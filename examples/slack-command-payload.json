@@ -1,0 +1,8 @@
+{
+  "team_id": "T_EXAMPLE",
+  "channel_id": "C_EXAMPLE",
+  "user_id": "U_EXAMPLE",
+  "command": "/avatar",
+  "text": "join https://meet.google.com/abc-defg-hij --avatar hiyori --bot-name DemoBot",
+  "response_url": "https://hooks.slack.com/commands/example"
+}

@@ -1,0 +1,305 @@
+package meetingagent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/AFK-surf/oneesama/internal/meetrunner"
+)
+
+func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetRequest) (JoinGoogleMeetResponse, error) {
+	if strings.TrimSpace(input.MeetingURL) == "" {
+		return JoinGoogleMeetResponse{}, fmt.Errorf("meeting_url is required")
+	}
+
+	runner, err := s.meetRunner.Ping(ctx)
+	if err != nil {
+		return JoinGoogleMeetResponse{}, err
+	}
+	sessionID := strings.TrimSpace(firstNonEmpty(input.SessionID, input.MeetingID))
+	artifactsDir := strings.TrimSpace(input.ArtifactsDir)
+	if artifactsDir == "" && input.RecordMeeting && sessionID != "" {
+		artifactsDir = defaultJoinArtifactsDir(s.pipeline.RootDir(), sessionID)
+	}
+	prepare, err := s.meetRunner.PrepareGoogleMeet(ctx, meetrunner.PrepareGoogleMeetInput{
+		SessionID:                 sessionID,
+		MeetingURL:                strings.TrimSpace(input.MeetingURL),
+		DisplayName:               strings.TrimSpace(input.DisplayName),
+		Title:                     strings.TrimSpace(input.Title),
+		DryRun:                    input.DryRun,
+		AllowNonGoogleMeet:        input.AllowNonGoogleMeet,
+		CollectFixtureState:       input.CollectFixtureState,
+		CaptureCaptions:           input.CaptureCaptions,
+		CaptionLanguage:           strings.TrimSpace(input.CaptionLanguage),
+		RecordMeeting:             input.RecordMeeting,
+		ArtifactsDir:              artifactsDir,
+		MeetAudioBackend:          strings.TrimSpace(input.MeetAudioBackend),
+		InstallRealtimeBridge:     input.InstallRealtimeBridge,
+		InstallLocalDialogBridge:  input.InstallLocalDialogBridge,
+		InstallWorkerResultBridge: input.InstallWorkerResultBridge,
+		InstallScreenShareBridge:  input.InstallScreenShareBridge,
+		AutoStartScreenShare:      input.AutoStartScreenShare,
+		WorkerPollURL:             strings.TrimSpace(input.WorkerPollURL),
+		WorkerResultMinCreatedAt:  strings.TrimSpace(input.WorkerResultMinCreatedAt),
+		WorkerDelegateURL:         strings.TrimSpace(input.WorkerDelegateURL),
+		WorkerStatusURL:           strings.TrimSpace(input.WorkerStatusURL),
+		LocalDialogTurnURL:        strings.TrimSpace(input.LocalDialogTurnURL),
+		LocalDialogTTSURL:         strings.TrimSpace(input.LocalDialogTTSURL),
+		LocalDialogTTSMode:        strings.TrimSpace(input.LocalDialogTTSMode),
+		LocalDialogTTSProvider:    strings.TrimSpace(input.LocalDialogTTSProvider),
+		LocalDialogTTSGain:        formatOptionalFloat(input.LocalDialogTTSGain),
+		ScreenShareMode:           strings.TrimSpace(input.ScreenShareMode),
+		ScreenShareTitle:          strings.TrimSpace(input.ScreenShareTitle),
+		ScreenShareSubtitle:       strings.TrimSpace(input.ScreenShareSubtitle),
+		ScreenShareWidth:          input.ScreenShareWidth,
+		ScreenShareHeight:         input.ScreenShareHeight,
+		ScreenShareFPS:            input.ScreenShareFPS,
+		BrowserExtraArgs:          strings.TrimSpace(input.BrowserExtraArgs),
+	})
+	if err != nil {
+		return JoinGoogleMeetResponse{}, err
+	}
+
+	session, err := s.UpsertSession(ctx, SessionUpsertInput{
+		ID:         prepare.Session.ID,
+		MeetingID:  strings.TrimSpace(firstNonEmpty(input.MeetingID, prepare.Session.ID)),
+		MeetingURL: prepare.Session.MeetingURL,
+		Status:     strings.TrimSpace(prepare.Session.Status),
+		Title:      strings.TrimSpace(firstNonEmpty(input.Title, prepare.Session.Title)),
+		StartedAt:  timestampIfStarted(prepare.Started),
+		Metadata: map[string]any{
+			"bridge_mode":      prepare.BridgeMode,
+			"runner_name":      runner.Name,
+			"started":          prepare.Started,
+			"capture_captions": input.CaptureCaptions,
+			"caption_language": strings.TrimSpace(input.CaptionLanguage),
+			"record_meeting":   input.RecordMeeting,
+			"artifacts_dir":    artifactsDir,
+			"realtime_join":    input.InstallRealtimeBridge,
+			"slack_channel_id": strings.TrimSpace(input.SlackChannelID),
+			"slack_thread_ts":  strings.TrimSpace(input.SlackThreadTS),
+		},
+	})
+	if err != nil {
+		return JoinGoogleMeetResponse{}, err
+	}
+	if prepare.Started && !input.DryRun {
+		go s.monitorJoinSession(context.WithoutCancel(ctx), session.ID)
+	}
+
+	return JoinGoogleMeetResponse{
+		OK:       prepare.OK,
+		Accepted: prepare.Accepted,
+		Started:  prepare.Started,
+		Note:     prepare.Note,
+		Session:  session,
+		Plan:     prepare.Plan,
+		Runner:   runner,
+	}, nil
+}
+
+func defaultJoinArtifactsDir(rootDir string, sessionID string) string {
+	dir := filepath.Join(strings.TrimSpace(rootDir), "runner-"+strings.TrimSpace(sessionID))
+	if absolute, err := filepath.Abs(dir); err == nil {
+		return absolute
+	}
+	return dir
+}
+
+func (s *Service) JoinStatus(ctx context.Context, sessionID string) (JoinStatusResponse, error) {
+	runner, err := s.meetRunner.Ping(ctx)
+	if err != nil {
+		return JoinStatusResponse{}, err
+	}
+	summary, err := s.SessionSummary(ctx)
+	if err != nil {
+		return JoinStatusResponse{}, err
+	}
+
+	active, err := s.resolveJoinSession(ctx, sessionID)
+	if err != nil {
+		return JoinStatusResponse{}, err
+	}
+	var runtime *meetrunner.StatusSessionResult
+	if active != nil && !isTerminalSessionStatus(active.Status) {
+		status, err := s.meetRunner.StatusSession(ctx, meetrunner.StatusSessionInput{SessionID: active.ID})
+		if err == nil {
+			runtime = &status
+			if refreshed := s.sessionFromRuntimeStatus(ctx, *active, status); refreshed != nil {
+				active = refreshed
+			}
+		} else {
+			s.logger.Warn("meet-runner status failed", "session_id", active.ID, "error", err)
+		}
+	}
+
+	return JoinStatusResponse{
+		OK:        true,
+		Runner:    runner,
+		Active:    active,
+		Sessions:  summary,
+		Available: runner.OK,
+		Runtime:   runtime,
+	}, nil
+}
+
+func (s *Service) StopJoin(ctx context.Context, input StopJoinRequest) (StopJoinResponse, error) {
+	session, err := s.resolveJoinSession(ctx, input.SessionID)
+	if err != nil {
+		return StopJoinResponse{}, err
+	}
+	if session == nil {
+		return StopJoinResponse{}, fmt.Errorf("meeting session not found")
+	}
+
+	stop, err := s.meetRunner.StopSession(ctx, meetrunner.StopSessionInput{
+		SessionID: session.ID,
+		Reason:    strings.TrimSpace(input.Reason),
+	})
+	if err != nil {
+		return StopJoinResponse{}, err
+	}
+
+	metadata := cloneMap(session.Metadata)
+	if len(metadata) == 0 {
+		metadata = map[string]any{}
+	}
+	metadata["stop_reason"] = strings.TrimSpace(input.Reason)
+	saved, err := s.UpsertSession(ctx, SessionUpsertInput{
+		ID:         session.ID,
+		Status:     strings.TrimSpace(firstNonEmpty(stop.Session.Status, "stopped")),
+		EndedAt:    strings.TrimSpace(firstNonEmpty(stop.StoppedAt, time.Now().UTC().Format(time.RFC3339Nano))),
+		Title:      session.Title,
+		MeetingID:  session.MeetingID,
+		MeetingURL: session.MeetingURL,
+		Metadata:   metadata,
+	})
+	if err != nil {
+		return StopJoinResponse{}, err
+	}
+
+	postMeeting, postMeetingWarning := s.finalizeStoppedJoin(ctx, saved, stop, fixtureCaptionsFromStopRequest(input))
+	return StopJoinResponse{
+		OK:                 stop.OK,
+		Stopped:            true,
+		Session:            saved,
+		Runner:             stop,
+		PostMeeting:        postMeeting,
+		PostMeetingWarning: postMeetingWarning,
+	}, nil
+}
+
+func (s *Service) sessionFromRuntimeStatus(ctx context.Context, session SessionRecord, status meetrunner.StatusSessionResult) *SessionRecord {
+	runtimeStatus := runtimeMeetPageStatus(status.Active)
+	if runtimeStatus == "" {
+		return nil
+	}
+	if runtimeStatus == session.Status {
+		metadata := cloneMap(session.Metadata)
+		if len(metadata) == 0 {
+			metadata = map[string]any{}
+		}
+		metadata["runtime_status"] = status
+		session.Metadata = metadata
+		return &session
+	}
+	metadata := cloneMap(session.Metadata)
+	if len(metadata) == 0 {
+		metadata = map[string]any{}
+	}
+	metadata["runtime_status"] = status
+	updated, err := s.UpsertSession(ctx, SessionUpsertInput{
+		ID:               session.ID,
+		MeetingID:        session.MeetingID,
+		MeetingURL:       session.MeetingURL,
+		Status:           runtimeStatus,
+		Title:            session.Title,
+		ParticipantCount: session.ParticipantCount,
+		StartedAt:        session.StartedAt,
+		EndedAt:          session.EndedAt,
+		Metadata:         metadata,
+	})
+	if err != nil {
+		s.logger.Warn("persist runtime join status failed", "session_id", session.ID, "error", err)
+		return nil
+	}
+	return &updated
+}
+
+func runtimeMeetPageStatus(active any) string {
+	fields := map[string]any{}
+	raw, err := json.Marshal(active)
+	if err != nil || len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return ""
+	}
+	meetPage, _ := fields["meetPage"].(map[string]any)
+	if boolField(meetPage, "cannotJoin") {
+		return "failed"
+	}
+	if boolField(meetPage, "waitingForAdmit") {
+		return "waiting"
+	}
+	if boolField(meetPage, "inMeeting") {
+		return "joined"
+	}
+	return ""
+}
+
+func boolField(values map[string]any, key string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	value, _ := values[key].(bool)
+	return value
+}
+
+func (s *Service) resolveJoinSession(ctx context.Context, sessionID string) (*SessionRecord, error) {
+	trimmedID := strings.TrimSpace(sessionID)
+	if trimmedID != "" {
+		return s.GetSession(ctx, trimmedID)
+	}
+
+	sessions, err := s.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if !isTerminalSessionStatus(session.Status) {
+			return &session, nil
+		}
+	}
+	if len(sessions) == 0 {
+		return nil, nil
+	}
+	return &sessions[0], nil
+}
+
+func isTerminalSessionStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "stopped", "done", "failed", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func timestampIfStarted(started bool) string {
+	if !started {
+		return ""
+	}
+	return time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+func formatOptionalFloat(value float64) string {
+	if value == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%g", value)
+}

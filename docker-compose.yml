@@ -1,0 +1,85 @@
+services:
+  meeting-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meeting-avatar-bot:local
+    command: ["npm", "run", "dev:meeting"]
+    init: true
+    shm_size: 1gb
+    restart: unless-stopped
+    env_file:
+      - ${MAB_ENV_FILE:-.env}
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      MAB_MEETING_PORT: "8781"
+      MAB_MEETING_AGENT_URL: "http://meeting-agent:8781"
+      MAB_DATA_DIR: "/data"
+      MAB_STATE_PROVIDER: "${MAB_STATE_PROVIDER:-sqlite}"
+      MAB_STATE_SQLITE_PATH: "/data/meeting-avatar-bot.sqlite3"
+      MAB_SCREENSHOT_DIR: "/screenshots"
+      MAB_MEETING_ARTIFACTS_DIR: "/artifacts"
+      MAB_BROWSER_HEADLESS: "${MAB_BROWSER_HEADLESS:-true}"
+    ports:
+      - "${MAB_MEETING_PORT:-8781}:8781"
+    volumes:
+      - meeting-avatar-data:/data
+      - meeting-avatar-screenshots:/screenshots
+      - meeting-avatar-artifacts:/artifacts
+      - ${MAB_AVATAR_DEPS_HOST_DIR:-./runtime/avatar-deps}:/runtime/avatar-deps:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:8781/healthz')
+          .then((r) => process.exit(r.ok ? 0 : 1))
+          .catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  slack-agent:
+    image: meeting-avatar-bot:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["npm", "run", "dev:slack"]
+    init: true
+    restart: unless-stopped
+    depends_on:
+      meeting-agent:
+        condition: service_healthy
+    env_file:
+      - ${MAB_ENV_FILE:-.env}
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      MAB_SLACK_PORT: "8780"
+      MAB_SLACK_SOCKET_MODE: "${MAB_SLACK_SOCKET_MODE:-0}"
+      MAB_PUBLIC_BASE_URL: "${MAB_PUBLIC_BASE_URL:-http://127.0.0.1:8780}"
+      MAB_MEETING_AGENT_URL: "http://meeting-agent:8781"
+      MAB_DATA_DIR: "/data"
+      MAB_STATE_PROVIDER: "${MAB_STATE_PROVIDER:-sqlite}"
+      MAB_STATE_SQLITE_PATH: "/data/meeting-avatar-bot.sqlite3"
+      MAB_CANVAS_DIR: "/artifacts/canvas"
+    ports:
+      - "${MAB_SLACK_PORT:-8780}:8780"
+    volumes:
+      - meeting-avatar-data:/data
+      - meeting-avatar-artifacts:/artifacts
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:8780/healthz')
+          .then((r) => process.exit(r.ok ? 0 : 1))
+          .catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  meeting-avatar-data:
+  meeting-avatar-screenshots:
+  meeting-avatar-artifacts:

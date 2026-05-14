@@ -1,0 +1,317 @@
+package slackagent
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	appconfig "github.com/AFK-surf/oneesama/pkg/config"
+)
+
+type recordingCanvasPublisher struct {
+	mu      sync.Mutex
+	inputs  []CanvasPublishInput
+	results []PublishedCanvasManifest
+}
+
+func (p *recordingCanvasPublisher) Publish(_ context.Context, input CanvasPublishInput) (PublishedCanvasManifest, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.inputs = append(p.inputs, input)
+	result := PublishedCanvasManifest{
+		ID:         "canvas-test",
+		Provider:   "test",
+		Surface:    "slack-thread",
+		ArtifactID: input.ArtifactID,
+		OK:         true,
+		Slack: &PostMessageResult{
+			OK:       true,
+			Mock:     true,
+			Channel:  input.Channel,
+			ThreadTS: input.ThreadTS,
+			DedupKey: input.DedupKey,
+		},
+	}
+	p.results = append(p.results, result)
+	return result, nil
+}
+
+func (p *recordingCanvasPublisher) ListPublished() ([]PublishedCanvasManifest, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]PublishedCanvasManifest(nil), p.results...), nil
+}
+
+func (p *recordingCanvasPublisher) Inputs() []CanvasPublishInput {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]CanvasPublishInput(nil), p.inputs...)
+}
+
+func TestMeetingWebhookJoinedPersistsThreadAndProcessingUsesIt(t *testing.T) {
+	assistant := &recordingAssistant{}
+	poster := &recordingPoster{}
+	router := newMeetingWebhookTestRouter(t, poster, assistant, nil)
+
+	joined := `{"event":"meeting.joined","meeting_id":42,"title":"Weekly Sync","slack_ref":{"channel_id":"C123","thread_ts":"123.456"}}`
+	response := postMeetingWebhook(t, router, "meet-secret", joined)
+	if response.Code != http.StatusOK {
+		t.Fatalf("joined status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"event":"meeting.joined"`) {
+		t.Fatalf("joined body = %s, want meeting.joined", response.Body.String())
+	}
+	calls := poster.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("poster calls = %d, want 1", len(calls))
+	}
+	if !strings.Contains(calls[0].Text, ":studio_microphone: *Joined: Weekly Sync*") {
+		t.Fatalf("joined text = %q", calls[0].Text)
+	}
+
+	processing := `{"event":"meeting.processing","meeting_id":42,"title":"Weekly Sync"}`
+	response = postMeetingWebhook(t, router, "meet-secret", processing)
+	if response.Code != http.StatusOK {
+		t.Fatalf("processing status = %d, body=%s", response.Code, response.Body.String())
+	}
+	assistantCalls := assistant.Calls()
+	if len(assistantCalls) != 2 {
+		t.Fatalf("assistant calls = %#v, want joined+processing statuses", assistantCalls)
+	}
+	if assistantCalls[0].Status != "Recording meeting..." || assistantCalls[1].Status != "Generating meeting summary..." {
+		t.Fatalf("assistant statuses = %#v", assistantCalls)
+	}
+}
+
+func TestMeetingWebhookResultPublishesSummaryAndDedupe(t *testing.T) {
+	assistant := &recordingAssistant{}
+	canvas := &recordingCanvasPublisher{}
+	router := newMeetingWebhookTestRouter(t, &recordingPoster{}, assistant, canvas)
+
+	joined := `{"event":"meeting.joined","meeting_id":77,"title":"Design Review","slack_ref":{"channel_id":"C999","thread_ts":"999.000"}}`
+	response := postMeetingWebhook(t, router, "meet-secret", joined)
+	if response.Code != http.StatusOK {
+		t.Fatalf("joined status = %d, body=%s", response.Code, response.Body.String())
+	}
+
+	result := `{"event":"meeting.result","meeting_id":77,"title":"Design Review","summary":{"title":"Design Review","duration_minutes":30,"attendees":["Peng"],"key_points":["Ship R19"],"action_items":[{"description":"Review gate","owner":"Peng","deadline":"today"}]},"artifacts":{"transcript_path":"/tmp/transcript.txt"}}`
+	response = postMeetingWebhook(t, router, "meet-secret", result)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("result status = %d, body=%s", response.Code, response.Body.String())
+	}
+	inputs := canvas.Inputs()
+	if len(inputs) != 1 {
+		t.Fatalf("canvas inputs = %d, want 1", len(inputs))
+	}
+	if inputs[0].Channel != "C999" || inputs[0].ThreadTS != "999.000" {
+		t.Fatalf("canvas input = %#v, want stored thread", inputs[0])
+	}
+	if !inputs[0].ForceSlackCanvas {
+		t.Fatalf("canvas input ForceSlackCanvas = false, want native Slack Canvas publish")
+	}
+	if !strings.Contains(inputs[0].NotificationText, "{{canvas_link}}") || !strings.Contains(inputs[0].NotificationText, ":memo: *Meeting Summary: Design Review* · 30 min") {
+		t.Fatalf("notification text = %q", inputs[0].NotificationText)
+	}
+	if !strings.Contains(inputs[0].SummaryMarkdown, "**Duration:** 30 minutes") ||
+		!strings.Contains(inputs[0].SummaryMarkdown, "**Participants:** Peng") ||
+		!strings.Contains(inputs[0].SummaryMarkdown, "## Key Points") ||
+		!strings.Contains(inputs[0].SummaryMarkdown, "## Action Items") ||
+		!strings.Contains(inputs[0].SummaryMarkdown, "Review gate — **Owner:** Peng — **Deadline:** today") ||
+		!strings.Contains(inputs[0].SummaryMarkdown, "_Generated by Onee Sama Meeting Bot_") {
+		t.Fatalf("summary markdown = %q", inputs[0].SummaryMarkdown)
+	}
+	if calls := assistant.Calls(); calls[len(calls)-1].Status != "" {
+		t.Fatalf("last assistant status = %#v, want clear", calls[len(calls)-1])
+	}
+
+	response = postMeetingWebhook(t, router, "meet-secret", result)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("duplicate status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"duplicate":true`) {
+		t.Fatalf("duplicate body = %s", response.Body.String())
+	}
+	if len(canvas.Inputs()) != 1 {
+		t.Fatalf("canvas inputs after duplicate = %d, want 1", len(canvas.Inputs()))
+	}
+}
+
+func TestMeetingWebhookResultUploadsTranscriptAndAudioBeforeCanvasPublish(t *testing.T) {
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.txt")
+	if err := os.WriteFile(transcriptPath, []byte("Peng: real transcript line\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	audioPath := filepath.Join(t.TempDir(), "audio.mp3")
+	if err := os.WriteFile(audioPath, []byte("fake mp3 bytes"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	var canvasMarkdown string
+	var postedText string
+	completedFiles := map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/files.getUploadURLExternal":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse upload url request: %v", err)
+			}
+			filename := r.Form.Get("filename")
+			fileID := map[string]string{"transcript.txt": "FTRANSCRIPT", "audio.mp3": "FAUDIO"}[filename]
+			if fileID == "" {
+				t.Fatalf("unexpected upload filename %q", filename)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file_id": fileID, "upload_url": "http://" + r.Host + "/upload/" + fileID})
+		case "/upload/FTRANSCRIPT", "/upload/FAUDIO":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse upload: %v", err)
+			}
+			_, _ = w.Write([]byte("ok"))
+		case "/files.completeUploadExternal":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse complete: %v", err)
+			}
+			if r.Form.Get("channel_id") != "" || r.Form.Get("thread_ts") != "" {
+				t.Fatalf("complete form = %#v, want file uploaded without thread share", r.Form)
+			}
+			filesJSON := r.Form.Get("files")
+			if strings.Contains(filesJSON, "FTRANSCRIPT") {
+				completedFiles["transcript.txt"] = true
+			}
+			if strings.Contains(filesJSON, "FAUDIO") {
+				completedFiles["audio.mp3"] = true
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "files": []map[string]any{{"id": "FTRANSCRIPT", "title": "transcript.txt"}}})
+		case "/files.info":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse info: %v", err)
+			}
+			permalink := map[string]string{
+				"FTRANSCRIPT": "https://files.slack.com/transcript.txt",
+				"FAUDIO":      "https://files.slack.com/audio.mp3",
+			}[r.Form.Get("file")]
+			if permalink == "" {
+				t.Fatalf("unexpected file info request %#v", r.Form)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file": map[string]any{"permalink": permalink}})
+		case "/canvases.create":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode canvas: %v", err)
+			}
+			content, _ := body["document_content"].(map[string]any)
+			canvasMarkdown, _ = content["markdown"].(string)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "canvas_id": "canvas_uploaded"})
+		case "/auth.test":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "team_id": "T123"})
+		case "/chat.postMessage":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode post: %v", err)
+			}
+			postedText, _ = body["text"].(string)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "ts": "111.222"})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	router := newTestRouter(t, Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "json-file", DataDir: t.TempDir()},
+		MeetWebhookSecret: "meet-secret",
+		Slack:             appconfig.SlackConfig{SigningSecret: "slack-secret", BotToken: "xoxb-test"},
+		Poster:            NewPoster(PosterConfig{BotToken: "xoxb-test", Endpoint: server.URL + "/chat.postMessage", Client: server.Client()}),
+		Assistant:         &recordingAssistant{},
+		CanvasPublisherConfig: CanvasPublisherConfig{
+			Provider:   "file",
+			BotToken:   "xoxb-test",
+			APIBaseURL: server.URL,
+			Client:     server.Client(),
+			Poster:     NewPoster(PosterConfig{BotToken: "xoxb-test", Endpoint: server.URL + "/chat.postMessage", Client: server.Client()}),
+		},
+	})
+
+	body := `{"event":"meeting.result","meeting_id":91,"title":"Review","summary":{"title":"Review","duration_minutes":1,"attendees":["Peng"],"key_points":["Real point"]},"artifacts":{"transcript_path":` + strconv.Quote(transcriptPath) + `,"audio_path":` + strconv.Quote(audioPath) + `},"slack_ref":{"channel_id":"C123","thread_ts":"123.456"},"force_delivery":true}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if !completedFiles["transcript.txt"] || !completedFiles["audio.mp3"] {
+		t.Fatalf("completed files = %#v, want transcript and audio uploads", completedFiles)
+	}
+	if !strings.Contains(canvasMarkdown, "![transcript.txt](https://files.slack.com/transcript.txt)") ||
+		!strings.Contains(canvasMarkdown, "![audio.mp3](https://files.slack.com/audio.mp3)") ||
+		strings.Contains(canvasMarkdown, "```") {
+		t.Fatalf("canvas markdown = %s", canvasMarkdown)
+	}
+	if !strings.Contains(postedText, "View full notes") || strings.Contains(postedText, "transcript.txt") || strings.Contains(postedText, "audio.mp3") {
+		t.Fatalf("posted text = %q, want only short Canvas notification", postedText)
+	}
+}
+
+func TestMeetingWebhookRejectsBadSignature(t *testing.T) {
+	router := newMeetingWebhookTestRouter(t, &recordingPoster{}, &recordingAssistant{}, nil)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/webhooks/meeting-result", strings.NewReader(`{"event":"meeting.result"}`))
+	request.Header.Set("X-Webhook-Signature", "bad")
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), "invalid signature") {
+		t.Fatalf("body = %s, want invalid signature", response.Body.String())
+	}
+}
+
+func TestMeetingWebhookFailedResultPostsFailureNotice(t *testing.T) {
+	poster := &recordingPoster{}
+	router := newMeetingWebhookTestRouter(t, poster, &recordingAssistant{}, nil)
+	body := `{"event":"meeting.result","meeting_id":"88","status":"failed","error":"join failed","slack_ref":{"channel_id":"C123","thread_ts":"123.456"}}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	calls := poster.Calls()
+	if len(calls) != 1 || calls[0].Text != ":x: Meeting failed: join failed" {
+		t.Fatalf("poster calls = %#v", calls)
+	}
+}
+
+func newMeetingWebhookTestRouter(t *testing.T, poster PosterService, assistant AssistantService, canvas CanvasPublisherService) http.Handler {
+	t.Helper()
+	return newTestRouter(t, Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "json-file", DataDir: t.TempDir()},
+		MeetWebhookSecret: "meet-secret",
+		Slack:             appconfig.SlackConfig{SigningSecret: "slack-secret"},
+		Poster:            poster,
+		Assistant:         assistant,
+		CanvasPublisher:   canvas,
+	})
+}
+
+func postMeetingWebhook(t *testing.T, router http.Handler, secret string, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/webhooks/meeting-result", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Webhook-Signature", meetingWebhookSignature([]byte(body), secret))
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func decodeMeetingWebhookResponse(t *testing.T, response *httptest.ResponseRecorder) MeetingWebhookResponse {
+	t.Helper()
+	var payload MeetingWebhookResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return payload
+}

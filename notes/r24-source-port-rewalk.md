@@ -1,0 +1,162 @@
+# R24 Source-Port Rewalk
+
+Status: R24 join-card / true-Meet lifecycle is withdrawn from live. Live is rolled back to `0ab759c`, the last Peng-verified working point for emoji/help/zero-config webhook.
+
+Purpose: re-copy the old behavior by user action chain, not by handler shape. This is the canonical checklist before R24 can return to live.
+
+## Rules
+
+- No more "layer green" or "unit green" as ship criteria for user-visible Slack/Meet behavior.
+- Every row below must have old behavior, Go current state, gap, test, and dogfood evidence.
+- Peng-facing evidence is only real behavior: reproducible operation chain, screenshots/contact sheet, real Slack thread messages, Canvas link/content, and known uncovered risks.
+- Source refs, line ranges, SHAs, and unit names are reviewer-facing appendix material.
+- Recording meeting is not green just because a summary exists. The release gate is five concrete artifacts in the original Slack thread: `captions.count > 0`, `transcript.txt` Slack file card, non-silent `audio.mp3` Slack file card, Cueboard-style Canvas sections, and a short thread notification with the Canvas link. Missing any one of these means the recording path is still red.
+- R24 is not accepted until this operation chain passes end to end:
+
+```text
+@Onee-sama join <real Meet URL>
+  -> exactly one join card
+  -> click Join / Join with realtime
+  -> same card or same thread immediately shows Joining...
+  -> Chromium joins the Meet
+  -> selected caption language is applied
+  -> meeting ends or stop is requested
+  -> bot leaves / runner stops
+  -> transcript or fail-loud status is produced
+  -> summary/action-items/Canvas is posted back to Slack
+```
+
+## Peng-Facing Acceptance Package
+
+Before asking Peng to verify again, prepare this package:
+
+- One fresh Slack thread permalink showing the full action chain.
+- Screenshot/contact sheet showing:
+  - single join card,
+  - immediate Joining state,
+  - bot visible in Google Meet,
+  - selected caption language evidence,
+  - final Slack thread result.
+- Canvas link and a short excerpt of its generated content.
+- For recording-meeting validation, the five-gate artifact proof: caption count, transcript file card, audio file card, Cueboard-style Canvas, and original-thread notification.
+- One explicit "not covered yet" list.
+- Rollback SHA and current live SHA.
+
+## Reviewer Matrix
+
+Legend: `✅` copied and verified, `⚠️` partial/branch-only/unverified, `❌` missing or known broken, `🚫` intentionally out of scope.
+
+| Area | User action / contract | Old source behavior | Go current state | Gap / next fix | Verification |
+|---|---|---|---|---|---|
+| Slack ingress | Root channel `@Onee-sama help` | Old TS handles `app_mention`, claims mention key before execution (`apps/slack-agent/src/index.ts:3078-3090`); cueboard handles `AppMentionEvent` (`internal/bridge/slack/mention.go:26-43`). | ✅ R23/R24 path works on live before rollback. | Keep as regression baseline. | Peng-visible: help reply + emoji flip. Reviewer: app_mention fixture + live counter. |
+| Slack ingress | Root channel `@Onee-sama join <url>` produces one command | Old TS mention key = team/channel/ts/user/text, TTL 10 min (`index.ts:1892-1917`) and claims both fallback and app_mention paths. | ⚠️ Branch R24.5 ports mention-level dedupe; not live/dogfooded. | Dogfood must prove Slack's real double-delivery produces one card only. | Fixture with same user action delivered as `app_mention` and `message` passes; dogfood still required. |
+| Slack ingress | Thread reply `@Onee-sama` sees parent Meet URL | Cueboard fetches thread context and injects join request when mention text empty and transcript contains Meet URL (`mention.go:100-114`). Old TS fetches `conversations.replies` (`index.ts:1738-1790`) before command body. | ⚠️ R24.3/R24.4 branch handles `message` and `message_replied`, but live was rolled back. Not dogfooded after rollback. | Keep branch fix, then verify with real thread reply and fail-loud logs if no mention is found. | Fixture for `message_replied` + real Slack thread dogfood. |
+| Slack ingress | Unknown Slack envelopes are not silent | Cueboard logs unhandled Socket Mode event types (`bridge.go:387-389`). | ⚠️ Go has counters, but no enough per-reason logs for user-action dead ends. | Add fail-loud no-op logs for unsupported envelope / no latest bot mention / dedupe skip / interaction update path. | Logs by source ts + reason; no "nothing happened" black box. |
+| Reaction lifecycle | Mention shows eyes/check/warning | Cueboard adds eyes on mention, warning on error, check on success (`mention.go:43,87-88,202-203,302-303`). | ✅ R23a live accepted at `f29a1cf`; rollback target `0ab759c` contains that commit, so emoji lifecycle remains included. | Keep as regression baseline. | Peng-visible: `@Onee-sama help` eyes -> check. Reviewer: commit ancestry confirms `0ab759c` includes `f29a1cf`. |
+| Join card | Card shows caption language selector and Join / Join with realtime | Product requirement from Peng 15:58. Old TS join payload supports `captureCaptions`, `captionLanguage`, realtime bridge flags (`apps/meeting-agent/src/index.ts:1240-1256,1277-1340`). | ⚠️ R24 branch implemented card. Live rolled back. | Re-ship only after full interaction/join lifecycle passes. | Screenshot of card in Slack thread. |
+| Join card | Default join is real, dry-run only explicit | Old TS `/join/google-meet` defaults dry-run unless `dryRun:false` (`apps/meeting-agent/src/index.ts:1295`); user-facing Slack card must send real join on button click per product. | ⚠️ R24.1 branch changed parser default to real; live rolled back. | Keep explicit product decision in matrix; tests must cover `--dry-run` and card real join. | Fixture: card button payload has `dry_run=false`; dogfood: Chromium launch starts. |
+| Interaction transport | HTTP interactivity returns replace_original | Old TS HTTP `/slack/interactions` executes interaction command (`index.ts:3155-3190`). | ⚠️ Unit path passed; not the live path for Socket Mode. | Keep HTTP fallback test but do not use it as Socket proof. | Separate HTTP fixture only. |
+| Interaction transport | Socket Mode `interactive` is received | Cueboard handles `socketmode.EventTypeInteractive` and acks envelope before async handler (`bridge.go:374-379`). Old TS handles `message.type === "interactive"` (`index.ts:3241-3260`). | ⚠️ R24.2 branch added Socket interactive. Live rolled back. | Keep, but update transport handling below. | Socket fixture must use real envelope shape and increment counter. |
+| Interaction transport | Socket button click updates user-visible card/thread | Slack Socket ack only acknowledges envelope; reliable visible update must use `response_url` or `chat.update`. | ⚠️ Branch R24.5 acks Socket envelope with empty payload, POSTs immediate `Joining...` to `response_url`, and posts joining/final thread status. Not live/dogfooded. | Dogfood must prove real Slack Socket click shows visible state within 1s. | Fake `response_url` test with two POSTs + recording poster passes; dogfood still required. |
+| Interaction transport | Dedupe card updates and link to source | Old TS carries response_url and command body; no Go-visible card ID yet. | ⚠️ Branch R24.5 adds `card_id`, source channel/thread/message metadata in button values, and update transport logs. | Confirm logs are sufficient during true dogfood; add `chat.update` fallback only if response_url is unreliable. | Reviewer: logs show card_id per click. Peng: not required to inspect. |
+| Real join | Slack card click calls meeting-agent `/join/google-meet` | Old TS `/join/google-meet` calls joiner with full flags (`apps/meeting-agent/src/index.ts:1277-1340`). | ⚠️ Branch calls Go meeting-agent and records Slack channel/thread on the join session; live dogfood failed before reliable feedback. | After transport fix, verify actual meeting-agent request and meet-runner call. | Logs keyed by Slack source ts and session id; Peng-visible bot enters Meet. |
+| Real join | Joined feedback is user-facing, not session/debug text | Cueboard/old thread shows `:studio_microphone: *Joined: <title>*`, `Recording — summary will be posted when the meeting ends.`, and a meeting-bot context; it also flips assistant status to `Recording meeting...` (`meeting_webhook.go:196-203,741-751`). | ⚠️ Branch R24.9 replaces visible `Session <id> created...` copy with oneesama-branded cueboard-style joined blocks and keeps session id in metadata only; not live/dogfooded. | Short dogfood window should verify final card/thread shape only. | Reviewer: HTTP + Socket interaction tests assert no visible `Session ... created` and assistant status set. Peng-facing: final card screenshot. |
+| Real join | meet-runner launches Chromium and keeps session alive | Old TS joiner plan includes launch, open URL, click join, keep browser alive until stopped (`google-meet-joiner.ts:1846-1879`). | ⚠️ Branch R24.6 adds `join.session.status` and exposes runtime status from `/join/status`; unit tests use fixture status. | Need true non-dry-run dogfood with real Meet URL. | Browser screenshot + runner status `active/joined`; no dry-run substitute. |
+| Caption | Captions always captured by default | Old TS carries `captureCaptions` and installs caption capture when joined (`google-meet-joiner.ts:1823-1824,2146-2156`). Product says ASR/action items always on. | ⚠️ Branch sends `capture_captions=true`; true DOM capture not dogfooded. | Verify selected language applied and captions captured; if no captions, fail loud. | Real Meet dogfood with spoken text; artifact has captions or visible failure status. |
+| Caption | Selected caption language is applied | Old TS passes `captionLanguage` and chooses option in Meet settings (`caption-capture.ts:100-115`). | ⚠️ Branch plumbs `caption_language`; no real DOM proof. | Verify against real Meet language UI/diagnostics. | Screenshot/diagnostics entry `caption_capture_ready` with selected language. |
+| Caption | Synthetic transcript can exercise post-meeting without human speech | No old production behavior; this is a dogfood-only harness requested by Peng to avoid waiting for live meeting audio. | ⚠️ Branch adds `/join/stop` fixture/synthetic transcript fields. Runtime captions win; fixture captions are used only when runtime captions are empty. | Use it to prove transcript -> summary/action-items -> webhook/Canvas path. Do not claim it verifies Google Meet ASR or caption DOM capture. | Reviewer: fixture stop with `Decision:` and `Action item:` sends `meeting.processing` + `meeting.result`. Peng-facing: dogfood Slack thread must show Canvas/result from injected transcript. |
+| Realtime | Join with realtime installs realtime bridge | Old TS join carries `installRealtimeBridge` and worker result bridge (`apps/meeting-agent/src/index.ts:1301-1303`; `google-meet-joiner.ts:1816-1819`). | ⚠️ Branch button toggles realtime flag; no dogfood. | Verify bridge state in runtime status. | Dogfood: runtime status shows realtime bridge installed or clear fail-loud reason. |
+| Stop | `@Onee-sama stop` / `/join/stop` leaves browser | Old TS `/join/stop` calls joiner.stop (`apps/meeting-agent/src/index.ts:1376-1379`); joiner stop flushes captions and closes browser (`google-meet-joiner.ts:1768-1801`). | ⚠️ Branch R24.6 captures `beforeStop` runtime/captions, stops the runner, persists terminal session state, and starts post-meeting processing. Real session cleanup not dogfooded. | Run stop during a real join and confirm browser/page exits. | Peng-visible bot leaves Meet; runner status stopped; Slack thread gets final status. |
+| Meeting end | If meeting ends, bot leaves / runner stops | Cueboard meetd reacts to `meeting_ended`, marks processing, calls `processMeetingEnd` (`internal/meeting/watcher.go:275-279`). Old TS status exposes Meet page/caption state (`google-meet-joiner.ts:2280-2317,2719-2747`). | ⚠️ Branch R24.6 adds a Go monitor that polls `join.session.status` and calls stop when runtime reports joined-then-left or a failed join. True "everyone left but bot still in room" behavior is not proven. | Dogfood must prove real Meet end detection; if Meet remains `inMeeting` when humans leave, add participant/room-ended detection before live. | Real Meet dogfood: end room, bot leaves or branch is not accepted. |
+| Meeting end | If everyone leaves, bot detects empty room and leaves | Cueboard meeting-joiner `waitForMeetingEnd` polls participant count every 5s; if participants <= 1 for 30s, it calls `endMeeting` and emits `meeting_ended` (`meeting-joiner/src/meet-session/ui.ts:203-283`). | ✅ R24.11 branch ports participant count status and monitor-side empty-room stop with a 30s timeout; live `956d268` failed this before the fix. | Dogfood still needs a real host-leaves scenario after hot-update. | Branch test: `TestCueboardParityParticipantCountOneMeansEmptyRoom` and `TestJoinMonitorStopsSoloMeetingAfterTimeout`; Peng-facing dogfood: host leaves, bot self-leaves and posts result. |
+| Post-meeting | Meeting end triggers processing and Canvas | Cueboard `processMeetingEnd` calls OnProcessing and OnResult after summary/artifacts (`watcher_finalize.go:23-88,309-323`); meetd daemon sends webhooks for joined/processing/result (`cmd/meetd/main.go:82-113`). Slack side posts summary/Canvas on result (`meeting_webhook.go:259-335`). | ⚠️ Branch R24.6 connects direct join stop/end to `PostProcessMeeting` and sends `meeting.processing` + `meeting.result` webhooks using the Slack channel/thread stored at join time. No true Meet dogfood yet. | Verify stop/end path produces Slack processing state and Canvas, not only meetd scheduled watcher. | Real dogfood: after stop/end, Slack thread gets Canvas link/content. |
+| Post-meeting | Recording output has Cueboard-quality artifacts | Cueboard uploads transcript/audio artifacts as Slack files, references them from Canvas attachments, and posts a short original-thread notification. | ⚠️ R24.13a live writes/uploads `transcript.txt` and renders Cueboard-style Canvas; ordinary join now requests recording and threads recorder/audio artifact paths through finalize. Historical runs without raw audio cannot be backfilled. | Next real/fake-media dogfood must prove `audio.mp3` is actually captured, transcoded, uploaded, and referenced. Do not report "recording green" if only summary/Canvas exists. | Five-gate proof: `captions.count > 0`, `transcript.txt` file card, `audio.mp3` file card, Cueboard-style Canvas sections, and original-thread notification. |
+| ASR provider | Audio chunks use the old ASR provider path, not fixture transcript | Cueboard ASR defaults to Google Gemini Files API + generateContent and writes `ASRResult` / chunk transcripts (`internal/meeting/asr.go`). | ❌ R24.10 fixture transcript proves only downstream transcript handling; it does not prove audio -> ASR parity. | R25 ports ASR provider config and audio chunk transcription; fixture transcript cannot satisfy this row. | Evidence must include audio/chunk ASR source logs/artifacts, not fixture text. |
+| Summary provider | Transcript summary uses configured production summary model | Cueboard summary/calibration routes through configured LLM credentials/model (`internal/meeting/summary.go`). | ⚠️ R24.10 proves summary/action-items output from fixture transcript, but not provider/model parity. | R25 must read summary model from env/config only; no product-visible model ID, no hard-coded private default. | Reviewer evidence: config key + call path. Peng-facing evidence: summary provider parity verified without exposing model ID. |
+| Empty transcript | No transcript must not silently disappear | Cueboard marks done with "no transcript captured" and returns without OnResult (`watcher_finalize.go:53-55,357-360`), which is a bad user-visible silent path for this product. | ✅ R24.11/R25 bundle intentionally overrides old silent behavior for both direct and scheduled paths: no captions sends `meeting.result` failed with `no transcript captured` and `force_delivery=true`. | Prove Slack receives visible failure when captions are empty. | Tagged parity test `TestCueboardParityMeetdEmptyTranscriptSendsFailedResult`; real dogfood still required. |
+| Failure feedback | Join failure / post-meeting failure visible in Slack | Cueboard posts failure notice for meeting result failed (`meeting_webhook.go:301-310,346-358`). | ⚠️ Some branch final response_url failure text exists; full chain not dogfooded. | Every failure after click must update same card/thread. | Simulated join failure + real invalid URL dogfood show visible failure. |
+
+## Immediate Fix Queue
+
+1. **R24.5 card and ingress contract** (branch implementation complete, dogfood not complete)
+   - Port mention-level dedupe from old TS.
+   - Split HTTP vs Socket interaction update transport.
+   - Add `response_url` immediate update plus thread status message.
+   - Add interaction/card trace fields.
+   - Verification done: raw fixtures plus fake response_url and recording poster.
+   - Verification still required: real Slack Socket Mode click.
+
+2. **R24.6 join lifecycle + post-meeting bridge** (branch implementation complete, dogfood not complete)
+   - Source-passed old TS direct join status/stop/caption flush and cueboard meetd watcher finalize callbacks.
+   - Added `join.session.status` through meet-runner and `/join/status` runtime projection.
+   - Added direct join monitor that polls runtime status and stops on failed/left state.
+   - Connected stop/end to post-meeting artifacts and Slack `meeting.processing` / `meeting.result` webhooks.
+   - Added fail-loud `no transcript captured` result for empty captions.
+   - Verification done: fixture stop runtime with captions sends processing+result webhooks and post-meeting output.
+   - Verification still required: true Meet dogfood through bot leaves/stops and Canvas/slack failure visibility.
+
+3. **R24.11 empty-room auto-leave** (in progress)
+   - Port cueboard meeting-joiner's participant-count alone timer.
+   - Expose `participantCount` from Meet page status.
+   - Stop with `reason=empty_room` after the bot is alone for 30s.
+   - Trigger the same post-meeting/fail-loud pipeline as manual stop.
+   - Verification required: host leaves, bot self-leaves, Slack thread gets result.
+
+4. **R25 provider parity** (queued, not blocking R24.11)
+   - Gemini ASR parity for audio chunks / final audio.
+   - Configured summary model parity through env/config only.
+   - No private model IDs in product-visible messages, logs, or public docs.
+
+5. **R24.7 dogfood evidence package** (not started)
+   - Run the full real Slack + real Meet operation chain.
+   - Capture Peng-facing evidence package before asking for verification.
+   - Add any remaining source-port fixes found by the dogfood run.
+
+6. **R24.9 cueboard joined copy parity** (branch implementation in progress)
+   - Replace visible `Session <id> created...` with cueboard-style joined Block Kit.
+   - Set assistant status to `Recording meeting...` on successful direct/card join.
+   - Keep session id in metadata/logs only.
+   - Verification done: HTTP + Socket interaction tests assert user-facing copy and no visible session id.
+   - Verification still required: real Slack UI short-window copy/shape check.
+
+7. **R24.10 synthetic transcript harness** (branch implementation in progress)
+   - Add dev/dogfood-only fixture transcript fields to `/join/stop`.
+   - Keep real runtime captions authoritative; use fixture transcript only when runtime captions are empty.
+   - Verify deterministic transcript text produces summary decisions/action items and `meeting.processing` / `meeting.result` webhook payloads.
+   - Verification still required: controlled Slack card -> real Meet -> stop with fixture transcript -> Canvas/result visible in the original Slack thread.
+
+## Dogfood Script
+
+Run only on branch/local live after R24.5-R24.7 are implemented.
+
+1. Create a throwaway Google Meet room.
+2. Post one root channel message: `@Onee-sama join <url>`.
+3. Confirm exactly one join card.
+4. Select a non-default caption language and click `Join`.
+5. Confirm visible Slack feedback within one second.
+6. Confirm Chromium joins and bot appears in Meet.
+7. Speak at least two captionable sentences, or inject a deterministic fixture transcript for the synthetic-transcript dogfood layer.
+8. End the meeting or run `@Onee-sama stop`.
+9. Confirm bot leaves and runner status is terminal.
+10. Confirm Slack thread gets final Canvas or explicit fail-loud no-transcript status.
+
+For recording-meeting dogfood, step 10 is not enough. The run is green only when the same original Slack thread contains:
+
+1. `captions.count > 0` in live status/logs.
+2. A `transcript.txt` Slack file card, not inline transcript text or a code block.
+3. A non-silent `audio.mp3` Slack file card from the actual recorder path, not a fabricated/backfilled placeholder. A valid MP3 container with all-zero samples is red, not a recording pass.
+4. Cueboard-style Canvas sections: Duration, Participants, Key Points, Action Items, Decisions, Open Questions, Blockers, Attachments, and footer.
+5. A short original-thread notification linking to the Canvas.
+
+## Retro Summary
+
+Why this migration failed:
+
+1. We copied route/handler shapes instead of the full user action chain.
+2. We skipped an old-to-new behavior manifest before coding.
+3. We used wrong substitutes: HTTP/dry-run/mock tick instead of Socket Mode/live Meet/real end.
+4. Review accepted per-layer tests instead of end-to-end user actions.
+5. Missing fail-loud observability turned gaps into "no reaction" for Peng.
+6. We treated "summary exists" as recording success, but recording success also requires artifact fidelity: transcript file, audio file, Canvas format, and original-thread delivery.
+
+Correction: R24 returns to live only after the matrix above is green and the dogfood package exists.
