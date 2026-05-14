@@ -151,55 +151,12 @@ func TestMeetdRedeliverSyntheticJoinSessionReprocessesDirectJoin(t *testing.T) {
 	}
 }
 
-func TestJoinRedeliverAcceptsSessionID(t *testing.T) {
+func TestFinalizeStoppedJoinRegistersSyntheticMeetdMeeting(t *testing.T) {
 	t.Parallel()
 
 	var capturedResult MeetdMeetingResult
 	service, router := newMeetdOpsTestRouter(t, func(_ context.Context, _ MeetdMeetingRecord, result MeetdMeetingResult) error {
 		capturedResult = result
-		return nil
-	})
-	sessionID := "session_join_redeliver"
-	_, err := service.UpsertSession(context.Background(), SessionUpsertInput{
-		ID:         sessionID,
-		MeetingID:  sessionID,
-		MeetingURL: "https://meet.google.com/join-redeliver",
-		Status:     "stopped",
-		Title:      "Join Redeliver",
-		StartedAt:  time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339Nano),
-		EndedAt:    time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano),
-	})
-	if err != nil {
-		t.Fatalf("upsert session: %v", err)
-	}
-	if _, err := service.PostProcessMeeting(context.Background(), postmeeting.PostProcessInput{
-		ArtifactID: "join-" + sessionID,
-		MeetingID:  meetingIDString(syntheticMeetingID(sessionID)),
-		SessionID:  sessionID,
-		Title:      "Join Redeliver",
-		MeetURL:    "https://meet.google.com/join-redeliver",
-		Captions: []postmeeting.TranscriptSegmentInput{{
-			Speaker: "Peng Xiao",
-			Text:    "按 session id 重新投递。",
-		}},
-		Source: "join-stop",
-	}); err != nil {
-		t.Fatalf("postprocess seed: %v", err)
-	}
-
-	response := performMeetdRequest(router, http.MethodPost, "/join/redeliver", fmt.Sprintf(`{"session_id":%q}`, sessionID))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"redelivered"`) {
-		t.Fatalf("join redeliver response = %d %s", response.Code, response.Body.String())
-	}
-	if !capturedResult.ForceDelivery || capturedResult.Status != "done" {
-		t.Fatalf("captured result = %+v, want forced done", capturedResult)
-	}
-}
-
-func TestFinalizeStoppedJoinRegistersSyntheticMeetdMeeting(t *testing.T) {
-	t.Parallel()
-
-	service, router := newMeetdOpsTestRouter(t, func(context.Context, MeetdMeetingRecord, MeetdMeetingResult) error {
 		return nil
 	})
 	session := SessionRecord{
@@ -215,6 +172,18 @@ func TestFinalizeStoppedJoinRegistersSyntheticMeetdMeeting(t *testing.T) {
 			"slack_thread_ts":  "111.222",
 		},
 	}
+	if _, err := service.UpsertSession(context.Background(), SessionUpsertInput{
+		ID:         session.ID,
+		MeetingID:  session.MeetingID,
+		MeetingURL: session.MeetingURL,
+		Status:     session.Status,
+		Title:      session.Title,
+		StartedAt:  session.StartedAt,
+		EndedAt:    session.EndedAt,
+		Metadata:   session.Metadata,
+	}); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
 	result, warning := service.finalizeStoppedJoin(context.Background(), session, meetrunner.StopSessionResult{OK: true}, []postmeeting.TranscriptSegmentInput{{
 		Speaker: "Peng Xiao",
 		Text:    "结束入会后应该自动注册 redeliver 记录。",
@@ -228,9 +197,21 @@ func TestFinalizeStoppedJoinRegistersSyntheticMeetdMeeting(t *testing.T) {
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"status":"done"`) || !strings.Contains(get.Body.String(), `"result"`) {
 		t.Fatalf("get synthetic meeting = %d %s, want done result", get.Code, get.Body.String())
 	}
+	if err := service.SetMeetdMeetingSummary(context.Background(), meetingID, MeetdSummaryData{
+		Title:     "stale stored summary",
+		KeyPoints: []string{"old result must not be reused for direct join redeliver"},
+	}); err != nil {
+		t.Fatalf("set stale summary: %v", err)
+	}
 	redeliver := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
 	if redeliver.Code != http.StatusOK || strings.TrimSpace(redeliver.Body.String()) != `{"status":"redelivered"}` {
 		t.Fatalf("redeliver synthetic meeting = %d %s", redeliver.Code, redeliver.Body.String())
+	}
+	if capturedResult.Summary == nil || capturedResult.Summary.Title == "stale stored summary" {
+		t.Fatalf("redeliver result summary = %+v, want reprocessed direct join summary", capturedResult.Summary)
+	}
+	if capturedResult.Artifacts.CaptionsCount == 0 || capturedResult.Artifacts.TranscriptPath == "" {
+		t.Fatalf("redeliver artifacts = %+v, want reprocessed transcript artifacts", capturedResult.Artifacts)
 	}
 }
 

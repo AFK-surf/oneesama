@@ -35,7 +35,6 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	join.POST("/google-meet", h.handleJoinGoogleMeet)
 	join.GET("/status", h.handleJoinStatus)
 	join.POST("/stop", h.handleJoinStop)
-	join.POST("/redeliver", h.handleJoinRedeliver)
 
 	worker := rg.Group("/worker")
 	worker.Use(h.requireInternalAuth)

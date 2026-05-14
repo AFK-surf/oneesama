@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,21 @@ func (h *Handler) handleMeetdRedeliverMeeting(c *gin.Context) {
 		meetdJSONError(c, http.StatusConflict, fmt.Sprintf("meeting %d is in %q state, cannot redeliver", meeting.ID, meeting.Status))
 		return
 	}
+	if meetdMeetingIsSyntheticJoin(*meeting) {
+		if err := h.redeliverSyntheticJoinMeeting(c.Request.Context(), *meeting); err != nil {
+			switch {
+			case errors.Is(err, errJoinSessionNotFound):
+				meetdJSONError(c, http.StatusNotFound, "meeting not found")
+			case errors.Is(err, errJoinSessionNotRedeliverable):
+				meetdJSONError(c, http.StatusConflict, err.Error())
+			default:
+				meetdJSONError(c, http.StatusInternalServerError, "redeliver join session: "+err.Error())
+			}
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "redelivered"})
+		return
+	}
 	result, err := h.service.LoadStoredMeetdMeetingResult(c.Request.Context(), *meeting)
 	if err != nil {
 		meetdJSONError(c, http.StatusInternalServerError, "load meeting result: "+err.Error())
@@ -58,6 +74,17 @@ func (h *Handler) handleMeetdRedeliverMeeting(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "redelivered"})
+}
+
+func (h *Handler) redeliverSyntheticJoinMeeting(ctx context.Context, meeting MeetdMeetingRecord) error {
+	if strings.TrimSpace(meeting.SessionID) != "" {
+		return h.service.RedeliverJoinSession(ctx, meeting.SessionID)
+	}
+	return h.service.RedeliverJoinSessionBySyntheticMeetingID(ctx, meeting.ID)
+}
+
+func meetdMeetingIsSyntheticJoin(meeting MeetdMeetingRecord) bool {
+	return strings.HasPrefix(strings.TrimSpace(meeting.CalendarEventID), "join:")
 }
 
 func (h *Handler) handleMeetdResummarizeMeeting(c *gin.Context) {
