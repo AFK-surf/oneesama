@@ -3,6 +3,7 @@ package agentrunner
 import (
 	"context"
 	"testing"
+	"unicode/utf8"
 
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
@@ -91,5 +92,28 @@ func TestListJobsReturnsStoredJobs(t *testing.T) {
 	}
 	if jobs[0].ID != first.ID || jobs[1].ID != second.ID {
 		t.Fatalf("jobs order = %#v, want [%q, %q]", jobs, first.ID, second.ID)
+	}
+}
+
+func TestStartTaskNormalizesInvalidUTF8Task(t *testing.T) {
+	t.Parallel()
+
+	runner, err := New(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		AgentRunner: appconfig.AgentRunnerConfig{Provider: "dry-run"},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	job, err := runner.StartTask(context.Background(), StartInput{Task: "hello\xff中文"})
+	if err != nil {
+		t.Fatalf("StartTask() error = %v", err)
+	}
+	if !utf8.ValidString(job.Task) {
+		t.Fatalf("job.Task is not valid UTF-8: %q", job.Task)
+	}
+	if job.Task != "hello中文" {
+		t.Fatalf("job.Task = %q, want invalid byte stripped", job.Task)
 	}
 }

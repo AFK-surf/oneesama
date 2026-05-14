@@ -197,7 +197,7 @@ func newProvider(cfg appconfig.AgentRunnerConfig) (runnerProvider, error) {
 
 func normalizeStartInput(input StartInput) StartInput {
 	return StartInput{
-		Task:             strings.TrimSpace(input.Task),
+		Task:             strings.ToValidUTF8(strings.TrimSpace(input.Task), ""),
 		Context:          cloneMap(input.Context),
 		Mode:             defaultMode(input.Mode),
 		AllowCodeChanges: input.AllowCodeChanges,

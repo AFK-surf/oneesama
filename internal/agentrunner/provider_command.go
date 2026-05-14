@@ -42,7 +42,7 @@ func (p commandProvider) Run(ctx context.Context, input StartInput) (RunResult, 
 	command.Stdout = stdout
 	command.Stderr = stderr
 	if p.stdinPrompt {
-		command.Stdin = strings.NewReader(p.promptBuilder(input))
+		command.Stdin = strings.NewReader(strings.ToValidUTF8(p.promptBuilder(input), ""))
 	}
 
 	if err := runCommand(ctx, command); err != nil {

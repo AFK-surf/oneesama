@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestCommandProviderCapsStdout(t *testing.T) {
@@ -70,5 +71,32 @@ func TestCommandProviderCancelKillsChildProcessGroup(t *testing.T) {
 	}
 	if result.Error != "job canceled" {
 		t.Fatalf("result.Error = %q, want job canceled", result.Error)
+	}
+}
+
+func TestCommandProviderNormalizesInvalidUTF8Prompt(t *testing.T) {
+	t.Parallel()
+
+	provider := commandProvider{
+		provider: "codex",
+		bin:      "/bin/sh",
+		argsBuilder: func(StartInput) []string {
+			return []string{"-c", "cat"}
+		},
+		promptBuilder: func(StartInput) string {
+			return "ok\xff中文"
+		},
+		stdinPrompt: true,
+	}
+
+	result, err := provider.Run(context.Background(), StartInput{Task: "unused"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !utf8.ValidString(result.Result) {
+		t.Fatalf("result.Result is not valid UTF-8: %q", result.Result)
+	}
+	if result.Result != "ok中文" {
+		t.Fatalf("result.Result = %q, want invalid byte stripped", result.Result)
 	}
 }
