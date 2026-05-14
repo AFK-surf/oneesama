@@ -21,11 +21,17 @@ func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord
 		captions = normalizeFixtureCaptions(fixtureCaptions)
 	}
 	meeting := syntheticMeetdMeeting(session, slackChannel, slackThread)
+	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "processing", "", ""); err == nil && updated != nil {
+		meeting = *updated
+	}
 	if slackChannel != "" && slackThread != "" {
 		s.NotifyMeetdWebhook(ctx, "meeting.processing", meeting, nil)
 	}
 	if len(captions) == 0 {
 		warning := "no transcript captured"
+		if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", warning, ""); err == nil && updated != nil {
+			meeting = *updated
+		}
 		if slackChannel != "" && slackThread != "" {
 			s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
 				MeetingID:     meetingIDString(meeting.ID),
@@ -48,6 +54,9 @@ func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord
 		Source:     "join-stop",
 	})
 	if err != nil {
+		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", err.Error(), ""); updateErr == nil && updated != nil {
+			meeting = *updated
+		}
 		if slackChannel != "" && slackThread != "" {
 			s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
 				MeetingID:     meetingIDString(meeting.ID),
@@ -57,6 +66,9 @@ func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord
 			})
 		}
 		return nil, err.Error()
+	}
+	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "done", "", result.Artifact.Dir); err == nil && updated != nil {
+		meeting = *updated
 	}
 	if slackChannel != "" && slackThread != "" {
 		s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{

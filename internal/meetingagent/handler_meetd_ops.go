@@ -2,6 +2,7 @@ package meetingagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -14,8 +15,28 @@ func (h *Handler) handleMeetdRedeliverMeeting(c *gin.Context) {
 		meetdJSONError(c, http.StatusNotImplemented, "webhook sender not configured")
 		return
 	}
-	meeting, ok := h.meetdMeetingOrError(c)
+	meetingID, ok := h.meetdMeetingIDOrError(c)
 	if !ok {
+		return
+	}
+	meeting, err := h.service.GetMeetdMeeting(c.Request.Context(), meetingID)
+	if err != nil {
+		meetdJSONError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if meeting == nil {
+		if err := h.service.RedeliverJoinSessionBySyntheticMeetingID(c.Request.Context(), meetingID); err != nil {
+			switch {
+			case errors.Is(err, errJoinSessionNotFound):
+				meetdJSONError(c, http.StatusNotFound, "meeting not found")
+			case errors.Is(err, errJoinSessionNotRedeliverable):
+				meetdJSONError(c, http.StatusConflict, err.Error())
+			default:
+				meetdJSONError(c, http.StatusInternalServerError, "redeliver join session: "+err.Error())
+			}
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "redelivered"})
 		return
 	}
 	if meeting.Status != "done" && meeting.Status != "failed" {
