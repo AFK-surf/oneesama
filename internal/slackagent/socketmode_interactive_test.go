@@ -123,6 +123,10 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 	if !body.InstallRealtimeBridge || !body.InstallWorkerResultBridge {
 		t.Fatalf("realtime flags = %#v, want realtime bridge pair", body)
 	}
+	if body.RealtimeBridgeMode != "webrtc" || !body.AutoConnectRealtime ||
+		!body.SendRealtimeSessionUpdate || !body.ForwardMeetAudioToRealtime {
+		t.Fatalf("realtime connect fields = %#v, want live OpenAI Realtime bridge", body)
+	}
 
 	select {
 	case finalBody := <-finalResponseCh:

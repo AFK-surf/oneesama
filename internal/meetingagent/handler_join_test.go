@@ -38,22 +38,28 @@ func (fakeMeetRunner) PrepareGoogleMeet(_ context.Context, input meetrunner.Prep
 			Title:      firstNonEmpty(input.Title, "Join Dry Run"),
 		},
 		Plan: meetrunner.JoinPlan{
-			Entry:                     "google-meet-joiner.ts",
-			Mode:                      "playwright-ts",
-			DryRun:                    input.DryRun,
-			DisplayName:               input.DisplayName,
-			AllowNonGoogleMeet:        input.AllowNonGoogleMeet,
-			CollectFixtureState:       input.CollectFixtureState,
-			CaptureCaptions:           input.CaptureCaptions,
-			CaptionLanguage:           input.CaptionLanguage,
-			RecordMeeting:             input.RecordMeeting,
-			ArtifactsDir:              input.ArtifactsDir,
-			MeetAudioBackend:          input.MeetAudioBackend,
-			InstallRealtimeBridge:     input.InstallRealtimeBridge,
-			InstallLocalDialogBridge:  input.InstallLocalDialogBridge,
-			InstallWorkerResultBridge: input.InstallWorkerResultBridge,
-			InstallScreenShareBridge:  input.InstallScreenShareBridge,
-			AutoStartScreenShare:      input.AutoStartScreenShare,
+			Entry:                      "google-meet-joiner.ts",
+			Mode:                       "playwright-ts",
+			DryRun:                     input.DryRun,
+			DisplayName:                input.DisplayName,
+			AllowNonGoogleMeet:         input.AllowNonGoogleMeet,
+			CollectFixtureState:        input.CollectFixtureState,
+			CaptureCaptions:            input.CaptureCaptions,
+			CaptionLanguage:            input.CaptionLanguage,
+			RecordMeeting:              input.RecordMeeting,
+			ArtifactsDir:               input.ArtifactsDir,
+			MeetAudioBackend:           input.MeetAudioBackend,
+			InstallRealtimeBridge:      input.InstallRealtimeBridge,
+			RealtimeBridgeMode:         input.RealtimeBridgeMode,
+			AutoConnectRealtime:        input.AutoConnectRealtime,
+			SendRealtimeSessionUpdate:  input.SendRealtimeSessionUpdate,
+			IncludeParticipantAudio:    input.IncludeParticipantAudio,
+			ForwardMeetAudioToRealtime: input.ForwardMeetAudioToRealtime,
+			RealtimeFallbackToLocalMic: input.RealtimeFallbackToLocalMic,
+			InstallLocalDialogBridge:   input.InstallLocalDialogBridge,
+			InstallWorkerResultBridge:  input.InstallWorkerResultBridge,
+			InstallScreenShareBridge:   input.InstallScreenShareBridge,
+			AutoStartScreenShare:       input.AutoStartScreenShare,
 		},
 	}, nil
 }
@@ -147,7 +153,7 @@ func TestHandleJoinLifecycle(t *testing.T) {
 
 	router := newJoinTestRouter(t)
 
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_test","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"collect_fixture_state":true,"capture_captions":true,"caption_language":"English","record_meeting":true,"install_realtime_bridge":true,"install_local_dialog_bridge":true,"install_worker_result_bridge":true,"install_screen_share_bridge":true,"auto_start_screen_share":true}`))
+	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_test","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"collect_fixture_state":true,"capture_captions":true,"caption_language":"English","record_meeting":true,"install_realtime_bridge":true,"realtime_bridge_mode":"webrtc","auto_connect_realtime":true,"send_realtime_session_update":true,"forward_meet_audio_to_realtime":true,"install_local_dialog_bridge":true,"install_worker_result_bridge":true,"install_screen_share_bridge":true,"auto_start_screen_share":true}`))
 	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
 	joinRequest.Header.Set("Content-Type", "application/json")
 	joinResponse := httptest.NewRecorder()
@@ -161,6 +167,10 @@ func TestHandleJoinLifecycle(t *testing.T) {
 	if !strings.Contains(joinResponse.Body.String(), `"install_realtime_bridge":true`) ||
 		!strings.Contains(joinResponse.Body.String(), `"install_local_dialog_bridge":true`) ||
 		!strings.Contains(joinResponse.Body.String(), `"install_worker_result_bridge":true`) ||
+		!strings.Contains(joinResponse.Body.String(), `"realtime_bridge_mode":"webrtc"`) ||
+		!strings.Contains(joinResponse.Body.String(), `"auto_connect_realtime":true`) ||
+		!strings.Contains(joinResponse.Body.String(), `"send_realtime_session_update":true`) ||
+		!strings.Contains(joinResponse.Body.String(), `"forward_meet_audio_to_realtime":true`) ||
 		!strings.Contains(joinResponse.Body.String(), `"install_screen_share_bridge":true`) ||
 		!strings.Contains(joinResponse.Body.String(), `"auto_start_screen_share":true`) ||
 		!strings.Contains(joinResponse.Body.String(), `"collect_fixture_state":true`) ||

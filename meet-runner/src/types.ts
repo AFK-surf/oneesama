@@ -31,6 +31,12 @@ export type PrepareJoinParams = {
   artifacts_dir?: string;
   meet_audio_backend?: string;
   install_realtime_bridge?: boolean;
+  realtime_bridge_mode?: string;
+  auto_connect_realtime?: boolean;
+  send_realtime_session_update?: boolean;
+  include_participant_audio?: boolean;
+  forward_meet_audio_to_realtime?: boolean;
+  realtime_fallback_to_local_mic?: boolean;
   install_local_dialog_bridge?: boolean;
   install_worker_result_bridge?: boolean;
   install_screen_share_bridge?: boolean;

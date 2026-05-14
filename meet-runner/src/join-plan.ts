@@ -9,6 +9,12 @@ export type BrowserIslandOptions = {
   artifactsDir: string;
   meetAudioBackend: string;
   installRealtimeBridge: boolean;
+  realtimeBridgeMode: string;
+  autoConnectRealtime: boolean;
+  sendRealtimeSessionUpdate: boolean;
+  includeParticipantAudio: boolean;
+  forwardMeetAudioToRealtime: boolean;
+  realtimeFallbackToLocalMic: boolean;
   installLocalDialogBridge: boolean;
   installWorkerResultBridge: boolean;
   installScreenShareBridge: boolean;
@@ -16,6 +22,7 @@ export type BrowserIslandOptions = {
 };
 
 export function normalizeBrowserIslandOptions(params: PrepareJoinParams): BrowserIslandOptions {
+  const installRealtimeBridge = Boolean(params.install_realtime_bridge);
   return {
     allowNonGoogleMeet: Boolean(params.allow_non_google_meet),
     collectFixtureState: Boolean(params.collect_fixture_state),
@@ -24,7 +31,14 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
     recordMeeting: Boolean(params.record_meeting),
     artifactsDir: typeof params.artifacts_dir === "string" ? params.artifacts_dir.trim() : "",
     meetAudioBackend: typeof params.meet_audio_backend === "string" ? params.meet_audio_backend.trim() : "",
-    installRealtimeBridge: Boolean(params.install_realtime_bridge),
+    installRealtimeBridge,
+    realtimeBridgeMode:
+      typeof params.realtime_bridge_mode === "string" ? params.realtime_bridge_mode.trim() : "",
+    autoConnectRealtime: Boolean(params.auto_connect_realtime),
+    sendRealtimeSessionUpdate: installRealtimeBridge && params.send_realtime_session_update !== false,
+    includeParticipantAudio: Boolean(params.include_participant_audio),
+    forwardMeetAudioToRealtime: installRealtimeBridge && params.forward_meet_audio_to_realtime !== false,
+    realtimeFallbackToLocalMic: Boolean(params.realtime_fallback_to_local_mic),
     installLocalDialogBridge: Boolean(params.install_local_dialog_bridge),
     installWorkerResultBridge: Boolean(params.install_worker_result_bridge),
     installScreenShareBridge: Boolean(params.install_screen_share_bridge),
@@ -47,6 +61,12 @@ export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
     artifacts_dir: options.artifactsDir,
     meet_audio_backend: options.meetAudioBackend,
     install_realtime_bridge: options.installRealtimeBridge,
+    realtime_bridge_mode: options.realtimeBridgeMode,
+    auto_connect_realtime: options.autoConnectRealtime,
+    send_realtime_session_update: options.sendRealtimeSessionUpdate,
+    include_participant_audio: options.includeParticipantAudio,
+    forward_meet_audio_to_realtime: options.forwardMeetAudioToRealtime,
+    realtime_fallback_to_local_mic: options.realtimeFallbackToLocalMic,
     install_local_dialog_bridge: options.installLocalDialogBridge,
     install_worker_result_bridge: options.installWorkerResultBridge,
     install_screen_share_bridge: options.installScreenShareBridge,

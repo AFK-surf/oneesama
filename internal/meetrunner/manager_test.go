@@ -55,19 +55,23 @@ func TestManagerPrepareAndStop(t *testing.T) {
 
 	manager := New(Config{Dir: filepath.Join("..", "..", "meet-runner")})
 	prepare, err := manager.PrepareGoogleMeet(context.Background(), PrepareGoogleMeetInput{
-		SessionID:                 "session_live",
-		MeetingURL:                "https://meet.google.com/abc-defg-hij",
-		DisplayName:               "Onee-sama",
-		Title:                     "Dry Run",
-		DryRun:                    true,
-		CollectFixtureState:       true,
-		CaptureCaptions:           true,
-		CaptionLanguage:           "English",
-		InstallRealtimeBridge:     true,
-		InstallLocalDialogBridge:  true,
-		InstallWorkerResultBridge: true,
-		InstallScreenShareBridge:  true,
-		AutoStartScreenShare:      true,
+		SessionID:                  "session_live",
+		MeetingURL:                 "https://meet.google.com/abc-defg-hij",
+		DisplayName:                "Onee-sama",
+		Title:                      "Dry Run",
+		DryRun:                     true,
+		CollectFixtureState:        true,
+		CaptureCaptions:            true,
+		CaptionLanguage:            "English",
+		InstallRealtimeBridge:      true,
+		RealtimeBridgeMode:         "webrtc",
+		AutoConnectRealtime:        true,
+		SendRealtimeSessionUpdate:  true,
+		ForwardMeetAudioToRealtime: true,
+		InstallLocalDialogBridge:   true,
+		InstallWorkerResultBridge:  true,
+		InstallScreenShareBridge:   true,
+		AutoStartScreenShare:       true,
 	})
 	if err != nil {
 		t.Fatalf("PrepareGoogleMeet() error = %v", err)
@@ -77,6 +81,8 @@ func TestManagerPrepareAndStop(t *testing.T) {
 	}
 	if !prepare.Plan.CollectFixtureState || !prepare.Plan.CaptureCaptions ||
 		prepare.Plan.CaptionLanguage != "English" || !prepare.Plan.InstallRealtimeBridge ||
+		prepare.Plan.RealtimeBridgeMode != "webrtc" || !prepare.Plan.AutoConnectRealtime ||
+		!prepare.Plan.SendRealtimeSessionUpdate || !prepare.Plan.ForwardMeetAudioToRealtime ||
 		!prepare.Plan.InstallLocalDialogBridge || !prepare.Plan.InstallWorkerResultBridge ||
 		!prepare.Plan.InstallScreenShareBridge || !prepare.Plan.AutoStartScreenShare {
 		t.Fatalf("prepare plan = %#v, want explicit browser-island flags preserved", prepare.Plan)

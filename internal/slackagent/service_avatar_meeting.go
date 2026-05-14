@@ -22,18 +22,22 @@ const (
 )
 
 type meetingAgentJoinRequest struct {
-	SessionID                 string `json:"session_id,omitempty"`
-	MeetingURL                string `json:"meeting_url"`
-	DisplayName               string `json:"display_name,omitempty"`
-	Title                     string `json:"title,omitempty"`
-	DryRun                    bool   `json:"dry_run"`
-	CaptureCaptions           bool   `json:"capture_captions,omitempty"`
-	CaptionLanguage           string `json:"caption_language,omitempty"`
-	RecordMeeting             bool   `json:"record_meeting,omitempty"`
-	InstallRealtimeBridge     bool   `json:"install_realtime_bridge,omitempty"`
-	InstallWorkerResultBridge bool   `json:"install_worker_result_bridge,omitempty"`
-	SlackChannelID            string `json:"slack_channel_id,omitempty"`
-	SlackThreadTS             string `json:"slack_thread_ts,omitempty"`
+	SessionID                  string `json:"session_id,omitempty"`
+	MeetingURL                 string `json:"meeting_url"`
+	DisplayName                string `json:"display_name,omitempty"`
+	Title                      string `json:"title,omitempty"`
+	DryRun                     bool   `json:"dry_run"`
+	CaptureCaptions            bool   `json:"capture_captions,omitempty"`
+	CaptionLanguage            string `json:"caption_language,omitempty"`
+	RecordMeeting              bool   `json:"record_meeting,omitempty"`
+	InstallRealtimeBridge      bool   `json:"install_realtime_bridge,omitempty"`
+	InstallWorkerResultBridge  bool   `json:"install_worker_result_bridge,omitempty"`
+	RealtimeBridgeMode         string `json:"realtime_bridge_mode,omitempty"`
+	AutoConnectRealtime        bool   `json:"auto_connect_realtime,omitempty"`
+	SendRealtimeSessionUpdate  bool   `json:"send_realtime_session_update,omitempty"`
+	ForwardMeetAudioToRealtime bool   `json:"forward_meet_audio_to_realtime,omitempty"`
+	SlackChannelID             string `json:"slack_channel_id,omitempty"`
+	SlackThreadTS              string `json:"slack_thread_ts,omitempty"`
 }
 
 type meetingAgentStopRequest struct {
@@ -191,6 +195,12 @@ func (s *Service) postMeetingAgentJoin(ctx context.Context, input AvatarCommandI
 		InstallWorkerResultBridge: parsed.RealtimeJoin,
 		SlackChannelID:            strings.TrimSpace(input.ChannelID),
 		SlackThreadTS:             strings.TrimSpace(input.ThreadTS),
+	}
+	if parsed.RealtimeJoin {
+		request.RealtimeBridgeMode = "webrtc"
+		request.AutoConnectRealtime = true
+		request.SendRealtimeSessionUpdate = true
+		request.ForwardMeetAudioToRealtime = true
 	}
 	var result meetingAgentJoinResponse
 	if err := s.postMeetingAgentJSONWithTimeout(ctx, "/join/google-meet", request, &result, meetingAgentJoinTimeout); err != nil {

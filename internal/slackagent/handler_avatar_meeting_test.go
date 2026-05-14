@@ -84,6 +84,10 @@ func TestHandleAvatarCommandJoinCallsMeetingAgent(t *testing.T) {
 		if body.DryRun || body.InstallRealtimeBridge || body.InstallWorkerResultBridge {
 			t.Fatalf("join flags = %#v, want real join with browser bridges off by default", body)
 		}
+		if body.RealtimeBridgeMode != "" || body.AutoConnectRealtime ||
+			body.SendRealtimeSessionUpdate || body.ForwardMeetAudioToRealtime {
+			t.Fatalf("realtime connect fields = %#v, want ordinary join to keep realtime disabled", body)
+		}
 		if !body.CaptureCaptions || body.CaptionLanguage != "English" {
 			t.Fatalf("caption flags = %#v, want captions captured by default", body)
 		}
