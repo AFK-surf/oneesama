@@ -447,6 +447,11 @@ func int64Value(values ...any) int64 {
 			if typed != 0 {
 				return int64(typed)
 			}
+		case json.Number:
+			parsed, err := typed.Int64()
+			if err == nil && parsed != 0 {
+				return parsed
+			}
 		case string:
 			parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
 			if err == nil && parsed != 0 {

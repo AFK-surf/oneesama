@@ -1,6 +1,7 @@
 package slackagent
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -29,7 +30,9 @@ func (h *Handler) handleMeetingWebhook(c *gin.Context) {
 		return
 	}
 	var payload MeetingWebhookPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil {
 		c.String(http.StatusBadRequest, "invalid payload")
 		return
 	}

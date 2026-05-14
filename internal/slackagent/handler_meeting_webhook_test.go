@@ -144,6 +144,30 @@ func TestMeetingWebhookResultPublishesSummaryAndDedupe(t *testing.T) {
 	}
 }
 
+func TestMeetingWebhookPreservesLargeNumericMeetingID(t *testing.T) {
+	canvas := &recordingCanvasPublisher{}
+	router := newMeetingWebhookTestRouter(t, &recordingPoster{}, &recordingAssistant{}, canvas)
+	meetingID := int64(7182267292038423576)
+
+	body := `{"event":"meeting.result","meeting_id":7182267292038423576,"title":"Large ID","summary":{"title":"Large ID","duration_minutes":1,"attendees":["Peng"],"key_points":["ID must not lose precision."]},"slack_ref":{"channel_id":"C123","thread_ts":"123.456"},"force_delivery":true}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	payload := decodeMeetingWebhookResponse(t, response)
+	if payload.MeetingID != meetingID {
+		t.Fatalf("response meeting id = %d, want %d", payload.MeetingID, meetingID)
+	}
+	inputs := canvas.Inputs()
+	if len(inputs) != 1 {
+		t.Fatalf("canvas inputs = %d, want 1", len(inputs))
+	}
+	if !strings.Contains(inputs[0].ArtifactID, strconv.FormatInt(meetingID, 10)) ||
+		!strings.Contains(inputs[0].DedupKey, strconv.FormatInt(meetingID, 10)) {
+		t.Fatalf("canvas input = %#v, want exact large meeting id", inputs[0])
+	}
+}
+
 func TestMeetingWebhookResultUploadsTranscriptAndAudioBeforeCanvasPublish(t *testing.T) {
 	transcriptPath := filepath.Join(t.TempDir(), "transcript.txt")
 	if err := os.WriteFile(transcriptPath, []byte("Peng: real transcript line\n"), 0o644); err != nil {
