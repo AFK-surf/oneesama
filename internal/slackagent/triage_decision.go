@@ -1,14 +1,30 @@
 package slackagent
 
 import (
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
 var slackTriageActionablePattern = regexp.MustCompile(`(?i)\b(todo|follow.?up|fix|bug|blocked|need|needs|should|please|明天|跟进|修|问题|阻塞|需要)\b`)
+var slackTriageURLPattern = regexp.MustCompile(`https?://[^\s<>()]+`)
 
-var slackPendingActionTypes = map[string]struct{}{
+var slackTriageActionTypes = map[string]struct{}{
+	"follow_up":         {},
+	"create_task":       {},
+	"ask_user":          {},
+	"delegate":          {},
+	"create_issue":      {},
+	"add_comment":       {},
+	"create_event":      {},
+	"join_meeting":      {},
+	"create_channel":    {},
+	"post_thread_reply": {},
+	"none":              {},
+}
+
+var slackTriageMutationActionTypes = map[string]struct{}{
 	"follow_up":      {},
 	"create_task":    {},
 	"ask_user":       {},
@@ -18,7 +34,6 @@ var slackPendingActionTypes = map[string]struct{}{
 	"create_event":   {},
 	"join_meeting":   {},
 	"create_channel": {},
-	"none":           {},
 }
 
 type slackTriageFallback struct {
@@ -57,12 +72,16 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 
 	return strings.Join([]string{
 		"You are porting Legacy Slack Agent triage behavior.",
-		"Read buffered Slack activity and decide whether the bot should surface an action card.",
-		"Do not call Slack/Linear/Notion tools directly here. If a tool is needed, propose a pending action for user confirmation.",
+		"Read buffered Slack activity and decide whether the bot should reply, stay silent, or surface a mutation action card.",
+		"Legacy Cueboard behavior is low-friction: most triage cycles reply or stay silent. Confirmation cards are only for external mutations.",
 		"",
 		"Channel: " + input.ChannelID,
 		existingBrain + memoryBlock + previousBlock,
 		"Policy rails:",
+		"- Use `post_thread_reply` with `requiresConfirmation:false` for read-only answers, summaries, link commentary, and brief synthesis.",
+		"- Use pending confirmation only for mutations: create_issue, add_comment, create_event, join_meeting, create_channel, delegate/create_task/follow_up/ask_user.",
+		"- Do not ask permission to read a public link. If it is worth handling, read it and answer directly; otherwise choose none.",
+		"- Bare Slack archive/permalink URLs are not automatically relevant. Ignore them unless the message explicitly asks you to inspect/summarize that Slack thread.",
 		"- Casual chat exception: one short reply is allowed only when it adds something new and sounds natural out loud; otherwise choose none.",
 		"- Facts for facts. For meaningful external links, read first; do not auto-skip just because nobody asked.",
 		"- technical threads that have clearly stalled may need one verified fact or issue hygiene; do not do the debugging yourself in triage.",
@@ -79,14 +98,14 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 		`  "summary": "one concise channel-brain update",`,
 		`  "actions": [`,
 		"    {",
-		`      "type": "follow_up | create_task | ask_user | delegate | create_issue | add_comment | create_event | join_meeting | create_channel | none",`,
+		`      "type": "post_thread_reply | follow_up | create_task | ask_user | delegate | create_issue | add_comment | create_event | join_meeting | create_channel | none",`,
 		`      "title": "short action title",`,
-		`      "message": "what the user should confirm or what the agent should do",`,
+		`      "message": "reply text for post_thread_reply, or what the user should confirm for a mutation",`,
 		`      "channelId": "Slack channel id, optional",`,
 		`      "threadTs": "Slack thread ts, optional",`,
 		`      "confidence": 0.0,`,
 		`      "reason": "why this action is justified",`,
-		`      "requiresConfirmation": true`,
+		`      "requiresConfirmation": false`,
 		"    }",
 		"  ]",
 		"}",
@@ -192,7 +211,10 @@ func normalizeSlackTriageActions(values []any, fallback slackTriageFallback) []S
 	for _, value := range values {
 		action := triageActionFromAny(value)
 		typ := strings.ToLower(firstNonEmpty(action.Type, "follow_up"))
-		if _, ok := slackPendingActionTypes[typ]; !ok {
+		if typ == "reply" || typ == "answer" {
+			typ = "post_thread_reply"
+		}
+		if _, ok := slackTriageActionTypes[typ]; !ok {
 			typ = "follow_up"
 		}
 		if typ == "none" {
@@ -200,10 +222,7 @@ func normalizeSlackTriageActions(values []any, fallback slackTriageFallback) []S
 		}
 		title := truncateSlackContextText(firstNonEmpty(action.Title, "Review Slack activity"), 160)
 		message := truncateSlackContextText(firstNonEmpty(action.Message, action.Reason, title), 2000)
-		requires := true
-		if action.RequiresConfirmation == false {
-			requires = false
-		}
+		requires := slackTriageActionRequiresConfirmation(typ, action.RequiresConfirmation)
 		actions = append(actions, SlackTriageDecisionAction{
 			Type:                 typ,
 			Title:                title,
@@ -257,4 +276,73 @@ func joinSlackMessageTexts(messages []SlackInboundMessage) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func slackTriageActionRequiresConfirmation(actionType string, modelValue bool) bool {
+	if _, ok := slackTriageMutationActionTypes[actionType]; ok {
+		return true
+	}
+	return modelValue && actionType != "post_thread_reply"
+}
+
+func filterSlackTriageActionsForMessages(actions []SlackTriageDecisionAction, messages []SlackInboundMessage) []SlackTriageDecisionAction {
+	if len(actions) == 0 {
+		return actions
+	}
+	if slackMessagesAreBareInternalPermalinks(messages) && !explicitlyRequestsSlackPermalinkHandling(joinSlackMessageTexts(messages)) {
+		return nil
+	}
+	return actions
+}
+
+func slackMessagesAreBareInternalPermalinks(messages []SlackInboundMessage) bool {
+	var sawURL bool
+	for _, message := range messages {
+		text := strings.TrimSpace(message.Text)
+		if text == "" {
+			continue
+		}
+		urls := slackTriageURLPattern.FindAllString(text, -1)
+		if len(urls) == 0 {
+			return false
+		}
+		for _, rawURL := range urls {
+			if !isInternalSlackArchiveURL(rawURL) {
+				return false
+			}
+			sawURL = true
+		}
+		rest := strings.TrimSpace(slackTriageURLPattern.ReplaceAllString(text, ""))
+		rest = strings.Trim(rest, "<>| \t\r\n")
+		if rest != "" {
+			return false
+		}
+	}
+	return sawURL
+}
+
+func isInternalSlackArchiveURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.Trim(rawURL, "<>|.,，。)）]】"))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return strings.HasSuffix(host, ".slack.com") && strings.HasPrefix(parsed.Path, "/archives/")
+}
+
+func explicitlyRequestsSlackPermalinkHandling(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	for _, keyword := range []string{
+		"看看", "看下", "看一下", "读一下", "读下", "总结", "概括", "分析", "解释", "这是啥", "什么情况", "帮我看",
+		"read", "summarize", "summary", "check this", "look at", "what is", "what's", "explain",
+	} {
+		if strings.Contains(normalized, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func slackTriageDirectReplyAction(action SlackTriageDecisionAction) bool {
+	return action.Type == "post_thread_reply" && !action.RequiresConfirmation
 }

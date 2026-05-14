@@ -160,11 +160,14 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	rawOutput := firstNonEmpty(job.Result, job.Error)
 	decision := parseSlackTriageDecision(rawOutput, fallback)
 	ok := job.Status == agentrunner.StatusCompleted
-	actions := decision.Actions
+	actions := filterSlackTriageActionsForMessages(decision.Actions, messages)
+	decision.Actions = actions
 	if !ok {
 		actions = nil
+		decision.Actions = nil
 	}
-	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: len(actions)}, nil)
+	directToolCalls, directFailures := s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions)
+	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: len(actions), failures: directFailures}, nil)
 	if ok {
 		var reason string
 		ok, reason = triageDidSucceed(job.ID, mutations, failures, nil, rawOutput)
@@ -181,14 +184,14 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		Digest:    stringFromContext(job.Context, "digest"),
 		Channels:  []string{channelID},
 		Actions:   triageActionRows(actions),
-		ToolCalls: []SlackTriageToolCall{{
+		ToolCalls: append([]SlackTriageToolCall{{
 			Tool:    "agent_runner",
 			Action:  "slack_triage",
 			Args:    marshalTriageArgs(job.Provider, job.ID, decision.ParseOK),
 			Success: ok,
 			Brief:   mapBool(ok, "AgentRunner triage completed", "AgentRunner triage failed"),
 			Result:  rawOutput,
-		}},
+		}}, directToolCalls...),
 		Steps:     1,
 		Mutations: mutations,
 		Failures:  failures,
@@ -212,4 +215,37 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	finalization := &SlackTriageFinalization{Run: updatedRun, Decision: decision, PendingActions: pendingActions}
 	s.finalizedTriageResults[job.ID] = finalization
 	return finalization, nil
+}
+
+func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspaceID string, channelID string, threadTS string, runID int64, actions []SlackTriageDecisionAction) ([]SlackTriageToolCall, int) {
+	calls := make([]SlackTriageToolCall, 0)
+	var failures int
+	for _, action := range actions {
+		if !slackTriageDirectReplyAction(action) {
+			continue
+		}
+		effectiveChannel := firstNonEmpty(action.ChannelID, channelID)
+		effectiveThread := firstNonEmpty(action.ThreadTS, threadTS)
+		result := s.PostMessage(ctx, PostMessageInput{
+			Channel:  effectiveChannel,
+			ThreadTS: effectiveThread,
+			Text:     action.Message,
+			DedupKey: fmt.Sprintf("slack-triage-direct:%d:%s:%s", runID, effectiveChannel, firstNonEmpty(effectiveThread, "root")),
+		})
+		call := SlackTriageToolCall{
+			Tool:    "slack_api",
+			Action:  "post_thread_reply",
+			Args:    marshalTriageArgs("chat.postMessage", result.TS, result.OK),
+			Success: result.OK,
+			Brief:   firstNonEmpty(action.Title, firstLine(action.Message), "posted a thread reply"),
+			Result:  firstNonEmpty(result.Error, result.Detail, result.TS, result.ThreadTS),
+		}
+		if !result.OK {
+			failures++
+		} else if err := s.cognition.RecordOutbound(ctx, workspaceID, effectiveChannel, effectiveThread, "Triage replied: "+firstNonEmpty(action.Title, firstLine(action.Message))); err != nil {
+			s.logger.Warn("slack thread ledger direct reply record failed", "error", err)
+		}
+		calls = append(calls, call)
+	}
+	return calls, failures
 }

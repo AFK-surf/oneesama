@@ -11,9 +11,13 @@ func buildAgentRunnerConfig(raw rawAgentRunner) AgentRunnerConfig {
 		DryRun:     raw.DryRun,
 		JobTimeout: durationOrDefault(raw.JobTimeout, defaultAgentJobTimeout),
 		Codex: CodexRunnerConfig{
-			Bin:     stringOrDefault(raw.Codex.Bin, defaultCodexBin),
-			Model:   stringOrDefault(raw.Codex.Model, defaultCodexModel),
-			Sandbox: strings.TrimSpace(raw.Codex.Sandbox),
+			Bin:           stringOrDefault(raw.Codex.Bin, defaultCodexBin),
+			Model:         stringOrDefault(raw.Codex.Model, defaultCodexModel),
+			Sandbox:       strings.TrimSpace(raw.Codex.Sandbox),
+			ModelProvider: strings.TrimSpace(raw.Codex.ModelProvider),
+			BaseURL:       trimURL(raw.Codex.BaseURL),
+			EnvKey:        strings.TrimSpace(raw.Codex.EnvKey),
+			WireAPI:       strings.TrimSpace(raw.Codex.WireAPI),
 		},
 		Claude: ClaudeRunnerConfig{
 			Bin:                 stringOrDefault(raw.Claude.Bin, defaultClaudeBin),
@@ -47,6 +51,18 @@ func applyAgentRunnerEnvOverrides(cfg *Config) {
 	}
 	if value := strings.TrimSpace(getenv("ONEESAMA_CODEX_SANDBOX", "MAB_CODEX_SANDBOX")); value != "" {
 		cfg.AgentRunner.Codex.Sandbox = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_CODEX_MODEL_PROVIDER", "MAB_CODEX_MODEL_PROVIDER")); value != "" {
+		cfg.AgentRunner.Codex.ModelProvider = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_CODEX_BASE_URL", "MAB_CODEX_BASE_URL")); value != "" {
+		cfg.AgentRunner.Codex.BaseURL = trimURL(value)
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_CODEX_ENV_KEY", "MAB_CODEX_ENV_KEY")); value != "" {
+		cfg.AgentRunner.Codex.EnvKey = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_CODEX_WIRE_API", "MAB_CODEX_WIRE_API")); value != "" {
+		cfg.AgentRunner.Codex.WireAPI = value
 	}
 	if value := strings.TrimSpace(getenv("ONEESAMA_CLAUDE_BIN", "MAB_CLAUDE_BIN")); value != "" {
 		cfg.AgentRunner.Claude.Bin = value
@@ -83,4 +99,8 @@ func durationOrDefault(raw string, fallback time.Duration) time.Duration {
 		return parsed
 	}
 	return fallback
+}
+
+func trimURL(value string) string {
+	return strings.TrimRight(strings.TrimSpace(value), "/")
 }

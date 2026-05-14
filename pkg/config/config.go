@@ -113,9 +113,13 @@ type DialogConfig struct {
 }
 
 type CodexRunnerConfig struct {
-	Bin     string
-	Model   string
-	Sandbox string
+	Bin           string
+	Model         string
+	Sandbox       string
+	ModelProvider string
+	BaseURL       string
+	EnvKey        string
+	WireAPI       string
 }
 
 type ClaudeRunnerConfig struct {

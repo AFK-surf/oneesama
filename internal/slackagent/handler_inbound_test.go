@@ -406,6 +406,152 @@ func TestSlackHistoryScannerPostsPendingActionCard(t *testing.T) {
 	}
 }
 
+func TestSlackHistoryScannerPostsDirectReadOnlyReplyForExternalLink(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://x.com/steipete/status/2054850632067019173","ts":"1778767510.917049"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_x_link",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"X link summarized","actions":[{"type":"post_thread_reply","title":"X link summary","message":"这条 X 主要在讨论一个开发工具观察，值得留意。","channelId":"C123","threadTs":"1778767510.917049","confidence":0.86,"reason":"Public external links are read-only and should be answered directly.","requiresConfirmation":false}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+			Triage: appconfig.SlackTriageConfig{
+				PostActions:       true,
+				HeuristicFallback: true,
+			},
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.inbound.SetCursor("C123", "1778767000.000000")
+
+	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("scanSlackHistoryOnce: %v", err)
+	}
+	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
+		t.Fatalf("result = %#v, want flushed scanner result", result)
+	}
+	poster.WaitForCalls(t, 1)
+	calls := poster.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("poster calls = %d, want 1 direct reply", len(calls))
+	}
+	call := calls[0]
+	if call.Channel != "C123" || call.ThreadTS != "1778767510.917049" || !strings.Contains(call.Text, "这条 X") {
+		t.Fatalf("post call = %#v, want direct summary in source thread", call)
+	}
+	if len(call.Blocks) != 0 || strings.Contains(call.Text, "Triage suggestion") || !strings.Contains(call.DedupKey, "slack-triage-direct:") {
+		t.Fatalf("post call = %#v, want plain direct reply without action card", call)
+	}
+	status, err := service.TriageStatus(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("TriageStatus: %v", err)
+	}
+	if len(status.PendingActions) != 0 {
+		t.Fatalf("pending actions = %#v, want none for read-only reply", status.PendingActions)
+	}
+}
+
+func TestSlackHistoryScannerIgnoresBareSlackPermalinkActions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://cue-3kl2780.slack.com/archives/C0AQ0C0KVMH/p1778767624846809","ts":"1778767624.846809"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_slack_permalink",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"Bare Slack permalink only","actions":[{"type":"follow_up","title":"核实并总结 Slack 链接","message":"是否读取这条 Slack 链接并总结？","channelId":"C123","threadTs":"1778767624.846809","confidence":0.58,"reason":"消息只有内部 Slack 链接。","requiresConfirmation":true}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+			Triage: appconfig.SlackTriageConfig{
+				PostActions:       true,
+				HeuristicFallback: true,
+			},
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.inbound.SetCursor("C123", "1778767000.000000")
+
+	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("scanSlackHistoryOnce: %v", err)
+	}
+	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
+		t.Fatalf("result = %#v, want flushed scanner result", result)
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want no reply or confirmation card for bare Slack permalink", calls)
+	}
+	status, err := service.TriageStatus(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("TriageStatus: %v", err)
+	}
+	if len(status.PendingActions) != 0 {
+		t.Fatalf("pending actions = %#v, want bare Slack permalink suppressed", status.PendingActions)
+	}
+	if len(status.Runs) == 0 || len(status.Runs[0].Actions) != 0 {
+		t.Fatalf("runs = %#v, want suppressed action recorded as no-op", status.Runs)
+	}
+}
+
 func signedSlackEventRequest(t *testing.T, router http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	timestamp, signature := signedSlackJSONBody("secret", body)

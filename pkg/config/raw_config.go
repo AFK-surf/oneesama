@@ -113,9 +113,13 @@ type rawDialogConfig struct {
 }
 
 type rawCodexRunnerConfig struct {
-	Bin     string `json:"bin"`
-	Model   string `json:"model"`
-	Sandbox string `json:"sandbox"`
+	Bin           string `json:"bin"`
+	Model         string `json:"model"`
+	Sandbox       string `json:"sandbox"`
+	ModelProvider string `json:"model_provider"`
+	BaseURL       string `json:"base_url"`
+	EnvKey        string `json:"env_key"`
+	WireAPI       string `json:"wire_api"`
 }
 
 type rawClaudeRunnerConfig struct {

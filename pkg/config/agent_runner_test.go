@@ -15,7 +15,15 @@ func TestLoadParsesAgentRunnerConfigFile(t *testing.T) {
     "provider": "claude",
     "dry_run": true,
     "job_timeout": "3m",
-    "codex": {"bin": "codex-dev", "model": "gpt-5.6", "sandbox": "workspace-write"},
+    "codex": {
+      "bin": "codex-dev",
+      "model": "deepseek/deepseek-v4-pro",
+      "sandbox": "workspace-write",
+      "model_provider": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1/",
+      "env_key": "OPENROUTER_API_KEY",
+      "wire_api": "responses"
+    },
     "claude": {"bin": "claude-dev", "model": "opus", "read_permission_mode": "read-only", "write_permission_mode": "acceptEdits", "max_budget_usd": "0.80"},
     "ollama": {"base_url": "http://127.0.0.1:11435", "model": "qwen3"}
   }
@@ -39,7 +47,12 @@ func TestLoadParsesAgentRunnerConfigFile(t *testing.T) {
 	if cfg.AgentRunner.JobTimeout != 3*time.Minute {
 		t.Fatalf("AgentRunner.JobTimeout = %s, want 3m", cfg.AgentRunner.JobTimeout)
 	}
-	if cfg.AgentRunner.Codex.Bin != "codex-dev" || cfg.AgentRunner.Codex.Model != "gpt-5.6" {
+	if cfg.AgentRunner.Codex.Bin != "codex-dev" ||
+		cfg.AgentRunner.Codex.Model != "deepseek/deepseek-v4-pro" ||
+		cfg.AgentRunner.Codex.ModelProvider != "openrouter" ||
+		cfg.AgentRunner.Codex.BaseURL != "https://openrouter.ai/api/v1" ||
+		cfg.AgentRunner.Codex.EnvKey != "OPENROUTER_API_KEY" ||
+		cfg.AgentRunner.Codex.WireAPI != "responses" {
 		t.Fatalf("Codex config = %#v, want file values", cfg.AgentRunner.Codex)
 	}
 	if cfg.AgentRunner.Claude.Bin != "claude-dev" || cfg.AgentRunner.Claude.MaxBudgetUSD != "0.80" {
@@ -56,8 +69,12 @@ func TestLoadHonorsAgentRunnerEnvOverrides(t *testing.T) {
 	t.Setenv("ONEESAMA_DRY_RUN_AGENT", "true")
 	t.Setenv("ONEESAMA_AGENT_RUNNER_JOB_TIMEOUT", "45s")
 	t.Setenv("ONEESAMA_CODEX_BIN", "codex-ci")
-	t.Setenv("ONEESAMA_CODEX_MODEL", "gpt-6")
+	t.Setenv("ONEESAMA_CODEX_MODEL", "deepseek/deepseek-v4-pro")
 	t.Setenv("ONEESAMA_CODEX_SANDBOX", "workspace-write")
+	t.Setenv("ONEESAMA_CODEX_MODEL_PROVIDER", "openrouter")
+	t.Setenv("ONEESAMA_CODEX_BASE_URL", "https://openrouter.ai/api/v1/")
+	t.Setenv("ONEESAMA_CODEX_ENV_KEY", "OPENROUTER_API_KEY")
+	t.Setenv("ONEESAMA_CODEX_WIRE_API", "responses")
 	t.Setenv("ONEESAMA_CLAUDE_BIN", "claude-ci")
 	t.Setenv("ONEESAMA_CLAUDE_MODEL", "sonnet-4")
 	t.Setenv("ONEESAMA_CLAUDE_READ_PERMISSION_MODE", "read-only")
@@ -90,7 +107,13 @@ func TestLoadHonorsAgentRunnerEnvOverrides(t *testing.T) {
 	if cfg.AgentRunner.JobTimeout != 45*time.Second {
 		t.Fatalf("AgentRunner.JobTimeout = %s, want 45s", cfg.AgentRunner.JobTimeout)
 	}
-	if cfg.AgentRunner.Codex.Bin != "codex-ci" || cfg.AgentRunner.Codex.Sandbox != "workspace-write" {
+	if cfg.AgentRunner.Codex.Bin != "codex-ci" ||
+		cfg.AgentRunner.Codex.Model != "deepseek/deepseek-v4-pro" ||
+		cfg.AgentRunner.Codex.Sandbox != "workspace-write" ||
+		cfg.AgentRunner.Codex.ModelProvider != "openrouter" ||
+		cfg.AgentRunner.Codex.BaseURL != "https://openrouter.ai/api/v1" ||
+		cfg.AgentRunner.Codex.EnvKey != "OPENROUTER_API_KEY" ||
+		cfg.AgentRunner.Codex.WireAPI != "responses" {
 		t.Fatalf("Codex env override = %#v, want env values", cfg.AgentRunner.Codex)
 	}
 	if cfg.AgentRunner.Claude.Bin != "claude-ci" || cfg.AgentRunner.Claude.MaxBudgetUSD != "0.20" {
