@@ -1,11 +1,12 @@
 package slackagent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ type slackRepliesResponse struct {
 	Error    string         `json:"error,omitempty"`
 	Messages []SlackMessage `json:"messages,omitempty"`
 }
+
+var slackThreadFetchAPIBaseURL = defaultSlackAPIBaseURL
 
 func (s *Service) buildSlackAppMentionContext(ctx context.Context, workspaceID string, event SlackEventPayload) *SlackAppMentionContext {
 	messages, source, ok, fetchErr := s.fetchSlackMentionThreadMessages(ctx, event)
@@ -85,21 +88,20 @@ func hasThreadFixture(event SlackEventPayload) bool {
 }
 
 func (s *Service) callSlackConversationsReplies(ctx context.Context, channel string, threadTS string) (slackRepliesResponse, error) {
-	payload := map[string]any{
-		"channel": strings.TrimSpace(channel),
-		"ts":      strings.TrimSpace(threadTS),
-		"limit":   maxAppMentionThreadMessages,
+	values := url.Values{
+		"channel": {strings.TrimSpace(channel)},
+		"ts":      {strings.TrimSpace(threadTS)},
+		"limit":   {strconv.Itoa(maxAppMentionThreadMessages)},
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return slackRepliesResponse{}, fmt.Errorf("encode conversations.replies payload: %w", err)
+	baseURL := strings.TrimRight(strings.TrimSpace(slackThreadFetchAPIBaseURL), "/")
+	if baseURL == "" {
+		baseURL = defaultSlackAPIBaseURL
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, defaultSlackAPIBaseURL+"/conversations.replies", bytes.NewReader(raw))
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/conversations.replies?"+values.Encode(), nil)
 	if err != nil {
 		return slackRepliesResponse{}, fmt.Errorf("build conversations.replies request: %w", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(s.botToken))
-	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 
 	httpResponse, err := httputil.NewHTTPClient(10 * time.Second).Do(request)
 	if err != nil {
