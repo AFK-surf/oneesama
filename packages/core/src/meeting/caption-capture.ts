@@ -160,6 +160,10 @@ async function enableCaptionsViaSettings(
         await selectLiveCaptionsMode(page);
         await disableTranslatedCaptions(page);
         diagnostics?.record("caption_settings_inventory_after_language", await inspectCaptionSettingsPanel(page).catch((error) => ({ error: String(error?.message || error) })));
+        if (await translatedCaptionsEnabled(page)) {
+          throw new Error("translated captions enabled instead of meeting language");
+        }
+        diagnostics?.record("caption_settings_live_radio_selected", { attempt: attempt + 1, selected: await liveCaptionsRadioSelected(page) });
       }
 
       if (enableLiveCaptions) {
@@ -169,13 +173,6 @@ async function enableCaptionsViaSettings(
         await page.keyboard.press("Escape").catch(() => {});
       });
       await page.waitForTimeout(1000);
-      if (captionLanguage && await translatedCaptionsEnabled(page)) {
-        throw new Error("translated captions enabled instead of meeting language");
-      }
-      if (captionLanguage) {
-        const liveSelected = await liveCaptionsRadioSelected(page);
-        diagnostics?.record("caption_settings_live_radio_selected", { attempt: attempt + 1, selected: liveSelected });
-      }
       return { ok: true, method: "settings", attempt: attempt + 1, path: settingsPath };
     } catch (error) {
       diagnostics?.record("caption_settings_attempt_failed", { attempt: attempt + 1, error: String(error?.message || error).slice(0, 220) });
@@ -427,7 +424,7 @@ async function liveCaptionsRadioSelected(page: import("playwright").Page): Promi
       if (inner) candidates.push(inner);
       candidates.push(label);
       for (const candidate of candidates) {
-        const checked = candidate.getAttribute("aria-checked") ?? (candidate as HTMLInputElement).checked?.toString();
+        const checked = candidate.getAttribute("aria-checked") || (candidate as HTMLInputElement).checked?.toString();
         if (checked === "true") return true;
       }
     }
@@ -473,7 +470,7 @@ async function translatedCaptionsEnabled(page: import("playwright").Page): Promi
       if (inner) candidates.push(inner);
       candidates.push(label);
       for (const candidate of candidates) {
-        const checked = candidate.getAttribute("aria-checked") ?? (candidate as HTMLInputElement).checked?.toString();
+        const checked = candidate.getAttribute("aria-checked") || (candidate as HTMLInputElement).checked?.toString();
         if (checked === "true") return true;
       }
     }
@@ -519,6 +516,12 @@ async function inspectCaptionSettingsPanel(page: import("playwright").Page) {
     };
   });
 }
+
+export const __captionCaptureTestInternals = {
+  clickCaptionLanguageOption,
+  liveCaptionsRadioSelected,
+  translatedCaptionsEnabled,
+};
 
 async function clickMeetingLanguageComboboxByLabel(page: import("playwright").Page): Promise<boolean> {
   return page.evaluate(() => {
