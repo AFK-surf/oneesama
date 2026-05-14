@@ -25,3 +25,13 @@ test("avatar init script includes model fallback URLs", () => {
   assert.match(script, /example\.test\/fallback\.model3\.json/);
   assert.match(script, /loadLive2DModelWithFallback/);
 });
+
+test("avatar init script can defer heavy renderer startup until after join", () => {
+  const script = buildAvatarInitScript({
+    deferRendererUntilExplicitStart: true,
+  });
+
+  assert.match(script, /deferRendererUntilExplicitStart/);
+  assert.match(script, /MAB_AVATAR_START_RENDERER/);
+  assert.match(script, /avatar renderer deferred until explicit start/);
+});

@@ -213,6 +213,7 @@ interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   avatarDepsDir?: string;
   avatarLayout?: string;
   disableLive2D?: boolean;
+  deferAvatarRendererUntilJoined?: boolean;
   avatarCanvasWidth?: number | string;
   avatarCanvasHeight?: number | string;
   avatarCaptureFps?: number | string;
@@ -1431,6 +1432,25 @@ async function evaluateAvatarReady(page) {
   ).catch(() => null);
 }
 
+async function startAvatarRenderer(page, diagnostics: Diagnostics | null = null) {
+  const result = await withTimeout(
+    page.evaluate(async () => {
+      if (!window.MAB_AVATAR_START_RENDERER) {
+        return { ok: false, error: "avatar_renderer_start_missing" };
+      }
+      const ready = await window.MAB_AVATAR_START_RENDERER();
+      return { ok: true, ready: ready || window.MAB_AVATAR_READY || null };
+    }),
+    25_000,
+    { ok: false, error: "avatar_renderer_start_timeout" },
+  ).catch((error) => ({
+    ok: false,
+    error: String(error?.message || error).slice(0, 300),
+  }));
+  diagnostics?.record("avatar_renderer_start", result);
+  return result;
+}
+
 async function evaluateAvatarAudio(page) {
   return await withTimeout(
     page.evaluate(() => window.MAB_AVATAR_AUDIO || null),
@@ -2018,6 +2038,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           layout: input.avatarLayout || config.avatarLayout,
           botName,
           disableLive2D: Boolean(input.disableLive2D),
+          deferRendererUntilExplicitStart:
+            input.deferAvatarRendererUntilJoined !== false && installAvatar,
           canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1920),
           canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 1080),
           captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 30),
@@ -2184,6 +2206,20 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         if (pageState?.waitingForAdmit || pageState?.inMeeting) clicked = "keyboard:enter";
       }
     }
+    if (!clicked) {
+      const meetPage = await evaluateMeetPageState(page);
+      diagnostics.record("join_failed_no_button", { meetPage });
+      await saveDiagnostics(diagnostics);
+      await stop("join_button_not_found").catch(() => {});
+      return {
+        ok: false,
+        error: "join_button_not_found",
+        sessionId,
+        screenshotDir: config.screenshotDir,
+        diagnosticsPath: diagnostics.jsonPath,
+        meetPage,
+      };
+    }
 
     await page.waitForTimeout(2500);
     await takeScreenshot(page, diagnostics, "02-after-join-click");
@@ -2225,6 +2261,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         };
       }
     }
+    const avatarRendererStart =
+      installAvatar && clicked
+        ? await startAvatarRenderer(page, diagnostics)
+        : { ok: false, skipped: true, reason: "avatar_not_installed_or_not_joined" };
     let captionCapture = null;
     let captionEnable = null;
     if (captureCaptions && clicked) {
@@ -2303,6 +2343,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       localDialog,
       screenShare,
       screenShareStart,
+      avatarRendererStart,
       captions: compactCaptionState(captions),
     });
     await saveDiagnostics(diagnostics);

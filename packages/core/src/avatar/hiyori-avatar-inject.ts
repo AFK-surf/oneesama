@@ -20,6 +20,7 @@
     background: "#f7f8fb",
     layout: "face",
     disableLive2D: false,
+    deferRendererUntilExplicitStart: false,
     enableVisualTestHooks: false,
     ...(window.MAB_AVATAR_CONFIG || {}),
   };
@@ -1064,32 +1065,59 @@
       live2dLoaded: window.MAB_AVATAR_RENDERER.live2dLoaded,
       fallbackReason: window.MAB_AVATAR_RENDERER.fallbackReason,
       modelUrl: config.modelUrl,
+      rendererDeferred: Boolean(config.deferRendererUntilExplicitStart),
     };
     log("avatar fake media ready", window.MAB_AVATAR_READY);
-    const renderCanvas = await createAvatarCanvas();
-    const mirrorRenderCanvas = () => {
-      try {
-        bootCtx.clearRect(0, 0, canvas.width, canvas.height);
-        bootCtx.drawImage(renderCanvas, 0, 0, canvas.width, canvas.height);
-      } catch (error) {
+    let rendererStartPromise: Promise<typeof window.MAB_AVATAR_READY> | null = null;
+    const startRenderer = async () => {
+      if (rendererStartPromise) return rendererStartPromise;
+      rendererStartPromise = (async () => {
+        const renderCanvas = await createAvatarCanvas();
+        const mirrorRenderCanvas = () => {
+          try {
+            bootCtx.clearRect(0, 0, canvas.width, canvas.height);
+            bootCtx.drawImage(renderCanvas, 0, 0, canvas.width, canvas.height);
+          } catch (error) {
+            rendererState.fallbackReason =
+              rendererState.fallbackReason || String(error?.message || error);
+          }
+          requestAnimationFrame(mirrorRenderCanvas);
+        };
+        requestAnimationFrame(mirrorRenderCanvas);
+        Object.assign(window.MAB_AVATAR_READY, {
+          avatarState: window.MAB_AVATAR_STATE,
+          renderer: window.MAB_AVATAR_RENDERER,
+          rendererMode: window.MAB_AVATAR_RENDERER.renderer,
+          live2dLoaded: window.MAB_AVATAR_RENDERER.live2dLoaded,
+          fallbackReason: window.MAB_AVATAR_RENDERER.fallbackReason,
+          modelUrl: config.modelUrl,
+          rendererDeferred: false,
+          rendererStartedAt: new Date().toISOString(),
+        });
+        if (config.enableVisualTestHooks) {
+          window.MAB_AVATAR_VISUAL_TEST = createAvatarVisualTestHooks(canvas);
+        }
+        log("avatar renderer ready", window.MAB_AVATAR_READY);
+        return window.MAB_AVATAR_READY;
+      })().catch((error) => {
+        rendererStartPromise = null;
         rendererState.fallbackReason =
           rendererState.fallbackReason || String(error?.message || error);
-      }
-      requestAnimationFrame(mirrorRenderCanvas);
+        Object.assign(window.MAB_AVATAR_READY, {
+          ok: false,
+          rendererDeferred: false,
+          rendererError: String(error?.message || error),
+        });
+        throw error;
+      });
+      return rendererStartPromise;
     };
-    requestAnimationFrame(mirrorRenderCanvas);
-    Object.assign(window.MAB_AVATAR_READY, {
-      avatarState: window.MAB_AVATAR_STATE,
-      renderer: window.MAB_AVATAR_RENDERER,
-      rendererMode: window.MAB_AVATAR_RENDERER.renderer,
-      live2dLoaded: window.MAB_AVATAR_RENDERER.live2dLoaded,
-      fallbackReason: window.MAB_AVATAR_RENDERER.fallbackReason,
-      modelUrl: config.modelUrl,
-    });
-    if (config.enableVisualTestHooks) {
-      window.MAB_AVATAR_VISUAL_TEST = createAvatarVisualTestHooks(canvas);
+    window.MAB_AVATAR_START_RENDERER = startRenderer;
+    if (config.deferRendererUntilExplicitStart) {
+      log("avatar renderer deferred until explicit start", window.MAB_AVATAR_READY);
+    } else {
+      await startRenderer();
     }
-    log("avatar renderer ready", window.MAB_AVATAR_READY);
   }
 
   if (document.readyState === "loading") {

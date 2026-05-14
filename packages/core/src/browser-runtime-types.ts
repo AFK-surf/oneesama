@@ -236,6 +236,7 @@ export interface PixiNamespace {
 export interface HiyoriAvatarConfig {
   modelUrl?: string;
   modelFallbackUrls?: string[];
+  deferRendererUntilExplicitStart?: boolean;
   modelBase?: string;
   width?: number;
   height?: number;
@@ -275,6 +276,7 @@ declare global {
     MAB_AVATAR_CONFIG?: HiyoriAvatarConfig | null;
     MAB_AVATAR_CONTROLLER?: AvatarController;
     MAB_AVATAR_READY?: Record<string, unknown> | null;
+    MAB_AVATAR_START_RENDERER?: (() => Promise<unknown>) | null;
     MAB_AVATAR_RENDERER?:
       | (Record<string, unknown> & {
           renderer?: string;
