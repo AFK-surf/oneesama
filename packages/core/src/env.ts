@@ -155,6 +155,8 @@ export function getRuntimeConfig(env = process.env) {
     avatarCanvasWidth: Number(env.MAB_AVATAR_CANVAS_WIDTH || 1920),
     avatarCanvasHeight: Number(env.MAB_AVATAR_CANVAS_HEIGHT || 1080),
     avatarCaptureFps: Number(env.MAB_AVATAR_CAPTURE_FPS || 30),
-    avatarUseSwiftShader: (env.MAB_AVATAR_USE_SWIFTSHADER || "auto") !== "0",
+    avatarUseSwiftShader: ["1", "true", "yes"].includes(
+      String(env.MAB_AVATAR_USE_SWIFTSHADER || "").toLowerCase(),
+    ),
   };
 }

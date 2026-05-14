@@ -17,6 +17,28 @@ test("Realtime contract preserves structured turn detection overrides", () => {
   });
 });
 
+test("Realtime contract maps fast turn detection preset for browser sessions", () => {
+  const session = buildRealtimeSessionConfig({}, {
+    openaiRealtimeTurnDetection: "fast",
+  });
+
+  assert.deepEqual(session.audio.input.turn_detection, {
+    type: "semantic_vad",
+    eagerness: "high",
+  });
+});
+
+test("Realtime contract parses JSON turn detection config strings", () => {
+  const session = buildRealtimeSessionConfig({}, {
+    openaiRealtimeTurnDetection: '{"type":"semantic_vad","eagerness":"low"}',
+  });
+
+  assert.deepEqual(session.audio.input.turn_detection, {
+    type: "semantic_vad",
+    eagerness: "low",
+  });
+});
+
 test("Realtime contract builds identity-aware instructions from runtime config", () => {
   const session = buildRealtimeSessionConfig({}, {
     botName: "Onee Sama",

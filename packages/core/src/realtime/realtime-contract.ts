@@ -557,6 +557,24 @@ function normalizeTurnDetectionConfig(value: unknown) {
   }
   const normalized = String(value || "").trim();
   if (!normalized || normalized === "none") return null;
+  if (normalized.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(normalized);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return { ...parsed };
+      }
+    } catch {
+      // Fall through to treating the value as a literal turn_detection type.
+    }
+  }
+  switch (normalized.toLowerCase()) {
+    case "steady":
+      return { type: "semantic_vad", eagerness: "low" };
+    case "balanced":
+      return { type: "semantic_vad", eagerness: "auto" };
+    case "fast":
+      return { type: "semantic_vad", eagerness: "high" };
+  }
   return { type: normalized };
 }
 
