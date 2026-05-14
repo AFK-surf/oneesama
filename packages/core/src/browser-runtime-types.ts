@@ -235,6 +235,7 @@ export interface PixiNamespace {
 
 export interface HiyoriAvatarConfig {
   modelUrl?: string;
+  modelFallbackUrls?: string[];
   modelBase?: string;
   width?: number;
   height?: number;

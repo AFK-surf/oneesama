@@ -5672,6 +5672,18 @@ async function avatarSmoke() {
   try {
     const context = await browser.newContext({ permissions: ["microphone", "camera"] });
     await context.addInitScript({
+      content: `
+        (() => {
+          if (typeof globalThis.__name !== "function") {
+            Object.defineProperty(globalThis, "__name", {
+              value: (fn) => fn,
+              configurable: true,
+            });
+          }
+        })();
+      `,
+    });
+    await context.addInitScript({
       content: buildAvatarInitScript({
         botName: "Avatar Smoke Bot",
         disableLive2D: true,
@@ -8179,7 +8191,7 @@ async function hiyoriLive2dSmoke() {
         window.MAB_AVATAR_RENDERER &&
         window.MAB_AVATAR_VISUAL_TEST,
       null,
-      { timeout: 30_000 },
+      { timeout: 60_000 },
     );
 
     const readiness = (await page.evaluate(() => ({
@@ -8218,12 +8230,10 @@ async function hiyoriLive2dSmoke() {
         timeout: 15_000,
       },
     );
-    const result = (await page.evaluate(async () => {
-      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-      const visualTest = window.MAB_AVATAR_VISUAL_TEST as unknown as AvatarVisualTestHarness;
-      const controller = window.MAB_AVATAR_CONTROLLER as {
-        updateState: (state: Record<string, unknown>) => void;
-      } | null;
+    const result = (await page.evaluate(`(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const visualTest = window.MAB_AVATAR_VISUAL_TEST;
+      const controller = window.MAB_AVATAR_CONTROLLER;
       const neutral = visualTest.captureSourceSnapshot({
         label: "live2d-neutral",
       });
@@ -8242,7 +8252,7 @@ async function hiyoriLive2dSmoke() {
         avatar: window.MAB_AVATAR_STATE,
         snapshots: { neutral, expressive },
       };
-    })) as {
+    })()`)) as {
       ready?: unknown;
       renderer?: { live2dLoaded?: boolean; [key: string]: unknown } | null;
       avatar?: AvatarStateSnapshot | null;

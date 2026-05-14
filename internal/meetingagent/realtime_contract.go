@@ -1,6 +1,7 @@
 package meetingagent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -193,6 +194,20 @@ func turnDetectionObject(value any) any {
 	normalized := strings.TrimSpace(stringFromAny(value))
 	if normalized == "" || normalized == "none" {
 		return nil
+	}
+	if strings.HasPrefix(normalized, "{") {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(normalized), &parsed); err == nil && len(parsed) > 0 {
+			return parsed
+		}
+	}
+	switch strings.ToLower(normalized) {
+	case "steady":
+		return map[string]any{"type": "semantic_vad", "eagerness": "low"}
+	case "balanced":
+		return map[string]any{"type": "semantic_vad", "eagerness": "auto"}
+	case "fast":
+		return map[string]any{"type": "semantic_vad", "eagerness": "high"}
 	}
 	return map[string]any{"type": normalized}
 }

@@ -74,6 +74,36 @@ func TestBuildRealtimeSessionSupportsStructuredTurnDetection(t *testing.T) {
 	}
 }
 
+func TestBuildRealtimeSessionMapsFastTurnDetectionPreset(t *testing.T) {
+	t.Parallel()
+
+	cfg := testRealtimeOpenAIConfig()
+	cfg.RealtimeTurnDetection = "fast"
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{}, cfg)
+
+	audio := session["audio"].(map[string]any)
+	input := audio["input"].(map[string]any)
+	turn := input["turn_detection"].(map[string]any)
+	if turn["type"] != "semantic_vad" || turn["eagerness"] != "high" {
+		t.Fatalf("turn_detection = %#v, want fast semantic_vad preset", turn)
+	}
+}
+
+func TestBuildRealtimeSessionParsesJSONTurnDetectionConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := testRealtimeOpenAIConfig()
+	cfg.RealtimeTurnDetection = `{"type":"semantic_vad","eagerness":"high"}`
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{}, cfg)
+
+	audio := session["audio"].(map[string]any)
+	input := audio["input"].(map[string]any)
+	turn := input["turn_detection"].(map[string]any)
+	if turn["type"] != "semantic_vad" || turn["eagerness"] != "high" {
+		t.Fatalf("turn_detection = %#v, want JSON semantic_vad config", turn)
+	}
+}
+
 func TestBuildRealtimeSessionDisablesTurnDetectionWithNone(t *testing.T) {
 	t.Parallel()
 

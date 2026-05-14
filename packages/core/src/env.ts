@@ -137,7 +137,18 @@ export function getRuntimeConfig(env = process.env) {
     meetProfileMode: env.MAB_MEET_PROFILE_MODE || "",
     avatarModelUrl:
       env.MAB_AVATAR_MODEL_URL ||
-      "https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@master/Samples/Resources/Hiyori/Hiyori.model3.json",
+      "https://fastly.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json",
+    avatarModelFallbackUrls: (
+      env.MAB_AVATAR_MODEL_FALLBACK_URLS ||
+      [
+        "https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json",
+        "https://gcore.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json",
+        "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Hiyori/Hiyori.model3.json",
+      ].join(",")
+    )
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
     avatarDepsDir: env.MAB_AVATAR_DEPS_DIR || "",
     avatarAssetRoot: env.MAB_AVATAR_ASSET_ROOT || "",
     avatarLayout: env.MAB_AVATAR_LAYOUT || "face",

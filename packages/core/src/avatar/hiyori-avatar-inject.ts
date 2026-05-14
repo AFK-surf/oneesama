@@ -3,9 +3,16 @@
   if (window.top !== window) return;
   window.__meetingAvatarBotInjected = true;
 
+  const DEFAULT_HIYORI_MODEL_URL =
+    "https://fastly.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json";
+  const DEFAULT_HIYORI_MODEL_FALLBACK_URLS = [
+    "https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json",
+    "https://gcore.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json",
+    "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Hiyori/Hiyori.model3.json",
+  ];
   const config = {
-    modelUrl:
-      "https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@master/Samples/Resources/Hiyori/Hiyori.model3.json",
+    modelUrl: DEFAULT_HIYORI_MODEL_URL,
+    modelFallbackUrls: DEFAULT_HIYORI_MODEL_FALLBACK_URLS,
     canvasWidth: 1920,
     canvasHeight: 1080,
     captureFps: 30,
@@ -257,6 +264,7 @@
     live2dLoaded: false,
     fallbackReason: "",
     modelUrl: config.modelUrl,
+    modelAttempts: [],
     live2dParameterFrames: 0,
   };
   window.MAB_AVATAR_RENDERER = rendererState;
@@ -293,6 +301,39 @@
     await loadScript("https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js");
     await loadScript("https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js");
     await loadScript("https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js");
+  }
+
+  function normalizeModelUrls(...values) {
+    const urls = [];
+    const seen = new Set();
+    for (const value of values.flat()) {
+      const url = String(value || "").trim();
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      urls.push(url);
+    }
+    return urls;
+  }
+
+  async function loadLive2DModelWithFallback() {
+    const urls = normalizeModelUrls(config.modelUrl, config.modelFallbackUrls);
+    let lastError = null;
+    for (const modelUrl of urls) {
+      try {
+        rendererState.modelAttempts.push({ url: modelUrl, ok: false });
+        const model = await window.PIXI!.live2d.Live2DModel.from(modelUrl, { autoInteract: false });
+        const attempt = rendererState.modelAttempts[rendererState.modelAttempts.length - 1];
+        if (attempt) attempt.ok = true;
+        rendererState.modelUrl = modelUrl;
+        return { model, modelUrl };
+      } catch (error) {
+        lastError = error;
+        const attempt = rendererState.modelAttempts[rendererState.modelAttempts.length - 1];
+        if (attempt) attempt.error = String(error?.message || error);
+        log("Live2D model load failed; trying fallback", modelUrl, error?.message);
+      }
+    }
+    throw lastError || new Error("no Live2D model URLs configured");
   }
 
   function drawRoundRect(ctx, x, y, w, h, r) {
@@ -667,7 +708,7 @@
           powerPreference: "high-performance",
           autoStart: true,
         });
-        const model = await window.PIXI!.live2d.Live2DModel.from(config.modelUrl, { autoInteract: false });
+        const { model, modelUrl } = await loadLive2DModelWithFallback();
         app.stage.addChild(model);
         const fitScale = config.canvasHeight / model.height;
         const scale = config.layout === "presenter" ? fitScale * 0.82 : fitScale * 2.35;
@@ -705,11 +746,12 @@
           renderer: "live2d",
           live2dLoaded: true,
           fallbackReason: "",
+          modelUrl,
           modelWidth: model.width,
           modelHeight: model.height,
           layout: config.layout,
         });
-        log("Live2D avatar loaded", config.modelUrl);
+        log("Live2D avatar loaded", modelUrl);
       } catch (error) {
         fallbackReason = String(error?.message || error);
         log("Live2D load failed; using fallback canvas", error?.message);

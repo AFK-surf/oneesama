@@ -2013,6 +2013,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       await context.addInitScript({
         content: buildAvatarInitScript({
           modelUrl: input.avatarModelUrl || config.avatarModelUrl,
+          modelFallbackUrls: config.avatarModelFallbackUrls,
           live2dDepsDir: input.avatarDepsDir || config.avatarDepsDir,
           layout: input.avatarLayout || config.avatarLayout,
           botName,

@@ -16,6 +16,7 @@ import (
 
 const defaultTimeout = 10 * time.Second
 const joinLaunchTimeout = 4 * time.Minute
+const statusSnapshotTimeout = 45 * time.Second
 
 type Config struct {
 	Dir     string
