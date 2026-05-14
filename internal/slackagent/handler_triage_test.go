@@ -100,6 +100,24 @@ func TestSlackTriageDecisionParsesFencedJSON(t *testing.T) {
 	}
 }
 
+func TestSlackTriageDecisionHidesWorkerMechanismAction(t *testing.T) {
+	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
+		ChannelID: "C123",
+		Digest:    "please investigate this link",
+	})
+	if strings.Contains(prompt, "delegate") {
+		t.Fatalf("prompt contains hidden worker command: %s", prompt)
+	}
+
+	decision := parseSlackTriageDecision(`{"summary":"route work","actions":[{"type":"delegate","title":"Investigate","message":"Check this","requiresConfirmation":true}]}`, slackTriageFallback{Channel: "C123", ThreadTS: "123.456"})
+	if len(decision.Actions) != 1 {
+		t.Fatalf("decision = %#v, want one normalized action", decision)
+	}
+	if decision.Actions[0].Type != "create_task" {
+		t.Fatalf("action type = %q, want create_task", decision.Actions[0].Type)
+	}
+}
+
 func TestChannelBrainBuildsFactsAndOpenLoops(t *testing.T) {
 	summary := buildChannelBrainSummary([]SlackThreadLedgerRecord{
 		{ThreadTS: "111.222", Status: "active", Summary: "Decision: use Codex for runner", UpdatedAt: "2026-05-13T01:00:00Z"},

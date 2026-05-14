@@ -31,17 +31,20 @@ func (s *Service) RunAvatarCommand(ctx context.Context, input AvatarCommandInput
 		}
 	}
 
-	if parsed.Action == "delegate" {
-		return s.runDelegateCommand(ctx, input, parsed)
+	if parsed.Action == "work" {
+		return s.runWorkCommand(ctx, input, parsed)
 	}
-	if parsed.Action == "jobs" {
-		return s.runJobsCommand(ctx, input, parsed)
+
+	if !isHiddenAvatarCommand(parsed.Action) && strings.TrimSpace(input.Text) != "" {
+		parsed.Action = "work"
+		parsed.Task = strings.TrimSpace(input.Text)
+		return s.runWorkCommand(ctx, input, parsed)
 	}
 
 	return AvatarCommandResponse{
 		OK:           false,
 		ResponseType: "ephemeral",
-		Text:         fmt.Sprintf("Unknown command: %s\n\n%s", parsed.Action, avatarCommandUsage()),
+		Text:         avatarUnknownCommandText(parsed.Action),
 		Metadata: map[string]any{
 			"allowed_commands": allowedAvatarCommands(),
 		},
@@ -70,7 +73,7 @@ func (s *Service) runScheduleCommand(ctx context.Context, input AvatarCommandInp
 	}
 }
 
-func (s *Service) runDelegateCommand(ctx context.Context, input AvatarCommandInput, parsed parsedAvatarCommand) AvatarCommandResponse {
+func (s *Service) runWorkCommand(ctx context.Context, input AvatarCommandInput, parsed parsedAvatarCommand) AvatarCommandResponse {
 	if parsed.Task == "" {
 		return AvatarCommandResponse{
 			OK:           false,
@@ -82,7 +85,7 @@ func (s *Service) runDelegateCommand(ctx context.Context, input AvatarCommandInp
 		return AvatarCommandResponse{
 			OK:           false,
 			ResponseType: "ephemeral",
-			Text:         "Agent runner is not ready: " + runnerErrorText(s.runnerErr),
+			Text:         "I am not ready to handle that yet: " + runnerErrorText(s.runnerErr),
 		}
 	}
 
@@ -98,13 +101,13 @@ func (s *Service) runDelegateCommand(ctx context.Context, input AvatarCommandInp
 		return AvatarCommandResponse{
 			OK:           false,
 			ResponseType: "ephemeral",
-			Text:         "Delegate failed: " + err.Error(),
+			Text:         "I could not start that task: " + err.Error(),
 		}
 	}
 	return AvatarCommandResponse{
 		OK:           true,
 		ResponseType: "ephemeral",
-		Text:         fmt.Sprintf("Delegated to %s: %s (%s).", job.Provider, job.ID, job.Status),
+		Text:         "我来处理，完成后会发回这个线程。",
 		Metadata: metadataWithSlackContext(slackContext, map[string]any{
 			"job": job,
 		}),
@@ -204,17 +207,34 @@ func avatarCommandUsage() string {
 		`join <meet-url> [--bot-name name] [--dry-run false]`,
 		`status [session-id]`,
 		`stop [session-id] [--reason text]`,
-		`delegate <task> [--session meet_xxx] [--mode analysis] [--write false]`,
-		`jobs`,
+		`help`,
+		`Or just mention me with what you need.`,
 	}, "\n")
 }
 
 func allowedAvatarCommands() []string {
-	return []string{"join", "status", "stop", "delegate", "jobs", "help"}
+	return []string{"join", "status", "stop", "help"}
+}
+
+func avatarUnknownCommandText(action string) string {
+	action = strings.TrimSpace(action)
+	if isHiddenAvatarCommand(action) {
+		return "I don't understand that command.\n\n" + avatarCommandUsage()
+	}
+	return fmt.Sprintf("Unknown command: %s\n\n%s", action, avatarCommandUsage())
+}
+
+func isHiddenAvatarCommand(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "delegate", "jobs", "cancel", "schedule":
+		return true
+	default:
+		return false
+	}
 }
 
 func formatCombinedJobList(localJobs []agentrunner.Job, meetingJobs []meetingWorkerJob, ready meetingWorkerPollResponse) string {
-	lines := []string{fmt.Sprintf("Worker jobs: local=%d, meeting=%d", len(localJobs), len(meetingJobs))}
+	lines := []string{fmt.Sprintf("Background tasks: local=%d, meeting=%d", len(localJobs), len(meetingJobs))}
 	if len(ready.Messages) > 0 {
 		lines = append(lines, "", strings.Join(ready.Messages, "\n\n"))
 	}

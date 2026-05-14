@@ -16,7 +16,7 @@ func eventTextToAvatarCommand(event SlackEventPayload) string {
 
 	first := strings.ToLower(strings.Fields(text)[0])
 	switch first {
-	case "join", "status", "stop", "delegate", "jobs", "help":
+	case "join", "status", "stop", "help":
 		return text
 	}
 
@@ -24,7 +24,7 @@ func eventTextToAvatarCommand(event SlackEventPayload) string {
 		return "join " + meetURL
 	}
 
-	return "delegate " + text
+	return "work " + text
 }
 
 func findSlackMeetURL(text string) string {

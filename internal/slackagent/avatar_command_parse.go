@@ -129,7 +129,7 @@ func parseAvatarCommand(text string) parsedAvatarCommand {
 			} else {
 				taskParts = append(taskParts, token)
 			}
-		case parsed.Action == "delegate" && parsed.SessionID == "" && strings.HasPrefix(token, "meet_"):
+		case (parsed.Action == "work" || parsed.Action == "delegate") && parsed.SessionID == "" && strings.HasPrefix(token, "meet_"):
 			parsed.SessionID = token
 		case (parsed.Action == "status" || parsed.Action == "jobs" || parsed.Action == "stop") && parsed.SessionID == "":
 			parsed.SessionID = token

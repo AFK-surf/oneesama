@@ -81,7 +81,7 @@ npm run smoke:hiyori-live2d
 
 `smoke:shadow-parity` verifies:
 
-- a fixture old stack and the new repo both accept the same join/delegate/jobs/stop sequence
+- a fixture old stack and the new repo both accept the same join/work/status/stop sequence
 - the new stack starts the Meeting Agent path in an isolated fixture environment
 - worker delegation and Slack-facing job summaries stay semantically compatible
 - the parity report lists command-level pass/fail checks before any real legacy shadow tap is installed
@@ -89,7 +89,7 @@ npm run smoke:hiyori-live2d
 `smoke:shadow-tap` verifies:
 
 - `/shadow/slack-command` rejects invalid shadow tap secrets
-- mirrored old-stack join/delegate/jobs/stop payloads are parsed and recorded
+- mirrored old-stack join/work/status/stop payloads are parsed and recorded
 - no Slack session or Meeting Agent side effect is created by the receiver
 - `GET /shadow/report` returns the side-effect-free receiver report
 
@@ -98,7 +98,7 @@ npm run smoke:hiyori-live2d
 - the runnable stdin hook `npm run shadow:transmit` stays disabled by default and fails closed when enabled without URL/secret
 - sanitized old-stack mirror payloads can be built without Slack `token`, `response_url`, or `trigger_id`
 - missing transmitter secret fails closed
-- join/delegate/jobs/stop payloads can post to `/shadow/slack-command`
+- join/work/status/stop payloads can post to `/shadow/slack-command`
 - the receiver records every mirrored command without creating Slack sessions or Meeting Agent side effects
 
 `smoke:cutover-evidence` verifies:
@@ -212,7 +212,7 @@ Use this checklist when moving from fixture parity into live replacement. Do not
 - [ ] Run the new repo with `MAB_CUTOVER_MODE=shadow`.
 - [ ] Configure `MAB_SHADOW_TAP_SECRET` and a durable `MAB_SHADOW_TAP_REPORT_PATH`.
 - [ ] Mirror old-stack Slack commands to `POST /shadow/slack-command` with the env-gated transmitter hook `npm run shadow:transmit`.
-- [ ] Confirm `GET /shadow/report` records join/delegate/jobs/stop commands without creating new Slack sessions or Meeting Agent sessions.
+- [ ] Confirm `GET /shadow/report` records join/work/status/stop commands without creating new Slack sessions or Meeting Agent sessions.
 - [ ] Compare old-stack observed behavior with new parser output for at least:
   - join URL / bot name / avatar option
   - duplicate bot prevention

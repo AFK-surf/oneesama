@@ -38,8 +38,8 @@ func TestHandleEventsSuppressesRunningDelegateAck(t *testing.T) {
 	if !payload.OK || !payload.Handled {
 		t.Fatalf("payload = %#v, want handled ok response", payload)
 	}
-	if payload.Response == nil || !strings.Contains(payload.Response.Text, "Delegated to codex") {
-		t.Fatalf("payload.Response = %#v, want delegate metadata preserved", payload.Response)
+	if payload.Response == nil || !strings.Contains(payload.Response.Text, "我来处理") {
+		t.Fatalf("payload.Response = %#v, want internal worker metadata preserved without exposing delegate", payload.Response)
 	}
 	if payload.Posted != nil {
 		t.Fatalf("payload.Posted = %#v, want nil for running delegate ack suppression", payload.Posted)

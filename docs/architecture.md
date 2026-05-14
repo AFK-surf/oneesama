@@ -29,7 +29,7 @@ flowchart LR
 
 | Boundary            | Owned Here                                                                                  | Replaceable Provider                                                                              |
 | ------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Workspace control   | Slack slash-command HTTP surface, session lifecycle, status/delegate/jobs commands          | Slack app deployment mode, poster backend, old Slack Agent D adapter                              |
+| Workspace control   | Slack slash-command HTTP surface, session lifecycle, join/status/stop/help commands, and natural-language mention routing | Slack app deployment mode, poster backend, old Slack Agent D adapter                              |
 | Meeting runtime     | Playwright Google Meet joiner, fake mic/cam injection, diagnostics, stop-before-start guard | Meeting provider, browser strategy, real-room canary policy                                       |
 | Avatar output       | Hiyori/fallback renderer contract, fake camera track, fake mic bus                          | Avatar model/runtime, true Live2D WebGL gate                                                      |
 | Dialog input/output | Browser-side local dialog bridge and optional Realtime bridge                               | STT provider, TTS provider, OpenAI Realtime endpoint                                              |

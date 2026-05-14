@@ -4,8 +4,8 @@ Open-source AI meeting avatar bot framework.
 
 The product has two first-class services:
 
-- **Slack Agent service**: workspace control plane for commands, identity, permissions, memory, tasks, and long-running worker delegation.
-- **Meeting Agent service**: realtime runtime that joins Google Meet with Playwright, routes captions/audio/dialog through selected providers, and delegates complex work to a user-selected local agent runner.
+- **Slack Agent service**: workspace control plane for commands, identity, permissions, memory, tasks, and long-running background work.
+- **Meeting Agent service**: realtime runtime that joins Google Meet with Playwright, routes captions/audio/dialog through selected providers, and can route complex work to a user-selected local agent runner.
 
 This repo intentionally does **not** implement its own agent brain. It is a thin meeting/workspace shell: users bring Codex, Claude Code, OpenHands, an HTTP runner, OpenAI Realtime, an OpenAI-compatible endpoint, or another local backend.
 
@@ -26,7 +26,7 @@ sequenceDiagram
   G-->>M: participant audio
   M->>P: speech/text turn
   P-->>M: response text/audio
-  M->>W: delegate complex task
+  M->>W: route complex task
   W-->>S: job result
   S-->>U: status/result in Slack
   M-->>G: Hiyori speaks result
@@ -133,7 +133,7 @@ curl -X POST http://127.0.0.1:8781/join/google-meet \
   -d '{"meetUrl":"https://meet.google.com/abc-defg-hij","botName":"Demo Bot","dryRun":true}'
 ```
 
-The scaffold currently starts local control-plane services, validates the environment, persists session/job state through a replaceable state provider (`memory`, `json-file`, or `sqlite`), exposes a Google Meet joiner adapter with dry-run, local non-dry-run fixture smoke, a stricter Meet contract matrix, and optional real-room smoke modes. Visual avatar injection is intentionally not a product requirement; the Meet runner keeps that browser path disabled while preserving realtime audio/dialog, worker delegation, meeting join/stop/status, and post-meeting artifact flows. The repo verifies Slack request signatures, provides an agent-runner provider seam (`dry-run`, `codex`, `claude`, `ollama`, `slack-agent-d`, `command`, `http`), and can report worker results back to Slack through a mock/live poster adapter. Post-meeting artifacts now follow the old MeetD shape: audio artifact, `transcript.json`, `summary.md`, `manifest.json`, and a Slack Canvas-compatible Markdown publisher with Slack-thread fallback. Cutover smoke verifies shadow/canary/rollback mode decisions without changing the old-stack primary path; rollback smoke verifies `MAB_CUTOVER_AUTO_ROLLBACK_ON_FAILURE=1` fails closed when the selected new Meeting Agent path is down; shadow parity smoke mirrors a fixture old-stack control-plane sequence against the new repo and emits an old-vs-new parity report; shadow tap smoke verifies a future old-stack transmitter can mirror commands into the new repo without starting a second bot; shadow transmitter smoke verifies the env-gated stdin hook against the side-effect-free receiver; cutover evidence smoke generates a fixture-safe tarball with git/PR snapshots, healthz output, cutover/shadow reports, SQLite state snapshots, optional agent real-task reports, and a manifest. `smoke:real-meet`, `smoke:real-local-dialog`, `smoke:agent-real-task`, `smoke:realtime-sdp`, and `smoke:realtime-live-tool` are optional: they skip when their real provider/runtime is unavailable. Run real agent task proof with `MAB_RUN_AGENT_REAL_TASK_SMOKE=1 MAB_AGENT_RUNNER=codex npm run smoke:agent-real-task`; require it with `MAB_REQUIRE_AGENT_REAL_TASK=1`. Live Realtime smokes also skip by default even if an API key is present; enable them with `MAB_RUN_REALTIME_SDP=1` / `MAB_RUN_REALTIME_LIVE_TOOL=1`, and make optional gates mandatory with `MAB_REQUIRE_REAL_MEET=1`, `MAB_REQUIRE_REAL_LOCAL_DIALOG=1`, `MAB_REQUIRE_REALTIME_SDP=1`, and `MAB_REQUIRE_REALTIME_LIVE_TOOL=1`.
+The scaffold currently starts local control-plane services, validates the environment, persists session/job state through a replaceable state provider (`memory`, `json-file`, or `sqlite`), exposes a Google Meet joiner adapter with dry-run, local non-dry-run fixture smoke, a stricter Meet contract matrix, and optional real-room smoke modes. Visual avatar injection is intentionally not a product requirement; the Meet runner keeps that browser path disabled while preserving realtime audio/dialog, background work routing, meeting join/stop/status, and post-meeting artifact flows. The repo verifies Slack request signatures, provides an agent-runner provider seam (`dry-run`, `codex`, `claude`, `ollama`, `slack-agent-d`, `command`, `http`), and can report worker results back to Slack through a mock/live poster adapter. Post-meeting artifacts now follow the old MeetD shape: audio artifact, `transcript.json`, `summary.md`, `manifest.json`, and a Slack Canvas-compatible Markdown publisher with Slack-thread fallback. Cutover smoke verifies shadow/canary/rollback mode decisions without changing the old-stack primary path; rollback smoke verifies `MAB_CUTOVER_AUTO_ROLLBACK_ON_FAILURE=1` fails closed when the selected new Meeting Agent path is down; shadow parity smoke mirrors a fixture old-stack control-plane sequence against the new repo and emits an old-vs-new parity report; shadow tap smoke verifies a future old-stack transmitter can mirror commands into the new repo without starting a second bot; shadow transmitter smoke verifies the env-gated stdin hook against the side-effect-free receiver; cutover evidence smoke generates a fixture-safe tarball with git/PR snapshots, healthz output, cutover/shadow reports, SQLite state snapshots, optional agent real-task reports, and a manifest. `smoke:real-meet`, `smoke:real-local-dialog`, `smoke:agent-real-task`, `smoke:realtime-sdp`, and `smoke:realtime-live-tool` are optional: they skip when their real provider/runtime is unavailable. Run real agent task proof with `MAB_RUN_AGENT_REAL_TASK_SMOKE=1 MAB_AGENT_RUNNER=codex npm run smoke:agent-real-task`; require it with `MAB_REQUIRE_AGENT_REAL_TASK=1`. Live Realtime smokes also skip by default even if an API key is present; enable them with `MAB_RUN_REALTIME_SDP=1` / `MAB_RUN_REALTIME_LIVE_TOOL=1`, and make optional gates mandatory with `MAB_REQUIRE_REAL_MEET=1`, `MAB_REQUIRE_REAL_LOCAL_DIALOG=1`, `MAB_REQUIRE_REALTIME_SDP=1`, and `MAB_REQUIRE_REALTIME_LIVE_TOOL=1`.
 
 ## Repository Layout
 
@@ -155,11 +155,11 @@ Slack app mentions, DMs, and interactive actions invoke the same text command pa
 join <meet-url> [--bot-name name] [--dry-run false]
 status [session-id]
 stop [session-id] [--reason text]
-delegate <task> [--session meet_xxx] [--mode analysis] [--write false]
-jobs
+help
+Or mention the bot with what you need.
 ```
 
-`join` creates a Slack-owned session record and hands it to Meeting Agent. `delegate` starts the configured worker runner and reports completed jobs back to Meeting Agent so Realtime can speak the result in the live meeting.
+`join` creates a Slack-owned session record and hands it to Meeting Agent. Natural-language mentions are handled directly by the bot; when a request needs heavier background work, the service routes it internally and reports the result back to the thread without exposing provider-specific commands.
 
 Use `npm run smoke:slack-contract` for the strict fixture matrix covering parser behavior, HMAC verification, slash payload compatibility, command edges, and result deduplication. Use `npm run smoke:slack-tool-registry` for the Slack tool compatibility registry/adapters smoke. Use `npm run smoke:slack-domain-store` for the Slack domain store smoke that backs channel cache, thread ledger, channel brain, pending actions, heartbeat followups, triage runs, and the Slack Agent `/slack/domain/refresh` channel/member cache route. Use `npm run smoke:slack-triage-flow` for the buffered Slack message -> AgentRunner triage decision -> pending action/card loop. See [docs/slack-contract-matrix.md](docs/slack-contract-matrix.md) and [docs/slack-tools-parity.md](docs/slack-tools-parity.md) for the coverage maps and remaining live Slack gaps.
 
@@ -174,7 +174,7 @@ MAB_SLACK_MEMORY_ENABLED=1 npm run slack:memory-seed
 MAB_SLACK_MEMORY_ENABLED=1 npm run smoke:slack-memory
 ```
 
-The seed copies allowed Markdown memory files (`MEMORY.md`, `memory/**/*.md`) and exports safe local SQLite snapshots such as `channel_brain` and `thread_ledger` into the local data directory. Slack delegate jobs attach relevant snippets as private runtime context; private Slack payload fields such as `token`, `response_url`, and `trigger_id` remain stripped before provider delegation.
+The seed copies allowed Markdown memory files (`MEMORY.md`, `memory/**/*.md`) and exports safe local SQLite snapshots such as `channel_brain` and `thread_ledger` into the local data directory. Background task routing attaches relevant snippets as private runtime context; private Slack payload fields such as `token`, `response_url`, and `trigger_id` remain stripped before provider calls.
 
 ## Meeting Runtime
 

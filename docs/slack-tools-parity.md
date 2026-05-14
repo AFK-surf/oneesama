@@ -144,14 +144,14 @@ curl -X POST http://127.0.0.1:8780/slack/scanner/sweep \
 ```
 
 This intentionally does not port credentialed Linear/Notion/Figma tool bodies:
-those can be delegated through the chosen Codex/MCP/AgentRunner provider.
+those can route through the chosen Codex/MCP/AgentRunner provider.
 The owned product logic here is the Slack Agent's channel sensing, triage
 decision, pending-action ledger, and confirmation loop.
 
 Pending-action taxonomy:
 
 - Action types accepted from triage/suggest-action style output:
-  `follow_up`, `create_task`, `ask_user`, `delegate`, `create_issue`,
+  `post_thread_reply`, `follow_up`, `create_task`, `ask_user`, `create_issue`,
   `add_comment`, `create_event`, `join_meeting`, `create_channel`, `none`.
 - Interaction outcomes persisted by Slack actions: `confirmed`, `dismissed`,
   `snoozed`, `assigned`, `opened`.

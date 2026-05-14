@@ -8,7 +8,7 @@ The open-source project should turn that spike into a clean, reproducible framew
 
 ## Product Definition
 
-**Meeting Avatar Bot** is a Slack-controlled AI meeting participant shell. It joins a meeting as a virtual avatar, routes dialog through a selected provider, and delegates complex work to user-selected worker agents.
+**Meeting Avatar Bot** is a Slack-controlled AI meeting participant shell. It joins a meeting as a virtual avatar, routes dialog through a selected provider, and can send complex work to user-selected background agents.
 
 ## Architecture
 
@@ -54,7 +54,7 @@ Slack Agent is required in MVP because it is the place that carries workspace id
 - [x] Phase 3b: port real Google Meet Playwright joiner from the internal prototype, with optional real-room smoke gated by `MAB_REAL_MEET_URL`.
 - [ ] Phase 4: port Hiyori Live2D renderer and dialog provider bridge.
 - [x] Phase 5a: add realtime capability contract + worker completion report store.
-- [x] Phase 5b: Slack command contract for session lifecycle and worker delegation (`join/status/stop/delegate/jobs`).
+- [x] Phase 5b: Slack command contract for session lifecycle and internal background work routing (`join/status/stop/help` plus natural-language mentions).
 - [ ] Phase 5c: wire real Realtime WebRTC data channel/audio to meeting browser.
 - [x] Phase 5d: add configurable agent runner completion reporting to Slack and Realtime-compatible bridges.
 - [ ] Phase 6: package public demo and documentation.
@@ -67,8 +67,7 @@ The MVP keeps Slack as the product spine, while CLI commands remain smoke-test h
 /avatar join <meet-url> [--avatar hiyori] [--bot-name name] [--dry-run false]
 /avatar status [session-id]
 /avatar stop [session-id] [--reason text]
-/avatar delegate <task> [--session meet_xxx] [--mode analysis] [--write false]
-/avatar jobs
+/avatar help
 ```
 
-`join` owns workspace/session context and calls Meeting Agent. `delegate` routes complex tasks to the configured agent runner and reports finished jobs back to Meeting Agent, where the selected dialog provider can poll/speak/display the result.
+`join` owns workspace/session context and calls Meeting Agent. Natural-language mentions are the user-facing work surface; the service decides internally whether to answer synchronously or route heavier work to the configured provider, then reports the result back to Slack and Meeting Agent.

@@ -142,7 +142,7 @@ func (s *Service) runStatusCommand(ctx context.Context, input AvatarCommandInput
 		return AvatarCommandResponse{
 			OK:           true,
 			ResponseType: "ephemeral",
-			Text:         fmt.Sprintf("Status: no active session\nWorker jobs: %d", status.AgentRunner.Jobs),
+			Text:         fmt.Sprintf("Status: no active session\nActive background tasks: %d", status.AgentRunner.Jobs),
 			Metadata:     metadata,
 		}
 	}
@@ -150,7 +150,7 @@ func (s *Service) runStatusCommand(ctx context.Context, input AvatarCommandInput
 	return AvatarCommandResponse{
 		OK:           true,
 		ResponseType: "ephemeral",
-		Text:         fmt.Sprintf("Status: %s\nWorker jobs: %d", summarizeMeetingSession(joinStatus.Active), status.AgentRunner.Jobs),
+		Text:         fmt.Sprintf("Status: %s\nActive background tasks: %d", summarizeMeetingSession(joinStatus.Active), status.AgentRunner.Jobs),
 		Metadata:     metadata,
 	}
 }

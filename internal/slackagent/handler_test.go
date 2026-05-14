@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/httpserver"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 	"github.com/gin-gonic/gin"
@@ -167,12 +166,12 @@ func TestHandleAvatarCommandDoesNotExposeScheduleSurface(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.OK || payload.Text != "Unknown command: schedule\n\n"+avatarCommandUsage() {
+	if payload.OK || payload.Text != "I don't understand that command.\n\n"+avatarCommandUsage() {
 		t.Fatalf("payload = %#v, want schedule hidden from user command surface", payload)
 	}
 }
 
-func TestHandleAvatarCommandDelegatesAndListsJobs(t *testing.T) {
+func TestHandleAvatarCommandHidesWorkerDebugCommands(t *testing.T) {
 	router := newTestRouter(t, Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack:       appconfig.SlackConfig{SigningSecret: "secret"},
@@ -182,74 +181,85 @@ func TestHandleAvatarCommandDelegatesAndListsJobs(t *testing.T) {
 		},
 	})
 
-	delegatePayload := signAvatarCommand(t, "secret", url.Values{
-		"text":       {`delegate --session meet_go_123 --mode code --write true "Summarize route wiring"`},
+	for _, text := range []string{
+		`delegate --session meet_go_123 --mode code --write true "Summarize route wiring"`,
+		"jobs --session meet_go_123",
+	} {
+		payload := signAvatarCommand(t, "secret", url.Values{
+			"text":       {text},
+			"team_id":    {"T123"},
+			"channel_id": {"C123"},
+			"thread_ts":  {"123.456"},
+			"user_id":    {"U123"},
+			"user_name":  {"peng"},
+		})
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", bytes.NewBufferString(payload.body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
+		request.Header.Set("X-Slack-Signature", payload.signature)
+		router.ServeHTTP(response, request)
+
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", text, response.Code)
+		}
+		var decoded AvatarCommandResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+			t.Fatalf("decode %s response: %v", text, err)
+		}
+		if decoded.OK || !strings.Contains(decoded.Text, "I don't understand that command.") {
+			t.Fatalf("%s payload = %#v, want hidden debug command", text, decoded)
+		}
+		if strings.Contains(decoded.Text, "delegate") || strings.Contains(decoded.Text, "jobs") || strings.Contains(decoded.Text, "Codex") {
+			t.Fatalf("%s text = %q, want no worker implementation terms", text, decoded.Text)
+		}
+	}
+}
+
+func TestHandleAvatarCommandNaturalTextStartsWorkInternally(t *testing.T) {
+	router := newTestRouter(t, Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{SigningSecret: "secret"},
+		AgentRunner: appconfig.AgentRunnerConfig{
+			Provider: "codex",
+			DryRun:   true,
+		},
+	})
+
+	payload := signAvatarCommand(t, "secret", url.Values{
+		"text":       {"Summarize route wiring"},
 		"team_id":    {"T123"},
 		"channel_id": {"C123"},
 		"thread_ts":  {"123.456"},
 		"user_id":    {"U123"},
 		"user_name":  {"peng"},
 	})
-	delegateResponse := httptest.NewRecorder()
-	delegateRequest := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", bytes.NewBufferString(delegatePayload.body))
-	delegateRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	delegateRequest.Header.Set("X-Slack-Request-Timestamp", delegatePayload.timestamp)
-	delegateRequest.Header.Set("X-Slack-Signature", delegatePayload.signature)
-	router.ServeHTTP(delegateResponse, delegateRequest)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", bytes.NewBufferString(payload.body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
+	request.Header.Set("X-Slack-Signature", payload.signature)
+	router.ServeHTTP(response, request)
 
-	if delegateResponse.Code != http.StatusOK {
-		t.Fatalf("delegate status = %d, want 200", delegateResponse.Code)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
 	}
-
-	var delegate AvatarCommandResponse
-	if err := json.Unmarshal(delegateResponse.Body.Bytes(), &delegate); err != nil {
-		t.Fatalf("decode delegate response: %v", err)
+	var decoded AvatarCommandResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
 	}
-	jobMap, ok := delegate.Metadata["job"].(map[string]any)
-	if !delegate.OK || !ok {
-		t.Fatalf("delegate payload = %#v, want job metadata", delegate)
+	jobMap, ok := decoded.Metadata["job"].(map[string]any)
+	if !decoded.OK || !ok {
+		t.Fatalf("payload = %#v, want internal task metadata", decoded)
 	}
-	if jobMap["provider"] != "codex" {
-		t.Fatalf("job provider = %#v, want codex", jobMap["provider"])
+	if decoded.Text != "我来处理，完成后会发回这个线程。" {
+		t.Fatalf("text = %q, want generic work acknowledgement", decoded.Text)
 	}
-	if jobMap["status"] != string(agentrunner.StatusCompleted) {
-		t.Fatalf("job status = %#v, want completed", jobMap["status"])
+	if jobMap["provider"] != "codex" || jobMap["task"] != "Summarize route wiring" {
+		t.Fatalf("job = %#v, want provider and natural task", jobMap)
 	}
-	contextMap, ok := jobMap["context"].(map[string]any)
-	if !ok {
-		t.Fatalf("job context = %#v, want map", jobMap["context"])
-	}
-	slackContext, ok := contextMap["slack"].(map[string]any)
-	if !ok {
-		t.Fatalf("slack context = %#v, want map", contextMap["slack"])
-	}
-	if slackContext["workspaceId"] != "T123" || slackContext["channelId"] != "C123" {
-		t.Fatalf("slack context = %#v, want team/channel ids", slackContext)
-	}
-	if contextMap["session_id"] != "meet_go_123" {
-		t.Fatalf("session_id = %#v, want meet_go_123", contextMap["session_id"])
-	}
-
-	jobsPayload := signAvatarCommand(t, "secret", url.Values{
-		"text":       {"jobs --session meet_go_123"},
-		"team_id":    {"T123"},
-		"channel_id": {"C123"},
-		"thread_ts":  {"123.456"},
-		"user_id":    {"U123"},
-		"user_name":  {"peng"},
-	})
-	jobsResponse := httptest.NewRecorder()
-	jobsRequest := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", bytes.NewBufferString(jobsPayload.body))
-	jobsRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	jobsRequest.Header.Set("X-Slack-Request-Timestamp", jobsPayload.timestamp)
-	jobsRequest.Header.Set("X-Slack-Signature", jobsPayload.signature)
-	router.ServeHTTP(jobsResponse, jobsRequest)
-
-	if jobsResponse.Code != http.StatusOK {
-		t.Fatalf("jobs status = %d, want 200", jobsResponse.Code)
-	}
-	if !strings.Contains(jobsResponse.Body.String(), "Summarize route wiring") {
-		t.Fatalf("jobs body = %s, want delegated task", jobsResponse.Body.String())
+	if strings.Contains(decoded.Text, "delegate") || strings.Contains(decoded.Text, "Codex") {
+		t.Fatalf("text = %q, want no implementation terms", decoded.Text)
 	}
 }
 

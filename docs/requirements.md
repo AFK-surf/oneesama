@@ -43,7 +43,7 @@
 - [x] Slack Agent has a mock/live `chat.postMessage` adapter for completed worker results with thread metadata, retry, and delivery dedup keys.
 - [x] Cutover controller can run in `shadow`, `canary`, and `rollback` modes with a JSONL parity report.
 - [x] Cutover can auto-rollback a selected new-stack join when Meeting Agent is down and record the fail-closed decision.
-- [x] Fixture-level shadow parity runner can mirror join/delegate/jobs/stop across an old-stack fixture and the new repo.
+- [x] Fixture-level shadow parity runner can mirror join/work/status/stop across an old-stack fixture and the new repo.
 - [x] Shadow tap receiver can accept old-stack mirrored Slack commands with a shared secret and record them without starting a second bot.
 - [x] Shadow tap transmitter hook can read sanitized old-stack mirror input from stdin, stay disabled by default, and post to the side-effect-free receiver in local smoke.
 - [x] Cutover evidence bundle generator can collect fixture healthz output, cutover/shadow reports, SQLite state snapshots, command logs, and a manifest into a tarball.
@@ -64,7 +64,7 @@
 - [x] A mocked Slack command can create a meeting session record.
 - [x] Slack Agent can hand off that session to Meeting Agent locally.
 - [x] A mocked worker delegation can complete and report status.
-- [x] Slack control-plane smoke covers join/status/delegate/jobs/stop.
+- [x] Slack control-plane smoke covers join/status/stop/help and natural-language work routing.
 - [x] Slack control-plane smoke rejects a bad Slack signature and accepts a valid signed slash command.
 - [x] Slack contract smoke covers quoted parser flags, URL-encoded slash payloads, valid/bad/stale signatures, command edge cases, worker handoff, and worker result deduplication.
 - [x] Local Meet fixture smoke covers non-dry-run Playwright join, injected media, diagnostics, and stop-before-start.

@@ -22,7 +22,7 @@ npm run ci
 
 This verifies:
 
-- local session + dry-run worker delegation
+- local session + dry-run background work routing
 - agent runner provider seam for dry-run, Codex, Claude Code, Ollama, Slack Agent D bridge, command, and HTTP backends
 - state provider seam for `memory`, `json-file`, and WAL-backed `sqlite`, including restart restoration of sessions and worker delivery markers
 - persistent local session/job store across service restart
@@ -36,7 +36,7 @@ This verifies:
 - browser Realtime remote audio route into the avatar fake mic audio bus in local mock mode
 - browser Realtime repeat/interrupt guard that skips duplicate worker-result injection and cancels an active response when user speech starts
 - browser Realtime `session.update` registration for runtime instructions and tools
-- browser Realtime worker tools that delegate to Meeting Agent and return `function_call_output`
+- browser Realtime worker tools that route work to Meeting Agent and return `function_call_output`
 - browser Realtime avatar-state tools that update Hiyori/fallback mood and action state
 - avatar visual smoke that compares deterministic mouth/action snapshot hashes and visible pixel diffs
 - optional true Hiyori Live2D pixel smoke that skips when headless WebGL/CDN loading is unavailable and becomes mandatory with `MAB_REQUIRE_HIYORI_LIVE2D=1`
@@ -46,12 +46,12 @@ This verifies:
 - Slack contract matrix smoke that covers parser flags, signed URL-encoded slash payloads, bad/stale signatures, command edge cases, and worker result deduplication
 - cutover shadow/canary/rollback smoke that proves shadow mode records parity data without starting the new Meeting Agent path
 - cutover rollback smoke that proves a selected new-stack failure fails closed to old-stack-primary and writes a report event
-- shadow parity smoke that mirrors join/delegate/jobs/stop across an old-stack fixture and the new repo
+- shadow parity smoke that mirrors join/work/status/stop across an old-stack fixture and the new repo
 - shadow tap smoke that verifies an old-stack transmitter can mirror commands into `/shadow/slack-command` while the new repo records/parses them with side effects suppressed
 - shadow transmitter smoke that verifies sanitized old-stack mirror payloads can be built and posted to the receiver without leaking Slack secrets or creating side effects
 - optional real OpenAI Realtime SDP smoke when `MAB_OPENAI_API_KEY` or `OPENAI_API_KEY` is present
 - optional real OpenAI Realtime live tool smoke that requires the model to trigger `delegate_to_worker`
-- Realtime worker delegation prompt/tool contract
+- Realtime background work prompt/tool contract
 - Slack control-plane commands against a local Meeting Agent, including Slack signing-secret verification
 
 ## 3. Start Services
@@ -77,11 +77,11 @@ curl -X POST http://127.0.0.1:8780/commands/avatar \
 
 curl -X POST http://127.0.0.1:8780/commands/avatar \
   -H 'content-type: application/json' \
-  -d '{"user_id":"U_LOCAL","text":"delegate --session meet_xxxxxxxx summarize this meeting bot architecture"}'
+  -d '{"user_id":"U_LOCAL","text":"summarize this meeting bot architecture"}'
 
 curl -X POST http://127.0.0.1:8780/commands/avatar \
   -H 'content-type: application/json' \
-  -d '{"user_id":"U_LOCAL","text":"jobs"}'
+  -d '{"user_id":"U_LOCAL","text":"status"}'
 
 curl -X POST http://127.0.0.1:8780/commands/avatar \
   -H 'content-type: application/json' \

@@ -14,7 +14,6 @@ var slackTriageActionTypes = map[string]struct{}{
 	"follow_up":         {},
 	"create_task":       {},
 	"ask_user":          {},
-	"delegate":          {},
 	"create_issue":      {},
 	"add_comment":       {},
 	"create_event":      {},
@@ -28,7 +27,6 @@ var slackTriageMutationActionTypes = map[string]struct{}{
 	"follow_up":      {},
 	"create_task":    {},
 	"ask_user":       {},
-	"delegate":       {},
 	"create_issue":   {},
 	"add_comment":    {},
 	"create_event":   {},
@@ -79,7 +77,7 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 		existingBrain + memoryBlock + previousBlock,
 		"Policy rails:",
 		"- Use `post_thread_reply` with `requiresConfirmation:false` for read-only answers, summaries, link commentary, and brief synthesis.",
-		"- Use pending confirmation only for mutations: create_issue, add_comment, create_event, join_meeting, create_channel, delegate/create_task/follow_up/ask_user.",
+		"- Use pending confirmation only for mutations: create_issue, add_comment, create_event, join_meeting, create_channel, create_task/follow_up/ask_user.",
 		"- Do not ask permission to read a public link. If it is worth handling, read it and answer directly; otherwise choose none.",
 		"- Bare Slack archive/permalink URLs are not automatically relevant. Ignore them unless the message explicitly asks you to inspect/summarize that Slack thread.",
 		"- Casual chat exception: one short reply is allowed only when it adds something new and sounds natural out loud; otherwise choose none.",
@@ -98,7 +96,7 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 		`  "summary": "one concise channel-brain update",`,
 		`  "actions": [`,
 		"    {",
-		`      "type": "post_thread_reply | follow_up | create_task | ask_user | delegate | create_issue | add_comment | create_event | join_meeting | create_channel | none",`,
+		`      "type": "post_thread_reply | follow_up | create_task | ask_user | create_issue | add_comment | create_event | join_meeting | create_channel | none",`,
 		`      "title": "short action title",`,
 		`      "message": "reply text for post_thread_reply, or what the user should confirm for a mutation",`,
 		`      "channelId": "Slack channel id, optional",`,
@@ -213,6 +211,9 @@ func normalizeSlackTriageActions(values []any, fallback slackTriageFallback) []S
 		typ := strings.ToLower(firstNonEmpty(action.Type, "follow_up"))
 		if typ == "reply" || typ == "answer" {
 			typ = "post_thread_reply"
+		}
+		if typ == "delegate" {
+			typ = "create_task"
 		}
 		if _, ok := slackTriageActionTypes[typ]; !ok {
 			typ = "follow_up"

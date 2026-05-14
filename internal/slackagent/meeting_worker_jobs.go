@@ -56,7 +56,7 @@ func (s *Service) pollMeetingWorkerResults(ctx context.Context, limit int, markD
 		if len(result.Messages) > 0 {
 			result.Text = strings.Join(result.Messages, "\n\n")
 		} else {
-			result.Text = "No completed meeting worker jobs ready for Slack."
+			result.Text = "No completed background tasks ready for Slack."
 		}
 	}
 	return result, nil
@@ -71,5 +71,5 @@ func formatMeetingWorkerJobForSlack(job meetingWorkerJob) string {
 	if job.Status == "completed" && strings.TrimSpace(job.Result) == "" {
 		detail = "(no result)"
 	}
-	return fmt.Sprintf("Worker %s %s: %s\n%s", firstNonEmpty(job.ID, "worker"), statusLabel, firstNonEmpty(job.Task, "(untitled task)"), detail)
+	return fmt.Sprintf("Task %s %s: %s\n%s", firstNonEmpty(job.ID, "task"), statusLabel, firstNonEmpty(job.Task, "(untitled task)"), detail)
 }

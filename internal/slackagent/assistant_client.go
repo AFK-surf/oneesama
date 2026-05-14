@@ -106,7 +106,7 @@ func (c *SlackAssistantClient) SetSuggestedPrompts(ctx context.Context, input As
 		"prompts": []AssistantPrompt{
 			{Title: "今天日程", Message: "今天有什么会议和日程安排？"},
 			{Title: "未读消息", Message: "帮我看看有什么重要的未读消息？"},
-			{Title: "让 Codex 做事", Message: "请委托 Codex 帮我查代码或处理任务。"},
+			{Title: "处理任务", Message: "请帮我查清楚这件事，并把结果发回这个线程。"},
 		},
 	}
 	return c.call(ctx, "assistant.threads.setSuggestedPrompts", payload)

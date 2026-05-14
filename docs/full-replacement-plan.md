@@ -17,12 +17,12 @@ The high-level replacement inventory is in
 
 | Area                            | Current repo status                                                                                                                                                                                                                                                                                                       | Replacement status |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| Slack control plane             | `/avatar join/status/stop/delegate/jobs` dry-run command contract + mock/live Slack result poster seam                                                                                                                                                                                                                    | Partial            |
+| Slack control plane             | `/avatar join/status/stop/help` dry-run command contract, natural-language mention routing, and mock/live Slack result poster seam                                                                                                                                                                                        | Partial            |
 | Session lifecycle               | Replaceable state provider (`memory` / `json-file` / `sqlite`) and restart persistence smoke                                                                                                                                                                                                                              | Partial            |
 | Google Meet joiner              | Playwright adapter, dry-run plan, strict Meet contract matrix, local non-dry-run fixture smoke, optional real-room smoke, diagnostics, stop-before-start guard                                                                                                                                                            | Partial            |
 | Hiyori avatar camera/mic        | Browser fake mic/cam smoke + fallback visual hash gate + optional true Live2D pixel smoke                                                                                                                                                                                                                                 | Partial            |
 | Dialog provider                 | Provider-selected speech/text route; OpenAI Realtime is optional and configurable through an OpenAI-compatible base URL                                                                                                                                                                                                   | Partial            |
-| Worker delegation               | Bring-your-own agent runner seam (`dry-run`, `codex`, `claude`, `ollama`, `slack-agent-d`, `command`, `http`) + worker report store + browser worker-result polling bridge + Realtime data-channel-shaped event injection + browser worker tool execution seam + Slack-side completed-job polling/formatting/posting seam | Partial            |
+| Background work routing         | Bring-your-own agent runner seam (`dry-run`, `codex`, `claude`, `ollama`, `slack-agent-d`, `command`, `http`) + worker report store + browser worker-result polling bridge + Realtime data-channel-shaped event injection + browser worker tool execution seam + Slack-side completed-job polling/formatting/posting seam | Partial            |
 | Cutover / production deployment | Shadow/canary/rollback decision controller + auto-rollback fail-closed smoke + JSONL cutover report smoke + fixture-level old/new parity runner + side-effect-free shadow tap receiver + env-gated transmitter hook                                                                                                       | Partial            |
 
 ## Replacement Gates
@@ -39,7 +39,7 @@ The high-level replacement inventory is in
   - [x] Local persistent session/job store with json-file and SQLite providers.
   - [x] Mock/live `chat.postMessage` adapter for result reporting into Slack threads/channels.
   - [ ] Live Slack workspace acceptance for result reporting into Slack threads/channels.
-  - [ ] Acceptance: a real Slack command can start, inspect, stop, and delegate work for a meeting session.
+  - [ ] Acceptance: a real Slack command can start/inspect/stop a meeting session, while a natural-language mention can trigger heavier background work without exposing worker commands.
 
 - [ ] **Gate 2: Meet D parity**
   - [x] Local non-dry-run Playwright join fixture.
@@ -77,7 +77,7 @@ The high-level replacement inventory is in
   - [ ] Hiyori mouth/expression/action state accepted in a real Meet + OpenAI Realtime session.
   - [ ] Acceptance: in a real Meet, the bot hears, answers once, mouth moves while speaking, and can be interrupted.
 
-- [ ] **Gate 4: Worker delegation parity**
+- [ ] **Gate 4: Background work routing parity**
   - [x] Agent runner provider seam supports dry-run, Codex, Claude Code, Ollama, Slack Agent D bridge, shell-command, and HTTP backends.
   - [x] Realtime tool call starts a worker job in local mock mode.
   - [x] Slack Agent can poll completed Meeting Agent worker jobs and format status/result for Slack.
@@ -90,7 +90,7 @@ The high-level replacement inventory is in
   - [x] Browser runtime has an optional real Realtime live-tool smoke for `delegate_to_worker` when `MAB_OPENAI_API_KEY` / `OPENAI_API_KEY` is present; the smoke can run the selected AgentRunner provider (for example `MAB_AGENT_RUNNER=codex`) instead of the dry-run worker.
   - [ ] Meeting Agent injects completed job result into the actual OpenAI Realtime data channel.
   - [ ] Bot proactively reports the result in the live meeting.
-  - [ ] Acceptance: a complex request is delegated to Codex, completes, appears in Slack, and is spoken by Hiyori without user polling.
+  - [ ] Acceptance: a complex request completes through the selected provider, appears in Slack, and is spoken by Hiyori without user polling or provider-specific commands.
 
 - [ ] **Gate 5: Shadow mode**
   - [x] Feature flag for `new` / `shadow` / `canary` / `rollback` routing.
@@ -99,7 +99,7 @@ The high-level replacement inventory is in
   - [x] Auto-rollback mode keeps old stack primary when a selected new-stack join fails and records the original decision plus rollback decision.
   - [x] Canary mode can route a deterministic percentage of sessions to the new stack.
   - [x] Cutover JSONL report is exposed through Slack Agent diagnostics.
-  - [x] Fixture-level old-stack runner mirrors join/delegate/jobs/stop against the new repo and emits a parity report.
+  - [x] Fixture-level old-stack runner mirrors join/work/status/stop against the new repo and emits a parity report.
   - [x] Shadow tap receiver accepts old-stack mirrored Slack commands and records a side-effect-free report.
   - [x] Shadow transmitter hook builds sanitized old-stack mirror payloads from stdin and posts them to the side-effect-free receiver in smoke.
   - [ ] Run old stack and new repo against the same demo checklist.

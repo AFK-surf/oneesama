@@ -159,14 +159,14 @@ func assistantStatusPriority(status string) int {
 	switch trimmed {
 	case "":
 		return 0
-	case "Thinking...", "Working on it...":
+	case "Thinking...":
 		return 1
-	case "Starting Codex...", "Planning...":
+	case "Working on it...", "Planning...":
 		return 2
 	case "Composing reply...":
 		return 3
 	}
-	for _, prefix := range []string{"Running", "Using", "Editing", "Inspecting", "Delegating", "Waiting", "Messaging", "Checking"} {
+	for _, prefix := range []string{"Running", "Using", "Editing", "Inspecting", "Waiting", "Messaging", "Checking"} {
 		if strings.HasPrefix(trimmed, prefix) {
 			return 4
 		}

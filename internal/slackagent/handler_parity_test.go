@@ -106,21 +106,21 @@ func TestJobsCommandIncludesMeetingWorkerPoll(t *testing.T) {
 		CanvasPublisherConfig: CanvasPublisherConfig{},
 	})
 
-	response := service.RunAvatarCommand(context.Background(), AvatarCommandInput{
+	response := service.runJobsCommand(context.Background(), AvatarCommandInput{
 		Text:      "jobs",
 		TeamID:    "T123",
 		ChannelID: "C123",
 		ThreadTS:  "123.456",
 		UserID:    "U123",
 		Command:   "app_mention",
-	})
+	}, parsedAvatarCommand{Action: "jobs"})
 	if !response.OK {
 		t.Fatalf("response = %#v, want ok", response)
 	}
-	if !strings.Contains(response.Text, "Worker jobs: local=1, meeting=1") {
+	if !strings.Contains(response.Text, "Background tasks: local=1, meeting=1") {
 		t.Fatalf("text = %q, want local/meeting count", response.Text)
 	}
-	if !strings.Contains(response.Text, "Worker meeting_job_done completed: meeting summary\nsummary done") {
+	if !strings.Contains(response.Text, "Task meeting_job_done completed: meeting summary\nsummary done") {
 		t.Fatalf("text = %q, want ready meeting worker output", response.Text)
 	}
 	if response.Metadata["slack_context"] == nil || response.Metadata["ready_for_slack"] == nil {
@@ -129,11 +129,14 @@ func TestJobsCommandIncludesMeetingWorkerPoll(t *testing.T) {
 }
 
 func TestEventTextToAvatarCommandDoesNotTreatGoOnlyCommandsAsExplicit(t *testing.T) {
-	if got := eventTextToAvatarCommand(SlackEventPayload{Text: "<@UBOT> cancel job_1"}); got != "delegate cancel job_1" {
-		t.Fatalf("cancel command = %q, want delegate fallback", got)
+	if got := eventTextToAvatarCommand(SlackEventPayload{Text: "<@UBOT> cancel job_1"}); got != "work cancel job_1" {
+		t.Fatalf("cancel command = %q, want worker fallback", got)
 	}
-	if got := eventTextToAvatarCommand(SlackEventPayload{Text: "<@UBOT> schedule list"}); got != "delegate schedule list" {
-		t.Fatalf("schedule command = %q, want delegate fallback", got)
+	if got := eventTextToAvatarCommand(SlackEventPayload{Text: "<@UBOT> schedule list"}); got != "work schedule list" {
+		t.Fatalf("schedule command = %q, want worker fallback", got)
+	}
+	if got := eventTextToAvatarCommand(SlackEventPayload{Text: "<@UBOT> delegate summarize"}); got != "work delegate summarize" {
+		t.Fatalf("delegate command = %q, want worker fallback", got)
 	}
 }
 

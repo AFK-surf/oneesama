@@ -81,8 +81,8 @@ func TestHandleAvatarCommandDoesNotExposeCancelSurface(t *testing.T) {
 	if body.OK || runner.cancelCalled {
 		t.Fatalf("body = %#v cancelCalled=%v, want cancel hidden from user command surface", body, runner.cancelCalled)
 	}
-	if body.Text != "Unknown command: cancel\n\n"+avatarCommandUsage() {
-		t.Fatalf("text = %q, want TS unknown-command parity", body.Text)
+	if body.Text != "I don't understand that command.\n\n"+avatarCommandUsage() {
+		t.Fatalf("text = %q, want hidden command fallback", body.Text)
 	}
 }
 

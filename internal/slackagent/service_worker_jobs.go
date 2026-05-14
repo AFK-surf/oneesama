@@ -141,16 +141,7 @@ func assistantStatusTextForJob(job agentrunner.Job) string {
 	if job.Status != agentrunner.StatusRunning {
 		return ""
 	}
-	switch strings.ToLower(strings.TrimSpace(job.Provider)) {
-	case "codex":
-		return "Starting Codex..."
-	case "claude", "claude-code":
-		return "Starting Claude..."
-	case "ollama", "ollama-http", "local-ollama":
-		return "Using Ollama..."
-	default:
-		return "Working on it..."
-	}
+	return "Working on it..."
 }
 
 func isTerminalJobStatus(status agentrunner.JobStatus) bool {

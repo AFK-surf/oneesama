@@ -207,8 +207,8 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 		s.addSlackReaction(ctx, event.Channel, reactionTS, slackReactionEyes)
 	}
 	if mentionMode {
-		if shouldRewriteMentionDelegateTask(commandText, richContext) {
-			commandText = "delegate " + strconv.Quote(richContext.MentionText)
+		if shouldRewriteMentionWorkerTask(commandText, richContext) {
+			commandText = "work " + strconv.Quote(richContext.MentionText)
 		}
 	}
 
@@ -268,7 +268,7 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 	return response
 }
 
-func shouldRewriteMentionDelegateTask(commandText string, richContext *SlackAppMentionContext) bool {
+func shouldRewriteMentionWorkerTask(commandText string, richContext *SlackAppMentionContext) bool {
 	if richContext == nil {
 		return false
 	}
@@ -277,10 +277,10 @@ func shouldRewriteMentionDelegateTask(commandText string, richContext *SlackAppM
 		rawFirst = strings.ToLower(fields[0])
 	}
 	switch rawFirst {
-	case "delegate", "join", "status", "stop", "jobs", "help":
+	case "join", "status", "stop", "help":
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(commandText), "delegate ") && strings.TrimSpace(richContext.MentionText) != ""
+	return strings.HasPrefix(strings.TrimSpace(commandText), "work ") && strings.TrimSpace(richContext.MentionText) != ""
 }
 
 func isSlackMentionCommandMode(mode string) bool {

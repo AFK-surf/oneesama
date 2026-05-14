@@ -96,10 +96,10 @@ func (s *Service) BuildManifest() SlackManifest {
 			AppHome: slackAppHome{HomeTabEnabled: true, MessagesTabEnabled: true},
 			BotUser: slackBotUser{DisplayName: defaultSlackDisplayName, AlwaysOnline: true},
 			AssistantView: slackAssistantView{
-				AssistantDescription: defaultSlackDisplayName + " helps summarize conversations, answer questions, and delegate complex work to Codex.",
+				AssistantDescription: defaultSlackDisplayName + " helps summarize conversations, answer questions, and handle follow-up work.",
 				SuggestedPrompts: []slackSuggestedPrompt{
 					{Title: "总结当前频道", Message: "请总结这个频道最近的重要讨论。"},
-					{Title: "委托 Codex", Message: "请把这个任务委托给 Codex，并把结果发回这个线程。"},
+					{Title: "处理任务", Message: "请处理这个任务，并把结果发回这个线程。"},
 				},
 			},
 		},

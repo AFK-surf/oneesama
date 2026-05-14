@@ -223,7 +223,7 @@ func TestWorkerProgressUpdatesAssistantStatus(t *testing.T) {
 	})
 
 	calls := assistant.Calls()
-	assertStatusCalls(t, calls, []string{"Starting Codex..."})
+	assertStatusCalls(t, calls, []string{"Working on it..."})
 }
 
 func assertStatusCalls(t *testing.T, calls []assistantCall, want []string) {

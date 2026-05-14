@@ -19,8 +19,8 @@ func TestAvatarCommandUsageMatchesLegacySurface(t *testing.T) {
 		"join <meet-url> [--bot-name name] [--dry-run false]",
 		"status [session-id]",
 		"stop [session-id] [--reason text]",
-		"delegate <task> [--session meet_xxx] [--mode analysis] [--write false]",
-		"jobs",
+		"help",
+		"Or just mention me with what you need.",
 	}, "\n")
 	if got := avatarCommandUsage(); got != want {
 		t.Fatalf("usage = %q, want %q", got, want)
