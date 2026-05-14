@@ -159,6 +159,50 @@ func TestSocketModeServeOnceDispatchesEventsAPI(t *testing.T) {
 	}
 }
 
+func TestSocketModeEventsAPIBuffersPlainChannelMessages(t *testing.T) {
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+		},
+	})
+	runner := NewSocketModeRunner(SocketModeRunnerConfig{
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Service:  service,
+		AppToken: "app-token",
+	})
+
+	acked := false
+	err := runner.handleEnvelope(context.Background(), SlackSocketEnvelope{
+		Type:       "events_api",
+		EnvelopeID: "EnMessage",
+		Payload:    []byte(`{"type":"event_callback","event_id":"EvPlainMessage","team_id":"T123","event":{"type":"message","channel_type":"channel","user":"U123","text":"please triage me","channel":"C123","ts":"123.456"}}`),
+	}, func(payload any) error {
+		acked = true
+		if payload != nil {
+			t.Fatalf("ack payload = %#v, want nil", payload)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handle envelope: %v", err)
+	}
+	if !acked {
+		t.Fatal("events_api envelope was not acknowledged")
+	}
+	status := service.InboundStatus().EventBuffer
+	if status.BufferedMessages != 1 || status.Channels["C123"].Pending != 1 {
+		t.Fatalf("inbound status = %#v, want plain channel message buffered", status)
+	}
+	if got := runner.Snapshot().EventsHandled; got != 1 {
+		t.Fatalf("events handled = %d, want 1", got)
+	}
+}
+
 func TestSocketModeReconnectDelayForAttemptCapsExponentially(t *testing.T) {
 	runner := NewSocketModeRunner(SocketModeRunnerConfig{
 		AppToken:       "app-token",

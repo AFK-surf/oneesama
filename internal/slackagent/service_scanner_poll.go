@@ -157,10 +157,21 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 	if err != nil {
 		return nil, err
 	}
+	if previousCursor == "" {
+		cursor := firstNonEmpty(latestTS, formatSlackTimestamp(time.Now()))
+		s.inbound.SetCursor(channelID, cursor)
+		return &SlackScannerChannelResult{
+			ChannelID:      channelID,
+			OK:             true,
+			Source:         "slack_web_api",
+			PreviousCursor: previousCursor,
+			NextCursor:     cursor,
+			Scanned:        len(messages),
+			Buffered:       0,
+		}, nil
+	}
 	if latestTS != "" {
 		defer s.inbound.SetCursor(channelID, latestTS)
-	} else if previousCursor == "" {
-		defer s.inbound.SetCursor(channelID, formatSlackTimestamp(time.Now()))
 	}
 	if len(messages) == 0 {
 		return &SlackScannerChannelResult{
