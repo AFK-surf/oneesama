@@ -26,7 +26,10 @@ func (r *fakeRunner) Provider() string { return r.job.Provider }
 func (r *fakeRunner) DryRun() bool     { return false }
 func (r *fakeRunner) StartTask(_ context.Context, input agentrunner.StartInput) (agentrunner.Job, error) {
 	r.startInput = input
-	return r.job, nil
+	job := r.job
+	job.Task = input.Task
+	job.Context = input.Context
+	return job, nil
 }
 func (r *fakeRunner) GetJob(context.Context, string) (agentrunner.Job, bool, error) {
 	return r.job, true, nil

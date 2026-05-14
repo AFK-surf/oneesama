@@ -96,6 +96,9 @@ type Service struct {
 	socketModeMu sync.Mutex
 	socketMode   *SocketModeRunner
 
+	scannerMu     sync.Mutex
+	scannerCancel context.CancelFunc
+
 	eventMu    sync.Mutex
 	seenEvents map[string]time.Time
 

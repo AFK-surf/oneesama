@@ -3,6 +3,8 @@ package slackagent
 import "context"
 
 func (s *Service) Start() error {
+	s.startSlackHistoryScanner()
+
 	if s == nil || s.appToken == "" {
 		return nil
 	}
@@ -25,6 +27,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	s.stopSlackHistoryScanner()
 	s.socketModeMu.Lock()
 	runner := s.socketMode
 	s.socketModeMu.Unlock()

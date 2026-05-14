@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
@@ -126,6 +128,79 @@ func TestHandleScannerSweepFlushesFixtureMessages(t *testing.T) {
 	}
 	if !strings.Contains(retry.Body.String(), `"previousCursor":"2026-05-13T01:00:01Z"`) || !strings.Contains(retry.Body.String(), `"buffered":0`) {
 		t.Fatalf("retry sweep body = %s, want cursor dedupe", retry.Body.String())
+	}
+}
+
+func TestSlackHistoryScannerPollsJoinedChannelMessages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			if r.Form.Get("types") != "public_channel,private_channel" {
+				t.Fatalf("types = %q, want public/private channels", r.Form.Get("types"))
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"xp-test","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			if r.Form.Get("channel") != "C123" {
+				t.Fatalf("channel = %q, want C123", r.Form.Get("channel"))
+			}
+			if r.Form.Get("oldest") == "" {
+				t.Fatal("history request should use a bootstrap oldest cursor")
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"please create a follow-up","ts":"1778765842.164299"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_poll",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"scanner saw a follow-up request","actions":[{"type":"none","title":"No action","message":"test","channelId":"C123","threadTs":"1778765842.164299","confidence":0.9,"reason":"test","requiresConfirmation":false}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+			Triage: appconfig.SlackTriageConfig{
+				HeuristicFallback: true,
+			},
+		},
+		Runner: runner,
+	})
+
+	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("scanSlackHistoryOnce: %v", err)
+	}
+	if !result.OK || len(result.Sweeps) != 1 {
+		t.Fatalf("result = %#v, want one successful sweep", result)
+	}
+	sweep := result.Sweeps[0]
+	if sweep.Source != "slack_web_api" || sweep.Buffered != 1 || sweep.Flushed == nil || sweep.Flushed.Count != 1 {
+		t.Fatalf("sweep = %#v, want Slack history message buffered and flushed", sweep)
+	}
+	status := service.InboundStatus().EventBuffer
+	if status.Flushes != 1 || status.LastTriageJobID != "job_triage_poll" {
+		t.Fatalf("inbound status = %#v, want flush and triage job", status)
+	}
+	if !strings.Contains(runner.startInput.Task, "please create a follow-up") {
+		t.Fatalf("runner task missing scanned message:\n%s", runner.startInput.Task)
 	}
 }
 
