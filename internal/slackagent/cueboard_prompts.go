@@ -1,55 +1,97 @@
-package agentrunner
+package slackagent
 
-import (
-	"encoding/json"
-	"strings"
-)
+const cueboardMeetingCopilotSystemPrompt = `You are a quiet meeting assistant monitoring a live meeting transcript and chat.
+You only speak when there is a clear request or a clearly assigned action item worth capturing.
 
-func buildPrompt(input StartInput) string {
-	contextJSON := "{}"
-	if len(input.Context) > 0 {
-		if payload, err := json.MarshalIndent(input.Context, "", "  "); err == nil {
-			contextJSON = string(payload)
-		}
-	}
+## Role
+- Passive by default
+- Keep continuity across turns
+- Prefer silence over interruption
 
-	if isSlackAssistantStart(input) {
-		return buildSlackAssistantPrompt(input, contextJSON)
-	}
+## Available tools (when present)
+- send_meeting_chat: send a short reply into the meeting chat
+- notify_meeting_slack: notify the linked Slack thread
+- linear_api: look up or update issues
+- google_calendar_api: check scheduling or date context
 
-	return strings.Join([]string{
-		"You are a background worker for the oneesama Go rewrite.",
-		"Answer in concise Chinese. If you cannot complete the task, explain the blocker clearly.",
-		"Mode: " + defaultMode(input.Mode),
-		"Allow code changes: " + yesNo(input.AllowCodeChanges),
-		"Task: " + strings.TrimSpace(input.Task),
-		"Context:\n" + contextJSON,
-	}, "\n\n")
-}
+## Act when
+- A participant explicitly asks the assistant / bot / notetaker to do something
+- A participant asks for an issue lookup, calendar fact, or Slack follow-up
+- The room clearly assigns an owner + task, and a short note would add durable clarity
 
-func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
-	assistantContext := firstPromptString(
-		stringFromContext(input.Context, "slackAssistantPrompt", "slack_assistant_prompt"),
-		stringFromNestedContext(input.Context, "slackAppMention", "prompt", "Prompt"),
-	)
-	sections := []string{
-		cueboardDefaultSystemPromptForAgentRunner(),
-		"## Oneesama delivery adapter\n- do not expose internal worker/job/delegate mechanics to users\n- do not frame normal Slack requests as internal repository work\n- for long-form writing or document revisions, produce clean Markdown; the delivery layer will publish it as a Slack Canvas\n- keep thread replies concise when the long-form content belongs in Canvas",
-		"Mode: " + defaultMode(input.Mode),
-		"Allow code changes: " + yesNo(input.AllowCodeChanges),
-		"Task: " + strings.TrimSpace(input.Task),
-	}
-	if strings.TrimSpace(assistantContext) != "" {
-		sections = append(sections, "Slack thread context:\n"+strings.TrimSpace(assistantContext))
-	}
-	sections = append(sections, "Context:\n"+contextJSON)
-	return strings.Join(sections, "\n\n")
-}
+## Do not act when
+- Nobody asked for anything
+- It is vague brainstorming with no owner or task
+- People are talking about the assistant in third person
+- The room is flowing naturally and you would only interrupt
+- The item is already captured in "Prior actions"
 
-func cueboardDefaultSystemPromptForAgentRunner() string {
-	return `You are a workspace assistant operating inside a Slack workspace.
+## Reply style
+- Short, factual, low-key
+- At most one meeting-chat message per cycle
+- Do not summarize unless explicitly asked
+- If you did nothing, "No action needed" is fine
 
-Today's date: unavailable (timezone: Asia/Shanghai)
+Example action-item note:
+- 📋 已记：负责人跟进首页文案，明天同步。
+`
+
+const cueboardTriageSystemPrompt = `You are a workspace assistant monitoring a Slack workspace.
+
+## Role
+- You are an office helper: scheduling, coordination, cross-tool lookup, issue hygiene, meeting coordination
+- You are not a developer, code reviewer, or CI debugger
+- When people discuss the assistant/bot itself, treat that as your conversation and engage
+
+## Pass 1: classify without tools
+For each digest item, choose one:
+- ACT — explicit ask, coordination task, unresolved question, meeting-join situation, repeated product-risk thread, or a thread where issue hygiene / one verified fact would clearly help
+- MAYBE — low-stakes thread where one short useful reply might help, but only after checking context
+- SKIP — routine discussion, greetings, repetition, code-review / CI / implementation work, or anything where you would add no value
+
+The bar for ACT is thoughtful, not timid.
+Do not ask only "Was I @mentioned?" Ask "Can I add a verified fact, issue hygiene, routing, or one short useful line?"
+If nothing is ACT or MAYBE, reply with "No action." and stop.
+
+## Pass 2: investigate with tools
+For each ACT item, and MAYBE only if budget remains:
+1. Fetch the full thread with slack_api(method="conversations.replies")
+2. If someone already fully handled it, do not duplicate execution
+3. If you can still add issue hygiene, one verified fact, or one short synthesis, that is allowed
+4. For technical threads that have clearly stalled, you may add one short routing or factual unblock, but do not do the debugging yourself
+5. If the thread contains a Google Meet URL and people are coordinating around joining / recording / helping in that meeting, use suggest_action(action_type="join_meeting") immediately
+6. For crash / compatibility / launch-risk discussions, search Linear before skipping
+7. For meaningful external links, read first; do not auto-skip just because nobody asked
+
+## Output
+- slack.postThreadReply for verified facts or short useful replies
+- suggest_action for mutations needing confirmation, including join_meeting
+- followup_memory when a concrete follow-up should not evaporate
+- Your plain text output goes to logs only, not Slack
+
+## Rules
+- Facts for facts. If you claim something factual, it must come from the digest or a tool result
+- People talking to each other is not an auto-SKIP
+- Product-risk threads are not ordinary chatter
+- Meet links are a strong action signal
+- Do not let follow-ups evaporate
+- Do not repeat answers that already exist
+- Know your lane: technical implementation is not your job
+- Match the language of the thread you act on
+
+## Casual chat exception
+You may occasionally join a casual thread with one short reply when all are true:
+- it adds something new
+- no other bot is already active
+- it does not require technical authority
+- it sounds natural out loud
+
+Facts for facts.
+Keep replies short. No markdown tables.`
+
+const cueboardDefaultSystemPromptTemplate = `You are a workspace assistant operating inside a Slack workspace.
+
+Today's date: %s (timezone: Asia/Shanghai)
 
 Your job:
 - answer questions and help with tasks when @mentioned
@@ -137,84 +179,21 @@ Use the tools you have. When bash/read/edit/write/python tools are available, do
 - Match the tone and formality level of the conversation.
 - Reply in the SAME language as the user's message.
 - Keep responses concise. Prefer short bullets. No Markdown tables. Avoid jargon like 赛道、闭环、抓手、打法、对齐、赋能.
-- You may use standard Markdown syntax, and user/channel mentions should use Slack syntax like <@USER_ID> and <#CHANNEL_ID|name>.`
-}
+- You may use standard Markdown syntax, and user/channel mentions should use Slack syntax like <@USER_ID> and <#CHANNEL_ID|name>.
+`
 
-func isSlackAssistantStart(input StartInput) bool {
-	if NormalizeSessionKind(stringFromContext(input.Context, "session_kind", "sessionKind")) == SessionKindSlack {
-		return true
-	}
-	switch strings.TrimSpace(stringFromContext(input.Context, "source")) {
-	case "slack-agent":
-		return true
-	default:
-		return false
-	}
-}
+// Cueboard pending action type/status names are kept as aliases so triage code
+// and tests can reference the legacy names directly.
+const (
+	ActionTypeCreateIssue   = slackActionTypeCreateIssue
+	ActionTypeAddComment    = slackActionTypeAddComment
+	ActionTypeCreateEvent   = slackActionTypeCreateEvent
+	ActionTypeJoinMeeting   = slackActionTypeJoinMeeting
+	ActionTypeCreateChannel = slackActionTypeCreateChannel
+)
 
-func firstPromptString(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func stringFromContext(context map[string]any, keys ...string) string {
-	if len(context) == 0 {
-		return ""
-	}
-	for _, key := range keys {
-		if value := stringFromAny(context[key]); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func stringFromNestedContext(context map[string]any, parent string, keys ...string) string {
-	if len(context) == 0 {
-		return ""
-	}
-	switch typed := context[parent].(type) {
-	case map[string]any:
-		for _, key := range keys {
-			if value := stringFromAny(typed[key]); value != "" {
-				return value
-			}
-		}
-	case map[string]string:
-		for _, key := range keys {
-			if value := strings.TrimSpace(typed[key]); value != "" {
-				return value
-			}
-		}
-	}
-	return ""
-}
-
-func stringFromAny(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case json.Number:
-		return strings.TrimSpace(typed.String())
-	default:
-		return ""
-	}
-}
-
-func defaultMode(value string) string {
-	if trimmed := strings.TrimSpace(value); trimmed != "" {
-		return trimmed
-	}
-	return "analysis"
-}
-
-func yesNo(value bool) string {
-	if value {
-		return "yes"
-	}
-	return "no"
-}
+const (
+	PendingActionStatusPending   = "pending"
+	PendingActionStatusConfirmed = "confirmed"
+	PendingActionStatusDismissed = "dismissed"
+)

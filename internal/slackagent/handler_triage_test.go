@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
-func TestHandleTriageRunRecordsFallbackActionAndChannelBrain(t *testing.T) {
+func TestHandleTriageRunDoesNotInventFallbackActionCards(t *testing.T) {
 	router := newTestRouter(t, Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
@@ -33,8 +34,8 @@ func TestHandleTriageRunRecordsFallbackActionAndChannelBrain(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"source":"slack-triage"`) || !strings.Contains(response.Body.String(), `"action_type":"follow_up"`) {
-		t.Fatalf("body = %s, want triage job and pending follow_up", response.Body.String())
+	if !strings.Contains(response.Body.String(), `"source":"slack-triage"`) || strings.Contains(response.Body.String(), `"action_type":"follow_up"`) {
+		t.Fatalf("body = %s, want triage job without invented pending follow_up", response.Body.String())
 	}
 
 	status := httptest.NewRecorder()
@@ -44,8 +45,39 @@ func TestHandleTriageRunRecordsFallbackActionAndChannelBrain(t *testing.T) {
 	if status.Code != http.StatusOK {
 		t.Fatalf("status route = %d, want 200: %s", status.Code, status.Body.String())
 	}
-	if !strings.Contains(status.Body.String(), `"pendingActions"`) || !strings.Contains(status.Body.String(), `"channelBrains"`) {
-		t.Fatalf("status body = %s, want pending actions and channel brain", status.Body.String())
+	if strings.Contains(status.Body.String(), `"pendingActions"`) || !strings.Contains(status.Body.String(), `"channelBrains"`) {
+		t.Fatalf("status body = %s, want no pending actions and channel brain", status.Body.String())
+	}
+}
+
+func TestHandleTriageRunRecordsModelRequestedPendingAction(t *testing.T) {
+	router := newTestRouter(t, Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{
+				PostActions:       false,
+				HeuristicFallback: true,
+			},
+		},
+		Runner: &fakeRunner{job: agentrunner.Job{
+			ID:       "job_triage_followup",
+			Provider: "codex",
+			Status:   agentrunner.StatusCompleted,
+			Result:   `{"summary":"owner follow-up needed","actions":[{"type":"follow_up","title":"Follow up with owner","message":"请确认 owner 并跟进 blocked deploy。","confidence":0.82,"requiresConfirmation":true}]}`,
+		}},
+	})
+
+	body := `{"team_id":"T123","channel_id":"C123","user_id":"U123","text":"need follow up on the blocked deploy","ts":"123.456"}`
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/triage/run", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"source":"slack-triage"`) || !strings.Contains(response.Body.String(), `"action_type":"follow_up"`) {
+		t.Fatalf("body = %s, want model-requested pending follow_up", response.Body.String())
 	}
 }
 

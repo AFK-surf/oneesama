@@ -43,17 +43,15 @@ type slackTriageFallback struct {
 
 func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 	recentMemory := formatSlackTriageMemory(input.LocalMemory)
-	existingBrain := ""
+	var contextBlocks []string
 	if input.ChannelBrain != nil && strings.TrimSpace(input.ChannelBrain.Summary) != "" {
-		existingBrain = "Existing channel brain:\n" + input.ChannelBrain.Summary + "\n\n"
+		contextBlocks = append(contextBlocks, "Existing channel brain:\n"+input.ChannelBrain.Summary)
 	}
-	memoryBlock := ""
 	if recentMemory != "" {
-		memoryBlock = "Relevant local memory:\n" + recentMemory + "\n\n"
+		contextBlocks = append(contextBlocks, "Relevant local memory:\n"+recentMemory)
 	}
-	previousBlock := ""
 	if input.PreviousTriage != "" {
-		previousBlock = input.PreviousTriage + "\n\n"
+		contextBlocks = append(contextBlocks, input.PreviousTriage)
 	}
 	messageBlock := strings.TrimSpace(input.Digest)
 	if messageBlock == "" {
@@ -68,28 +66,23 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 		messageBlock = strings.Join(lines, "\n")
 	}
 
-	return strings.Join([]string{
-		"You are porting Legacy Slack Agent triage behavior.",
-		"Read buffered Slack activity and decide whether the bot should reply, stay silent, or surface a mutation action card.",
-		"Legacy Cueboard behavior is low-friction: most triage cycles reply or stay silent. Confirmation cards are only for external mutations.",
-		"",
+	sections := []string{
+		cueboardTriageSystemPrompt,
 		"Channel: " + input.ChannelID,
-		existingBrain + memoryBlock + previousBlock,
-		"Policy rails:",
-		"- Use `post_thread_reply` with `requiresConfirmation:false` for read-only answers, summaries, link commentary, and brief synthesis.",
-		"- Use pending confirmation only for mutations: create_issue, add_comment, create_event, join_meeting, create_channel, create_task/follow_up/ask_user.",
-		"- Do not ask permission to read a public link. If it is worth handling, read it and answer directly; otherwise choose none.",
-		"- Bare Slack archive/permalink URLs are not automatically relevant. Ignore them unless the message explicitly asks you to inspect/summarize that Slack thread.",
-		"- Casual chat exception: one short reply is allowed only when it adds something new and sounds natural out loud; otherwise choose none.",
-		"- Facts for facts. For meaningful external links, read first; do not auto-skip just because nobody asked.",
-		"- technical threads that have clearly stalled may need one verified fact or issue hygiene; do not do the debugging yourself in triage.",
-		"- Google Meet URL is a strong action signal; prefer a join_meeting pending action when someone appears to be asking for meeting help.",
-		"- Product-risk threads are not ordinary chatter; crash, compatibility, and launch-risk discussions are issue-hygiene candidates.",
-		"- People talking to each other is not an auto-skip; if you can add issue hygiene, one verified fact, or one short synthesis, act thoughtfully.",
-		"- No action is valid when there is truly nothing useful. Do not let concrete follow-ups evaporate.",
-		"",
-		"Buffered activity:",
+	}
+	if len(contextBlocks) > 0 {
+		sections = append(sections, "Context:\n"+strings.Join(contextBlocks, "\n\n"))
+	}
+	sections = append(sections,
+		"Digest:",
 		messageBlock,
+		"",
+		"Runtime output adapter:",
+		"The legacy tools are represented as JSON in this Go runtime. Preserve the cueboard policy above; only translate the action you would have taken into the JSON action list below.",
+		"- slack.postThreadReply maps to type post_thread_reply with requiresConfirmation=false.",
+		"- suggest_action(action_type=\"join_meeting\") maps to type join_meeting.",
+		"- suggest_action for create_issue, add_comment, create_event, create_channel, create_task, follow_up, or ask_user maps to the matching type and requiresConfirmation=true.",
+		"- If the cueboard policy says no action, return an empty actions array.",
 		"",
 		"Return only JSON with this shape:",
 		"{",
@@ -107,7 +100,8 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 		"    }",
 		"  ]",
 		"}",
-	}, "\n")
+	)
+	return strings.Join(sections, "\n")
 }
 
 type SlackTriagePromptInput struct {
@@ -183,24 +177,10 @@ func suggestSlackTriageFallback(channelID string, messages []SlackInboundMessage
 	if !slackTriageActionablePattern.MatchString(joined) {
 		return slackTriageFallback{Summary: summary, Channel: channelID, ThreadTS: firstNonEmpty(latest.ThreadTS, latest.TS)}
 	}
-	title := truncateSlackContextText(strings.Join(strings.Fields(firstNonEmpty(latest.Text, joined)), " "), 80)
-	if title == "" {
-		title = "Follow up on Slack activity"
-	}
 	return slackTriageFallback{
 		Summary:  summary,
 		Channel:  channelID,
 		ThreadTS: firstNonEmpty(latest.ThreadTS, latest.TS),
-		Actions: []SlackTriageDecisionAction{{
-			Type:                 "follow_up",
-			Title:                title,
-			Message:              "Review and follow up on this Slack activity:\n" + truncateSlackContextText(joined, 1200),
-			ChannelID:            channelID,
-			ThreadTS:             firstNonEmpty(latest.ThreadTS, latest.TS),
-			Confidence:           0.65,
-			Reason:               "Buffered activity contains actionable wording.",
-			RequiresConfirmation: true,
-		}},
 	}
 }
 
@@ -209,7 +189,11 @@ func normalizeSlackTriageActions(values []any, fallback slackTriageFallback) []S
 	for _, value := range values {
 		action := triageActionFromAny(value)
 		typ := strings.ToLower(firstNonEmpty(action.Type, "follow_up"))
+		typ = strings.TrimPrefix(typ, "slack.")
 		if typ == "reply" || typ == "answer" {
+			typ = "post_thread_reply"
+		}
+		if typ == "postthreadreply" {
 			typ = "post_thread_reply"
 		}
 		if typ == "delegate" {

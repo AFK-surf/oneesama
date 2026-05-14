@@ -1,3 +1,5 @@
+import { CUEBOARD_TRIAGE_SYSTEM_PROMPT } from "./cueboard-triage-prompts.js";
+
 function safeString(value, fallback = "") {
   const result = String(value ?? "").trim();
   return result || fallback;
@@ -100,7 +102,6 @@ export const SLACK_PENDING_ACTION_TYPES = [
   "follow_up",
   "create_task",
   "ask_user",
-  "delegate",
   "create_issue",
   "add_comment",
   "create_event",
@@ -151,12 +152,13 @@ export function buildSlackTriagePrompt({
         `${index + 1}. ${entry.source || entry.kind || "memory"}: ${String(entry.content || "").slice(0, 500)}`,
     )
     .join("\n");
-  const existingBrain = channelBrain?.summary
-    ? `Existing channel brain:\n${channelBrain.summary}\n\n`
-    : "";
-  const memoryBlock = recentMemory ? `Relevant local memory:\n${recentMemory}\n\n` : "";
-  const previousTriageBlock = previousTriage?.text ? `${previousTriage.text}\n\n` : "";
-  const contextBlock = `${existingBrain}${memoryBlock}${previousTriageBlock}`;
+  const contextBlock = [
+    channelBrain?.summary ? `Existing channel brain:\n${channelBrain.summary}` : "",
+    recentMemory ? `Relevant local memory:\n${recentMemory}` : "",
+    previousTriage?.text || "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const messageBlock =
     digest ||
     messages
@@ -167,23 +169,27 @@ export function buildSlackTriagePrompt({
       .join("\n");
 
   return [
-    "You are porting Legacy Slack Agent triage behavior.",
-    "Read buffered Slack activity and decide whether the bot should surface an action card.",
-    "Do not call Slack/Linear/Notion tools directly here. If a tool is needed, propose a pending action for user confirmation.",
-    "",
+    CUEBOARD_TRIAGE_SYSTEM_PROMPT,
     `Channel: ${channelId}`,
-    contextBlock,
-    "Buffered activity:",
+    contextBlock ? `Context:\n${contextBlock}` : "",
+    "Digest:",
     messageBlock,
+    "",
+    "Runtime output adapter:",
+    "The legacy tools are represented as JSON in this runtime. Preserve the cueboard policy above; only translate the action you would have taken into the JSON action list below.",
+    "- slack.postThreadReply maps to type post_thread_reply with requiresConfirmation=false.",
+    '- suggest_action(action_type="join_meeting") maps to type join_meeting.',
+    "- suggest_action for create_issue, add_comment, create_event, create_channel, create_task, follow_up, or ask_user maps to the matching type and requiresConfirmation=true.",
+    "- If the cueboard policy says no action, return an empty actions array.",
     "",
     "Return only JSON with this shape:",
     "{",
     '  "summary": "one concise channel-brain update",',
     '  "actions": [',
     "    {",
-    '      "type": "follow_up | create_task | ask_user | delegate | create_issue | add_comment | create_event | join_meeting | create_channel | none",',
+    '      "type": "post_thread_reply | follow_up | create_task | ask_user | create_issue | add_comment | create_event | join_meeting | create_channel | none",',
     '      "title": "short action title",',
-    '      "message": "what the user should confirm or what the agent should do",',
+    '      "message": "reply text for post_thread_reply, or what the user should confirm for a mutation",',
     '      "channelId": "Slack channel id, optional",',
     '      "threadTs": "Slack thread ts, optional",',
     '      "confidence": 0.0,',
@@ -192,7 +198,9 @@ export function buildSlackTriagePrompt({
     "    }",
     "  ]",
     "}",
-  ].join("\n");
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 export function parseSlackTriageDecision(rawOutput: unknown, fallback: SlackTriageFallback = {}) {
@@ -232,24 +240,9 @@ export function suggestSlackTriageFallback({
     ? `Buffered ${messages.length} Slack message(s); latest from <@${latest.userId || "unknown"}>.`
     : "No Slack messages to triage.";
   if (!actionable) return { summary, actions: [] };
-  const title =
-    String(latest.text || joined)
-      .replace(/\s+/g, " ")
-      .slice(0, 80) || "Follow up on Slack activity";
   return {
     summary,
-    actions: [
-      {
-        type: "follow_up",
-        title,
-        message: `Review and follow up on this Slack activity:\n${joined.slice(0, 1200)}`,
-        channelId,
-        threadTs: latest.threadTs || latest.ts || "",
-        confidence: 0.65,
-        reason: "Buffered activity contains actionable wording.",
-        requiresConfirmation: true,
-      },
-    ],
+    actions: [],
   };
 }
 
@@ -263,8 +256,15 @@ export function normalizeSlackTriageActions(
       const type = safeString(
         action.type || action.actionType || action.action_type,
         "follow_up",
-      ).toLowerCase();
-      const normalizedType = allowedTypes.has(type) ? type : "follow_up";
+      )
+        .toLowerCase()
+        .replace(/^slack\./, "");
+      const aliasedType = type === "reply" || type === "answer" || type === "postthreadreply"
+        ? "post_thread_reply"
+        : type === "delegate"
+          ? "create_task"
+          : type;
+      const normalizedType = allowedTypes.has(aliasedType) ? aliasedType : "follow_up";
       if (normalizedType === "none") return null;
       const title = safeString(
         action.title || action.brief || action.summary,
@@ -285,7 +285,8 @@ export function normalizeSlackTriageActions(
         confidence: Math.max(0, Math.min(1, safeNumber(action.confidence, 0.5))),
         reason: safeString(action.reason || action.rationale),
         requiresConfirmation:
-          action.requiresConfirmation !== false && action.requires_confirmation !== false,
+          normalizedType !== "post_thread_reply" &&
+          (action.requiresConfirmation !== false && action.requires_confirmation !== false),
       };
     })
     .filter(Boolean)

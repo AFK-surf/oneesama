@@ -5163,7 +5163,8 @@ async function slackTriageFlowSmoke() {
   const env = {
     MAB_SLACK_PORT: "18944",
     MAB_MEETING_AGENT_URL: "http://127.0.0.1:18945",
-    MAB_DRY_RUN_AGENT: "1",
+    MAB_AGENT_RUNNER: "command",
+    MAB_AGENT_COMMAND: `node -e 'let input=""; process.stdin.on("data", (chunk) => input += chunk); process.stdin.on("end", () => { const job = JSON.parse(input || "{}"); const task = String(job.task || ""); const needsAction = task.includes("meet.google.com") || task.includes("pending action"); const payload = needsAction ? { summary: "join meeting suggested", actions: [{ type: "join_meeting", title: "Join demo room", message: "Join the demo room and summarize it.", confidence: 0.88, requiresConfirmation: true }] } : { summary: "No action.", actions: [] }; console.log(JSON.stringify({ status: "completed", result: JSON.stringify(payload) })); });'`,
     MAB_DATA_DIR: dataDir,
     MAB_SLACK_POSTER_MOCK: "1",
     MAB_SLACK_EVENT_TRIAGE: "1",
@@ -5418,9 +5419,34 @@ async function slackTriageFlowSmoke() {
       compactRoute,
     );
 
-    const status = await (
-      await fetch("http://127.0.0.1:18944/slack/triage/status?limit=10")
-    ).json();
+    const mutationTriage = await postJsonWithStatus("http://127.0.0.1:18944/slack/triage/run", {
+      team_id: "T_TRIAGE",
+      channel_id: "C_ACTIONS",
+      user_id: "U_PENG",
+      text: "https://meet.google.com/abc-defg-hij 帮我让 bot 进会",
+      ts: "1778234000.000100",
+      thread_ts: "1778234000.000100",
+    });
+    assertSmoke(
+      mutationTriage.httpStatus === 200 && mutationTriage.ok === true,
+      "Slack triage explicit mutation route failed",
+      mutationTriage,
+    );
+
+    let status = await (await fetch("http://127.0.0.1:18944/slack/triage/status?limit=10")).json();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const pending = status.triage?.pendingActions || [];
+      if (
+        pending.some(
+          (entry) =>
+            entry.action_type === "join_meeting" && entry.thread_ts === "1778234000.000100",
+        )
+      ) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      status = await (await fetch("http://127.0.0.1:18944/slack/triage/status?limit=10")).json();
+    }
     const runs = status.triage?.runs || [];
     const pendingActions = status.triage?.pendingActions || [];
     const projectedTriage = loadTriageContextProjection(pathJoin(dataDir, "slack-workspace"));
@@ -5430,8 +5456,8 @@ async function slackTriageFlowSmoke() {
       status,
     );
     assertSmoke(
-      pendingActions.length >= 1,
-      "Slack triage flow did not create a pending action",
+      pendingActions.some((entry) => entry.action_type === "join_meeting"),
+      "Slack triage flow did not create a pending action for explicit mutation",
       status,
     );
     assertSmoke(
@@ -5535,7 +5561,7 @@ async function slackTriageFlowSmoke() {
             teamId: "T_TRIAGE",
             channelId: "C_ACTIONS",
             userId: "U_PENG",
-            text: `todo: ${spec.label} this pending action`,
+            text: `todo: ${spec.label} this pending action https://meet.google.com/abc-defg-hij`,
             ts: threadTs,
             threadTs,
           },

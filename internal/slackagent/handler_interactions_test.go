@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
@@ -294,7 +295,12 @@ func TestHandleInteractionUpdatesPendingTriageAction(t *testing.T) {
 				HeuristicFallback: true,
 			},
 		},
-		AgentRunner: appconfig.AgentRunnerConfig{Provider: "dry-run", DryRun: true},
+		Runner: &fakeRunner{job: agentrunner.Job{
+			ID:       "job_triage_interaction",
+			Provider: "codex",
+			Status:   agentrunner.StatusCompleted,
+			Result:   `{"summary":"owner follow-up needed","actions":[{"type":"follow_up","title":"Follow up with owner","message":"请确认 owner 并跟进。","confidence":0.82,"requiresConfirmation":true}]}`,
+		}},
 	})
 
 	triageResponse := httptest.NewRecorder()
