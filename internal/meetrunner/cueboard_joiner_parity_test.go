@@ -82,7 +82,8 @@ func TestCueboardParityManagerPreservesJoinerFlagsInPlan(t *testing.T) {
 	}
 	if !result.Plan.CollectFixtureState || !result.Plan.CaptureCaptions || result.Plan.CaptionLanguage != "English" ||
 		!result.Plan.RecordMeeting || result.Plan.ArtifactsDir != "/tmp/session_joiner_parity" || result.Plan.MeetAudioBackend != "none" ||
-		!result.Plan.InstallRealtimeBridge || !result.Plan.InstallWorkerResultBridge || !result.Plan.AutoStartScreenShare {
+		!result.Plan.InstallAvatar || result.Plan.DisableLive2D || !result.Plan.InstallRealtimeBridge ||
+		!result.Plan.InstallWorkerResultBridge || !result.Plan.AutoStartScreenShare {
 		t.Fatalf("plan = %#v, want browser-island joiner flags preserved", result.Plan)
 	}
 	_, _ = manager.StopSession(testContext(t), StopSessionInput{SessionID: "session_joiner_parity", Reason: "test_done"})

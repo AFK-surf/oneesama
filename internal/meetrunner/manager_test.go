@@ -81,6 +81,7 @@ func TestManagerPrepareAndStop(t *testing.T) {
 	}
 	if !prepare.Plan.CollectFixtureState || !prepare.Plan.CaptureCaptions ||
 		prepare.Plan.CaptionLanguage != "English" || !prepare.Plan.InstallRealtimeBridge ||
+		!prepare.Plan.InstallAvatar || prepare.Plan.DisableLive2D ||
 		prepare.Plan.RealtimeBridgeMode != "webrtc" || !prepare.Plan.AutoConnectRealtime ||
 		!prepare.Plan.SendRealtimeSessionUpdate || !prepare.Plan.ForwardMeetAudioToRealtime ||
 		!prepare.Plan.InstallLocalDialogBridge || !prepare.Plan.InstallWorkerResultBridge ||

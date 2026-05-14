@@ -8,6 +8,8 @@ export type BrowserIslandOptions = {
   recordMeeting: boolean;
   artifactsDir: string;
   meetAudioBackend: string;
+  installAvatar: boolean;
+  disableLive2D: boolean;
   installRealtimeBridge: boolean;
   realtimeBridgeMode: string;
   autoConnectRealtime: boolean;
@@ -23,6 +25,7 @@ export type BrowserIslandOptions = {
 
 export function normalizeBrowserIslandOptions(params: PrepareJoinParams): BrowserIslandOptions {
   const installRealtimeBridge = Boolean(params.install_realtime_bridge);
+  const installAvatar = installRealtimeBridge || Boolean(params.install_local_dialog_bridge);
   return {
     allowNonGoogleMeet: Boolean(params.allow_non_google_meet),
     collectFixtureState: Boolean(params.collect_fixture_state),
@@ -31,6 +34,8 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
     recordMeeting: Boolean(params.record_meeting),
     artifactsDir: typeof params.artifacts_dir === "string" ? params.artifacts_dir.trim() : "",
     meetAudioBackend: typeof params.meet_audio_backend === "string" ? params.meet_audio_backend.trim() : "",
+    installAvatar,
+    disableLive2D: !installAvatar,
     installRealtimeBridge,
     realtimeBridgeMode:
       typeof params.realtime_bridge_mode === "string" ? params.realtime_bridge_mode.trim() : "",
@@ -60,6 +65,8 @@ export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
     record_meeting: options.recordMeeting,
     artifacts_dir: options.artifactsDir,
     meet_audio_backend: options.meetAudioBackend,
+    install_avatar: options.installAvatar,
+    disable_live2d: options.disableLive2D,
     install_realtime_bridge: options.installRealtimeBridge,
     realtime_bridge_mode: options.realtimeBridgeMode,
     auto_connect_realtime: options.autoConnectRealtime,

@@ -35,6 +35,8 @@ type PrepareGoogleMeetInput struct {
 	RecordMeeting              bool   `json:"record_meeting,omitempty"`
 	ArtifactsDir               string `json:"artifacts_dir,omitempty"`
 	MeetAudioBackend           string `json:"meet_audio_backend,omitempty"`
+	InstallAvatar              bool   `json:"install_avatar,omitempty"`
+	DisableLive2D              bool   `json:"disable_live2d,omitempty"`
 	InstallRealtimeBridge      bool   `json:"install_realtime_bridge,omitempty"`
 	RealtimeBridgeMode         string `json:"realtime_bridge_mode,omitempty"`
 	AutoConnectRealtime        bool   `json:"auto_connect_realtime,omitempty"`
@@ -84,6 +86,8 @@ type JoinPlan struct {
 	RecordMeeting              bool   `json:"record_meeting,omitempty"`
 	ArtifactsDir               string `json:"artifacts_dir,omitempty"`
 	MeetAudioBackend           string `json:"meet_audio_backend,omitempty"`
+	InstallAvatar              bool   `json:"install_avatar,omitempty"`
+	DisableLive2D              bool   `json:"disable_live2d,omitempty"`
 	InstallRealtimeBridge      bool   `json:"install_realtime_bridge,omitempty"`
 	RealtimeBridgeMode         string `json:"realtime_bridge_mode,omitempty"`
 	AutoConnectRealtime        bool   `json:"auto_connect_realtime,omitempty"`
