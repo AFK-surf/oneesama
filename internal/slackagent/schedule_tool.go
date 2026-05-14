@@ -62,7 +62,7 @@ func ExecuteAssistantScheduleTool(ctx context.Context, args ExecuteAssistantSche
 			Success: false,
 			Tool:    AssistantScheduleToolName,
 			Error:   "assistant_mutation_blocked",
-			Text:    fmt.Sprintf("Action %q is not available in assistant sessions. Allowed actions: %q.", action, assistantScheduleActions[0]),
+			Text:    assistantMutationBlockedMessage(AssistantScheduleToolName, action, assistantScheduleActions...),
 			Metadata: map[string]any{
 				"allowed_actions": assistantScheduleActions,
 			},

@@ -4,6 +4,9 @@ package slackagent
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +79,8 @@ func TestCueboardParityCompactTriageSummaryPrefersActions(t *testing.T) {
 		Actions: []SlackTriageAction{
 			{Tool: "post_thread_reply", Channel: "general", Brief: "shared a short synthesis"},
 			{Tool: "add_reaction", Channel: "watercooler", Brief: "added eyes"},
+			{Tool: "delete_message", Channel: "random", Brief: "deleted msg"},
+			{Tool: "edit_message", Channel: "ops", Brief: "edited msg"},
 		},
 	})
 	if !strings.Contains(got, "#general shared a short synthesis") {
@@ -83,6 +88,58 @@ func TestCueboardParityCompactTriageSummaryPrefersActions(t *testing.T) {
 	}
 	if !strings.Contains(got, "#watercooler added eyes") {
 		t.Fatalf("compactTriageSummary missing watercooler action: %q", got)
+	}
+	if strings.Contains(got, "edited msg") {
+		t.Fatalf("compactTriageSummary should keep cueboard's first-three action cap, got %q", got)
+	}
+	if strings.Contains(got, ";") {
+		t.Fatalf("compactTriageSummary should use cueboard pipe separators, got %q", got)
+	}
+}
+
+func TestCueboardParityCompactTriageSummaryIncludesFailureReason(t *testing.T) {
+	t.Parallel()
+
+	got := compactTriageSummary(SlackTriageContext{
+		Status: "failed",
+		Error:  "empty final response with no mutations",
+	})
+	if got != "FAILED: empty final response with no mutations" {
+		t.Fatalf("compactTriageSummary failed run = %q", got)
+	}
+}
+
+func TestCueboardParityTriageProjectionRingBufferArchivesEvictions(t *testing.T) {
+	workspace := t.TempDir()
+	for i := 0; i < triageContextMaxSize+2; i++ {
+		persistTriageContext(workspace, SlackTriageContext{
+			SessionID: "sess-" + string(rune('a'+i)),
+			Timestamp: time.Date(2026, 3, 20, 12, i, 0, 0, time.UTC).
+				Format(time.RFC3339Nano),
+			Status:   "ok",
+			Channels: []string{"general"},
+			Summary:  "summary",
+		})
+	}
+
+	contexts := loadTriageContextsFromProjection(workspace)
+	if len(contexts) != triageContextMaxSize {
+		t.Fatalf("projection len = %d, want ring buffer size %d", len(contexts), triageContextMaxSize)
+	}
+	if contexts[0].SessionID != "sess-c" {
+		t.Fatalf("first retained context = %q, want oldest two archived", contexts[0].SessionID)
+	}
+	archivePath := filepath.Join(workspace, "memory", "triage-archive", "2026-03-20.json")
+	raw, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	var archived []SlackTriageContext
+	if err := json.Unmarshal(raw, &archived); err != nil {
+		t.Fatalf("parse archive: %v", err)
+	}
+	if len(archived) != 2 || archived[0].SessionID != "sess-a" || archived[1].SessionID != "sess-b" {
+		t.Fatalf("archived = %#v, want first two evicted contexts", archived)
 	}
 }
 

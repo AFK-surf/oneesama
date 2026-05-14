@@ -347,7 +347,7 @@ func TestCueboardParityStoreSanitizesThreadLedgerSummaries(t *testing.T) {
 	}
 }
 
-func TestCueboardParityStoreTriageRunsPreserveToolCallsAndSortByAbsoluteTime(t *testing.T) {
+func TestCueboardParityStoreTriageRunsPreserveToolCallsAndReturnNewestLimitChronological(t *testing.T) {
 	ctx := context.Background()
 	store := newSlackTriageStore(appconfig.PersistenceConfig{Provider: "memory"}, cueboardParityDiscardLogger())
 
@@ -388,19 +388,42 @@ func TestCueboardParityStoreTriageRunsPreserveToolCallsAndSortByAbsoluteTime(t *
 	if _, err := store.RecordRun(ctx, laterUTC); err != nil {
 		t.Fatalf("RecordRun later: %v", err)
 	}
+	latest := SlackTriageContext{
+		SessionID: "sess-latest",
+		Timestamp: time.Date(2026, 3, 25, 8, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		Status:    "ok",
+		Channels:  []string{"latest"},
+		Summary:   "latest absolute time",
+	}
+	if _, err := store.RecordRun(ctx, latest); err != nil {
+		t.Fatalf("RecordRun latest: %v", err)
+	}
+	if err := store.SaveTriageRun(SlackTriageContext{
+		SessionID: "sess-wrapper",
+		Timestamp: time.Date(2026, 3, 25, 8, 1, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		Status:    "ok",
+		Channels:  []string{"wrapper"},
+		Summary:   "wrapper absolute time",
+	}); err != nil {
+		t.Fatalf("SaveTriageRun wrapper: %v", err)
+	}
 
-	contexts, err := store.ListRuns(ctx, 20)
+	contexts, err := store.ListTriageContexts(2)
 	if err != nil {
-		t.Fatalf("ListRuns: %v", err)
+		t.Fatalf("ListTriageContexts: %v", err)
 	}
 	if len(contexts) != 2 {
 		t.Fatalf("contexts len = %d, want 2", len(contexts))
 	}
-	if contexts[0].SessionID != "sess-utc" || contexts[1].SessionID != "sess-local" {
-		t.Fatalf("contexts order = %+v, want newest absolute timestamp first", contexts)
+	if contexts[0].SessionID != "sess-latest" || contexts[1].SessionID != "sess-wrapper" {
+		t.Fatalf("contexts order = %+v, want cueboard newest-limit then chronological order", contexts)
 	}
-	if contexts[0].Error != "boom" || contexts[0].RawOutput != "raw" || len(contexts[0].Actions) != 1 || len(contexts[0].ToolCalls) != 1 {
-		t.Fatalf("stored triage context lost fields: %+v", contexts[0])
+	allContexts, err := store.ListTriageContexts(10)
+	if err != nil {
+		t.Fatalf("ListTriageContexts all: %v", err)
+	}
+	if allContexts[1].Error != "boom" || allContexts[1].RawOutput != "raw" || len(allContexts[1].Actions) != 1 || len(allContexts[1].ToolCalls) != 1 {
+		t.Fatalf("stored triage context lost fields: %+v", allContexts[1])
 	}
 }
 

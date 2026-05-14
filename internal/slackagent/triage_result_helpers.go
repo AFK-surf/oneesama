@@ -36,15 +36,12 @@ func hydrateTriageResultContent(sessionID string, content string, history []tria
 }
 
 func triageDidSucceed(sessionID string, mutations int, failures int, recorder *triageActionRecorder, content string) (bool, string) {
-	if failures > 0 {
-		return false, fmt.Sprintf("%d tool failure(s)", failures)
-	}
 	if recorder != nil {
-		mutations = maxInt(mutations, len(recorder.actions))
-		failures = maxInt(failures, countFailedTriageToolCalls(recorder.toolCalls))
-		if failures > 0 {
-			return false, fmt.Sprintf("%d tool failure(s)", failures)
-		}
+		mutations = maxInt(mutations, recorder.mutationCount())
+		failures = maxInt(failures, recorder.failureCount())
+	}
+	if failures > 0 && mutations == 0 {
+		return false, fmt.Sprintf("%d tool call(s) failed with no mutations", failures)
 	}
 	if mutations == 0 && strings.TrimSpace(content) == "" {
 		return false, "empty final response with no mutations"
@@ -58,8 +55,8 @@ func reconcileTriageCounts(counters *triageCounters, recorder *triageActionRecor
 		failures = counters.failures
 	}
 	if recorder != nil {
-		mutations = maxInt(mutations, len(recorder.actions))
-		failures = maxInt(failures, countFailedTriageToolCalls(recorder.toolCalls))
+		mutations = maxInt(mutations, recorder.mutationCount())
+		failures = maxInt(failures, recorder.failureCount())
 	}
 	return mutations, failures
 }

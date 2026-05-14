@@ -1,13 +1,125 @@
 package slackagent
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
-const triageContextCharBudget = 1600
+const (
+	triageContextFile       = ".triage-context.json"
+	triageContextMaxSize    = 20
+	adminTriageMaxSize      = 100
+	triageContextCharBudget = 1600
+)
+
+var channelNameRe = regexp.MustCompile(`#(\S+)\s+\(C[A-Z0-9]+\):`)
+
+func persistTriageContext(workspaceDir string, context SlackTriageContext) {
+	if strings.TrimSpace(workspaceDir) == "" {
+		return
+	}
+	dir := filepath.Join(workspaceDir, "memory")
+	filePath := filepath.Join(dir, triageContextFile)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	entries := loadTriageContextsFromProjection(workspaceDir)
+	entries = append(entries, context)
+	if len(entries) > triageContextMaxSize {
+		evicted := append([]SlackTriageContext(nil), entries[:len(entries)-triageContextMaxSize]...)
+		archiveTriageEntries(workspaceDir, evicted)
+		entries = entries[len(entries)-triageContextMaxSize:]
+	}
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return
+	}
+	tmpPath := filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		_ = os.Remove(tmpPath)
+	}
+}
+
+func loadTriageContextsFromProjection(workspaceDir string) []SlackTriageContext {
+	if strings.TrimSpace(workspaceDir) == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(workspaceDir, "memory", triageContextFile))
+	if err != nil {
+		return nil
+	}
+	var entries []SlackTriageContext
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil
+	}
+	return entries
+}
+
+func loadTriageContexts(store *slackTriageStore, workspaceDir string) []SlackTriageContext {
+	return loadTriageContextsWithLimit(store, workspaceDir, triageContextMaxSize)
+}
+
+func loadAdminTriageContexts(store *slackTriageStore, workspaceDir string) []SlackTriageContext {
+	return loadTriageContextsWithLimit(store, workspaceDir, adminTriageMaxSize)
+}
+
+func loadTriageContextsWithLimit(store *slackTriageStore, workspaceDir string, limit int) []SlackTriageContext {
+	if limit <= 0 {
+		limit = triageContextMaxSize
+	}
+	if store != nil {
+		if contexts, err := store.ListRuns(context.Background(), limit); err == nil {
+			return contexts
+		}
+	}
+	contexts := loadTriageContextsFromProjection(workspaceDir)
+	if len(contexts) > limit {
+		contexts = contexts[len(contexts)-limit:]
+	}
+	return contexts
+}
+
+func archiveTriageEntries(workspaceDir string, entries []SlackTriageContext) {
+	if len(entries) == 0 || strings.TrimSpace(workspaceDir) == "" {
+		return
+	}
+	archiveDir := filepath.Join(workspaceDir, "memory", "triage-archive")
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		return
+	}
+	byDate := make(map[string][]SlackTriageContext)
+	for _, entry := range entries {
+		timestamp := parseTriageTimestamp(entry.Timestamp)
+		if timestamp.IsZero() {
+			timestamp = time.Now().UTC()
+		}
+		date := timestamp.In(time.FixedZone("CST", 8*3600)).Format("2006-01-02")
+		byDate[date] = append(byDate[date], entry)
+	}
+	for date, dayEntries := range byDate {
+		archivePath := filepath.Join(archiveDir, date+".json")
+		var existing []SlackTriageContext
+		if data, err := os.ReadFile(archivePath); err == nil {
+			_ = json.Unmarshal(data, &existing)
+		}
+		existing = append(existing, dayEntries...)
+		data, err := json.MarshalIndent(existing, "", "  ")
+		if err != nil {
+			continue
+		}
+		_ = os.WriteFile(archivePath, data, 0o644)
+	}
+}
 
 func formatTriageContexts(contexts []SlackTriageContext) string {
 	if len(contexts) == 0 {
@@ -92,21 +204,19 @@ func formatTriageChannelSummary(channel string, actions []string, status string)
 	if len(actions) == 0 {
 		return fmt.Sprintf("#%s: %s", channel, triagePromptFallbackLabel(status))
 	}
-	return fmt.Sprintf("#%s: %s", channel, strings.Join(actions, ", "))
+	return fmt.Sprintf("#%s: %s", channel, strings.Join(actions, " | "))
 }
 
 func triagePromptFallbackLabel(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "ok", "success":
-		return "Scanned, no action taken."
-	case "timeout":
-		return "TIMEOUT"
 	case "failed", "error":
 		return "FAILED"
-	case "recorded":
-		return "recorded"
+	case "timeout":
+		return "TIMEOUT"
+	case "ok":
+		return "ACTIONLESS"
 	default:
-		return "pending"
+		return "ACTIONLESS"
 	}
 }
 
@@ -115,13 +225,35 @@ func compactTriageSummary(context SlackTriageContext) string {
 		summaries := make([]string, 0, len(context.Actions))
 		for _, action := range context.Actions {
 			summaries = append(summaries, compactTriageActionSummary(action))
+			if len(summaries) >= 3 {
+				break
+			}
 		}
-		return truncateSlackContextText(strings.Join(summaries, "; "), 2000)
+		return truncateSlackContextText(strings.Join(summaries, " | "), 280)
 	}
-	if strings.TrimSpace(context.Summary) != "" {
-		return truncateSlackContextText(strings.TrimSpace(context.Summary), 2000)
+	return compactTriageStatusSummary(context)
+}
+
+func compactTriageStatusSummary(context SlackTriageContext) string {
+	if strings.EqualFold(context.Status, "ok") || strings.EqualFold(context.Status, "success") {
+		summary := normalizeTriageText(context.Summary)
+		if summary != "" {
+			return truncateSlackContextText(summary, 280)
+		}
+		return "Scanned, no action taken."
+	}
+	if errText := normalizeTriageText(context.Error); errText != "" {
+		return truncateSlackContextText(fmt.Sprintf("%s: %s", strings.ToUpper(context.Status), errText), 280)
+	}
+	summary := normalizeTriageText(context.Summary)
+	if summary != "" {
+		return truncateSlackContextText(summary, 280)
 	}
 	return triagePromptFallbackLabel(context.Status)
+}
+
+func normalizeTriageText(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 func compactTriageActionSummary(action SlackTriageAction) string {
@@ -141,4 +273,18 @@ func triageContextClock(value string) string {
 		return value[11:16]
 	}
 	return "00:00"
+}
+
+func extractChannelNames(digest string) []string {
+	matches := channelNameRe.FindAllStringSubmatch(digest, -1)
+	seen := make(map[string]bool)
+	var names []string
+	for _, match := range matches {
+		name := match[1]
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
 }

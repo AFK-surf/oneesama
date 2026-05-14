@@ -55,7 +55,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 	}
 
 	channelBrain, _ := s.cognition.GetChannelBrain(ctx, workspaceID, channelID)
-	previousRuns, _ := s.triage.ListRuns(ctx, 20)
+	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
 	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(digest, 5), digest)
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
@@ -124,7 +124,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 }
 
 func (s *Service) recordSlackTriageOnly(ctx context.Context, channelID string, messages []SlackInboundMessage, digest string) (*SlackTriageContext, error) {
-	return s.triage.RecordRun(ctx, SlackTriageContext{
+	run, err := s.triage.RecordRun(ctx, SlackTriageContext{
 		SessionID: fmt.Sprintf("buffer:%s:%d", channelID, s.InboundStatus().EventBuffer.Flushes),
 		Status:    "recorded",
 		Summary:   fmt.Sprintf("Buffered %d Slack message(s) for %s", len(messages), channelID),
@@ -132,6 +132,10 @@ func (s *Service) recordSlackTriageOnly(ctx context.Context, channelID string, m
 		Channels:  []string{channelID},
 		Steps:     0,
 	})
+	if run != nil {
+		persistTriageContext(s.workspaceDir, *run)
+	}
+	return run, err
 }
 
 func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Job) (*SlackTriageFinalization, error) {
@@ -178,11 +182,11 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	runPatch := SlackTriageContext{
 		ID:        runID,
 		SessionID: stringFromContext(job.Context, "sessionId", "session_id"),
-		Status:    "success",
+		Status:    "ok",
 		Summary:   decision.Summary,
 		RawOutput: rawOutput,
 		Digest:    stringFromContext(job.Context, "digest"),
-		Channels:  []string{channelID},
+		Channels:  firstNonEmptyStringSlice(extractChannelNames(stringFromContext(job.Context, "digest")), []string{channelID}),
 		Actions:   triageActionRows(actions),
 		ToolCalls: append([]SlackTriageToolCall{{
 			Tool:    "agent_runner",
@@ -205,6 +209,9 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	updatedRun, err := s.triage.UpdateRun(ctx, runPatch)
 	if err != nil {
 		return nil, err
+	}
+	if updatedRun != nil {
+		persistTriageContext(s.workspaceDir, *updatedRun)
 	}
 	if ok && decision.Summary != "" {
 		if _, err := s.cognition.UpsertChannelBrainSummary(ctx, workspaceID, channelID, decision.Summary); err != nil {
@@ -249,4 +256,11 @@ func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspace
 		calls = append(calls, call)
 	}
 	return calls, failures
+}
+
+func firstNonEmptyStringSlice(values []string, fallback []string) []string {
+	if len(values) > 0 {
+		return values
+	}
+	return fallback
 }

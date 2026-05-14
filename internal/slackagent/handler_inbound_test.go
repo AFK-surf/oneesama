@@ -85,7 +85,7 @@ func TestHandleInboundFlushReturnsDigest(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "=== Slack Activity ===") || !strings.Contains(response.Body.String(), "need a digest") {
 		t.Fatalf("flush body = %s, want digest", response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"status":"success"`) || !strings.Contains(response.Body.String(), `"slack-triage"`) {
+	if !strings.Contains(response.Body.String(), `"status":"ok"`) || !strings.Contains(response.Body.String(), `"slack-triage"`) {
 		t.Fatalf("flush body = %s, want completed triage job", response.Body.String())
 	}
 }

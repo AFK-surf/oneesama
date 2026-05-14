@@ -35,6 +35,18 @@ func TestCueboardParityTriageDidSucceedRejectsEmptyNoMutationRun(t *testing.T) {
 	}
 }
 
+func TestCueboardParityTriageDidSucceedAllowsMutationsWithFailures(t *testing.T) {
+	t.Parallel()
+
+	ok, reason := triageDidSucceed("sess-1", 1, 2, nil, "")
+	if !ok {
+		t.Fatalf("triageDidSucceed rejected mutation-bearing run with failures: %s", reason)
+	}
+	if reason != "" {
+		t.Fatalf("reason = %q, want empty", reason)
+	}
+}
+
 func TestCueboardParityTriageDidSucceedAllowsNoOpRunWithSummary(t *testing.T) {
 	t.Parallel()
 
@@ -99,6 +111,40 @@ func TestCueboardParityReconcileTriageCountsUsesRecorderObservations(t *testing.
 	}
 	if failures != 1 {
 		t.Fatalf("failures = %d, want 1", failures)
+	}
+}
+
+func TestCueboardParityRecorderTracksOnlySuccessfulOutboundMutations(t *testing.T) {
+	t.Parallel()
+
+	var recorder triageActionRecorder
+	recorder.record("slack_api", map[string]any{
+		"method": "slack.postThreadReply",
+		"params": map[string]any{
+			"channel":   "C123",
+			"thread_ts": "1778772007.043069",
+			"text":      "shared a short synthesis",
+		},
+	}, slackAPIToolResult{Success: true, Text: "ok"})
+	recorder.record("slack_api", map[string]any{
+		"method": "slack.addReaction",
+		"params": map[string]any{
+			"channel": "C123",
+			"emoji":   "eyes",
+		},
+	}, slackAPIToolResult{Success: false, Text: "nope"})
+
+	if recorder.mutationCount() != 1 {
+		t.Fatalf("mutationCount = %d, want only successful post_thread_reply", recorder.mutationCount())
+	}
+	if recorder.failureCount() != 1 {
+		t.Fatalf("failureCount = %d, want failed reaction tracked", recorder.failureCount())
+	}
+	if len(recorder.actions) != 1 || recorder.actions[0].Tool != "post_thread_reply" || recorder.actions[0].Channel != "C123" {
+		t.Fatalf("actions = %#v, want successful post_thread_reply action only", recorder.actions)
+	}
+	if len(recorder.toolCalls) != 2 || recorder.toolCalls[0].Args != "channel=C123 thread_ts=1778772007.043069" {
+		t.Fatalf("toolCalls = %#v, want cueboard-style arg summaries", recorder.toolCalls)
 	}
 }
 

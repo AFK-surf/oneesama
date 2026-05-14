@@ -126,6 +126,9 @@ func (s *slackTriageStore) ListRuns(ctx context.Context, limit int) ([]SlackTria
 	if limit > 0 && len(runs) > limit {
 		runs = runs[:limit]
 	}
+	for i, j := 0, len(runs)-1; i < j; i, j = i+1, j-1 {
+		runs[i], runs[j] = runs[j], runs[i]
+	}
 	return runs, nil
 }
 

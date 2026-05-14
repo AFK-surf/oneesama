@@ -73,9 +73,30 @@ func TestCueboardParityAssistantScheduleToolBlocksMutations(t *testing.T) {
 		if result.Success || result.Error != "assistant_mutation_blocked" {
 			t.Fatalf("%s should be blocked by current Onee Sama assistant schedule boundary, got %#v", action, result)
 		}
-		if !strings.Contains(result.Text, `Allowed actions: "list"`) {
+		if result.Text != `manage_schedule action "`+action+`" is not available in assistant sessions. Allowed actions here: "list".` {
 			t.Fatalf("%s block text = %q, want allowed list hint", action, result.Text)
 		}
+	}
+}
+
+func TestCueboardParityAssistantMutationBlockedMessages(t *testing.T) {
+	t.Parallel()
+
+	if got := assistantMutationBlockedMessage("", ""); got != "this tool is not available in assistant sessions." {
+		t.Fatalf("empty tool/action = %q", got)
+	}
+	if got := assistantMutationBlockedMessage("slack_api", "post_message", "post_thread_reply", "add_reaction"); got != `slack_api action "post_message" is not available in assistant sessions. Allowed actions here: "post_thread_reply" and "add_reaction".` {
+		t.Fatalf("two actions = %q", got)
+	}
+	if got := formatAssistantAllowedActions([]string{"list", "get", "watch"}); got != `"list", "get", and "watch"` {
+		t.Fatalf("formatAssistantAllowedActions = %q", got)
+	}
+	params := assistantActionParameters("Allowed schedule action.", []string{"list"})
+	properties, _ := params["properties"].(map[string]any)
+	action, _ := properties["action"].(map[string]any)
+	enum, _ := action["enum"].([]string)
+	if params["type"] != "object" || action["description"] != "Allowed schedule action." || len(enum) != 1 || enum[0] != "list" {
+		t.Fatalf("assistantActionParameters = %#v", params)
 	}
 }
 
