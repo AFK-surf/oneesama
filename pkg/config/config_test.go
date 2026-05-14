@@ -83,8 +83,8 @@ func TestLoadHonorsConfigPathOverride(t *testing.T) {
   "slack_agent": {"listen": ":19080"},
   "meeting_agent": {"listen": ":19081"},
   "slack": {"signing_secret": "cfg-secret", "bot_token": "cfg-token", "app_token": "cfg-app-token", "client_id": "cfg-client-id", "client_secret": "cfg-client-secret", "redirect_uri": "https://oneesama.example.com/slack/oauth", "workspace_dir": "./workspace", "internal_auth_key": "cfg-auth-key", "public_base_url": "https://oneesama.example.com", "event_buffer": {"enabled": true, "triage": true, "max_batch": 3, "debounce": "4s"}, "triage": {"post_actions": false, "heuristic_fallback": false}, "memory": {"enabled": true, "dir": "./memory-seed"}},
-  "meetd": {"watch_interval": "2m", "webhook_url": "https://oneesama.example.com/meeting-webhook", "webhook_secret": "cfg-meetd-secret", "summary_model": "summary-file-model", "calibrate_model": "calibrate-file-model", "asr_provider": "gemini", "asr_language": "zh", "gemini_asr_model": "gemini-file-model"},
-  "openai": {"api_key": "cfg-openai-key", "base_url": "https://openai.example.com/v1/", "realtime_model": "gpt-realtime-2-test", "realtime_reasoning_effort": "medium", "realtime_voice": "verse", "realtime_turn_detection": "server_vad", "realtime_session_schema": "legacy", "realtime_personality_context": "local context", "bot_name": "Onee-sama", "current_user_name": "Peng", "current_user_email": "peng@example.com"},
+  "meetd": {"watch_interval": "2m", "webhook_url": "https://oneesama.example.com/meeting-webhook", "webhook_secret": "cfg-meetd-secret", "summary_model": "summary-file-model", "calibrate_model": "calibrate-file-model", "asr_provider": "gemini", "asr_model": "asr-file-model", "asr_language": "zh", "gemini_asr_model": "gemini-file-model"},
+  "openai": {"api_key": "cfg-openai-key", "base_url": "https://openai.example.com/v1/", "audio_transcriptions_url": "https://openai.example.com/v1/audio/transcriptions-custom", "realtime_model": "gpt-realtime-2-test", "realtime_reasoning_effort": "medium", "realtime_voice": "verse", "realtime_turn_detection": "server_vad", "realtime_session_schema": "legacy", "realtime_personality_context": "local context", "bot_name": "Onee-sama", "current_user_name": "Peng", "current_user_email": "peng@example.com"},
   "dialog": {"stt_provider": "event", "tts_provider": "command", "tts_voice": "local", "tts_command": "say-json", "tts_http_url": "http://127.0.0.1:9001/tts"},
   "logging": {"level": "debug", "format": "text"},
   "paths": {"meet_runner_dir": "./custom-meet-runner"},
@@ -147,7 +147,7 @@ func TestLoadHonorsConfigPathOverride(t *testing.T) {
 	if cfg.Meetd.SummaryModel != "summary-file-model" || cfg.Meetd.CalibrateModel != "calibrate-file-model" {
 		t.Fatalf("Meetd summary models = %#v, want config values", cfg.Meetd)
 	}
-	if cfg.Meetd.ASRProvider != "gemini" || cfg.Meetd.ASRLanguage != "zh" || cfg.Meetd.GeminiASRModel != "gemini-file-model" {
+	if cfg.Meetd.ASRProvider != "gemini" || cfg.Meetd.ASRModel != "asr-file-model" || cfg.Meetd.ASRLanguage != "zh" || cfg.Meetd.GeminiASRModel != "gemini-file-model" {
 		t.Fatalf("Meetd ASR = %#v, want config values", cfg.Meetd)
 	}
 	if cfg.OpenAI.APIKey != "cfg-openai-key" {
@@ -155,6 +155,9 @@ func TestLoadHonorsConfigPathOverride(t *testing.T) {
 	}
 	if cfg.OpenAI.BaseURL != "https://openai.example.com/v1" {
 		t.Fatalf("OpenAI.BaseURL = %q, want trimmed config value", cfg.OpenAI.BaseURL)
+	}
+	if cfg.OpenAI.AudioTranscriptionsURL != "https://openai.example.com/v1/audio/transcriptions-custom" {
+		t.Fatalf("OpenAI.AudioTranscriptionsURL = %q, want config value", cfg.OpenAI.AudioTranscriptionsURL)
 	}
 	if cfg.OpenAI.RealtimeClientSecretsURL != "https://openai.example.com/v1/realtime/client_secrets" {
 		t.Fatalf("OpenAI.RealtimeClientSecretsURL = %q, want derived URL", cfg.OpenAI.RealtimeClientSecretsURL)
@@ -224,6 +227,8 @@ func clearAmbientEnvOverrides(t *testing.T) {
 		"OPENAI_REALTIME_MODEL",
 		"ONEESAMA_OPENAI_API_KEY",
 		"MAB_OPENAI_API_KEY",
+		"ONEESAMA_OPENAI_AUDIO_TRANSCRIPTIONS_URL",
+		"MAB_OPENAI_AUDIO_TRANSCRIPTIONS_URL",
 		"ONEESAMA_MEETD_WEBHOOK_URL",
 		"MEET_WEBHOOK_URL",
 		"MAB_MEET_WEBHOOK_URL",
@@ -239,8 +244,13 @@ func clearAmbientEnvOverrides(t *testing.T) {
 		"MEET_CALIBRATE_MODEL",
 		"ONEESAMA_MEETING_ASR_PROVIDER",
 		"MEET_ASR_PROVIDER",
+		"MAB_ASR_PROVIDER",
+		"ONEESAMA_MEETING_ASR_MODEL",
+		"MEET_ASR_MODEL",
+		"MAB_ASR_MODEL",
 		"ONEESAMA_MEETING_ASR_LANGUAGE",
 		"MEET_ASR_LANGUAGE",
+		"MAB_ASR_LANGUAGE",
 		"GEMINI_API_KEY",
 		"ONEESAMA_GEMINI_ASR_MODEL",
 		"GEMINI_ASR_MODEL",

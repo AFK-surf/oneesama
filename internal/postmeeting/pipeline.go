@@ -15,21 +15,51 @@ import (
 const defaultArtifactsRootDir = "./runtime/meeting-artifacts"
 
 type Pipeline struct {
-	rootDir string
+	rootDir    string
+	asr        ASRProvider
+	summarizer Summarizer
 }
 
-func NewPipeline(rootDir string) *Pipeline {
+type PipelineOption func(*Pipeline)
+
+type Summarizer interface {
+	Summarize(ctx context.Context, input PostProcessInput, segments []NormalizedSegment, participants []string) (Summary, error)
+}
+
+type transcriptCalibrator interface {
+	Calibrate(ctx context.Context, captionTranscript, asrTranscript string) (string, error)
+}
+
+func WithASRProvider(provider ASRProvider) PipelineOption {
+	return func(p *Pipeline) {
+		p.asr = provider
+	}
+}
+
+func WithSummarizer(summarizer Summarizer) PipelineOption {
+	return func(p *Pipeline) {
+		p.summarizer = summarizer
+	}
+}
+
+func NewPipeline(rootDir string, options ...PipelineOption) *Pipeline {
 	if firstNonEmpty(rootDir) == "" {
 		rootDir = defaultArtifactsRootDir
 	}
-	return &Pipeline{rootDir: rootDir}
+	pipeline := &Pipeline{rootDir: rootDir}
+	for _, option := range options {
+		if option != nil {
+			option(pipeline)
+		}
+	}
+	return pipeline
 }
 
 func (p *Pipeline) RootDir() string {
 	return p.rootDir
 }
 
-func (p *Pipeline) PostProcess(_ context.Context, input PostProcessInput) (PostProcessResult, error) {
+func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (PostProcessResult, error) {
 	artifactID := firstNonEmpty(input.ArtifactID, input.ID, "meeting-"+uuid.NewString()[:8])
 	dir := filepath.Join(firstNonEmpty(input.RootDir, p.rootDir), artifactID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -38,11 +68,33 @@ func (p *Pipeline) PostProcess(_ context.Context, input PostProcessInput) (PostP
 
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 	segments := normalizeSegments(input)
-	transcriptText := joinSegmentText(segments)
 	participants := participantList(input, segments)
 	chatMessages := normalizeChatMessages(input)
 	chatLinks := collectChatLinks(chatMessages)
-	summary := buildFallbackSummary(input, segments, participants)
+	transcriptProvider := "caption"
+	summaryInput := input
+	if asrTranscript, err := p.transcribeAudio(ctx, input, dir, participants); err == nil && firstNonEmpty(asrTranscript.Text) != "" {
+		summaryInput.ASRTranscriptText = firstNonEmpty(asrTranscript.Text)
+		summaryInput.ASRProvider = asrTranscript.Provider
+		if calibrated := p.calibrateTranscript(ctx, segments, asrTranscript); calibrated != "" {
+			segments = transcriptSegmentsFromText(calibrated, "calibrated")
+			transcriptProvider = "calibrated"
+			summaryInput.TranscriptText = renderTranscriptText(segments)
+		} else if len(segments) == 0 {
+			segments = asrTranscript.Segments
+			if len(segments) == 0 {
+				segments = transcriptSegmentsFromText(asrTranscript.Text, "asr")
+			}
+			transcriptProvider = "asr"
+			if provider := firstNonEmpty(asrTranscript.Provider); provider != "" {
+				transcriptProvider = "asr:" + provider
+			}
+			summaryInput.TranscriptText = renderTranscriptText(segments)
+		}
+	}
+	participants = participantList(input, segments)
+	transcriptText := joinSegmentText(segments)
+	summary := p.summarize(ctx, summaryInput, segments, participants)
 
 	files := ArtifactFiles{
 		Transcript:     filepath.Join(dir, "transcript.json"),
@@ -56,7 +108,7 @@ func (p *Pipeline) PostProcess(_ context.Context, input PostProcessInput) (PostP
 	transcript := TranscriptArtifact{
 		Schema:       "oneesama.transcript.v1",
 		ID:           artifactID,
-		Provider:     "caption",
+		Provider:     transcriptProvider,
 		OK:           true,
 		Text:         transcriptText,
 		Segments:     segments,
@@ -124,6 +176,42 @@ func (p *Pipeline) PostProcess(_ context.Context, input PostProcessInput) (PostP
 		Summary:    summary,
 		Chat:       chat,
 	}, nil
+}
+
+func (p *Pipeline) transcribeAudio(ctx context.Context, input PostProcessInput, artifactDir string, participants []string) (ASRTranscript, error) {
+	if p.asr == nil || firstNonEmpty(input.AudioPath) == "" {
+		return ASRTranscript{}, nil
+	}
+	transcript, err := p.asr.Transcribe(ctx, ASRRequest{
+		AudioPath:    input.AudioPath,
+		ArtifactDir:  artifactDir,
+		Participants: participants,
+	})
+	if err != nil {
+		return ASRTranscript{}, err
+	}
+	return transcript, nil
+}
+
+func (p *Pipeline) calibrateTranscript(ctx context.Context, captionSegments []NormalizedSegment, asrTranscript ASRTranscript) string {
+	calibrator, ok := p.summarizer.(transcriptCalibrator)
+	if !ok || firstNonEmpty(asrTranscript.Text) == "" || len(captionSegments) == 0 {
+		return ""
+	}
+	calibrated, err := calibrator.Calibrate(ctx, renderTranscriptText(captionSegments), asrTranscript.Text)
+	if err != nil {
+		return ""
+	}
+	return firstNonEmpty(calibrated)
+}
+
+func (p *Pipeline) summarize(ctx context.Context, input PostProcessInput, segments []NormalizedSegment, participants []string) Summary {
+	if p.summarizer != nil {
+		if summary, err := p.summarizer.Summarize(ctx, input, segments, participants); err == nil {
+			return summary
+		}
+	}
+	return buildFallbackSummary(input, segments, participants)
 }
 
 func (p *Pipeline) GetArtifact(id string) (*ArtifactManifest, error) {

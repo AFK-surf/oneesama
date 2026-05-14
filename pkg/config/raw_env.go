@@ -118,10 +118,13 @@ func applyMeetdEnvOverrides(cfg *Config) {
 	if strings.TrimSpace(cfg.Meetd.CalibrateModel) == "" {
 		cfg.Meetd.CalibrateModel = cfg.Meetd.SummaryModel
 	}
-	if value := strings.TrimSpace(getenv("ONEESAMA_MEETING_ASR_PROVIDER", "MEET_ASR_PROVIDER")); value != "" {
+	if value := strings.TrimSpace(getenv("ONEESAMA_MEETING_ASR_PROVIDER", "MEET_ASR_PROVIDER", "MAB_ASR_PROVIDER")); value != "" {
 		cfg.Meetd.ASRProvider = value
 	}
-	if value := strings.TrimSpace(getenv("ONEESAMA_MEETING_ASR_LANGUAGE", "MEET_ASR_LANGUAGE")); value != "" {
+	if value := strings.TrimSpace(getenv("ONEESAMA_MEETING_ASR_MODEL", "MEET_ASR_MODEL", "MAB_ASR_MODEL")); value != "" {
+		cfg.Meetd.ASRModel = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_MEETING_ASR_LANGUAGE", "MEET_ASR_LANGUAGE", "MAB_ASR_LANGUAGE")); value != "" {
 		cfg.Meetd.ASRLanguage = value
 	}
 	if value := strings.TrimSpace(getenv("GEMINI_API_KEY")); value != "" {
@@ -140,6 +143,9 @@ func applyOpenAIEnvOverrides(cfg *Config) {
 		cfg.OpenAI.BaseURL = strings.TrimRight(value, "/")
 		cfg.OpenAI.RealtimeClientSecretsURL = cfg.OpenAI.BaseURL + "/realtime/client_secrets"
 		cfg.OpenAI.RealtimeSDPURL = cfg.OpenAI.BaseURL + "/realtime/calls"
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_OPENAI_AUDIO_TRANSCRIPTIONS_URL", "MAB_OPENAI_AUDIO_TRANSCRIPTIONS_URL")); value != "" {
+		cfg.OpenAI.AudioTranscriptionsURL = value
 	}
 	if value := strings.TrimSpace(getenv("ONEESAMA_OPENAI_REALTIME_CLIENT_SECRETS_URL", "MAB_OPENAI_REALTIME_CLIENT_SECRETS_URL")); value != "" {
 		cfg.OpenAI.RealtimeClientSecretsURL = value

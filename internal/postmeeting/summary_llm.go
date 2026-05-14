@@ -12,9 +12,14 @@ const (
 	summaryLLMStreamTimeout = 90 * time.Second
 )
 
-const meetingSummarySystemPrompt = `You are a meeting notes assistant.
+const meetingSummarySystemPrompt = `You are a meeting notes assistant. You may receive two transcript sources:
 
-Use the transcript and participant list to produce ONLY a valid JSON object with:
+1. Transcript assembled from live captions, usually with better speaker labels but possible caption recognition errors.
+2. ASR Transcript from post-meeting audio, usually more coherent text but possibly weaker speaker labels.
+
+Cross-reference both sources. Prefer speaker names from live captions and content corrections from ASR.
+
+Produce ONLY a valid JSON object with:
 {
   "title": "concise meeting title",
   "participants": ["name1"],
@@ -28,6 +33,7 @@ Rules:
 - Do not invent details not present in the transcript.
 - Keep highlights and action items concrete.
 - Output in the same language as the majority of the transcript.
+- If the transcript is too short or non-substantive, leave highlights/action_items/decisions empty instead of padding.
 - Output JSON only; no markdown, commentary, or code fences.`
 
 const meetingCalibrateSystemPrompt = `You are a transcript editor.
@@ -37,8 +43,8 @@ Prefer speaker names and timing from captions, and use ASR text only to fill con
 Output transcript lines only; no commentary.`
 
 type SummaryLLMMessage struct {
-	Role    string
-	Content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type SummaryLLMResponse struct {
@@ -145,6 +151,19 @@ func buildMeetingSummaryUserMessage(input PostProcessInput, transcript string, p
 	if len(participants) > 0 {
 		b.WriteString("\nParticipants: ")
 		b.WriteString(strings.Join(participants, ", "))
+	}
+	if asr := strings.TrimSpace(input.ASRTranscriptText); asr != "" {
+		b.WriteString("\n\n## Transcript (live captions / calibrated)\n")
+		b.WriteString(strings.TrimSpace(transcript))
+		b.WriteString("\n\n## ASR Transcript")
+		if provider := strings.TrimSpace(input.ASRProvider); provider != "" {
+			b.WriteString(" (")
+			b.WriteString(provider)
+			b.WriteString(")")
+		}
+		b.WriteString("\n")
+		b.WriteString(asr)
+		return b.String()
 	}
 	b.WriteString("\n\n## Transcript\n")
 	b.WriteString(strings.TrimSpace(transcript))

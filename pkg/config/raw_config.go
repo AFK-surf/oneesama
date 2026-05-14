@@ -78,6 +78,7 @@ type rawMeetdConfig struct {
 	SummaryModel    string `json:"summary_model"`
 	CalibrateModel  string `json:"calibrate_model"`
 	ASRProvider     string `json:"asr_provider"`
+	ASRModel        string `json:"asr_model"`
 	ASRLanguage     string `json:"asr_language"`
 	GeminiASRModel  string `json:"gemini_asr_model"`
 }
@@ -85,6 +86,7 @@ type rawMeetdConfig struct {
 type rawOpenAIConfig struct {
 	APIKey                     string `json:"api_key"`
 	BaseURL                    string `json:"base_url"`
+	AudioTranscriptionsURL     string `json:"audio_transcriptions_url"`
 	RealtimeClientSecretsURL   string `json:"realtime_client_secrets_url"`
 	RealtimeSDPURL             string `json:"realtime_sdp_url"`
 	RealtimeModel              string `json:"realtime_model"`
@@ -184,6 +186,7 @@ func (r rawConfig) toConfig(path string) Config {
 			SummaryModel:    strings.TrimSpace(r.Meetd.SummaryModel),
 			CalibrateModel:  strings.TrimSpace(r.Meetd.CalibrateModel),
 			ASRProvider:     strings.TrimSpace(r.Meetd.ASRProvider),
+			ASRModel:        strings.TrimSpace(r.Meetd.ASRModel),
 			ASRLanguage:     strings.TrimSpace(r.Meetd.ASRLanguage),
 			GeminiASRModel:  strings.TrimSpace(r.Meetd.GeminiASRModel),
 		},
@@ -291,6 +294,7 @@ func buildOpenAIConfig(raw rawOpenAIConfig) OpenAIConfig {
 	return OpenAIConfig{
 		APIKey:                     strings.TrimSpace(raw.APIKey),
 		BaseURL:                    baseURL,
+		AudioTranscriptionsURL:     strings.TrimSpace(raw.AudioTranscriptionsURL),
 		RealtimeClientSecretsURL:   clientSecretsURL,
 		RealtimeSDPURL:             sdpURL,
 		RealtimeModel:              stringOrDefault(raw.RealtimeModel, defaultOpenAIRealtimeModel),

@@ -102,6 +102,7 @@ func TestLoadHonorsMeetdEnvOverrides(t *testing.T) {
 	t.Setenv("MEET_SUMMARY_MODEL", "summary-env-model")
 	t.Setenv("MEET_CALIBRATE_MODEL", "calibrate-env-model")
 	t.Setenv("MEET_ASR_PROVIDER", "gemini")
+	t.Setenv("MAB_ASR_MODEL", "asr-env-model")
 	t.Setenv("MEET_ASR_LANGUAGE", "zh")
 	t.Setenv("GEMINI_API_KEY", "gemini-env-key")
 	t.Setenv("GEMINI_ASR_MODEL", "gemini-env-model")
@@ -122,7 +123,7 @@ func TestLoadHonorsMeetdEnvOverrides(t *testing.T) {
 	if cfg.Meetd.SummaryModel != "summary-env-model" || cfg.Meetd.CalibrateModel != "calibrate-env-model" {
 		t.Fatalf("Meetd summary models = %#v, want explicit env values", cfg.Meetd)
 	}
-	if cfg.Meetd.ASRProvider != "gemini" || cfg.Meetd.ASRLanguage != "zh" || cfg.Meetd.GeminiAPIKey != "gemini-env-key" || cfg.Meetd.GeminiASRModel != "gemini-env-model" {
+	if cfg.Meetd.ASRProvider != "gemini" || cfg.Meetd.ASRModel != "asr-env-model" || cfg.Meetd.ASRLanguage != "zh" || cfg.Meetd.GeminiAPIKey != "gemini-env-key" || cfg.Meetd.GeminiASRModel != "gemini-env-model" {
 		t.Fatalf("Meetd ASR = %#v, want env values", cfg.Meetd)
 	}
 }
@@ -146,6 +147,7 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	t.Setenv(oneesamaConfigEnvOverrideKey, "")
 	t.Setenv("MAB_OPENAI_API_KEY", "env-openai-key")
 	t.Setenv("MAB_OPENAI_BASE_URL", "https://env.openai.example/v1/")
+	t.Setenv("MAB_OPENAI_AUDIO_TRANSCRIPTIONS_URL", "https://env.openai.example/custom/audio/transcriptions")
 	t.Setenv("MAB_OPENAI_REALTIME_CLIENT_SECRETS_URL", "https://env.openai.example/custom/client_secrets")
 	t.Setenv("MAB_OPENAI_REALTIME_SDP_URL", "https://env.openai.example/custom/calls")
 	t.Setenv("MAB_OPENAI_REALTIME_MODEL", "gpt-realtime-2-env")
@@ -173,6 +175,9 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	}
 	if cfg.OpenAI.BaseURL != "https://env.openai.example/v1" {
 		t.Fatalf("OpenAI.BaseURL = %q, want trimmed env value", cfg.OpenAI.BaseURL)
+	}
+	if cfg.OpenAI.AudioTranscriptionsURL != "https://env.openai.example/custom/audio/transcriptions" {
+		t.Fatalf("OpenAI.AudioTranscriptionsURL = %q, want explicit env value", cfg.OpenAI.AudioTranscriptionsURL)
 	}
 	if cfg.OpenAI.RealtimeClientSecretsURL != "https://env.openai.example/custom/client_secrets" {
 		t.Fatalf("OpenAI.RealtimeClientSecretsURL = %q, want explicit env value", cfg.OpenAI.RealtimeClientSecretsURL)

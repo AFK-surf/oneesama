@@ -77,6 +77,7 @@ type MeetdConfig struct {
 	SummaryModel    string
 	CalibrateModel  string
 	ASRProvider     string
+	ASRModel        string
 	ASRLanguage     string
 	GeminiAPIKey    string
 	GeminiASRModel  string
@@ -85,6 +86,7 @@ type MeetdConfig struct {
 type OpenAIConfig struct {
 	APIKey                     string
 	BaseURL                    string
+	AudioTranscriptionsURL     string
 	RealtimeClientSecretsURL   string
 	RealtimeSDPURL             string
 	RealtimeModel              string

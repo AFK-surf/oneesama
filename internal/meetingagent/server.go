@@ -21,6 +21,7 @@ func NewServer(cfg config.Config, logger *slog.Logger) *httpserver.ManagedServer
 		MeetdWebhookURL:    cfg.Meetd.WebhookURL,
 		MeetdWebhookSecret: cfg.Meetd.WebhookSecret,
 		MeetdWatchInterval: cfg.Meetd.WatchInterval,
+		Meetd:              cfg.Meetd,
 		CaptionLanguage:    cfg.Meetd.CaptionLanguage,
 		OpenAI:             cfg.OpenAI,
 		Dialog:             cfg.Dialog,

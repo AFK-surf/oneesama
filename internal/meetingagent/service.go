@@ -31,6 +31,7 @@ type Config struct {
 	MeetdWebhookURL    string
 	MeetdWebhookSecret string
 	MeetdWatchInterval time.Duration
+	Meetd              appconfig.MeetdConfig
 	CaptionLanguage    string
 	OpenAI             appconfig.OpenAIConfig
 	Dialog             appconfig.DialogConfig
@@ -80,7 +81,7 @@ func NewService(cfg Config) *Service {
 
 	pipeline := cfg.Pipeline
 	if pipeline == nil {
-		pipeline = postmeeting.NewPipeline(cfg.ArtifactsRootDir)
+		pipeline = newPostMeetingPipeline(cfg.ArtifactsRootDir, cfg.Meetd, cfg.OpenAI, cfg.HTTPClient)
 	}
 	webhookSender := cfg.WebhookSender
 	if webhookSender == nil {

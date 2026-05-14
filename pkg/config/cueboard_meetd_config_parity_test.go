@@ -13,7 +13,7 @@ func TestCueboardParityMeetdModelDefaultsStayConfigOnly(t *testing.T) {
 	clearMeetdConfigParityEnv(t)
 
 	cfg := loadInTempDir(t)
-	if cfg.Meetd.SummaryModel != "" || cfg.Meetd.CalibrateModel != "" || cfg.Meetd.GeminiASRModel != "" {
+	if cfg.Meetd.SummaryModel != "" || cfg.Meetd.CalibrateModel != "" || cfg.Meetd.ASRModel != "" || cfg.Meetd.GeminiASRModel != "" {
 		t.Fatalf("Meetd models = %#v, want no hard-coded provider/model defaults", cfg.Meetd)
 	}
 }
@@ -66,6 +66,7 @@ func TestCueboardParityMeetdFileAndASREnvConfig(t *testing.T) {
     "summary_model": "summary-file-model",
     "calibrate_model": "calibrate-file-model",
     "asr_provider": "gemini",
+    "asr_model": "asr-file-model",
     "asr_language": "zh",
     "gemini_asr_model": "gemini-file-model"
   }
@@ -82,7 +83,7 @@ func TestCueboardParityMeetdFileAndASREnvConfig(t *testing.T) {
 	if cfg.Meetd.SummaryModel != "summary-file-model" || cfg.Meetd.CalibrateModel != "calibrate-file-model" {
 		t.Fatalf("Meetd summary models = %#v, want config values", cfg.Meetd)
 	}
-	if cfg.Meetd.ASRProvider != "gemini" || cfg.Meetd.ASRLanguage != "zh" ||
+	if cfg.Meetd.ASRProvider != "gemini" || cfg.Meetd.ASRModel != "asr-file-model" || cfg.Meetd.ASRLanguage != "zh" ||
 		cfg.Meetd.GeminiASRModel != "gemini-file-model" || cfg.Meetd.GeminiAPIKey != "gemini-secret" {
 		t.Fatalf("Meetd ASR = %#v, want config/env values", cfg.Meetd)
 	}
@@ -105,8 +106,13 @@ func clearMeetdConfigParityEnv(t *testing.T) {
 		"MEET_CALIBRATE_MODEL",
 		"ONEESAMA_MEETING_ASR_PROVIDER",
 		"MEET_ASR_PROVIDER",
+		"MAB_ASR_PROVIDER",
+		"ONEESAMA_MEETING_ASR_MODEL",
+		"MEET_ASR_MODEL",
+		"MAB_ASR_MODEL",
 		"ONEESAMA_MEETING_ASR_LANGUAGE",
 		"MEET_ASR_LANGUAGE",
+		"MAB_ASR_LANGUAGE",
 		"GEMINI_API_KEY",
 		"ONEESAMA_GEMINI_ASR_MODEL",
 		"GEMINI_ASR_MODEL",

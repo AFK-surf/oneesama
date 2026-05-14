@@ -54,25 +54,27 @@ type Summary struct {
 }
 
 type PostProcessInput struct {
-	ID               string                   `json:"id,omitempty"`
-	ArtifactID       string                   `json:"artifact_id,omitempty"`
-	MeetingID        string                   `json:"meeting_id,omitempty"`
-	SessionID        string                   `json:"session_id,omitempty"`
-	Title            string                   `json:"title,omitempty"`
-	MeetURL          string                   `json:"meet_url,omitempty"`
-	SummaryText      string                   `json:"summary_text,omitempty"`
-	TranscriptText   string                   `json:"transcript_text,omitempty"`
-	Text             string                   `json:"text,omitempty"`
-	Transcript       TranscriptInput          `json:"transcript,omitempty"`
-	Segments         []TranscriptSegmentInput `json:"segments,omitempty"`
-	Captions         []TranscriptSegmentInput `json:"captions,omitempty"`
-	ChatMessages     []ChatMessageInput       `json:"chat_messages,omitempty"`
-	MeetChatMessages []ChatMessageInput       `json:"meet_chat_messages,omitempty"`
-	Participants     []string                 `json:"participants,omitempty"`
-	AudioPath        string                   `json:"audio_path,omitempty"`
-	RootDir          string                   `json:"root_dir,omitempty"`
-	Source           string                   `json:"source,omitempty"`
-	Summary          *Summary                 `json:"summary,omitempty"`
+	ID                string                   `json:"id,omitempty"`
+	ArtifactID        string                   `json:"artifact_id,omitempty"`
+	MeetingID         string                   `json:"meeting_id,omitempty"`
+	SessionID         string                   `json:"session_id,omitempty"`
+	Title             string                   `json:"title,omitempty"`
+	MeetURL           string                   `json:"meet_url,omitempty"`
+	SummaryText       string                   `json:"summary_text,omitempty"`
+	TranscriptText    string                   `json:"transcript_text,omitempty"`
+	ASRTranscriptText string                   `json:"asr_transcript_text,omitempty"`
+	ASRProvider       string                   `json:"asr_provider,omitempty"`
+	Text              string                   `json:"text,omitempty"`
+	Transcript        TranscriptInput          `json:"transcript,omitempty"`
+	Segments          []TranscriptSegmentInput `json:"segments,omitempty"`
+	Captions          []TranscriptSegmentInput `json:"captions,omitempty"`
+	ChatMessages      []ChatMessageInput       `json:"chat_messages,omitempty"`
+	MeetChatMessages  []ChatMessageInput       `json:"meet_chat_messages,omitempty"`
+	Participants      []string                 `json:"participants,omitempty"`
+	AudioPath         string                   `json:"audio_path,omitempty"`
+	RootDir           string                   `json:"root_dir,omitempty"`
+	Source            string                   `json:"source,omitempty"`
+	Summary           *Summary                 `json:"summary,omitempty"`
 }
 
 type NormalizedSegment struct {

@@ -2,6 +2,7 @@ package postmeeting
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,6 +90,117 @@ func TestPipelineFallbackHighlightsSplitLongTranscriptIntoReadableBullets(t *tes
 		if len([]rune(item)) > 243 {
 			t.Fatalf("highlight %q too long", item)
 		}
+	}
+}
+
+type fakeASRProvider struct {
+	transcript ASRTranscript
+	err        error
+	request    ASRRequest
+}
+
+func (p *fakeASRProvider) Transcribe(_ context.Context, request ASRRequest) (ASRTranscript, error) {
+	p.request = request
+	return p.transcript, p.err
+}
+
+type fakePipelineSummarizer struct {
+	summary           Summary
+	err               error
+	calibrated        string
+	calibrateErr      error
+	summarizeInput    PostProcessInput
+	summarizeSegments []NormalizedSegment
+	calibrateCaption  string
+	calibrateASR      string
+}
+
+func (s *fakePipelineSummarizer) Summarize(_ context.Context, input PostProcessInput, segments []NormalizedSegment, _ []string) (Summary, error) {
+	s.summarizeInput = input
+	s.summarizeSegments = append([]NormalizedSegment(nil), segments...)
+	if s.err != nil {
+		return Summary{}, s.err
+	}
+	return s.summary, nil
+}
+
+func (s *fakePipelineSummarizer) Calibrate(_ context.Context, captionTranscript, asrTranscript string) (string, error) {
+	s.calibrateCaption = captionTranscript
+	s.calibrateASR = asrTranscript
+	if s.calibrateErr != nil {
+		return "", s.calibrateErr
+	}
+	return s.calibrated, nil
+}
+
+func TestPipelineUsesConfiguredASRCalibrationAndLLMSummary(t *testing.T) {
+	t.Parallel()
+
+	audioPath := filepath.Join(t.TempDir(), "audio.mp3")
+	if err := os.WriteFile(audioPath, []byte("fake audio"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	asr := &fakeASRProvider{transcript: ASRTranscript{
+		Provider: "openai",
+		Text:     "[00:00] Peng: ASR 更完整内容",
+	}}
+	summarizer := &fakePipelineSummarizer{
+		calibrated: "Peng: 校准后的高质量文本",
+		summary: Summary{
+			Title:       "高质量总结",
+			Highlights:  []string{"校准后再总结"},
+			ActionItems: []string{"继续接 provider"},
+		},
+	}
+	pipeline := NewPipeline(t.TempDir(), WithASRProvider(asr), WithSummarizer(summarizer))
+
+	result, err := pipeline.PostProcess(context.Background(), PostProcessInput{
+		Title:     "原始标题",
+		AudioPath: audioPath,
+		Captions: []TranscriptSegmentInput{{
+			Speaker: "Peng",
+			Text:    "字幕误听内容",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("PostProcess() error = %v", err)
+	}
+	if asr.request.AudioPath != audioPath {
+		t.Fatalf("ASR audio path = %q, want %q", asr.request.AudioPath, audioPath)
+	}
+	if !strings.Contains(summarizer.calibrateCaption, "Peng: 字幕误听内容") || !strings.Contains(summarizer.calibrateASR, "ASR 更完整内容") {
+		t.Fatalf("calibration inputs caption=%q asr=%q", summarizer.calibrateCaption, summarizer.calibrateASR)
+	}
+	if summarizer.summarizeInput.ASRTranscriptText == "" || summarizer.summarizeInput.ASRProvider != "openai" {
+		t.Fatalf("summary input ASR fields = %#v", summarizer.summarizeInput)
+	}
+	if len(summarizer.summarizeSegments) != 1 || summarizer.summarizeSegments[0].Text != "校准后的高质量文本" {
+		t.Fatalf("summary segments = %#v, want calibrated transcript", summarizer.summarizeSegments)
+	}
+	if result.Transcript.Provider != "calibrated" || !strings.Contains(result.Transcript.Text, "校准后的高质量文本") {
+		t.Fatalf("transcript = %#v, want calibrated provider/text", result.Transcript)
+	}
+	if result.Summary.Title != "高质量总结" || len(result.Summary.Highlights) != 1 {
+		t.Fatalf("summary = %#v, want LLM summary", result.Summary)
+	}
+}
+
+func TestPipelineFallsBackWhenConfiguredLLMSummaryFails(t *testing.T) {
+	t.Parallel()
+
+	pipeline := NewPipeline(t.TempDir(), WithSummarizer(&fakePipelineSummarizer{err: errors.New("llm down")}))
+	result, err := pipeline.PostProcess(context.Background(), PostProcessInput{
+		Title: "Fallback",
+		Captions: []TranscriptSegmentInput{{
+			Speaker: "Peng",
+			Text:    "Decision: keep fallback reliable.",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("PostProcess() error = %v", err)
+	}
+	if len(result.Summary.Decisions) == 0 {
+		t.Fatalf("summary = %#v, want fallback decision extraction", result.Summary)
 	}
 }
 
