@@ -229,7 +229,8 @@ func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspace
 		result := s.PostMessage(ctx, PostMessageInput{
 			Channel:  effectiveChannel,
 			ThreadTS: effectiveThread,
-			Text:     action.Message,
+			Text:     markdownToSlackFallbackText(action.Message),
+			Blocks:   buildSlackThreadReplyBlocks(action.Message, "", nil),
 			DedupKey: fmt.Sprintf("slack-triage-direct:%d:%s:%s", runID, effectiveChannel, firstNonEmpty(effectiveThread, "root")),
 		})
 		call := SlackTriageToolCall{

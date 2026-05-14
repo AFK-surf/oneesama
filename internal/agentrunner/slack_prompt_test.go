@@ -1,0 +1,50 @@
+package agentrunner
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestBuildPromptUsesWorkspaceAssistantForSlackSessions(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task: "帮我把后面补充的信息并进文稿",
+		Context: map[string]any{
+			"source":               "slack-agent",
+			"slackAssistantPrompt": "Thread metadata:\n- channel: C123\n\nThread context:\n[ts:1.0] <@U1>: 初稿\n[ts:2.0] <@U1>: 后面补充",
+		},
+	}, SessionKindSlack))
+
+	for _, want := range []string{
+		"You are a workspace assistant operating inside a Slack workspace.",
+		"Thread context:",
+		"帮我把后面补充的信息并进文稿",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "oneesama Go rewrite") {
+		t.Fatalf("slack workspace prompt leaked repo-worker identity:\n%s", prompt)
+	}
+}
+
+func TestBuildPromptReadsSlackAppMentionPromptFromGenericContext(t *testing.T) {
+	prompt := buildPrompt(StartInput{
+		Task: "看看补充的信息",
+		Context: map[string]any{
+			"source":       "slack-agent",
+			"session_kind": SessionKindSlack,
+			"slackAppMention": map[string]any{
+				"prompt": "Thread metadata:\n- thread_ts: 123.456\n\nThread context:\nold canvas F123",
+			},
+		},
+	})
+
+	if !strings.Contains(prompt, "workspace assistant operating inside a Slack workspace") ||
+		!strings.Contains(prompt, "old canvas F123") {
+		t.Fatalf("prompt = %s, want workspace assistant prompt with mention context", prompt)
+	}
+	if strings.Contains(prompt, "background worker for the oneesama Go rewrite") {
+		t.Fatalf("prompt should not use repo-worker framing for Slack assistant sessions:\n%s", prompt)
+	}
+}

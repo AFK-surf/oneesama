@@ -190,6 +190,9 @@ func (s *Service) buildAgentRunnerContext(input AvatarCommandInput, parsed parse
 	}
 	if input.RichThreadContext != nil {
 		context["slackAppMention"] = input.RichThreadContext
+		if strings.TrimSpace(input.RichThreadContext.Prompt) != "" {
+			context["slackAssistantPrompt"] = input.RichThreadContext.Prompt
+		}
 		query := strings.Join([]string{
 			input.RichThreadContext.MentionText,
 			input.RichThreadContext.Transcript,

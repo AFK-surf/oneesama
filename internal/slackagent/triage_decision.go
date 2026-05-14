@@ -293,7 +293,50 @@ func filterSlackTriageActionsForMessages(actions []SlackTriageDecisionAction, me
 	if slackMessagesAreBareInternalPermalinks(messages) && !explicitlyRequestsSlackPermalinkHandling(joinSlackMessageTexts(messages)) {
 		return nil
 	}
+	if slackTriageThreadContinuationShouldStaySilent(messages) {
+		filtered := make([]SlackTriageDecisionAction, 0, len(actions))
+		for _, action := range actions {
+			if slackTriageDirectReplyAction(action) {
+				continue
+			}
+			filtered = append(filtered, action)
+		}
+		return filtered
+	}
 	return actions
+}
+
+func slackTriageThreadContinuationShouldStaySilent(messages []SlackInboundMessage) bool {
+	var sawThreadContinuation bool
+	var textParts []string
+	for _, message := range messages {
+		text := strings.TrimSpace(message.Text)
+		if text == "" {
+			continue
+		}
+		if strings.TrimSpace(message.ThreadTS) == "" || strings.TrimSpace(message.ThreadTS) == strings.TrimSpace(message.TS) {
+			return false
+		}
+		sawThreadContinuation = true
+		textParts = append(textParts, text)
+	}
+	if !sawThreadContinuation {
+		return false
+	}
+	text := strings.Join(textParts, "\n")
+	if explicitlyRequestsSlackPermalinkHandling(text) {
+		return false
+	}
+	if slackTriageURLPattern.MatchString(text) {
+		return false
+	}
+	if strings.Contains(text, "<@") {
+		return false
+	}
+	if strings.ContainsAny(text, "?？") {
+		return false
+	}
+	return true
 }
 
 func slackMessagesAreBareInternalPermalinks(messages []SlackInboundMessage) bool {

@@ -229,5 +229,11 @@ func NewService(cfg Config) *Service {
 			service.logger.Warn("slack inbound buffer flush failed", "channel", channelID, "error", err)
 		}
 	}
+	if service.workspaceDir != "" {
+		result := EnsureWorkspaceFiles(EnsureWorkspaceFilesOptions{WorkspaceDir: service.workspaceDir})
+		if !result.OK {
+			service.logger.Warn("slack workspace bootstrap failed", "workspace_dir", service.workspaceDir, "error", result.Error)
+		}
+	}
 	return service
 }

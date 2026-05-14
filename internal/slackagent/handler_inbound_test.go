@@ -470,8 +470,8 @@ func TestSlackHistoryScannerPostsDirectReadOnlyReplyForExternalLink(t *testing.T
 	if call.Channel != "C123" || call.ThreadTS != "1778767510.917049" || !strings.Contains(call.Text, "这条 X") {
 		t.Fatalf("post call = %#v, want direct summary in source thread", call)
 	}
-	if len(call.Blocks) != 0 || strings.Contains(call.Text, "Triage suggestion") || !strings.Contains(call.DedupKey, "slack-triage-direct:") {
-		t.Fatalf("post call = %#v, want plain direct reply without action card", call)
+	if len(call.Blocks) == 0 || strings.Contains(call.Text, "Triage suggestion") || !strings.Contains(call.DedupKey, "slack-triage-direct:") {
+		t.Fatalf("post call = %#v, want direct reply blocks without action card", call)
 	}
 	status, err := service.TriageStatus(context.Background(), 10)
 	if err != nil {

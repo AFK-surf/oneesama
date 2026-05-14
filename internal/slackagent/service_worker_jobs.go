@@ -73,14 +73,143 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 	if strings.TrimSpace(text) == "" {
 		return
 	}
+	dedupKey := fmt.Sprintf("slack-worker-result:%s:%s:%s", job.ID, ref.ChannelID, firstNonEmpty(ref.ThreadTS, "root"))
+	if shouldPublishWorkerResultAsCanvas(job, text) {
+		manifest, err := s.PublishCanvas(ctx, workerResultCanvasInput(job, ref, text, dedupKey))
+		if err == nil && manifest.OK {
+			return
+		}
+		if err != nil {
+			s.logger.Warn("slack worker canvas publish failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "error", err)
+		} else {
+			s.logger.Warn("slack worker canvas publish failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "surface", manifest.Surface)
+		}
+	}
 	result := s.PostMessage(ctx, PostMessageInput{
 		Channel:  ref.ChannelID,
 		ThreadTS: ref.ThreadTS,
-		Text:     text,
-		DedupKey: fmt.Sprintf("slack-worker-result:%s:%s:%s", job.ID, ref.ChannelID, firstNonEmpty(ref.ThreadTS, "root")),
+		Text:     markdownToSlackFallbackText(text),
+		Blocks:   buildSlackThreadReplyBlocks(text, "", nil),
+		DedupKey: dedupKey,
 	})
 	if !result.OK {
 		s.logger.Warn("slack worker result post failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "error", result.Error, "detail", result.Detail)
+	}
+}
+
+func shouldPublishWorkerResultAsCanvas(job agentrunner.Job, text string) bool {
+	if job.Status != agentrunner.StatusCompleted {
+		return false
+	}
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	if len([]rune(trimmed)) > 1800 {
+		return true
+	}
+	if len(slackAppMentionCanvasFiles(job.Context)) > 0 && (len([]rune(trimmed)) > 700 || looksLikeLongFormMarkdown(trimmed)) {
+		return true
+	}
+	return false
+}
+
+func looksLikeLongFormMarkdown(text string) bool {
+	normalized := strings.TrimSpace(text)
+	return strings.HasPrefix(normalized, "# ") ||
+		strings.Contains(normalized, "\n# ") ||
+		strings.Contains(normalized, "\n## ") ||
+		strings.Count(normalized, "\n\n") >= 4
+}
+
+func workerResultCanvasInput(job agentrunner.Job, ref AssistantThreadRef, text string, dedupKey string) CanvasPublishInput {
+	files := slackAppMentionCanvasFiles(job.Context)
+	revision := len(files) > 0
+	title := workerResultCanvasTitle(text, files)
+	return CanvasPublishInput{
+		ArtifactID:       "slack-worker-" + firstNonEmpty(job.ID, "result"),
+		Title:            title,
+		SummaryMarkdown:  text,
+		Channel:          ref.ChannelID,
+		ThreadTS:         ref.ThreadTS,
+		DedupKey:         "slack-worker-canvas:" + dedupKey,
+		NotificationText: workerResultCanvasNotification(title, revision),
+		ForceSlackCanvas: true,
+	}
+}
+
+func workerResultCanvasTitle(text string, files []SlackThreadFile) string {
+	for _, file := range files {
+		if title := firstNonEmpty(file.Title, file.Name, file.ID); title != "" {
+			return title
+		}
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			title := strings.TrimSpace(strings.TrimLeft(line, "#"))
+			if title != "" {
+				return title
+			}
+		}
+	}
+	return "Slack thread notes"
+}
+
+func workerResultCanvasNotification(title string, revision bool) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "文档"
+	}
+	if revision {
+		return "新版 " + title + " 已更新：{{canvas_link}}"
+	}
+	return title + " 已写成 Canvas：{{canvas_link}}"
+}
+
+func slackAppMentionCanvasFiles(context map[string]any) []SlackThreadFile {
+	if len(context) == 0 {
+		return nil
+	}
+	switch typed := context["slackAppMention"].(type) {
+	case *SlackAppMentionContext:
+		return append([]SlackThreadFile(nil), typed.CanvasFiles...)
+	case SlackAppMentionContext:
+		return append([]SlackThreadFile(nil), typed.CanvasFiles...)
+	case map[string]any:
+		return slackThreadFilesFromAny(typed["canvasFiles"])
+	case map[string]string:
+		if id := strings.TrimSpace(typed["canvasFileID"]); id != "" {
+			return []SlackThreadFile{{ID: id, Title: typed["canvasFileTitle"]}}
+		}
+	}
+	return nil
+}
+
+func slackThreadFilesFromAny(value any) []SlackThreadFile {
+	switch typed := value.(type) {
+	case []SlackThreadFile:
+		return append([]SlackThreadFile(nil), typed...)
+	case []any:
+		files := make([]SlackThreadFile, 0, len(typed))
+		for _, item := range typed {
+			switch file := item.(type) {
+			case SlackThreadFile:
+				files = append(files, file)
+			case map[string]any:
+				files = append(files, SlackThreadFile{
+					ID:        stringFromAny(file["id"]),
+					Name:      stringFromAny(file["name"]),
+					Title:     stringFromAny(file["title"]),
+					Filetype:  stringFromAny(file["filetype"]),
+					Mimetype:  stringFromAny(file["mimetype"]),
+					Permalink: stringFromAny(file["permalink"]),
+				})
+			}
+		}
+		return files
+	default:
+		return nil
 	}
 }
 
