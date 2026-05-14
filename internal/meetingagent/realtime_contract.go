@@ -181,10 +181,20 @@ func mergeRealtimeAudio(base map[string]any, override map[string]any) map[string
 }
 
 func turnDetectionObject(value any) any {
-	if strings.TrimSpace(stringFromAny(value)) == "none" {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case map[string]any:
+		if len(typed) == 0 {
+			return nil
+		}
+		return cloneMap(typed)
+	}
+	normalized := strings.TrimSpace(stringFromAny(value))
+	if normalized == "" || normalized == "none" {
 		return nil
 	}
-	return map[string]any{"type": value}
+	return map[string]any{"type": normalized}
 }
 
 func shouldAttachReasoning(model string, effort string) bool {

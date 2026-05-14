@@ -56,6 +56,38 @@ func TestBuildRealtimeSessionMergesAudioAndReasoningOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildRealtimeSessionSupportsStructuredTurnDetection(t *testing.T) {
+	t.Parallel()
+
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{
+		TurnDetection: map[string]any{
+			"type":      "semantic_vad",
+			"eagerness": "low",
+		},
+	}, testRealtimeOpenAIConfig())
+
+	audio := session["audio"].(map[string]any)
+	input := audio["input"].(map[string]any)
+	turn := input["turn_detection"].(map[string]any)
+	if turn["type"] != "semantic_vad" || turn["eagerness"] != "low" {
+		t.Fatalf("turn_detection = %#v, want structured semantic_vad override", turn)
+	}
+}
+
+func TestBuildRealtimeSessionDisablesTurnDetectionWithNone(t *testing.T) {
+	t.Parallel()
+
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{
+		TurnDetection: "none",
+	}, testRealtimeOpenAIConfig())
+
+	audio := session["audio"].(map[string]any)
+	input := audio["input"].(map[string]any)
+	if input["turn_detection"] != nil {
+		t.Fatalf("turn_detection = %#v, want nil", input["turn_detection"])
+	}
+}
+
 func testRealtimeOpenAIConfig() appconfig.OpenAIConfig {
 	return appconfig.OpenAIConfig{
 		BaseURL:                  "https://api.openai.com/v1",

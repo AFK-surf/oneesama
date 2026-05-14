@@ -14,7 +14,11 @@ import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-promp
 import { buildScreenShareInitScript } from "./screen-share-init-builder.ts";
 import { buildRealtimeBrowserInitScript } from "../realtime/realtime-browser-init-builder.ts";
 import { buildWorkerResultInitScript } from "../realtime/worker-result-init-builder.ts";
-import { buildRealtimeInstructions, realtimeToolSchemas } from "../realtime/realtime-contract.ts";
+import {
+  buildRealtimeInstructions,
+  buildRealtimeSessionConfig,
+  realtimeToolSchemas,
+} from "../realtime/realtime-contract.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -1991,6 +1995,20 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       captionCapture: null,
     };
     const browserRecord = await rememberActiveBrowser(browser, sessionId, meetUrl);
+    // tsx/esbuild can serialize page.evaluate callbacks through __name; expose a no-op
+    // helper so browser-side diagnostics keep working when smokes run TypeScript directly.
+    await context.addInitScript({
+      content: `
+        (() => {
+          if (typeof globalThis.__name !== "function") {
+            Object.defineProperty(globalThis, "__name", {
+              value: (fn) => fn,
+              configurable: true,
+            });
+          }
+        })();
+      `,
+    });
     if (installAvatar) {
       await context.addInitScript({
         content: buildAvatarInitScript({
@@ -2006,14 +2024,41 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       });
     }
     if (installRealtimeBridge) {
+      const realtimeCurrentUser = {
+        name: config.currentUserName,
+        englishName: config.currentUserEnglishName,
+        email: config.currentUserEmail,
+        linear: config.currentUserLinear,
+        github: config.currentUserGithub,
+        role: config.currentUserRole,
+      };
+      const realtimeTools = input.realtimeTools || realtimeToolSchemas;
+      const realtimeInstructions =
+        input.realtimeInstructions ||
+        buildRealtimeInstructions({
+          botName,
+          personalityContext: config.realtimePersonalityContext,
+          currentUser: realtimeCurrentUser,
+        });
+      const realtimeSession =
+        input.realtimeSession ||
+        buildRealtimeSessionConfig(
+          {
+            botName,
+            currentUser: realtimeCurrentUser,
+            instructions: realtimeInstructions,
+            tools: realtimeTools,
+          },
+          config,
+        );
       await context.addInitScript({
         content: buildRealtimeBrowserInitScript({
           mode: input.realtimeBridgeMode || "mock",
           botName,
           autoRespondToWorkerResults: input.autoRespondToWorkerResults !== false,
-          instructions: input.realtimeInstructions || buildRealtimeInstructions({ botName }),
-          tools: input.realtimeTools || realtimeToolSchemas,
-          session: input.realtimeSession || {},
+          instructions: realtimeInstructions,
+          tools: realtimeTools,
+          session: realtimeSession,
           sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
           includeParticipantAudio: Boolean(input.includeParticipantAudio),
           forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
@@ -2144,12 +2189,18 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     await collectButtonInventory(page, diagnostics, "after-join-click");
     let admission = null;
     if (clicked) {
-      admission = await waitForMeetAdmission(page, {
-        diagnostics,
-        dismissMeetPrompts,
-        evaluateMeetPageState,
-        timeoutMs: 120_000,
-      });
+      const joinedFixture = allowNonGoogleMeet ? await evaluateFixtureState(page) : null;
+      if (joinedFixture?.joined === true) {
+        admission = { state: "admitted", signal: "fixture_joined", fixtureState: joinedFixture };
+        diagnostics.record("admission_state", admission);
+      } else {
+        admission = await waitForMeetAdmission(page, {
+          diagnostics,
+          dismissMeetPrompts,
+          evaluateMeetPageState,
+          timeoutMs: 120_000,
+        });
+      }
       if (admission.state === "denied") {
         await saveDiagnostics(diagnostics);
         return {

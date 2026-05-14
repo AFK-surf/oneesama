@@ -7663,6 +7663,19 @@ async function realtimeLiveToolSmoke() {
   try {
     await waitForHealth("http://127.0.0.1:18893/healthz");
     const context = await browser.newContext({ permissions: ["microphone", "camera"] });
+    // Keep page.evaluate callbacks usable when this smoke is run through tsx/esbuild.
+    await context.addInitScript({
+      content: `
+        (() => {
+          if (typeof globalThis.__name !== "function") {
+            Object.defineProperty(globalThis, "__name", {
+              value: (fn) => fn,
+              configurable: true,
+            });
+          }
+        })();
+      `,
+    });
     await context.addInitScript({
       content: buildAvatarInitScript({
         botName: "Realtime Live Tool Bot",
@@ -10096,7 +10109,12 @@ async function startOldStackFixture({ port }) {
 }
 
 function startService(script, env) {
-  const child = spawn(process.execPath, [script], {
+  let entry = script;
+  if (!existsSync(entry) && entry.endsWith(".js") && existsSync(entry.replace(/\.js$/, ".ts"))) {
+    entry = entry.replace(/\.js$/, ".ts");
+  }
+  const args = entry.endsWith(".ts") ? ["--import", "tsx", entry] : [entry];
+  const child = spawn(process.execPath, args, {
     cwd: process.cwd(),
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],

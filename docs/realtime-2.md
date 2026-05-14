@@ -39,6 +39,12 @@ MAB_OPENAI_REALTIME_REASONING_EFFORT=high
 MAB_OPENAI_REALTIME_VOICE=marin
 MAB_OPENAI_REALTIME_TURN_DETECTION=semantic_vad
 MAB_OPENAI_REALTIME_SESSION_SCHEMA=realtime-2
+MAB_CURRENT_USER_NAME=Operator
+MAB_CURRENT_USER_ENGLISH_NAME=Operator
+MAB_CURRENT_USER_EMAIL=operator@example.com
+MAB_CURRENT_USER_LINEAR=operator
+MAB_CURRENT_USER_GITHUB=operator
+MAB_CURRENT_USER_ROLE=meeting operator
 ```
 
 Endpoint overrides remain available for OpenAI-compatible gateways that support
@@ -52,6 +58,26 @@ MAB_OPENAI_REALTIME_SDP_URL=https://your-gateway.example/v1/realtime/calls
 Use `MAB_OPENAI_REALTIME_SESSION_SCHEMA=legacy` only when a compatible endpoint
 requires the older `modalities` / `input_audio_format` session shape. The
 default demo path should stay on `realtime-2`.
+
+## Human-in-the-loop tuning
+
+Realtime tuning should not be fully automatic. The automated gates can prove
+that the session mints, WebRTC connects, the data channel opens, Meet audio is
+forwarded, remote audio reaches the avatar bus, tool calls route, and errors are
+observable. Voice preference, response timing, interruption timing, VAD
+eagerness, persona feel, and silence handling still need a human listener.
+
+`GET /realtime/config` returns the current session plus a `tuning` block with
+presets:
+
+- `balanced`: `semantic_vad` with `eagerness=auto`, the default starting point.
+- `steady`: `semantic_vad` with `eagerness=low`, less interrupt-prone.
+- `fast`: `semantic_vad` with `eagerness=high`, faster chunking/response timing.
+- `server_vad`: silence-based baseline with threshold/padding/silence controls.
+
+For one-off live experiments, pass a structured `turnDetection` object to
+`POST /realtime/client-secret`; the backend preserves the full object instead
+of flattening it to a string-only `{type: ...}` shape.
 
 ## Verification
 

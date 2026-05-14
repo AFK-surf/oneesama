@@ -441,7 +441,7 @@ export interface RealtimeSessionOptions {
         type?: string;
         rate?: number;
       };
-      turn_detection?: { type: unknown } | null;
+      turn_detection?: Record<string, unknown> | null;
       [key: string]: unknown;
     };
     output?: {
@@ -468,6 +468,14 @@ export interface RealtimeSessionConfig {
   openaiRealtimeReasoningEffort?: string;
   openaiRealtimeTurnDetection?: unknown;
   openaiRealtimeSessionSchema?: string;
+  botName?: string;
+  realtimePersonalityContext?: string;
+  currentUserName?: string;
+  currentUserEnglishName?: string;
+  currentUserEmail?: string;
+  currentUserLinear?: string;
+  currentUserGithub?: string;
+  currentUserRole?: string;
   [key: string]: unknown;
 }
 
@@ -480,7 +488,7 @@ interface LegacyRealtimeSession {
   voice: string;
   input_audio_format: string;
   output_audio_format: string;
-  turn_detection: { type: unknown } | null;
+  turn_detection: Record<string, unknown> | null;
   tool_choice?: string;
 }
 
@@ -490,7 +498,7 @@ interface Realtime2AudioConfig {
       type: string;
       rate: number;
     };
-    turn_detection: { type: unknown } | null;
+    turn_detection: Record<string, unknown> | null;
     [key: string]: unknown;
   };
   output: {
@@ -531,12 +539,38 @@ export interface RealtimeInstructionOptions {
   currentUser?: RealtimeCurrentUser;
 }
 
+function currentUserFromConfig(config: RealtimeSessionConfig = {}): RealtimeCurrentUser {
+  return {
+    name: config.currentUserName || "",
+    englishName: config.currentUserEnglishName || "",
+    email: config.currentUserEmail || "",
+    linear: config.currentUserLinear || "",
+    github: config.currentUserGithub || "",
+    role: config.currentUserRole || "",
+  };
+}
+
+function normalizeTurnDetectionConfig(value: unknown) {
+  if (value === null) return null;
+  if (typeof value === "object" && value !== undefined) {
+    return { ...(value as Record<string, unknown>) };
+  }
+  const normalized = String(value || "").trim();
+  if (!normalized || normalized === "none") return null;
+  return { type: normalized };
+}
+
 export function buildRealtimeSessionConfig(
   options: RealtimeSessionOptions = {},
   config: RealtimeSessionConfig = {},
 ) {
   const model = options.model || config.openaiRealtimeModel || DEFAULT_REALTIME_MODEL;
-  const instructions = options.instructions || buildRealtimeInstructions(options);
+  const currentUser = options.currentUser || currentUserFromConfig(config);
+  const personalityContext =
+    options.personalityContext || config.realtimePersonalityContext || "";
+  const botName = options.botName || config.botName || "Meeting Avatar Bot";
+  const instructions =
+    options.instructions || buildRealtimeInstructions({ botName, personalityContext, currentUser });
   const tools = options.tools || realtimeToolSchemas;
   const toolChoice =
     options.toolChoice || options.tool_choice || (tools?.length ? "auto" : undefined);
@@ -568,7 +602,7 @@ export function buildRealtimeSessionConfig(
       voice,
       input_audio_format: options.inputAudioFormat || options.input_audio_format || "pcm16",
       output_audio_format: options.outputAudioFormat || options.output_audio_format || "pcm16",
-      turn_detection: legacyTurnDetection === "none" ? null : { type: legacyTurnDetection },
+      turn_detection: normalizeTurnDetectionConfig(legacyTurnDetection),
     };
     if (toolChoice) legacySession.tool_choice = toolChoice;
     return legacySession;
@@ -586,7 +620,7 @@ export function buildRealtimeSessionConfig(
           type: options.inputAudioFormatType || "audio/pcm",
           rate: Number(options.inputAudioRate || 24000),
         },
-        turn_detection: turnDetection === "none" ? null : { type: turnDetection },
+        turn_detection: normalizeTurnDetectionConfig(turnDetection),
       },
       output: {
         format: {

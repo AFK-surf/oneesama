@@ -44,6 +44,15 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	if body["model"] != "gpt-realtime-2" || body["voice"] != "marin" || body["turnDetection"] != "semantic_vad" {
 		t.Fatalf("body = %#v, want old realtime defaults", body)
 	}
+	currentUser := body["currentUser"].(map[string]any)
+	if currentUser["name"] != "Peng" || currentUser["englishName"] != "Peng Xiao" {
+		t.Fatalf("currentUser = %#v, want configured identity", currentUser)
+	}
+	tuning := body["tuning"].(map[string]any)
+	presets := tuning["presets"].(map[string]any)
+	if presets["steady"] == nil || presets["fast"] == nil || presets["server_vad"] == nil {
+		t.Fatalf("tuning presets = %#v, want human-loop presets", presets)
+	}
 	session := body["session"].(map[string]any)
 	audio := session["audio"].(map[string]any)
 	input := audio["input"].(map[string]any)
@@ -175,6 +184,42 @@ func TestRealtimeClientSecretUpstreamError(t *testing.T) {
 	detail := body["detail"].(map[string]any)
 	if detail["raw"] != "not json" {
 		t.Fatalf("detail = %#v, want raw body", detail)
+	}
+}
+
+func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
+	t.Parallel()
+
+	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{
+		CurrentUserName:        "老大",
+		CurrentUserEnglishName: "Peng Xiao",
+		CurrentUserEmail:       "peng@example.com",
+		CurrentUserLinear:      "pengxiao",
+		CurrentUserGitHub:      "pengx17",
+		CurrentUserRole:        "owner",
+	})
+
+	identity := httptest.NewRecorder()
+	router.ServeHTTP(identity, realtimeRequest(http.MethodPost, "/tools/current_user_identity", `{}`))
+	if identity.Code != http.StatusOK {
+		t.Fatalf("identity status = %d: %s", identity.Code, identity.Body.String())
+	}
+	var identityBody map[string]any
+	decodeRealtimeBody(t, identity.Body.String(), &identityBody)
+	currentUser := identityBody["current_user"].(map[string]any)
+	if currentUser["name"] != "老大" || currentUser["english_name"] != "Peng Xiao" || currentUser["github"] != "pengx17" {
+		t.Fatalf("identity body = %#v, want configured current user", identityBody)
+	}
+
+	now := httptest.NewRecorder()
+	router.ServeHTTP(now, realtimeRequest(http.MethodPost, "/tools/now", `{}`))
+	if now.Code != http.StatusOK {
+		t.Fatalf("now status = %d: %s", now.Code, now.Body.String())
+	}
+	var nowBody map[string]any
+	decodeRealtimeBody(t, now.Body.String(), &nowBody)
+	if nowBody["timezone"] != "Asia/Shanghai" || nowBody["now"] == "" {
+		t.Fatalf("now body = %#v, want Asia/Shanghai timestamp", nowBody)
 	}
 }
 

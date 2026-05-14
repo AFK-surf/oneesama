@@ -51,6 +51,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	realtime.GET("/config", h.handleRealtimeConfig)
 	realtime.POST("/client-secret", h.handleRealtimeClientSecret)
 
+	tools := rg.Group("/tools")
+	tools.Use(h.requireInternalAuth)
+	tools.POST("/:name", h.handleRealtimeWorkspaceTool)
+
 	dialog := rg.Group("/dialog")
 	dialog.Use(h.requireInternalAuth)
 	dialog.GET("/providers", h.handleDialogProviders)

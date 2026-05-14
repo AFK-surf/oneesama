@@ -13,9 +13,10 @@ import (
 const defaultRealtimeSafetyIdentifier = "meeting-avatar-bot-local"
 
 func (s *Service) RealtimeConfig() map[string]any {
+	currentUser := s.realtimeCurrentUser()
 	options := RealtimeSessionOptions{
 		BotName:     s.openai.BotName,
-		CurrentUser: s.realtimeCurrentUser(),
+		CurrentUser: currentUser,
 	}
 	return map[string]any{
 		"ok":              true,
@@ -27,6 +28,52 @@ func (s *Service) RealtimeConfig() map[string]any {
 		"instructions":    buildRealtimeInstructions(options, s.openai),
 		"tools":           defaultRealtimeToolSchemas(),
 		"session":         buildRealtimeSessionConfig(options, s.openai),
+		"currentUser":     currentUser,
+		"tuning":          realtimeTuningGuide(),
+	}
+}
+
+func realtimeTuningGuide() map[string]any {
+	return map[string]any{
+		"automatic": []string{
+			"session/client-secret mint",
+			"WebRTC data channel",
+			"Meet participant audio forwarding",
+			"remote audio route to avatar bus",
+			"tool call routing",
+			"error/reconnect signals",
+		},
+		"human": []string{
+			"voice preference",
+			"response timing",
+			"interrupt timing",
+			"VAD eagerness",
+			"persona feel",
+			"silence handling",
+		},
+		"presets": map[string]any{
+			"steady": map[string]any{
+				"turnDetection": map[string]any{"type": "semantic_vad", "eagerness": "low"},
+				"note":          "least interrupt-prone; lets the user take time before chunking.",
+			},
+			"balanced": map[string]any{
+				"turnDetection": map[string]any{"type": "semantic_vad", "eagerness": "auto"},
+				"note":          "default human-loop starting point.",
+			},
+			"fast": map[string]any{
+				"turnDetection": map[string]any{"type": "semantic_vad", "eagerness": "high"},
+				"note":          "faster responses; more likely to cut short pauses.",
+			},
+			"server_vad": map[string]any{
+				"turnDetection": map[string]any{
+					"type":                "server_vad",
+					"threshold":           0.5,
+					"prefix_padding_ms":   300,
+					"silence_duration_ms": 500,
+				},
+				"note": "silence-based baseline for noisy rooms.",
+			},
+		},
 	}
 }
 

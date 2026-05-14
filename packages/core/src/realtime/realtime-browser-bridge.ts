@@ -773,6 +773,16 @@
     return ["legacy", "v1", "1", "1.5", "realtime-1.5"].includes(String(value || "").toLowerCase());
   }
 
+  function normalizeTurnDetectionConfig(value: unknown) {
+    if (value === null) return null;
+    if (typeof value === "object" && value !== undefined) {
+      return { ...(value as Record<string, unknown>) };
+    }
+    const normalized = String(value || "").trim();
+    if (!normalized || normalized === "none") return null;
+    return { type: normalized };
+  }
+
   function defaultRealtime2Session(session: RealtimeSessionShape = {}): RealtimeSessionShape {
     const merged: RealtimeSessionShape & {
       reasoning?: { effort?: string };
@@ -785,7 +795,8 @@
       merged.modalities || ["audio"];
     delete merged.outputModalities;
     delete merged.modalities;
-    const inputTurnDetection = merged.audio?.input?.turn_detection ?? merged.turn_detection;
+    const inputTurnDetection =
+      merged.audio?.input?.turn_detection ?? merged.turn_detection ?? { type: "semantic_vad" };
     merged.audio = {
       ...(merged.audio || {}),
       input: {
@@ -795,13 +806,7 @@
           rate: 24000,
           ...(merged.audio?.input?.format || {}),
         },
-        turn_detection:
-          inputTurnDetection === null
-            ? null
-            : {
-                type: "semantic_vad",
-                ...((inputTurnDetection as Record<string, unknown> | undefined) || {}),
-              },
+        turn_detection: normalizeTurnDetectionConfig(inputTurnDetection),
       },
       output: {
         ...(merged.audio?.output || {}),
