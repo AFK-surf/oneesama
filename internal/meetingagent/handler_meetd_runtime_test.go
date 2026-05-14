@@ -159,6 +159,42 @@ func TestMeetdProcessingSendsProcessingAndResultWebhooks(t *testing.T) {
 	}
 }
 
+func TestMeetdRuntimeDoesNotRecoverSyntheticJoinProcessing(t *testing.T) {
+	t.Parallel()
+
+	webhooks := make(chan MeetdWebhookPayload, 4)
+	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
+	service, _ := newMeetdRuntimeTestRouter(t, runtimeMeetRunner{}, webhookURL, "secret")
+	now := time.Now().UTC().Truncate(time.Second)
+	session := SessionRecord{
+		ID:         "session_synthetic_processing",
+		MeetingID:  "session_synthetic_processing",
+		MeetingURL: "https://meet.google.com/synthetic-processing",
+		Status:     "stopped",
+		Title:      "Synthetic Processing",
+		StartedAt:  now.Add(-10 * time.Minute).Format(time.RFC3339Nano),
+		EndedAt:    now.Add(-5 * time.Minute).Format(time.RFC3339Nano),
+	}
+	meeting := syntheticMeetdMeeting(session, "C123", "111.222")
+	meeting.Status = "processing"
+	if _, err := service.upsertSyntheticMeetdMeeting(context.Background(), meeting, "processing", "", ""); err != nil {
+		t.Fatalf("upsert synthetic meeting: %v", err)
+	}
+
+	result, err := service.TickMeetdRuntime(context.Background(), MeetdRuntimeTickOptions{Now: now})
+	if err != nil {
+		t.Fatalf("TickMeetdRuntime: %v", err)
+	}
+	if len(result.Recovered) != 0 {
+		t.Fatalf("recovered = %+v, want synthetic join processing ignored", result.Recovered)
+	}
+	select {
+	case payload := <-webhooks:
+		t.Fatalf("unexpected webhook for synthetic join recovery: %+v", payload)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func newMeetdRuntimeTestRouter(t *testing.T, runner meetrunner.Runner, webhookURL string, secret string) (*Service, http.Handler) {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)

@@ -105,10 +105,15 @@ func (s *Service) recoverMeetdProcessing(ctx context.Context) ([]MeetdMeetingRec
 	if err != nil {
 		return nil, err
 	}
+	recovered := make([]MeetdMeetingRecord, 0, len(processing))
 	for _, meeting := range processing {
+		if meetdMeetingIsSyntheticJoin(meeting) {
+			continue
+		}
 		go s.ProcessMeetdMeetingEnd(context.WithoutCancel(ctx), meeting, false)
+		recovered = append(recovered, meeting)
 	}
-	return processing, nil
+	return recovered, nil
 }
 
 func (s *Service) processReadyMeetdMeetings(ctx context.Context, now time.Time, dryRunJoiner bool) ([]MeetdRuntimeAction, error) {
