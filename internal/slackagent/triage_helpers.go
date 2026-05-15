@@ -37,6 +37,13 @@ func firstMessageTeamID(messages []SlackInboundMessage) string {
 	return messages[0].TeamID
 }
 
+func firstMessageChannelID(messages []SlackInboundMessage) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	return messages[0].ChannelID
+}
+
 func lastMessageThreadTS(messages []SlackInboundMessage) string {
 	if len(messages) == 0 {
 		return ""

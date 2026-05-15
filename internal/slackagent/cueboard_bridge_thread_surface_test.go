@@ -261,3 +261,49 @@ func TestCueboardParityTriageKeepsExplicitBotMentionReplies(t *testing.T) {
 		t.Fatalf("actions = %#v, want explicit bot mention reply kept", actions)
 	}
 }
+
+func TestCueboardParityTriageSuppressesUnmentionedBotDiscussionReplies(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "W1",
+		ChannelID: "C123",
+		UserID:    "U123",
+		TS:        "1778845444.339469",
+		Text:      "我一动鼠标 agent 怎么就停了？",
+	}}
+	actions := filterSlackTriageActionsForMessages([]SlackTriageDecisionAction{{
+		Type:                 "post_thread_reply",
+		Title:                "Explain desktop agent",
+		Message:              "Agent uses keyboard and mouse control.",
+		ChannelID:            "C123",
+		ThreadTS:             "1778845444.339469",
+		Confidence:           0.9,
+		RequiresConfirmation: false,
+	}}, messages, "UBOT")
+
+	if len(actions) != 0 {
+		t.Fatalf("actions = %#v, want unmentioned bot-discussion reply suppressed", actions)
+	}
+}
+
+func TestCueboardParityTriageKeepsNamedOneesamaDiscussionReplies(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "W1",
+		ChannelID: "C123",
+		UserID:    "U123",
+		TS:        "1778845444.339469",
+		Text:      "oneesama 一动鼠标怎么就停了？",
+	}}
+	actions := filterSlackTriageActionsForMessages([]SlackTriageDecisionAction{{
+		Type:                 "post_thread_reply",
+		Title:                "Explain oneesama",
+		Message:              "Oneesama uses keyboard and mouse control.",
+		ChannelID:            "C123",
+		ThreadTS:             "1778845444.339469",
+		Confidence:           0.9,
+		RequiresConfirmation: false,
+	}}, messages, "UBOT")
+
+	if len(actions) != 1 {
+		t.Fatalf("actions = %#v, want named oneesama discussion reply kept", actions)
+	}
+}

@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -132,6 +133,23 @@ func TestSlackTriageDecisionParsesFencedJSON(t *testing.T) {
 	}
 }
 
+func TestSlackTriageDecisionRepairsPlainNoActionOutput(t *testing.T) {
+	raw := "No action.\n\n线程自然收尾，不需要再接话。"
+	decision := parseSlackTriageDecision(raw, slackTriageFallback{Summary: "fallback summary", Channel: "C123", ThreadTS: "123.456"})
+	if !decision.ParseOK {
+		t.Fatalf("decision = %#v, want repaired no-action output to count as parsed", decision)
+	}
+	if len(decision.Actions) != 0 {
+		t.Fatalf("actions = %#v, want no actions", decision.Actions)
+	}
+	if !strings.Contains(decision.Summary, "线程自然收尾") {
+		t.Fatalf("summary = %q, want repaired plain-text no-action summary", decision.Summary)
+	}
+	if reason := slackTriageSuppressedReason(decision, decision.Actions, true); reason != "no_actions" {
+		t.Fatalf("suppressed reason = %q, want no_actions after repair", reason)
+	}
+}
+
 func TestSlackTriageDecisionHidesWorkerMechanismAction(t *testing.T) {
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
 		ChannelID: "C123",
@@ -147,6 +165,30 @@ func TestSlackTriageDecisionHidesWorkerMechanismAction(t *testing.T) {
 	}
 	if decision.Actions[0].Type != "create_task" {
 		t.Fatalf("action type = %q, want create_task", decision.Actions[0].Type)
+	}
+}
+
+func TestTriageStatusDefaultKeepsAuditWindowBeyondTenRuns(t *testing.T) {
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	for i := 0; i < 12; i++ {
+		if _, err := service.triage.RecordRun(context.Background(), SlackTriageContext{
+			SessionID: "triage-window",
+			Status:    "ok",
+			Summary:   "run",
+			Channels:  []string{"C123"},
+		}); err != nil {
+			t.Fatalf("RecordRun %d: %v", i, err)
+		}
+	}
+	status, err := service.TriageStatus(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TriageStatus: %v", err)
+	}
+	if len(status.Runs) != 12 {
+		t.Fatalf("runs = %d, want all 12 by default for 6h audit window", len(status.Runs))
 	}
 }
 

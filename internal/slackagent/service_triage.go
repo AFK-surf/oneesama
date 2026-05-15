@@ -8,9 +8,14 @@ import (
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
 )
 
+const (
+	slackTriageStatusDefaultLimit      = 100
+	slackTriageLowContextCharThreshold = 200
+)
+
 func (s *Service) TriageStatus(ctx context.Context, limit int) (SlackTriageStatus, error) {
 	if limit <= 0 {
-		limit = 10
+		limit = slackTriageStatusDefaultLimit
 	}
 	runs, err := s.triage.ListRuns(ctx, limit)
 	if err != nil {
@@ -44,11 +49,15 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 	threadTS := firstNonEmpty(lastMessageThreadTS(messages), "channel-root")
 	sessionID := fmt.Sprintf("triage:%s:%d", channelID, timeNow().UnixMilli())
 	threadContexts := s.fetchSlackTriageThreadContexts(ctx, channelID, messages)
+	channelContexts := s.fetchSlackTriageChannelContexts(ctx, channelID, messages, digest, threadContexts)
+	if len(channelContexts) > 0 {
+		digest = renderSlackActivityDigestWithContext(channelID, channelContexts, messages)
+	}
 	if enriched := appendSlackTriageThreadContextDigest(digest, threadContexts); enriched != "" {
 		digest = enriched
 	}
 	externalLinks := fetchSlackExternalLinkContexts(ctx, messages)
-	auditMetadata := slackTriageAuditMetadata(digest, messages, threadContexts, externalLinks)
+	auditMetadata := slackTriageAuditMetadata(digest, messages, threadContexts, channelContexts, externalLinks)
 	run, err := s.triage.RecordRun(ctx, SlackTriageContext{
 		SessionID: sessionID,
 		Status:    "pending",
@@ -110,10 +119,11 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 			"count":       len(previous),
 			"text":        formatTriageContexts(previous),
 		},
-		"externalLinks":  externalLinks,
-		"threadContexts": threadContexts,
-		"triageAudit":    auditMetadata,
-		"expectedOutput": "JSON triage decision with summary and actions[]",
+		"externalLinks":   externalLinks,
+		"threadContexts":  threadContexts,
+		"channelContexts": channelContexts,
+		"triageAudit":     auditMetadata,
+		"expectedOutput":  "JSON triage decision with summary and actions[]",
 	}
 	job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
 		Task:             prompt,
@@ -330,6 +340,49 @@ func (s *Service) fetchSlackTriageThreadContexts(ctx context.Context, channelID 
 	return contexts
 }
 
+func (s *Service) fetchSlackTriageChannelContexts(ctx context.Context, channelID string, messages []SlackInboundMessage, digest string, threadContexts []SlackTriageThreadContext) []SlackInboundMessage {
+	if s == nil || strings.TrimSpace(s.botToken) == "" {
+		return nil
+	}
+	if !slackTriageNeedsChannelContext(digest, messages, threadContexts) {
+		return nil
+	}
+	latestTS := ""
+	for _, message := range messages {
+		message = normalizeSlackInboundMessage(message)
+		if ts := firstNonEmpty(message.TS, message.EventTS); slackTSGreater(ts, latestTS) {
+			latestTS = ts
+		}
+	}
+	if latestTS == "" {
+		return nil
+	}
+	channel := firstNonEmpty(firstMessageChannelID(messages), channelID)
+	contextMessages := s.fetchSlackHistoryContext(ctx, channel, latestTS)
+	if len(contextMessages) == 0 {
+		return nil
+	}
+	return slackScannerInboundMessages(slackScannerConversation{ID: channel, IsChannel: true}, contextMessages)
+}
+
+func slackTriageNeedsChannelContext(digest string, messages []SlackInboundMessage, threadContexts []SlackTriageThreadContext) bool {
+	if len(threadContexts) > 0 {
+		return false
+	}
+	if len(messages) == 0 {
+		return false
+	}
+	if len([]rune(strings.TrimSpace(digest))) >= slackTriageLowContextCharThreshold {
+		return false
+	}
+	for _, message := range messages {
+		if slackTriageThreadLookupTS(message) != "" {
+			return false
+		}
+	}
+	return true
+}
+
 func slackTriageThreadLookupTS(message SlackInboundMessage) string {
 	message = normalizeSlackInboundMessage(message)
 	if ts := strings.TrimSpace(message.ThreadTS); ts != "" {
@@ -361,7 +414,7 @@ func appendSlackTriageThreadContextDigest(digest string, contexts []SlackTriageT
 	return digest + "\n\nFetched Slack thread context:\n" + threadContext
 }
 
-func slackTriageAuditMetadata(digest string, messages []SlackInboundMessage, threadContexts []SlackTriageThreadContext, externalLinks []SlackExternalLinkContext) map[string]any {
+func slackTriageAuditMetadata(digest string, messages []SlackInboundMessage, threadContexts []SlackTriageThreadContext, channelContexts []SlackInboundMessage, externalLinks []SlackExternalLinkContext) map[string]any {
 	threadFetched := false
 	threadMessages := 0
 	for _, context := range threadContexts {
@@ -371,12 +424,14 @@ func slackTriageAuditMetadata(digest string, messages []SlackInboundMessage, thr
 		}
 	}
 	return map[string]any{
-		"input_context_chars":     len([]rune(digest)),
-		"message_count":           len(messages),
-		"thread_context_fetched":  threadFetched,
-		"thread_context_count":    len(threadContexts),
-		"thread_context_messages": threadMessages,
-		"external_links_fetched":  len(externalLinks),
+		"input_context_chars":      len([]rune(digest)),
+		"message_count":            len(messages),
+		"thread_context_fetched":   threadFetched,
+		"thread_context_count":     len(threadContexts),
+		"thread_context_messages":  threadMessages,
+		"channel_context_fetched":  len(channelContexts) > 0,
+		"channel_context_messages": len(channelContexts),
+		"external_links_fetched":   len(externalLinks),
 	}
 }
 

@@ -161,6 +161,9 @@ func formatSlackTriageThreadContexts(contexts []SlackTriageThreadContext) string
 
 func parseSlackTriageDecision(rawOutput string, fallback slackTriageFallback) SlackTriageDecision {
 	parsed, ok := firstSlackTriageJSONObject(rawOutput)
+	if !ok {
+		parsed, ok = repairSlackTriagePlainNoAction(rawOutput)
+	}
 	source := parsed
 	if source == nil {
 		source = map[string]any{}
@@ -186,6 +189,60 @@ func parseSlackTriageDecision(rawOutput string, fallback slackTriageFallback) Sl
 		Raw:     parsed,
 		ParseOK: ok,
 	}
+}
+
+func repairSlackTriagePlainNoAction(raw string) (map[string]any, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	normalized := strings.ToLower(raw)
+	noActionHints := []string{
+		"no action",
+		"no-action",
+		"no further action",
+		"nothing to do",
+		"无需操作",
+		"无需行动",
+		"不需要操作",
+		"不需要行动",
+		"不用操作",
+		"不用行动",
+		"无需接话",
+		"不用接话",
+		"跳过",
+	}
+	matched := false
+	for _, hint := range noActionHints {
+		if strings.Contains(normalized, strings.ToLower(hint)) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return nil, false
+	}
+	return map[string]any{
+		"summary": slackTriagePlainNoActionSummary(raw),
+		"actions": []any{},
+	}, true
+}
+
+func slackTriagePlainNoActionSummary(raw string) string {
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(strings.Trim(line, "`"))
+		if line == "" {
+			continue
+		}
+		normalized := strings.ToLower(strings.Trim(line, ".。:： \t"))
+		switch normalized {
+		case "no action", "no action needed", "no further action", "nothing to do":
+			continue
+		}
+		return truncateSlackContextText(line, 300)
+	}
+	return "No action needed."
 }
 
 func suggestSlackTriageFallback(channelID string, messages []SlackInboundMessage) slackTriageFallback {
@@ -340,6 +397,9 @@ func slackTriageDirectRepliesShouldStaySilent(messages []SlackInboundMessage, bo
 	if slackMessagesHaveFetchableExternalLinks(messages) {
 		return false
 	}
+	if slackTriageUnaddressedBotDiscussion(text) {
+		return true
+	}
 	if strings.ContainsAny(text, "?？") {
 		return false
 	}
@@ -349,6 +409,24 @@ func slackTriageDirectRepliesShouldStaySilent(messages []SlackInboundMessage, bo
 		}
 	}
 	return true
+}
+
+func slackTriageUnaddressedBotDiscussion(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	for _, explicit := range []string{"oneesama", "onee-sama", "imoutochan", "onibaba", "欧尼", "欧尼桑玛"} {
+		if strings.Contains(normalized, explicit) {
+			return false
+		}
+	}
+	for _, keyword := range []string{"agent", "bot", "机器人", "小机器人", "助手"} {
+		if strings.Contains(normalized, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func slackMessagesMentionOtherUsersWithoutBot(messages []SlackInboundMessage, botUserID string) bool {

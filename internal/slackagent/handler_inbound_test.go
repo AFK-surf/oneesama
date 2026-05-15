@@ -808,6 +808,77 @@ func TestSlackHistoryScannerAddsCueboardContextAndThreadFetchAudit(t *testing.T)
 	}
 }
 
+func TestSlackTriageExpandsLowContextStandaloneMessages(t *testing.T) {
+	var sawHistoryContext bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.history":
+			sawHistoryContext = true
+			if r.Form.Get("channel") != "C123" || r.Form.Get("latest") != "1778765842.164299" || r.Form.Get("limit") != "3" || r.Form.Get("inclusive") != "false" {
+				t.Fatalf("history context form = %s", r.Form.Encode())
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U111","text":"previous channel context that disambiguates the short reply","ts":"1778765800.000000"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_low_context",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"short message skipped after channel context","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			Triage:   appconfig.SlackTriageConfig{HeuristicFallback: true},
+		},
+		Runner: runner,
+	})
+
+	started, err := service.StartSlackTriage(context.Background(), "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "？？",
+		TS:        "1778765842.164299",
+	}}, "？？")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if !sawHistoryContext {
+		t.Fatal("expected low-context standalone triage to fetch channel history context")
+	}
+	task := runner.startInput.Task
+	for _, want := range []string{
+		`(context) <@U111>: "previous channel context that disambiguates the short reply"`,
+		`--- new messages ---`,
+		`[ref:m1 msg_ts:1778765842.164299] <@U123>: "？？"`,
+	} {
+		if !strings.Contains(task, want) {
+			t.Fatalf("runner task missing %q:\n%s", want, task)
+		}
+	}
+	run := started.Finalization.Run
+	if run.Metadata["channel_context_fetched"] != true || run.Metadata["channel_context_messages"] != 1 {
+		t.Fatalf("metadata = %#v, want channel context audit", run.Metadata)
+	}
+	if got := run.Metadata["input_context_chars"]; got == nil || got == 0 {
+		t.Fatalf("metadata = %#v, want input_context_chars", run.Metadata)
+	}
+}
+
 func signedSlackEventRequest(t *testing.T, router http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	timestamp, signature := signedSlackJSONBody("secret", body)
