@@ -1,6 +1,6 @@
 # Task #147 Cueboard Slack Surface Inventory
 
-Status: active audit after live `f3cdc7f`.
+Status: active audit after live `cf1ed4a`.
 
 This inventory replaces the earlier narrow "prompt/runtime parity" gate. The acceptance bar is now full surface parity for user-visible Cueboard Slack Agent D behavior, with explicit product exclusions called out rather than silently dropped.
 
@@ -16,9 +16,9 @@ Legend:
 
 | Priority | Surface | Status | Why it matters | Action |
 |---|---|---:|---|---|
-| P0 | Exact bot mention identity | ported in `f3cdc7f` | Fixed "cannot tell whether it was @mentioned"; old fallback matched any `<@U...>` mention. | Keep live watch + regression tests. |
-| P0 | Triage should be silent by default | partial | Prompt is 1:1, but scanner/gates/tool availability can still make it speak too often. | Add live cueboard-vs-oneesama shadow checks before marking done. |
-| P0 | External link read-first behavior | partial | `f3cdc7f` prefetches external links with Jina and suppresses "是否读取" cards; tool-level `exa_search/exa_contents` is still missing. | Port or shim web/search tool surface; keep prefetch as guardrail. |
+| P0 | Exact bot mention identity | ported in `f3cdc7f` + shadow harness | Fixed "cannot tell whether it was @mentioned"; old fallback matched any `<@U...>` mention. `TestTask147ShadowHarnessRecognizesExplicitBotMention` locks exact mention handling through `/slack/events`. | Keep live watch. |
+| P0 | Triage should be silent by default | ported/partial | Prompt is 1:1 and shadow harness now covers plain observation silence + assistant self-comment silence through the scanner path. Still needs real Slack screenshot/log evidence before final task acceptance. | Run live cueboard-vs-oneesama shadow checks before marking done. |
+| P0 | External link read-first behavior | ported/partial | `f3cdc7f` prefetches external links with Jina and suppresses "是否读取" cards; `TestTask147ShadowHarnessReadsExternalLinkWithoutConfirmation` locks direct source-thread answer. Tool-level `exa_search/exa_contents` is still missing. | Port or shim web/search tool surface; keep prefetch as guardrail. |
 | P0 | Memory / dreaming / self-growth | partial | Follow-up and local memory exist; current slices port Cueboard-style self-growth signals into heartbeat follow-ups, lesson candidates, managed `MEMORY.md`, and visible heartbeat/dream delivery guards (6h rate limit, quiet hours, public rate limit, newer-activity block). Dedicated live shadow evidence still pending. | Live-shadow self-growth and visible heartbeat/dream behavior against old bridge. |
 | P0 | Tool registry parity except credentialed apps | partial | Prompt advertises tools not all exposed/implemented by capabilities; LLM may not know how to fetch or remember. | Align prompt, capabilities, and actual handlers. |
 | P1 | Meet join from triage cards | partial | Join card exists and recent extra triage reply fixed; live "加会加不进来" still needs interaction evidence. | Reproduce interaction from Slack payload/logs. |
@@ -125,7 +125,10 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
 
 ## Immediate Work Queue
 
-1. P0 live shadow test: replay the three evidence links against cueboard behavior and oneesama behavior, capture screenshots/logs, and do not call task #147 pass without that evidence.
+1. P0 live shadow test:
+   - Source-controlled harness now exists as `internal/slackagent/cueboard_shadow_harness_test.go`.
+   - Covered stimuli: plain channel observation stays silent; explicit bot mention is handled; X/Twitter link is read before answering; assistant self-comment stays silent.
+   - Still required before final task #147 acceptance: capture real Slack old-bridge vs imoutochan screenshots/logs for the same four stimuli.
 2. P0 tool surface correction:
    - Add/alias `usage_api` or remove/replace prompt mention.
    - Add explicit web content/search capability (`exa_contents`/`exa_search` equivalent) or document that Jina prefetch is the product replacement.
@@ -141,6 +144,34 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
    - Slack API tool action matrix.
    - HTTP route matrix.
    - Persistence concept/table matrix.
+
+## Shadow Harness Evidence
+
+Run:
+
+```bash
+go test ./internal/slackagent -run 'TestTask147ShadowHarness' -count=1 -v
+```
+
+Current result:
+
+| Stimulus | Cueboard expectation | Oneesama proof |
+|---|---|---|
+| Plain channel observation: `这个onboarding-bot-hourly刷屏了` | Scanner may record, but no casual public reply/action card. | `TestTask147ShadowHarnessSilencesPlainChannelObservation` goes through Slack history scanner + triage finalization and asserts zero `PostMessage` calls + zero pending actions. |
+| Explicit `<@UBOT> 你在吗` | Treat as direct bot mention and route to assistant/worker. | `TestTask147ShadowHarnessRecognizesExplicitBotMention` goes through `/slack/events` and asserts handled `app_mention` with the mention stripped to `你在吗`. |
+| Bare public X/Twitter link | Read first, then answer directly; do not ask whether to read. | `TestTask147ShadowHarnessReadsExternalLinkWithoutConfirmation` injects Jina reader content, asserts prompt includes fetched context, posts one direct source-thread reply, and creates no pending action. |
+| Assistant self-comment: `转生后的oneesama味道有点不对` | Stay silent unless explicitly asked/mentioned. | `TestTask147ShadowHarnessSilencesAssistantSelfComment` goes through scanner + triage finalization and asserts zero public replies. |
+
+## Live Slack Log Evidence
+
+Fetched with Slack Web API `conversations.replies` using the live bot token. These are not new test posts; they are the user-reported threads that motivated the harness.
+
+| Evidence thread | Observed drift before fixes | Guard now locked |
+|---|---|---|
+| `C09LNPCGU3E/1778767510.917049` | New `imoutochan` (`B0APMC75QNN`) saw a bare X link and posted a pending "是否读取..." card. | `TestTask147ShadowHarnessReadsExternalLinkWithoutConfirmation`; external link prefetch + read-confirmation suppression. |
+| `C09KVPBMLJ3/1778779797.697749` | New `imoutochan` casually replied to plain bot-noise observation, later replied when another user was addressed, and then answered a self-comment thread. | `TestTask147ShadowHarnessSilencesPlainChannelObservation`, `TestCueboardParityTriageSuppressesRepliesWhenAnotherUserIsMentioned`, `TestTask147ShadowHarnessSilencesAssistantSelfComment`. |
+| `C0ALMF2AD70/1778810550.773349` | New `imoutochan` posted a join card, then emitted an unrelated friendly reply in the same thread. The actual button-click failure still needs the interaction/meeting-agent/meet-runner trace. | Scanner ignores current bot mentions; join interaction trace remains in the queue. |
+| `C0AQ0C0KVMH/1778772007.043069` | Old `bridge_bot` (`B09SQ28BZ2P`) used concise Canvas revision replies; new `imoutochan` had already drifted into inline long-form/repo-worker framing. | Covered by prior bridge surface parity slice; not part of this shadow harness slice. |
 
 ## Non-Blocking Product Exclusions
 
