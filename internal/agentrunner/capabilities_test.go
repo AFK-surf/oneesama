@@ -34,7 +34,7 @@ func TestCapabilitiesForSessionKindMirrorsCueboardMeetingCopilot(t *testing.T) {
 	capabilities := CapabilitiesForSessionKind(SessionKindMeetingCopilot)
 	assertEqual(t, capabilities.Role, SessionRoleMeetingCopilot)
 	assertContains(t, capabilities.AllowedTools, "notify_meeting_slack")
-	assertContains(t, capabilities.AllowedTools, "send_meeting_chat")
+	assertNotContains(t, capabilities.AllowedTools, "send_meeting_chat")
 }
 
 func TestCapabilitiesForSessionKindMirrorsCueboardCompactAndCompletionOnly(t *testing.T) {

@@ -52,7 +52,6 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 	case SessionKindMeetingCopilot:
 		return newCapabilities(normalized, SessionRoleMeetingCopilot, []string{
 			"notify_meeting_slack",
-			"send_meeting_chat",
 		}, nil)
 	case SessionKindTriage:
 		return newCapabilities(normalized, SessionRolePlanner, []string{
