@@ -26,7 +26,11 @@ func formatMessageLine(msg SlackMessage, resolveName func(string) string, ref st
 	}
 
 	if msg.ReplyCount > 0 {
-		fmt.Fprintf(&sb, " [thread_ts:%s, %d replies, %d participants]", ts, msg.ReplyCount, len(msg.Replies))
+		participants := len(msg.ReplyUsers)
+		if participants == 0 {
+			participants = len(msg.Replies)
+		}
+		fmt.Fprintf(&sb, " [thread_ts:%s, %d replies, %d participants]", ts, msg.ReplyCount, participants)
 	} else if msg.ThreadTS != "" && msg.ThreadTS != ts {
 		fmt.Fprintf(&sb, " [reply in thread_ts:%s]", msg.ThreadTS)
 	}

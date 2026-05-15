@@ -113,6 +113,7 @@ type SlackMessage struct {
 	ThreadTS     string            `json:"thread_ts,omitempty"`
 	ParentUserID string            `json:"parent_user_id,omitempty"`
 	ReplyCount   int               `json:"reply_count,omitempty"`
+	ReplyUsers   []string          `json:"reply_users,omitempty"`
 	LatestReply  string            `json:"latest_reply,omitempty"`
 	Replies      []SlackMessage    `json:"replies,omitempty"`
 	Permalink    string            `json:"permalink,omitempty"`

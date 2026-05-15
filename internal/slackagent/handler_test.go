@@ -26,6 +26,14 @@ func TestHandleStatus(t *testing.T) {
 			SQLitePath: "./runtime/state/oneesama.sqlite",
 		},
 		Slack: appconfig.SlackConfig{AppToken: "xapp-test"},
+		AgentRunner: appconfig.AgentRunnerConfig{
+			Provider: "codex",
+			Codex: appconfig.CodexRunnerConfig{
+				Model:         "deepseek/deepseek-v4-pro",
+				ModelProvider: "openrouter",
+				BaseURL:       "https://openrouter.ai/api/v1",
+			},
+		},
 	})
 
 	response := httptest.NewRecorder()
@@ -43,6 +51,11 @@ func TestHandleStatus(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"socket_mode":{"configured":true`) {
 		t.Fatalf("body = %s, want socket mode status", response.Body.String())
+	}
+	for _, want := range []string{`"model":"deepseek/deepseek-v4-pro"`, `"model_provider":"openrouter"`, `"base_url":"https://openrouter.ai/api/v1"`} {
+		if !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("body = %s, want %s", response.Body.String(), want)
+		}
 	}
 }
 

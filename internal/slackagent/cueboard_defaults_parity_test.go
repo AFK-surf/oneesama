@@ -215,7 +215,42 @@ func TestCueboardParityRenderSlackActivityDigestIncludesFileShare(t *testing.T) 
 		Subtype:   "file_share",
 		Files:     []SlackFile{{Name: "diagram.png", Filetype: "png"}},
 	}})
-	if !strings.Contains(digest, "[file: diagram.png type=png]") {
-		t.Fatalf("digest = %s, want file summary", digest)
+	if !strings.Contains(digest, "name: diagram.png") {
+		t.Fatalf("digest = %s, want cueboard file metadata", digest)
+	}
+}
+
+func TestCueboardParityRenderSlackActivityDigestUsesScannerContextAndRefs(t *testing.T) {
+	t.Parallel()
+
+	digest := renderSlackActivityDigestWithContext("C1", []SlackInboundMessage{{
+		ChannelID: "C1",
+		UserID:    "U0",
+		TS:        "1709812330.000000",
+		Text:      "previous context",
+	}}, []SlackInboundMessage{{
+		ChannelID:  "C1",
+		UserID:     "U1",
+		TS:         "1709812345.123456",
+		Text:       "Let's discuss",
+		ReplyCount: 2,
+		ReplyUsers: []string{"U2", "U3"},
+	}, {
+		ChannelID: "C1",
+		UserID:    "U2",
+		TS:        "1709812346.123456",
+		ThreadTS:  "1709812345.123456",
+		Text:      "reply detail",
+	}})
+	for _, want := range []string{
+		`(context) <@U0>: "previous context"`,
+		"--- new messages ---",
+		"--- conversation ---",
+		`• [ref:m1 msg_ts:1709812345.123456] <@U1>: "Let's discuss" [thread_ts:1709812345.123456, 2 replies, 2 participants]`,
+		`• [ref:m2 msg_ts:1709812346.123456] <@U2>: "reply detail" [reply in thread_ts:1709812345.123456]`,
+	} {
+		if !strings.Contains(digest, want) {
+			t.Fatalf("digest missing %q:\n%s", want, digest)
+		}
 	}
 }

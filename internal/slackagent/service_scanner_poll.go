@@ -17,6 +17,7 @@ import (
 const (
 	slackHistoryScannerMinInterval       = 10 * time.Second
 	slackHistoryScannerBootstrapLookback = 10 * time.Minute
+	slackScannerContextMessageCount      = 3
 )
 
 var slackScannerAPIBaseURL = defaultSlackAPIBaseURL
@@ -153,6 +154,10 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 	if oldest == "" && bootstrapLookback > 0 {
 		oldest = formatSlackTimestamp(time.Now().Add(-bootstrapLookback))
 	}
+	var contextMessages []SlackMessage
+	if previousCursor != "" {
+		contextMessages = s.fetchSlackHistoryContext(ctx, channelID, previousCursor)
+	}
 	messages, latestTS, err := s.fetchSlackHistory(ctx, channelID, oldest)
 	if err != nil {
 		return nil, err
@@ -189,10 +194,11 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 		WorkspaceID: "workspace",
 		Flush:       boolPtr(true),
 		Channels: []SlackScannerChannel{{
-			ID:       channelID,
-			Name:     channel.Name,
-			Type:     slackScannerChannelType(channel),
-			Messages: slackScannerInboundMessages(channel, messages),
+			ID:              channelID,
+			Name:            channel.Name,
+			Type:            slackScannerChannelType(channel),
+			Messages:        slackScannerInboundMessages(channel, messages),
+			ContextMessages: slackScannerInboundMessages(channel, contextMessages),
 		}},
 	})
 	if len(sweep.Sweeps) == 0 {
@@ -261,6 +267,31 @@ func (s *Service) fetchSlackHistory(ctx context.Context, channelID string, oldes
 	return response.Messages, latestTS, nil
 }
 
+func (s *Service) fetchSlackHistoryContext(ctx context.Context, channelID string, latest string) []SlackMessage {
+	if strings.TrimSpace(latest) == "" {
+		return nil
+	}
+	params := map[string]string{
+		"channel":   strings.TrimSpace(channelID),
+		"latest":    strings.TrimSpace(latest),
+		"limit":     strconv.Itoa(slackScannerContextMessageCount),
+		"inclusive": "false",
+	}
+	var response slackConversationsHistoryResponse
+	if err := s.callSlackScannerAPI(ctx, "conversations.history", params, &response); err != nil {
+		s.logger.Warn("slack history scanner context fetch failed", "channel", channelID, "error", err)
+		return nil
+	}
+	if !response.OK {
+		s.logger.Warn("slack history scanner context fetch failed", "channel", channelID, "error", firstNonEmpty(response.Error, "slack_api_error"))
+		return nil
+	}
+	sort.Slice(response.Messages, func(i, j int) bool {
+		return slackTSLess(firstNonEmpty(response.Messages[i].TS, response.Messages[i].EventTS), firstNonEmpty(response.Messages[j].TS, response.Messages[j].EventTS))
+	})
+	return response.Messages
+}
+
 func (s *Service) callSlackScannerAPI(ctx context.Context, method string, params map[string]string, out any) error {
 	baseURL := strings.TrimRight(strings.TrimSpace(slackScannerAPIBaseURL), "/")
 	if baseURL == "" {
@@ -308,7 +339,10 @@ func slackScannerInboundMessages(channel slackScannerConversation, messages []Sl
 			TS:          firstNonEmpty(message.TS, message.EventTS, message.Timestamp),
 			EventTS:     firstNonEmpty(message.EventTS, message.TS, message.Timestamp),
 			ThreadTS:    message.ThreadTS,
+			ReplyCount:  message.ReplyCount,
+			ReplyUsers:  append([]string(nil), message.ReplyUsers...),
 			Files:       append([]SlackFile(nil), message.Files...),
+			Reactions:   append([]SlackReaction(nil), message.Reactions...),
 		})
 	}
 	return out

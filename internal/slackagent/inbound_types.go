@@ -1,25 +1,28 @@
 package slackagent
 
 type SlackInboundMessage struct {
-	TeamID           string      `json:"teamId,omitempty"`
-	TeamIDSnake      string      `json:"team_id,omitempty"`
-	ChannelID        string      `json:"channelId"`
-	ChannelIDSnake   string      `json:"channel_id,omitempty"`
-	ChannelType      string      `json:"channelType,omitempty"`
-	ChannelTypeSnake string      `json:"channel_type,omitempty"`
-	UserID           string      `json:"userId,omitempty"`
-	UserIDSnake      string      `json:"user_id,omitempty"`
-	User             string      `json:"user,omitempty"`
-	BotID            string      `json:"botId,omitempty"`
-	BotIDSnake       string      `json:"bot_id,omitempty"`
-	Subtype          string      `json:"subtype,omitempty"`
-	Text             string      `json:"text"`
-	TS               string      `json:"ts"`
-	EventTS          string      `json:"eventTs,omitempty"`
-	EventTSSnake     string      `json:"event_ts,omitempty"`
-	ThreadTS         string      `json:"threadTs,omitempty"`
-	ThreadTSSnake    string      `json:"thread_ts,omitempty"`
-	Files            []SlackFile `json:"files,omitempty"`
+	TeamID           string          `json:"teamId,omitempty"`
+	TeamIDSnake      string          `json:"team_id,omitempty"`
+	ChannelID        string          `json:"channelId"`
+	ChannelIDSnake   string          `json:"channel_id,omitempty"`
+	ChannelType      string          `json:"channelType,omitempty"`
+	ChannelTypeSnake string          `json:"channel_type,omitempty"`
+	UserID           string          `json:"userId,omitempty"`
+	UserIDSnake      string          `json:"user_id,omitempty"`
+	User             string          `json:"user,omitempty"`
+	BotID            string          `json:"botId,omitempty"`
+	BotIDSnake       string          `json:"bot_id,omitempty"`
+	Subtype          string          `json:"subtype,omitempty"`
+	Text             string          `json:"text"`
+	TS               string          `json:"ts"`
+	EventTS          string          `json:"eventTs,omitempty"`
+	EventTSSnake     string          `json:"event_ts,omitempty"`
+	ThreadTS         string          `json:"threadTs,omitempty"`
+	ThreadTSSnake    string          `json:"thread_ts,omitempty"`
+	ReplyCount       int             `json:"reply_count,omitempty"`
+	ReplyUsers       []string        `json:"reply_users,omitempty"`
+	Files            []SlackFile     `json:"files,omitempty"`
+	Reactions        []SlackReaction `json:"reactions,omitempty"`
 }
 
 type SlackInboundChannelState struct {
@@ -55,11 +58,12 @@ type SlackInboundBufferResult struct {
 }
 
 type SlackInboundFlushResult struct {
-	ChannelID string                    `json:"channelId"`
-	Messages  []SlackInboundMessage     `json:"messages,omitempty"`
-	Count     int                       `json:"count"`
-	Digest    string                    `json:"digest,omitempty"`
-	Triage    *SlackInboundTriageResult `json:"triage,omitempty"`
+	ChannelID       string                    `json:"channelId"`
+	Messages        []SlackInboundMessage     `json:"messages,omitempty"`
+	ContextMessages []SlackInboundMessage     `json:"context_messages,omitempty"`
+	Count           int                       `json:"count"`
+	Digest          string                    `json:"digest,omitempty"`
+	Triage          *SlackInboundTriageResult `json:"triage,omitempty"`
 }
 
 type SlackInboundTriageResult struct {
@@ -84,10 +88,11 @@ type SlackScannerSweepRequest struct {
 }
 
 type SlackScannerChannel struct {
-	ID       string                `json:"id"`
-	Name     string                `json:"name,omitempty"`
-	Type     string                `json:"type,omitempty"`
-	Messages []SlackInboundMessage `json:"messages,omitempty"`
+	ID              string                `json:"id"`
+	Name            string                `json:"name,omitempty"`
+	Type            string                `json:"type,omitempty"`
+	Messages        []SlackInboundMessage `json:"messages,omitempty"`
+	ContextMessages []SlackInboundMessage `json:"context_messages,omitempty"`
 }
 
 type SlackScannerSweepResult struct {

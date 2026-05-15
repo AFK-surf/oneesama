@@ -56,6 +56,9 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 	if externalLinks := formatSlackExternalLinkContexts(input.ExternalLinks); externalLinks != "" {
 		contextBlocks = append(contextBlocks, "Fetched external links:\n"+externalLinks)
 	}
+	if threadContexts := formatSlackTriageThreadContexts(input.ThreadContexts); threadContexts != "" {
+		contextBlocks = append(contextBlocks, "Fetched Slack thread context:\n"+threadContexts)
+	}
 	messageBlock := strings.TrimSpace(input.Digest)
 	if messageBlock == "" {
 		lines := make([]string, 0, len(input.Messages))
@@ -115,6 +118,7 @@ type SlackTriagePromptInput struct {
 	LocalMemory    []SlackTriageMemoryEntry
 	PreviousTriage string
 	ExternalLinks  []SlackExternalLinkContext
+	ThreadContexts []SlackTriageThreadContext
 }
 
 type SlackTriageMemoryEntry struct {
@@ -137,6 +141,22 @@ func formatSlackTriageMemory(entries []SlackTriageMemoryEntry) string {
 		lines = append(lines, strconv.Itoa(index+1)+". "+label+": "+content)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatSlackTriageThreadContexts(contexts []SlackTriageThreadContext) string {
+	var blocks []string
+	for _, context := range contexts {
+		if !context.FetchOK && strings.TrimSpace(context.FetchError) != "" {
+			blocks = append(blocks, "thread "+context.ChannelID+"/"+context.ThreadTS+": fetch failed: "+context.FetchError)
+			continue
+		}
+		transcript := strings.TrimSpace(context.Transcript)
+		if transcript == "" {
+			continue
+		}
+		blocks = append(blocks, "thread "+context.ChannelID+"/"+context.ThreadTS+" ("+strconv.Itoa(context.MessageCount)+" messages):\n"+transcript)
+	}
+	return strings.Join(blocks, "\n\n")
 }
 
 func parseSlackTriageDecision(rawOutput string, fallback slackTriageFallback) SlackTriageDecision {

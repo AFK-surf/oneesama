@@ -29,11 +29,14 @@ type SlackStatus struct {
 }
 
 type AgentRunnerStatus struct {
-	Provider string `json:"provider"`
-	Ready    bool   `json:"ready"`
-	DryRun   bool   `json:"dry_run"`
-	Jobs     int    `json:"jobs"`
-	Error    string `json:"error,omitempty"`
+	Provider      string `json:"provider"`
+	Ready         bool   `json:"ready"`
+	DryRun        bool   `json:"dry_run"`
+	Model         string `json:"model,omitempty"`
+	ModelProvider string `json:"model_provider,omitempty"`
+	BaseURL       string `json:"base_url,omitempty"`
+	Jobs          int    `json:"jobs"`
+	Error         string `json:"error,omitempty"`
 }
 
 type AvatarCommandInput struct {
@@ -152,9 +155,12 @@ func cloneMetadata(source map[string]any) map[string]any {
 
 func (s *Service) agentRunnerStatus(ctx context.Context) AgentRunnerStatus {
 	status := AgentRunnerStatus{
-		Provider: strings.TrimSpace(s.agentRunner.Provider),
-		Ready:    s.runner != nil && s.runnerErr == nil,
-		DryRun:   s.agentRunner.DryRun,
+		Provider:      strings.TrimSpace(s.agentRunner.Provider),
+		Ready:         s.runner != nil && s.runnerErr == nil,
+		DryRun:        s.agentRunner.DryRun,
+		Model:         strings.TrimSpace(s.agentRunner.Codex.Model),
+		ModelProvider: strings.TrimSpace(s.agentRunner.Codex.ModelProvider),
+		BaseURL:       strings.TrimSpace(s.agentRunner.Codex.BaseURL),
 	}
 	if s.runner != nil {
 		status.Provider = s.runner.Provider()

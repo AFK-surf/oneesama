@@ -77,6 +77,10 @@ func (s *Service) FlushSlackInbound(ctx context.Context, channelID string) ([]Sl
 }
 
 func (s *Service) flushSlackInboundChannel(ctx context.Context, channelID string) (*SlackInboundFlushResult, error) {
+	return s.flushSlackInboundChannelWithContext(ctx, channelID, nil)
+}
+
+func (s *Service) flushSlackInboundChannelWithContext(ctx context.Context, channelID string, contextMessages []SlackInboundMessage) (*SlackInboundFlushResult, error) {
 	messages := s.inbound.Drain(channelID)
 	if len(messages) == 0 {
 		return nil, nil
@@ -84,7 +88,10 @@ func (s *Service) flushSlackInboundChannel(ctx context.Context, channelID string
 	sort.Slice(messages, func(i, j int) bool {
 		return slackTSLess(messages[i].TS, messages[j].TS)
 	})
-	digest := renderSlackActivityDigest(channelID, messages)
+	sort.Slice(contextMessages, func(i, j int) bool {
+		return slackTSLess(contextMessages[i].TS, contextMessages[j].TS)
+	})
+	digest := renderSlackActivityDigestWithContext(channelID, contextMessages, messages)
 	s.inbound.RecordFlush(channelID, len(messages))
 	_, err := s.rememberInboundDigest(ctx, channelID, digest, len(messages))
 	if err != nil {
@@ -112,11 +119,12 @@ func (s *Service) flushSlackInboundChannel(ctx context.Context, channelID string
 		triage.Run = run
 	}
 	result := SlackInboundFlushResult{
-		ChannelID: channelID,
-		Messages:  messages,
-		Count:     len(messages),
-		Digest:    digest,
-		Triage:    &triage,
+		ChannelID:       channelID,
+		Messages:        messages,
+		ContextMessages: contextMessages,
+		Count:           len(messages),
+		Digest:          digest,
+		Triage:          &triage,
 	}
 	return &result, nil
 }
@@ -162,13 +170,13 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 		}
 		var flushed *SlackInboundFlushResult
 		if flush && buffered > 0 {
-			values, err := s.FlushSlackInbound(ctx, channel.ID)
+			value, err := s.flushSlackInboundChannelWithContext(ctx, channel.ID, normalizeScannerContextMessages(workspaceID, channel, channel.ContextMessages))
 			if err != nil {
 				results = append(results, SlackScannerChannelResult{ChannelID: channel.ID, OK: false, Error: err.Error(), PreviousCursor: previousCursor, NextCursor: nextCursor, Scanned: len(channel.Messages), Buffered: buffered})
 				continue
 			}
-			if len(values) > 0 {
-				flushed = &values[0]
+			if value != nil {
+				flushed = value
 			}
 		}
 		results = append(results, SlackScannerChannelResult{ChannelID: channel.ID, OK: true, Source: "fixture", PreviousCursor: previousCursor, NextCursor: nextCursor, Scanned: len(channel.Messages), Buffered: buffered, Flushed: flushed})
@@ -178,6 +186,23 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 		ok = ok && result.OK
 	}
 	return SlackScannerSweepResult{OK: ok, WorkspaceID: workspaceID, Sweeps: results, Inbound: s.InboundStatus()}
+}
+
+func normalizeScannerContextMessages(workspaceID string, channel SlackScannerChannel, messages []SlackInboundMessage) []SlackInboundMessage {
+	out := make([]SlackInboundMessage, 0, len(messages))
+	for _, message := range messages {
+		message = normalizeSlackInboundMessage(message)
+		message.TeamID = firstNonEmpty(message.TeamID, workspaceID)
+		message.ChannelID = firstNonEmpty(message.ChannelID, channel.ID)
+		message.ChannelType = firstNonEmpty(message.ChannelType, channel.Type)
+		message.TS = firstNonEmpty(message.TS, message.EventTS)
+		message.EventTS = firstNonEmpty(message.EventTS, message.TS)
+		if shouldIgnoreScannerInboundMessage(message, "") {
+			continue
+		}
+		out = append(out, message)
+	}
+	return out
 }
 
 func (s *Service) rememberInboundDigest(ctx context.Context, channelID string, digest string, count int) (*SlackContextRecord, error) {

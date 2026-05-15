@@ -44,7 +44,7 @@ type SlackAppMentionContext struct {
 	CanvasFiles         []SlackThreadFile              `json:"canvasFiles,omitempty"`
 	Files               []SlackThreadFile              `json:"files,omitempty"`
 	ImageParts          []SlackThreadImage             `json:"imageParts,omitempty"`
-	ExternalLinks       []SlackExternalLinkContext      `json:"externalLinks,omitempty"`
+	ExternalLinks       []SlackExternalLinkContext     `json:"externalLinks,omitempty"`
 	MeetingContext      string                         `json:"meetingContext,omitempty"`
 	ThreadPermalink     string                         `json:"threadPermalink,omitempty"`
 	FetchOK             bool                           `json:"fetchOk"`

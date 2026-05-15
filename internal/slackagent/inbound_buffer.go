@@ -3,6 +3,7 @@ package slackagent
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 const (
 	slackInboundDefaultMaxBatch = 10
 	slackInboundDefaultDebounce = 30 * time.Second
+	slackInboundConversationGap = 5 * time.Minute
 )
 
 type slackInboundBuffer struct {
@@ -334,6 +336,96 @@ func (b *slackInboundBuffer) Snapshot() SlackInboundState {
 }
 
 func renderSlackActivityDigest(channelID string, messages []SlackInboundMessage) string {
+	return renderSlackActivityDigestWithContext(channelID, nil, messages)
+}
+
+func renderSlackActivityDigestWithContext(channelID string, contextMessages []SlackInboundMessage, messages []SlackInboundMessage) string {
+	lines := []string{"=== Slack Activity ===", "", "#" + channelID}
+	if len(contextMessages) > 0 {
+		for _, message := range contextMessages {
+			message = normalizeSlackInboundMessage(message)
+			text := strings.TrimSpace(message.Text)
+			if text == "" && len(message.Files) > 0 {
+				text = slackInboundFileSummary(message.Files)
+			}
+			lines = append(lines, fmt.Sprintf("  (context) %s: %q", slackInboundResolveName(message.UserID), truncateString(resolveTextMentions(text, slackInboundResolveName), 150)))
+		}
+		lines = append(lines, "  --- new messages ---")
+	}
+	refCounter := 0
+	for _, group := range groupSlackInboundMessagesByTime(messages, slackInboundConversationGap) {
+		if len(group) == 1 {
+			refCounter++
+			lines = append(lines, "  "+formatSlackInboundMessageLine(group[0], fmt.Sprintf("m%d", refCounter)))
+			continue
+		}
+		lines = append(lines, "  --- conversation ---")
+		for _, message := range group {
+			refCounter++
+			lines = append(lines, "    "+formatSlackInboundMessageLine(message, fmt.Sprintf("m%d", refCounter)))
+		}
+		lines = append(lines, "  ---")
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func formatSlackInboundMessageLine(message SlackInboundMessage, ref string) string {
+	message = normalizeSlackInboundMessage(message)
+	return formatMessageLine(SlackMessage{
+		TS:         message.TS,
+		EventTS:    message.EventTS,
+		User:       message.UserID,
+		UserID:     message.UserID,
+		BotID:      message.BotID,
+		Subtype:    message.Subtype,
+		Text:       message.Text,
+		ThreadTS:   message.ThreadTS,
+		ReplyCount: message.ReplyCount,
+		ReplyUsers: append([]string(nil), message.ReplyUsers...),
+		Files:      append([]SlackFile(nil), message.Files...),
+		Reactions:  append([]SlackReaction(nil), message.Reactions...),
+	}, slackInboundResolveName, ref)
+}
+
+func slackInboundResolveName(userID string) string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "<@unknown>"
+	}
+	return "<@" + userID + ">"
+}
+
+func groupSlackInboundMessagesByTime(messages []SlackInboundMessage, gap time.Duration) [][]SlackInboundMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+	groups := [][]SlackInboundMessage{{messages[0]}}
+	for i := 1; i < len(messages); i++ {
+		previous := parseSlackTime(firstNonEmpty(messages[i-1].TS, messages[i-1].EventTS))
+		current := parseSlackTime(firstNonEmpty(messages[i].TS, messages[i].EventTS))
+		if !previous.IsZero() && !current.IsZero() && current.Sub(previous) > gap {
+			groups = append(groups, []SlackInboundMessage{messages[i]})
+			continue
+		}
+		groups[len(groups)-1] = append(groups[len(groups)-1], messages[i])
+	}
+	return groups
+}
+
+func parseSlackTime(ts string) time.Time {
+	ts = strings.TrimSpace(ts)
+	if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		return parsed
+	}
+	parts := strings.SplitN(ts, ".", 2)
+	sec, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	return time.Unix(sec, 0)
+}
+
+func renderLegacySlackActivityDigest(channelID string, messages []SlackInboundMessage) string {
 	lines := []string{"=== Slack Activity ===", "", "#" + channelID}
 	for _, message := range messages {
 		thread := ""

@@ -3,6 +3,7 @@ package slackagent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
 )
@@ -42,6 +43,12 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 	workspaceID := firstNonEmpty(firstMessageTeamID(messages), "workspace")
 	threadTS := firstNonEmpty(lastMessageThreadTS(messages), "channel-root")
 	sessionID := fmt.Sprintf("triage:%s:%d", channelID, timeNow().UnixMilli())
+	threadContexts := s.fetchSlackTriageThreadContexts(ctx, channelID, messages)
+	if enriched := appendSlackTriageThreadContextDigest(digest, threadContexts); enriched != "" {
+		digest = enriched
+	}
+	externalLinks := fetchSlackExternalLinkContexts(ctx, messages)
+	auditMetadata := slackTriageAuditMetadata(digest, messages, threadContexts, externalLinks)
 	run, err := s.triage.RecordRun(ctx, SlackTriageContext{
 		SessionID: sessionID,
 		Status:    "pending",
@@ -49,6 +56,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 		Digest:    digest,
 		Channels:  []string{channelID},
 		Steps:     0,
+		Metadata:  auditMetadata,
 	})
 	if err != nil {
 		return SlackTriageStartResult{}, err
@@ -58,7 +66,6 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
 	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(digest, 5), digest)
-	externalLinks := fetchSlackExternalLinkContexts(ctx, messages)
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
 		ChannelID:      channelID,
 		Messages:       messages,
@@ -67,6 +74,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 		LocalMemory:    localMemory,
 		PreviousTriage: formatTriageContexts(previous),
 		ExternalLinks:  externalLinks,
+		ThreadContexts: threadContexts,
 	})
 	contextMap := map[string]any{
 		"source":        "slack-triage",
@@ -103,6 +111,8 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 			"text":        formatTriageContexts(previous),
 		},
 		"externalLinks":  externalLinks,
+		"threadContexts": threadContexts,
+		"triageAudit":    auditMetadata,
 		"expectedOutput": "JSON triage decision with summary and actions[]",
 	}
 	job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
@@ -202,6 +212,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		Steps:     1,
 		Mutations: mutations,
 		Failures:  failures,
+		Metadata:  mergeStringAnyMaps(mapFromAnyOrEmpty(job.Context["triageAudit"]), map[string]any{"suppressed_reason": slackTriageSuppressedReason(decision, actions, ok)}),
 	}
 	if !ok {
 		runPatch.Status = "failed"
@@ -267,4 +278,134 @@ func firstNonEmptyStringSlice(values []string, fallback []string) []string {
 		return values
 	}
 	return fallback
+}
+
+func (s *Service) fetchSlackTriageThreadContexts(ctx context.Context, channelID string, messages []SlackInboundMessage) []SlackTriageThreadContext {
+	if s == nil || strings.TrimSpace(s.botToken) == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var contexts []SlackTriageThreadContext
+	for _, message := range messages {
+		message = normalizeSlackInboundMessage(message)
+		threadTS := slackTriageThreadLookupTS(message)
+		if threadTS == "" {
+			continue
+		}
+		channel := firstNonEmpty(message.ChannelID, channelID)
+		key := channel + "\x00" + threadTS
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		response, err := s.callSlackConversationsReplies(ctx, channel, threadTS)
+		if err != nil {
+			contexts = append(contexts, SlackTriageThreadContext{
+				ChannelID:  channel,
+				ThreadTS:   threadTS,
+				FetchOK:    false,
+				FetchError: err.Error(),
+			})
+			continue
+		}
+		if !response.OK {
+			contexts = append(contexts, SlackTriageThreadContext{
+				ChannelID:  channel,
+				ThreadTS:   threadTS,
+				FetchOK:    false,
+				FetchError: firstNonEmpty(response.Error, "slack_api_error"),
+			})
+			continue
+		}
+		inbound := slackInboundMessagesFromThreadMessages(channel, response.Messages)
+		contexts = append(contexts, SlackTriageThreadContext{
+			ChannelID:    channel,
+			ThreadTS:     threadTS,
+			FetchOK:      true,
+			MessageCount: len(inbound),
+			Messages:     inbound,
+			Transcript:   renderSlackTriageThreadTranscript(inbound),
+		})
+	}
+	return contexts
+}
+
+func slackTriageThreadLookupTS(message SlackInboundMessage) string {
+	message = normalizeSlackInboundMessage(message)
+	if ts := strings.TrimSpace(message.ThreadTS); ts != "" {
+		return ts
+	}
+	if message.ReplyCount > 0 {
+		return strings.TrimSpace(message.TS)
+	}
+	return ""
+}
+
+func renderSlackTriageThreadTranscript(messages []SlackInboundMessage) string {
+	var lines []string
+	for _, message := range messages {
+		lines = append(lines, formatSlackInboundMessageLine(message, ""))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func appendSlackTriageThreadContextDigest(digest string, contexts []SlackTriageThreadContext) string {
+	threadContext := formatSlackTriageThreadContexts(contexts)
+	if strings.TrimSpace(threadContext) == "" {
+		return strings.TrimSpace(digest)
+	}
+	digest = strings.TrimSpace(digest)
+	if digest == "" {
+		return "Fetched Slack thread context:\n" + threadContext
+	}
+	return digest + "\n\nFetched Slack thread context:\n" + threadContext
+}
+
+func slackTriageAuditMetadata(digest string, messages []SlackInboundMessage, threadContexts []SlackTriageThreadContext, externalLinks []SlackExternalLinkContext) map[string]any {
+	threadFetched := false
+	threadMessages := 0
+	for _, context := range threadContexts {
+		if context.FetchOK {
+			threadFetched = true
+			threadMessages += context.MessageCount
+		}
+	}
+	return map[string]any{
+		"input_context_chars":     len([]rune(digest)),
+		"message_count":           len(messages),
+		"thread_context_fetched":  threadFetched,
+		"thread_context_count":    len(threadContexts),
+		"thread_context_messages": threadMessages,
+		"external_links_fetched":  len(externalLinks),
+	}
+}
+
+func slackTriageSuppressedReason(decision SlackTriageDecision, actions []SlackTriageDecisionAction, ok bool) string {
+	if !ok {
+		return "triage_failed"
+	}
+	if len(actions) == 0 {
+		if !decision.ParseOK {
+			return "no_actions_parse_fallback"
+		}
+		return "no_actions"
+	}
+	return ""
+}
+
+func mergeStringAnyMaps(values ...map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, value := range values {
+		for key, item := range value {
+			out[key] = item
+		}
+	}
+	return out
+}
+
+func mapFromAnyOrEmpty(value any) map[string]any {
+	if mapped, ok := mapFromAny(value); ok {
+		return mapped
+	}
+	return map[string]any{}
 }

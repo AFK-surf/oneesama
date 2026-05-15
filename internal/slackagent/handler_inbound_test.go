@@ -245,6 +245,10 @@ func TestSlackHistoryScannerPollsJoinedChannelMessages(t *testing.T) {
 		case "/conversations.list":
 			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"xp-test","is_member":true,"is_channel":true}]}`))
 		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
 			if got := r.Form.Get("oldest"); got != "1778765800.000000" {
 				t.Fatalf("oldest = %q, want stored cursor", got)
 			}
@@ -313,6 +317,10 @@ func TestSlackHistoryScannerIgnoresBotAndSubtypeMessages(t *testing.T) {
 		case "/conversations.list":
 			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"xp-test","is_member":true,"is_channel":true}]}`))
 		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","bot_id":"B123","text":"bot noise","ts":"1778765844.000000"},{"type":"message","subtype":"channel_join","user":"U123","text":"joined","ts":"1778765843.000000"},{"type":"message","user":"U123","text":"human signal","ts":"1778765842.000000"}]}`))
 		default:
 			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
@@ -375,6 +383,10 @@ func TestSlackHistoryScannerPostsPendingActionCard(t *testing.T) {
 		case "/conversations.list":
 			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"xp-test","is_member":true,"is_channel":true}]}`))
 		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"please follow up with Alice tomorrow","ts":"1778765842.000000"}]}`))
 		default:
 			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
@@ -458,6 +470,10 @@ Caveat: It won't fix system architecture for ya, so you still need BRAIN as mast
 		case "/conversations.list":
 			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
 		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://x.com/steipete/status/2054850632067019173","ts":"1778767510.917049"}]}`))
 		default:
 			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
@@ -554,6 +570,10 @@ Wrote a skill that runs codex /review in a loop until there's no booboos anymore
 		case "/conversations.list":
 			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
 		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://x.com/steipete/status/2054850632067019173","ts":"1778767510.917049"}]}`))
 		default:
 			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
@@ -621,6 +641,10 @@ func TestSlackHistoryScannerIgnoresBareSlackPermalinkActions(t *testing.T) {
 		case "/conversations.list":
 			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
 		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://cue-3kl2780.slack.com/archives/C0AQ0C0KVMH/p1778767624846809","ts":"1778767624.846809"}]}`))
 		default:
 			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
@@ -678,6 +702,109 @@ func TestSlackHistoryScannerIgnoresBareSlackPermalinkActions(t *testing.T) {
 	}
 	if len(status.Runs) == 0 || len(status.Runs[0].Actions) != 0 {
 		t.Fatalf("runs = %#v, want suppressed action recorded as no-op", status.Runs)
+	}
+}
+
+func TestSlackHistoryScannerAddsCueboardContextAndThreadFetchAudit(t *testing.T) {
+	var sawContextHistory bool
+	var sawNewHistory bool
+	var sawThreadFetch bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			if latest := r.Form.Get("latest"); latest != "" {
+				sawContextHistory = true
+				if latest != "1778765800.000000" || r.Form.Get("limit") != "3" || r.Form.Get("inclusive") != "false" {
+					t.Fatalf("context history form = %s", r.Form.Encode())
+				}
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U000","text":"previous context matters","ts":"1778765799.000000"}]}`))
+				return
+			}
+			sawNewHistory = true
+			if got := r.Form.Get("oldest"); got != "1778765800.000000" {
+				t.Fatalf("oldest = %q, want stored cursor", got)
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"this reply needs full thread","ts":"1778765842.164299","thread_ts":"1778765700.000000"}]}`))
+		case "/conversations.replies":
+			sawThreadFetch = true
+			if r.URL.Query().Get("channel") != "C123" || r.URL.Query().Get("ts") != "1778765700.000000" {
+				t.Fatalf("replies query = %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U111","text":"thread root has the actual ask","ts":"1778765700.000000"},{"type":"message","user":"U123","text":"this reply needs full thread","ts":"1778765842.164299","thread_ts":"1778765700.000000"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	previousThreadBaseURL := slackThreadFetchAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	slackThreadFetchAPIBaseURL = server.URL
+	defer func() {
+		slackScannerAPIBaseURL = previousBaseURL
+		slackThreadFetchAPIBaseURL = previousThreadBaseURL
+	}()
+
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_context",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"thread context fetched","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+			Triage: appconfig.SlackTriageConfig{HeuristicFallback: true},
+		},
+		Runner: runner,
+	})
+	service.inbound.SetCursor("C123", "1778765800.000000")
+
+	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("scanSlackHistoryOnce: %v", err)
+	}
+	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
+		t.Fatalf("result = %#v, want flushed scanner result", result)
+	}
+	if !sawContextHistory || !sawNewHistory || !sawThreadFetch {
+		t.Fatalf("saw context=%v new=%v thread=%v, want all true", sawContextHistory, sawNewHistory, sawThreadFetch)
+	}
+	task := runner.startInput.Task
+	for _, want := range []string{
+		`(context) <@U000>: "previous context matters"`,
+		`• [ref:m1 msg_ts:1778765842.164299] <@U123>: "this reply needs full thread" [reply in thread_ts:1778765700.000000]`,
+		"Fetched Slack thread context:",
+		"thread root has the actual ask",
+	} {
+		if !strings.Contains(task, want) {
+			t.Fatalf("runner task missing %q:\n%s", want, task)
+		}
+	}
+	threadContexts, ok := runner.startInput.Context["threadContexts"].([]SlackTriageThreadContext)
+	if !ok || len(threadContexts) != 1 || !threadContexts[0].FetchOK || threadContexts[0].MessageCount != 2 {
+		t.Fatalf("threadContexts = %#v", runner.startInput.Context["threadContexts"])
+	}
+	run := result.Sweeps[0].Flushed.Triage.Finalization.Run
+	if run.Metadata["thread_context_fetched"] != true || run.Metadata["thread_context_messages"] != 2 {
+		t.Fatalf("metadata = %#v, want thread context audit", run.Metadata)
+	}
+	if run.Metadata["input_context_chars"] == nil || run.Metadata["suppressed_reason"] != "no_actions" {
+		t.Fatalf("metadata = %#v, want input chars and no_actions suppression", run.Metadata)
 	}
 }
 

@@ -99,12 +99,13 @@ func messagesFromAnySlice(values []any) []SlackInboundMessage {
 	for _, item := range values {
 		if mapped, ok := mapFromAny(item); ok {
 			out = append(out, SlackInboundMessage{
-				TeamID:    firstNonEmpty(stringFromAny(mapped["teamId"]), stringFromAny(mapped["team_id"])),
-				ChannelID: firstNonEmpty(stringFromAny(mapped["channelId"]), stringFromAny(mapped["channel_id"])),
-				UserID:    firstNonEmpty(stringFromAny(mapped["userId"]), stringFromAny(mapped["user_id"]), stringFromAny(mapped["user"])),
-				Text:      stringFromAny(mapped["text"]),
-				TS:        firstNonEmpty(stringFromAny(mapped["ts"]), stringFromAny(mapped["eventTs"]), stringFromAny(mapped["event_ts"])),
-				ThreadTS:  firstNonEmpty(stringFromAny(mapped["threadTs"]), stringFromAny(mapped["thread_ts"])),
+				TeamID:     firstNonEmpty(stringFromAny(mapped["teamId"]), stringFromAny(mapped["team_id"])),
+				ChannelID:  firstNonEmpty(stringFromAny(mapped["channelId"]), stringFromAny(mapped["channel_id"])),
+				UserID:     firstNonEmpty(stringFromAny(mapped["userId"]), stringFromAny(mapped["user_id"]), stringFromAny(mapped["user"])),
+				Text:       stringFromAny(mapped["text"]),
+				TS:         firstNonEmpty(stringFromAny(mapped["ts"]), stringFromAny(mapped["eventTs"]), stringFromAny(mapped["event_ts"])),
+				ThreadTS:   firstNonEmpty(stringFromAny(mapped["threadTs"]), stringFromAny(mapped["thread_ts"])),
+				ReplyCount: intFromAny(mapped["reply_count"]),
 			})
 		}
 	}

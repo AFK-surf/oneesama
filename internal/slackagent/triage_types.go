@@ -35,6 +35,16 @@ type SlackTriageToolCall struct {
 	Result  string `json:"result,omitempty"`
 }
 
+type SlackTriageThreadContext struct {
+	ChannelID    string                `json:"channel_id"`
+	ThreadTS     string                `json:"thread_ts"`
+	FetchOK      bool                  `json:"fetch_ok"`
+	FetchError   string                `json:"fetch_error,omitempty"`
+	MessageCount int                   `json:"message_count"`
+	Messages     []SlackInboundMessage `json:"messages,omitempty"`
+	Transcript   string                `json:"transcript,omitempty"`
+}
+
 type SlackTriageDecision struct {
 	Summary string                      `json:"summary"`
 	Actions []SlackTriageDecisionAction `json:"actions"`
