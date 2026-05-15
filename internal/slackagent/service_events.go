@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 	"strings"
+
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 )
 
 func (s *Service) HandleSlackEvent(ctx context.Context, envelope SlackEventEnvelope, headers SlackEventHeaders) SlackEventResponse {
@@ -229,6 +231,21 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 		Command:           mode,
 		RichThreadContext: richContext,
 	})
+	if mentionMode {
+		userText := commandText
+		transcript := ""
+		if richContext != nil {
+			userText = firstNonEmpty(richContext.MentionText, commandText)
+			transcript = richContext.Transcript
+		}
+		sessionID := ""
+		if job, ok := command.Metadata["job"].(agentrunner.Job); ok {
+			sessionID = job.ID
+		} else if jobMap, ok := mapFromAny(command.Metadata["job"]); ok {
+			sessionID = stringFromAny(jobMap["id"])
+		}
+		s.maybeRecordThreadImprovementSignals(ctx, ref.ChannelID, ref.ThreadTS, firstNonEmpty(event.TS, event.EventTS), sessionID, userText, transcript, command.Text)
+	}
 	keepAssistantStatus := shouldKeepAssistantStatusUntilWorkerDone(command)
 	if !keepAssistantStatus {
 		clearResult := s.scheduleAssistantThreadStatus(ctx, ref, "", true)

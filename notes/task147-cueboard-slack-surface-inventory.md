@@ -19,7 +19,7 @@ Legend:
 | P0 | Exact bot mention identity | ported in `f3cdc7f` | Fixed "cannot tell whether it was @mentioned"; old fallback matched any `<@U...>` mention. | Keep live watch + regression tests. |
 | P0 | Triage should be silent by default | partial | Prompt is 1:1, but scanner/gates/tool availability can still make it speak too often. | Add live cueboard-vs-oneesama shadow checks before marking done. |
 | P0 | External link read-first behavior | partial | `f3cdc7f` prefetches external links with Jina and suppresses "是否读取" cards; tool-level `exa_search/exa_contents` is still missing. | Port or shim web/search tool surface; keep prefetch as guardrail. |
-| P0 | Memory / dreaming / self-growth | partial/missing | Follow-up and local memory exist; Cueboard self-growth/dreaming improvement workflow is not fully present. | Port missing self-growth signal + lesson workflow, or explicitly exclude. |
+| P0 | Memory / dreaming / self-growth | partial | Follow-up and local memory exist; current slice ports Cueboard-style self-growth signals into heartbeat follow-ups, lesson candidates, and a managed `MEMORY.md` block from mention + scanner input. Dedicated visible dreaming/heartbeat delivery still needs live evidence. | Live-shadow self-growth behavior and decide whether a separate dream delivery loop is still required. |
 | P0 | Tool registry parity except credentialed apps | partial | Prompt advertises tools not all exposed/implemented by capabilities; LLM may not know how to fetch or remember. | Align prompt, capabilities, and actual handlers. |
 | P1 | Meet join from triage cards | partial | Join card exists and recent extra triage reply fixed; live "加会加不进来" still needs interaction evidence. | Reproduce interaction from Slack payload/logs. |
 
@@ -66,7 +66,7 @@ Legend:
 | `meeting_scanner.go` | Scheduled meeting scanner from meetd. | `meeting_scanner.go`, `service_meeting_webhook.go` | partial | Meeting webhook result path ported; `meeting.digest` copilot and some scheduled watcher details missing. |
 | `heartbeat.go:68-140` | Heartbeat delivery plan + notification surface. | `service_followups.go:10-96`, `heartbeat_store.go` | partial | Follow-up store/routes exist; heartbeat result listener/dream delivery is not a single old-equivalent loop. |
 | `heartbeat_followup.go:23` | 30m supervisory commitment recheck interval and follow-up workflow. | `service_followups.go`, `heartbeat_store.go` | partial | Follow-up memory exists; recheck runner cadence and self-resolution need evidence. |
-| `improvement_self_growth.go:14-31`, `improvement_self_growth.go:72-120` | Self-growth/dreaming signals from feedback, memory, proactivity, tool capability. | no direct equivalent; some local memory/lesson files | missing | This explains "记忆记录和做梦" gap. Port or create explicit current-design equivalent. |
+| `improvement_self_growth.go:14-31`, `improvement_self_growth.go:72-120` | Self-growth/dreaming signals from feedback, memory, proactivity, tool capability. | `improvement_self_growth.go`, `improvement_store.go`, `service_events.go`, `service_inbound.go` | partial | Current slice ports signal detection, cluster follow-ups, lesson candidates, and managed self-growth memory block. Still need live heartbeat/dream delivery evidence. |
 
 ## Tool Registrations
 
@@ -119,7 +119,7 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
 | `store.go:160+` | Old schema: channel, membership, thread_case, channel_brain, thread_ledger, pending action, triage, heartbeat, feedback, meetings. | `cognition_store.go`, `triage_store.go`, `heartbeat_store.go`, meeting stores | partial | Many concepts ported; exact schema/table names differ. |
 | `store_triage.go:28-99` | Atomic triage run + actions + tool calls in SQLite. | `triage_store.go:57-154`, `store_triage.go:5-18` | partial | Typed collection version, behavior tests exist. Need export/inspection parity. |
 | `store_heartbeat.go:46-88` | Follow-up kinds/status/surface records. | `heartbeat_store.go:17-57`, `service_followups.go` | partial | Concepts ported; delivery loop/self-growth incomplete. |
-| `store_improvement.go`, `improvement_self_growth.go` | Improvement signals and lesson candidates. | no direct store found | missing | Port self-growth/dreaming memory flow or declare excluded. |
+| `store_improvement.go`, `improvement_self_growth.go` | Improvement signals and lesson candidates. | `improvement_store.go`, `improvement_self_growth.go`, `lesson_memory.go` | partial | Typed-collection equivalent now records signals and writes lesson candidates / self-growth memory; schema names differ by current persistence architecture. |
 | `team_memory.go`, `people_memory.go` | Team and people memory files. | `team_memory.go`, `people_memory.go`, `local_memory.go` | ported/partial | Parity tests exist; live memory recall/write needs proof. |
 | `triage_context.go:61`, `triage_context.go:154` | Previous triage contexts and archive path. | `triage_context.go`, archive helpers | ported/partial | Runtime parity slice covered ring buffer/archive; live prompt injection needs proof. |
 
@@ -130,8 +130,9 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
    - Add/alias `usage_api` or remove/replace prompt mention.
    - Add explicit web content/search capability (`exa_contents`/`exa_search` equivalent) or document that Jina prefetch is the product replacement.
    - Expose generic memory tools where the prompt tells the assistant to call them, or stop advertising them for Slack sessions.
-3. P0 memory/dreaming/self-growth:
-   - Port `improvement_self_growth.go` + `store_improvement.go` equivalent, or record explicit product exclusion.
+3. P0 memory/dreaming/self-growth live evidence:
+   - Verify a real feedback message creates a self-improvement heartbeat follow-up plus lesson candidate without noisy thread spam.
+   - Decide whether old dedicated "dreaming" delivery loop must be ported separately or the heartbeat/self-growth queue is the accepted current equivalent.
 4. P0 scanner silence:
    - Compare active mention thread filtering, retry/reinject, cursor commit, and direct reply thresholds against cueboard with live examples.
 5. P1 Meet join interaction:

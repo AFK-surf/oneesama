@@ -20,6 +20,7 @@ func (s *Service) BufferSlackInboundEvent(ctx context.Context, envelope SlackEve
 		if err := s.cognition.RecordInbound(ctx, firstNonEmpty(envelope.TeamID, "workspace"), message); err != nil {
 			s.logger.Warn("slack cognition inbound record failed", "channel", event.Channel, "error", err)
 		}
+		s.maybeRecordInboundImprovementSignal(ctx, message)
 	}
 	return result
 }
@@ -150,6 +151,7 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 				if err := s.cognition.RecordInbound(ctx, workspaceID, message); err != nil {
 					s.logger.Warn("slack cognition inbound record failed", "channel", channel.ID, "error", err)
 				}
+				s.maybeRecordInboundImprovementSignal(ctx, message)
 			}
 			if slackTSGreater(message.TS, nextCursor) {
 				nextCursor = message.TS
