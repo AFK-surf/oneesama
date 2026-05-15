@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
 const (
 	slackAPIRoleAssistant = "assistant"
+	slackAPIRolePlanner   = "planner"
 )
 
 type slackAPITool struct {
@@ -43,13 +45,30 @@ func (t *slackAPITool) Execute(ctx context.Context, args map[string]any) (slackA
 		return slackAPIToolResult{Success: false, Text: err.Error()}, nil
 	}
 
-	if resolvedAction == "post_thread_reply" && t.role == slackAPIRoleAssistant {
+	if resolvedAction == "post_thread_reply" && t.role != slackAPIRolePlanner {
 		return slackAPIToolResult{Success: false, Text: plannerOnlySlackActionMessage(resolvedAction, params)}, nil
 	}
-	if resolvedAction != "post_message" {
+	if resolvedAction == "post_message" && t.role == slackAPIRolePlanner {
+		return slackAPIToolResult{Success: false, Text: `WRONG ACTION: post_message is NOT available in triage mode. Use slack.postThreadReply instead. Retry NOW with: ` + slackPostThreadReplyRetrySnippet(params)}, nil
+	}
+	switch resolvedAction {
+	case "post_message":
+		return t.actionPostMessage(ctx, params)
+	case "post_thread_reply":
+		return t.actionPostThreadReply(ctx, params)
+	case "fetch_thread":
+		return t.actionFetchThread(ctx, params)
+	case "fetch_channel_history":
+		return t.actionFetchChannelHistory(ctx, params)
+	case "upload_file":
+		return t.actionUploadFile(ctx, params), nil
+	case "add_reaction", "delete_message", "edit_message", "list_emoji", "pin", "unpin", "set_topic", "set_purpose", "add_bookmark", "invite":
+		return t.actionGenericSlackForm(ctx, resolvedAction, params)
+	case "fetch_image", "fetch_canvas", "create_canvas", "edit_canvas", "send_dm":
+		return slackAPIToolResult{Success: false, Text: fmt.Sprintf("Action %q is registered in the matrix but not available in this Go runtime yet", resolvedAction)}, nil
+	default:
 		return slackAPIToolResult{Success: false, Text: fmt.Sprintf("Action %q is not implemented by the current Slack API parity shim", resolvedAction)}, nil
 	}
-	return t.actionPostMessage(ctx, params)
 }
 
 func (t *slackAPITool) actionPostMessage(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
@@ -115,14 +134,282 @@ func (t *slackAPITool) actionPostMessage(ctx context.Context, params map[string]
 	return slackAPIToolResult{Success: true, Text: fmt.Sprintf("Message posted (ts: %s, 1 blocks)", body.TS)}, nil
 }
 
-var slackAPIMethodByAction = map[string]string{
-	"post_message":      "chat.postMessage",
-	"post_thread_reply": "slack.postThreadReply",
+func (t *slackAPITool) actionPostThreadReply(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
+	channel := strings.TrimSpace(stringFromAny(params["channel"]))
+	threadTS := strings.TrimSpace(firstNonEmpty(stringFromAny(params["thread_ts"]), stringFromAny(params["ts"])))
+	text := strings.TrimSpace(stringFromAny(params["text"]))
+	if channel == "" || threadTS == "" || text == "" {
+		return slackAPIToolResult{
+			Success: false,
+			Text:    "channel, thread_ts, and text are required for slack.postThreadReply. Retry NOW with: " + slackPostThreadReplyRetrySnippet(params),
+		}, nil
+	}
+	params = cloneStringAnyMap(params)
+	params["thread_ts"] = threadTS
+	return t.actionPostMessage(ctx, params)
 }
 
-var slackAPIActionsByMethod = map[string]string{
-	"chat.postMessage":      "post_message",
-	"slack.postThreadReply": "post_thread_reply",
+func (t *slackAPITool) actionFetchThread(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
+	channel, threadTS := normalizedFetchThreadParams(params)
+	if channel == "" || threadTS == "" {
+		return slackAPIToolResult{Success: false, Text: "channel and thread_ts are required for conversations.replies"}, nil
+	}
+	limit := maxInt(intFromAny(params["limit"]), maxAppMentionThreadMessages)
+	values := url.Values{
+		"channel": {channel},
+		"ts":      {threadTS},
+		"limit":   {strconv.Itoa(limit)},
+	}
+	var body slackRepliesResponse
+	if result := t.callSlackGET(ctx, slackThreadFetchAPIBaseURL, "conversations.replies", values, &body); !result.OK || !body.OK {
+		return slackAPIToolResult{Success: false, Text: "Failed to fetch thread: " + firstNonEmpty(body.Error, result.Error, result.Detail)}, nil
+	}
+	return slackAPIJSONTextResult(map[string]any{
+		"ok":       true,
+		"channel":  channel,
+		"threadTS": threadTS,
+		"messages": body.Messages,
+	})
+}
+
+func (t *slackAPITool) actionFetchChannelHistory(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
+	channel := strings.TrimSpace(firstNonEmpty(stringFromAny(params["channel"]), stringFromAny(params["channel_id"])))
+	if channel == "" {
+		return slackAPIToolResult{Success: false, Text: "channel is required for conversations.history"}, nil
+	}
+	limit := intFromAny(params["limit"])
+	if limit <= 0 {
+		limit = 20
+	}
+	values := url.Values{
+		"channel": {channel},
+		"limit":   {strconv.Itoa(limit)},
+	}
+	if cursor := strings.TrimSpace(stringFromAny(params["cursor"])); cursor != "" {
+		values.Set("cursor", cursor)
+	}
+	if oldest := strings.TrimSpace(stringFromAny(params["oldest"])); oldest != "" {
+		values.Set("oldest", oldest)
+	}
+	if latest := strings.TrimSpace(stringFromAny(params["latest"])); latest != "" {
+		values.Set("latest", latest)
+	}
+	var body slackRepliesResponse
+	if result := t.callSlackGET(ctx, slackThreadFetchAPIBaseURL, "conversations.history", values, &body); !result.OK || !body.OK {
+		return slackAPIToolResult{Success: false, Text: "Failed to fetch channel history: " + firstNonEmpty(body.Error, result.Error, result.Detail)}, nil
+	}
+	return slackAPIJSONTextResult(map[string]any{
+		"ok":       true,
+		"channel":  channel,
+		"messages": body.Messages,
+	})
+}
+
+func (t *slackAPITool) actionUploadFile(ctx context.Context, params map[string]any) slackAPIToolResult {
+	client := &http.Client{Transport: t.httpTransport}
+	if client.Transport == nil {
+		client.Transport = http.DefaultTransport
+	}
+	result := UploadSlackFile(ctx, client, t.token, t.apiURL, SlackFileUploadInput{
+		Path:           firstNonEmpty(stringFromAny(params["path"]), stringFromAny(params["file_path"])),
+		Filename:       stringFromAny(params["filename"]),
+		Title:          stringFromAny(params["title"]),
+		Channel:        firstNonEmpty(stringFromAny(params["channel"]), stringFromAny(params["channel_id"])),
+		ThreadTS:       firstNonEmpty(stringFromAny(params["thread_ts"]), stringFromAny(params["threadTs"])),
+		InitialComment: firstNonEmpty(stringFromAny(params["initial_comment"]), stringFromAny(params["comment"])),
+	})
+	if !result.OK {
+		return slackAPIToolResult{Success: false, Text: "Failed to upload file: " + firstNonEmpty(result.Error, result.Detail)}
+	}
+	text := fmt.Sprintf("File uploaded: %s", firstNonEmpty(result.Permalink, result.FileID, result.Filename))
+	return slackAPIToolResult{Success: true, Text: text}
+}
+
+func (t *slackAPITool) actionGenericSlackForm(ctx context.Context, action string, params map[string]any) (slackAPIToolResult, error) {
+	method := slackAPIMethodByAction[action]
+	if method == "" {
+		return slackAPIToolResult{Success: false, Text: fmt.Sprintf("No Slack API method registered for action %q", action)}, nil
+	}
+	values := url.Values{}
+	for key, value := range params {
+		if text := slackAPIParamString(value); text != "" {
+			values.Set(key, text)
+		}
+	}
+	normalizeSlackFormAliases(values, action)
+	client := &http.Client{Transport: t.httpTransport}
+	if client.Transport == nil {
+		client.Transport = http.DefaultTransport
+	}
+	var body map[string]any
+	result := callSlackFormAPI(ctx, client, t.token, t.apiURL, method, values, &body)
+	if !result.OK {
+		return slackAPIToolResult{Success: false, Text: "Failed to call " + method + ": " + firstNonEmpty(result.Error, result.Detail)}, nil
+	}
+	if ok, _ := body["ok"].(bool); !ok {
+		return slackAPIToolResult{Success: false, Text: "Failed to call " + method + ": " + firstNonEmpty(stringFromAny(body["error"]), "slack_api_error")}, nil
+	}
+	return slackAPIJSONTextResult(body)
+}
+
+func (t *slackAPITool) callSlackGET(ctx context.Context, baseURL string, method string, values url.Values, target any) slackFormAPIResult {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = defaultSlackAPIBaseURL
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/"+method+"?"+values.Encode(), nil)
+	if err != nil {
+		return slackFormAPIResult{Error: "build_request_failed", Detail: err.Error()}
+	}
+	if token := strings.TrimSpace(t.token); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Transport: t.httpTransport}
+	if client.Transport == nil {
+		client.Transport = http.DefaultTransport
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return slackFormAPIResult{Error: "request_failed", Detail: err.Error()}
+	}
+	defer response.Body.Close()
+	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
+		return slackFormAPIResult{Status: response.StatusCode, Error: "decode_response_failed", Detail: err.Error()}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return slackFormAPIResult{Status: response.StatusCode, Error: fmt.Sprintf("http_%d", response.StatusCode)}
+	}
+	return slackFormAPIResult{OK: true, Status: response.StatusCode}
+}
+
+func slackAPIJSONTextResult(value any) (slackAPIToolResult, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return slackAPIToolResult{}, err
+	}
+	return slackAPIToolResult{Success: true, Text: string(payload)}, nil
+}
+
+func cloneStringAnyMap(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
+func slackAPIParamString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case json.Number:
+		return strings.TrimSpace(typed.String())
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	default:
+		return ""
+	}
+}
+
+func normalizeSlackFormAliases(values url.Values, action string) {
+	if values.Get("channel") == "" && values.Get("channel_id") != "" {
+		values.Set("channel", values.Get("channel_id"))
+	}
+	if values.Get("timestamp") == "" && values.Get("ts") != "" {
+		values.Set("timestamp", values.Get("ts"))
+	}
+	if action == "add_bookmark" && values.Get("type") == "" {
+		values.Set("type", "link")
+	}
+}
+
+var slackAPIMethodByAction = map[string]string{
+	"send_dm":               "slack.sendDM",
+	"fetch_thread":          "conversations.replies",
+	"fetch_channel_history": "conversations.history",
+	"fetch_image":           "slack.fetchImage",
+	"fetch_canvas":          "slack.fetchCanvas",
+	"upload_file":           "slack.uploadFile",
+	"post_message":          "chat.postMessage",
+	"post_thread_reply":     "slack.postThreadReply",
+	"delete_message":        "chat.delete",
+	"edit_message":          "chat.update",
+	"add_reaction":          "reactions.add",
+	"list_emoji":            "emoji.list",
+	"pin":                   "pins.add",
+	"unpin":                 "pins.remove",
+	"set_topic":             "conversations.setTopic",
+	"set_purpose":           "conversations.setPurpose",
+	"add_bookmark":          "bookmarks.add",
+	"invite":                "conversations.invite",
+	"create_canvas":         "canvases.create",
+	"edit_canvas":           "canvases.edit",
+}
+
+var slackAPIActions = []string{
+	"send_dm", "fetch_thread", "fetch_channel_history", "fetch_image", "fetch_canvas",
+	"upload_file", "post_message", "post_thread_reply", "delete_message", "edit_message",
+	"add_reaction", "list_emoji", "pin", "unpin", "set_topic", "set_purpose",
+	"add_bookmark", "invite", "create_canvas", "edit_canvas",
+}
+
+var slackAPIActionsByMethod = func() map[string]string {
+	byMethod := make(map[string]string, len(slackAPIMethodByAction))
+	for action, method := range slackAPIMethodByAction {
+		byMethod[method] = action
+	}
+	return byMethod
+}()
+
+func slackAPIMethodMatrix() []SlackAPIMethodSpec {
+	statusByAction := map[string]string{
+		"fetch_thread":          "active",
+		"fetch_channel_history": "active",
+		"upload_file":           "active",
+		"post_message":          "active",
+		"post_thread_reply":     "active",
+		"delete_message":        "active",
+		"edit_message":          "active",
+		"add_reaction":          "active",
+		"list_emoji":            "active",
+		"pin":                   "active",
+		"unpin":                 "active",
+		"set_topic":             "active",
+		"set_purpose":           "active",
+		"add_bookmark":          "active",
+		"invite":                "active",
+		"fetch_image":           "registered_unavailable",
+		"fetch_canvas":          "registered_unavailable",
+		"create_canvas":         "registered_unavailable",
+		"edit_canvas":           "registered_unavailable",
+		"send_dm":               "registered_unavailable",
+	}
+	roleByAction := map[string]string{
+		"send_dm":           "planner",
+		"post_thread_reply": "planner",
+		"post_message":      "assistant/scheduled",
+	}
+	methods := make([]SlackAPIMethodSpec, 0, len(slackAPIActions))
+	for _, action := range slackAPIActions {
+		method := slackAPIMethodByAction[action]
+		methods = append(methods, SlackAPIMethodSpec{
+			Method: method,
+			Action: action,
+			Status: firstNonEmpty(statusByAction[action], "registered_unavailable"),
+			Role:   roleByAction[action],
+			Source: "cueboard slack_api_tool.go",
+		})
+	}
+	return methods
 }
 
 func resolveSlackAPIOperation(action, method string) (string, string, error) {
@@ -162,6 +449,18 @@ func plannerOnlySlackActionMessage(action string, params map[string]any) string 
 	default:
 		return fmt.Sprintf("%s is only available to the planner role", action)
 	}
+}
+
+func slackPostThreadReplyRetrySnippet(params map[string]any) string {
+	channel := strings.TrimSpace(stringFromAny(params["channel"]))
+	threadTS := strings.TrimSpace(stringFromAny(params["thread_ts"]))
+	if channel == "" {
+		channel = "<channel-id>"
+	}
+	if threadTS != "" {
+		return `slack_api(method="slack.postThreadReply", params={"channel": "` + channel + `", "thread_ts": "` + threadTS + `", "text": "<your message>"})`
+	}
+	return `slack_api(method="slack.postThreadReply", params={"channel": "` + channel + `", "text": "<your message>"})`
 }
 
 func slackPostMessageRetrySnippet(params map[string]any) string {

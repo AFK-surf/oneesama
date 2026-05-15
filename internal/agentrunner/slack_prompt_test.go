@@ -48,3 +48,23 @@ func TestBuildPromptReadsSlackAppMentionPromptFromGenericContext(t *testing.T) {
 		t.Fatalf("prompt should not use repo-worker framing for Slack assistant sessions:\n%s", prompt)
 	}
 }
+
+func TestBuildPromptMentionsLocalSlackToolGateway(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task: "读一下这个 X 链接",
+		Context: map[string]any{
+			"source": "slack-agent",
+		},
+	}, SessionKindSlack))
+
+	for _, want := range []string{
+		"Local Slack tool gateway",
+		"http://127.0.0.1:8780/slack/tools/call",
+		`"tool":"exa_contents"`,
+		`"tool":"memory_search"`,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}

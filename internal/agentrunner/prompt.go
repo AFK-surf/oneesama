@@ -35,6 +35,7 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 	sections := []string{
 		cueboardDefaultSystemPromptForAgentRunner(),
 		"## Oneesama delivery adapter\n- do not expose internal worker/job/delegate mechanics to users\n- do not frame normal Slack requests as internal repository work\n- for long-form writing or document revisions, produce clean Markdown; the delivery layer will publish it as a Slack Canvas\n- keep thread replies concise when the long-form content belongs in Canvas",
+		"## Local Slack tool gateway\nWhen native tool calls are not exposed by this runner, use the loopback gateway before answering facts, links, memory, or Slack-thread questions: POST JSON to http://127.0.0.1:8780/slack/tools/call. Examples: {\"tool\":\"exa_contents\",\"args\":{\"url\":\"https://example.com\"}}, {\"tool\":\"exa_search\",\"args\":{\"query\":\"search terms\"}}, {\"tool\":\"memory_search\",\"args\":{\"query\":\"person or project\"}}, {\"tool\":\"slack_api\",\"role\":\"planner\",\"args\":{\"method\":\"conversations.replies\",\"params\":{\"channel\":\"C...\",\"thread_ts\":\"...\"}}}.",
 		"Mode: " + defaultMode(input.Mode),
 		"Allow code changes: " + yesNo(input.AllowCodeChanges),
 		"Task: " + strings.TrimSpace(input.Task),

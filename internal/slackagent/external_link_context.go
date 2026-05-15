@@ -20,8 +20,12 @@ const (
 )
 
 var (
-	slackExternalLinkHTTPClient = httputil.NewHTTPClient(8 * time.Second)
-	slackExternalLinkReaderURL  = func(rawURL string) string { return "https://r.jina.ai/http://" + rawURL }
+	slackExternalLinkHTTPClient   = httputil.NewHTTPClient(8 * time.Second)
+	slackExternalLinkReaderURL    = func(rawURL string) string { return "https://r.jina.ai/http://" + rawURL }
+	slackExternalSearchHTTPClient = httputil.NewHTTPClient(8 * time.Second)
+	slackExternalSearchURL        = func(query string) string {
+		return "https://r.jina.ai/http://duckduckgo.com/html/?q=" + url.QueryEscape(query)
+	}
 )
 
 type SlackExternalLinkContext struct {

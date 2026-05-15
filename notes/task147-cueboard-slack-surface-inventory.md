@@ -1,6 +1,6 @@
 # Task #147 Cueboard Slack Surface Inventory
 
-Status: active audit after live `cf1ed4a`.
+Status: active audit after live `cd31653`; tool-surface slice in progress.
 
 This inventory replaces the earlier narrow "prompt/runtime parity" gate. The acceptance bar is now full surface parity for user-visible Cueboard Slack Agent D behavior, with explicit product exclusions called out rather than silently dropped.
 
@@ -18,9 +18,9 @@ Legend:
 |---|---|---:|---|---|
 | P0 | Exact bot mention identity | ported in `f3cdc7f` + shadow harness | Fixed "cannot tell whether it was @mentioned"; old fallback matched any `<@U...>` mention. `TestTask147ShadowHarnessRecognizesExplicitBotMention` locks exact mention handling through `/slack/events`. | Keep live watch. |
 | P0 | Triage should be silent by default | ported/partial | Prompt is 1:1 and shadow harness now covers plain observation silence + assistant self-comment silence through the scanner path. Still needs real Slack screenshot/log evidence before final task acceptance. | Run live cueboard-vs-oneesama shadow checks before marking done. |
-| P0 | External link read-first behavior | ported/partial | `f3cdc7f` prefetches external links with Jina and suppresses "是否读取" cards; `TestTask147ShadowHarnessReadsExternalLinkWithoutConfirmation` locks direct source-thread answer. Tool-level `exa_search/exa_contents` is still missing. | Port or shim web/search tool surface; keep prefetch as guardrail. |
+| P0 | External link read-first behavior | ported | `f3cdc7f` prefetches external links with Jina and suppresses "是否读取" cards; `TestTask147ShadowHarnessReadsExternalLinkWithoutConfirmation` locks direct source-thread answer. The tool gateway now exposes `exa_contents` via the same Jina reader and `exa_search` via Jina search compatibility. | Keep live watch. |
 | P0 | Memory / dreaming / self-growth | partial | Follow-up and local memory exist; current slices port Cueboard-style self-growth signals into heartbeat follow-ups, lesson candidates, managed `MEMORY.md`, and visible heartbeat/dream delivery guards (6h rate limit, quiet hours, public rate limit, newer-activity block). Dedicated live shadow evidence still pending. | Live-shadow self-growth and visible heartbeat/dream behavior against old bridge. |
-| P0 | Tool registry parity except credentialed apps | partial | Prompt advertises tools not all exposed/implemented by capabilities; LLM may not know how to fetch or remember. | Align prompt, capabilities, and actual handlers. |
+| P0 | Tool registry parity except credentialed apps | ported/partial | `/slack/tools/parity` now lists active local equivalents for `slack_api`, `read_doc`, memory, `exa_search`, `exa_contents`, runtime/follow-up helpers, and explicit product exclusions for Linear/Notion/Calendar/Figma. Image/audio and meeting-chat providers remain product/pending decisions. | Keep matrix updated as providers land. |
 | P1 | Meet join from triage cards | ported | Evidence thread showed two separate paths: direct @ with Meet URL posted a join setup card correctly, while bare Meet-link triage created a `join_meeting` pending action. The real gap was pending-action confirm only marked `confirmed` and never executed the meeting join. | `TestHandleInteractionConfirmedJoinMeetingPendingActionExecutesMeetJoin` locks confirm -> `/join/google-meet` -> source-thread joined post. |
 
 ## HTTP Routes
@@ -32,7 +32,7 @@ Legend:
 | `meeting_webhook.go:111` | `GET /health`. | `handler.go:15` (`/slack/status`) plus process `/healthz` | partial | Health path shape differs; product impact low, but runtime probes use `/healthz` fallback. |
 | `admin.go:16`, `admin.go:20-29`, `admin_templates.go:76-80` | Admin dashboard + JSON routes (`/admin`, `/admin/api/*`). | no direct admin dashboard; internal status routes in `handler.go:45-57` | product-excluded | Peng previously said admin/debug not needed. Do not block task #147, but keep listed. |
 | `slash_commands.go:16` | Socket Mode slash command dispatch (`/usage`, `/status`). | `handler.go:19-21` (`/slack/commands/avatar`) and `socketmode_dispatch.go:76` | drift | Oneesama exposes avatar slash command, not old usage/status command semantics. User-facing impact currently low because product uses natural mentions and join card. |
-| old TS parity docs `docs/slack-tools-parity.md` | `GET /tools/parity`, `/slack/tools/parity`, `POST /tools/call`, `/slack/tools/call`. | no Go route in `handler.go:13-61` | missing | If Go stack replaces old tool parity/debug endpoint, add route or explicitly kill it. |
+| old TS parity docs `docs/slack-tools-parity.md` | `GET /tools/parity`, `/slack/tools/parity`, `POST /tools/call`, `/slack/tools/call`. | `handler.go` + `handler_tools.go` | ported | Internal-auth guarded routes report the tool matrix and execute active local equivalents. |
 | `admin.go:106` | Admin memory file browser. | `handler.go:54` (`GET /memory`) | partial | Search endpoint exists; old file-browser behavior intentionally not public. |
 | `heartbeat_followup.go` + admin routes | Follow-up status/surface endpoints via admin/store. | `handler.go:47-50` | partial | Oneesama has internal follow-up create/surface/status and heartbeat context, but not old admin UX. |
 | `meeting_webhook.go:179-182` | `meeting.digest` webhook enqueues copilot digest. | `service_meeting_webhook.go:19-24` has joined/processing/result only | missing | In-meeting copilot digest parity not ported to Slack side; may matter for realtime/meeting-copilot behavior. |
@@ -74,17 +74,17 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
 
 | Cueboard source | Tool | Oneesama source | Status | Gap / action |
 |---|---|---|---:|---|
-| `slack_tools.go:20-24`, `tool_registration_test.go:48-63` | Full assistant registry: `audio_generation`, `figma_api`, `followup_memory`, `google_calendar_api`, `heartbeat_log`, `image_generation`, `linear_api`, `notion_api`, `person_memory`, `read_doc`, `runtime_status`, `slack_api`, `suggest_action`, `usage_api`. | `agentrunner/capabilities.go:73-87` | partial | Oneesama allows `slack_api/read_doc/person_memory/suggest_action/followup_memory/runtime_status/heartbeat_log/manage_schedule` but not `usage_api`, image/audio, or web search; credentialed apps excluded. |
-| `tool_registration_test.go:69-90` | Planner/triage includes `followup_memory`, `person_memory`, excludes image/audio/runtime. | `agentrunner/capabilities.go:57-69` | partial | Triage includes `usage` not `usage_api`; no web/search tools. |
-| `slack_api_tool_fetch.go`, `slack_api_tool_messages.go`, `slack_api_tool_canvas.go` | Slack fetch/reply/file/reaction/canvas/message actions. | `slack_api_tool_fetch.go`, `slack_api_tool_messages.go`, `canvas_api.go` | partial | Message posting shim currently supports only subset; planner-only restrictions exist. Need method matrix. |
+| `slack_tools.go:20-24`, `tool_registration_test.go:48-63` | Full assistant registry: `audio_generation`, `figma_api`, `followup_memory`, `google_calendar_api`, `heartbeat_log`, `image_generation`, `linear_api`, `notion_api`, `person_memory`, `read_doc`, `runtime_status`, `slack_api`, `suggest_action`, `usage_api`. | `agentrunner/capabilities.go:73-87`, `slack_tool_registry.go` | ported/partial | Local gateway exposes active equivalents plus a `usage_api` status stub; credentialed apps are product-excluded; image/audio remain product-question. |
+| `tool_registration_test.go:69-90` | Planner/triage includes `followup_memory`, `person_memory`, excludes image/audio/runtime. | `agentrunner/capabilities.go:57-69`, `/slack/tools/call` | ported/partial | Runner capabilities still use legacy compact names, but the loopback gateway exposes cueboard names for Slack assistant/triage prompts. |
+| `slack_api_tool_fetch.go`, `slack_api_tool_messages.go`, `slack_api_tool_canvas.go` | Slack fetch/reply/file/reaction/canvas/message actions. | `slack_api_tool_fetch.go`, `slack_api_tool_messages.go`, `canvas_api.go`, `slack_tool_registry.go` | ported/partial | Matrix now covers thread/history fetch, upload, post/reply, reactions, delete/update, emoji, pins, topic/purpose, bookmarks, and invite. Canvas/image/DM actions are registered unavailable until providers land. |
 | `suggest_tool.go`, `interaction.go:684-733` | `suggest_action` cards including join meeting, issue, event, channel. | `suggest_tool.go`, `service_pending_join.go`, `meeting_approval.go` | ported/partial | `join_meeting` pending cards now execute on Confirm, infer `meet_url` from params/message/thread transcript, call `/join/google-meet`, and post result back into the source thread. Credentialed mutations excluded; channel/event scope should be marked or removed. |
 | `people_memory_tool.go` | `person_memory`. | `people_memory_tool.go` | ported/partial | Exists; live behavior needs proof. |
 | `heartbeat_log_tool.go`, `runtime_status_tool.go` | `heartbeat_log`, `runtime_status`. | `heartbeat_log_view.go`, `runtime_status.go` | ported/partial | Exists and tested; verify current live logs/status when asked. |
-| `usage_tool.go` | `usage_api`. | prompt mentions `usage_api`; capabilities use `usage`; no handler found | drift | Rename/alias to `usage_api` or remove prompt advertisement. |
+| `usage_tool.go` | `usage_api`. | `slack_tool_registry.go` | ported/partial | Exposed as `active_stub` so prompt/tool matrix no longer lies; returns explicit local-backend-not-configured until a real usage provider is wired. |
 | `assistant_schedule_tool.go` | Schedule tool with assistant mutation gates. | `schedule_tool.go`, `schedule_filter.go` | partial | Registered as `manage_schedule`; mutation gate blocks creation by default. Need confirm intended product behavior. |
-| `read_doc` legacy utility in `slack_tools.go:52-57` | Workspace doc read. | capability only; no direct Go tool executor found outside runner host tools | partial | If Codex/App Server provides `read_doc`, document source; otherwise implement local read-doc adapter. |
-| old framework web tools shown in prompt/tests | `exa_search`, `exa_contents`. | `external_link_context.go` prefetch; no capability/tool executor | missing | User explicitly expects bot to fetch Twitter/web itself. Add explicit web search/content tool or map to runner provider. |
-| `DefaultSystemPromptTemplate` | `memory_write`, `memory_search`, `memory_get`. | compact session capabilities in `agentrunner/capabilities.go:41-45`; local memory handlers | partial | Slack assistant/triage capabilities do not expose generic memory tools, despite prompt advertising them. |
+| `read_doc` legacy utility in `slack_tools.go:52-57` | Workspace doc read. | `slack_tool_registry.go` | ported | Local adapter reads workspace `README.md` and `docs/*.md` only; hidden files and unrelated paths are blocked. |
+| old framework web tools shown in prompt/tests | `exa_search`, `exa_contents`. | `external_link_context.go`, `slack_tool_registry.go` | ported | `exa_contents` uses Jina reader compatibility; `exa_search` uses Jina search compatibility. The cueboard tool names remain stable for model behavior. |
+| `DefaultSystemPromptTemplate` | `memory_write`, `memory_search`, `memory_get`. | `local_memory.go`, `service_memory.go`, `slack_tool_registry.go` | ported | Loopback gateway exposes generic memory search/get/write with memory-path guards. |
 | `image_generation_tool.go`, `audio_generation_tool.go` | Image/audio generation. | no oneesama tool executor | product-question | Peng did not confirm; not blocking triage unless requested. |
 | `linear_tools.go`, `notion_tool.go`, `gcal_tools.go`, `figma_tools.go` | Credentialed app proxies. | deliberately blocked/excluded | product-excluded | Do not spend task #147 time unless Peng reopens scope. |
 
@@ -109,7 +109,7 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
 | `bridge.go:123-162` | GCal/Notion/Figma/Linear integrations initialized. | none / blocked | product-excluded | Peng excluded these credentialed app integrations. |
 | `slack_api_tool_fetch.go` | Slack Web API thread/file/canvas fetch. | `slack_thread_fetch.go`, `slack_api_tool_fetch.go`, `canvas_api.go` | partial | Need method matrix for `conversations.replies`, file/image, canvas. |
 | `file_upload.go`, `slack_api_tool_messages.go:141` | Slack file upload. | `slack_file_upload.go` | ported/partial | Meeting transcript/audio uploads pass; generic upload tool matrix still needs proof. |
-| external web search/content | Exa through framework tools/status. | `external_link_context.go` via Jina reader only | drift | Use explicit tool registration, not only hidden prefetch. |
+| external web search/content | Exa through framework tools/status. | `external_link_context.go`, `slack_tool_registry.go` | ported | Explicit `exa_search` and `exa_contents` tool calls preserve the old names while using Jina-compatible public fetchers. |
 
 ## State / Persistence
 
@@ -130,9 +130,9 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
    - Covered stimuli: plain channel observation stays silent; explicit bot mention is handled; X/Twitter link is read before answering; assistant self-comment stays silent.
    - Still required before final task #147 acceptance: capture real Slack old-bridge vs imoutochan screenshots/logs for the same four stimuli.
 2. P0 tool surface correction:
-   - Add/alias `usage_api` or remove/replace prompt mention.
-   - Add explicit web content/search capability (`exa_contents`/`exa_search` equivalent) or document that Jina prefetch is the product replacement.
-   - Expose generic memory tools where the prompt tells the assistant to call them, or stop advertising them for Slack sessions.
+   - `/slack/tools/parity` / `/tools/parity` report active, pending, and product-excluded tools.
+   - `/slack/tools/call` / `/tools/call` execute active local equivalents for `exa_search`, `exa_contents`, `read_doc`, `memory_search`, `memory_get`, `memory_write`, `person_memory`, `followup_memory`, `suggest_action`, `runtime_status`, `heartbeat_log`, `usage_api`, `manage_schedule`, `notify_meeting_slack`, and `slack_api`.
+   - Remaining product questions: image/audio generation and meeting-chat provider.
 3. P0 memory/dreaming/self-growth live evidence:
    - Verify a real feedback message creates a self-improvement heartbeat follow-up plus lesson candidate without noisy thread spam.
    - Verify visible heartbeat/dream delivery surfaces exactly when Cueboard would: not inside quiet hours, not more than 3 public surfaces/12h, not more than once/6h per follow-up, and not if the thread already has newer activity.
