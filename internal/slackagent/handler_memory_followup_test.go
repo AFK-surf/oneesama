@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
@@ -38,6 +39,9 @@ func TestHandleMemorySearchUsesLocalSlackMemory(t *testing.T) {
 }
 
 func TestFollowupCreateStatusAndSurface(t *testing.T) {
+	previousClock := timeNow
+	timeNow = func() time.Time { return time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation()) }
+	t.Cleanup(func() { timeNow = previousClock })
 	poster := &recordingPoster{callCh: make(chan struct{}, 2)}
 	router := newTestRouter(t, Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},

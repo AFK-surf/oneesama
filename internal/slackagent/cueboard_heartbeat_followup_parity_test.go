@@ -248,8 +248,7 @@ func TestCueboardParityFollowupCreateSideEffectsReserveRecommendationAndOutbound
 }
 
 func TestCueboardParitySurfaceFollowupPostsThreadMessage(t *testing.T) {
-	t.Parallel()
-
+	withCueboardParityClock(t, time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation()))
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
 	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Diagram follow-up", Summary: "Send the architecture sketch.", ChannelID: "C123", ThreadTS: "123.456"})
@@ -282,14 +281,135 @@ func TestCueboardParitySurfaceFollowupRecordsBlockedMissingTarget(t *testing.T) 
 	if err != nil {
 		t.Fatalf("SurfaceSlackFollowups: %v", err)
 	}
-	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "missing_thread_target" || response.Skipped[0].DeliveredSurface != "" {
-		t.Fatalf("response = %#v, want blocked missing target without delivered surface", response)
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "no_user_visible_target" || response.Skipped[0].DeliveredSurface != "" {
+		t.Fatalf("response = %#v, want blocked no user-visible target without delivered surface", response)
+	}
+}
+
+func TestCueboardParitySurfaceFollowupBlocksWhenRecentlySurfaced(t *testing.T) {
+	now := time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation())
+	withCueboardParityClock(t, now)
+	poster := &recordingPoster{}
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{
+		Title:          "Ping again later",
+		ChannelID:      "C123",
+		ThreadTS:       "123.456",
+		SourceKind:     "thread",
+		LastSurfacedAt: now.Add(-2 * time.Hour).Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want none", got)
+	}
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "followup_rate_limited" {
+		t.Fatalf("response = %#v, want followup_rate_limited", response)
+	}
+}
+
+func TestCueboardParitySurfaceFollowupBlocksDuringQuietHours(t *testing.T) {
+	now := time.Date(2026, 3, 24, 22, 15, 0, 0, shanghaiLocation())
+	withCueboardParityClock(t, now)
+	poster := &recordingPoster{}
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Late public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal"})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want none", got)
+	}
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "quiet_hours" {
+		t.Fatalf("response = %#v, want quiet_hours", response)
+	}
+}
+
+func TestCueboardParitySurfaceFollowupUrgentBypassesQuietHours(t *testing.T) {
+	now := time.Date(2026, 3, 24, 22, 15, 0, 0, shanghaiLocation())
+	withCueboardParityClock(t, now)
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Urgent public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "urgent"})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	poster.WaitForCalls(t, 1)
+	if len(response.Posted) != 1 || response.Posted[0].Status != "sent" {
+		t.Fatalf("response = %#v, want sent urgent surface", response)
+	}
+}
+
+func TestCueboardParitySurfaceFollowupBlocksWhenPublicRateLimited(t *testing.T) {
+	now := time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation())
+	withCueboardParityClock(t, now)
+	poster := &recordingPoster{}
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
+	for i := 0; i < 3; i++ {
+		if _, err := service.followups.RecordSurface(context.Background(), SlackHeartbeatSurface{Title: "prior", RequestedSurface: "thread", DeliveredSurface: "thread", Status: "sent", CreatedAt: now.Add(-time.Duration(i) * time.Hour).Format(time.RFC3339Nano)}); err != nil {
+			t.Fatalf("RecordSurface #%d: %v", i, err)
+		}
+	}
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Fourth public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal"})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want none", got)
+	}
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "public_rate_limited" {
+		t.Fatalf("response = %#v, want public_rate_limited", response)
+	}
+}
+
+func TestCueboardParitySurfaceFollowupBlocksWhenThreadHasNewerActivity(t *testing.T) {
+	now := time.Date(2026, 3, 24, 11, 0, 0, 0, time.UTC)
+	createdAt := now.Add(-30 * time.Minute)
+	current := createdAt
+	previousClock := timeNow
+	timeNow = func() time.Time { return current }
+	t.Cleanup(func() { timeNow = previousClock })
+	poster := &recordingPoster{}
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Thread already moved", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal", CreatedAt: createdAt.Format(time.RFC3339Nano), UpdatedAt: createdAt.Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+	current = now
+	if err := service.cognition.RecordInbound(context.Background(), "workspace", SlackInboundMessage{ChannelID: "C123", ThreadTS: "123.456", UserID: "U123", TS: now.Add(-5 * time.Minute).Format(time.RFC3339Nano), Text: "newer human update"}); err != nil {
+		t.Fatalf("RecordInbound: %v", err)
+	}
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want none", got)
+	}
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "thread_has_newer_activity" {
+		t.Fatalf("response = %#v, want thread_has_newer_activity", response)
 	}
 }
 
 func TestCueboardParitySurfaceFollowupUpdatesLastSurfacedAt(t *testing.T) {
-	t.Parallel()
-
+	withCueboardParityClock(t, time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation()))
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: &recordingPoster{callCh: make(chan struct{}, 1)}})
 	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Ping", ChannelID: "C123", ThreadTS: "123.456"})
 	if err != nil {
@@ -320,8 +440,8 @@ func TestCueboardParityHeartbeatDeliveryAutoWithoutTargetBlocks(t *testing.T) {
 	t.Parallel()
 
 	target := heartbeatDeliveryTarget(SlackHeartbeatFollowup{}, "auto")
-	if target.blockReason != "missing_thread_target" {
-		t.Fatalf("target = %#v, want missing_thread_target", target)
+	if target.blockReason != "no_user_visible_target" {
+		t.Fatalf("target = %#v, want no_user_visible_target", target)
 	}
 }
 
@@ -475,8 +595,7 @@ func TestCueboardParityFollowupCreateEndpointReturnsFullStatus(t *testing.T) {
 }
 
 func TestCueboardParityFollowupSurfaceEndpointPostsSelectedFollowup(t *testing.T) {
-	t.Parallel()
-
+	withCueboardParityClock(t, time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation()))
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	router := newTestRouter(t, Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
 	create := postInternalJSON(t, router, "/slack/followups/create", `{"channel_id":"C123","thread_ts":"123.456","title":"Surface me","summary":"Thread reminder"}`)

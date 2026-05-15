@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/AFK-surf/oneesama/internal/persistence"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
@@ -192,6 +193,35 @@ func (s *slackHeartbeatStore) ListSurfaces(ctx context.Context, limit int) ([]Sl
 		return records[i].CreatedAt > records[j].CreatedAt
 	})
 	return limitSurfaces(records, limit), nil
+}
+
+func (s *slackHeartbeatStore) CountRecentPublicHeartbeatSurfaces(ctx context.Context, since time.Time) (int, error) {
+	if s == nil || s.surfaces == nil {
+		return 0, nil
+	}
+	if since.IsZero() {
+		since = timeNow().UTC().Add(-12 * time.Hour)
+	}
+	records, err := s.surfaces.List(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list heartbeat surfaces: %w", err)
+	}
+	count := 0
+	for _, record := range records {
+		if !strings.EqualFold(record.Status, heartbeatSurfaceStatusSent) {
+			continue
+		}
+		surface := normalizeHeartbeatSurfaceName(record.DeliveredSurface)
+		if surface != heartbeatSurfaceThread && surface != heartbeatSurfaceChannel {
+			continue
+		}
+		createdAt := parseHeartbeatTime(record.CreatedAt)
+		if createdAt == nil || createdAt.Before(since.UTC()) {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 func heartbeatKey(id int64) string {
