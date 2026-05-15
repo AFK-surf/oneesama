@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
 )
@@ -34,10 +35,104 @@ func (s *Service) TriageStatus(ctx context.Context, limit int) (SlackTriageStatu
 		PostActions:       s.triagePostActions,
 		HeuristicFallback: s.triageHeuristicFallback,
 		LastTriageJobID:   s.InboundStatus().EventBuffer.LastTriageJobID,
+		AuditFreshness:    buildSlackTriageFreshness(runs),
+		AuditFixtures:     buildSlackTriageAuditFixtures(),
 		Runs:              runs,
 		PendingActions:    actions,
 		ChannelBrains:     brains,
 	}, nil
+}
+
+func buildSlackTriageFreshness(runs []SlackTriageContext) *SlackTriageFreshness {
+	now := timeNow().UTC()
+	freshness := &SlackTriageFreshness{
+		GeneratedAt: now.Format(time.RFC3339Nano),
+		RunCount:    len(runs),
+	}
+	var oldest, newest time.Time
+	for _, run := range runs {
+		timestamp := parseTriageTimestamp(run.Timestamp)
+		if timestamp.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || timestamp.Before(oldest) {
+			oldest = timestamp
+		}
+		if newest.IsZero() || timestamp.After(newest) {
+			newest = timestamp
+		}
+	}
+	if !oldest.IsZero() {
+		freshness.OldestRunAt = oldest.UTC().Format(time.RFC3339Nano)
+	}
+	if !newest.IsZero() {
+		freshness.NewestRunAt = newest.UTC().Format(time.RFC3339Nano)
+		if age := now.Sub(newest.UTC()); age > 0 {
+			freshness.NewestRunAgeSeconds = int64(age.Seconds())
+		}
+	}
+	if !oldest.IsZero() && !newest.IsZero() && newest.After(oldest) {
+		freshness.SampleWindowSeconds = int64(newest.Sub(oldest).Seconds())
+	}
+	return freshness
+}
+
+func buildSlackTriageAuditFixtures() []SlackTriageAuditFixture {
+	type fixture struct {
+		name     string
+		expected string
+		raw      string
+	}
+	fixtures := []fixture{
+		{
+			name:     "act_post_thread_reply",
+			expected: "ACT",
+			raw:      `{"summary":"用户明确 @ bot 请求一个短回复。","actions":[{"type":"post_thread_reply","title":"短回复","message":"收到，我来跟进。","channelId":"C_AUDIT","threadTs":"123.456","confidence":0.9,"requiresConfirmation":false}]}`,
+		},
+		{
+			name:     "maybe_follow_up",
+			expected: "MAYBE",
+			raw:      `{"summary":"用户提出需要后续确认的事项。","actions":[{"type":"follow_up","title":"确认 owner","message":"确认 owner 并跟进阻塞事项。","channelId":"C_AUDIT","threadTs":"123.456","confidence":0.8,"requiresConfirmation":true}]}`,
+		},
+		{
+			name:     "skip_no_action",
+			expected: "SKIP",
+			raw:      "No action.\n\n闲聊自然收尾，无需助手介入。",
+		},
+	}
+	results := make([]SlackTriageAuditFixture, 0, len(fixtures))
+	for _, item := range fixtures {
+		decision := parseSlackTriageDecision(item.raw, slackTriageFallback{Summary: "fixture fallback", Channel: "C_AUDIT", ThreadTS: "123.456"})
+		outcome, mutations := slackTriageAuditFixtureOutcome(decision.Actions)
+		results = append(results, SlackTriageAuditFixture{
+			Name:             item.name,
+			Expected:         item.expected,
+			Outcome:          outcome,
+			Pass:             decision.ParseOK && outcome == item.expected,
+			ParseOK:          decision.ParseOK,
+			Actions:          len(decision.Actions),
+			Mutations:        mutations,
+			SuppressedReason: slackTriageSuppressedReason(decision, decision.Actions, true),
+			Summary:          decision.Summary,
+		})
+	}
+	return results
+}
+
+func slackTriageAuditFixtureOutcome(actions []SlackTriageDecisionAction) (string, int) {
+	if len(actions) == 0 {
+		return "SKIP", 0
+	}
+	mutations := 0
+	for _, action := range actions {
+		if slackTriageDirectReplyAction(action) {
+			mutations++
+		}
+	}
+	if mutations > 0 {
+		return "ACT", mutations
+	}
+	return "MAYBE", 0
 }
 
 func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messages []SlackInboundMessage, digest string) (SlackTriageStartResult, error) {

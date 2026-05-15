@@ -96,11 +96,34 @@ type SlackTriagePendingResult struct {
 }
 
 type SlackTriageStatus struct {
-	Enabled           bool                 `json:"enabled"`
-	PostActions       bool                 `json:"postActions"`
-	HeuristicFallback bool                 `json:"heuristicFallback"`
-	LastTriageJobID   string               `json:"lastTriageJobId,omitempty"`
-	Runs              []SlackTriageContext `json:"runs,omitempty"`
-	PendingActions    []SlackPendingAction `json:"pendingActions,omitempty"`
-	ChannelBrains     []SlackChannelBrain  `json:"channelBrains,omitempty"`
+	Enabled           bool                      `json:"enabled"`
+	PostActions       bool                      `json:"postActions"`
+	HeuristicFallback bool                      `json:"heuristicFallback"`
+	LastTriageJobID   string                    `json:"lastTriageJobId,omitempty"`
+	AuditFreshness    *SlackTriageFreshness     `json:"auditFreshness,omitempty"`
+	AuditFixtures     []SlackTriageAuditFixture `json:"auditFixtures,omitempty"`
+	Runs              []SlackTriageContext      `json:"runs,omitempty"`
+	PendingActions    []SlackPendingAction      `json:"pendingActions,omitempty"`
+	ChannelBrains     []SlackChannelBrain       `json:"channelBrains,omitempty"`
+}
+
+type SlackTriageFreshness struct {
+	GeneratedAt         string `json:"generatedAt"`
+	RunCount            int    `json:"runCount"`
+	OldestRunAt         string `json:"oldestRunAt,omitempty"`
+	NewestRunAt         string `json:"newestRunAt,omitempty"`
+	NewestRunAgeSeconds int64  `json:"newestRunAgeSeconds,omitempty"`
+	SampleWindowSeconds int64  `json:"sampleWindowSeconds,omitempty"`
+}
+
+type SlackTriageAuditFixture struct {
+	Name             string `json:"name"`
+	Expected         string `json:"expected"`
+	Outcome          string `json:"outcome"`
+	Pass             bool   `json:"pass"`
+	ParseOK          bool   `json:"parseOk"`
+	Actions          int    `json:"actions"`
+	Mutations        int    `json:"mutations"`
+	SuppressedReason string `json:"suppressedReason,omitempty"`
+	Summary          string `json:"summary,omitempty"`
 }

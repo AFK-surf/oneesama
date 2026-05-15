@@ -235,6 +235,12 @@ func slackTriagePlainNoActionSummary(raw string) string {
 		if line == "" {
 			continue
 		}
+		if stripped, ok := stripSlackTriageNoActionPrefix(line); ok {
+			if stripped == "" {
+				continue
+			}
+			return truncateSlackContextText(stripped, 300)
+		}
 		normalized := strings.ToLower(strings.Trim(line, ".。:： \t"))
 		switch normalized {
 		case "no action", "no action needed", "no further action", "nothing to do":
@@ -243,6 +249,37 @@ func slackTriagePlainNoActionSummary(raw string) string {
 		return truncateSlackContextText(line, 300)
 	}
 	return "No action needed."
+}
+
+func stripSlackTriageNoActionPrefix(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	lower := strings.ToLower(trimmed)
+	prefixes := []string{
+		"no further action needed",
+		"no action needed",
+		"no further action",
+		"nothing to do",
+		"no action",
+		"no-action",
+		"无需操作",
+		"无需行动",
+		"不需要操作",
+		"不需要行动",
+		"不用操作",
+		"不用行动",
+		"无需接话",
+		"不用接话",
+		"跳过",
+	}
+	for _, prefix := range prefixes {
+		if !strings.HasPrefix(lower, strings.ToLower(prefix)) {
+			continue
+		}
+		rest := strings.TrimSpace(trimmed[len(prefix):])
+		rest = strings.TrimLeft(rest, ".。:：,，;；-— \t")
+		return strings.TrimSpace(rest), true
+	}
+	return "", false
 }
 
 func suggestSlackTriageFallback(channelID string, messages []SlackInboundMessage) slackTriageFallback {

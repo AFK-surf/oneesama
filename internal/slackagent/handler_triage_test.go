@@ -150,6 +150,17 @@ func TestSlackTriageDecisionRepairsPlainNoActionOutput(t *testing.T) {
 	}
 }
 
+func TestSlackTriageDecisionStripsInlineNoActionPrefix(t *testing.T) {
+	raw := "No action. 用户分享链接闲聊，无需助手介入。"
+	decision := parseSlackTriageDecision(raw, slackTriageFallback{Summary: "fallback summary", Channel: "C123", ThreadTS: "123.456"})
+	if !decision.ParseOK {
+		t.Fatalf("decision = %#v, want inline no-action output repaired", decision)
+	}
+	if decision.Summary != "用户分享链接闲聊，无需助手介入。" {
+		t.Fatalf("summary = %q, want no-action prefix stripped", decision.Summary)
+	}
+}
+
 func TestSlackTriageDecisionHidesWorkerMechanismAction(t *testing.T) {
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
 		ChannelID: "C123",
@@ -189,6 +200,77 @@ func TestTriageStatusDefaultKeepsAuditWindowBeyondTenRuns(t *testing.T) {
 	}
 	if len(status.Runs) != 12 {
 		t.Fatalf("runs = %d, want all 12 by default for 6h audit window", len(status.Runs))
+	}
+}
+
+func TestTriageStatusReportsSampleFreshness(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 16, 5, 46, 28, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	if _, err := service.triage.RecordRun(context.Background(), SlackTriageContext{
+		Timestamp: now.Add(-4 * time.Hour).Format(time.RFC3339Nano),
+		Status:    "ok",
+		Summary:   "oldest",
+		Channels:  []string{"C123"},
+	}); err != nil {
+		t.Fatalf("RecordRun oldest: %v", err)
+	}
+	if _, err := service.triage.RecordRun(context.Background(), SlackTriageContext{
+		Timestamp: now.Add(-30 * time.Minute).Format(time.RFC3339Nano),
+		Status:    "ok",
+		Summary:   "newest",
+		Channels:  []string{"C123"},
+	}); err != nil {
+		t.Fatalf("RecordRun newest: %v", err)
+	}
+	status, err := service.TriageStatus(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TriageStatus: %v", err)
+	}
+	if status.AuditFreshness == nil {
+		t.Fatalf("AuditFreshness missing")
+	}
+	if status.AuditFreshness.RunCount != 2 || status.AuditFreshness.NewestRunAgeSeconds != int64((30*time.Minute).Seconds()) {
+		t.Fatalf("freshness = %#v, want run count and newest age", status.AuditFreshness)
+	}
+	if status.AuditFreshness.OldestRunAt == "" || status.AuditFreshness.NewestRunAt == "" || status.AuditFreshness.SampleWindowSeconds != int64((3*time.Hour+30*time.Minute).Seconds()) {
+		t.Fatalf("freshness = %#v, want oldest/newest sample window", status.AuditFreshness)
+	}
+}
+
+func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	status, err := service.TriageStatus(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TriageStatus: %v", err)
+	}
+	if len(status.AuditFixtures) != 3 {
+		t.Fatalf("fixtures = %#v, want ACT/MAYBE/SKIP controls", status.AuditFixtures)
+	}
+	byName := map[string]SlackTriageAuditFixture{}
+	for _, fixture := range status.AuditFixtures {
+		byName[fixture.Name] = fixture
+		if !fixture.ParseOK || !fixture.Pass {
+			t.Fatalf("fixture = %#v, want parsed passing control", fixture)
+		}
+	}
+	if byName["act_post_thread_reply"].Outcome != "ACT" || byName["act_post_thread_reply"].Actions != 1 || byName["act_post_thread_reply"].Mutations != 1 {
+		t.Fatalf("ACT fixture = %#v", byName["act_post_thread_reply"])
+	}
+	if byName["maybe_follow_up"].Outcome != "MAYBE" || byName["maybe_follow_up"].Actions != 1 || byName["maybe_follow_up"].Mutations != 0 {
+		t.Fatalf("MAYBE fixture = %#v", byName["maybe_follow_up"])
+	}
+	if byName["skip_no_action"].Outcome != "SKIP" || byName["skip_no_action"].Actions != 0 || byName["skip_no_action"].SuppressedReason != "no_actions" {
+		t.Fatalf("SKIP fixture = %#v", byName["skip_no_action"])
 	}
 }
 
