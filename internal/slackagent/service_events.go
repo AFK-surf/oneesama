@@ -185,7 +185,7 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 		richContext = s.buildSlackAppMentionContext(ctx, firstNonEmpty(envelope.TeamID, "workspace"), event)
 	}
 
-	commandText := eventTextToAvatarCommand(event)
+	commandText := eventTextToAvatarCommandForBot(event, s.botUserID)
 	if commandText == "" && mentionMode && richContext != nil && richContext.ContainsMeetURL {
 		if meetURL := slackMeetURLPattern.FindString(richContext.Transcript); meetURL != "" {
 			commandText = "join " + meetURL

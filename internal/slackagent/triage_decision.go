@@ -53,6 +53,9 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 	if input.PreviousTriage != "" {
 		contextBlocks = append(contextBlocks, input.PreviousTriage)
 	}
+	if externalLinks := formatSlackExternalLinkContexts(input.ExternalLinks); externalLinks != "" {
+		contextBlocks = append(contextBlocks, "Fetched external links:\n"+externalLinks)
+	}
 	messageBlock := strings.TrimSpace(input.Digest)
 	if messageBlock == "" {
 		lines := make([]string, 0, len(input.Messages))
@@ -111,6 +114,7 @@ type SlackTriagePromptInput struct {
 	ChannelBrain   *SlackChannelBrain
 	LocalMemory    []SlackTriageMemoryEntry
 	PreviousTriage string
+	ExternalLinks  []SlackExternalLinkContext
 }
 
 type SlackTriageMemoryEntry struct {
@@ -270,14 +274,23 @@ func slackTriageActionRequiresConfirmation(actionType string, modelValue bool) b
 	return modelValue && actionType != "post_thread_reply"
 }
 
-func filterSlackTriageActionsForMessages(actions []SlackTriageDecisionAction, messages []SlackInboundMessage) []SlackTriageDecisionAction {
+func filterSlackTriageActionsForMessages(actions []SlackTriageDecisionAction, messages []SlackInboundMessage, botUserID string) []SlackTriageDecisionAction {
 	if len(actions) == 0 {
 		return actions
+	}
+	if slackMessagesMentionOtherUsersWithoutBot(messages, botUserID) {
+		return nil
 	}
 	if slackMessagesAreBareInternalPermalinks(messages) && !explicitlyRequestsSlackPermalinkHandling(joinSlackMessageTexts(messages)) {
 		return nil
 	}
-	if slackTriageThreadContinuationShouldStaySilent(messages) {
+	if slackMessagesAreBareFetchableExternalLinks(messages) {
+		actions = filterSlackTriageReadConfirmationActions(actions)
+		if len(actions) == 0 {
+			return nil
+		}
+	}
+	if slackTriageDirectRepliesShouldStaySilent(messages, botUserID) {
 		filtered := make([]SlackTriageDecisionAction, 0, len(actions))
 		for _, action := range actions {
 			if slackTriageDirectReplyAction(action) {
@@ -288,6 +301,99 @@ func filterSlackTriageActionsForMessages(actions []SlackTriageDecisionAction, me
 		return filtered
 	}
 	return actions
+}
+
+func slackTriageDirectRepliesShouldStaySilent(messages []SlackInboundMessage, botUserID string) bool {
+	if slackTriageThreadContinuationShouldStaySilent(messages) {
+		return true
+	}
+	text := latestSlackInboundMessageText(messages)
+	if text == "" {
+		return false
+	}
+	if slackTextMentionsUser(text, botUserID) {
+		return false
+	}
+	if explicitlyRequestsSlackPermalinkHandling(text) {
+		return false
+	}
+	if slackMessagesHaveFetchableExternalLinks(messages) {
+		return false
+	}
+	if strings.ContainsAny(text, "?？") {
+		return false
+	}
+	for _, keyword := range []string{"什么", "怎么", "咋", "为啥", "为什么", "吗", "么", "啥", "how", "what", "why", "can you", "could you"} {
+		if strings.Contains(strings.ToLower(text), keyword) {
+			return false
+		}
+	}
+	return true
+}
+
+func slackMessagesMentionOtherUsersWithoutBot(messages []SlackInboundMessage, botUserID string) bool {
+	text := latestSlackInboundMessageText(messages)
+	if text == "" || !strings.Contains(text, "<@") {
+		return false
+	}
+	mentions := slackMentionedUserIDs(text)
+	if len(mentions) == 0 {
+		return false
+	}
+	for _, userID := range mentions {
+		if botUserID != "" && userID == botUserID {
+			return false
+		}
+	}
+	return true
+}
+
+func filterSlackTriageReadConfirmationActions(actions []SlackTriageDecisionAction) []SlackTriageDecisionAction {
+	filtered := make([]SlackTriageDecisionAction, 0, len(actions))
+	for _, action := range actions {
+		if slackTriageReadConfirmationAction(action) {
+			continue
+		}
+		filtered = append(filtered, action)
+	}
+	return filtered
+}
+
+func slackTriageReadConfirmationAction(action SlackTriageDecisionAction) bool {
+	if slackTriageDirectReplyAction(action) {
+		return false
+	}
+	joined := strings.ToLower(strings.Join([]string{action.Type, action.Title, action.Message, action.Reason}, "\n"))
+	for _, keyword := range []string{
+		"是否读取", "要不要", "需不需要", "核实并总结", "读取", "读一下", "总结", "概括",
+		"should i read", "whether to read", "read this", "fetch this", "summarize this",
+	} {
+		if strings.Contains(joined, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func latestSlackInboundMessageText(messages []SlackInboundMessage) string {
+	for index := len(messages) - 1; index >= 0; index-- {
+		if text := strings.TrimSpace(messages[index].Text); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func slackMentionedUserIDs(text string) []string {
+	matches := slackBotMentionPattern.FindAllString(strings.TrimSpace(text), -1)
+	ids := make([]string, 0, len(matches))
+	for _, match := range matches {
+		id := strings.TrimSuffix(strings.TrimPrefix(match, "<@"), ">")
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func slackTriageThreadContinuationShouldStaySilent(messages []SlackInboundMessage) bool {
@@ -321,6 +427,36 @@ func slackTriageThreadContinuationShouldStaySilent(messages []SlackInboundMessag
 		return false
 	}
 	return true
+}
+
+func slackMessagesHaveFetchableExternalLinks(messages []SlackInboundMessage) bool {
+	return len(extractSlackExternalLinkURLs(messages)) > 0
+}
+
+func slackMessagesAreBareFetchableExternalLinks(messages []SlackInboundMessage) bool {
+	var sawURL bool
+	for _, message := range messages {
+		text := strings.TrimSpace(message.Text)
+		if text == "" {
+			continue
+		}
+		urls := slackTriageURLPattern.FindAllString(text, -1)
+		if len(urls) == 0 {
+			return false
+		}
+		for _, rawURL := range urls {
+			if !isFetchableSlackExternalURL(rawURL) {
+				return false
+			}
+			sawURL = true
+		}
+		rest := strings.TrimSpace(slackTriageURLPattern.ReplaceAllString(text, ""))
+		rest = strings.Trim(rest, "<>| \t\r\n")
+		if rest != "" {
+			return false
+		}
+	}
+	return sawURL
 }
 
 func slackMessagesAreBareInternalPermalinks(messages []SlackInboundMessage) bool {

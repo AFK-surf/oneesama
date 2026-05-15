@@ -56,6 +56,17 @@ func (s *Service) CompactSlackDailyNotes(ctx context.Context, input SlackScanner
 	return task, nil
 }
 
+func (s *Service) maybeCompactDailyNotes(ctx context.Context) {
+	result, err := s.CompactSlackDailyNotes(ctx, SlackScannerCompactRequest{Run: true})
+	if err != nil {
+		s.logger.Warn("slack scanner daily note compaction failed", "error", err)
+		return
+	}
+	if result.Job != nil {
+		s.logger.Info("slack scanner daily note compaction started", "date", result.Date, "job_id", result.Job.ID)
+	}
+}
+
 func (s *Service) buildDailyNoteCompactionTask(input SlackScannerCompactRequest) SlackScannerCompactResult {
 	root := strings.TrimSpace(firstNonEmpty(input.WorkspaceDir, input.WorkspaceDirAlt, s.workspaceDir))
 	if root == "" {

@@ -31,6 +31,7 @@ type SlackConfig struct {
 	SigningSecret   string
 	BotToken        string
 	AppToken        string
+	BotUserID       string
 	ClientID        string
 	ClientSecret    string
 	RedirectURI     string

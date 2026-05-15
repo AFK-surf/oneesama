@@ -89,7 +89,7 @@ func buildSlackAppMentionContext(event SlackEventPayload) *SlackAppMentionContex
 	transcriptMessages, omitted := compactSlackThreadTranscriptMessages(messages, true, mentionRecentThreadTail)
 	transcript := formatSlackThreadTranscriptForBot(transcriptMessages, botUserID)
 	transcript = annotateCompactedSlackTranscript(transcript, event.Channel, firstNonEmpty(event.ThreadTS, event.TS, event.EventTS), omitted)
-	rawMentionText := stripSlackBotMentions(event.Text)
+	rawMentionText := stripSlackUserMention(event.Text, botUserID)
 	mentionText := rawMentionText
 	injectedJoinRequest := false
 	if mentionText == "" && slackMeetURLPattern.MatchString(transcript) {

@@ -19,7 +19,7 @@ func TestHandleEventsJoinPostsMeetingOptionCard(t *testing.T) {
 	router := newTestRouter(t, Config{
 		MeetingAgentURL:        meetingAgent.URL,
 		DefaultCaptionLanguage: "English",
-		Slack:                  appconfig.SlackConfig{SigningSecret: "secret"},
+		Slack:                  appconfig.SlackConfig{SigningSecret: "secret", BotUserID: "UBOT"},
 		Poster:                 poster,
 		AgentRunner:            appconfig.AgentRunnerConfig{Provider: "codex", DryRun: true},
 	})
@@ -68,7 +68,7 @@ func TestHandleEventsJoinPostsCardFromSlackLabeledMeetLink(t *testing.T) {
 	router := newTestRouter(t, Config{
 		MeetingAgentURL:        meetingAgent.URL,
 		DefaultCaptionLanguage: "English",
-		Slack:                  appconfig.SlackConfig{SigningSecret: "secret"},
+		Slack:                  appconfig.SlackConfig{SigningSecret: "secret", BotUserID: "UBOT"},
 		Poster:                 poster,
 		AgentRunner:            appconfig.AgentRunnerConfig{Provider: "codex", DryRun: true},
 	})
@@ -100,7 +100,7 @@ func TestHandleEventsJoinMentionDedupeAcrossAppMentionAndMessage(t *testing.T) {
 	router := newTestRouter(t, Config{
 		MeetingAgentURL:        meetingAgent.URL,
 		DefaultCaptionLanguage: "English",
-		Slack:                  appconfig.SlackConfig{SigningSecret: "secret"},
+		Slack:                  appconfig.SlackConfig{SigningSecret: "secret", BotUserID: "UBOT"},
 		Poster:                 poster,
 		AgentRunner:            appconfig.AgentRunnerConfig{Provider: "codex", DryRun: true},
 	})

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +129,33 @@ func TestHandleScannerSweepFlushesFixtureMessages(t *testing.T) {
 	}
 	if !strings.Contains(retry.Body.String(), `"previousCursor":"2026-05-13T01:00:01Z"`) || !strings.Contains(retry.Body.String(), `"buffered":0`) {
 		t.Fatalf("retry sweep body = %s, want cursor dedupe", retry.Body.String())
+	}
+}
+
+func TestHandleScannerSweepIgnoresCurrentBotMentions(t *testing.T) {
+	router := newTestRouter(t, Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotUserID: "UBOT",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+		},
+	})
+
+	body := `{"workspace_id":"T123","channels":[{"id":"C123","type":"channel","messages":[{"user":"U1","text":"<@UBOT> https://meet.google.com/yuf-wnes-yqt","ts":"1778810550.773349"},{"user":"U2","text":"normal background chatter","ts":"1778810551.000000"}]}]}`
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/scanner/sweep", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("sweep status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"buffered":1`) || strings.Contains(response.Body.String(), "yuf-wnes-yqt") {
+		t.Fatalf("sweep body = %s, want scanner to ignore current bot mentions and only buffer background chatter", response.Body.String())
 	}
 }
 
@@ -407,6 +435,20 @@ func TestSlackHistoryScannerPostsPendingActionCard(t *testing.T) {
 }
 
 func TestSlackHistoryScannerPostsDirectReadOnlyReplyForExternalLink(t *testing.T) {
+	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`Title: Peter Steinberger on X: codex review loop
+
+Markdown Content:
+Wrote a skill that runs codex /review in a loop until there's no booboos anymore.
+Caveat: It won't fix system architecture for ya, so you still need BRAIN as master model.`))
+	}))
+	defer reader.Close()
+	previousReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkReaderURL = func(rawURL string) string {
+		return reader.URL + "/?url=" + url.QueryEscape(rawURL)
+	}
+	defer func() { slackExternalLinkReaderURL = previousReaderURL }()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse form: %v", err)
@@ -461,6 +503,13 @@ func TestSlackHistoryScannerPostsDirectReadOnlyReplyForExternalLink(t *testing.T
 	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
 		t.Fatalf("result = %#v, want flushed scanner result", result)
 	}
+	if !strings.Contains(runner.startInput.Task, "Fetched external links") || !strings.Contains(runner.startInput.Task, "codex /review") {
+		t.Fatalf("runner task missing fetched external link context:\n%s", runner.startInput.Task)
+	}
+	externalLinks, ok := runner.startInput.Context["externalLinks"].([]SlackExternalLinkContext)
+	if !ok || len(externalLinks) != 1 || !strings.Contains(externalLinks[0].Excerpt, "codex /review") {
+		t.Fatalf("externalLinks context = %#v, want fetched X content", runner.startInput.Context["externalLinks"])
+	}
 	poster.WaitForCalls(t, 1)
 	calls := poster.Calls()
 	if len(calls) != 1 {
@@ -479,6 +528,86 @@ func TestSlackHistoryScannerPostsDirectReadOnlyReplyForExternalLink(t *testing.T
 	}
 	if len(status.PendingActions) != 0 {
 		t.Fatalf("pending actions = %#v, want none for read-only reply", status.PendingActions)
+	}
+}
+
+func TestSlackHistoryScannerDoesNotAskBeforeReadingExternalLink(t *testing.T) {
+	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`Title: Peter Steinberger on X: codex review loop
+
+Markdown Content:
+Wrote a skill that runs codex /review in a loop until there's no booboos anymore.`))
+	}))
+	defer reader.Close()
+	previousReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkReaderURL = func(rawURL string) string {
+		return reader.URL + "/?url=" + url.QueryEscape(rawURL)
+	}
+	defer func() { slackExternalLinkReaderURL = previousReaderURL }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://x.com/steipete/status/2054850632067019173","ts":"1778767510.917049"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_x_link_confirm",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"X link needs reading","actions":[{"type":"follow_up","title":"核实并总结 X 链接","message":"是否读取这条 @steipete 的 X 动态，并提炼可以回复什么？","channelId":"C123","threadTs":"1778767510.917049","confidence":0.7,"reason":"需要先读链接。","requiresConfirmation":true}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+			Triage: appconfig.SlackTriageConfig{
+				PostActions:       true,
+				HeuristicFallback: true,
+			},
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.inbound.SetCursor("C123", "1778767000.000000")
+
+	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("scanSlackHistoryOnce: %v", err)
+	}
+	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
+		t.Fatalf("result = %#v, want flushed scanner result", result)
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want no confirmation card asking whether to read an external link", calls)
+	}
+	status, err := service.TriageStatus(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("TriageStatus: %v", err)
+	}
+	if len(status.PendingActions) != 0 {
+		t.Fatalf("pending actions = %#v, want external-link read confirmation suppressed", status.PendingActions)
 	}
 }
 

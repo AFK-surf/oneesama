@@ -139,7 +139,7 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 			message.ChannelType = firstNonEmpty(message.ChannelType, channel.Type)
 			message.TS = firstNonEmpty(message.TS, message.EventTS)
 			message.EventTS = firstNonEmpty(message.EventTS, message.TS)
-			if shouldIgnoreScannerInboundMessage(message, "") {
+			if shouldIgnoreScannerInboundMessage(message, s.botUserID) {
 				continue
 			}
 			if previousCursor != "" && !slackTSGreater(message.TS, previousCursor) {

@@ -6,7 +6,7 @@ import (
 )
 
 func (s *Service) messageMentionFallbackEvent(ctx context.Context, event SlackEventPayload) (SlackEventPayload, bool) {
-	if isBotMentionFallbackMessage(event) {
+	if isBotMentionFallbackMessage(event, s.botUserID) {
 		return event, true
 	}
 	if !isThreadMentionFallbackCandidate(event) {
@@ -14,7 +14,7 @@ func (s *Service) messageMentionFallbackEvent(ctx context.Context, event SlackEv
 	}
 
 	messages, source, ok, fetchErr := s.fetchSlackMentionThreadMessages(ctx, event)
-	mention, found := latestThreadBotMentionMessage(event, messages)
+	mention, found := latestThreadBotMentionMessage(event, messages, s.botUserID)
 	if !found {
 		s.logger.Warn(
 			"slack thread mention fallback skipped",
@@ -34,14 +34,14 @@ func (s *Service) messageMentionFallbackEvent(ctx context.Context, event SlackEv
 	return slackEventFromThreadMention(event, mention, messages), true
 }
 
-func isBotMentionFallbackMessage(event SlackEventPayload) bool {
+func isBotMentionFallbackMessage(event SlackEventPayload, botUserID string) bool {
 	if event.BotID != "" || event.Subtype != "" {
 		return false
 	}
 	if event.Type != "message" || strings.TrimSpace(event.ChannelType) == "im" {
 		return false
 	}
-	return slackBotMentionPattern.MatchString(event.Text)
+	return slackTextMentionsUser(event.Text, botUserID)
 }
 
 func isThreadMentionFallbackCandidate(event SlackEventPayload) bool {
@@ -54,7 +54,7 @@ func isThreadMentionFallbackCandidate(event SlackEventPayload) bool {
 	return hasThreadFixture(event)
 }
 
-func latestThreadBotMentionMessage(event SlackEventPayload, messages []SlackMessage) (SlackMessage, bool) {
+func latestThreadBotMentionMessage(event SlackEventPayload, messages []SlackMessage, botUserID string) (SlackMessage, bool) {
 	latestReplyTS := latestThreadReplyTS(event)
 	latestUserTS := ""
 	for index := len(messages) - 1; index >= 0; index-- {
@@ -70,7 +70,7 @@ func latestThreadBotMentionMessage(event SlackEventPayload, messages []SlackMess
 		if latestUserTS == "" {
 			latestUserTS = messageTS
 		}
-		if !slackBotMentionPattern.MatchString(text) {
+		if !slackTextMentionsUser(text, botUserID) {
 			continue
 		}
 		if latestReplyTS != "" {
@@ -79,6 +79,14 @@ func latestThreadBotMentionMessage(event SlackEventPayload, messages []SlackMess
 		return message, latestUserTS == "" || messageTS == latestUserTS
 	}
 	return SlackMessage{}, false
+}
+
+func slackTextMentionsUser(text string, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	return strings.Contains(strings.TrimSpace(text), "<@"+userID+">")
 }
 
 func slackEventFromThreadMention(event SlackEventPayload, mention SlackMessage, messages []SlackMessage) SlackEventPayload {

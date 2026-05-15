@@ -9,7 +9,11 @@ var slackMeetURLPattern = regexp.MustCompile(`https://meet\.google\.com/[a-z]{3}
 var slackBotMentionPattern = regexp.MustCompile(`<@[A-Z0-9]+>`)
 
 func eventTextToAvatarCommand(event SlackEventPayload) string {
-	text := strings.TrimSpace(stripSlackBotMentions(event.Text))
+	return eventTextToAvatarCommandForBot(event, "")
+}
+
+func eventTextToAvatarCommandForBot(event SlackEventPayload, botUserID string) string {
+	text := strings.TrimSpace(stripSlackUserMention(event.Text, botUserID))
 	if text == "" {
 		return ""
 	}
@@ -36,9 +40,16 @@ func findSlackMeetURL(text string) string {
 }
 
 func stripSlackBotMentions(text string) string {
+	return stripSlackUserMention(text, "")
+}
+
+func stripSlackUserMention(text string, userID string) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return ""
+	}
+	if userID != "" {
+		return strings.TrimSpace(strings.ReplaceAll(trimmed, "<@"+userID+">", ""))
 	}
 	return strings.TrimSpace(slackBotMentionPattern.ReplaceAllString(trimmed, ""))
 }

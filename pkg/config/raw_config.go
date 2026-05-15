@@ -32,6 +32,7 @@ type rawSlackConfig struct {
 	SigningSecret   string                    `json:"signing_secret"`
 	BotToken        string                    `json:"bot_token"`
 	AppToken        string                    `json:"app_token"`
+	BotUserID       string                    `json:"bot_user_id"`
 	ClientID        string                    `json:"client_id"`
 	ClientSecret    string                    `json:"client_secret"`
 	RedirectURI     string                    `json:"redirect_uri"`
@@ -159,6 +160,7 @@ func (r rawConfig) toConfig(path string) Config {
 			SigningSecret:   strings.TrimSpace(r.Slack.SigningSecret),
 			BotToken:        strings.TrimSpace(r.Slack.BotToken),
 			AppToken:        strings.TrimSpace(r.Slack.AppToken),
+			BotUserID:       strings.TrimSpace(r.Slack.BotUserID),
 			ClientID:        strings.TrimSpace(r.Slack.ClientID),
 			ClientSecret:    strings.TrimSpace(r.Slack.ClientSecret),
 			RedirectURI:     strings.TrimSpace(r.Slack.RedirectURI),

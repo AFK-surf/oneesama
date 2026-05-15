@@ -21,6 +21,12 @@ func TestCueboardParityMentionTextHelpers(t *testing.T) {
 	if got := stripSlackBotMentions("<@U123BOT> and <@U123BOT> again"); got != "and  again" {
 		t.Fatalf("strip multiple = %q", got)
 	}
+	if got := stripSlackUserMention("<@UBOT> ask <@UOTHER> to check", "UBOT"); got != "ask <@UOTHER> to check" {
+		t.Fatalf("strip exact bot mention = %q", got)
+	}
+	if got := eventTextToAvatarCommandForBot(SlackEventPayload{Text: "<@UBOT> ask <@UOTHER> to check"}, "UBOT"); got != "work ask <@UOTHER> to check" {
+		t.Fatalf("command = %q, want other mentions preserved", got)
+	}
 }
 
 func TestCueboardParityMentionTranscriptFormatting(t *testing.T) {

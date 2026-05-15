@@ -58,6 +58,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
 	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(digest, 5), digest)
+	externalLinks := fetchSlackExternalLinkContexts(ctx, messages)
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
 		ChannelID:      channelID,
 		Messages:       messages,
@@ -65,6 +66,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 		ChannelBrain:   channelBrain,
 		LocalMemory:    localMemory,
 		PreviousTriage: formatTriageContexts(previous),
+		ExternalLinks:  externalLinks,
 	})
 	contextMap := map[string]any{
 		"source":        "slack-triage",
@@ -100,6 +102,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 			"count":       len(previous),
 			"text":        formatTriageContexts(previous),
 		},
+		"externalLinks":  externalLinks,
 		"expectedOutput": "JSON triage decision with summary and actions[]",
 	}
 	job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
@@ -164,7 +167,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	rawOutput := firstNonEmpty(job.Result, job.Error)
 	decision := parseSlackTriageDecision(rawOutput, fallback)
 	ok := job.Status == agentrunner.StatusCompleted
-	actions := filterSlackTriageActionsForMessages(decision.Actions, messages)
+	actions := filterSlackTriageActionsForMessages(decision.Actions, messages, s.botUserID)
 	decision.Actions = actions
 	if !ok {
 		actions = nil
@@ -213,6 +216,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	if updatedRun != nil {
 		persistTriageContext(s.workspaceDir, *updatedRun)
 	}
+	go s.maybeCompactDailyNotes(context.WithoutCancel(ctx))
 	if ok && decision.Summary != "" {
 		if _, err := s.cognition.UpsertChannelBrainSummary(ctx, workspaceID, channelID, decision.Summary); err != nil {
 			s.logger.Warn("slack channel brain summary update failed", "error", err)

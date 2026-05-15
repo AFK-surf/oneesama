@@ -152,10 +152,65 @@ func TestCueboardParityTriageSuppressesCasualRepliesInActiveThreads(t *testing.T
 		ThreadTS:             "1778772007.043069",
 		Confidence:           0.72,
 		RequiresConfirmation: false,
-	}}, messages)
+	}}, messages, "UBOT")
 
 	if len(actions) != 0 {
 		t.Fatalf("actions = %#v, want casual triage reply suppressed in active human/assistant thread", actions)
+	}
+}
+
+func TestCueboardParityTriageSuppressesUnmentionedObservationDirectReplies(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "W1",
+		ChannelID: "C123",
+		UserID:    "U123",
+		TS:        "1778779797.697749",
+		Text:      "这个onboarding-bot-hourly刷屏了",
+	}}
+	actions := filterSlackTriageActionsForMessages([]SlackTriageDecisionAction{{
+		Type:                 "post_thread_reply",
+		Title:                "bot noise",
+		Message:              "看到了，确实在刷屏。",
+		ChannelID:            "C123",
+		ThreadTS:             "1778779797.697749",
+		Confidence:           0.72,
+		RequiresConfirmation: false,
+	}}, messages, "UBOT")
+
+	if len(actions) != 0 {
+		t.Fatalf("actions = %#v, want unmentioned observation to stay silent instead of casual triage reply", actions)
+	}
+}
+
+func TestCueboardParityTriageSuppressesRepliesWhenAnotherUserIsMentioned(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "W1",
+		ChannelID: "C123",
+		UserID:    "U123",
+		TS:        "1778808469.644499",
+		ThreadTS:  "1778779797.697749",
+		Text:      "prod Willow/control DB 里查到了吗 <@UOTHER> `name = 'onboarding-bot-hourly'` 查 `schedules`",
+	}}
+	actions := filterSlackTriageActionsForMessages([]SlackTriageDecisionAction{{
+		Type:                 "post_thread_reply",
+		Title:                "wrong target",
+		Message:              "不是我设置的。",
+		ChannelID:            "C123",
+		ThreadTS:             "1778779797.697749",
+		Confidence:           0.9,
+		RequiresConfirmation: false,
+	}, {
+		Type:                 "create_issue",
+		Title:                "track onboarding bot",
+		Message:              "Track onboarding bot schedule.",
+		ChannelID:            "C123",
+		ThreadTS:             "1778779797.697749",
+		Confidence:           0.8,
+		RequiresConfirmation: true,
+	}}, messages, "UBOT")
+
+	if len(actions) != 0 {
+		t.Fatalf("actions = %#v, want triage fully silent when the latest message mentions another user but not the bot", actions)
 	}
 }
 
@@ -176,9 +231,33 @@ func TestCueboardParityTriageKeepsExplicitThreadRequests(t *testing.T) {
 		ThreadTS:             "1778772007.043069",
 		Confidence:           0.86,
 		RequiresConfirmation: false,
-	}}, messages)
+	}}, messages, "UBOT")
 
 	if len(actions) != 1 {
 		t.Fatalf("actions = %#v, want explicit inspect/summarize thread request kept", actions)
+	}
+}
+
+func TestCueboardParityTriageKeepsExplicitBotMentionReplies(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "W1",
+		ChannelID: "C123",
+		UserID:    "U123",
+		TS:        "1778810926.574949",
+		ThreadTS:  "1778779797.697749",
+		Text:      "<@UBOT> 你闭嘴",
+	}}
+	actions := filterSlackTriageActionsForMessages([]SlackTriageDecisionAction{{
+		Type:                 "post_thread_reply",
+		Title:                "ack",
+		Message:              "好的，我闭嘴。",
+		ChannelID:            "C123",
+		ThreadTS:             "1778779797.697749",
+		Confidence:           0.9,
+		RequiresConfirmation: false,
+	}}, messages, "UBOT")
+
+	if len(actions) != 1 {
+		t.Fatalf("actions = %#v, want explicit bot mention reply kept", actions)
 	}
 }

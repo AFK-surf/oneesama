@@ -19,7 +19,7 @@ func TestHandleEventsMessageMentionFallbackUsesThreadMeetURLJoinCard(t *testing.
 	router := newTestRouter(t, Config{
 		MeetingAgentURL:        meetingAgent.URL,
 		DefaultCaptionLanguage: "English",
-		Slack:                  appconfig.SlackConfig{SigningSecret: "secret"},
+		Slack:                  appconfig.SlackConfig{SigningSecret: "secret", BotUserID: "UBOT"},
 		Poster:                 poster,
 		AgentRunner:            appconfig.AgentRunnerConfig{Provider: "codex", DryRun: true},
 	})
@@ -86,7 +86,7 @@ func TestHandleEventsMessageRepliedMentionUsesThreadMeetURLJoinCard(t *testing.T
 	router := newTestRouter(t, Config{
 		MeetingAgentURL:        meetingAgent.URL,
 		DefaultCaptionLanguage: "English",
-		Slack:                  appconfig.SlackConfig{SigningSecret: "secret"},
+		Slack:                  appconfig.SlackConfig{SigningSecret: "secret", BotUserID: "UBOT"},
 		Poster:                 poster,
 		AgentRunner:            appconfig.AgentRunnerConfig{Provider: "codex", DryRun: true},
 	})
@@ -157,6 +157,7 @@ func TestHandleEventsMessageRepliedIgnoresUnrelatedThreadAfterOlderBotMention(t 
 		DefaultCaptionLanguage: "English",
 		Slack: appconfig.SlackConfig{
 			SigningSecret: "secret",
+			BotUserID:     "UBOT",
 			EventBuffer: appconfig.SlackEventBufferConfig{
 				Enabled: true,
 			},
@@ -211,5 +212,57 @@ func TestHandleEventsMessageRepliedIgnoresUnrelatedThreadAfterOlderBotMention(t 
 	}
 	if calls := poster.Calls(); len(calls) != 0 {
 		t.Fatalf("poster calls = %#v, want no direct bot reply for unrelated thread continuation", calls)
+	}
+}
+
+func TestHandleEventsMessageMentionFallbackIgnoresOtherUserMention(t *testing.T) {
+	poster := &recordingPoster{callCh: make(chan struct{}, 4)}
+	router := newTestRouter(t, Config{
+		DefaultCaptionLanguage: "English",
+		Slack: appconfig.SlackConfig{
+			SigningSecret: "secret",
+			BotUserID:     "UBOT",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled: true,
+			},
+		},
+		Poster:      poster,
+		AgentRunner: appconfig.AgentRunnerConfig{Provider: "codex", DryRun: true},
+	})
+
+	body := `{
+		"type":"event_callback",
+		"event_id":"EvMessageMentionsSomeoneElse",
+		"team_id":"T123",
+		"event":{
+			"type":"message",
+			"channel_type":"channel",
+			"user":"U123",
+			"text":"prod Willow/control DB 里查到了吗 <@UOTHER> ` + "`" + `name = 'onboarding-bot-hourly'` + "`" + ` 查 schedules",
+			"channel":"C123",
+			"ts":"1778808469.644499",
+			"thread_ts":"1778779797.697749"
+		}
+	}`
+	timestamp, signature := signedSlackJSONBody("secret", body)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Slack-Request-Timestamp", timestamp)
+	request.Header.Set("X-Slack-Signature", signature)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var payload SlackEventResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.OK || !payload.Handled || payload.Mode != "event_buffer" {
+		t.Fatalf("payload = %#v, want ordinary message buffered, not treated as bot mention", payload)
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want no direct bot mention response", calls)
 	}
 }
