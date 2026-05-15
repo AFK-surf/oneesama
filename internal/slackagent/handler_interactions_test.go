@@ -338,3 +338,110 @@ func TestHandleInteractionUpdatesPendingTriageAction(t *testing.T) {
 		t.Fatalf("body = %s, want pending action confirmed", response.Body.String())
 	}
 }
+
+func TestHandleInteractionConfirmedJoinMeetingPendingActionExecutesMeetJoin(t *testing.T) {
+	meetURL := "https://meet.google.com/yuf-wnes-yqt"
+	joinRequestCh := make(chan meetingAgentJoinRequest, 1)
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/join/google-meet" {
+			t.Fatalf("path = %s, want /join/google-meet", request.URL.Path)
+		}
+		var body meetingAgentJoinRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		joinRequestCh <- body
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"ok":true,"accepted":true,"started":true,"session":{"id":"session_pending_join","meeting_url":"` + meetURL + `","status":"joined","title":"Google Meet"}}`))
+	}))
+	defer meetingAgent.Close()
+	finalResponseCh := make(chan string, 1)
+	responseURLServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		raw, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read response url body: %v", err)
+		}
+		finalResponseCh <- string(raw)
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer responseURLServer.Close()
+	poster := &recordingPoster{callCh: make(chan struct{}, 4)}
+	router := newTestRouter(t, Config{
+		MeetingAgentURL: meetingAgent.URL,
+		Persistence:     appconfig.PersistenceConfig{Provider: "memory"},
+		Poster:          poster,
+		Slack: appconfig.SlackConfig{
+			SigningSecret:   "secret",
+			InternalAuthKey: "secret-key",
+			BotUserID:       "UBOT",
+			Triage: appconfig.SlackTriageConfig{
+				PostActions:       true,
+				HeuristicFallback: false,
+			},
+		},
+		Runner: &fakeRunner{job: agentrunner.Job{
+			ID:       "job_triage_join_meeting",
+			Provider: "codex",
+			Status:   agentrunner.StatusCompleted,
+			Result:   `{"summary":"meeting join needed","actions":[{"type":"join_meeting","title":"加入 Google Meet","message":"检测到 Google Meet 链接 https://meet.google.com/yuf-wnes-yqt，由 <@U09KNU8QD1V> 分享，建议加入会议。","confidence":0.85,"requiresConfirmation":true}]}`,
+		}},
+	})
+
+	triageResponse := httptest.NewRecorder()
+	triageRequest := httptest.NewRequest(http.MethodPost, "/slack/triage/run", strings.NewReader(`{"team_id":"T123","channel_id":"C0ALMF2AD70","user_id":"U09KNU8QD1V","text":"https://meet.google.com/yuf-wnes-yqt","ts":"1778810546.196809"}`))
+	triageRequest.Header.Set("Content-Type", "application/json")
+	triageRequest.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(triageResponse, triageRequest)
+	if triageResponse.Code != http.StatusOK {
+		t.Fatalf("triage status = %d, want 200: %s", triageResponse.Code, triageResponse.Body.String())
+	}
+	var triageBody struct {
+		Triage SlackTriageStartResult `json:"triage"`
+	}
+	if err := json.Unmarshal(triageResponse.Body.Bytes(), &triageBody); err != nil {
+		t.Fatalf("decode triage: %v", err)
+	}
+	if triageBody.Triage.Finalization == nil || len(triageBody.Triage.Finalization.PendingActions) != 1 {
+		t.Fatalf("triage = %#v, want pending join action", triageBody.Triage)
+	}
+	pendingID := triageBody.Triage.Finalization.PendingActions[0].PendingAction.ID
+
+	payload := signAvatarCommand(t, "secret", url.Values{
+		"payload": {`{"team_id":"T123","channel_id":"C0ALMF2AD70","user_id":"U09KNU8QD1V","response_url":` + strconv.Quote(responseURLServer.URL) + `,"actions":[{"block_id":"mab_pending_action:` + strconv.FormatInt(pendingID, 10) + `","action_id":"mab_pending_action_confirm","value":"{\"kind\":\"mab_pending_action\",\"id\":` + strconv.FormatInt(pendingID, 10) + `,\"status\":\"confirmed\"}"}]}`},
+	})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/interactions", bytes.NewBufferString(payload.body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
+	request.Header.Set("X-Slack-Signature", payload.signature)
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "executing") {
+		t.Fatalf("body = %s, want confirmed action execution acknowledgement", response.Body.String())
+	}
+
+	var joinBody meetingAgentJoinRequest
+	select {
+	case joinBody = <-joinRequestCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for pending action to call meeting-agent join")
+	}
+	if joinBody.MeetingURL != meetURL || joinBody.DryRun {
+		t.Fatalf("join body = %#v, want real join for evidence Meet URL", joinBody)
+	}
+	if joinBody.SlackChannelID != "C0ALMF2AD70" || joinBody.SlackThreadTS != "1778810546.196809" {
+		t.Fatalf("join slack context = %#v, want source thread carried into meeting-agent", joinBody)
+	}
+
+	select {
+	case finalBody := <-finalResponseCh:
+		if !strings.Contains(finalBody, `"replace_original":true`) ||
+			!strings.Contains(finalBody, ":studio_microphone: *Joined: Google Meet*") {
+			t.Fatalf("final response = %s, want pending card replaced with joined result", finalBody)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for pending action response_url update")
+	}
+}

@@ -60,4 +60,5 @@ type SlackPendingActionInteraction struct {
 	SnoozeMinutes  int    `json:"snooze_minutes,omitempty"`
 	ChannelID      string `json:"channel_id,omitempty"`
 	ThreadTS       string `json:"thread_ts,omitempty"`
+	ResponseURL    string `json:"response_url,omitempty"`
 }

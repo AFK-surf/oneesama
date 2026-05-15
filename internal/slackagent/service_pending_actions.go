@@ -51,6 +51,7 @@ func parsePendingActionInteraction(payload SlackInteractionPayload) *SlackPendin
 		SnoozeMinutes:  int(numberFromAny(firstNonEmpty(stringFromAny(parsed["snoozeMinutes"]), stringFromAny(parsed["snooze_minutes"])), 0)),
 		ChannelID:      firstNonEmpty(stringFromAny(parsed["channelId"]), stringFromAny(parsed["channel_id"])),
 		ThreadTS:       firstNonEmpty(stringFromAny(parsed["threadTs"]), stringFromAny(parsed["thread_ts"])),
+		ResponseURL:    strings.TrimSpace(payload.ResponseURL),
 	}
 }
 
@@ -81,6 +82,20 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 	workspaceID := "workspace"
 	if err := s.cognition.RecordAction(ctx, workspaceID, updated.ChannelID, updated.ThreadTS, updated.ActionType, interaction.Status); err != nil {
 		s.logger.Warn("slack pending action cognition update failed", "error", err)
+	}
+	if interaction.Status == "confirmed" && updated.ActionType == slackActionTypeJoinMeeting {
+		go s.executeJoinMeetingPendingAction(context.WithoutCancel(ctx), *updated, interaction)
+		return AvatarCommandResponse{
+			OK:              true,
+			ResponseType:    "ephemeral",
+			Text:            fmt.Sprintf("Pending action %d marked confirmed; executing join_meeting.", updated.ID),
+			ReplaceOriginal: true,
+			Metadata: map[string]any{
+				"pending_action": updated,
+				"interaction":    interaction,
+				"execution":      "started",
+			},
+		}
 	}
 	return AvatarCommandResponse{
 		OK:           true,

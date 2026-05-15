@@ -21,7 +21,7 @@ Legend:
 | P0 | External link read-first behavior | ported/partial | `f3cdc7f` prefetches external links with Jina and suppresses "是否读取" cards; `TestTask147ShadowHarnessReadsExternalLinkWithoutConfirmation` locks direct source-thread answer. Tool-level `exa_search/exa_contents` is still missing. | Port or shim web/search tool surface; keep prefetch as guardrail. |
 | P0 | Memory / dreaming / self-growth | partial | Follow-up and local memory exist; current slices port Cueboard-style self-growth signals into heartbeat follow-ups, lesson candidates, managed `MEMORY.md`, and visible heartbeat/dream delivery guards (6h rate limit, quiet hours, public rate limit, newer-activity block). Dedicated live shadow evidence still pending. | Live-shadow self-growth and visible heartbeat/dream behavior against old bridge. |
 | P0 | Tool registry parity except credentialed apps | partial | Prompt advertises tools not all exposed/implemented by capabilities; LLM may not know how to fetch or remember. | Align prompt, capabilities, and actual handlers. |
-| P1 | Meet join from triage cards | partial | Join card exists and recent extra triage reply fixed; live "加会加不进来" still needs interaction evidence. | Reproduce interaction from Slack payload/logs. |
+| P1 | Meet join from triage cards | ported | Evidence thread showed two separate paths: direct @ with Meet URL posted a join setup card correctly, while bare Meet-link triage created a `join_meeting` pending action. The real gap was pending-action confirm only marked `confirmed` and never executed the meeting join. | `TestHandleInteractionConfirmedJoinMeetingPendingActionExecutesMeetJoin` locks confirm -> `/join/google-meet` -> source-thread joined post. |
 
 ## HTTP Routes
 
@@ -48,7 +48,7 @@ Legend:
 | `bridge.go:407-411`, `mention_state.go:26` | `assistant_thread_started` sets suggested prompts. | `service_events.go:42-57` | ported | Suggested prompts cleaned in R31; parity should stay user-friendly. |
 | `bridge.go:412-430` | DM message -> mention path; non-DM channel messages -> scanner buffer. | `service_events.go:69-106` | ported/partial | DM and channel buffer exist; `f3cdc7f` fixed bot mention filtering. Need live silence evidence. |
 | `interaction.go:16-29` | Block action dispatch: dismiss, confirm, feedback. | `handler.go:27-30`, `service_interaction_dispatch.go`, `service_interactions.go` | partial | Join and pending-action paths exist; feedback/improvement tail is not fully old Cueboard. |
-| `interaction.go:136-173` | Confirm/dismiss pending actions. | `service_pending_actions.go`, `triage_action_card.go` | partial | Join-meeting confirmation exists; third-party mutations excluded; action taxonomy should be compared for remaining non-credentialed actions. |
+| `interaction.go:136-173`, `interaction.go:425-458`, `interaction.go:684-733` | Confirm/dismiss pending actions and execute confirmed `join_meeting`. | `service_pending_actions.go`, `service_pending_join.go`, `triage_action_card.go` | ported/partial | `join_meeting` confirmation now executes the meeting-agent join and posts the joined/failure result back into the source thread. Third-party mutations remain excluded; action taxonomy should be compared for remaining non-credentialed actions. |
 | `interaction.go:78` | Reply helpful/not-helpful feedback. | `pending_action_feedback.go`, `interaction_summary.go`; no full improvement loop | partial | Feedback can be stored/rendered, but self-growth learning loop is not complete. |
 | `bridge.go:380-386`, `slash_commands.go:16-29` | Slash commands: usage/status. | `handler_avatar_command.go`, `avatar_command_parse.go` | drift | User-visible command vocabulary intentionally changed to `join/status/stop/help`; not a triage blocker unless Peng wants old slash commands. |
 
@@ -77,7 +77,7 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
 | `slack_tools.go:20-24`, `tool_registration_test.go:48-63` | Full assistant registry: `audio_generation`, `figma_api`, `followup_memory`, `google_calendar_api`, `heartbeat_log`, `image_generation`, `linear_api`, `notion_api`, `person_memory`, `read_doc`, `runtime_status`, `slack_api`, `suggest_action`, `usage_api`. | `agentrunner/capabilities.go:73-87` | partial | Oneesama allows `slack_api/read_doc/person_memory/suggest_action/followup_memory/runtime_status/heartbeat_log/manage_schedule` but not `usage_api`, image/audio, or web search; credentialed apps excluded. |
 | `tool_registration_test.go:69-90` | Planner/triage includes `followup_memory`, `person_memory`, excludes image/audio/runtime. | `agentrunner/capabilities.go:57-69` | partial | Triage includes `usage` not `usage_api`; no web/search tools. |
 | `slack_api_tool_fetch.go`, `slack_api_tool_messages.go`, `slack_api_tool_canvas.go` | Slack fetch/reply/file/reaction/canvas/message actions. | `slack_api_tool_fetch.go`, `slack_api_tool_messages.go`, `canvas_api.go` | partial | Message posting shim currently supports only subset; planner-only restrictions exist. Need method matrix. |
-| `suggest_tool.go` | `suggest_action` cards including join meeting, issue, event, channel. | `suggest_tool.go`, `meeting_approval.go` | partial | Join-meeting card exists; credentialed mutations excluded; channel/event scope should be marked or removed. |
+| `suggest_tool.go`, `interaction.go:684-733` | `suggest_action` cards including join meeting, issue, event, channel. | `suggest_tool.go`, `service_pending_join.go`, `meeting_approval.go` | ported/partial | `join_meeting` pending cards now execute on Confirm, infer `meet_url` from params/message/thread transcript, call `/join/google-meet`, and post result back into the source thread. Credentialed mutations excluded; channel/event scope should be marked or removed. |
 | `people_memory_tool.go` | `person_memory`. | `people_memory_tool.go` | ported/partial | Exists; live behavior needs proof. |
 | `heartbeat_log_tool.go`, `runtime_status_tool.go` | `heartbeat_log`, `runtime_status`. | `heartbeat_log_view.go`, `runtime_status.go` | ported/partial | Exists and tested; verify current live logs/status when asked. |
 | `usage_tool.go` | `usage_api`. | prompt mentions `usage_api`; capabilities use `usage`; no handler found | drift | Rename/alias to `usage_api` or remove prompt advertisement. |
@@ -138,9 +138,7 @@ Peng scope for task #147: do not port credentialed external app integrations (`l
    - Verify visible heartbeat/dream delivery surfaces exactly when Cueboard would: not inside quiet hours, not more than 3 public surfaces/12h, not more than once/6h per follow-up, and not if the thread already has newer activity.
 4. P0 scanner silence:
    - Compare active mention thread filtering, retry/reinject, cursor commit, and direct reply thresholds against cueboard with live examples.
-5. P1 Meet join interaction:
-   - Trace the Slack Join button path for the evidence permalink and confirm whether interaction payload, meeting-agent call, or Meet runner failed.
-6. P1 method matrices:
+5. P1 method matrices:
    - Slack API tool action matrix.
    - HTTP route matrix.
    - Persistence concept/table matrix.
@@ -170,7 +168,8 @@ Fetched with Slack Web API `conversations.replies` using the live bot token. The
 |---|---|---|
 | `C09LNPCGU3E/1778767510.917049` | New `imoutochan` (`B0APMC75QNN`) saw a bare X link and posted a pending "是否读取..." card. | `TestTask147ShadowHarnessReadsExternalLinkWithoutConfirmation`; external link prefetch + read-confirmation suppression. |
 | `C09KVPBMLJ3/1778779797.697749` | New `imoutochan` casually replied to plain bot-noise observation, later replied when another user was addressed, and then answered a self-comment thread. | `TestTask147ShadowHarnessSilencesPlainChannelObservation`, `TestCueboardParityTriageSuppressesRepliesWhenAnotherUserIsMentioned`, `TestTask147ShadowHarnessSilencesAssistantSelfComment`. |
-| `C0ALMF2AD70/1778810550.773349` | New `imoutochan` posted a join card, then emitted an unrelated friendly reply in the same thread. The actual button-click failure still needs the interaction/meeting-agent/meet-runner trace. | Scanner ignores current bot mentions; join interaction trace remains in the queue. |
+| `C0ALMF2AD70/1778810550.773349` | New `imoutochan` posted a direct join setup card with `oneesama_join_without_realtime` / `oneesama_join_with_realtime`; log search found no Socket Mode interaction or `/join/google-meet` call for that card. The unrelated friendly reply is covered by scanner self-comment/mention guards. | Join setup card path was already structurally correct; no evidence of a delivered button click for this card. |
+| `C0ALMF2AD70/1778810546.196809` | Bare Meet link produced pending action `1778810610947008` (`join_meeting`), and Slack state shows Peng confirmed it. Before this slice, confirmation only changed status/result to `interaction:confirmed`; it did not execute `join_meeting`, so no meeting-agent record for `yuf-wnes-yqt` existed in `meetd_meetings.json`. | Fixed by `service_pending_join.go`: Confirm on `join_meeting` pending action infers the Meet URL, calls meeting-agent `/join/google-meet`, carries Slack channel/thread context, posts joined/failure result to the thread, and updates pending-action result. |
 | `C0AQ0C0KVMH/1778772007.043069` | Old `bridge_bot` (`B09SQ28BZ2P`) used concise Canvas revision replies; new `imoutochan` had already drifted into inline long-form/repo-worker framing. | Covered by prior bridge surface parity slice; not part of this shadow harness slice. |
 
 ## Non-Blocking Product Exclusions
