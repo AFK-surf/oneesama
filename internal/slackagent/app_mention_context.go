@@ -44,6 +44,7 @@ type SlackAppMentionContext struct {
 	CanvasFiles         []SlackThreadFile              `json:"canvasFiles,omitempty"`
 	Files               []SlackThreadFile              `json:"files,omitempty"`
 	ImageParts          []SlackThreadImage             `json:"imageParts,omitempty"`
+	ExternalLinks       []SlackExternalLinkContext      `json:"externalLinks,omitempty"`
 	MeetingContext      string                         `json:"meetingContext,omitempty"`
 	ThreadPermalink     string                         `json:"threadPermalink,omitempty"`
 	FetchOK             bool                           `json:"fetchOk"`
@@ -290,6 +291,9 @@ func buildSlackAssistantThreadMessage(input *SlackAppMentionContext) string {
 	}
 	if input.MeetingContext != "" {
 		lines = append(lines, "", "---", "Live meeting status:", input.MeetingContext)
+	}
+	if len(input.ExternalLinks) > 0 {
+		lines = append(lines, "", "---", "Fetched external link context:", formatSlackExternalLinkContexts(input.ExternalLinks))
 	}
 	lines = append(lines, "", "---", fmt.Sprintf("User <@%s> says:", firstNonEmpty(input.UserID, "unknown")), strings.TrimSpace(input.MentionText))
 	return strings.TrimSpace(strings.Join(lines, "\n"))

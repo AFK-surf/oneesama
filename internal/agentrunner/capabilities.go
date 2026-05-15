@@ -64,8 +64,12 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 			"read_doc",
 			"person_memory",
 			"suggest_action",
-			"usage",
+			"usage_api",
 			"followup_memory",
+			"memory_search",
+			"memory_get",
+			"exa_search",
+			"exa_contents",
 		}, appendToolNames(slackUnsupportedToolNames, slackPlannerOnlyUnsupportedToolNames...))
 	case SessionKindCompact:
 		return newCapabilities(normalized, SessionRoleCompact, compactAllowedToolNames, nil)
@@ -79,11 +83,17 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 			"manage_schedule",
 			"slack_api",
 			"read_doc",
+			"memory_write",
+			"memory_search",
+			"memory_get",
 			"person_memory",
 			"suggest_action",
 			"followup_memory",
 			"runtime_status",
 			"heartbeat_log",
+			"usage_api",
+			"exa_search",
+			"exa_contents",
 		}, slackUnsupportedToolNames)
 	}
 }

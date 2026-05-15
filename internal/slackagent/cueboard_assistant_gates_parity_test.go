@@ -132,4 +132,9 @@ func TestCueboardParityAssistantCapabilitiesExcludeCredentialedThirdPartyTools(t
 	if !containsString(capabilities.AllowedTools, AssistantScheduleToolName) {
 		t.Fatalf("assistant capability should retain read-only schedule tool: %#v", capabilities.AllowedTools)
 	}
+	for _, name := range []string{"usage_api", "exa_search", "exa_contents", "memory_write", "memory_search", "memory_get"} {
+		if !containsString(capabilities.AllowedTools, name) {
+			t.Fatalf("assistant capability should expose non-credentialed cueboard tool %q: %#v", name, capabilities.AllowedTools)
+		}
+	}
 }

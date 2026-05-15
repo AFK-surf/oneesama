@@ -15,9 +15,14 @@ func TestCueboardParitySlackAssistantToolSetMatchesCurrentCategories(t *testing.
 	want := []string{
 		"bash",
 		"edit",
+		"exa_contents",
+		"exa_search",
 		"followup_memory",
 		"heartbeat_log",
 		"manage_schedule",
+		"memory_get",
+		"memory_search",
+		"memory_write",
 		"person_memory",
 		"read",
 		"read_doc",
@@ -25,12 +30,13 @@ func TestCueboardParitySlackAssistantToolSetMatchesCurrentCategories(t *testing.
 		"send_message",
 		"slack_api",
 		"suggest_action",
+		"usage_api",
 		"write",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("assistant tool set\n got: %v\nwant: %v", got, want)
 	}
-	for _, excluded := range []string{"linear_api", "notion_api", "figma_api", "google_calendar_api", "image_generation", "audio_generation", "usage_api", "usage"} {
+	for _, excluded := range []string{"linear_api", "notion_api", "figma_api", "google_calendar_api", "image_generation", "audio_generation", "usage"} {
 		if slices.Contains(got, excluded) {
 			t.Fatalf("assistant tool set should not expose out-of-scope/credentialed tool %q: %v", excluded, got)
 		}
@@ -42,7 +48,7 @@ func TestCueboardParityPlannerIncludesFollowupMemoryButNotAssistantRuntimeTools(
 
 	capabilities := CapabilitiesForSessionKind(SessionKindTriage)
 	got := sortedToolNames(capabilities.AllowedTools)
-	for _, name := range []string{"slack_api", "followup_memory", "person_memory", "suggest_action"} {
+	for _, name := range []string{"slack_api", "followup_memory", "person_memory", "suggest_action", "usage_api", "memory_search", "memory_get", "exa_search", "exa_contents"} {
 		if !slices.Contains(got, name) {
 			t.Fatalf("planner tool set should include %q: %v", name, got)
 		}

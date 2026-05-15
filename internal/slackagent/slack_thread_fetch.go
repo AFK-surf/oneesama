@@ -28,6 +28,10 @@ func (s *Service) buildSlackAppMentionContext(ctx context.Context, workspaceID s
 		enriched.Replies = messages
 	}
 	richContext := buildSlackAppMentionContext(enriched)
+	richContext.ExternalLinks = fetchSlackExternalLinkContexts(ctx, slackInboundMessagesFromThreadMessages(richContext.ChannelID, threadMessagesFromEvent(enriched)))
+	if len(richContext.ExternalLinks) > 0 {
+		richContext.Prompt = buildSlackAssistantThreadMessage(richContext)
+	}
 	richContext.Source = source
 	richContext.FetchOK = ok
 	richContext.FetchError = fetchErr
@@ -49,8 +53,43 @@ func (s *Service) buildSlackAppMentionContext(ctx context.Context, workspaceID s
 			brain,
 			nil,
 		)
+		richContext.Prompt = appendSlackExternalLinkPromptContext(richContext.Prompt, richContext.ExternalLinks)
 	}
 	return richContext
+}
+
+func slackInboundMessagesFromThreadMessages(channelID string, messages []SlackMessage) []SlackInboundMessage {
+	out := make([]SlackInboundMessage, 0, len(messages))
+	for _, message := range messages {
+		out = append(out, SlackInboundMessage{
+			ChannelID: firstNonEmpty(message.Channel, channelID),
+			UserID:    firstNonEmpty(message.UserID, message.UserIDCamel, message.User),
+			User:      message.User,
+			BotID:     message.BotID,
+			Subtype:   message.Subtype,
+			Text:      message.Text,
+			TS:        firstNonEmpty(message.TS, message.Timestamp, message.EventTS),
+			EventTS:   message.EventTS,
+			ThreadTS:  message.ThreadTS,
+			Files:     message.Files,
+		})
+	}
+	return normalizeSlackInboundMessages(out)
+}
+
+func appendSlackExternalLinkPromptContext(prompt string, contexts []SlackExternalLinkContext) string {
+	if len(contexts) == 0 {
+		return prompt
+	}
+	section := strings.TrimSpace(formatSlackExternalLinkContexts(contexts))
+	if section == "" {
+		return prompt
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "Fetched external link context:\n" + section
+	}
+	return prompt + "\n\n---\nFetched external link context:\n" + section
 }
 
 func (s *Service) fetchSlackMentionThreadMessages(ctx context.Context, event SlackEventPayload) ([]SlackMessage, string, bool, string) {
