@@ -84,7 +84,7 @@ func TestLoadHonorsConfigPathOverride(t *testing.T) {
   "meeting_agent": {"listen": ":19081"},
   "slack": {"signing_secret": "cfg-secret", "bot_token": "cfg-token", "app_token": "cfg-app-token", "client_id": "cfg-client-id", "client_secret": "cfg-client-secret", "redirect_uri": "https://oneesama.example.com/slack/oauth", "workspace_dir": "./workspace", "internal_auth_key": "cfg-auth-key", "public_base_url": "https://oneesama.example.com", "event_buffer": {"enabled": true, "triage": true, "max_batch": 3, "debounce": "4s"}, "triage": {"post_actions": false, "heuristic_fallback": false}, "memory": {"enabled": true, "dir": "./memory-seed"}},
   "meetd": {"watch_interval": "2m", "webhook_url": "https://oneesama.example.com/meeting-webhook", "webhook_secret": "cfg-meetd-secret", "summary_model": "summary-file-model", "calibrate_model": "calibrate-file-model", "asr_provider": "gemini", "asr_model": "asr-file-model", "asr_language": "zh", "gemini_asr_model": "gemini-file-model"},
-  "openai": {"api_key": "cfg-openai-key", "base_url": "https://openai.example.com/v1/", "audio_transcriptions_url": "https://openai.example.com/v1/audio/transcriptions-custom", "realtime_model": "gpt-realtime-2-test", "realtime_reasoning_effort": "medium", "realtime_voice": "verse", "realtime_turn_detection": "server_vad", "realtime_session_schema": "legacy", "realtime_personality_context": "local context", "bot_name": "Onee-sama", "current_user_name": "Peng", "current_user_email": "peng@example.com"},
+  "openai": {"api_key": "cfg-openai-key", "base_url": "https://openai.example.com/v1/", "audio_transcriptions_url": "https://openai.example.com/v1/audio/transcriptions-custom", "realtime_model": "gpt-realtime-2-test", "realtime_reasoning_effort": "medium", "realtime_voice": "verse", "realtime_turn_detection": "server_vad", "realtime_session_schema": "legacy", "realtime_agent_runtime": "raw", "realtime_personality_context": "local context", "bot_name": "Onee-sama", "current_user_name": "Peng", "current_user_email": "peng@example.com"},
   "dialog": {"stt_provider": "event", "tts_provider": "command", "tts_voice": "local", "tts_command": "say-json", "tts_http_url": "http://127.0.0.1:9001/tts"},
   "logging": {"level": "debug", "format": "text"},
   "paths": {"meet_runner_dir": "./custom-meet-runner"},
@@ -167,6 +167,9 @@ func TestLoadHonorsConfigPathOverride(t *testing.T) {
 	}
 	if cfg.OpenAI.RealtimeModel != "gpt-realtime-2-test" || cfg.OpenAI.RealtimeVoice != "verse" {
 		t.Fatalf("OpenAI realtime = %#v, want config values", cfg.OpenAI)
+	}
+	if cfg.OpenAI.RealtimeAgentRuntime != "raw" {
+		t.Fatalf("OpenAI.RealtimeAgentRuntime = %q, want config value", cfg.OpenAI.RealtimeAgentRuntime)
 	}
 	if cfg.OpenAI.CurrentUserName != "Peng" || cfg.OpenAI.CurrentUserEmail != "peng@example.com" {
 		t.Fatalf("OpenAI current user = %#v, want config values", cfg.OpenAI)

@@ -21,6 +21,7 @@ type JoinGoogleMeetRequest struct {
 	MeetAudioBackend           string  `json:"meet_audio_backend,omitempty"`
 	InstallRealtimeBridge      bool    `json:"install_realtime_bridge,omitempty"`
 	RealtimeBridgeMode         string  `json:"realtime_bridge_mode,omitempty"`
+	RealtimeAgentRuntime       string  `json:"realtime_agent_runtime,omitempty"`
 	AutoConnectRealtime        bool    `json:"auto_connect_realtime,omitempty"`
 	SendRealtimeSessionUpdate  bool    `json:"send_realtime_session_update,omitempty"`
 	IncludeParticipantAudio    bool    `json:"include_participant_audio,omitempty"`

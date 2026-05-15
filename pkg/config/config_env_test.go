@@ -155,6 +155,7 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	t.Setenv("MAB_OPENAI_REALTIME_VOICE", "cedar")
 	t.Setenv("MAB_OPENAI_REALTIME_TURN_DETECTION", "server_vad")
 	t.Setenv("MAB_OPENAI_REALTIME_SESSION_SCHEMA", "legacy")
+	t.Setenv("MAB_OPENAI_REALTIME_AGENT_RUNTIME", "raw")
 	t.Setenv("MAB_REALTIME_PERSONALITY_CONTEXT", "env personality")
 	t.Setenv("MAB_BOT_NAME", "Env Onee-sama")
 	t.Setenv("MAB_CURRENT_USER_NAME", "Peng")
@@ -190,6 +191,9 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	}
 	if cfg.OpenAI.RealtimeTurnDetection != "server_vad" || cfg.OpenAI.RealtimeSessionSchema != "legacy" {
 		t.Fatalf("OpenAI realtime = %#v, want env turn/schema", cfg.OpenAI)
+	}
+	if cfg.OpenAI.RealtimeAgentRuntime != "raw" {
+		t.Fatalf("OpenAI.RealtimeAgentRuntime = %q, want env value", cfg.OpenAI.RealtimeAgentRuntime)
 	}
 	if cfg.OpenAI.RealtimePersonalityContext != "env personality" || cfg.OpenAI.BotName != "Env Onee-sama" {
 		t.Fatalf("OpenAI persona = %#v, want env persona", cfg.OpenAI)

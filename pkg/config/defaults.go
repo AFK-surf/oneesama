@@ -26,6 +26,7 @@ const (
 	defaultOpenAIRealtimeVoice          = "marin"
 	defaultOpenAIRealtimeTurnDetection  = "semantic_vad"
 	defaultOpenAIRealtimeSessionSchema  = "realtime-2"
+	defaultOpenAIRealtimeAgentRuntime   = "agents-sdk"
 	defaultRealtimeBotName              = "Meeting Avatar Bot"
 	defaultSTTProvider                  = "event"
 	defaultTTSProvider                  = "tone-wav"

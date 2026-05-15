@@ -39,6 +39,8 @@ type PrepareGoogleMeetInput struct {
 	DisableLive2D              bool   `json:"disable_live2d,omitempty"`
 	InstallRealtimeBridge      bool   `json:"install_realtime_bridge,omitempty"`
 	RealtimeBridgeMode         string `json:"realtime_bridge_mode,omitempty"`
+	RealtimeAgentRuntime       string `json:"realtime_agent_runtime,omitempty"`
+	RealtimeToolCallbackToken  string `json:"realtime_tool_callback_token,omitempty"`
 	AutoConnectRealtime        bool   `json:"auto_connect_realtime,omitempty"`
 	SendRealtimeSessionUpdate  bool   `json:"send_realtime_session_update,omitempty"`
 	IncludeParticipantAudio    bool   `json:"include_participant_audio,omitempty"`
@@ -90,6 +92,7 @@ type JoinPlan struct {
 	DisableLive2D              bool   `json:"disable_live2d,omitempty"`
 	InstallRealtimeBridge      bool   `json:"install_realtime_bridge,omitempty"`
 	RealtimeBridgeMode         string `json:"realtime_bridge_mode,omitempty"`
+	RealtimeAgentRuntime       string `json:"realtime_agent_runtime,omitempty"`
 	AutoConnectRealtime        bool   `json:"auto_connect_realtime,omitempty"`
 	SendRealtimeSessionUpdate  bool   `json:"send_realtime_session_update,omitempty"`
 	IncludeParticipantAudio    bool   `json:"include_participant_audio,omitempty"`

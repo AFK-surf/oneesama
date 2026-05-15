@@ -218,6 +218,8 @@ interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   avatarCanvasHeight?: number | string;
   avatarCaptureFps?: number | string;
   realtimeBridgeMode?: string;
+  realtimeAgentRuntime?: string;
+  realtimeToolCallbackToken?: string;
   autoRespondToWorkerResults?: boolean;
   realtimeTools?: unknown[];
   realtimeSession?: Record<string, unknown>;
@@ -2077,7 +2079,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       await context.addInitScript({
         content: buildRealtimeBrowserInitScript({
           mode: input.realtimeBridgeMode || "mock",
+          agentRuntime: input.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime,
+          sessionId,
           botName,
+          toolCallbackToken: input.realtimeToolCallbackToken || config.internalAuthKey || "",
           autoRespondToWorkerResults: input.autoRespondToWorkerResults !== false,
           instructions: realtimeInstructions,
           tools: realtimeTools,

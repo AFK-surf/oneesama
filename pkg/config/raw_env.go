@@ -171,6 +171,9 @@ func applyOpenAIEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(getenv("ONEESAMA_OPENAI_REALTIME_SESSION_SCHEMA", "MAB_OPENAI_REALTIME_SESSION_SCHEMA")); value != "" {
 		cfg.OpenAI.RealtimeSessionSchema = value
 	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_OPENAI_REALTIME_AGENT_RUNTIME", "MAB_OPENAI_REALTIME_AGENT_RUNTIME", "MAB_REALTIME_AGENT_RUNTIME")); value != "" {
+		cfg.OpenAI.RealtimeAgentRuntime = value
+	}
 	if value := strings.TrimSpace(getenv("ONEESAMA_REALTIME_PERSONALITY_CONTEXT", "MAB_REALTIME_PERSONALITY_CONTEXT")); value != "" {
 		cfg.OpenAI.RealtimePersonalityContext = value
 	}

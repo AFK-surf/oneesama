@@ -12,6 +12,7 @@ export type BrowserIslandOptions = {
   disableLive2D: boolean;
   installRealtimeBridge: boolean;
   realtimeBridgeMode: string;
+  realtimeAgentRuntime: string;
   autoConnectRealtime: boolean;
   sendRealtimeSessionUpdate: boolean;
   includeParticipantAudio: boolean;
@@ -39,6 +40,10 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
     installRealtimeBridge,
     realtimeBridgeMode:
       typeof params.realtime_bridge_mode === "string" ? params.realtime_bridge_mode.trim() : "",
+    realtimeAgentRuntime:
+      typeof params.realtime_agent_runtime === "string"
+        ? params.realtime_agent_runtime.trim()
+        : "",
     autoConnectRealtime: Boolean(params.auto_connect_realtime),
     sendRealtimeSessionUpdate: installRealtimeBridge && params.send_realtime_session_update !== false,
     includeParticipantAudio: Boolean(params.include_participant_audio),
@@ -69,6 +74,7 @@ export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
     disable_live2d: options.disableLive2D,
     install_realtime_bridge: options.installRealtimeBridge,
     realtime_bridge_mode: options.realtimeBridgeMode,
+    realtime_agent_runtime: options.realtimeAgentRuntime,
     auto_connect_realtime: options.autoConnectRealtime,
     send_realtime_session_update: options.sendRealtimeSessionUpdate,
     include_participant_audio: options.includeParticipantAudio,

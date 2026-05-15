@@ -30,9 +30,11 @@ func New(serviceName string, logger *slog.Logger, allowedOrigins []string, regis
 
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, contract.HealthResponse{
-			OK:      true,
-			Service: serviceName,
-			Version: version.Version,
+			OK:              true,
+			Service:         serviceName,
+			Version:         version.Version,
+			BundleVersion:   version.RealtimeBundleVersion,
+			AgentSDKVersion: version.RealtimeAgentSDKVersion,
 		})
 	})
 	router.GET("/health", func(c *gin.Context) {

@@ -8,10 +8,14 @@ LDFLAGS := -ldflags "-X github.com/AFK-surf/oneesama/pkg/version.Version=$(VERSI
 NODE_DEPS_SENTINEL := node_modules/typescript/package.json
 GO_PACKAGES := $(shell $(GO) list ./... | grep -v '/node_modules/')
 
-.PHONY: build vet tidy test ensure-js-deps
+.PHONY: build vet tidy test ensure-js-deps js-build
 
-build:
+build: js-build
 	$(GO) build $(LDFLAGS) -o $(BINARY) $(PKG)
+
+js-build: ensure-js-deps
+	$(NPM) run typecheck
+	$(NPM) run bundle:realtime-agents-sdk
 
 vet:
 	$(GO) vet $(GO_PACKAGES)

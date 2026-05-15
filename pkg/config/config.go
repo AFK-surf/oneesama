@@ -95,6 +95,7 @@ type OpenAIConfig struct {
 	RealtimeVoice              string
 	RealtimeTurnDetection      string
 	RealtimeSessionSchema      string
+	RealtimeAgentRuntime       string
 	RealtimePersonalityContext string
 	BotName                    string
 	CurrentUserName            string

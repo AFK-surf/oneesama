@@ -25,6 +25,7 @@ func (s *Service) RealtimeConfig() map[string]any {
 		"voice":           s.openai.RealtimeVoice,
 		"turnDetection":   s.openai.RealtimeTurnDetection,
 		"sessionSchema":   s.openai.RealtimeSessionSchema,
+		"agentRuntime":    s.openai.RealtimeAgentRuntime,
 		"instructions":    buildRealtimeInstructions(options, s.openai),
 		"tools":           defaultRealtimeToolSchemas(),
 		"session":         buildRealtimeSessionConfig(options, s.openai),

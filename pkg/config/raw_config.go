@@ -95,6 +95,7 @@ type rawOpenAIConfig struct {
 	RealtimeVoice              string `json:"realtime_voice"`
 	RealtimeTurnDetection      string `json:"realtime_turn_detection"`
 	RealtimeSessionSchema      string `json:"realtime_session_schema"`
+	RealtimeAgentRuntime       string `json:"realtime_agent_runtime"`
 	RealtimePersonalityContext string `json:"realtime_personality_context"`
 	BotName                    string `json:"bot_name"`
 	CurrentUserName            string `json:"current_user_name"`
@@ -308,6 +309,7 @@ func buildOpenAIConfig(raw rawOpenAIConfig) OpenAIConfig {
 		RealtimeVoice:              stringOrDefault(raw.RealtimeVoice, defaultOpenAIRealtimeVoice),
 		RealtimeTurnDetection:      stringOrDefault(raw.RealtimeTurnDetection, defaultOpenAIRealtimeTurnDetection),
 		RealtimeSessionSchema:      stringOrDefault(raw.RealtimeSessionSchema, defaultOpenAIRealtimeSessionSchema),
+		RealtimeAgentRuntime:       stringOrDefault(raw.RealtimeAgentRuntime, defaultOpenAIRealtimeAgentRuntime),
 		RealtimePersonalityContext: strings.TrimSpace(raw.RealtimePersonalityContext),
 		BotName:                    stringOrDefault(raw.BotName, defaultRealtimeBotName),
 		CurrentUserName:            strings.TrimSpace(raw.CurrentUserName),

@@ -122,6 +122,8 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     installAvatar: options.installAvatar,
     installRealtimeBridge: options.installRealtimeBridge,
     realtimeBridgeMode: options.realtimeBridgeMode,
+    realtimeAgentRuntime: options.realtimeAgentRuntime,
+    realtimeToolCallbackToken: params.realtime_tool_callback_token,
     autoConnectRealtime: options.autoConnectRealtime,
     sendRealtimeSessionUpdate: options.sendRealtimeSessionUpdate,
     includeParticipantAudio: options.includeParticipantAudio,

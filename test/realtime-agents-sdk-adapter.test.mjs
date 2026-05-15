@@ -1,0 +1,142 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+import test from "node:test";
+
+import { chromium } from "playwright";
+
+import { buildRealtimeBrowserInitScript } from "../packages/core/src/realtime/realtime-browser-init-builder.ts";
+
+function readJson(request) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on("error", reject);
+  });
+}
+
+async function withToolServer(callback) {
+  const calls = [];
+  const server = http.createServer(async (request, response) => {
+    try {
+      const body = await readJson(request);
+      calls.push({
+        path: request.url,
+        method: request.method,
+        auth: request.headers["x-oneesama-internal-key"] || "",
+        body,
+      });
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/realtime/client-secret") {
+        response.end(JSON.stringify({ ok: true, client_secret: { value: "ek_mock_sdk" } }));
+        return;
+      }
+      if (request.url === "/tools/now") {
+        if (request.headers["x-oneesama-internal-key"] !== "test-session-token") {
+          response.statusCode = 401;
+          response.end(JSON.stringify({ ok: false, error: "missing_internal_session_token" }));
+          return;
+        }
+        response.end(
+          JSON.stringify({
+            ok: true,
+            timezone: "Asia/Shanghai",
+            now: "2026-05-15T14:00:00+08:00",
+          }),
+        );
+        return;
+      }
+      response.statusCode = 404;
+      response.end(JSON.stringify({ ok: false, error: "not_found" }));
+    } catch (error) {
+      response.statusCode = 500;
+      response.end(JSON.stringify({ ok: false, error: String(error?.message || error) }));
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    await callback({ baseUrl, calls });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects", async () => {
+  await withToolServer(async ({ baseUrl, calls }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk-mock",
+          agentRuntime: "agents-sdk",
+          sessionId: "sdk-smoke-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          toolCallbackToken: "test-session-token",
+          instructions: "Use tools when needed.",
+          tools: [
+            {
+              type: "function",
+              name: "now",
+              description: "Return current date/time.",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          ],
+          session: {
+            model: "gpt-realtime-2",
+            audio: { output: { voice: "marin" } },
+          },
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.agentRuntime?.sdkConnected === true,
+      );
+      const connected = await page.evaluate(() => window.MAB_REALTIME_BRIDGE);
+      assert.equal(connected.agentRuntime.active, "agents-sdk");
+      assert.equal(connected.agentRuntime.sdkVersion, "0.11.4");
+      assert.equal(connected.sessionId, "sdk-smoke-session");
+      assert.ok(connected.agentRuntime.sdkToolNames.includes("now"));
+
+      const toolResult = await page.evaluate(() =>
+        window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("now", {}),
+      );
+      assert.equal(toolResult.ok, true);
+      assert.equal(toolResult.result.ok, true);
+      assert.equal(toolResult.result.timezone, "Asia/Shanghai");
+      assert.ok(calls.some((entry) => entry.path === "/realtime/client-secret"));
+      assert.ok(
+        calls.some((entry) => entry.path === "/tools/now" && entry.auth === "test-session-token"),
+      );
+
+      const disconnected = await page.evaluate(() => {
+        window.MAB_REALTIME_CLIENT.disconnect("sdk-smoke-disconnect");
+        return window.MAB_REALTIME_BRIDGE;
+      });
+      assert.equal(disconnected.connected, false);
+      assert.equal(disconnected.agentRuntime.sdkConnected, false);
+      assert.ok(
+        disconnected.timeline.some(
+          (entry) =>
+            entry.type === "realtime_agent_sdk_tool_start" &&
+            entry.detail.session_id === "sdk-smoke-session",
+        ),
+      );
+    } finally {
+      await browser.close();
+    }
+  });
+});
