@@ -250,6 +250,8 @@
     "present_video_stage",
     "stop_video_stage",
     "read_meet_chat",
+    "meet_participants",
+    "active_speaker",
   ]);
   const LOCAL_WORKSPACE_TOOLS = new Set([
     "current_user_identity",
@@ -854,8 +856,8 @@
       merged.modalities || ["audio"];
     delete merged.outputModalities;
     delete merged.modalities;
-    const inputTurnDetection =
-      merged.audio?.input?.turn_detection ?? merged.turn_detection ?? { type: "semantic_vad" };
+    const inputTurnDetection = merged.audio?.input?.turn_detection ??
+      merged.turn_detection ?? { type: "semantic_vad" };
     merged.audio = {
       ...(merged.audio || {}),
       input: {
@@ -1013,7 +1015,9 @@
           body.error || "Realtime client secret response did not include a value",
           `status=${response.status}`,
           body.detail ? `detail=${JSON.stringify(body.detail)}` : "",
-        ].filter(Boolean).join(" "),
+        ]
+          .filter(Boolean)
+          .join(" "),
       );
     }
     return value;
@@ -1196,7 +1200,8 @@
         });
         pc.addEventListener("connectionstatechange", () => {
           state.connection.peerConnectionState = pc.connectionState;
-          state.connected = pc.connectionState === "connected" || pc.connectionState === "completed";
+          state.connected =
+            pc.connectionState === "connected" || pc.connectionState === "completed";
           recordTimeline("realtime_agent_sdk_peer_connection", { state: pc.connectionState });
           updateFeedback();
         });
@@ -1698,7 +1703,9 @@
 
   function findMeetChatSendButton(input) {
     const inputRect = input?.getBoundingClientRect?.() || null;
-    const candidates = Array.from(document.querySelectorAll<HTMLButtonElement>("button,[role='button']"))
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button,[role='button']"),
+    )
       .filter((element) => {
         if (!isVisibleElement(element)) return false;
         if (element.disabled || element.getAttribute?.("aria-disabled") === "true") return false;
@@ -1841,6 +1848,32 @@
     };
   }
 
+  function readMeetingAwarenessTool(name = "meet_participants") {
+    const awareness = window.MAB_MEETING_AWARENESS || null;
+    const base = {
+      ok: Boolean(awareness),
+      source: awareness?.source || "",
+      observedAt: awareness?.observedAt || "",
+      caveat:
+        awareness?.caveat ||
+        "Best-effort Google Meet DOM/caption heuristic; no live awareness has been published yet.",
+    };
+    if (name === "active_speaker") {
+      return {
+        ...base,
+        activeSpeaker: awareness?.activeSpeaker || null,
+        recentSpeakers: awareness?.recentSpeakers || [],
+      };
+    }
+    return {
+      ...base,
+      participants: awareness?.participants || [],
+      participantCount: awareness?.participantCount || null,
+      activeSpeaker: awareness?.activeSpeaker || null,
+      recentSpeakers: awareness?.recentSpeakers || [],
+    };
+  }
+
   function extractUrls(text: unknown): string[] {
     return Array.from(String(text || "").matchAll(/https?:\/\/[^\s<>"')\]]+/g)).map((match) =>
       match[0].replace(/[.,，。!?！？;；:：]+$/g, ""),
@@ -1973,9 +2006,7 @@
     const anchors = element.querySelectorAll
       ? Array.from(element.querySelectorAll<HTMLAnchorElement>("a[href]"))
       : [];
-    const links = anchors
-      .map((anchor) => anchor.href)
-      .filter((url) => /^https?:\/\//.test(url));
+    const links = anchors.map((anchor) => anchor.href).filter((url) => /^https?:\/\//.test(url));
     if (/^https?:\/\//.test(href) && !links.includes(href)) links.push(href);
     for (const url of extractUrls(text)) {
       if (!links.includes(url)) links.push(url);
@@ -2103,6 +2134,8 @@
       return postJson(localServiceUrl("/screen-share/video"), args);
     if (name === "stop_video_stage") return postJson(localServiceUrl("/screen-share/stop"), args);
     if (name === "read_meet_chat") return readMeetChat(args);
+    if (name === "meet_participants" || name === "active_speaker")
+      return readMeetingAwarenessTool(name);
     throw new Error(`unsupported local meet tool: ${name}`);
   }
 
@@ -2475,7 +2508,8 @@
   async function connectRealtime(options = {}) {
     if (
       state.connected &&
-      ((window.MAB_REALTIME_DATA_CHANNEL || window.MAB_REALTIME_DC) ||
+      (window.MAB_REALTIME_DATA_CHANNEL ||
+        window.MAB_REALTIME_DC ||
         state.agentRuntime.sdkConnected === true)
     ) {
       return { ok: true, alreadyConnected: true, mode: state.mode };
@@ -2501,11 +2535,7 @@
         shouldUseRealtimeAgentSDK(connectionConfig.agentRuntime) ||
         state.connection.mode === "agents-sdk" ||
         state.connection.mode === "agents-sdk-mock";
-      if (
-        wantsSDK &&
-        state.connection.mode !== "mock" &&
-        state.connection.mode !== "webrtc-mock"
-      ) {
+      if (wantsSDK && state.connection.mode !== "mock" && state.connection.mode !== "webrtc-mock") {
         try {
           return await connectRealtimeAgentSDK(connectionConfig);
         } catch (error) {
@@ -2568,7 +2598,9 @@
             tokenBody.error || "Realtime client secret response did not include a value",
             `status=${tokenResponse.status}`,
             tokenBody.detail ? `detail=${JSON.stringify(tokenBody.detail)}` : "",
-          ].filter(Boolean).join(" "),
+          ]
+            .filter(Boolean)
+            .join(" "),
         );
       }
 
@@ -2583,7 +2615,8 @@
       pc.onconnectionstatechange = () => {
         if (pcGeneration !== reconnectGeneration) return;
         state.connection.peerConnectionState = pc.connectionState;
-        state.connected = pc.connectionState === "connected" || (pc.connectionState as string) === "completed";
+        state.connected =
+          pc.connectionState === "connected" || (pc.connectionState as string) === "completed";
         recordTimeline("peer_connection_state", { state: pc.connectionState });
         if (pc.connectionState === "failed" || pc.connectionState === "closed") {
           state.connection.dataChannelOpen = false;

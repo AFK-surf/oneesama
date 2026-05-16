@@ -143,6 +143,28 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
+    name: "meet_participants",
+    description:
+      "Return the current Google Meet participant list and best-effort active/recent speaker state from live Meet DOM/captions.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "active_speaker",
+    description:
+      "Return the current or most recent Google Meet speaker, with source/confidence metadata. This is best-effort and may come from captions or Meet DOM speaker indicators.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    type: "function",
     name: "fetch_url",
     description:
       "Read a public URL and return extracted text/markdown. Uses the Jina reader by default, which is useful for X/Twitter links and pages that are hard to read directly. If this fails or the request needs deeper browsing, delegate to Codex.",
@@ -584,8 +606,7 @@ export function buildRealtimeSessionConfig(
 ) {
   const model = options.model || config.openaiRealtimeModel || DEFAULT_REALTIME_MODEL;
   const currentUser = options.currentUser || currentUserFromConfig(config);
-  const personalityContext =
-    options.personalityContext || config.realtimePersonalityContext || "";
+  const personalityContext = options.personalityContext || config.realtimePersonalityContext || "";
   const botName = options.botName || config.botName || "Meeting Avatar Bot";
   const instructions =
     options.instructions || buildRealtimeInstructions({ botName, personalityContext, currentUser });
@@ -707,6 +728,7 @@ export function buildRealtimeInstructions({
     "When the user asks you to post something into the current Google Meet chat, call send_meet_chat with the exact short message text.",
     "When the user asks you to share screen, present a video, play a video, or open a stage in the meeting, call present_video_stage. If the user asks to stop sharing / 停止分享 / 关掉分享, call stop_video_stage. If the video source is not a direct playable URL/file, delegate to Codex first to resolve/download it, then present the resulting video file or URL. Do not answer that you cannot share video; use this tool path.",
     "When the user asks about a link or message they posted in Google Meet chat, call read_meet_chat and answer from the returned recent messages/links.",
+    "Live Meet participants and current/recent speaker context may be pushed into the conversation automatically. When the user explicitly asks who is in the meeting or who is speaking, call meet_participants or active_speaker and include the source/confidence caveat.",
     "When the user asks you to read or summarize a URL, first call fetch_url if the URL is visible. If fetch_url fails, needs login, needs browser interaction, needs a downloadable asset/video, or needs deeper analysis, call delegate_to_codex with the URL and the exact task. For X/Twitter links, fetch_url via Jina is the first quick path; for downloading videos or files, delegate to Codex rather than claiming you cannot download.",
     "For non-trivial spoken answers, call update_avatar_state before or during the answer so the avatar mood/action matches the conversation. Use happy+nod for agreement, thinking+think for reasoning, happy+emphasize for conclusions, sad+shake for failures, surprised+lean_forward for unexpected findings, and happy+wave for greetings.",
     "Never pretend a complex delegated task is done before the worker result arrives.",

@@ -293,6 +293,7 @@ declare global {
       [key: string]: unknown;
     };
     MAB_CAPTION_CAPTURE?: CaptionCaptureState;
+    MAB_MEETING_AWARENESS?: any;
     MAB_LOCAL_DIALOG?: Record<string, unknown> | null;
     MAB_LOCAL_DIALOG_CONFIG?: LocalDialogConfig | null;
     MAB_LOCAL_DIALOG_CONTROLLER?: LocalDialogController | null;

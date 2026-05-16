@@ -169,6 +169,8 @@ interface MeetPageState {
   source?: string;
   inMeeting?: boolean;
   participantCount?: number | null;
+  participants?: MeetParticipantSignal[];
+  activeSpeaker?: MeetSpeakerSignal | null;
   waitingForAdmit?: boolean;
   preJoin?: boolean;
   signIn?: boolean;
@@ -178,6 +180,35 @@ interface MeetPageState {
   error?: string;
   jsProbe?: { ok: boolean; error?: string };
   accessibilityProbe?: { ok: boolean; error?: string };
+}
+
+interface MeetParticipantSignal {
+  name: string;
+  source: string;
+  confidence: "low" | "medium" | "high";
+  participantId?: string;
+  rawLabel?: string;
+  lastSeenAt?: string;
+}
+
+interface MeetSpeakerSignal {
+  name: string;
+  source: string;
+  confidence: "low" | "medium" | "high";
+  observedAt: string;
+  rawLabel?: string;
+  text?: string;
+}
+
+interface MeetingAwarenessState {
+  ok: boolean;
+  observedAt: string;
+  source: string;
+  participants: MeetParticipantSignal[];
+  participantCount: number | null;
+  activeSpeaker: MeetSpeakerSignal | null;
+  recentSpeakers: MeetSpeakerSignal[];
+  caveat: string;
 }
 
 interface GoogleMeetJoinerOptions {
@@ -437,12 +468,7 @@ async function takeScreenshot(page: Page, diagnostics: Diagnostics, name: string
       9000,
       { timedOut: true },
     );
-    if (
-      typeof result === "object" &&
-      result !== null &&
-      "timedOut" in result &&
-      result.timedOut
-    ) {
+    if (typeof result === "object" && result !== null && "timedOut" in result && result.timedOut) {
       throw new Error("screenshot_timeout");
     }
     diagnostics.screenshots.push({ ts: nowIso(), name, path });
@@ -482,7 +508,7 @@ async function collectButtonInventory(
           role: node.getAttribute("role") || "",
           disabled: Boolean(
             ("disabled" in node && typeof node.disabled === "boolean" && node.disabled) ||
-              node.getAttribute("aria-disabled") === "true",
+            node.getAttribute("aria-disabled") === "true",
           ),
           visible:
             rect.width > 0 && rect.height > 0 && getComputedStyle(node).visibility !== "hidden",
@@ -541,7 +567,11 @@ async function clickFirstVisible(
   return "";
 }
 
-async function withTimeout<T, F>(promise: Promise<T>, timeoutMs: number, fallback: F): Promise<T | F> {
+async function withTimeout<T, F>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: F,
+): Promise<T | F> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -583,8 +613,7 @@ function collectAccessibilityButtons(
       role: accessibilityNode.role,
     });
   }
-  for (const child of accessibilityNode.children || [])
-    collectAccessibilityButtons(child, output);
+  for (const child of accessibilityNode.children || []) collectAccessibilityButtons(child, output);
   return output;
 }
 
@@ -660,7 +689,7 @@ async function getMeetPresentationState(page: Page): Promise<PresentationState> 
       const isDisabled = (node: HTMLElement) =>
         Boolean(
           ("disabled" in node && typeof node.disabled === "boolean" && node.disabled) ||
-            node.getAttribute("aria-disabled") === "true",
+          node.getAttribute("aria-disabled") === "true",
         );
       const buttons = Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]"))
         .map((node, index) => {
@@ -703,9 +732,7 @@ async function getMeetPresentationState(page: Page): Promise<PresentationState> 
   ).catch((error) => ({ ok: false, error: String(error?.message || error) }));
 }
 
-function getNativeScreenShareFailureHint(
-  presentation: PresentationState | null | undefined,
-) {
+function getNativeScreenShareFailureHint(presentation: PresentationState | null | undefined) {
   const text = presentation?.textHead || "";
   if (
     process.platform === "darwin" &&
@@ -732,7 +759,7 @@ async function clickMeetShareScreenControl(
       const isDisabled = (node: HTMLElement) =>
         Boolean(
           ("disabled" in node && typeof node.disabled === "boolean" && node.disabled) ||
-            node.getAttribute("aria-disabled") === "true",
+          node.getAttribute("aria-disabled") === "true",
         );
       const isVisible = (node) => {
         const rect = node.getBoundingClientRect();
@@ -801,11 +828,13 @@ async function clickMeetShareScreenControl(
     }),
     2500,
     { ok: false, reason: "share_screen_dom_click_timeout" },
-  ).catch((error): ShareScreenDomClickResult => ({
-    ok: false,
-    reason: "share_screen_dom_click_error",
-    error: String(error?.message || error).slice(0, 240),
-  }));
+  ).catch(
+    (error): ShareScreenDomClickResult => ({
+      ok: false,
+      reason: "share_screen_dom_click_error",
+      error: String(error?.message || error).slice(0, 240),
+    }),
+  );
   if (domClick.ok) {
     diagnostics?.record("click", { selector: domClick.selector, button: domClick.button });
     return domClick.selector;
@@ -860,7 +889,9 @@ async function clickMeetShareScreenControl(
   return "";
 }
 
-async function readScreenShareControllerState(page: Page): Promise<ScreenShareControllerState | null> {
+async function readScreenShareControllerState(
+  page: Page,
+): Promise<ScreenShareControllerState | null> {
   return await withTimeout(
     page.evaluate(() => {
       if (window.MAB_SCREEN_SHARE_CONTROLLER?.status)
@@ -878,8 +909,7 @@ async function readScreenShareControllerState(page: Page): Promise<ScreenShareCo
 
 async function ensureScreenShareController(page: Page, input: ScreenShareBridgeInput = {}) {
   const current = await readScreenShareControllerState(page);
-  if (current?.ok || current?.mode)
-    return { ok: true, installed: false, state: current };
+  if (current?.ok || current?.mode) return { ok: true, installed: false, state: current };
   await page.evaluate(
     (runtimeConfig) => {
       if (window.MAB_SCREEN_SHARE_CONTROLLER) return;
@@ -1071,7 +1101,8 @@ async function ensureScreenShareController(page: Page, input: ScreenShareBridgeI
       }
 
       const mediaDevices =
-        navigator.mediaDevices || ({} as MediaDevices & { getDisplayMedia?: typeof navigator.mediaDevices.getDisplayMedia });
+        navigator.mediaDevices ||
+        ({} as MediaDevices & { getDisplayMedia?: typeof navigator.mediaDevices.getDisplayMedia });
       Object.defineProperty(navigator, "mediaDevices", {
         configurable: true,
         value: mediaDevices,
@@ -1264,11 +1295,13 @@ async function fillGuestName(
         ok: false,
         reason: "guest_name_eval_timeout",
       },
-    ).catch((error): GuestNameEvalResult => ({
-      ok: false,
-      reason: "guest_name_eval_error",
-      error: String(error?.message || error).slice(0, 300),
-    }));
+    ).catch(
+      (error): GuestNameEvalResult => ({
+        ok: false,
+        reason: "guest_name_eval_error",
+        error: String(error?.message || error).slice(0, 300),
+      }),
+    );
     lastResult = result;
     if (["cannot_join_meeting", "google_sign_in_required"].includes(result.reason)) {
       diagnostics?.record("guest_name_terminal_state", result);
@@ -1320,7 +1353,7 @@ async function clickMeetJoinButton(
               label: label.slice(0, 160),
               disabled: Boolean(
                 ("disabled" in node && typeof node.disabled === "boolean" && node.disabled) ||
-                  node.getAttribute("aria-disabled") === "true",
+                node.getAttribute("aria-disabled") === "true",
               ),
               visible: isVisible(node),
               rect: {
@@ -1347,11 +1380,13 @@ async function clickMeetJoinButton(
         error: "join_button_eval_timeout",
         candidates: [],
       },
-    ).catch((error): MeetJoinButtonEvalResult => ({
-      ok: false,
-      error: String(error?.message || error).slice(0, 300),
-      candidates: [],
-    }));
+    ).catch(
+      (error): MeetJoinButtonEvalResult => ({
+        ok: false,
+        error: String(error?.message || error).slice(0, 300),
+        candidates: [],
+      }),
+    );
     lastCandidates = result.candidates || [];
     if (result.ok) {
       clickedSelector = result.selector;
@@ -1529,6 +1564,220 @@ function compactCaptionState(captions) {
   };
 }
 
+function normalizeMeetingPersonName(value: unknown): string {
+  let text = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^You$/i, "You")
+    .trim();
+  if (!text) return "";
+  text = text
+    .replace(
+      /\s*\((?:you|me|host|presenting|speaking|muted|muted microphone|microphone off)\)\s*$/i,
+      "",
+    )
+    .replace(/\s+(?:is )?(?:speaking|talking|presenting)$/i, "")
+    .replace(/\s+(?:muted|microphone off|camera off)$/i, "")
+    .replace(/'s (?:video|screen|presentation)$/i, "")
+    .replace(/(?:的视频|正在发言|正在讲话|正在演示|已静音|麦克风已关闭)$/g, "")
+    .trim();
+  const blacklist = [
+    "leave call",
+    "leave meeting",
+    "turn off microphone",
+    "turn on microphone",
+    "turn off camera",
+    "turn on camera",
+    "raise hand",
+    "more options",
+    "present now",
+    "share screen",
+    "people",
+    "chat",
+    "activities",
+    "host controls",
+    "settings",
+    "unknown",
+  ];
+  const lowered = text.toLowerCase();
+  if (blacklist.includes(lowered)) return "";
+  if (/^(press down arrow|external participants joined|your audio is merged)/i.test(text)) {
+    return "";
+  }
+  if (text.length > 80 || text.split(" ").length > 8) return "";
+  return text;
+}
+
+function captionEventTimeMs(event: any): number {
+  const parsed = Date.parse(String(event?.ts || event?.timestamp || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function captionSpeakerSignal(event: any): MeetSpeakerSignal | null {
+  const name = normalizeMeetingPersonName(event?.speaker);
+  if (!name) return null;
+  return {
+    name,
+    source: event?.source || "google-meet-caption-dom",
+    confidence: "high",
+    observedAt: String(event?.ts || event?.timestamp || nowIso()),
+    text: String(event?.text || "").slice(0, 240),
+  };
+}
+
+export function buildMeetingAwarenessState({
+  meetPage,
+  captions,
+  nowMs = Date.now(),
+  recentWindowMs = 30_000,
+}: {
+  meetPage?: MeetPageState | null;
+  captions?: any;
+  nowMs?: number;
+  recentWindowMs?: number;
+} = {}): MeetingAwarenessState {
+  const participantMap = new Map<string, MeetParticipantSignal>();
+  const addParticipant = (candidate: Partial<MeetParticipantSignal> | null | undefined) => {
+    const name = normalizeMeetingPersonName(candidate?.name);
+    if (!name) return;
+    const key = name.toLowerCase();
+    const existing = participantMap.get(key);
+    const next: MeetParticipantSignal = {
+      name,
+      source: candidate?.source || "unknown",
+      confidence: candidate?.confidence || "low",
+      participantId: candidate?.participantId || existing?.participantId || "",
+      rawLabel: candidate?.rawLabel || existing?.rawLabel || "",
+      lastSeenAt: candidate?.lastSeenAt || existing?.lastSeenAt || nowIso(),
+    };
+    const rank = { low: 1, medium: 2, high: 3 };
+    if (!existing || rank[next.confidence] >= rank[existing.confidence]) {
+      participantMap.set(key, next);
+    }
+  };
+
+  for (const participant of meetPage?.participants || []) addParticipant(participant);
+
+  const captionEvents = [
+    ...(Array.isArray(captions?.tail) ? captions.tail : []),
+    ...(Array.isArray(captions?.captions) ? captions.captions.slice(-12) : []),
+    captions?.latest,
+  ].filter(Boolean);
+  const recentSpeakers: MeetSpeakerSignal[] = [];
+  const seenRecent = new Set<string>();
+  for (const event of captionEvents) {
+    const signal = captionSpeakerSignal(event);
+    if (!signal) continue;
+    addParticipant({
+      name: signal.name,
+      source: "caption_speaker",
+      confidence: "medium",
+      lastSeenAt: signal.observedAt,
+    });
+    const key = signal.name.toLowerCase();
+    if (!seenRecent.has(key)) {
+      seenRecent.add(key);
+      recentSpeakers.push(signal);
+    }
+  }
+
+  const latestCaption = captionSpeakerSignal(captions?.latest);
+  const latestCaptionAge = latestCaption
+    ? nowMs - captionEventTimeMs(captions?.latest)
+    : Number.POSITIVE_INFINITY;
+  const captionIsFresh =
+    latestCaption && (!Number.isFinite(latestCaptionAge) || latestCaptionAge <= recentWindowMs);
+  const domSpeaker = meetPage?.activeSpeaker || null;
+  const activeSpeaker = captionIsFresh ? latestCaption : domSpeaker || latestCaption || null;
+  if (activeSpeaker?.name) {
+    addParticipant({
+      name: activeSpeaker.name,
+      source: activeSpeaker.source,
+      confidence: activeSpeaker.confidence,
+      lastSeenAt: activeSpeaker.observedAt,
+      rawLabel: activeSpeaker.rawLabel,
+    });
+  }
+
+  const participants = Array.from(participantMap.values()).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  const participantCount =
+    typeof meetPage?.participantCount === "number" && Number.isFinite(meetPage.participantCount)
+      ? meetPage.participantCount
+      : participants.length || null;
+  return {
+    ok: Boolean(meetPage?.ok || captions?.ok),
+    observedAt: nowIso(),
+    source: "meet_dom_and_caption_tail",
+    participants,
+    participantCount,
+    activeSpeaker,
+    recentSpeakers: recentSpeakers.slice(-8),
+    caveat:
+      "Best-effort Google Meet DOM/caption heuristic; active speaker is not an official Google API signal.",
+  };
+}
+
+export function meetingAwarenessContextText(awareness: MeetingAwarenessState | null): string {
+  if (!awareness?.ok) return "";
+  const names = awareness.participants.map((participant) => participant.name).filter(Boolean);
+  const speaker = awareness.activeSpeaker?.name
+    ? `${awareness.activeSpeaker.name} (source=${awareness.activeSpeaker.source}, confidence=${awareness.activeSpeaker.confidence})`
+    : "unknown";
+  const lines = [
+    "Live Google Meet context update:",
+    `- Participants now visible: ${names.length ? names.join(", ") : "unknown"}${awareness.participantCount ? ` (count=${awareness.participantCount})` : ""}.`,
+    `- Current/recent speaker: ${speaker}.`,
+    `- Caveat: ${awareness.caveat}`,
+  ];
+  return lines.join("\n");
+}
+
+function meetingAwarenessSignature(awareness: MeetingAwarenessState | null): string {
+  if (!awareness?.ok) return "";
+  const participants = awareness.participants
+    .map((participant) => participant.name.toLowerCase())
+    .sort()
+    .join("|");
+  const speaker = awareness.activeSpeaker?.name?.toLowerCase() || "";
+  if (!participants && !speaker) return "";
+  return `${speaker}::${participants}`;
+}
+
+async function publishMeetingAwarenessToPage(
+  page: Page,
+  awareness: MeetingAwarenessState | null,
+  pushContext = true,
+) {
+  if (!awareness?.ok) return { ok: false, skipped: true, reason: "awareness_empty" };
+  const contextText = meetingAwarenessContextText(awareness);
+  return await withTimeout(
+    page.evaluate(
+      ({ state, text, push }) => {
+        window.MAB_MEETING_AWARENESS = state;
+        if (!push) return { ok: true, stored: true, pushed: false, reason: "unchanged" };
+        if (!text) return { ok: true, stored: true, pushed: false, reason: "empty_context" };
+        const client = window.MAB_REALTIME_CLIENT;
+        if (typeof client?.sendRealtimeEvent !== "function") {
+          return { ok: true, stored: true, pushed: false, reason: "realtime_client_missing" };
+        }
+        const channel = client.sendRealtimeEvent({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "system",
+            content: [{ type: "input_text", text }],
+          },
+        });
+        return { ok: true, stored: true, pushed: true, channel };
+      },
+      { state: awareness, text: contextText, push: pushContext },
+    ),
+    2500,
+    { ok: false, error: "meeting_awareness_publish_timeout" },
+  ).catch((error) => ({ ok: false, error: String(error?.message || error) }));
+}
+
 function compactRuntimeState({
   avatarReady,
   avatarAudio,
@@ -1628,7 +1877,7 @@ async function evaluateMeetPageState(page: Page): Promise<MeetPageState> {
             label: label.slice(0, 160),
             disabled: Boolean(
               ("disabled" in node && typeof node.disabled === "boolean" && node.disabled) ||
-                node.getAttribute("aria-disabled") === "true",
+              node.getAttribute("aria-disabled") === "true",
             ),
             visible:
               rect.width > 0 && rect.height > 0 && getComputedStyle(node).visibility !== "hidden",
@@ -1641,6 +1890,158 @@ async function evaluateMeetPageState(page: Page): Promise<MeetPageState> {
           };
         })
         .filter((button) => button.visible && button.label);
+      function cleanPersonName(raw: unknown): string {
+        let value = String(raw || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!value) return "";
+        value = value
+          .replace(
+            /\s*\((?:you|me|host|presenting|speaking|muted|muted microphone|microphone off)\)\s*$/i,
+            "",
+          )
+          .replace(/\s+(?:is )?(?:speaking|talking|presenting)$/i, "")
+          .replace(/\s+(?:muted|microphone off|camera off)$/i, "")
+          .replace(/'s (?:video|screen|presentation)$/i, "")
+          .replace(/(?:的视频|正在发言|正在讲话|正在演示|已静音|麦克风已关闭)$/g, "")
+          .trim();
+        if (!value || value.length > 80 || value.split(" ").length > 8) return "";
+        const lowered = value.toLowerCase();
+        const blacklist = new Set([
+          "leave call",
+          "leave meeting",
+          "turn off microphone",
+          "turn on microphone",
+          "turn off camera",
+          "turn on camera",
+          "raise hand",
+          "more options",
+          "present now",
+          "share screen",
+          "people",
+          "chat",
+          "activities",
+          "host controls",
+          "settings",
+          "unknown",
+        ]);
+        if (blacklist.has(lowered)) return "";
+        if (/^(press down arrow|external participants joined|your audio is merged)/i.test(value)) {
+          return "";
+        }
+        return value;
+      }
+      function firstNameFromNode(node: HTMLElement | null): string {
+        if (!node) return "";
+        const direct = [
+          node.getAttribute("data-self-name"),
+          node.getAttribute("data-participant-name"),
+          node.getAttribute("aria-label"),
+          node.getAttribute("title"),
+        ];
+        for (const candidate of direct) {
+          const name = cleanPersonName(candidate);
+          if (name) return name;
+        }
+        const lines = (node.innerText || node.textContent || "")
+          .split("\n")
+          .map((line) => cleanPersonName(line))
+          .filter(Boolean);
+        return lines[0] || "";
+      }
+      function addParticipant(
+        map: Map<string, MeetParticipantSignal>,
+        input: Partial<MeetParticipantSignal>,
+      ) {
+        const name = cleanPersonName(input.name);
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (map.has(key)) return;
+        map.set(key, {
+          name,
+          source: input.source || "meet_dom",
+          confidence: input.confidence || "low",
+          participantId: input.participantId || "",
+          rawLabel: input.rawLabel || "",
+          lastSeenAt: new Date().toISOString(),
+        });
+      }
+      function parseSpeakerFromLabel(label: string): string {
+        const normalized = String(label || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!normalized) return "";
+        const patterns = [
+          /^(.+?)\s+(?:is\s+)?(?:speaking|talking)$/i,
+          /^(.+?)\s+(?:is\s+)?presenting$/i,
+          /^(.+?)'s (?:video|screen|presentation)$/i,
+          /^正在(?:发言|讲话)[:：]?\s*(.+)$/i,
+          /^(.+?)\s*正在(?:发言|讲话)$/i,
+        ];
+        for (const pattern of patterns) {
+          const match = normalized.match(pattern);
+          if (match) {
+            const name = cleanPersonName(match[1]);
+            if (name) return name;
+          }
+        }
+        return "";
+      }
+      function collectParticipants(): MeetParticipantSignal[] {
+        const map = new Map<string, MeetParticipantSignal>();
+        const nodes = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[data-participant-id], [data-requested-participant-id], [data-self-name], [data-participant-name]",
+          ),
+        ).slice(0, 80);
+        for (const node of nodes) {
+          addParticipant(map, {
+            name: firstNameFromNode(node),
+            source: "meet_participant_tile",
+            confidence: "medium",
+            participantId:
+              node.getAttribute("data-participant-id") ||
+              node.getAttribute("data-requested-participant-id") ||
+              "",
+            rawLabel:
+              node.getAttribute("aria-label") ||
+              node.getAttribute("title") ||
+              (node.innerText || "").split("\n").slice(0, 3).join(" / "),
+          });
+        }
+        return Array.from(map.values());
+      }
+      function detectActiveSpeaker(): MeetSpeakerSignal | null {
+        const nodes = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            '[aria-label], [data-tooltip], [title], [role="button"], [role="listitem"], [data-participant-id], [data-requested-participant-id]',
+          ),
+        ).slice(0, 400);
+        for (const node of nodes) {
+          const rawLabel = [
+            node.getAttribute("aria-label"),
+            node.getAttribute("data-tooltip"),
+            node.getAttribute("title"),
+            (node.innerText || "").split("\n").slice(0, 3).join(" "),
+          ]
+            .filter(Boolean)
+            .join(" ");
+          if (!/(speaking|talking|正在发言|正在讲话)/i.test(rawLabel)) continue;
+          const tile = node.closest<HTMLElement>(
+            "[data-participant-id], [data-requested-participant-id], [data-self-name], [data-participant-name]",
+          );
+          const name = parseSpeakerFromLabel(rawLabel) || firstNameFromNode(tile);
+          if (!name) continue;
+          return {
+            name,
+            source: "meet_speaker_tile_indicator",
+            confidence: "medium",
+            observedAt: new Date().toISOString(),
+            rawLabel: rawLabel.slice(0, 240),
+          };
+        }
+        return null;
+      }
       function participantCount(): number | null {
         const peopleBtn = document.querySelector<HTMLElement>(
           'button[aria-label*="people" i], button[aria-label*="参与者"], button[aria-label*="用户"]',
@@ -1656,10 +2057,14 @@ async function evaluateMeetPageState(page: Page): Promise<MeetPageState> {
           if (match) return Number.parseInt(match[1], 10);
         }
 
-        const tiles = document.querySelectorAll("[data-participant-id], [data-requested-participant-id]");
+        const tiles = document.querySelectorAll(
+          "[data-participant-id], [data-requested-participant-id]",
+        );
         if (tiles.length > 0) return tiles.length;
         return null;
       }
+      const participants = collectParticipants();
+      const activeSpeaker = detectActiveSpeaker();
       const waitingForAdmit =
         /Please wait until a meeting host brings you into the call|Someone will let you in soon|waiting for.*host/i.test(
           text,
@@ -1694,6 +2099,8 @@ async function evaluateMeetPageState(page: Page): Promise<MeetPageState> {
         title,
         inMeeting: !waitingForAdmit && inMeetingSignals.some(Boolean),
         participantCount: participantCount(),
+        participants,
+        activeSpeaker,
         waitingForAdmit,
         preJoin: preJoinSignals.some(Boolean),
         signIn: signInSignals.some(Boolean),
@@ -1706,14 +2113,16 @@ async function evaluateMeetPageState(page: Page): Promise<MeetPageState> {
       };
     }),
     2500,
-      {
-        ok: false,
-        error: "meet_page_state_timeout",
-      },
-  ).catch((error): MeetPageState => ({
-    ok: false,
-    error: String(error?.message || error),
-  }));
+    {
+      ok: false,
+      error: "meet_page_state_timeout",
+    },
+  ).catch(
+    (error): MeetPageState => ({
+      ok: false,
+      error: String(error?.message || error),
+    }),
+  );
   if (jsState.ok || jsState.error !== "meet_page_state_timeout") return jsState;
   const accessibilityState = await evaluateMeetAccessibilityState(page);
   if (accessibilityState.ok) {
@@ -1726,6 +2135,53 @@ async function evaluateMeetPageState(page: Page): Promise<MeetPageState> {
     ...jsState,
     accessibilityProbe: accessibilityState,
   };
+}
+
+async function openMeetPeoplePanelForAwareness(page: Page, diagnostics?: Diagnostics) {
+  const result = await withTimeout(
+    page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]"));
+      const peopleButton = buttons.find((node) => {
+        const label =
+          `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""} ${node.getAttribute("data-tooltip") || ""}`
+            .replace(/\s+/g, " ")
+            .trim();
+        return /people|participants|show everyone|参与者|用户|成员/i.test(label);
+      });
+      if (!peopleButton) return { ok: false, reason: "people_button_not_found" };
+      const expanded =
+        peopleButton.getAttribute("aria-expanded") === "true" ||
+        peopleButton.getAttribute("aria-pressed") === "true";
+      if (expanded) {
+        return {
+          ok: true,
+          alreadyOpen: true,
+          label: (peopleButton.getAttribute("aria-label") || peopleButton.innerText || "").slice(
+            0,
+            120,
+          ),
+        };
+      }
+      peopleButton.click();
+      return {
+        ok: true,
+        clicked: true,
+        label: (peopleButton.getAttribute("aria-label") || peopleButton.innerText || "").slice(
+          0,
+          120,
+        ),
+      };
+    }),
+    2500,
+    { ok: false, reason: "people_panel_open_timeout" },
+  ).catch((error) => ({
+    ok: false,
+    reason: "people_panel_open_error",
+    error: String(error?.message || error),
+  }));
+  diagnostics?.record("meeting_awareness_people_panel", result);
+  if (Boolean((result as any)?.clicked)) await page.waitForTimeout(700).catch(() => {});
+  return result;
 }
 
 export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
@@ -2336,12 +2792,18 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const fixtureState = input.collectFixtureState ? await evaluateFixtureState(page) : null;
     const localDialog = await evaluateLocalDialogState(page);
     const screenShare = await evaluateScreenShareState(page);
-    const meetPage = await evaluateMeetPageState(page);
+    let meetPage = await evaluateMeetPageState(page);
+    if (meetPage.inMeeting) {
+      await openMeetPeoplePanelForAwareness(page, diagnostics);
+      meetPage = await evaluateMeetPageState(page);
+    }
     const captions = captionCapture ? await captionCapture.status() : null;
+    const meetingAwareness = buildMeetingAwarenessState({ meetPage, captions });
     diagnostics.record("join_complete", {
       clickedJoinSelector: clicked,
       admission,
       meetPage,
+      meetingAwareness,
       avatarReady,
       avatarAudio,
       fixtureState,
@@ -2367,7 +2829,16 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       screenShare,
       meetPage,
       captions,
+      meetingAwareness,
+      peoplePanelAwarenessAttempted: Boolean(meetPage.inMeeting),
     };
+    active.lastMeetingAwarenessSignature = "";
+    active.meetingAwarenessPush = await publishMeetingAwarenessToPage(page, meetingAwareness);
+    if (active.meetingAwarenessPush?.pushed) {
+      active.lastMeetingAwarenessSignature = meetingAwarenessSignature(meetingAwareness);
+      diagnostics.record("meeting_awareness_push", active.meetingAwarenessPush);
+      await saveDiagnostics(diagnostics).catch(() => {});
+    }
 
     return {
       ok: true,
@@ -2391,13 +2862,15 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       localDialog,
       screenShare,
       meetPage,
+      meetingAwareness,
+      meetingAwarenessPush: active.meetingAwarenessPush,
       screenShareStart,
     };
   }
 
   async function refreshActiveRuntimeState() {
     if (!active?.page) return;
-    const [
+    let [
       avatarReady,
       avatarAudio,
       fixtureState,
@@ -2418,6 +2891,12 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       active.captionCapture?.status() || Promise.resolve(null),
       evaluateMeetPageState(active.page),
     ]);
+    if (meetPage.inMeeting && !active.peoplePanelAwarenessAttempted) {
+      active.peoplePanelAwarenessAttempted = true;
+      await openMeetPeoplePanelForAwareness(active.page, active.diagnostics);
+      meetPage = await evaluateMeetPageState(active.page);
+    }
+    const meetingAwareness = buildMeetingAwarenessState({ meetPage, captions });
     active.avatarReady = avatarReady;
     active.avatarAudio = avatarAudio;
     active.fixtureState = fixtureState;
@@ -2427,9 +2906,24 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     active.screenShare = screenShare;
     active.captions = captions;
     active.meetPage = meetPage;
+    active.meetingAwareness = meetingAwareness;
+    const nextAwarenessSignature = meetingAwarenessSignature(meetingAwareness);
+    if (nextAwarenessSignature && nextAwarenessSignature !== active.lastMeetingAwarenessSignature) {
+      active.meetingAwarenessPush = await publishMeetingAwarenessToPage(
+        active.page,
+        meetingAwareness,
+      );
+      if (active.meetingAwarenessPush?.pushed) {
+        active.lastMeetingAwarenessSignature = nextAwarenessSignature;
+      }
+    } else {
+      await publishMeetingAwarenessToPage(active.page, meetingAwareness, false).catch(() => {});
+    }
     if (active.diagnostics) {
       active.diagnostics.record("runtime_state_refresh", {
         meetPage,
+        meetingAwareness,
+        meetingAwarenessPush: active.meetingAwarenessPush || null,
         ...compactRuntimeState({
           avatarReady,
           avatarAudio,
@@ -2869,6 +3363,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
             localDialog: active.localDialog || null,
             screenShare: active.screenShare || null,
             meetPage: active.meetPage || null,
+            meetingAwareness: active.meetingAwareness || null,
+            meetingAwarenessPush: active.meetingAwarenessPush || null,
           }
         : null,
     };

@@ -94,6 +94,12 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
               description: "Return current date/time.",
               parameters: { type: "object", properties: {}, required: [] },
             },
+            {
+              type: "function",
+              name: "meet_participants",
+              description: "Return live Meet participants.",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
           ],
           session: {
             model: "gpt-realtime-2",
@@ -121,6 +127,31 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
       assert.ok(
         calls.some((entry) => entry.path === "/tools/now" && entry.auth === "test-session-token"),
       );
+
+      const participantsResult = await page.evaluate(() => {
+        window.MAB_MEETING_AWARENESS = {
+          ok: true,
+          observedAt: "2026-05-16T15:25:30Z",
+          source: "meet_dom_and_caption_tail",
+          participants: [
+            { name: "Peng Xiao", source: "meet_participant_tile", confidence: "medium" },
+          ],
+          participantCount: 1,
+          activeSpeaker: {
+            name: "Peng Xiao",
+            source: "google-meet-caption-dom",
+            confidence: "high",
+            observedAt: "2026-05-16T15:25:29Z",
+          },
+          recentSpeakers: [],
+          caveat: "Best-effort Google Meet DOM/caption heuristic.",
+        };
+        return window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("meet_participants", {});
+      });
+      assert.equal(participantsResult.ok, true);
+      assert.equal(participantsResult.result.ok, true);
+      assert.equal(participantsResult.result.participants[0].name, "Peng Xiao");
+      assert.equal(participantsResult.result.activeSpeaker.name, "Peng Xiao");
 
       const disconnected = await page.evaluate(() => {
         window.MAB_REALTIME_CLIENT.disconnect("sdk-smoke-disconnect");
