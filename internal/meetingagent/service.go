@@ -34,39 +34,48 @@ type Config struct {
 	Meetd              appconfig.MeetdConfig
 	CaptionLanguage    string
 	OpenAI             appconfig.OpenAIConfig
+	SlackBotToken      string
+	SlackAPIBaseURL    string
 	Dialog             appconfig.DialogConfig
 	HTTPClient         *http.Client
 }
 
 type Service struct {
-	logger             *slog.Logger
-	persistence        appconfig.PersistenceConfig
-	internalAuthKey    string
-	pipeline           *postmeeting.Pipeline
-	webhookSender      *postmeeting.WebhookSender
-	meetRunner         meetrunner.Runner
-	runner             agentrunner.Runner
-	runnerErr          error
-	sessionMu          sync.Mutex
-	sessionStore       *persistence.TypedCollection[SessionRecord]
-	workerMu           sync.Mutex
-	workerStore        *persistence.TypedCollection[WorkerReport]
-	meetdMu            sync.Mutex
-	meetdWriteMu       sync.Mutex
-	meetdStore         *persistence.TypedCollection[MeetdMeetingRecord]
-	meetdCaptionStore  *persistence.TypedCollection[MeetdCaptionRecord]
-	meetdSummaryStore  *persistence.TypedCollection[MeetdMeetingSummaryRecord]
-	meetdWebhook       MeetdWebhookSender
-	meetdWebhookURL    string
-	meetdWebhookSecret string
-	meetdWatchInterval time.Duration
-	captionLanguage    string
-	openai             appconfig.OpenAIConfig
-	dialog             appconfig.DialogConfig
-	httpClient         *http.Client
-	meetdWake          chan struct{}
-	meetdRuntimeCancel context.CancelFunc
-	meetdRuntimeDone   chan struct{}
+	logger              *slog.Logger
+	persistence         appconfig.PersistenceConfig
+	internalAuthKey     string
+	pipeline            *postmeeting.Pipeline
+	webhookSender       *postmeeting.WebhookSender
+	meetRunner          meetrunner.Runner
+	runner              agentrunner.Runner
+	runnerErr           error
+	sessionMu           sync.Mutex
+	sessionStore        *persistence.TypedCollection[SessionRecord]
+	workerMu            sync.Mutex
+	workerStore         *persistence.TypedCollection[WorkerReport]
+	meetdMu             sync.Mutex
+	meetdWriteMu        sync.Mutex
+	meetdStore          *persistence.TypedCollection[MeetdMeetingRecord]
+	meetdCaptionStore   *persistence.TypedCollection[MeetdCaptionRecord]
+	meetdSummaryStore   *persistence.TypedCollection[MeetdMeetingSummaryRecord]
+	identityMu          sync.Mutex
+	identityStore       *persistence.TypedCollection[IdentityUserRecord]
+	slackUsersMu        sync.Mutex
+	slackUsersCache     []IdentityUserRecord
+	slackUsersFetchedAt time.Time
+	meetdWebhook        MeetdWebhookSender
+	meetdWebhookURL     string
+	meetdWebhookSecret  string
+	meetdWatchInterval  time.Duration
+	captionLanguage     string
+	openai              appconfig.OpenAIConfig
+	slackBotToken       string
+	slackAPIBaseURL     string
+	dialog              appconfig.DialogConfig
+	httpClient          *http.Client
+	meetdWake           chan struct{}
+	meetdRuntimeCancel  context.CancelFunc
+	meetdRuntimeDone    chan struct{}
 }
 
 type shutdownRunner interface {
@@ -109,6 +118,8 @@ func NewService(cfg Config) *Service {
 		meetdWatchInterval: watchInterval,
 		captionLanguage:    strings.TrimSpace(cfg.CaptionLanguage),
 		openai:             cfg.OpenAI,
+		slackBotToken:      strings.TrimSpace(cfg.SlackBotToken),
+		slackAPIBaseURL:    strings.TrimRight(strings.TrimSpace(cfg.SlackAPIBaseURL), "/"),
 		dialog:             cfg.Dialog,
 		httpClient:         cfg.HTTPClient,
 		meetdWake:          make(chan struct{}, 1),

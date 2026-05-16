@@ -214,6 +214,43 @@ export const realtimeToolSchemas = [
         },
         channel: { type: "string" },
         workspace: { type: "string" },
+        meeting_url: {
+          type: "string",
+          description: "Current Google Meet URL when available, used to reconcile calendar attendees.",
+        },
+        calendar_attendees: {
+          type: "array",
+          description: "Optional attendee hints from a matched calendar event.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              display_name: { type: "string" },
+              email: { type: "string" },
+              aliases: { type: "array", items: { type: "string" } },
+              role: { type: "string" },
+            },
+          },
+        },
+        learn: {
+          type: "object",
+          description:
+            "Optional user-corrected identity memory to persist for future speaker resolution.",
+          properties: {
+            canonical_name: { type: "string" },
+            preferred_name: { type: "string" },
+            honorific_preference: { type: "string" },
+            role: { type: "string" },
+            aliases: { type: "array", items: { type: "string" } },
+            meet_display_names: { type: "array", items: { type: "string" } },
+            slack_user_id: { type: "string" },
+            slack_team_id: { type: "string" },
+            email: { type: "string" },
+            calendar_emails: { type: "array", items: { type: "string" } },
+            linear: { type: "string" },
+            github: { type: "string" },
+          },
+        },
       },
       required: ["display_name"],
     },

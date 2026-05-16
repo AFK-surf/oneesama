@@ -24,6 +24,7 @@ func NewServer(cfg config.Config, logger *slog.Logger) *httpserver.ManagedServer
 		Meetd:              cfg.Meetd,
 		CaptionLanguage:    cfg.Meetd.CaptionLanguage,
 		OpenAI:             cfg.OpenAI,
+		SlackBotToken:      cfg.Slack.BotToken,
 		Dialog:             cfg.Dialog,
 	})
 	service.StartMeetdRuntime(context.Background())

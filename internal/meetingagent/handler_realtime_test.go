@@ -1,6 +1,7 @@
 package meetingagent
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -257,6 +258,164 @@ func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
 	decodeRealtimeBody(t, now.Body.String(), &nowBody)
 	if nowBody["timezone"] != "Asia/Shanghai" || nowBody["now"] == "" {
 		t.Fatalf("now body = %#v, want Asia/Shanghai timestamp", nowBody)
+	}
+}
+
+func TestResolveSpeakerIdentityFusesSlackAndPeopleMemory(t *testing.T) {
+	t.Parallel()
+
+	slackAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users.list" {
+			t.Fatalf("slack path = %q, want /users.list", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer xoxb-test" {
+			t.Fatalf("Authorization = %q, want bot token", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"members": [
+				{
+					"id": "U123",
+					"team_id": "T123",
+					"name": "peng",
+					"real_name": "Peng Xiao",
+					"profile": {
+						"display_name": "Peng",
+						"real_name": "Peng Xiao",
+						"email": "peng@example.com"
+					}
+				}
+			],
+			"response_metadata": {"next_cursor": ""}
+		}`))
+	}))
+	defer slackAPI.Close()
+
+	service := NewService(Config{
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: t.TempDir(),
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(t.TempDir()),
+		OpenAI: appconfig.OpenAIConfig{
+			CurrentUserName:        "Peng Xiao",
+			CurrentUserEnglishName: "Peng Xiao",
+			CurrentUserEmail:       "peng@example.com",
+			CurrentUserAliases:     []string{"彭潇"},
+		},
+		SlackBotToken:   "xoxb-test",
+		SlackAPIBaseURL: slackAPI.URL,
+	})
+	if err := service.upsertIdentityRecord(context.Background(), IdentityUserRecord{
+		ID:                  "person:peng",
+		CanonicalName:       "Peng Xiao",
+		PreferredName:       "Peng Xiao",
+		HonorificPreference: "肖鹏",
+		Role:                "current_user",
+		Aliases:             []string{"老大"},
+		Email:               "peng@example.com",
+		Sources:             []string{"people_memory"},
+	}); err != nil {
+		t.Fatalf("seed people memory: %v", err)
+	}
+
+	identity := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
+		DisplayName: "彭潇",
+		Source:      "meet_dom",
+	})
+	if identity["canonical_name"] != "Peng Xiao" || identity["preferred_name"] != "肖鹏" || identity["is_current_user"] != true {
+		t.Fatalf("identity = %#v, want fused current user with honorific", identity)
+	}
+	if identity["confidence"] != "high" || identity["source_match_count"] != 3 {
+		t.Fatalf("identity = %#v, want high confidence from three sources", identity)
+	}
+	cross := identity["cross_service_ids"].(map[string]any)
+	if cross["slack_user_id"] != "U123" || cross["email"] != "peng@example.com" {
+		t.Fatalf("cross_service_ids = %#v, want Slack + email mapping", cross)
+	}
+}
+
+func TestResolveSpeakerIdentityUsesCalendarAttendees(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(Config{
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: t.TempDir(),
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(t.TempDir()),
+		OpenAI: appconfig.OpenAIConfig{
+			CurrentUserName:        "Peng Xiao",
+			CurrentUserEnglishName: "Peng Xiao",
+		},
+	})
+	start := "2026-05-17T09:00:00Z"
+	end := "2026-05-17T10:00:00Z"
+	if _, err := service.ScheduleMeetdMeeting(context.Background(), MeetdMeetingBrief{
+		EventID:   "event-1",
+		MeetURL:   "https://meet.google.com/abc-defg-hij",
+		Title:     "Calendar source fixture",
+		StartAt:   start,
+		EndAt:     end,
+		Attendees: []string{"Li Si <lisi@example.com>"},
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("schedule meeting: %v", err)
+	}
+
+	identity := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
+		DisplayName: "Li Si",
+		Source:      "caption",
+		MeetingURL:  "https://meet.google.com/abc-defg-hij",
+	})
+	if identity["canonical_name"] != "Li Si" || identity["role"] != "external" || identity["confidence"] != "medium" {
+		t.Fatalf("identity = %#v, want calendar attendee match", identity)
+	}
+	cross := identity["cross_service_ids"].(map[string]any)
+	emails := cross["calendar_emails"].([]string)
+	if len(emails) != 1 || emails[0] != "lisi@example.com" {
+		t.Fatalf("cross_service_ids = %#v, want calendar email", cross)
+	}
+}
+
+func TestResolveSpeakerIdentityDisambiguatesAndFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(Config{
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: t.TempDir(),
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(t.TempDir()),
+		OpenAI: appconfig.OpenAIConfig{
+			CurrentUserName: "Owner",
+		},
+	})
+	for _, record := range []IdentityUserRecord{
+		{ID: "person:zhang-san", CanonicalName: "张三", Aliases: []string{"Zhang San"}, Sources: []string{"people_memory"}},
+		{ID: "person:zhang-shan", CanonicalName: "张山", Aliases: []string{"Zhang Shan"}, Sources: []string{"people_memory"}},
+		{ID: "person:alex-a", CanonicalName: "Alex A", Aliases: []string{"Alex"}, Sources: []string{"people_memory"}},
+		{ID: "person:alex-b", CanonicalName: "Alex B", Aliases: []string{"Alex"}, Sources: []string{"people_memory"}},
+	} {
+		if err := service.upsertIdentityRecord(context.Background(), record); err != nil {
+			t.Fatalf("seed identity %s: %v", record.ID, err)
+		}
+	}
+
+	resolved := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
+		DisplayName: "Zhang San",
+		Source:      "meet_dom",
+	})
+	if resolved["canonical_name"] != "张三" || resolved["confidence"] != "medium" {
+		t.Fatalf("resolved = %#v, want exact Zhang San match", resolved)
+	}
+
+	ambiguous := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
+		DisplayName: "Alex",
+		Source:      "meet_dom",
+	})
+	if ambiguous["canonical_name"] != "Alex" || ambiguous["confidence"] != "low" || ambiguous["resolver"] != "identity_resolver_v2" {
+		t.Fatalf("ambiguous = %#v, want low-confidence fallback", ambiguous)
 	}
 }
 
