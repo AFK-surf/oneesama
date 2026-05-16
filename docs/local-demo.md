@@ -134,7 +134,8 @@ source examples/provider-http.env
 npm run smoke:local-agent-dialog
 ```
 
-For a human handoff checklist, see [handoff-checklist.md](handoff-checklist.md).
+For a quick operator-facing entry point, start with the root
+[README](../README.md) and then follow the live checks below.
 
 For a real Google Meet room acceptance smoke, use a throwaway room and keep a human nearby in case Google puts the bot in the waiting room:
 
