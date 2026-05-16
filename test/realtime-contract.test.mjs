@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildRealtimeSessionConfig } from "../packages/core/src/realtime/realtime-contract.ts";
+import {
+  buildRealtimeSessionConfig,
+  realtimeToolSchemas,
+} from "../packages/core/src/realtime/realtime-contract.ts";
 
 test("Realtime contract preserves structured turn detection overrides", () => {
   const session = buildRealtimeSessionConfig({
@@ -39,7 +42,7 @@ test("Realtime contract parses JSON turn detection config strings", () => {
   });
 });
 
-test("Realtime contract builds identity-aware instructions from runtime config", () => {
+test("Realtime contract keeps identity data out of product instructions", () => {
   const session = buildRealtimeSessionConfig({}, {
     botName: "Onee Sama",
     currentUserName: "老大",
@@ -52,8 +55,13 @@ test("Realtime contract builds identity-aware instructions from runtime config",
   });
 
   assert.equal(session.model, "gpt-realtime-2");
-  assert.match(session.instructions, /Current speaker\/user: 老大/);
-  assert.match(session.instructions, /Current user aliases: 老大 \/ Peng Xiao \/ 彭潇 \/ 肖鹏 \/ Operator/);
-  assert.match(session.instructions, /email peng@example\.com/);
-  assert.match(session.instructions, /Linear pengxiao/);
+  assert.match(session.instructions, /Identity contract:/);
+  assert.doesNotMatch(session.instructions, /老大|Peng Xiao|彭潇|肖鹏|peng@example\.com|pengxiao|pengx17/);
+  assert.doesNotMatch(session.instructions, /Codex|codex|delegate_to_|worker|fetch_url|present_video_stage|send_meet_chat|update_avatar_state/);
+});
+
+test("Realtime contract exposes product identity resolver tool", () => {
+  const resolver = realtimeToolSchemas.find((tool) => tool.name === "resolve_speaker_identity");
+  assert.ok(resolver);
+  assert.deepEqual(resolver.parameters.required, ["display_name"]);
 });

@@ -77,8 +77,39 @@ test("meeting awareness links active speaker aliases to current user", () => {
     },
   });
 
-  assert.equal(awareness.activeSpeaker?.currentUserMatch?.currentUserName, "Peng Xiao");
-  assert.match(meetingAwarenessContextText(awareness), /matches current user Peng Xiao/);
+  assert.equal(awareness.activeSpeaker?.identity?.canonicalName, "Peng Xiao");
+  assert.equal(awareness.activeSpeaker?.identity?.isCurrentUser, true);
+  assert.match(meetingAwarenessContextText(awareness), /canonical_name=Peng Xiao/);
+  assert.match(meetingAwarenessContextText(awareness), /is_current_user=true/);
+});
+
+test("meeting awareness resolves another workspace owner without Peng-specific prompt data", () => {
+  const awareness = buildMeetingAwarenessState({
+    nowMs: Date.parse("2026-05-16T15:25:30Z"),
+    currentUser: {
+      name: "张三",
+      englishName: "Zhang San",
+      aliases: ["张三", "Zhang San", "Operator"],
+    },
+    meetPage: {
+      ok: true,
+      inMeeting: true,
+      participants: [{ name: "李四", source: "meet_participant_tile", confidence: "medium" }],
+      activeSpeaker: {
+        name: "Zhang San",
+        source: "meet_speaker_tile_indicator",
+        confidence: "medium",
+        observedAt: "2026-05-16T15:25:28Z",
+      },
+    },
+  });
+
+  assert.equal(awareness.activeSpeaker?.identity?.canonicalName, "张三");
+  assert.equal(awareness.activeSpeaker?.identity?.preferredName, "张三");
+  assert.equal(awareness.activeSpeaker?.identity?.isCurrentUser, true);
+  const external = awareness.participants.find((participant) => participant.name === "李四");
+  assert.equal(external?.identity?.role, "external");
+  assert.equal(external?.identity?.isCurrentUser, false);
 });
 
 test("meeting awareness falls back to DOM speaker when caption speaker is stale", () => {

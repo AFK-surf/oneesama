@@ -190,7 +190,7 @@ interface MeetParticipantSignal {
   participantId?: string;
   rawLabel?: string;
   lastSeenAt?: string;
-  currentUserMatch?: MeetingIdentityMatch | null;
+  identity?: SpeakerIdentityResolution | null;
 }
 
 interface MeetSpeakerSignal {
@@ -200,14 +200,20 @@ interface MeetSpeakerSignal {
   observedAt: string;
   rawLabel?: string;
   text?: string;
-  currentUserMatch?: MeetingIdentityMatch | null;
+  identity?: SpeakerIdentityResolution | null;
 }
 
-interface MeetingIdentityMatch {
-  kind: "current_user";
-  matchedAlias: string;
-  currentUserName: string;
-  currentUserEnglishName: string;
+interface SpeakerIdentityResolution {
+  resolved: boolean;
+  role: "current_user" | "external" | "unknown";
+  isCurrentUser: boolean;
+  canonicalName: string;
+  preferredName: string;
+  confidence: "low" | "medium" | "high";
+  resolver: "workspace_current_user" | "unresolved";
+  matchedAlias?: string;
+  displayName: string;
+  evidence: string[];
 }
 
 interface MeetingAwarenessState {
@@ -1668,23 +1674,46 @@ function currentUserAliasList(currentUser?: RealtimeCurrentUser | null): string[
   ]);
 }
 
-function matchCurrentUserAlias(
+function resolveSpeakerIdentity(
   displayName: unknown,
   currentUser?: RealtimeCurrentUser | null,
-): MeetingIdentityMatch | null {
+): SpeakerIdentityResolution | null {
+  const rawDisplayName = normalizeMeetingPersonName(displayName);
   const normalizedName = normalizeIdentityAlias(displayName);
   if (!normalizedName) return null;
+  const aliases = currentUserAliasList(currentUser);
   for (const alias of currentUserAliasList(currentUser)) {
     if (normalizeIdentityAlias(alias) === normalizedName) {
+      const canonicalName = currentUser?.name || currentUser?.englishName || currentUser?.english || alias;
       return {
-        kind: "current_user",
+        resolved: true,
+        role: "current_user",
+        isCurrentUser: true,
+        canonicalName,
+        preferredName: preferredCurrentUserAddress(aliases, canonicalName),
+        confidence: "high",
+        resolver: "workspace_current_user",
         matchedAlias: alias,
-        currentUserName: currentUser?.name || alias,
-        currentUserEnglishName: currentUser?.englishName || currentUser?.english || alias,
+        displayName: rawDisplayName,
+        evidence: [`exact_alias:${alias}`],
       };
     }
   }
-  return null;
+  return {
+    resolved: false,
+    role: "external",
+    isCurrentUser: false,
+    canonicalName: rawDisplayName,
+    preferredName: rawDisplayName,
+    confidence: "low",
+    resolver: "unresolved",
+    displayName: rawDisplayName,
+    evidence: ["fallback:display_name"],
+  };
+}
+
+function preferredCurrentUserAddress(aliases: string[], fallback: string): string {
+  return aliases.find((alias) => /[\u4e00-\u9fff]/.test(alias)) || fallback;
 }
 
 export function buildMeetingAwarenessState({
@@ -1713,7 +1742,7 @@ export function buildMeetingAwarenessState({
       participantId: candidate?.participantId || existing?.participantId || "",
       rawLabel: candidate?.rawLabel || existing?.rawLabel || "",
       lastSeenAt: candidate?.lastSeenAt || existing?.lastSeenAt || nowIso(),
-      currentUserMatch: matchCurrentUserAlias(name, currentUser) || existing?.currentUserMatch || null,
+      identity: resolveSpeakerIdentity(name, currentUser) || existing?.identity || null,
     };
     const rank = { low: 1, medium: 2, high: 3 };
     if (!existing || rank[next.confidence] >= rank[existing.confidence]) {
@@ -1755,7 +1784,7 @@ export function buildMeetingAwarenessState({
   const domSpeaker = meetPage?.activeSpeaker || null;
   const activeSpeaker = captionIsFresh ? latestCaption : domSpeaker || latestCaption || null;
   if (activeSpeaker?.name) {
-    activeSpeaker.currentUserMatch = matchCurrentUserAlias(activeSpeaker.name, currentUser);
+    activeSpeaker.identity = resolveSpeakerIdentity(activeSpeaker.name, currentUser);
   }
   if (activeSpeaker?.name) {
     addParticipant({
@@ -1799,12 +1828,12 @@ export function meetingAwarenessContextText(awareness: MeetingAwarenessState | n
     `- Current/recent speaker: ${speaker}.`,
     `- Caveat: ${awareness.caveat}`,
   ];
-  const identityMatch = awareness.activeSpeaker?.currentUserMatch;
-  if (identityMatch) {
+  const identity = awareness.activeSpeaker?.identity;
+  if (identity?.resolved) {
     lines.splice(
       3,
       0,
-      `- Identity link: ${awareness.activeSpeaker?.name} matches current user ${identityMatch.currentUserName} (${identityMatch.currentUserEnglishName}); treat this speaker as the current user/operator, not a separate person named Operator.`,
+      `- Active speaker identity: canonical_name=${identity.canonicalName}, preferred_name=${identity.preferredName}, role=${identity.role}, is_current_user=${identity.isCurrentUser}, confidence=${identity.confidence}. Treat first-person speech from the active speaker as this identity. Do not expose detection or internal mechanism details unless the user explicitly asks for debugging.`,
     );
   }
   return lines.join("\n");
@@ -1870,26 +1899,27 @@ function logMeetingAwarenessDebug(
       name: participant.name,
       source: participant.source,
       confidence: participant.confidence,
-      currentUserMatch: participant.currentUserMatch || null,
+      identity: participant.identity || null,
     })),
     activeSpeaker: activeSpeaker
       ? {
           name: activeSpeaker.name,
           source: activeSpeaker.source,
           confidence: activeSpeaker.confidence,
-          currentUserMatch: activeSpeaker.currentUserMatch || null,
+          identity: activeSpeaker.identity || null,
           text: activeSpeaker.text || "",
         }
       : null,
     pushResult: pushResult || null,
   };
   console.log(`[meeting-awareness] ${JSON.stringify(detail)}`);
-  if (activeSpeaker?.name && !activeSpeaker.currentUserMatch) {
+  if (activeSpeaker?.name && !activeSpeaker.identity?.resolved) {
     console.warn(
-      `[meeting-awareness-identity-mismatch] ${JSON.stringify({
+      `[meeting-awareness-identity-unresolved] ${JSON.stringify({
         activeSpeaker: activeSpeaker.name,
         source: activeSpeaker.source,
         confidence: activeSpeaker.confidence,
+        identity: activeSpeaker.identity || null,
       })}`,
     );
   }

@@ -64,11 +64,19 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	if reasoning["effort"] != "high" {
 		t.Fatalf("reasoning = %#v, want high", reasoning)
 	}
-	if !strings.Contains(body["instructions"].(string), "low-latency AI meeting avatar") ||
-		!strings.Contains(body["instructions"].(string), "peng@example.com") {
-		t.Fatalf("instructions missing old realtime prompt: %q", body["instructions"])
+	instructions := body["instructions"].(string)
+	if !strings.Contains(instructions, "low-latency AI meeting avatar") ||
+		!strings.Contains(instructions, "Identity contract:") {
+		t.Fatalf("instructions missing product realtime prompt: %q", instructions)
 	}
-	if !toolNamesInclude(body["tools"].([]any), "delegate_to_worker", "present_video_stage", "update_avatar_state") {
+	if strings.Contains(instructions, "peng@example.com") ||
+		strings.Contains(instructions, "Peng Xiao") ||
+		strings.Contains(instructions, "delegate_to_") ||
+		strings.Contains(instructions, "Codex") ||
+		strings.Contains(instructions, "worker") {
+		t.Fatalf("instructions leaked identity/mechanism details: %q", instructions)
+	}
+	if !toolNamesInclude(body["tools"].([]any), "delegate_to_worker", "present_video_stage", "update_avatar_state", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
 	}
 }
@@ -214,6 +222,30 @@ func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
 	aliases := currentUser["aliases"].([]any)
 	if len(aliases) != 5 || aliases[2] != "彭潇" {
 		t.Fatalf("identity aliases = %#v, want configured aliases plus names", aliases)
+	}
+
+	resolveCurrent := httptest.NewRecorder()
+	router.ServeHTTP(resolveCurrent, realtimeRequest(http.MethodPost, "/tools/resolve_speaker_identity", `{"display_name":"彭潇","source":"meet_dom"}`))
+	if resolveCurrent.Code != http.StatusOK {
+		t.Fatalf("resolve current status = %d: %s", resolveCurrent.Code, resolveCurrent.Body.String())
+	}
+	var resolveCurrentBody map[string]any
+	decodeRealtimeBody(t, resolveCurrent.Body.String(), &resolveCurrentBody)
+	currentIdentity := resolveCurrentBody["identity"].(map[string]any)
+	if currentIdentity["canonical_name"] != "老大" || currentIdentity["role"] != "current_user" || currentIdentity["is_current_user"] != true {
+		t.Fatalf("current identity = %#v, want current_user match", currentIdentity)
+	}
+
+	resolveExternal := httptest.NewRecorder()
+	router.ServeHTTP(resolveExternal, realtimeRequest(http.MethodPost, "/tools/resolve_speaker_identity", `{"display_name":"李四","source":"meet_dom"}`))
+	if resolveExternal.Code != http.StatusOK {
+		t.Fatalf("resolve external status = %d: %s", resolveExternal.Code, resolveExternal.Body.String())
+	}
+	var resolveExternalBody map[string]any
+	decodeRealtimeBody(t, resolveExternal.Body.String(), &resolveExternalBody)
+	externalIdentity := resolveExternalBody["identity"].(map[string]any)
+	if externalIdentity["canonical_name"] != "李四" || externalIdentity["role"] != "external" || externalIdentity["is_current_user"] != false {
+		t.Fatalf("external identity = %#v, want safe display-name fallback", externalIdentity)
 	}
 
 	now := httptest.NewRecorder()

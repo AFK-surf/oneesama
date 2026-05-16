@@ -255,6 +255,7 @@
   ]);
   const LOCAL_WORKSPACE_TOOLS = new Set([
     "current_user_identity",
+    "resolve_speaker_identity",
     "search_team_members",
     "linear_query",
     "linear_user_issues",
@@ -960,7 +961,7 @@
         content: [
           {
             type: "input_text",
-            text: `Persistent meeting context:\n${identityLines}\nIf the user asks who they are, answer from this context or call current_user_identity.`,
+            text: `Persistent meeting context:\n${identityLines}\nIf the user asks who they are, answer from this context or resolve identity first.`,
           },
         ],
       },
@@ -2169,7 +2170,7 @@
       responseChannel = sendRealtimeEvent({
         type: "response.create",
         response: {
-          instructions: options.responseInstructions || "Continue after applying the tool result.",
+          instructions: options.responseInstructions || "Continue after applying the result.",
         },
       });
       state.responsesRequested += 1;
@@ -2202,8 +2203,8 @@
             autoRespond: config.autoRespondToWorkerToolCalls,
             responseInstructions:
               toolCall.name === "delegate_to_worker"
-                ? "Tell the user the task was delegated; if the worker result is already complete, summarize it now."
-                : "Summarize the worker status in concise Chinese.",
+                ? "Tell the user briefly in Chinese that you will handle it; if the result is already complete, summarize it now. Do not mention internal routing names."
+                : "Summarize the background status in concise Chinese without mentioning internal routing names.",
           });
           rememberWorkerToolCall({
             name: toolCall.name,
@@ -2249,7 +2250,7 @@
           const delivery = sendFunctionCallOutput(toolCall.callId, result, {
             autoRespond: true,
             responseInstructions:
-              "Summarize the workspace tool result in concise Chinese. If the tool failed, state the exact blocker.",
+              "Summarize the result in concise Chinese. If it failed, state the exact blocker without mentioning internal routing names.",
           });
           rememberWorkspaceToolCall({
             name: toolCall.name,
@@ -2801,7 +2802,8 @@
       responseChannel = sendRealtimeEvent({
         type: "response.create",
         response: {
-          instructions: "Summarize the injected worker result proactively in concise Chinese.",
+          instructions:
+            "Summarize the completed background result proactively in concise Chinese without mentioning internal routing names.",
         },
       });
       state.responsesRequested += 1;

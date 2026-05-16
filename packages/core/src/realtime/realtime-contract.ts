@@ -3,19 +3,19 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "delegate_to_worker",
     description:
-      "Delegate complex work to the Codex/workspace worker instead of improvising in the realtime voice model. The worker can run shell commands, read/write files, inspect git repos, run tests, execute Python/Node/CLI tools, fetch arbitrary URLs, read links, and perform multi-step debugging/research/planning with fuller context.",
+      "Start a background workspace job for complex work that should not be improvised in the realtime voice conversation.",
     parameters: {
       type: "object",
       properties: {
         task: {
           type: "string",
           description:
-            "Clear task for the worker, including URLs, file paths, expected output, and any user wording that matters.",
+            "Clear task, including URLs, file paths, expected output, and any user wording that matters.",
         },
         context: {
           type: "string",
           description:
-            "Useful meeting/workspace context. Include Meet chat links or prior tool results when relevant.",
+            "Useful meeting/workspace context. Include Meet chat links or prior results when relevant.",
         },
         mode: {
           type: "string",
@@ -30,7 +30,7 @@ export const realtimeToolSchemas = [
   {
     type: "function",
     name: "worker_status",
-    description: "Check status/result of a delegated worker job.",
+    description: "Check status/result of a background workspace job.",
     parameters: {
       type: "object",
       properties: {
@@ -43,19 +43,18 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "delegate_to_codex",
     description:
-      "Alias for delegate_to_worker. Use this when the user asks for anything Codex is better at: reading/summarizing links, fetching X/Twitter via Jina or web fetch, downloading videos/files/media when legally accessible, running commands, checking files, reading repos, debugging code, changing code, searching workspace state, writing plans, or doing multi-step research. Do not say you cannot do these tasks; delegate to Codex.",
+      "Compatibility alias for starting a background workspace job for links, files, code, debugging, planning, or multi-step research.",
     parameters: {
       type: "object",
       properties: {
         task: {
           type: "string",
-          description:
-            "Clear task for Codex. Include exact URLs/file paths/commands and what to report back.",
+          description: "Clear task. Include exact URLs/file paths/commands and what to report back.",
         },
         context: {
           type: "string",
           description:
-            "Useful meeting/workspace context. Include Meet chat links or prior tool results when relevant.",
+            "Useful meeting/workspace context. Include Meet chat links or prior results when relevant.",
         },
         mode: {
           type: "string",
@@ -71,8 +70,7 @@ export const realtimeToolSchemas = [
   {
     type: "function",
     name: "delegate_status",
-    description:
-      "Legacy alias for worker_status. Check status/result of a delegated Codex worker job.",
+    description: "Compatibility alias for checking status/result of a background workspace job.",
     parameters: {
       type: "object",
       properties: {
@@ -100,7 +98,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "present_video_stage",
     description:
-      "Open a controlled video/stage tab and make Google Meet share that stage. Use immediately when the user says 放视频 / 分享视频 / 播放视频 / share screen with a video / open video stage / present video. This uses the synthetic screen-share path by default, keeps the Live2D camera separate, and avoids desktop TCC/native picker failures. For non-direct video links, first delegate to Codex to download/resolve a playable file or URL, then call this tool. If Codex returns both a local downloaded video path and a remote direct URL, prefer the local downloaded video path.",
+      "Open a controlled video/stage tab and make Google Meet share that stage. Use immediately when the user says 放视频 / 分享视频 / 播放视频 / share screen with a video / open video stage / present video. For non-direct video links, first resolve a playable file or URL in the background, then present the resulting video file or URL.",
     parameters: {
       type: "object",
       properties: {
@@ -167,7 +165,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "fetch_url",
     description:
-      "Read a public URL and return extracted text/markdown. Uses the Jina reader by default, which is useful for X/Twitter links and pages that are hard to read directly. If this fails or the request needs deeper browsing, delegate to Codex.",
+      "Read a public URL and return extracted text/markdown. Uses a reader service by default, which is useful for X/Twitter links and pages that are hard to read directly. If this fails or the request needs deeper browsing, continue in the background.",
     parameters: {
       type: "object",
       properties: {
@@ -195,6 +193,29 @@ export const realtimeToolSchemas = [
       type: "object",
       properties: {},
       required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "resolve_speaker_identity",
+    description:
+      "Resolve a live meeting speaker display name to the current workspace identity profile when possible. Falls back to the display name with low confidence instead of guessing.",
+    parameters: {
+      type: "object",
+      properties: {
+        display_name: {
+          type: "string",
+          description: "Raw speaker or participant display name from Meet, captions, Slack, or another surface.",
+        },
+        source: {
+          type: "string",
+          enum: ["meet_dom", "caption", "slack_event", "manual", "unknown"],
+          default: "unknown",
+        },
+        channel: { type: "string" },
+        workspace: { type: "string" },
+      },
+      required: ["display_name"],
     },
   },
   {
@@ -575,33 +596,6 @@ function currentUserFromConfig(config: RealtimeSessionConfig = {}): RealtimeCurr
   };
 }
 
-function splitAliasList(value: unknown): string[] {
-  const parts = Array.isArray(value) ? value : String(value || "").split(",");
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const item of parts) {
-    const text = String(item || "").trim();
-    if (!text) continue;
-    const key = text.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(text);
-  }
-  return out;
-}
-
-function currentUserAliasList(currentUser: RealtimeCurrentUser = {}): string[] {
-  return splitAliasList([
-    currentUser.name,
-    currentUser.englishName || currentUser.english,
-    ...splitAliasList(currentUser.aliases),
-  ]);
-}
-
-function preferredCurrentUserAddress(aliases: string[], fallback: string): string {
-  return aliases.find((alias) => /[\u4e00-\u9fff]/.test(alias)) || fallback;
-}
-
 function normalizeTurnDetectionConfig(value: unknown) {
   if (value === null) return null;
   if (typeof value === "object" && value !== undefined) {
@@ -733,42 +727,26 @@ export function buildRealtimeInstructions({
   personalityContext = "",
   currentUser = {},
 }: RealtimeInstructionOptions = {}) {
-  const userName = currentUser.name || "Operator";
-  const userEnglishName = currentUser.englishName || currentUser.english || "Operator";
-  const userEmail = currentUser.email || "operator@example.com";
-  const userLinear = currentUser.linear || "operator";
-  const userGithub = currentUser.github || "operator";
-  const userRole = currentUser.role || "meeting operator";
-  const userAliases = currentUserAliasList(currentUser);
-  const userAliasesText = userAliases.length ? userAliases.join(" / ") : "none";
-  const preferredUserAddress = preferredCurrentUserAddress(userAliases, userName);
   const lines = [
     `You are ${botName}, a low-latency AI meeting avatar.`,
     "Speak concise Chinese by default.",
-    "Persona: lively, concise, reliable meeting copilot with a bright Hiyori on-camera presence. Be warm and playful, but keep answers short and useful.",
-    `Current speaker/user: ${userName} (workspace English name ${userEnglishName}). Use the configured display name or preferred honorific when available. When the user says “我/我的/我是谁/你知道我是谁吗”, it refers to ${userName}.`,
-    `Current user identity: Chinese name ${userName}, English/workspace name ${userEnglishName}, email ${userEmail}, Linear ${userLinear}, GitHub ${userGithub}, role ${userRole}.`,
-    `Current user aliases: ${userAliasesText}. If live Meet active_speaker/participant displayName matches any alias, that speaker is the current user/operator, not a different person. In casual Chinese replies prefer ${preferredUserAddress} instead of saying Operator.`,
-    "Project context: AFK AI, Inc. builds oneesama as a meeting avatar and Slack/meeting automation framework.",
-    "Collaboration habits inherited from Slack Agent memory: low-friction actions, concise replies, no vague development time estimates, report concrete state/actions/blockers/evidence.",
-    "You can handle lightweight conversation and real workspace tool lookups.",
-    "Codex worker capability briefing: delegate_to_codex/delegate_to_worker has full local worker capabilities outside this realtime voice model: shell execution, WebFetch/URL reading, file/media download, video download via local CLIs such as yt-dlp when available, files, git, Python/Node scripts, tests, local CLIs, repo inspection, and multi-step implementation/debugging/research. If the user asks for something outside realtime voice context, delegate instead of saying you cannot.",
-    "Use the workspace tools for real data: Linear, Calendar, Slack, Notion, GitHub, team member lookup, memory, and current time. Never invent workspace data.",
-    `For any identity question like “我是谁/你知道我是谁吗/who am I”, call current_user_identity first; if the tool is unavailable, answer that the current speaker is ${userName} (${userEnglishName}).`,
-    `For "my Linear tasks" from the current user, call linear_user_issues with ${userEmail}.`,
-    "For multi-step reasoning, code/debug work, long research, architecture planning, PR/log review, running commands, reading files, downloading videos/media/files, or anything requiring a stronger agent, call delegate_to_worker or delegate_to_codex.",
-    "After delegating, tell the user you have handed the task to the background worker and will report back automatically.",
-    "When a worker completion is injected into the conversation, summarize it proactively in 1-2 short Chinese sentences.",
-    "When the user asks you to post something into the current Google Meet chat, call send_meet_chat with the exact short message text.",
-    "When the user asks you to share screen, present a video, play a video, or open a stage in the meeting, call present_video_stage. If the user asks to stop sharing / 停止分享 / 关掉分享, call stop_video_stage. If the video source is not a direct playable URL/file, delegate to Codex first to resolve/download it, then present the resulting video file or URL. Do not answer that you cannot share video; use this tool path.",
-    "When the user asks about a link or message they posted in Google Meet chat, call read_meet_chat and answer from the returned recent messages/links.",
-    "Live Meet participants and current/recent speaker context may be pushed into the conversation automatically. When the user explicitly asks who is in the meeting or who is speaking, call meet_participants or active_speaker and include the source/confidence caveat.",
-    "When the user asks you to read or summarize a URL, first call fetch_url if the URL is visible. If fetch_url fails, needs login, needs browser interaction, needs a downloadable asset/video, or needs deeper analysis, call delegate_to_codex with the URL and the exact task. For X/Twitter links, fetch_url via Jina is the first quick path; for downloading videos or files, delegate to Codex rather than claiming you cannot download.",
-    "For non-trivial spoken answers, call update_avatar_state before or during the answer so the avatar mood/action matches the conversation. Use happy+nod for agreement, thinking+think for reasoning, happy+emphasize for conclusions, sad+shake for failures, surprised+lean_forward for unexpected findings, and happy+wave for greetings.",
-    "Never pretend a complex delegated task is done before the worker result arrives.",
+    "Persona: lively, concise, reliable meeting copilot with a bright on-camera presence. Be warm and playful, but keep answers short and useful.",
+    "Product behavior: keep implementation details invisible. Do not mention internal function names, model/runtime names, background job names, or service routing unless the user explicitly asks for debugging.",
+    "When asked what you can do, describe capabilities in user-facing terms: listen and respond in the meeting, understand who is speaking, read meeting chat or shared links, help with workspace lookup, summarize, plan, research, and follow up.",
+    "When the user asks you to do complex work, say briefly that you will handle it or check it, then use the appropriate internal action. Do not narrate the internal mechanism.",
+    "Identity contract: live speaker identity is provided by runtime context or identity lookup. If active speaker context marks someone as current_user, treat first-person wording like “我/我的/我是谁” as that identity. If identity is uncertain, ask a short clarification instead of guessing.",
+    "Project context: AFK AI, Inc. builds oneesama as a meeting avatar and workspace automation framework.",
+    "Collaboration habits inherited from workspace memory: low-friction actions, concise replies, no vague development time estimates, report concrete state/actions/blockers/evidence.",
+    "Use real meeting/workspace data when available. Never invent names, tasks, calendar facts, documents, links, or code state.",
+    "For identity questions, resolve the current speaker identity first. Do not answer from stale defaults.",
+    "For personal task questions, resolve the current user profile first and use its workspace identifiers.",
+    "For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
+    "If a long-running result is not ready, say you are handling it and will report back automatically. Never pretend it is complete before the result arrives.",
+    "When live meeting participants or speaker context is injected, use it as conversation context. Do not recite detection sources, confidence values, or raw context fields unless the user asks for debugging.",
+    "For non-trivial spoken answers, adjust the avatar mood/action before or during the answer so the visible avatar matches the conversation.",
   ];
   if (personalityContext) {
-    lines.push(`Extra local Slack Agent context:\n${String(personalityContext).slice(0, 4000)}`);
+    lines.push(`Extra local workspace context:\n${String(personalityContext).slice(0, 4000)}`);
   }
   return lines.join("\n");
 }
