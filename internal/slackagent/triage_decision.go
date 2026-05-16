@@ -183,9 +183,15 @@ func parseSlackTriageDecision(rawOutput string, fallback slackTriageFallback) Sl
 		fallback.Summary,
 		"Slack activity triage completed.",
 	)
+	normalizedActions := normalizeSlackTriageActions(actions, fallback)
+	if len(normalizedActions) == 0 {
+		if stripped, ok := stripSlackTriageNoActionPrefix(summary); ok && stripped != "" {
+			summary = stripped
+		}
+	}
 	return SlackTriageDecision{
 		Summary: summary,
-		Actions: normalizeSlackTriageActions(actions, fallback),
+		Actions: normalizedActions,
 		Raw:     parsed,
 		ParseOK: ok,
 	}

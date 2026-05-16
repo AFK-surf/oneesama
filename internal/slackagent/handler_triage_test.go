@@ -161,6 +161,17 @@ func TestSlackTriageDecisionStripsInlineNoActionPrefix(t *testing.T) {
 	}
 }
 
+func TestSlackTriageDecisionStripsParsedNoActionSummaryPrefix(t *testing.T) {
+	raw := `{"summary":"No action. U123 已经接住问题，无需助手介入。","actions":[]}`
+	decision := parseSlackTriageDecision(raw, slackTriageFallback{Summary: "fallback summary", Channel: "C123", ThreadTS: "123.456"})
+	if !decision.ParseOK {
+		t.Fatalf("decision = %#v, want parsed JSON", decision)
+	}
+	if decision.Summary != "U123 已经接住问题，无需助手介入。" {
+		t.Fatalf("summary = %q, want parsed no-action prefix stripped", decision.Summary)
+	}
+}
+
 func TestSlackTriageDecisionHidesWorkerMechanismAction(t *testing.T) {
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
 		ChannelID: "C123",
