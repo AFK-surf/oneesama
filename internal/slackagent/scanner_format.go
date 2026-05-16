@@ -55,21 +55,38 @@ func resolveTextMentions(text string, resolveName func(string) string) string {
 	if resolveName == nil {
 		return text
 	}
+	var sb strings.Builder
+	remaining := text
 	for {
-		start := strings.Index(text, "<@")
+		start := strings.Index(remaining, "<@")
 		if start == -1 {
+			sb.WriteString(remaining)
 			break
 		}
-		end := strings.Index(text[start:], ">")
+		end := strings.Index(remaining[start:], ">")
 		if end == -1 {
+			sb.WriteString(remaining)
 			break
 		}
 		end += start
-		uid := text[start+2 : end]
+		sb.WriteString(remaining[:start])
+		uid := remaining[start+2 : end]
 		name := resolveName(uid)
-		text = text[:start] + "@" + name + text[end+1:]
+		sb.WriteString(formatResolvedMention(name, uid))
+		remaining = remaining[end+1:]
 	}
-	return text
+	return sb.String()
+}
+
+func formatResolvedMention(name string, uid string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = strings.TrimSpace(uid)
+	}
+	if strings.HasPrefix(name, "@") || (strings.HasPrefix(name, "<@") && strings.HasSuffix(name, ">")) {
+		return name
+	}
+	return "@" + name
 }
 
 func truncateString(value string, maxLen int) string {
