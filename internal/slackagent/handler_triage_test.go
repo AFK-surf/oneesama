@@ -285,6 +285,162 @@ func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
 	}
 }
 
+func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 17, 1, 0, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	runs := []SlackTriageContext{
+		{
+			Timestamp: now.Add(-7 * time.Hour).Format(time.RFC3339Nano),
+			Status:    "ok",
+			Summary:   "outside window",
+			Channels:  []string{"C123"},
+			Mutations: 1,
+			Metadata:  map[string]any{"input_context_chars": 900},
+		},
+		{
+			Timestamp: now.Add(-5 * time.Hour).Format(time.RFC3339Nano),
+			Status:    "ok",
+			Summary:   "low context skip",
+			Channels:  []string{"C123"},
+			Metadata: map[string]any{
+				"input_context_chars":      120,
+				"channel_context_fetched":  true,
+				"thread_context_fetched":   false,
+				"external_links_fetched":   1,
+				"suppressed_reason":        "no_actions",
+				"channel_context_messages": 3,
+			},
+		},
+		{
+			Timestamp: now.Add(-4 * time.Hour).Format(time.RFC3339Nano),
+			Status:    "ok",
+			Summary:   "maybe follow-up",
+			Channels:  []string{"C123"},
+			Actions:   []SlackTriageAction{{Tool: "suggest_action", Channel: "C123", Brief: "needs owner"}},
+			Metadata: map[string]any{
+				"input_context_chars":     300,
+				"thread_context_fetched":  true,
+				"external_links_fetched":  0,
+				"thread_context_messages": 4,
+			},
+		},
+		{
+			Timestamp: now.Add(-150 * time.Minute).Format(time.RFC3339Nano),
+			Status:    "ok",
+			Summary:   "direct reply",
+			Channels:  []string{"C123"},
+			Actions:   []SlackTriageAction{{Tool: "slack_api", Channel: "C123", Brief: "posted"}},
+			Mutations: 1,
+			Metadata: map[string]any{
+				"input_context_chars":    500,
+				"thread_context_fetched": true,
+			},
+		},
+	}
+	for _, run := range runs {
+		if _, err := service.triage.RecordRun(context.Background(), run); err != nil {
+			t.Fatalf("RecordRun: %v", err)
+		}
+	}
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if report.RunCount != 3 || report.Outcome.Mutations != 1 || report.Outcome.OutboundRuns != 1 || report.Outcome.MaybeRuns != 1 || report.Outcome.NoActionRuns != 1 {
+		t.Fatalf("outcome = %#v runCount=%d", report.Outcome, report.RunCount)
+	}
+	if report.InputContext.Min != 120 || report.InputContext.Median != 300 || report.InputContext.Max != 500 || report.InputContext.LowUnder200 != 1 {
+		t.Fatalf("inputContext = %#v", report.InputContext)
+	}
+	if report.ContextFetch.ChannelContextFetched != 1 || report.ContextFetch.ThreadContextFetched != 2 || report.ContextFetch.ExternalLinksFetched != 1 {
+		t.Fatalf("contextFetch = %#v", report.ContextFetch)
+	}
+	if report.Canary.Total != 3 || report.Canary.Passed != 3 || report.Canary.NeedsLiveSample {
+		t.Fatalf("canary = %#v", report.Canary)
+	}
+	if !hasAuditFlag(report.Flags, "stale_sample") || !hasAuditFlag(report.Flags, "low_context_samples") {
+		t.Fatalf("flags = %#v, want stale and low context", report.Flags)
+	}
+	if hasAuditFlag(report.Flags, "no_live_positive_samples") {
+		t.Fatalf("flags = %#v, live positive exists", report.Flags)
+	}
+}
+
+func TestTriageAuditFlagsMissingLivePositiveSample(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 17, 1, 0, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	if _, err := service.triage.RecordRun(context.Background(), SlackTriageContext{
+		Timestamp: now.Add(-time.Hour).Format(time.RFC3339Nano),
+		Status:    "ok",
+		Summary:   "skip",
+		Channels:  []string{"C123"},
+		Metadata:  map[string]any{"input_context_chars": 400, "suppressed_reason": "no_actions"},
+	}); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if !report.Canary.NeedsLiveSample || !hasAuditFlag(report.Flags, "no_live_positive_samples") {
+		t.Fatalf("report = %#v, want live positive warning", report)
+	}
+}
+
+func TestHandleTriageAuditReturnsSelfServeReport(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 17, 1, 0, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	router := newTestRouter(t, Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/slack/triage/audit?window=6h", nil)
+	request.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		OK    bool                   `json:"ok"`
+		Audit SlackTriageAuditReport `json:"audit"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 3 || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func hasAuditFlag(flags []SlackTriageAuditFlag, code string) bool {
+	for _, flag := range flags {
+		if flag.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 func TestChannelBrainBuildsFactsAndOpenLoops(t *testing.T) {
 	summary := buildChannelBrainSummary([]SlackThreadLedgerRecord{
 		{ThreadTS: "111.222", Status: "active", Summary: "Decision: use Codex for runner", UpdatedAt: "2026-05-13T01:00:00Z"},

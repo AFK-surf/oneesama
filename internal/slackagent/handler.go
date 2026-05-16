@@ -43,6 +43,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	internalSlack.POST("/scanner/sweep", h.handleScannerSweep)
 	internalSlack.POST("/scanner/compact", h.handleScannerCompact)
 	internalSlack.GET("/triage/status", h.handleTriageStatus)
+	internalSlack.GET("/triage/audit", h.handleTriageAudit)
 	internalSlack.POST("/triage/run", h.handleTriageRun)
 	internalSlack.GET("/followups/status", h.handleFollowupStatus)
 	internalSlack.POST("/followups/create", h.handleFollowupCreate)

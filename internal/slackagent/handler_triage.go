@@ -3,6 +3,7 @@ package slackagent
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,6 +30,27 @@ func (h *Handler) handleTriageStatus(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "triage": status})
+}
+
+func (h *Handler) handleTriageAudit(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	window := slackTriageAuditDefaultWindow
+	if raw := c.Query("window"); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "invalid window duration"})
+			return
+		}
+		window = parsed
+	} else if hours, _ := strconv.Atoi(c.Query("hours")); hours > 0 {
+		window = time.Duration(hours) * time.Hour
+	}
+	report, err := h.service.TriageAudit(c.Request.Context(), window, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "audit": report})
 }
 
 func (h *Handler) handleTriageRun(c *gin.Context) {
