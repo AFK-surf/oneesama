@@ -359,13 +359,87 @@ func TestSlackHistoryScannerBacksOffRateLimitedChannel(t *testing.T) {
 		t.Fatalf("second scan error = %v, want backoff skip without error", err)
 	}
 	if !second.OK || len(second.Sweeps) != 1 || second.Sweeps[0].OK || !strings.Contains(second.Sweeps[0].Error, "slack_history_rate_limited_until") {
-		t.Fatalf("second sweep = %#v, want channel backoff", second)
+		if !strings.Contains(second.Sweeps[0].Error, "slack_history_global_rate_limited_until") {
+			t.Fatalf("second sweep = %#v, want channel/global backoff", second)
+		}
 	}
 	if historyCalls != 1 {
 		t.Fatalf("history calls = %d, want second scan to skip rate-limited channel", historyCalls)
 	}
 	if cursor := service.inbound.Cursor("C123"); cursor != "1778765800.000000" {
 		t.Fatalf("cursor = %q, want unchanged while rate limited", cursor)
+	}
+}
+
+func TestSlackHistoryScannerStopsSweepOnGlobalRateLimit(t *testing.T) {
+	listCalls := 0
+	historyCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			listCalls++
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"xp-test","is_member":true,"is_channel":true},{"id":"C456","name":"xp-second","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			historyCalls++
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"ok":false,"error":"ratelimited"}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+		},
+		Runner: &fakeRunner{job: agentrunner.Job{ID: "job_triage_poll", Provider: "codex", Status: agentrunner.StatusCompleted}},
+	})
+	service.inbound.SetCursor("C123", "1778765800.000000")
+	service.inbound.SetCursor("C456", "1778765800.000000")
+
+	first, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("first scan error = %v, want rate limit captured in sweep", err)
+	}
+	if !first.OK || len(first.Sweeps) != 1 || first.Sweeps[0].ChannelID != "C123" {
+		t.Fatalf("first sweep = %#v, want scan to stop after first rate-limited channel", first)
+	}
+	if historyCalls != 1 {
+		t.Fatalf("history calls = %d, want no fan-out after method rate limit", historyCalls)
+	}
+	if listCalls != 1 {
+		t.Fatalf("list calls = %d, want first scan to list once", listCalls)
+	}
+
+	second, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("second scan error = %v, want global backoff skip", err)
+	}
+	if !second.OK || len(second.Sweeps) != 1 || second.Sweeps[0].ChannelID != "*" || !strings.Contains(second.Sweeps[0].Error, "slack_history_global_rate_limited_until") {
+		t.Fatalf("second sweep = %#v, want global backoff", second)
+	}
+	if historyCalls != 1 {
+		t.Fatalf("history calls = %d, want global backoff to skip history calls", historyCalls)
+	}
+	if listCalls != 1 {
+		t.Fatalf("list calls = %d, want global backoff to skip list calls too", listCalls)
 	}
 }
 

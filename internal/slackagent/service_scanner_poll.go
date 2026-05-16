@@ -21,6 +21,7 @@ const (
 	slackHistoryScannerBootstrapLookback = 10 * time.Minute
 	slackScannerContextMessageCount      = 3
 	slackScannerDefaultRateLimitBackoff  = time.Minute
+	slackScannerHistoryGlobalBackoffKey  = "__global__:conversations.history"
 )
 
 var slackScannerAPIBaseURL = defaultSlackAPIBaseURL
@@ -135,6 +136,19 @@ func (s *Service) runSlackHistoryScanner(ctx context.Context, interval time.Dura
 }
 
 func (s *Service) scanSlackHistoryOnce(ctx context.Context, bootstrapLookback time.Duration) (SlackScannerSweepResult, error) {
+	if until, ok := s.slackScannerHistoryGlobalBackoffUntil(); ok {
+		return SlackScannerSweepResult{
+			OK:          true,
+			WorkspaceID: "workspace",
+			Inbound:     s.InboundStatus(),
+			Sweeps: []SlackScannerChannelResult{{
+				ChannelID: "*",
+				OK:        false,
+				Source:    "slack_web_api",
+				Error:     "slack_history_global_rate_limited_until:" + until.Format(time.RFC3339),
+			}},
+		}, nil
+	}
 	channels, err := s.listSlackScannerChannels(ctx)
 	if err != nil {
 		return SlackScannerSweepResult{OK: false, Error: err.Error(), Inbound: s.InboundStatus()}, err
@@ -150,10 +164,17 @@ func (s *Service) scanSlackHistoryOnce(ctx context.Context, bootstrapLookback ti
 				Source:    "slack_web_api",
 				Error:     err.Error(),
 			})
+			var rateLimited slackScannerRateLimitError
+			if errors.As(err, &rateLimited) {
+				break
+			}
 			continue
 		}
 		if channelResult != nil {
 			result.Sweeps = append(result.Sweeps, *channelResult)
+		}
+		if _, ok := s.slackScannerHistoryGlobalBackoffUntil(); ok {
+			break
 		}
 	}
 	result.Inbound = s.InboundStatus()
@@ -185,6 +206,7 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 		var rateLimited slackScannerRateLimitError
 		if ok := errors.As(err, &rateLimited); ok {
 			s.setSlackScannerBackoff(channelID, rateLimited.RetryAfter)
+			s.setSlackScannerHistoryGlobalBackoff(rateLimited.RetryAfter)
 		}
 		return nil, err
 	}
@@ -317,6 +339,7 @@ func (s *Service) fetchSlackHistoryContext(ctx context.Context, channelID string
 		var rateLimited slackScannerRateLimitError
 		if ok := errors.As(err, &rateLimited); ok {
 			s.setSlackScannerBackoff(channelID, rateLimited.RetryAfter)
+			s.setSlackScannerHistoryGlobalBackoff(rateLimited.RetryAfter)
 		}
 		s.logger.Warn("slack history scanner context fetch failed", "channel", channelID, "error", err)
 		return nil
@@ -332,24 +355,51 @@ func (s *Service) fetchSlackHistoryContext(ctx context.Context, channelID string
 }
 
 func (s *Service) slackScannerBackoffUntil(channelID string) (time.Time, bool) {
-	if s == nil || strings.TrimSpace(channelID) == "" {
+	return s.slackScannerBackoffUntilKey(strings.TrimSpace(channelID))
+}
+
+func (s *Service) slackScannerHistoryGlobalBackoffUntil() (time.Time, bool) {
+	return s.slackScannerBackoffUntilKey(slackScannerHistoryGlobalBackoffKey)
+}
+
+func (s *Service) slackScannerBackoffUntilKey(key string) (time.Time, bool) {
+	if s == nil {
+		return time.Time{}, false
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
 		return time.Time{}, false
 	}
 	s.scannerMu.Lock()
 	defer s.scannerMu.Unlock()
-	until := s.scannerBackoff[strings.TrimSpace(channelID)]
+	until := s.scannerBackoff[key]
 	if until.IsZero() {
 		return time.Time{}, false
 	}
 	if time.Now().Before(until) {
 		return until, true
 	}
-	delete(s.scannerBackoff, strings.TrimSpace(channelID))
+	delete(s.scannerBackoff, key)
 	return time.Time{}, false
 }
 
 func (s *Service) setSlackScannerBackoff(channelID string, retryAfter time.Duration) {
-	if s == nil || strings.TrimSpace(channelID) == "" {
+	s.setSlackScannerBackoffKey(strings.TrimSpace(channelID), retryAfter)
+}
+
+func (s *Service) setSlackScannerHistoryGlobalBackoff(retryAfter time.Duration) {
+	if retryAfter < slackScannerDefaultRateLimitBackoff {
+		retryAfter = slackScannerDefaultRateLimitBackoff
+	}
+	s.setSlackScannerBackoffKey(slackScannerHistoryGlobalBackoffKey, retryAfter)
+}
+
+func (s *Service) setSlackScannerBackoffKey(key string, retryAfter time.Duration) {
+	if s == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
 		return
 	}
 	if retryAfter <= 0 {
@@ -360,7 +410,7 @@ func (s *Service) setSlackScannerBackoff(channelID string, retryAfter time.Durat
 	if s.scannerBackoff == nil {
 		s.scannerBackoff = make(map[string]time.Time)
 	}
-	s.scannerBackoff[strings.TrimSpace(channelID)] = time.Now().Add(retryAfter)
+	s.scannerBackoff[key] = time.Now().Add(retryAfter)
 }
 
 func (s *Service) callSlackScannerAPI(ctx context.Context, method string, params map[string]string, out any) error {
