@@ -145,6 +145,87 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 	assertStatusCalls(t, assistant.Calls(), []string{"Recording meeting..."})
 }
 
+func TestSocketModeInteractiveJoinSetupFallsBackToMessageBlockValue(t *testing.T) {
+	meetURL := "https://meet.google.com/czf-aaws-fgv"
+	joinRequestCh := make(chan meetingAgentJoinRequest, 1)
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/join/google-meet" {
+			t.Fatalf("path = %s, want /join/google-meet", request.URL.Path)
+		}
+		var body meetingAgentJoinRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		joinRequestCh <- body
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"ok":true,"accepted":true,"started":true,"session":{"id":"session_socket_realtime","meeting_url":"` + meetURL + `","status":"joined"}}`))
+	}))
+	defer meetingAgent.Close()
+
+	responseURLServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer responseURLServer.Close()
+
+	service := NewService(Config{
+		MeetingAgentURL: meetingAgent.URL,
+		Slack: appconfig.SlackConfig{
+			InternalAuthKey: "secret-key",
+		},
+	})
+	runner := NewSocketModeRunner(SocketModeRunnerConfig{
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Service:  service,
+		AppToken: "app-token",
+	})
+	blocks, err := json.Marshal(buildJoinSetupBlocks(
+		parsedAvatarCommand{MeetURL: meetURL, ValidMeetURL: true},
+		"English",
+		joinSetupCardContext{
+			CardID:    "join-card:C0ALMF2AD70:1778943765.480529:https___meet.google.com_czf-aaws-fgv",
+			ChannelID: "C0ALMF2AD70",
+			ThreadTS:  "1778943765.480529",
+			MessageTS: "1778943765.480529",
+		},
+	))
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	rawPayload := fmt.Sprintf(`{
+		"team":{"id":"T123"},
+		"channel":{"id":"C0ALMF2AD70"},
+		"user":{"id":"U123","username":"peng"},
+		"message":{"ts":"1778943770.350779","thread_ts":"1778943765.480529","blocks":%s},
+		"response_url":%q,
+		"actions":[{"action_id":%q,"value":""}]
+	}`, string(blocks), responseURLServer.URL, joinSetupRealtimeActionID)
+
+	var ackPayload any
+	err = runner.handleEnvelope(context.Background(), SlackSocketEnvelope{
+		Type:       "interactive",
+		EnvelopeID: "EnInteractiveJoinMissingValue",
+		Payload:    []byte(rawPayload),
+	}, func(payload any) error {
+		ackPayload = payload
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handle envelope: %v", err)
+	}
+	if ackPayload != nil {
+		t.Fatalf("ack payload = %#v, want nil socket envelope ack", ackPayload)
+	}
+
+	select {
+	case body := <-joinRequestCh:
+		if body.MeetingURL != meetURL || !body.InstallRealtimeBridge || !body.AutoConnectRealtime {
+			t.Fatalf("join body = %#v, want realtime join from message block fallback", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for meeting-agent join request")
+	}
+}
+
 func TestSocketModeInteractiveInvalidPayloadAcksEphemeralError(t *testing.T) {
 	runner := NewSocketModeRunner(SocketModeRunnerConfig{
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),

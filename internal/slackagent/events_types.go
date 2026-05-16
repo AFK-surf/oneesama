@@ -179,7 +179,9 @@ func (t *SlackBlockText) UnmarshalJSON(data []byte) error {
 }
 
 type SlackBlockElement struct {
-	Type string          `json:"type,omitempty"`
-	Text *SlackBlockText `json:"text,omitempty"`
-	URL  string          `json:"url,omitempty"`
+	Type     string          `json:"type,omitempty"`
+	ActionID string          `json:"action_id,omitempty"`
+	Text     *SlackBlockText `json:"text,omitempty"`
+	URL      string          `json:"url,omitempty"`
+	Value    string          `json:"value,omitempty"`
 }

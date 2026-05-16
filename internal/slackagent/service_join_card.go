@@ -239,8 +239,10 @@ func joinSetupCommandInputFromInteraction(payload SlackInteractionPayload) (Avat
 	if len(payload.Actions) == 0 {
 		return AvatarCommandInput{}, false
 	}
+	action := payload.Actions[0]
 	var value joinSetupActionValue
-	if err := json.Unmarshal([]byte(strings.TrimSpace(payload.Actions[0].Value)), &value); err != nil {
+	rawValue := joinSetupInteractionActionValue(payload, action)
+	if err := json.Unmarshal([]byte(rawValue), &value); err != nil {
 		return AvatarCommandInput{}, false
 	}
 	if value.Kind != joinSetupKind || strings.TrimSpace(value.MeetingURL) == "" {
@@ -269,6 +271,24 @@ func joinSetupCommandInputFromInteraction(payload SlackInteractionPayload) (Avat
 	input.ThreadTS = firstNonEmpty(input.ThreadTS, value.SourceThreadTS)
 	input.Text = strings.Join(command, " ")
 	return input, true
+}
+
+func joinSetupInteractionActionValue(payload SlackInteractionPayload, action SlackInteractionAction) string {
+	if raw := strings.TrimSpace(action.Value); raw != "" {
+		return raw
+	}
+	actionID := strings.TrimSpace(action.ActionID)
+	if actionID == "" || payload.Message == nil {
+		return ""
+	}
+	for _, block := range payload.Message.Blocks {
+		for _, element := range block.Elements {
+			if strings.TrimSpace(element.ActionID) == actionID && strings.TrimSpace(element.Value) != "" {
+				return strings.TrimSpace(element.Value)
+			}
+		}
+	}
+	return ""
 }
 
 func joinSetupSelectedCaptionLanguage(payload SlackInteractionPayload) string {

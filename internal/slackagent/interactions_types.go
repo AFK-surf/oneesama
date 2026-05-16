@@ -47,8 +47,9 @@ type SlackInteractionUser struct {
 }
 
 type SlackInteractionMessage struct {
-	ThreadTS string `json:"thread_ts,omitempty"`
-	TS       string `json:"ts,omitempty"`
+	ThreadTS string       `json:"thread_ts,omitempty"`
+	TS       string       `json:"ts,omitempty"`
+	Blocks   []SlackBlock `json:"blocks,omitempty"`
 }
 
 type SlackPendingActionInteraction struct {

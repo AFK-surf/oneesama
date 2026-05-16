@@ -102,11 +102,17 @@ func (r *SocketModeRunner) handleInteractive(ctx context.Context, payload []byte
 			Text:         "Invalid socket mode interaction payload.",
 		})
 	}
+	actionID, blockID, valueLen := slackInteractionFirstActionSummary(interaction)
+	r.service.logger.Info(
+		"slack socket interaction received",
+		"action_id", actionID,
+		"block_id", blockID,
+		"value_len", valueLen,
+		"channel", slackInteractionChannelID(interaction),
+		"thread_ts", slackInteractionThreadTS(interaction),
+		"response_url_present", strings.TrimSpace(interaction.ResponseURL) != "",
+	)
 	if command, ok := joinSetupCommandInputFromInteraction(interaction); ok {
-		actionID := ""
-		if len(interaction.Actions) > 0 {
-			actionID = interaction.Actions[0].ActionID
-		}
 		r.service.logger.Info(
 			"slack socket interaction join setup",
 			"action_id", actionID,
@@ -118,4 +124,26 @@ func (r *SocketModeRunner) handleInteractive(ctx context.Context, payload []byte
 		return ack(nil)
 	}
 	return ack(r.service.HandleSlackInteraction(context.WithoutCancel(ctx), interaction))
+}
+
+func slackInteractionFirstActionSummary(payload SlackInteractionPayload) (string, string, int) {
+	if len(payload.Actions) == 0 {
+		return "", "", 0
+	}
+	action := payload.Actions[0]
+	return strings.TrimSpace(action.ActionID), strings.TrimSpace(action.BlockID), len(strings.TrimSpace(action.Value))
+}
+
+func slackInteractionChannelID(payload SlackInteractionPayload) string {
+	if payload.Channel != nil && strings.TrimSpace(payload.Channel.ID) != "" {
+		return strings.TrimSpace(payload.Channel.ID)
+	}
+	return strings.TrimSpace(payload.ChannelID)
+}
+
+func slackInteractionThreadTS(payload SlackInteractionPayload) string {
+	if payload.Message != nil {
+		return firstNonEmpty(strings.TrimSpace(payload.Message.ThreadTS), strings.TrimSpace(payload.Message.TS))
+	}
+	return ""
 }
