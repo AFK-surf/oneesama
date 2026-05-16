@@ -104,6 +104,7 @@ type rawOpenAIConfig struct {
 	CurrentUserLinear          string `json:"current_user_linear"`
 	CurrentUserGitHub          string `json:"current_user_github"`
 	CurrentUserRole            string `json:"current_user_role"`
+	CurrentUserAliases         string `json:"current_user_aliases"`
 }
 
 type rawDialogConfig struct {
@@ -318,5 +319,25 @@ func buildOpenAIConfig(raw rawOpenAIConfig) OpenAIConfig {
 		CurrentUserLinear:          strings.TrimSpace(raw.CurrentUserLinear),
 		CurrentUserGitHub:          strings.TrimSpace(raw.CurrentUserGitHub),
 		CurrentUserRole:            strings.TrimSpace(raw.CurrentUserRole),
+		CurrentUserAliases:         splitConfigCSV(raw.CurrentUserAliases),
 	}
+}
+
+func splitConfigCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }

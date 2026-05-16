@@ -1,13 +1,14 @@
 package meetingagent
 
 type RealtimeCurrentUser struct {
-	Name        string `json:"name,omitempty"`
-	EnglishName string `json:"englishName,omitempty"`
-	English     string `json:"english,omitempty"`
-	Email       string `json:"email,omitempty"`
-	Linear      string `json:"linear,omitempty"`
-	GitHub      string `json:"github,omitempty"`
-	Role        string `json:"role,omitempty"`
+	Name        string   `json:"name,omitempty"`
+	EnglishName string   `json:"englishName,omitempty"`
+	English     string   `json:"english,omitempty"`
+	Email       string   `json:"email,omitempty"`
+	Linear      string   `json:"linear,omitempty"`
+	GitHub      string   `json:"github,omitempty"`
+	Role        string   `json:"role,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
 }
 
 type RealtimeSessionOptions struct {

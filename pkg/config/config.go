@@ -104,6 +104,7 @@ type OpenAIConfig struct {
 	CurrentUserLinear          string
 	CurrentUserGitHub          string
 	CurrentUserRole            string
+	CurrentUserAliases         []string
 }
 
 type DialogConfig struct {

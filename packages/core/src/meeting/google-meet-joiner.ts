@@ -17,6 +17,7 @@ import { buildWorkerResultInitScript } from "../realtime/worker-result-init-buil
 import {
   buildRealtimeInstructions,
   buildRealtimeSessionConfig,
+  type RealtimeCurrentUser,
   realtimeToolSchemas,
 } from "../realtime/realtime-contract.ts";
 
@@ -189,6 +190,7 @@ interface MeetParticipantSignal {
   participantId?: string;
   rawLabel?: string;
   lastSeenAt?: string;
+  currentUserMatch?: MeetingIdentityMatch | null;
 }
 
 interface MeetSpeakerSignal {
@@ -198,6 +200,14 @@ interface MeetSpeakerSignal {
   observedAt: string;
   rawLabel?: string;
   text?: string;
+  currentUserMatch?: MeetingIdentityMatch | null;
+}
+
+interface MeetingIdentityMatch {
+  kind: "current_user";
+  matchedAlias: string;
+  currentUserName: string;
+  currentUserEnglishName: string;
 }
 
 interface MeetingAwarenessState {
@@ -1624,14 +1634,69 @@ function captionSpeakerSignal(event: any): MeetSpeakerSignal | null {
   };
 }
 
+function normalizeIdentityAlias(value: unknown): string {
+  return normalizeMeetingPersonName(value)
+    .toLowerCase()
+    .replace(/[·・]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitIdentityAliases(value: unknown): string[] {
+  const parts = Array.isArray(value) ? value : String(value || "").split(",");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    const text = normalizeMeetingPersonName(part);
+    if (!text) continue;
+    const key = normalizeIdentityAlias(text);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function currentUserAliasList(currentUser?: RealtimeCurrentUser | null): string[] {
+  if (!currentUser) return [];
+  return splitIdentityAliases([
+    currentUser.name,
+    currentUser.englishName || currentUser.english,
+    ...(Array.isArray(currentUser.aliases)
+      ? currentUser.aliases
+      : splitIdentityAliases(currentUser.aliases)),
+  ]);
+}
+
+function matchCurrentUserAlias(
+  displayName: unknown,
+  currentUser?: RealtimeCurrentUser | null,
+): MeetingIdentityMatch | null {
+  const normalizedName = normalizeIdentityAlias(displayName);
+  if (!normalizedName) return null;
+  for (const alias of currentUserAliasList(currentUser)) {
+    if (normalizeIdentityAlias(alias) === normalizedName) {
+      return {
+        kind: "current_user",
+        matchedAlias: alias,
+        currentUserName: currentUser?.name || alias,
+        currentUserEnglishName: currentUser?.englishName || currentUser?.english || alias,
+      };
+    }
+  }
+  return null;
+}
+
 export function buildMeetingAwarenessState({
   meetPage,
   captions,
+  currentUser,
   nowMs = Date.now(),
   recentWindowMs = 30_000,
 }: {
   meetPage?: MeetPageState | null;
   captions?: any;
+  currentUser?: RealtimeCurrentUser | null;
   nowMs?: number;
   recentWindowMs?: number;
 } = {}): MeetingAwarenessState {
@@ -1648,6 +1713,7 @@ export function buildMeetingAwarenessState({
       participantId: candidate?.participantId || existing?.participantId || "",
       rawLabel: candidate?.rawLabel || existing?.rawLabel || "",
       lastSeenAt: candidate?.lastSeenAt || existing?.lastSeenAt || nowIso(),
+      currentUserMatch: matchCurrentUserAlias(name, currentUser) || existing?.currentUserMatch || null,
     };
     const rank = { low: 1, medium: 2, high: 3 };
     if (!existing || rank[next.confidence] >= rank[existing.confidence]) {
@@ -1688,6 +1754,9 @@ export function buildMeetingAwarenessState({
     latestCaption && (!Number.isFinite(latestCaptionAge) || latestCaptionAge <= recentWindowMs);
   const domSpeaker = meetPage?.activeSpeaker || null;
   const activeSpeaker = captionIsFresh ? latestCaption : domSpeaker || latestCaption || null;
+  if (activeSpeaker?.name) {
+    activeSpeaker.currentUserMatch = matchCurrentUserAlias(activeSpeaker.name, currentUser);
+  }
   if (activeSpeaker?.name) {
     addParticipant({
       name: activeSpeaker.name,
@@ -1730,6 +1799,14 @@ export function meetingAwarenessContextText(awareness: MeetingAwarenessState | n
     `- Current/recent speaker: ${speaker}.`,
     `- Caveat: ${awareness.caveat}`,
   ];
+  const identityMatch = awareness.activeSpeaker?.currentUserMatch;
+  if (identityMatch) {
+    lines.splice(
+      3,
+      0,
+      `- Identity link: ${awareness.activeSpeaker?.name} matches current user ${identityMatch.currentUserName} (${identityMatch.currentUserEnglishName}); treat this speaker as the current user/operator, not a separate person named Operator.`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -1776,6 +1853,46 @@ async function publishMeetingAwarenessToPage(
     2500,
     { ok: false, error: "meeting_awareness_publish_timeout" },
   ).catch((error) => ({ ok: false, error: String(error?.message || error) }));
+}
+
+function logMeetingAwarenessDebug(
+  label: string,
+  awareness: MeetingAwarenessState | null,
+  pushResult?: unknown,
+) {
+  if (!awareness?.ok) return;
+  const activeSpeaker = awareness.activeSpeaker || null;
+  const detail = {
+    label,
+    observedAt: awareness.observedAt,
+    participantCount: awareness.participantCount,
+    participants: awareness.participants.map((participant) => ({
+      name: participant.name,
+      source: participant.source,
+      confidence: participant.confidence,
+      currentUserMatch: participant.currentUserMatch || null,
+    })),
+    activeSpeaker: activeSpeaker
+      ? {
+          name: activeSpeaker.name,
+          source: activeSpeaker.source,
+          confidence: activeSpeaker.confidence,
+          currentUserMatch: activeSpeaker.currentUserMatch || null,
+          text: activeSpeaker.text || "",
+        }
+      : null,
+    pushResult: pushResult || null,
+  };
+  console.log(`[meeting-awareness] ${JSON.stringify(detail)}`);
+  if (activeSpeaker?.name && !activeSpeaker.currentUserMatch) {
+    console.warn(
+      `[meeting-awareness-identity-mismatch] ${JSON.stringify({
+        activeSpeaker: activeSpeaker.name,
+        source: activeSpeaker.source,
+        confidence: activeSpeaker.confidence,
+      })}`,
+    );
+  }
 }
 
 function compactRuntimeState({
@@ -2504,15 +2621,16 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         }),
       });
     }
+    const realtimeCurrentUser = {
+      name: config.currentUserName,
+      englishName: config.currentUserEnglishName,
+      email: config.currentUserEmail,
+      linear: config.currentUserLinear,
+      github: config.currentUserGithub,
+      role: config.currentUserRole,
+      aliases: config.currentUserAliases,
+    };
     if (installRealtimeBridge) {
-      const realtimeCurrentUser = {
-        name: config.currentUserName,
-        englishName: config.currentUserEnglishName,
-        email: config.currentUserEmail,
-        linear: config.currentUserLinear,
-        github: config.currentUserGithub,
-        role: config.currentUserRole,
-      };
       const realtimeTools = input.realtimeTools || realtimeToolSchemas;
       const realtimeInstructions =
         input.realtimeInstructions ||
@@ -2798,7 +2916,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       meetPage = await evaluateMeetPageState(page);
     }
     const captions = captionCapture ? await captionCapture.status() : null;
-    const meetingAwareness = buildMeetingAwarenessState({ meetPage, captions });
+    const meetingAwareness = buildMeetingAwarenessState({
+      meetPage,
+      captions,
+      currentUser: realtimeCurrentUser,
+    });
     diagnostics.record("join_complete", {
       clickedJoinSelector: clicked,
       admission,
@@ -2834,6 +2956,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     };
     active.lastMeetingAwarenessSignature = "";
     active.meetingAwarenessPush = await publishMeetingAwarenessToPage(page, meetingAwareness);
+    logMeetingAwarenessDebug("join_complete", meetingAwareness, active.meetingAwarenessPush);
     if (active.meetingAwarenessPush?.pushed) {
       active.lastMeetingAwarenessSignature = meetingAwarenessSignature(meetingAwareness);
       diagnostics.record("meeting_awareness_push", active.meetingAwarenessPush);
@@ -2896,7 +3019,20 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       await openMeetPeoplePanelForAwareness(active.page, active.diagnostics);
       meetPage = await evaluateMeetPageState(active.page);
     }
-    const meetingAwareness = buildMeetingAwarenessState({ meetPage, captions });
+    const realtimeCurrentUser = {
+      name: config.currentUserName,
+      englishName: config.currentUserEnglishName,
+      email: config.currentUserEmail,
+      linear: config.currentUserLinear,
+      github: config.currentUserGithub,
+      role: config.currentUserRole,
+      aliases: config.currentUserAliases,
+    };
+    const meetingAwareness = buildMeetingAwarenessState({
+      meetPage,
+      captions,
+      currentUser: realtimeCurrentUser,
+    });
     active.avatarReady = avatarReady;
     active.avatarAudio = avatarAudio;
     active.fixtureState = fixtureState;
@@ -2919,6 +3055,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     } else {
       await publishMeetingAwarenessToPage(active.page, meetingAwareness, false).catch(() => {});
     }
+    logMeetingAwarenessDebug("runtime_state_refresh", meetingAwareness, active.meetingAwarenessPush);
     if (active.diagnostics) {
       active.diagnostics.record("runtime_state_refresh", {
         meetPage,

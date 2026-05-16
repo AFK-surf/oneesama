@@ -48,10 +48,12 @@ test("Realtime contract builds identity-aware instructions from runtime config",
     currentUserLinear: "pengxiao",
     currentUserGithub: "pengx17",
     currentUserRole: "owner",
+    currentUserAliases: ["彭潇", "肖鹏", "Operator"],
   });
 
   assert.equal(session.model, "gpt-realtime-2");
   assert.match(session.instructions, /Current speaker\/user: 老大/);
+  assert.match(session.instructions, /Current user aliases: 老大 \/ Peng Xiao \/ 彭潇 \/ 肖鹏 \/ Operator/);
   assert.match(session.instructions, /email peng@example\.com/);
   assert.match(session.instructions, /Linear pengxiao/);
 });

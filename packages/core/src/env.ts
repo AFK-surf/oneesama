@@ -1,4 +1,9 @@
 export function getRuntimeConfig(env = process.env) {
+  const splitList = (value = "") =>
+    String(value || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
   const openaiBaseUrl = (
     env.MAB_OPENAI_BASE_URL ||
     env.OPENAI_BASE_URL ||
@@ -128,6 +133,7 @@ export function getRuntimeConfig(env = process.env) {
     currentUserLinear: env.MAB_CURRENT_USER_LINEAR || "",
     currentUserGithub: env.MAB_CURRENT_USER_GITHUB || "",
     currentUserRole: env.MAB_CURRENT_USER_ROLE || "",
+    currentUserAliases: splitList(env.MAB_CURRENT_USER_ALIASES || env.ONEESAMA_CURRENT_USER_ALIASES),
     browserHeadless: (env.MAB_BROWSER_HEADLESS || "false") === "true",
     screenshotDir: env.MAB_SCREENSHOT_DIR || "/tmp/meeting-avatar-bot",
     playwrightModulePath: env.MAB_PLAYWRIGHT_MODULE || "",

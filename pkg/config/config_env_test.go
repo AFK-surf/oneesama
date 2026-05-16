@@ -164,6 +164,7 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	t.Setenv("MAB_CURRENT_USER_LINEAR", "peng-linear")
 	t.Setenv("MAB_CURRENT_USER_GITHUB", "peng-gh")
 	t.Setenv("MAB_CURRENT_USER_ROLE", "founder")
+	t.Setenv("MAB_CURRENT_USER_ALIASES", "彭潇, 肖鹏, Operator")
 	t.Setenv("MAB_STT_PROVIDER", "event")
 	t.Setenv("MAB_TTS_PROVIDER", "http")
 	t.Setenv("MAB_TTS_VOICE", "warm")
@@ -203,6 +204,9 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	}
 	if cfg.OpenAI.CurrentUserLinear != "peng-linear" || cfg.OpenAI.CurrentUserGitHub != "peng-gh" || cfg.OpenAI.CurrentUserRole != "founder" {
 		t.Fatalf("OpenAI current user = %#v, want env workspace IDs", cfg.OpenAI)
+	}
+	if len(cfg.OpenAI.CurrentUserAliases) != 3 || cfg.OpenAI.CurrentUserAliases[0] != "彭潇" {
+		t.Fatalf("OpenAI current user aliases = %#v, want parsed aliases", cfg.OpenAI.CurrentUserAliases)
 	}
 	if cfg.Dialog.TTSProvider != "http" || cfg.Dialog.TTSVoice != "warm" || cfg.Dialog.TTSCommand != "tts-command" || cfg.Dialog.TTSHTTPURL != "http://127.0.0.1:9001/tts" {
 		t.Fatalf("Dialog = %#v, want env dialog provider values", cfg.Dialog)

@@ -103,6 +103,12 @@ func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.Ope
 	userLinear := firstNonEmpty(currentUser.Linear, "operator")
 	userGitHub := firstNonEmpty(currentUser.GitHub, "operator")
 	userRole := firstNonEmpty(currentUser.Role, "meeting operator")
+	userAliases := compactRealtimeAliases(currentUser.Aliases, userName, userEnglishName)
+	userAliasesText := "none"
+	if len(userAliases) > 0 {
+		userAliasesText = strings.Join(userAliases, " / ")
+	}
+	preferredUserAddress := preferredRealtimeUserAddress(userAliases, userName)
 
 	lines := []string{
 		"You are " + botName + ", a low-latency AI meeting avatar.",
@@ -110,6 +116,7 @@ func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.Ope
 		"Persona: lively, concise, reliable meeting copilot with a bright Hiyori on-camera presence. Be warm and playful, but keep answers short and useful.",
 		"Current speaker/user: " + userName + " (workspace English name " + userEnglishName + "). Use the configured display name or preferred honorific when available. When the user says “我/我的/我是谁/你知道我是谁吗”, it refers to " + userName + ".",
 		"Current user identity: Chinese name " + userName + ", English/workspace name " + userEnglishName + ", email " + userEmail + ", Linear " + userLinear + ", GitHub " + userGitHub + ", role " + userRole + ".",
+		"Current user aliases: " + userAliasesText + ". If live Meet active_speaker/participant displayName matches any alias, that speaker is the current user/operator, not a different person. In casual Chinese replies prefer " + preferredUserAddress + " instead of saying Operator.",
 		"Project context: AFK AI, Inc. builds oneesama as a meeting avatar and Slack/meeting automation framework.",
 		"Collaboration habits inherited from Slack Agent memory: low-friction actions, concise replies, no vague development time estimates, report concrete state/actions/blockers/evidence.",
 		"You can handle lightweight conversation and real workspace tool lookups.",
@@ -132,6 +139,41 @@ func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.Ope
 		lines = append(lines, "Extra local Slack Agent context:\n"+truncateString(personalityContext, 4000))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func compactRealtimeAliases(values []string, identityValues ...string) []string {
+	out := make([]string, 0, len(values)+len(identityValues))
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	for _, value := range identityValues {
+		add(value)
+	}
+	for _, value := range values {
+		add(value)
+	}
+	return out
+}
+
+func preferredRealtimeUserAddress(aliases []string, fallback string) string {
+	for _, alias := range aliases {
+		for _, r := range alias {
+			if r >= '\u4e00' && r <= '\u9fff' {
+				return alias
+			}
+		}
+	}
+	return fallback
 }
 
 func shouldUseLegacySessionSchema(value string) bool {

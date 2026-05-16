@@ -2,6 +2,7 @@ package meetingagent
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,12 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 	switch toolName {
 	case "current_user_identity":
 		currentUser := h.service.realtimeCurrentUser()
+		h.service.logger.Info(
+			"realtime current_user_identity tool",
+			"name", currentUser.Name,
+			"english_name", currentUser.EnglishName,
+			"aliases", currentUser.Aliases,
+		)
 		c.JSON(http.StatusOK, gin.H{
 			"ok": true,
 			"current_user": gin.H{
@@ -22,8 +29,9 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 				"linear":            currentUser.Linear,
 				"github":            currentUser.GitHub,
 				"role":              currentUser.Role,
+				"aliases":           currentUser.Aliases,
 			},
-			"answer_hint_zh": "当前和你说话的人是 " + currentUser.Name + "（英文账号 " + currentUser.EnglishName + "）。",
+			"answer_hint_zh": "当前和你说话的人是 " + currentUser.Name + "（英文账号 " + currentUser.EnglishName + "；别名 " + strings.Join(currentUser.Aliases, " / ") + "）。",
 		})
 	case "now":
 		loc, err := time.LoadLocation("Asia/Shanghai")

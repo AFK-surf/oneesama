@@ -86,7 +86,32 @@ func (s *Service) realtimeCurrentUser() RealtimeCurrentUser {
 		Linear:      firstNonEmpty(s.openai.CurrentUserLinear, "operator"),
 		GitHub:      firstNonEmpty(s.openai.CurrentUserGitHub, "operator"),
 		Role:        firstNonEmpty(s.openai.CurrentUserRole, "meeting operator"),
+		Aliases:     compactCurrentUserAliases(s.openai.CurrentUserAliases, s.openai.CurrentUserName, s.openai.CurrentUserEnglishName),
 	}
+}
+
+func compactCurrentUserAliases(values []string, identityValues ...string) []string {
+	out := make([]string, 0, len(values)+len(identityValues))
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	for _, value := range identityValues {
+		add(value)
+	}
+	for _, value := range values {
+		add(value)
+	}
+	return out
 }
 
 func (s *Service) MintRealtimeClientSecret(ctx context.Context, options RealtimeSessionOptions) (map[string]any, int, error) {

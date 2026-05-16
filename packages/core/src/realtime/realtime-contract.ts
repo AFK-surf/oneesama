@@ -498,6 +498,7 @@ export interface RealtimeSessionConfig {
   currentUserLinear?: string;
   currentUserGithub?: string;
   currentUserRole?: string;
+  currentUserAliases?: string[] | string;
   [key: string]: unknown;
 }
 
@@ -553,6 +554,7 @@ export interface RealtimeCurrentUser {
   linear?: string;
   github?: string;
   role?: string;
+  aliases?: string[] | string;
 }
 
 export interface RealtimeInstructionOptions {
@@ -569,7 +571,35 @@ function currentUserFromConfig(config: RealtimeSessionConfig = {}): RealtimeCurr
     linear: config.currentUserLinear || "",
     github: config.currentUserGithub || "",
     role: config.currentUserRole || "",
+    aliases: config.currentUserAliases || [],
   };
+}
+
+function splitAliasList(value: unknown): string[] {
+  const parts = Array.isArray(value) ? value : String(value || "").split(",");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of parts) {
+    const text = String(item || "").trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function currentUserAliasList(currentUser: RealtimeCurrentUser = {}): string[] {
+  return splitAliasList([
+    currentUser.name,
+    currentUser.englishName || currentUser.english,
+    ...splitAliasList(currentUser.aliases),
+  ]);
+}
+
+function preferredCurrentUserAddress(aliases: string[], fallback: string): string {
+  return aliases.find((alias) => /[\u4e00-\u9fff]/.test(alias)) || fallback;
 }
 
 function normalizeTurnDetectionConfig(value: unknown) {
@@ -709,12 +739,16 @@ export function buildRealtimeInstructions({
   const userLinear = currentUser.linear || "operator";
   const userGithub = currentUser.github || "operator";
   const userRole = currentUser.role || "meeting operator";
+  const userAliases = currentUserAliasList(currentUser);
+  const userAliasesText = userAliases.length ? userAliases.join(" / ") : "none";
+  const preferredUserAddress = preferredCurrentUserAddress(userAliases, userName);
   const lines = [
     `You are ${botName}, a low-latency AI meeting avatar.`,
     "Speak concise Chinese by default.",
     "Persona: lively, concise, reliable meeting copilot with a bright Hiyori on-camera presence. Be warm and playful, but keep answers short and useful.",
     `Current speaker/user: ${userName} (workspace English name ${userEnglishName}). Use the configured display name or preferred honorific when available. When the user says “我/我的/我是谁/你知道我是谁吗”, it refers to ${userName}.`,
     `Current user identity: Chinese name ${userName}, English/workspace name ${userEnglishName}, email ${userEmail}, Linear ${userLinear}, GitHub ${userGithub}, role ${userRole}.`,
+    `Current user aliases: ${userAliasesText}. If live Meet active_speaker/participant displayName matches any alias, that speaker is the current user/operator, not a different person. In casual Chinese replies prefer ${preferredUserAddress} instead of saying Operator.`,
     "Project context: AFK AI, Inc. builds oneesama as a meeting avatar and Slack/meeting automation framework.",
     "Collaboration habits inherited from Slack Agent memory: low-friction actions, concise replies, no vague development time estimates, report concrete state/actions/blockers/evidence.",
     "You can handle lightweight conversation and real workspace tool lookups.",

@@ -57,6 +57,30 @@ test("meeting awareness prefers fresh caption speaker and merges participant sou
   assert.match(meetingAwarenessContextText(awareness), /Current\/recent speaker: Peng Xiao/);
 });
 
+test("meeting awareness links active speaker aliases to current user", () => {
+  const awareness = buildMeetingAwarenessState({
+    nowMs: Date.parse("2026-05-16T15:25:30Z"),
+    currentUser: {
+      name: "Peng Xiao",
+      englishName: "Peng Xiao",
+      aliases: ["彭潇", "肖鹏", "Operator"],
+    },
+    meetPage: {
+      ok: true,
+      inMeeting: true,
+      activeSpeaker: {
+        name: "彭潇",
+        source: "meet_speaker_tile_indicator",
+        confidence: "medium",
+        observedAt: "2026-05-16T15:25:28Z",
+      },
+    },
+  });
+
+  assert.equal(awareness.activeSpeaker?.currentUserMatch?.currentUserName, "Peng Xiao");
+  assert.match(meetingAwarenessContextText(awareness), /matches current user Peng Xiao/);
+});
+
 test("meeting awareness falls back to DOM speaker when caption speaker is stale", () => {
   const awareness = buildMeetingAwarenessState({
     nowMs: Date.parse("2026-05-16T15:26:30Z"),

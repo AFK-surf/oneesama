@@ -45,6 +45,7 @@ MAB_CURRENT_USER_EMAIL=operator@example.com
 MAB_CURRENT_USER_LINEAR=operator
 MAB_CURRENT_USER_GITHUB=operator
 MAB_CURRENT_USER_ROLE=meeting operator
+MAB_CURRENT_USER_ALIASES=Operator
 ```
 
 Endpoint overrides remain available for OpenAI-compatible gateways that support

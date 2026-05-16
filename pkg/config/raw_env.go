@@ -198,6 +198,9 @@ func applyOpenAIEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(getenv("ONEESAMA_CURRENT_USER_ROLE", "MAB_CURRENT_USER_ROLE")); value != "" {
 		cfg.OpenAI.CurrentUserRole = value
 	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_CURRENT_USER_ALIASES", "MAB_CURRENT_USER_ALIASES")); value != "" {
+		cfg.OpenAI.CurrentUserAliases = splitConfigCSV(value)
+	}
 }
 
 func applyDialogEnvOverrides(cfg *Config) {

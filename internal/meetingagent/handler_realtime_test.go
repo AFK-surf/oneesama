@@ -197,6 +197,7 @@ func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
 		CurrentUserLinear:      "pengxiao",
 		CurrentUserGitHub:      "pengx17",
 		CurrentUserRole:        "owner",
+		CurrentUserAliases:     []string{"彭潇", "肖鹏", "Operator"},
 	})
 
 	identity := httptest.NewRecorder()
@@ -209,6 +210,10 @@ func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
 	currentUser := identityBody["current_user"].(map[string]any)
 	if currentUser["name"] != "老大" || currentUser["english_name"] != "Peng Xiao" || currentUser["github"] != "pengx17" {
 		t.Fatalf("identity body = %#v, want configured current user", identityBody)
+	}
+	aliases := currentUser["aliases"].([]any)
+	if len(aliases) != 5 || aliases[2] != "彭潇" {
+		t.Fatalf("identity aliases = %#v, want configured aliases plus names", aliases)
 	}
 
 	now := httptest.NewRecorder()
