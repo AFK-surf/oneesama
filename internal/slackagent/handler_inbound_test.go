@@ -56,6 +56,24 @@ func TestHandleEventsBuffersChannelMessageWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestSlackHistoryScannerIntervalMatchesCueboardDefault(t *testing.T) {
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: 30 * time.Second,
+			},
+		},
+	})
+	if got := service.slackHistoryScannerInterval(); got != 3*time.Minute {
+		t.Fatalf("scanner interval = %s, want cueboard poll-mode fixture 3m not event debounce", got)
+	}
+}
+
 func TestHandleInboundFlushReturnsDigest(t *testing.T) {
 	router := newTestRouter(t, Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	slackHistoryScannerMinInterval       = 10 * time.Second
+	slackHistoryScannerDefaultInterval   = 3 * time.Minute
 	slackHistoryScannerBootstrapLookback = 10 * time.Minute
 	slackScannerContextMessageCount      = 3
 	slackScannerDefaultRateLimitBackoff  = time.Minute
@@ -102,19 +102,7 @@ func (s *Service) slackHistoryScannerEnabled() bool {
 }
 
 func (s *Service) slackHistoryScannerInterval() time.Duration {
-	interval := slackInboundDefaultDebounce
-	if s != nil && s.inbound != nil {
-		snapshot := s.inbound.Snapshot()
-		if snapshot.EventBuffer.Enabled {
-			// Reuse the existing event debounce as the scanner cadence so live
-			// tuning stays under the same env knob as the Cueboard scanner aliases.
-			interval = s.inbound.debounce
-		}
-	}
-	if interval < slackHistoryScannerMinInterval {
-		return slackHistoryScannerMinInterval
-	}
-	return interval
+	return slackHistoryScannerDefaultInterval
 }
 
 func (s *Service) runSlackHistoryScanner(ctx context.Context, interval time.Duration) {
