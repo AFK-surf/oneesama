@@ -66,6 +66,34 @@ func TestHandleInteractionSupportsActionAliasAndEmbeddedJSON(t *testing.T) {
 	}
 }
 
+func TestHandleInteractionIgnoresUnknownExplicitActionID(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{ID: "job_should_not_start", Provider: "codex", Status: agentrunner.StatusRunning}}
+	router := newTestRouter(t, Config{
+		Slack:  appconfig.SlackConfig{SigningSecret: "secret"},
+		Runner: runner,
+	})
+
+	payload := signAvatarCommand(t, "secret", url.Values{
+		"payload": {`{"team":{"id":"T123"},"channel":{"id":"C123","name":"bridge-social-media"},"user":{"id":"U123","username":"peng"},"message":{"thread_ts":"123.456"},"actions":[{"action_id":"twitter_reply_approve","value":"2054761926526116281"}]}`},
+	})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/interactions", bytes.NewBufferString(payload.body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
+	request.Header.Set("X-Slack-Signature", payload.signature)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	if runner.startInput.Task != "" {
+		t.Fatalf("runner task = %q, want unknown foreign action ignored", runner.startInput.Task)
+	}
+	if !strings.Contains(response.Body.String(), "not handled by meeting-avatar") {
+		t.Fatalf("body = %s, want ignored action response", response.Body.String())
+	}
+}
+
 func TestHandleInteractionJoinSetupCallsMeetingAgentWithSelectedOptions(t *testing.T) {
 	meetURL := "https://meet.google.com/abc-defg-hij"
 	joinRequestCh := make(chan meetingAgentJoinRequest, 1)

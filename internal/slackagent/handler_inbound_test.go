@@ -307,6 +307,68 @@ func TestSlackHistoryScannerPollsJoinedChannelMessages(t *testing.T) {
 	}
 }
 
+func TestSlackHistoryScannerBacksOffRateLimitedChannel(t *testing.T) {
+	historyCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"xp-test","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			historyCalls++
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"ok":false,"error":"ratelimited"}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+		},
+		Runner: &fakeRunner{job: agentrunner.Job{ID: "job_triage_poll", Provider: "codex", Status: agentrunner.StatusCompleted}},
+	})
+	service.inbound.SetCursor("C123", "1778765800.000000")
+
+	first, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("first scan error = %v, want per-channel 429 recorded in result", err)
+	}
+	if !first.OK || len(first.Sweeps) != 1 || first.Sweeps[0].OK || !strings.Contains(first.Sweeps[0].Error, "slack_history_rate_limited_until") {
+		t.Fatalf("first sweep = %#v, want channel backoff after rate limit", first)
+	}
+	second, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("second scan error = %v, want backoff skip without error", err)
+	}
+	if !second.OK || len(second.Sweeps) != 1 || second.Sweeps[0].OK || !strings.Contains(second.Sweeps[0].Error, "slack_history_rate_limited_until") {
+		t.Fatalf("second sweep = %#v, want channel backoff", second)
+	}
+	if historyCalls != 1 {
+		t.Fatalf("history calls = %d, want second scan to skip rate-limited channel", historyCalls)
+	}
+	if cursor := service.inbound.Cursor("C123"); cursor != "1778765800.000000" {
+		t.Fatalf("cursor = %q, want unchanged while rate limited", cursor)
+	}
+}
+
 func TestSlackHistoryScannerIgnoresBotAndSubtypeMessages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {

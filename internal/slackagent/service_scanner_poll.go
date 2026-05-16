@@ -3,7 +3,9 @@ package slackagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -18,6 +20,7 @@ const (
 	slackHistoryScannerMinInterval       = 10 * time.Second
 	slackHistoryScannerBootstrapLookback = 10 * time.Minute
 	slackScannerContextMessageCount      = 3
+	slackScannerDefaultRateLimitBackoff  = time.Minute
 )
 
 var slackScannerAPIBaseURL = defaultSlackAPIBaseURL
@@ -47,6 +50,19 @@ type slackConversationsHistoryResponse struct {
 	OK       bool           `json:"ok"`
 	Error    string         `json:"error,omitempty"`
 	Messages []SlackMessage `json:"messages,omitempty"`
+}
+
+type slackScannerRateLimitError struct {
+	Method     string
+	RetryAfter time.Duration
+}
+
+func (e slackScannerRateLimitError) Error() string {
+	retryAfter := e.RetryAfter
+	if retryAfter <= 0 {
+		retryAfter = slackScannerDefaultRateLimitBackoff
+	}
+	return fmt.Sprintf("%s returned 429; retry after %s", strings.TrimSpace(e.Method), retryAfter)
 }
 
 func (s *Service) startSlackHistoryScanner() {
@@ -149,6 +165,9 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 	if channelID == "" || channel.IsArchived {
 		return nil, nil
 	}
+	if until, ok := s.slackScannerBackoffUntil(channelID); ok {
+		return slackScannerBackoffResult(channelID, until), nil
+	}
 	previousCursor := s.inbound.Cursor(channelID)
 	oldest := previousCursor
 	if oldest == "" && bootstrapLookback > 0 {
@@ -157,9 +176,16 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 	var contextMessages []SlackMessage
 	if previousCursor != "" {
 		contextMessages = s.fetchSlackHistoryContext(ctx, channelID, previousCursor)
+		if until, ok := s.slackScannerBackoffUntil(channelID); ok {
+			return slackScannerBackoffResult(channelID, until), nil
+		}
 	}
 	messages, latestTS, err := s.fetchSlackHistory(ctx, channelID, oldest)
 	if err != nil {
+		var rateLimited slackScannerRateLimitError
+		if ok := errors.As(err, &rateLimited); ok {
+			s.setSlackScannerBackoff(channelID, rateLimited.RetryAfter)
+		}
 		return nil, err
 	}
 	if previousCursor == "" {
@@ -211,6 +237,15 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 		channelResult.NextCursor = latestTS
 	}
 	return &channelResult, nil
+}
+
+func slackScannerBackoffResult(channelID string, until time.Time) *SlackScannerChannelResult {
+	return &SlackScannerChannelResult{
+		ChannelID: strings.TrimSpace(channelID),
+		OK:        false,
+		Source:    "slack_web_api",
+		Error:     "slack_history_rate_limited_until:" + until.Format(time.RFC3339),
+	}
 }
 
 func (s *Service) listSlackScannerChannels(ctx context.Context) ([]slackScannerConversation, error) {
@@ -279,6 +314,10 @@ func (s *Service) fetchSlackHistoryContext(ctx context.Context, channelID string
 	}
 	var response slackConversationsHistoryResponse
 	if err := s.callSlackScannerAPI(ctx, "conversations.history", params, &response); err != nil {
+		var rateLimited slackScannerRateLimitError
+		if ok := errors.As(err, &rateLimited); ok {
+			s.setSlackScannerBackoff(channelID, rateLimited.RetryAfter)
+		}
 		s.logger.Warn("slack history scanner context fetch failed", "channel", channelID, "error", err)
 		return nil
 	}
@@ -290,6 +329,38 @@ func (s *Service) fetchSlackHistoryContext(ctx context.Context, channelID string
 		return slackTSLess(firstNonEmpty(response.Messages[i].TS, response.Messages[i].EventTS), firstNonEmpty(response.Messages[j].TS, response.Messages[j].EventTS))
 	})
 	return response.Messages
+}
+
+func (s *Service) slackScannerBackoffUntil(channelID string) (time.Time, bool) {
+	if s == nil || strings.TrimSpace(channelID) == "" {
+		return time.Time{}, false
+	}
+	s.scannerMu.Lock()
+	defer s.scannerMu.Unlock()
+	until := s.scannerBackoff[strings.TrimSpace(channelID)]
+	if until.IsZero() {
+		return time.Time{}, false
+	}
+	if time.Now().Before(until) {
+		return until, true
+	}
+	delete(s.scannerBackoff, strings.TrimSpace(channelID))
+	return time.Time{}, false
+}
+
+func (s *Service) setSlackScannerBackoff(channelID string, retryAfter time.Duration) {
+	if s == nil || strings.TrimSpace(channelID) == "" {
+		return
+	}
+	if retryAfter <= 0 {
+		retryAfter = slackScannerDefaultRateLimitBackoff
+	}
+	s.scannerMu.Lock()
+	defer s.scannerMu.Unlock()
+	if s.scannerBackoff == nil {
+		s.scannerBackoff = make(map[string]time.Time)
+	}
+	s.scannerBackoff[strings.TrimSpace(channelID)] = time.Now().Add(retryAfter)
 }
 
 func (s *Service) callSlackScannerAPI(ctx context.Context, method string, params map[string]string, out any) error {
@@ -315,13 +386,32 @@ func (s *Service) callSlackScannerAPI(ctx context.Context, method string, params
 		return fmt.Errorf("call %s: %w", method, err)
 	}
 	defer response.Body.Close()
-	if err := json.NewDecoder(response.Body).Decode(out); err != nil {
+	raw, readErr := io.ReadAll(response.Body)
+	if readErr != nil {
+		return fmt.Errorf("read %s response: %w", method, readErr)
+	}
+	if response.StatusCode == http.StatusTooManyRequests {
+		_ = json.Unmarshal(raw, out)
+		return slackScannerRateLimitError{
+			Method:     method,
+			RetryAfter: slackScannerRetryAfter(response.Header.Get("Retry-After")),
+		}
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
 		return fmt.Errorf("decode %s response: %w", method, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("%s returned %d", method, response.StatusCode)
 	}
 	return nil
+}
+
+func slackScannerRetryAfter(value string) time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || seconds <= 0 {
+		return slackScannerDefaultRateLimitBackoff
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func slackScannerInboundMessages(channel slackScannerConversation, messages []SlackMessage) []SlackInboundMessage {

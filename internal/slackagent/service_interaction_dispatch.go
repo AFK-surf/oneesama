@@ -1,6 +1,9 @@
 package slackagent
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 func (s *Service) HandleSlackInteraction(ctx context.Context, payload SlackInteractionPayload) AvatarCommandResponse {
 	if pendingAction := parsePendingActionInteraction(payload); pendingAction != nil {
@@ -20,5 +23,22 @@ func (s *Service) HandleSlackInteraction(ctx context.Context, payload SlackInter
 		}
 	}
 
+	if slackInteractionHasExplicitUnhandledActionID(payload) {
+		return AvatarCommandResponse{
+			OK:           true,
+			ResponseType: "ephemeral",
+			Text:         "Action received. This interactive control is not handled by meeting-avatar.",
+		}
+	}
+
 	return s.RunAvatarCommand(ctx, command)
+}
+
+func slackInteractionHasExplicitUnhandledActionID(payload SlackInteractionPayload) bool {
+	for _, action := range payload.Actions {
+		if strings.TrimSpace(action.ActionID) != "" {
+			return true
+		}
+	}
+	return false
 }

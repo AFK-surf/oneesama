@@ -98,8 +98,9 @@ type Service struct {
 	socketModeMu sync.Mutex
 	socketMode   *SocketModeRunner
 
-	scannerMu     sync.Mutex
-	scannerCancel context.CancelFunc
+	scannerMu      sync.Mutex
+	scannerCancel  context.CancelFunc
+	scannerBackoff map[string]time.Time
 
 	eventMu    sync.Mutex
 	seenEvents map[string]time.Time
@@ -226,6 +227,7 @@ func NewService(cfg Config) *Service {
 		finalizedWorkerJobIDs:   make(map[string]struct{}),
 		finalizedTriageJobIDs:   make(map[string]struct{}),
 		finalizedTriageResults:  make(map[string]*SlackTriageFinalization),
+		scannerBackoff:          make(map[string]time.Time),
 	}
 	service.inbound.onFlush = func(channelID string) {
 		_, err := service.FlushSlackInbound(context.Background(), channelID)
