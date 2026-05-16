@@ -82,6 +82,37 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	}
 }
 
+func TestRealtimeContextHealthExposesLifecycleDefaults(t *testing.T) {
+	t.Parallel()
+
+	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{
+		RealtimeModel: "gpt-realtime-2",
+		BotName:       "Meeting Avatar Bot",
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, realtimeRequest(http.MethodGet, "/realtime/context-health", ""))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	decodeRealtimeBody(t, response.Body.String(), &body)
+	if body["ok"] != true || body["itemsCount"] != float64(0) || body["tokenEstimate"] != float64(0) {
+		t.Fatalf("context health = %#v, want empty healthy defaults", body)
+	}
+	if body["nextCompactThreshold"] != float64(80000) || body["lastCompactAt"] != "" {
+		t.Fatalf("context health = %#v, want lifecycle thresholds", body)
+	}
+	truncation := body["sessionTruncation"].(map[string]any)
+	if truncation["type"] != "retention_ratio" || truncation["retention_ratio"] != float64(0.8) {
+		t.Fatalf("truncation = %#v, want product retention ratio", truncation)
+	}
+	policy := body["contextLifecyclePolicy"].(map[string]any)
+	if policy["recentItems"] != float64(20) || policy["compactItemThreshold"] != float64(200) {
+		t.Fatalf("policy = %#v, want default compact policy", policy)
+	}
+}
+
 func TestRealtimeClientSecretDryRunMissingAPIKey(t *testing.T) {
 	t.Parallel()
 
@@ -431,6 +462,7 @@ func newRealtimeTestRouter(t *testing.T, openai appconfig.OpenAIConfig) http.Han
 		InternalAuthKey:  "secret-key",
 		Pipeline:         postmeeting.NewPipeline(rootDir),
 		OpenAI:           openai,
+		MeetRunner:       fakeMeetRunner{},
 	})
 	return httpserver.New("meeting-agent", logger, []string{"*"}, NewHandler(service))
 }

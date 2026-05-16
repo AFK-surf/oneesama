@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/AFK-surf/oneesama/internal/meetrunner"
 )
 
 const defaultRealtimeSafetyIdentifier = "meeting-avatar-bot-local"
@@ -32,6 +34,61 @@ func (s *Service) RealtimeConfig() map[string]any {
 		"currentUser":     currentUser,
 		"tuning":          realtimeTuningGuide(),
 	}
+}
+
+func (s *Service) RealtimeContextHealth(ctx context.Context) map[string]any {
+	options := RealtimeSessionOptions{
+		BotName:     s.openai.BotName,
+		CurrentUser: s.realtimeCurrentUser(),
+	}
+	session := buildRealtimeSessionConfig(options, s.openai)
+	health := map[string]any{
+		"itemsCount":             0,
+		"tokenEstimate":          0,
+		"lastCompactAt":          "",
+		"nextCompactThreshold":   80000,
+		"source":                 "no_active_realtime_session",
+		"sessionTruncation":      session["truncation"],
+		"contextLifecyclePolicy": map[string]any{"recentItems": 20, "compactItemThreshold": 200},
+	}
+	status, err := s.meetRunner.StatusSession(ctx, meetrunner.StatusSessionInput{})
+	if err != nil {
+		if strings.Contains(err.Error(), "no_active_join") {
+			health["ok"] = true
+			health["source"] = "no_active_realtime_session"
+			health["reason"] = "no_active_join"
+			return health
+		}
+		health["ok"] = false
+		health["error"] = err.Error()
+		return health
+	}
+	if contextHealth, ok := extractContextHealth(status.Active); ok {
+		for key, value := range contextHealth {
+			health[key] = value
+		}
+		health["source"] = "meet_runner_realtime_bridge"
+	}
+	health["ok"] = true
+	return health
+}
+
+func extractContextHealth(value any) (map[string]any, bool) {
+	root, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	if direct, ok := root["contextHealth"].(map[string]any); ok {
+		return direct, true
+	}
+	realtimeBridge, ok := root["realtimeBridge"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	if contextHealth, ok := realtimeBridge["contextHealth"].(map[string]any); ok {
+		return contextHealth, true
+	}
+	return nil, false
 }
 
 func realtimeTuningGuide() map[string]any {

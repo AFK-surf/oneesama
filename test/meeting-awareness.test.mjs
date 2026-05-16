@@ -54,7 +54,8 @@ test("meeting awareness prefers fresh caption speaker and merges participant sou
   assert.equal(awareness.activeSpeaker?.name, "Peng Xiao");
   assert.equal(awareness.activeSpeaker?.source, "google-meet-caption-dom");
   assert.equal(awareness.activeSpeaker?.confidence, "high");
-  assert.match(meetingAwarenessContextText(awareness), /Current\/recent speaker: Peng Xiao/);
+  assert.match(meetingAwarenessContextText(awareness), /当前或最近说话的人：Peng Xiao/);
+  assert.doesNotMatch(meetingAwarenessContextText(awareness), /source=|confidence=|canonical_name=/);
 });
 
 test("meeting awareness links active speaker aliases to current user", () => {
@@ -79,8 +80,8 @@ test("meeting awareness links active speaker aliases to current user", () => {
 
   assert.equal(awareness.activeSpeaker?.identity?.canonicalName, "Peng Xiao");
   assert.equal(awareness.activeSpeaker?.identity?.isCurrentUser, true);
-  assert.match(meetingAwarenessContextText(awareness), /canonical_name=Peng Xiao/);
-  assert.match(meetingAwarenessContextText(awareness), /is_current_user=true/);
+  assert.match(meetingAwarenessContextText(awareness), /这位说话者就是当前用户/);
+  assert.doesNotMatch(meetingAwarenessContextText(awareness), /canonical_name=|is_current_user=|confidence=/);
 });
 
 test("meeting awareness resolves another workspace owner without Peng-specific prompt data", () => {

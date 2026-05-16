@@ -36,6 +36,20 @@ func TestScreenShareRoutesProxyToMeetRunner(t *testing.T) {
 		t.Fatalf("start = %d %s, want proxied start", startResponse.Code, startResponse.Body.String())
 	}
 
+	apps := screenShareRequest(http.MethodPost, "/screen-share/apps", `{}`)
+	appsResponse := httptest.NewRecorder()
+	router.ServeHTTP(appsResponse, apps)
+	if appsResponse.Code != http.StatusOK || !strings.Contains(appsResponse.Body.String(), `"applicationName":"Deck"`) {
+		t.Fatalf("apps = %d %s, want shareable apps", appsResponse.Code, appsResponse.Body.String())
+	}
+
+	app := screenShareRequest(http.MethodPost, "/screen-share/app", `{"applicationName":"Deck","mode":"native"}`)
+	appResponse := httptest.NewRecorder()
+	router.ServeHTTP(appResponse, app)
+	if appResponse.Code != http.StatusOK || !strings.Contains(appResponse.Body.String(), `"applicationName":"Deck"`) {
+		t.Fatalf("app = %d %s, want proxied app share", appResponse.Code, appResponse.Body.String())
+	}
+
 	stop := screenShareRequest(http.MethodPost, "/screen-share/stop", `{}`)
 	stopResponse := httptest.NewRecorder()
 	router.ServeHTTP(stopResponse, stop)

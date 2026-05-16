@@ -70,6 +70,14 @@ func (runtimeMeetRunner) PresentVideoStage(context.Context, meetrunner.VideoStag
 	return meetrunner.ScreenShareResult{"ok": true}, nil
 }
 
+func (runtimeMeetRunner) ListShareableApps(context.Context, meetrunner.ShareableAppsInput) (meetrunner.ScreenShareResult, error) {
+	return meetrunner.ScreenShareResult{"ok": true, "applications": []map[string]any{}}, nil
+}
+
+func (runtimeMeetRunner) PresentAppShare(context.Context, meetrunner.AppShareInput) (meetrunner.ScreenShareResult, error) {
+	return meetrunner.ScreenShareResult{"ok": true}, nil
+}
+
 func (runtimeMeetRunner) StopScreenShare(context.Context, meetrunner.ScreenShareInput) (meetrunner.ScreenShareResult, error) {
 	return meetrunner.ScreenShareResult{"ok": true}, nil
 }

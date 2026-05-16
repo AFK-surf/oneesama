@@ -38,6 +38,26 @@ func (h *Handler) handleScreenShareVideo(c *gin.Context) {
 	writeScreenShareResult(c, result, err)
 }
 
+func (h *Handler) handleScreenShareApps(c *gin.Context) {
+	var input ShareableAppsRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httputil.AbortWithError(c, httputil.InvalidRequestError("parse screen share apps", gin.H{"reason": err.Error()}))
+		return
+	}
+	result, err := h.service.ListShareableApps(c.Request.Context(), input)
+	writeScreenShareResult(c, result, err)
+}
+
+func (h *Handler) handleScreenShareApp(c *gin.Context) {
+	var input AppShareRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httputil.AbortWithError(c, httputil.InvalidRequestError("parse screen share app", gin.H{"reason": err.Error()}))
+		return
+	}
+	result, err := h.service.PresentAppShare(c.Request.Context(), input)
+	writeScreenShareResult(c, result, err)
+}
+
 func (h *Handler) handleScreenShareStop(c *gin.Context) {
 	var input ScreenShareRequest
 	if err := c.ShouldBindJSON(&input); err != nil {

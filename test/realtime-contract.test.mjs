@@ -31,6 +31,34 @@ test("Realtime contract maps fast turn detection preset for browser sessions", (
   });
 });
 
+test("Realtime contract applies product truncation defaults", () => {
+  const session = buildRealtimeSessionConfig();
+
+  assert.deepEqual(session.truncation, {
+    type: "retention_ratio",
+    retention_ratio: 0.8,
+    token_limits: {
+      post_instructions: 8000,
+    },
+  });
+});
+
+test("Realtime contract allows explicit truncation override", () => {
+  const session = buildRealtimeSessionConfig({
+    truncation: {
+      type: "retention_ratio",
+      retention_ratio: 0.6,
+      token_limits: { post_instructions: 4000 },
+    },
+  });
+
+  assert.deepEqual(session.truncation, {
+    type: "retention_ratio",
+    retention_ratio: 0.6,
+    token_limits: { post_instructions: 4000 },
+  });
+});
+
 test("Realtime contract parses JSON turn detection config strings", () => {
   const session = buildRealtimeSessionConfig({}, {
     openaiRealtimeTurnDetection: '{"type":"semantic_vad","eagerness":"low"}',
@@ -64,4 +92,12 @@ test("Realtime contract exposes product identity resolver tool", () => {
   const resolver = realtimeToolSchemas.find((tool) => tool.name === "resolve_speaker_identity");
   assert.ok(resolver);
   assert.deepEqual(resolver.parameters.required, ["display_name"]);
+});
+
+test("Realtime contract exposes application share tools", () => {
+  const list = realtimeToolSchemas.find((tool) => tool.name === "list_shareable_apps");
+  const present = realtimeToolSchemas.find((tool) => tool.name === "present_app_share");
+  assert.ok(list);
+  assert.ok(present);
+  assert.equal(present.parameters.properties.applicationName.type, "string");
 });

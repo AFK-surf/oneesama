@@ -144,6 +144,30 @@ func (fakeMeetRunner) PresentVideoStage(_ context.Context, input meetrunner.Vide
 	return meetrunner.ScreenShareResult{"ok": true, "videoUrl": input.VideoURL, "stageTitle": input.StageTitle}, nil
 }
 
+func (fakeMeetRunner) ListShareableApps(context.Context, meetrunner.ShareableAppsInput) (meetrunner.ScreenShareResult, error) {
+	return meetrunner.ScreenShareResult{
+		"ok":     true,
+		"source": "recappi_shareable_content",
+		"count":  1,
+		"applications": []map[string]any{{
+			"processId":        4242,
+			"bundleIdentifier": "com.example.Deck",
+			"applicationName":  "Deck",
+			"source":           "recappi_shareable_content",
+		}},
+	}, nil
+}
+
+func (fakeMeetRunner) PresentAppShare(_ context.Context, input meetrunner.AppShareInput) (meetrunner.ScreenShareResult, error) {
+	return meetrunner.ScreenShareResult{
+		"ok":              true,
+		"applicationName": input.ApplicationName,
+		"processId":       input.ProcessID,
+		"mode":            input.Mode,
+		"title":           input.Title,
+	}, nil
+}
+
 func (fakeMeetRunner) StopScreenShare(context.Context, meetrunner.ScreenShareInput) (meetrunner.ScreenShareResult, error) {
 	return meetrunner.ScreenShareResult{"ok": true, "stopped": true}, nil
 }

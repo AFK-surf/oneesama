@@ -63,6 +63,38 @@ func (s *Service) PresentVideoStage(ctx context.Context, input VideoStageRequest
 	})
 }
 
+func (s *Service) ListShareableApps(ctx context.Context, input ShareableAppsRequest) (meetrunner.ScreenShareResult, error) {
+	sessionID, err := s.resolveScreenShareSessionID(ctx, input.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	return s.meetRunner.ListShareableApps(ctx, meetrunner.ShareableAppsInput{SessionID: sessionID})
+}
+
+func (s *Service) PresentAppShare(ctx context.Context, input AppShareRequest) (meetrunner.ScreenShareResult, error) {
+	sessionID, err := s.resolveScreenShareSessionID(ctx, input.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	return s.meetRunner.PresentAppShare(ctx, meetrunner.AppShareInput{
+		ScreenShareInput: meetrunner.ScreenShareInput{
+			SessionID: sessionID,
+			Title:     firstNonEmpty(input.Title, input.ScreenShareTitle),
+			Subtitle:  firstNonEmpty(input.Subtitle, input.ScreenShareSubtitle),
+			Preview:   input.Preview,
+			Mode:      firstNonEmpty(input.Mode, input.ScreenShareMode),
+			WaitMs:    input.WaitMs,
+		},
+		ProcessID:        firstNonZero(input.ProcessID, input.PID),
+		PID:              input.PID,
+		BundleIdentifier: firstNonEmpty(input.BundleIdentifier, input.BundleID),
+		BundleID:         input.BundleID,
+		ApplicationName:  firstNonEmpty(input.ApplicationName, input.AppName, input.Name),
+		AppName:          input.AppName,
+		Name:             input.Name,
+	})
+}
+
 func (s *Service) StopScreenShare(ctx context.Context, input ScreenShareRequest) (meetrunner.ScreenShareResult, error) {
 	sessionID, err := s.resolveScreenShareSessionID(ctx, input.SessionID)
 	if err != nil {

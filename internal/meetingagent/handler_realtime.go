@@ -13,6 +13,10 @@ func (h *Handler) handleRealtimeConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, h.service.RealtimeConfig())
 }
 
+func (h *Handler) handleRealtimeContextHealth(c *gin.Context) {
+	c.JSON(http.StatusOK, h.service.RealtimeContextHealth(c.Request.Context()))
+}
+
 func (h *Handler) handleRealtimeClientSecret(c *gin.Context) {
 	var input RealtimeSessionOptions
 	if err := c.ShouldBindJSON(&input); err != nil && !errors.Is(err, io.EOF) {

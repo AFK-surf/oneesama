@@ -87,6 +87,14 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
           tokenUrl: `${baseUrl}/realtime/client-secret`,
           toolCallbackToken: "test-session-token",
           instructions: "Use tools when needed.",
+          currentUser: {
+            name: "Peng Xiao",
+            aliases: ["彭潇"],
+          },
+          contextLifecycle: {
+            compactItemThreshold: 200,
+            recentItems: 20,
+          },
           tools: [
             {
               type: "function",
@@ -152,6 +160,82 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
       assert.equal(participantsResult.result.ok, true);
       assert.equal(participantsResult.result.participants[0].name, "Peng Xiao");
       assert.equal(participantsResult.result.activeSpeaker.name, "Peng Xiao");
+
+      const compact = await page.evaluate(() => {
+        window.MAB_REALTIME_CLIENT.rememberSessionContext(
+          "meetingAwareness",
+          {
+            ok: true,
+            activeSpeaker: {
+              name: "彭潇",
+              identity: {
+                resolved: true,
+                canonicalName: "Peng Xiao",
+                preferredName: "Peng Xiao",
+                isCurrentUser: true,
+              },
+            },
+            participants: [{ name: "Peng Xiao" }],
+          },
+          "test-fixture",
+        );
+        const history = Array.from({ length: 205 }, (_, index) => ({
+          itemId: `item_${index}`,
+          type: "message",
+          role: index % 2 === 0 ? "user" : "assistant",
+          content: [{ type: "input_text", text: `history item ${index}` }],
+        }));
+        const compacted = window.MAB_REALTIME_CLIENT.buildCompactedHistory(
+          history,
+          "unit_test_long_meeting",
+        );
+        return {
+          length: compacted.length,
+          first: compacted[0],
+          last: compacted.at(-1),
+          health: window.MAB_REALTIME_CLIENT.contextHealth(),
+        };
+      });
+      assert.equal(compact.length, 21);
+      assert.match(compact.first.content[0].text, /会议上下文快照/);
+      assert.match(compact.first.content[0].text, /Peng Xiao/);
+      assert.match(compact.first.content[0].text, /当前用户/);
+      assert.equal(compact.last.itemId, "item_204");
+      assert.equal(compact.health.enabled, true);
+
+      const lifecycle = await page.evaluate(() => {
+        const first = window.MAB_REALTIME_CLIENT.pushSessionContext({
+          text: "会议上下文快照：\n当前用户：Peng Xiao",
+          signature: "same-context",
+          reason: "dedupe-test",
+          kind: "identity",
+          value: { preferredName: "Peng Xiao", isCurrentUser: true },
+          force: true,
+        });
+        const second = window.MAB_REALTIME_CLIENT.pushSessionContext({
+          text: "会议上下文快照：\n当前用户：Peng Xiao",
+          signature: "same-context",
+          reason: "dedupe-test",
+          kind: "identity",
+          value: { preferredName: "Peng Xiao", isCurrentUser: true },
+        });
+        const compactResult = window.MAB_REALTIME_CLIENT.compactRealtimeHistory("manual-test");
+        return {
+          first,
+          second,
+          compactResult,
+          health: window.MAB_REALTIME_CLIENT.contextHealth(),
+          resetMessages: window.MAB_REALTIME_BRIDGE.connection.sentDataChannelMessages.filter(
+            (entry) => String(entry.payload || "").includes("mock.reset_history"),
+          ),
+        };
+      });
+      assert.equal(lifecycle.first.ok, true);
+      assert.equal(lifecycle.second.skipped, true);
+      assert.equal(lifecycle.second.reason, "dedupe_window");
+      assert.equal(lifecycle.compactResult.ok, true);
+      assert.ok(lifecycle.health.compactCount >= 1);
+      assert.ok(lifecycle.resetMessages.length >= 1);
 
       const disconnected = await page.evaluate(() => {
         window.MAB_REALTIME_CLIENT.disconnect("sdk-smoke-disconnect");

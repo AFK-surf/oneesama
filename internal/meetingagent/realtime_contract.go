@@ -81,6 +81,7 @@ func buildRealtime2Session(options RealtimeSessionOptions, model string, instruc
 		"instructions":      instructions,
 		"tools":             tools,
 		"audio":             audio,
+		"truncation":        realtimeTruncationObject(options.Truncation),
 	}
 	if toolChoice != "" {
 		session["tool_choice"] = toolChoice
@@ -91,6 +92,28 @@ func buildRealtime2Session(options RealtimeSessionOptions, model string, instruc
 		session["reasoning"] = map[string]any{"effort": reasoningEffort}
 	}
 	return session
+}
+
+func realtimeTruncationObject(value any) any {
+	if value != nil {
+		if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+			if strings.EqualFold(strings.TrimSpace(text), "disabled") {
+				return "disabled"
+			}
+			var parsed any
+			if err := json.Unmarshal([]byte(text), &parsed); err == nil && parsed != nil {
+				return parsed
+			}
+		}
+		return value
+	}
+	return map[string]any{
+		"type":            "retention_ratio",
+		"retention_ratio": 0.8,
+		"token_limits": map[string]any{
+			"post_instructions": 8000,
+		},
+	}
 }
 
 func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.OpenAIConfig) string {

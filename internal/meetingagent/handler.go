@@ -49,6 +49,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	realtime := rg.Group("/realtime")
 	realtime.Use(h.requireInternalAuth)
 	realtime.GET("/config", h.handleRealtimeConfig)
+	realtime.GET("/context-health", h.handleRealtimeContextHealth)
 	realtime.POST("/client-secret", h.handleRealtimeClientSecret)
 
 	tools := rg.Group("/tools")
@@ -69,6 +70,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	screenShare.POST("/start", h.handleScreenShareStart)
 	screenShare.POST("/present", h.handleScreenSharePresent)
 	screenShare.POST("/video", h.handleScreenShareVideo)
+	screenShare.POST("/apps", h.handleScreenShareApps)
+	screenShare.POST("/app", h.handleScreenShareApp)
 	screenShare.POST("/stop", h.handleScreenShareStop)
 
 	rg.GET("/stage-media/video", h.handleStageMediaVideo)

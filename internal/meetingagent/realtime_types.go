@@ -35,6 +35,7 @@ type RealtimeSessionOptions struct {
 	TurnDetection          any                 `json:"turnDetection,omitempty"`
 	TurnDetectionSnake     any                 `json:"turn_detection,omitempty"`
 	Audio                  map[string]any      `json:"audio,omitempty"`
+	Truncation             any                 `json:"truncation,omitempty"`
 	SessionSchema          string              `json:"sessionSchema,omitempty"`
 	SessionSchemaSnake     string              `json:"session_schema,omitempty"`
 	PersonalityContext     string              `json:"personalityContext,omitempty"`

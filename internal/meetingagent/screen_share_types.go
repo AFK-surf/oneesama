@@ -24,3 +24,18 @@ type VideoStageRequest struct {
 	ScreenShareHeight int    `json:"screenShareHeight,omitempty"`
 	Muted             *bool  `json:"muted,omitempty"`
 }
+
+type ShareableAppsRequest struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type AppShareRequest struct {
+	ScreenShareRequest
+	ProcessID        int    `json:"processId,omitempty"`
+	PID              int    `json:"pid,omitempty"`
+	BundleIdentifier string `json:"bundleIdentifier,omitempty"`
+	BundleID         string `json:"bundleId,omitempty"`
+	ApplicationName  string `json:"applicationName,omitempty"`
+	AppName          string `json:"appName,omitempty"`
+	Name             string `json:"name,omitempty"`
+}

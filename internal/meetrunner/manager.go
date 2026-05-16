@@ -73,7 +73,7 @@ func (m *Manager) Ping(_ context.Context) (RunnerStatus, error) {
 		Capabilities: []string{
 			"runner.ping", "join.google_meet.prepare", "join.session.status", "join.session.stop",
 			"worker.result.inject", "screen_share.start", "screen_share.present",
-			"screen_share.video", "screen_share.stop",
+			"screen_share.video", "screen_share.apps", "screen_share.app", "screen_share.stop",
 		},
 	}, nil
 }
@@ -125,6 +125,14 @@ func (m *Manager) PresentScreenShare(ctx context.Context, input ScreenShareInput
 
 func (m *Manager) PresentVideoStage(ctx context.Context, input VideoStageInput) (ScreenShareResult, error) {
 	return m.callScreenShare(ctx, input.SessionID, "screen_share.video", input)
+}
+
+func (m *Manager) ListShareableApps(ctx context.Context, input ShareableAppsInput) (ScreenShareResult, error) {
+	return m.callScreenShare(ctx, input.SessionID, "screen_share.apps", input)
+}
+
+func (m *Manager) PresentAppShare(ctx context.Context, input AppShareInput) (ScreenShareResult, error) {
+	return m.callScreenShare(ctx, input.SessionID, "screen_share.app", input)
 }
 
 func (m *Manager) StopScreenShare(ctx context.Context, input ScreenShareInput) (ScreenShareResult, error) {

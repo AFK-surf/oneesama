@@ -9,7 +9,7 @@ import { buildLocalDialogInitScript } from "../dialog/local-dialog-init-builder.
 import { enableMeetCaptions, installMeetCaptionCapture } from "./caption-capture.ts";
 import { waitForMeetAdmission } from "./meet-admission.ts";
 import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
-import { createMeetingRecorder } from "./meeting-recorder.ts";
+import { createMeetingRecorder, listShareableApplications } from "./meeting-recorder.ts";
 import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-prompts.ts";
 import { buildScreenShareInitScript } from "./screen-share-init-builder.ts";
 import { buildRealtimeBrowserInitScript } from "../realtime/realtime-browser-init-builder.ts";
@@ -49,6 +49,16 @@ interface ScreenShareBridgeInput extends VideoStageInput {
   preview?: boolean;
   allowCoordinateFallback?: boolean;
   waitMs?: number;
+}
+
+interface AppShareInput extends ScreenShareBridgeInput {
+  processId?: number | string;
+  pid?: number | string;
+  bundleIdentifier?: string;
+  bundleId?: string;
+  applicationName?: string;
+  appName?: string;
+  name?: string;
 }
 
 interface MeetChatInput {
@@ -1818,22 +1828,23 @@ export function buildMeetingAwarenessState({
 
 export function meetingAwarenessContextText(awareness: MeetingAwarenessState | null): string {
   if (!awareness?.ok) return "";
-  const names = awareness.participants.map((participant) => participant.name).filter(Boolean);
-  const speaker = awareness.activeSpeaker?.name
-    ? `${awareness.activeSpeaker.name} (source=${awareness.activeSpeaker.source}, confidence=${awareness.activeSpeaker.confidence})`
-    : "unknown";
+  const displayName = (entry?: { name?: string; identity?: SpeakerIdentityResolution | null }) =>
+    entry?.identity?.preferredName || entry?.identity?.canonicalName || entry?.name || "";
+  const names = awareness.participants.map((participant) => displayName(participant)).filter(Boolean);
+  const speaker = displayName(awareness.activeSpeaker || undefined) || "暂时不确定";
   const lines = [
-    "Live Google Meet context update:",
-    `- Participants now visible: ${names.length ? names.join(", ") : "unknown"}${awareness.participantCount ? ` (count=${awareness.participantCount})` : ""}.`,
-    `- Current/recent speaker: ${speaker}.`,
-    `- Caveat: ${awareness.caveat}`,
+    "会议实时状态更新：",
+    `- 当前可见参会者：${names.length ? names.join("、") : "暂时不确定"}。`,
+    `- 当前或最近说话的人：${speaker}。`,
   ];
   const identity = awareness.activeSpeaker?.identity;
   if (identity?.resolved) {
     lines.splice(
       3,
       0,
-      `- Active speaker identity: canonical_name=${identity.canonicalName}, preferred_name=${identity.preferredName}, role=${identity.role}, is_current_user=${identity.isCurrentUser}, confidence=${identity.confidence}. Treat first-person speech from the active speaker as this identity. Do not expose detection or internal mechanism details unless the user explicitly asks for debugging.`,
+      identity.isCurrentUser
+        ? "- 这位说话者就是当前用户；第一人称表达按当前用户理解。"
+        : `- 这位说话者可以按 ${identity.preferredName || identity.canonicalName} 理解。`,
     );
   }
   return lines.join("\n");
@@ -1845,7 +1856,13 @@ function meetingAwarenessSignature(awareness: MeetingAwarenessState | null): str
     .map((participant) => participant.name.toLowerCase())
     .sort()
     .join("|");
-  const speaker = awareness.activeSpeaker?.name?.toLowerCase() || "";
+  const speakerIdentity = awareness.activeSpeaker?.identity;
+  const speaker = [
+    awareness.activeSpeaker?.name?.toLowerCase() || "",
+    speakerIdentity?.canonicalName?.toLowerCase() || "",
+    speakerIdentity?.preferredName?.toLowerCase() || "",
+    speakerIdentity?.isCurrentUser ? "current_user" : "",
+  ].join("|");
   if (!participants && !speaker) return "";
   return `${speaker}::${participants}`;
 }
@@ -1859,11 +1876,21 @@ async function publishMeetingAwarenessToPage(
   const contextText = meetingAwarenessContextText(awareness);
   return await withTimeout(
     page.evaluate(
-      ({ state, text, push }) => {
+      ({ state, text, push, signature }) => {
         window.MAB_MEETING_AWARENESS = state;
         if (!push) return { ok: true, stored: true, pushed: false, reason: "unchanged" };
         if (!text) return { ok: true, stored: true, pushed: false, reason: "empty_context" };
         const client = window.MAB_REALTIME_CLIENT;
+        if (typeof client?.pushSessionContext === "function") {
+          const result = client.pushSessionContext({
+            text,
+            signature,
+            reason: "meeting_awareness",
+            kind: "meetingAwareness",
+            value: state,
+          });
+          return { ok: true, stored: true, pushed: result?.ok === true, channel: result?.channel || "", result };
+        }
         if (typeof client?.sendRealtimeEvent !== "function") {
           return { ok: true, stored: true, pushed: false, reason: "realtime_client_missing" };
         }
@@ -1877,7 +1904,7 @@ async function publishMeetingAwarenessToPage(
         });
         return { ok: true, stored: true, pushed: true, channel };
       },
-      { state: awareness, text: contextText, push: pushContext },
+      { state: awareness, text: contextText, push: pushContext, signature: meetingAwarenessSignature(awareness) },
     ),
     2500,
     { ok: false, error: "meeting_awareness_publish_timeout" },
@@ -2691,6 +2718,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           instructions: realtimeInstructions,
           tools: realtimeTools,
           session: realtimeSession,
+          currentUser: realtimeCurrentUser,
           sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
           includeParticipantAudio: Boolean(input.includeParticipantAudio),
           forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
@@ -3237,6 +3265,92 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     };
   }
 
+  async function listShareableApps() {
+    try {
+      const applications = await listShareableApplications();
+      active?.diagnostics?.record("shareable_apps_listed", {
+        count: applications.length,
+        source: "recappi_shareable_content",
+      });
+      await saveDiagnostics(active?.diagnostics).catch(() => {});
+      return {
+        ok: true,
+        source: "recappi_shareable_content",
+        count: applications.length,
+        applications,
+      };
+    } catch (error) {
+      const message = String(error?.message || error);
+      active?.diagnostics?.record("shareable_apps_list_error", { error: message });
+      await saveDiagnostics(active?.diagnostics).catch(() => {});
+      return {
+        ok: false,
+        error: "shareable_apps_unavailable",
+        detail: message,
+        source: "recappi_shareable_content",
+      };
+    }
+  }
+
+  function matchesShareableApp(app, input: AppShareInput) {
+    const processId = Number(input.processId || input.pid || 0) || 0;
+    const bundle = String(input.bundleIdentifier || input.bundleId || "").trim().toLowerCase();
+    const name = String(input.applicationName || input.appName || input.name || "")
+      .trim()
+      .toLowerCase();
+    if (processId && Number(app.processId || 0) === processId) return true;
+    if (bundle && String(app.bundleIdentifier || "").trim().toLowerCase() === bundle) return true;
+    if (!name) return false;
+    return [app.applicationName, app.name, app.title]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .some((candidate) => candidate === name || candidate.includes(name));
+  }
+
+  async function presentAppShare(input: AppShareInput = {}) {
+    if (!active?.page) return { ok: false, error: "no_active_join" };
+    const listed = await listShareableApps();
+    if (!listed.ok) return listed;
+    const applications = Array.isArray(listed.applications) ? listed.applications : [];
+    const app = applications.find((candidate) => matchesShareableApp(candidate, input));
+    if (!app) {
+      return {
+        ok: false,
+        error: "shareable_app_not_found",
+        source: listed.source,
+        count: applications.length,
+        candidates: applications.slice(0, 20),
+      };
+    }
+    const title = input.title || `Share ${app.applicationName || app.name || "application"}`;
+    const mode = input.mode || input.screenShareMode || "native";
+    const present = await presentScreenShare({
+      ...input,
+      mode,
+      title,
+      subtitle: input.subtitle || "Application share requested",
+      waitMs: input.waitMs || 2500,
+    });
+    const result = {
+      ok: Boolean(present.ok),
+      app,
+      present,
+      capture: {
+        mode,
+        appPixelsAutomaticallySelected: false,
+        reason: "Meet/Chrome owns the native app-window picker; the app candidate is selected for user-visible intent and diagnostics, not forced by the bot.",
+      },
+      note: "app_share_requested; choose the matching app/window in the Meet picker if Chrome asks.",
+    };
+    active.diagnostics?.record("shareable_app_present_requested", {
+      app,
+      mode,
+      ok: result.ok,
+      present,
+    });
+    await saveDiagnostics(active.diagnostics).catch(() => {});
+    return result;
+  }
+
   async function startScreenShare(input: ScreenShareBridgeInput = {}) {
     if (!active?.page) return { ok: false, error: "no_active_join" };
     const result = await active.page
@@ -3546,6 +3660,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     requestRealtimeTextTurn,
     sendMeetChat,
     readMeetChat,
+    listShareableApps,
+    presentAppShare,
     startScreenShare,
     presentScreenShare,
     openVideoStage,

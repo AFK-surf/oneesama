@@ -209,6 +209,30 @@
       checks: {},
       updatedAt: new Date().toISOString(),
     },
+    contextHealth: {
+      enabled: true,
+      itemsCount: 0,
+      tokenEstimate: 0,
+      nextCompactThreshold: 80000,
+      recentItemsRetained: 20,
+      refreshCount: 0,
+      compactCount: 0,
+      dedupeSkips: 0,
+      lastRefreshAt: "",
+      lastRefreshReason: "",
+      lastCompactAt: "",
+      lastCompactReason: "",
+      lastCompactBeforeItems: 0,
+      lastCompactAfterItems: 0,
+      lastSummaryChars: 0,
+      lastSignature: "",
+      lastSignatureAt: 0,
+      cache: {
+        identity: null,
+        meetingAwareness: null,
+        currentTask: null,
+      },
+    },
   };
   const participantStreams = [];
   const participantTrackIds = new Set();
@@ -249,6 +273,8 @@
     "send_meet_chat",
     "present_video_stage",
     "stop_video_stage",
+    "list_shareable_apps",
+    "present_app_share",
     "read_meet_chat",
     "meet_participants",
     "active_speaker",
@@ -303,6 +329,216 @@
       },
     });
     state.timeline = state.timeline.slice(-120);
+  }
+
+  function contextLifecycleConfig() {
+    const raw = (config.contextLifecycle || {}) as Record<string, unknown>;
+    return {
+      enabled: raw.enabled !== false,
+      compactTokenThreshold: Number(raw.compactTokenThreshold || 80000),
+      compactItemThreshold: Number(raw.compactItemThreshold || 200),
+      recentItems: Math.max(5, Math.min(Number(raw.recentItems || 20), 80)),
+      dedupeWindowMs: Math.max(1000, Number(raw.dedupeWindowMs || 5000)),
+      summaryMaxChars: Math.max(800, Number(raw.summaryMaxChars || 3000)),
+    };
+  }
+
+  function estimateTokensFromText(value: unknown): number {
+    return Math.ceil(String(value || "").length / 4);
+  }
+
+  function estimateHistoryTokens(history: unknown[]): number {
+    return Math.ceil(JSON.stringify(history || []).length / 4);
+  }
+
+  function currentHistorySnapshot(): unknown[] {
+    const history = activeRealtimeAgentSession?.history;
+    return Array.isArray(history) ? history : [];
+  }
+
+  function updateContextHealthFromHistory(history = currentHistorySnapshot()) {
+    const lifecycle = contextLifecycleConfig();
+    state.contextHealth.enabled = lifecycle.enabled;
+    state.contextHealth.itemsCount = history.length;
+    state.contextHealth.tokenEstimate = estimateHistoryTokens(history);
+    state.contextHealth.nextCompactThreshold = lifecycle.compactTokenThreshold;
+    state.contextHealth.recentItemsRetained = lifecycle.recentItems;
+    return state.contextHealth;
+  }
+
+  function rememberSessionContext(kind: string, value: unknown, reason = "update") {
+    if (!kind) return state.contextHealth;
+    const cache = state.contextHealth.cache as Record<string, unknown>;
+    if (kind === "identity") cache.identity = value;
+    else if (kind === "meetingAwareness") cache.meetingAwareness = value;
+    else if (kind === "currentTask") cache.currentTask = value;
+    state.contextHealth.refreshCount += 1;
+    state.contextHealth.lastRefreshAt = new Date().toISOString();
+    state.contextHealth.lastRefreshReason = reason;
+    recordTimeline("realtime_context_refresh", {
+      kind,
+      reason,
+      tokenEstimate: state.contextHealth.tokenEstimate,
+    });
+    return state.contextHealth;
+  }
+
+  function displayNameFromIdentity(identity: unknown): string {
+    const value = (identity || {}) as Record<string, unknown>;
+    return String(
+      value.preferredName ||
+        value.preferred_name ||
+        value.canonicalName ||
+        value.canonical_name ||
+        value.name ||
+        "",
+    ).trim();
+  }
+
+  function buildSessionContextSummary(): string {
+    const cache = state.contextHealth.cache as Record<string, unknown>;
+    const awareness = (cache.meetingAwareness || {}) as Record<string, any>;
+    const identity = cache.identity || null;
+    const speaker = awareness.activeSpeaker || awareness.active_speaker || null;
+    const speakerIdentity = speaker?.identity || null;
+    const speakerName = displayNameFromIdentity(speakerIdentity) || String(speaker?.name || "");
+    const currentUserName = displayNameFromIdentity(identity);
+    const participants = Array.isArray(awareness.participants)
+      ? awareness.participants
+          .map((entry) => displayNameFromIdentity(entry?.identity) || String(entry?.name || ""))
+          .filter(Boolean)
+          .slice(0, 12)
+      : [];
+    const currentTask = (cache.currentTask || {}) as Record<string, unknown>;
+    const lines = [
+      "会议上下文快照：",
+      currentUserName ? `当前用户：${currentUserName}` : "",
+      speakerName ? `当前或最近说话的人：${speakerName}` : "",
+      speakerIdentity?.isCurrentUser === true || speakerIdentity?.is_current_user === true
+        ? "这位说话者就是当前用户。"
+        : "",
+      participants.length ? `当前可见参会者：${participants.join("、")}` : "",
+      currentTask.summary ? `当前正在处理的事：${String(currentTask.summary).slice(0, 500)}` : "",
+      "回答时自然使用这些事实；如果事实不确定，简短澄清，不要猜。",
+    ].filter(Boolean);
+    return lines.join("\n").slice(0, contextLifecycleConfig().summaryMaxChars);
+  }
+
+  function makeContextSummaryItem(reason = "manual") {
+    return {
+      itemId: `ctx_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      type: "message",
+      role: "system",
+      status: "completed",
+      content: [{ type: "input_text", text: buildSessionContextSummary() }],
+      metadata: { source: "meeting_context_snapshot", reason },
+    };
+  }
+
+  function buildCompactedHistory(history: unknown[] = [], reason = "manual") {
+    const lifecycle = contextLifecycleConfig();
+    const recentItems = Array.isArray(history) ? history.slice(-lifecycle.recentItems) : [];
+    return [makeContextSummaryItem(reason), ...recentItems];
+  }
+
+  function compactRealtimeHistory(reason = "manual") {
+    const lifecycle = contextLifecycleConfig();
+    if (!lifecycle.enabled) {
+      return { ok: false, skipped: true, reason: "context_lifecycle_disabled" };
+    }
+    const session = activeRealtimeAgentSession;
+    if (!session || typeof session.updateHistory !== "function") {
+      return { ok: false, skipped: true, reason: "sdk_history_unavailable" };
+    }
+    const before = currentHistorySnapshot();
+    const beforeItems = before.length;
+    const nextHistory = buildCompactedHistory(before, reason);
+    session.updateHistory(() => nextHistory);
+    const afterItems = nextHistory.length;
+    state.contextHealth.compactCount += 1;
+    state.contextHealth.lastCompactAt = new Date().toISOString();
+    state.contextHealth.lastCompactReason = reason;
+    state.contextHealth.lastCompactBeforeItems = beforeItems;
+    state.contextHealth.lastCompactAfterItems = afterItems;
+    state.contextHealth.lastSummaryChars = String((nextHistory[0] as any)?.content?.[0]?.text || "").length;
+    state.contextHealth.itemsCount = afterItems;
+    state.contextHealth.tokenEstimate = estimateHistoryTokens(nextHistory);
+    recordTimeline("realtime_context_compact", {
+      reason,
+      beforeItems,
+      afterItems,
+      summaryChars: state.contextHealth.lastSummaryChars,
+      retainedRecentItems: Math.max(0, nextHistory.length - 1),
+    });
+    return {
+      ok: true,
+      reason,
+      beforeItems,
+      afterItems,
+      retainedRecentItems: Math.max(0, nextHistory.length - 1),
+      summaryChars: state.contextHealth.lastSummaryChars,
+    };
+  }
+
+  function maybeCompactRealtimeHistory(reason = "history_updated") {
+    const lifecycle = contextLifecycleConfig();
+    const history = currentHistorySnapshot();
+    updateContextHealthFromHistory(history);
+    if (!lifecycle.enabled) return { ok: false, skipped: true, reason: "disabled" };
+    if (
+      history.length >= lifecycle.compactItemThreshold ||
+      state.contextHealth.tokenEstimate >= lifecycle.compactTokenThreshold
+    ) {
+      return compactRealtimeHistory(reason);
+    }
+    return { ok: true, skipped: true, reason: "below_threshold" };
+  }
+
+  function pushSessionContext(input: {
+    text?: string;
+    signature?: string;
+    reason?: string;
+    kind?: string;
+    value?: unknown;
+    force?: boolean;
+  } = {}) {
+    const lifecycle = contextLifecycleConfig();
+    const signature = String(input.signature || input.text || input.reason || "").slice(0, 800);
+    const nowMs = Date.now();
+    if (
+      !input.force &&
+      signature &&
+      signature === state.contextHealth.lastSignature &&
+      nowMs - Number(state.contextHealth.lastSignatureAt || 0) < lifecycle.dedupeWindowMs
+    ) {
+      state.contextHealth.dedupeSkips += 1;
+      recordTimeline("realtime_context_push_deduped", {
+        reason: input.reason || "",
+        signature: signature.slice(0, 120),
+      });
+      return { ok: true, skipped: true, reason: "dedupe_window" };
+    }
+    if (input.kind) rememberSessionContext(input.kind, input.value, input.reason || "push");
+    state.contextHealth.lastSignature = signature;
+    state.contextHealth.lastSignatureAt = nowMs;
+    const text = String(input.text || buildSessionContextSummary()).trim();
+    if (!text) return { ok: true, skipped: true, reason: "empty_context" };
+    const channel = sendRealtimeEvent({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "system",
+        content: [{ type: "input_text", text }],
+      },
+    });
+    recordTimeline("realtime_context_pushed", {
+      reason: input.reason || "",
+      kind: input.kind || "",
+      channel,
+      chars: text.length,
+    });
+    maybeCompactRealtimeHistory(input.reason || "context_push");
+    return { ok: true, channel, chars: text.length };
   }
 
   function summarizeRealtimeEvent(event: unknown): RealtimeEventSummary {
@@ -845,6 +1081,17 @@
     return { type: normalized };
   }
 
+  function defaultRealtimeTruncation(value: unknown) {
+    if (value !== undefined && value !== null && value !== "") return value;
+    return {
+      type: "retention_ratio",
+      retention_ratio: 0.8,
+      token_limits: {
+        post_instructions: 8000,
+      },
+    };
+  }
+
   function defaultRealtime2Session(session: RealtimeSessionShape = {}): RealtimeSessionShape {
     const merged: RealtimeSessionShape & {
       reasoning?: { effort?: string };
@@ -859,6 +1106,7 @@
     delete merged.modalities;
     const inputTurnDetection = merged.audio?.input?.turn_detection ??
       merged.turn_detection ?? { type: "semantic_vad" };
+    merged.truncation = defaultRealtimeTruncation((merged as Record<string, unknown>).truncation);
     merged.audio = {
       ...(merged.audio || {}),
       input: {
@@ -947,26 +1195,24 @@
   }
 
   function injectCurrentUserContext() {
-    const instructions = String(config.instructions || "");
-    const identityLines = instructions
-      .split("\n")
-      .filter((line) => /^Current (speaker\/user|user identity):/.test(line))
-      .join("\n");
-    if (!identityLines) return { ok: true, skipped: true, reason: "no_identity_context" };
-    const channel = sendRealtimeEvent({
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "system",
-        content: [
-          {
-            type: "input_text",
-            text: `Persistent meeting context:\n${identityLines}\nIf the user asks who they are, answer from this context or resolve identity first.`,
-          },
-        ],
-      },
+    const currentUser = (config.currentUser || {}) as Record<string, unknown>;
+    const name = String(currentUser.name || currentUser.englishName || currentUser.english || "").trim();
+    if (!name) return { ok: true, skipped: true, reason: "no_current_user_context" };
+    const identity = {
+      resolved: true,
+      role: "current_user",
+      isCurrentUser: true,
+      canonicalName: name,
+      preferredName: String(currentUser.name || name),
+      confidence: "high",
+      evidence: ["runtime_current_user_config"],
+    };
+    return pushSessionContext({
+      reason: "current_user_bootstrap",
+      kind: "identity",
+      value: identity,
+      force: true,
     });
-    return { ok: true, channel };
   }
 
   function configureRealtimeSession() {
@@ -1175,7 +1421,24 @@
       interrupt() {
         transport.sendEvent({ type: "response.cancel" });
       },
-      resetHistory() {},
+      resetHistory(oldHistory = [], newHistory = []) {
+        state.connection.sentDataChannelMessages.push({
+          ts: new Date().toISOString(),
+          payload: JSON.stringify({
+            type: "mock.reset_history",
+            oldItems: Array.isArray(oldHistory) ? oldHistory.length : 0,
+            newItems: Array.isArray(newHistory) ? newHistory.length : 0,
+          }),
+          runtime: "agents-sdk",
+        });
+        state.connection.sentDataChannelMessages =
+          state.connection.sentDataChannelMessages.slice(-100);
+        emit("transport_event", {
+          type: "history_updated",
+          oldItems: Array.isArray(oldHistory) ? oldHistory.length : 0,
+          newItems: Array.isArray(newHistory) ? newHistory.length : 0,
+        });
+      },
       sendMcpResponse() {},
     };
     return transport;
@@ -1227,6 +1490,11 @@
         handoff: event?.handoff?.targetAgent?.name || event?.handoff || "",
       });
       rememberInboundEvent({ type: `agents_sdk.${eventType}` }, "agents-sdk");
+      if (type === "history_updated") {
+        const history = Array.isArray(event) ? event : currentHistorySnapshot();
+        updateContextHealthFromHistory(history);
+        maybeCompactRealtimeHistory("history_updated");
+      }
       updateFeedback();
     };
     for (const eventName of [
@@ -1274,6 +1542,7 @@
       model: connectionConfig.session?.model || "gpt-realtime-2",
       transport,
       config: defaultRealtime2Session(connectionConfig.session || {}),
+      historyStoreAudio: false,
       context: {
         session_id: state.sessionId || String(config.sessionId || ""),
         botName: connectionConfig.botName || "",
@@ -1296,6 +1565,8 @@
     state.session.configured = true;
     state.session.instructionsLength = String(connectionConfig.instructions || "").length;
     state.session.toolNames = normalizeToolNames(connectionConfig.tools || []);
+    updateContextHealthFromHistory(currentHistorySnapshot());
+    injectCurrentUserContext();
     recordTimeline("realtime_agent_sdk_connected", {
       tools: state.session.toolNames,
       sdkVersion: state.agentRuntime.sdkVersion,
@@ -2134,6 +2405,8 @@
     if (name === "present_video_stage")
       return postJson(localServiceUrl("/screen-share/video"), args);
     if (name === "stop_video_stage") return postJson(localServiceUrl("/screen-share/stop"), args);
+    if (name === "list_shareable_apps") return postJson(localServiceUrl("/screen-share/apps"), args);
+    if (name === "present_app_share") return postJson(localServiceUrl("/screen-share/app"), args);
     if (name === "read_meet_chat") return readMeetChat(args);
     if (name === "meet_participants" || name === "active_speaker")
       return readMeetingAwarenessTool(name);
@@ -2846,6 +3119,12 @@
     runRealtimeAgentSDKTool: simulateRealtimeAgentToolCall,
     simulateRealtimeAgentToolCall,
     sendRealtimeEvent,
+    pushSessionContext,
+    rememberSessionContext,
+    contextHealth: () => updateContextHealthFromHistory(currentHistorySnapshot()),
+    buildCompactedHistory,
+    compactRealtimeHistory,
+    resetHistory: compactRealtimeHistory,
     discoverParticipantAudioStreams,
     registerParticipantAudioStream,
     injectWorkerResult,

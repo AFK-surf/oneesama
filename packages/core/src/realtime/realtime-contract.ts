@@ -127,6 +127,43 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
+    name: "list_shareable_apps",
+    description:
+      "List local applications that can be selected for an application/window share in the current meeting.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "present_app_share",
+    description:
+      "Request sharing a specific local application/window into the current meeting. The browser or meeting client may still ask the user to confirm the exact window.",
+    parameters: {
+      type: "object",
+      properties: {
+        processId: { type: "integer", description: "Process id from list_shareable_apps." },
+        bundleIdentifier: {
+          type: "string",
+          description: "Bundle identifier from list_shareable_apps.",
+        },
+        applicationName: {
+          type: "string",
+          description: "Application name from list_shareable_apps.",
+        },
+        mode: {
+          type: "string",
+          enum: ["native", "synthetic"],
+          default: "native",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
     name: "read_meet_chat",
     description:
       "Read recent visible Google Meet chat messages and links from the current meeting.",
@@ -534,6 +571,7 @@ export interface RealtimeSessionOptions {
     };
     [key: string]: unknown;
   };
+  truncation?: unknown;
   sessionSchema?: string;
   session_schema?: string;
   botName?: string;
@@ -602,6 +640,7 @@ interface Realtime2Session {
   audio: Realtime2AudioConfig;
   tool_choice?: string;
   reasoning?: Record<string, unknown>;
+  truncation?: unknown;
 }
 
 export interface RealtimeCurrentUser {
@@ -661,6 +700,27 @@ function normalizeTurnDetectionConfig(value: unknown) {
   return { type: normalized };
 }
 
+function normalizeRealtimeTruncation(value: unknown) {
+  if (value !== undefined && value !== null && value !== "") {
+    if (typeof value === "string") {
+      if (value.trim().toLowerCase() === "disabled") return "disabled";
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  return {
+    type: "retention_ratio",
+    retention_ratio: 0.8,
+    token_limits: {
+      post_instructions: 8000,
+    },
+  };
+}
+
 export function buildRealtimeSessionConfig(
   options: RealtimeSessionOptions = {},
   config: RealtimeSessionConfig = {},
@@ -714,6 +774,7 @@ export function buildRealtimeSessionConfig(
     output_modalities: normalizeModalities(options.outputModalities || options.output_modalities),
     instructions,
     tools,
+    truncation: normalizeRealtimeTruncation(options.truncation),
     audio: {
       input: {
         format: {

@@ -230,7 +230,7 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
             capabilities: [
               "runner.ping", "join.google_meet.prepare", "join.session.status", "join.session.stop",
               "worker.result.inject", "screen_share.start", "screen_share.present",
-              "screen_share.video", "screen_share.stop",
+              "screen_share.video", "screen_share.apps", "screen_share.app", "screen_share.stop",
             ],
           }),
         );
@@ -264,6 +264,12 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
         return;
       case "screen_share.video":
         writeResponse(success(request.id, await joiner.presentVideoStage(request.params ?? {})));
+        return;
+      case "screen_share.apps":
+        writeResponse(success(request.id, await joiner.listShareableApps()));
+        return;
+      case "screen_share.app":
+        writeResponse(success(request.id, await joiner.presentAppShare(request.params ?? {})));
         return;
       case "screen_share.stop":
         writeResponse(success(request.id, await joiner.stopScreenShare()));

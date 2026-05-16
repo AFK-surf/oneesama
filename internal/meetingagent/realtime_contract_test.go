@@ -56,6 +56,30 @@ func TestBuildRealtimeSessionMergesAudioAndReasoningOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildRealtimeSessionAppliesProductTruncationDefault(t *testing.T) {
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{}, testRealtimeOpenAIConfig())
+	truncation, ok := session["truncation"].(map[string]any)
+	if !ok {
+		t.Fatalf("truncation = %#v, want object", session["truncation"])
+	}
+	if truncation["type"] != "retention_ratio" || truncation["retention_ratio"] != 0.8 {
+		t.Fatalf("truncation = %#v, want retention_ratio 0.8", truncation)
+	}
+	tokenLimits, ok := truncation["token_limits"].(map[string]any)
+	if !ok || tokenLimits["post_instructions"] != 8000 {
+		t.Fatalf("token_limits = %#v, want post_instructions 8000", truncation["token_limits"])
+	}
+}
+
+func TestBuildRealtimeSessionAllowsTruncationOverride(t *testing.T) {
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{
+		Truncation: "disabled",
+	}, testRealtimeOpenAIConfig())
+	if session["truncation"] != "disabled" {
+		t.Fatalf("truncation = %#v, want disabled", session["truncation"])
+	}
+}
+
 func TestBuildRealtimeSessionSupportsStructuredTurnDetection(t *testing.T) {
 	t.Parallel()
 

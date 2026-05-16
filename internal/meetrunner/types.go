@@ -11,6 +11,8 @@ type Runner interface {
 	StartScreenShare(ctx context.Context, input ScreenShareInput) (ScreenShareResult, error)
 	PresentScreenShare(ctx context.Context, input ScreenShareInput) (ScreenShareResult, error)
 	PresentVideoStage(ctx context.Context, input VideoStageInput) (ScreenShareResult, error)
+	ListShareableApps(ctx context.Context, input ShareableAppsInput) (ScreenShareResult, error)
+	PresentAppShare(ctx context.Context, input AppShareInput) (ScreenShareResult, error)
 	StopScreenShare(ctx context.Context, input ScreenShareInput) (ScreenShareResult, error)
 }
 
@@ -169,6 +171,21 @@ type VideoStageInput struct {
 	Width      int    `json:"width,omitempty"`
 	Height     int    `json:"height,omitempty"`
 	Muted      bool   `json:"muted,omitempty"`
+}
+
+type ShareableAppsInput struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type AppShareInput struct {
+	ScreenShareInput
+	ProcessID        int    `json:"processId,omitempty"`
+	PID              int    `json:"pid,omitempty"`
+	BundleIdentifier string `json:"bundleIdentifier,omitempty"`
+	BundleID         string `json:"bundleId,omitempty"`
+	ApplicationName  string `json:"applicationName,omitempty"`
+	AppName          string `json:"appName,omitempty"`
+	Name             string `json:"name,omitempty"`
 }
 
 type ScreenShareResult map[string]any

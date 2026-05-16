@@ -22,9 +22,15 @@ interface MeetingRecorderOptions {
   sinkName?: string;
 }
 
-interface ShareableApplication {
+export interface ShareableApplication {
   bundleIdentifier?: string;
+  bundleId?: string;
   processId?: number;
+  pid?: number;
+  applicationName?: string;
+  localizedName?: string;
+  name?: string;
+  title?: string;
 }
 
 interface ShareableAudioSession {
@@ -168,6 +174,31 @@ async function loadRecappiSdk(options: MeetingRecorderOptions = {}): Promise<Rec
     throw new Error("Recappi SDK not found. Set MAB_RECAPPI_SDK_PATH or install @recappi/sdk.");
   }
   return require(sdkPath);
+}
+
+function normalizeShareableApplication(app: ShareableApplication, index: number) {
+  const processId = Number(app.processId || app.pid || 0) || 0;
+  const bundleIdentifier = String(app.bundleIdentifier || app.bundleId || "").trim();
+  const applicationName = String(
+    app.applicationName || app.localizedName || app.name || app.title || bundleIdentifier || processId || `app-${index + 1}`,
+  ).trim();
+  return {
+    processId,
+    bundleIdentifier,
+    applicationName,
+    name: applicationName,
+    title: applicationName,
+    source: "recappi_shareable_content",
+  };
+}
+
+export async function listShareableApplications(options: MeetingRecorderOptions = {}) {
+  const { ShareableContent } = await loadRecappiSdk(options);
+  const apps = ShareableContent.applications?.() || [];
+  return apps
+    .map(normalizeShareableApplication)
+    .filter((app) => app.processId || app.bundleIdentifier || app.applicationName)
+    .sort((a, b) => a.applicationName.localeCompare(b.applicationName));
 }
 
 class PulseAudioRecorder {
