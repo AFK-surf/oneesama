@@ -77,15 +77,17 @@ The active surface is still not as complete as Cueboard's runtime behavior:
 
 ## P0 Gaps
 
-- `suggest_tool.go:220-335` is not actually active through the Oneesama tool gateway. Cueboard `Execute` reserves duplicate-protected recommendations, inserts a pending action, posts a confirmation card, records `card_ts`, confirms the reservation, records the thread ledger action, and schedules decision follow-up. Oneesama `Service.executeSuggestActionTool` currently stops after normalization and returns the request. Either implement the side effects or mark `suggest_action` as `validation_only` in `/slack/tools/parity`.
-- `slack_api_tool_messages.go:236-304` active-thread protection is still dormant. Cueboard calls `Bridge.hasActiveThread` inside `actionPostMessage`; Oneesama has the `activeThread` callback field but `Service.executeSlackAPITool` leaves it nil. This can let an assistant/tool call post a duplicate Slack reply into the same active mention thread.
+All P0 gaps in this audit slice are now closed.
+
+- ~~`suggest_tool.go:220-335` is not actually active through the Oneesama tool gateway.~~ **RESOLVED** (commits `12e09b2`, `ece0124`, `fc0ae2c`): `suggest_action` now inserts a pending action, posts a Slack confirmation card, records `card_ts`, writes the thread ledger action, and enqueues a decision follow-up. Confirm/dismiss flow updates the original card and closes the follow-up.
+- ~~`slack_api_tool_messages.go:236-304` active-thread protection is still dormant.~~ **RESOLVED** (commit `78a0905`): `Service.executeSlackAPITool` now passes `s.isActiveMentionThread` as the live `activeThread` callback; `chat.postMessage` to a mention-owned thread is refused with a clear retry hint.
 
 ## P1 Gaps
 
-- `slack.fetchImage`, `slack.fetchCanvas`, `canvases.create`, `canvases.edit`, and `slack.sendDM` are listed in Oneesama's Slack API matrix but return registered-unavailable. These are not the same as the product-excluded generation/credentialed tools; they are core Slack workspace helpers Cueboard had.
-- `chat.postMessage` and `slack.postThreadReply` are too thin. Cueboard supports safe Block Kit blocks, markdown-to-block conversion, dedupe reservations, failure confirmation, mutation counters, reply footer/state, and ledger recording. Oneesama currently posts plain form text and lacks outbound idempotency in this gateway.
+- ~~`slack.fetchImage`, `slack.fetchCanvas`~~ **RESOLVED** (commits `1240484` + `94cd49b`): both actions are now `active` with size caps. `canvases.create`, `canvases.edit`, and `slack.sendDM` remain `registered_unavailable` pending product decisions.
+- ~~`chat.postMessage` and `slack.postThreadReply` are too thin.~~ **PARTIALLY RESOLVED** (commit `3dbdc9a`): safe Block Kit blocks are now accepted with interactive-block rejection. Markdown-to-block conversion, ledger recording, and outbound idempotency centralization are still open — tracked under the Phase 5 P1 "centralize Slack post ledger" line.
 - `runtime_status(action=...)` and `heartbeat_log(limit=...)` need to return the Cueboard-style formatted views, not just raw `s.Status()` or raw log line maps. The formatter code and tests exist; the gateway should use them.
-- `usage_api` should either call a real usage backend or be demoted from `active_stub` to a clearer unavailable/stub status in the parity report.
+- ~~`usage_api` should either call a real usage backend or be demoted from `active_stub`~~ **RESOLVED** (commit `12e09b2`): `usage_api` is now `validation_only` in the parity matrix.
 - `notify_meeting_slack` should resolve the current meeting's linked Slack thread and mention user IDs by channel membership/name matching. The current gateway version accepts raw channel/thread/text and loses Cueboard's dedupe/user-resolution safety.
 - `slack_api(add_reaction)` should restore Cueboard's digest `message_ref` / latest-message target resolution if the triage runner is expected to react using digest refs.
 
