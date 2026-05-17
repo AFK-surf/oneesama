@@ -90,6 +90,7 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 			OK:              true,
 			ResponseType:    "ephemeral",
 			Text:            fmt.Sprintf("Pending action %d marked confirmed; executing join_meeting.", updated.ID),
+			Blocks:          buildPendingActionResolvedBlocks(*updated, interaction, "executing join_meeting"),
 			ReplaceOriginal: true,
 			Metadata: map[string]any{
 				"pending_action": updated,
@@ -98,13 +99,54 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 			},
 		}
 	}
+	text := fmt.Sprintf("Pending action %d marked %s.", updated.ID, interaction.Status)
 	return AvatarCommandResponse{
-		OK:           true,
-		ResponseType: "ephemeral",
-		Text:         fmt.Sprintf("Pending action %d marked %s.", updated.ID, interaction.Status),
+		OK:              true,
+		ResponseType:    "ephemeral",
+		Text:            text,
+		Blocks:          buildPendingActionResolvedBlocks(*updated, interaction, ""),
+		ReplaceOriginal: pendingActionInteractionReplacesOriginal(interaction.Status),
 		Metadata: map[string]any{
 			"pending_action": updated,
 			"interaction":    interaction,
+		},
+	}
+}
+
+func pendingActionInteractionReplacesOriginal(status string) bool {
+	return status != "opened"
+}
+
+func buildPendingActionResolvedBlocks(action SlackPendingAction, interaction SlackPendingActionInteraction, suffix string) []map[string]any {
+	status := firstNonEmpty(interaction.Status, action.Status, "updated")
+	actionType := firstNonEmpty(action.ActionType, "follow_up")
+	title := firstNonEmpty(stringFromAny(action.Params["title"]), stringFromAny(action.Params["summary"]), actionType)
+	user := strings.TrimSpace(interaction.UserID)
+	contextParts := []string{
+		"Action: `" + actionType + "`",
+		fmt.Sprintf("Pending: %d", action.ID),
+		"Status: `" + status + "`",
+	}
+	if user != "" {
+		contextParts = append(contextParts, "By: <@"+user+">")
+	}
+	if strings.TrimSpace(suffix) != "" {
+		contextParts = append(contextParts, strings.TrimSpace(suffix))
+	}
+	return []map[string]any{
+		{
+			"type": "section",
+			"text": map[string]any{
+				"type": "mrkdwn",
+				"text": fmt.Sprintf("*Triage suggestion %s:* %s", status, title),
+			},
+		},
+		{
+			"type": "context",
+			"elements": []map[string]any{{
+				"type": "mrkdwn",
+				"text": strings.Join(contextParts, " | "),
+			}},
 		},
 	}
 }

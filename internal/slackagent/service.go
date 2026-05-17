@@ -110,6 +110,14 @@ type Service struct {
 	scannerSweeps  []time.Time
 	scanner429s    []time.Time
 
+	heartbeatMu          sync.Mutex
+	heartbeatCancel      context.CancelFunc
+	heartbeatTicks       []time.Time
+	heartbeatLastTickAt  time.Time
+	heartbeatLastPosted  int
+	heartbeatLastSkipped int
+	heartbeatLastError   string
+
 	eventMu    sync.Mutex
 	seenEvents map[string]time.Time
 

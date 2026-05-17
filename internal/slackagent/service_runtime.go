@@ -16,19 +16,20 @@ type StatusResponse struct {
 }
 
 type SlackStatus struct {
-	SigningSecretConfigured bool                     `json:"signing_secret_configured"`
-	BotTokenConfigured      bool                     `json:"bot_token_configured"`
-	AppTokenConfigured      bool                     `json:"app_token_configured"`
-	BotUserID               string                   `json:"bot_user_id,omitempty"`
-	PosterMode              string                   `json:"poster_mode"`
-	CanvasProvider          string                   `json:"canvas_provider"`
-	ScheduleManagerReady    bool                     `json:"schedule_manager_ready"`
-	WorkspaceDir            string                   `json:"workspace_dir"`
-	InternalAuthConfigured  bool                     `json:"internal_auth_configured"`
-	SocketMode              SlackSocketModeStatus    `json:"socket_mode"`
-	ScannerCursors          SlackScannerCursorStats  `json:"scanner_cursors"`
-	WorkspaceState          SlackWorkspaceStateStats `json:"workspace_state"`
-	ThreadCases             SlackThreadCaseStats     `json:"thread_cases"`
+	SigningSecretConfigured bool                       `json:"signing_secret_configured"`
+	BotTokenConfigured      bool                       `json:"bot_token_configured"`
+	AppTokenConfigured      bool                       `json:"app_token_configured"`
+	BotUserID               string                     `json:"bot_user_id,omitempty"`
+	PosterMode              string                     `json:"poster_mode"`
+	CanvasProvider          string                     `json:"canvas_provider"`
+	ScheduleManagerReady    bool                       `json:"schedule_manager_ready"`
+	WorkspaceDir            string                     `json:"workspace_dir"`
+	InternalAuthConfigured  bool                       `json:"internal_auth_configured"`
+	SocketMode              SlackSocketModeStatus      `json:"socket_mode"`
+	HeartbeatTicker         SlackHeartbeatTickerStatus `json:"heartbeat_ticker"`
+	ScannerCursors          SlackScannerCursorStats    `json:"scanner_cursors"`
+	WorkspaceState          SlackWorkspaceStateStats   `json:"workspace_state"`
+	ThreadCases             SlackThreadCaseStats       `json:"thread_cases"`
 }
 
 type AgentRunnerStatus struct {
@@ -100,6 +101,7 @@ func (s *Service) Status() StatusResponse {
 			WorkspaceDir:            s.workspaceDir,
 			InternalAuthConfigured:  s.internalAuthKey != "",
 			SocketMode:              s.socketModeStatus(),
+			HeartbeatTicker:         s.heartbeatTickerStatus(),
 			ScannerCursors:          scannerCursorStats,
 			WorkspaceState:          workspaceStats,
 			ThreadCases:             threadCaseStats,
