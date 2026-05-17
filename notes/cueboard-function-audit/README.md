@@ -56,9 +56,9 @@ Each reviewed row should include:
 
 Example:
 
-| Module | Source file | Function | Kind | Exported | Lines | Suggested status | Oneesama target | Evidence | Notes |
-|---|---|---|---|---:|---:|---|---|---|---|
-| slack | `scanner_triage.go` | `runTriageCycle` | function | no | 210-390 | partial | `internal/slackagent/triage_decision.go:RunSlackTriage` | task #147 / task #157 audit endpoint | Prompt parity exists, but ACT/MAYBE live samples still rely on canary until real positive traffic appears. |
+| Module | Source file         | Function         | Kind     | Exported |   Lines | Suggested status | Oneesama target                                         | Evidence                             | Notes                                                                                                      |
+| ------ | ------------------- | ---------------- | -------- | -------: | ------: | ---------------- | ------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| slack  | `scanner_triage.go` | `runTriageCycle` | function |       no | 210-390 | partial          | `internal/slackagent/triage_decision.go:RunSlackTriage` | task #147 / task #157 audit endpoint | Prompt parity exists, but ACT/MAYBE live samples still rely on canary until real positive traffic appears. |
 
 ## Task Map
 
@@ -72,6 +72,9 @@ Example:
 - task #169: Meeting / ASR / summary / joiner.
 - task #170: Shared runtime / integrations / entrypoints.
 - task #171: consolidation backlog and implementation order.
+
+The consolidated implementation backlog lives in
+`notes/cueboard-function-audit/consolidated-backlog.md`.
 
 ## Review Workflow
 
