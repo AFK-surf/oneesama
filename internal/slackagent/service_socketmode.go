@@ -5,6 +5,7 @@ import "context"
 func (s *Service) Start() error {
 	s.startSlackHistoryScanner()
 	s.startMeetingApprovalScanner()
+	s.primeHeartbeatStateOnStart(context.Background())
 	s.startHeartbeatTicker()
 
 	if s == nil || s.appToken == "" {
