@@ -61,6 +61,12 @@ func applySlackEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(getenv("ONEESAMA_PUBLIC_BASE_URL", "MAB_PUBLIC_BASE_URL")); value != "" {
 		cfg.Slack.PublicBaseURL = value
 	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_PILOT_USER_ID", "SLACK_PILOT_USER_ID", "MAB_SLACK_PILOT_USER_ID")); value != "" {
+		cfg.Slack.PilotUserID = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_DEBUG_CHANNEL_ID", "SLACK_DEBUG_CHANNEL_ID", "MAB_SLACK_DEBUG_CHANNEL_ID")); value != "" {
+		cfg.Slack.DebugChannelID = value
+	}
 }
 
 func applySlackEventBufferEnvOverrides(cfg *Config) {

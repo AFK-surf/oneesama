@@ -38,6 +38,8 @@ type SlackConfig struct {
 	WorkspaceDir    string
 	InternalAuthKey string
 	PublicBaseURL   string
+	PilotUserID     string
+	DebugChannelID  string
 	EventBuffer     SlackEventBufferConfig
 	Triage          SlackTriageConfig
 	Memory          SlackMemoryConfig
