@@ -38,6 +38,42 @@ func TestHandleMemorySearchUsesLocalSlackMemory(t *testing.T) {
 	}
 }
 
+func TestHandleMemorySearchIncludesLiveWorkspaceTriageProjection(t *testing.T) {
+	localRoot := t.TempDir()
+	workspaceDir := t.TempDir()
+	persistTriageContext(workspaceDir, SlackTriageContext{
+		SessionID: "triage:C123:1",
+		Timestamp: "2026-05-17T05:00:00Z",
+		Status:    "ok",
+		Channels:  []string{"C123"},
+		Summary:   "Cueboard thread was already handled by another bot; no office-helper action needed.",
+		Digest:    `#cueboard (C123): current work was already handled by another bot`,
+		Steps:     1,
+	})
+	router := newTestRouter(t, Config{
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Memory:       appconfig.SlackMemoryConfig{Enabled: true, Dir: localRoot},
+		},
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/memory?q=Cueboard&limit=3", nil)
+	request.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"workspaceTriageContexts":1`) {
+		t.Fatalf("body = %s, want workspace triage summary count", body)
+	}
+	if !strings.Contains(body, `"kind":"triage_projection"`) || !strings.Contains(body, "already handled by another bot") {
+		t.Fatalf("body = %s, want triage projection memory result", body)
+	}
+}
+
 func TestFollowupCreateStatusAndSurface(t *testing.T) {
 	previousClock := timeNow
 	timeNow = func() time.Time { return time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation()) }

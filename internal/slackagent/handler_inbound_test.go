@@ -1033,6 +1033,71 @@ func TestSlackTriageExpandsLowContextStandaloneMessages(t *testing.T) {
 	}
 }
 
+func TestSlackTriageActionlessDecisionPersistsThreadMemory(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_memory",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"decision: cueboard drag upload work was already handled by another bot; no office-helper action needed.","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Triage:       appconfig.SlackTriageConfig{HeuristicFallback: true},
+			Memory:       appconfig.SlackMemoryConfig{Enabled: true, Dir: t.TempDir()},
+		},
+		Runner: runner,
+	})
+
+	started, err := service.StartSlackTriage(context.Background(), "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "cueboard drag upload is already being handled",
+		TS:        "1778765842.164299",
+		ThreadTS:  "1778765700.000000",
+	}}, `#cueboard (C123): cueboard drag upload is already being handled`)
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if started.Finalization == nil || started.Finalization.Run == nil {
+		t.Fatalf("started = %#v, want finalization", started)
+	}
+	records, err := service.cognition.ListRecentThreadLedgers(context.Background(), "T123", "C123", 5)
+	if err != nil {
+		t.Fatalf("ListRecentThreadLedgers: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %#v, want one thread memory record", records)
+	}
+	record := records[0]
+	if record.ThreadTS != "1778765700.000000" || record.LastActionType != "triage" || record.LastActionStatus != "no_action" {
+		t.Fatalf("record = %#v, want triage no_action thread record", record)
+	}
+	if !strings.Contains(record.Summary, "cueboard drag upload work") {
+		t.Fatalf("record summary = %q, want triage summary", record.Summary)
+	}
+	brain, err := service.cognition.GetChannelBrain(context.Background(), "T123", "C123")
+	if err != nil {
+		t.Fatalf("GetChannelBrain: %v", err)
+	}
+	if brain == nil || !strings.Contains(brain.Summary, "cueboard drag upload work") {
+		t.Fatalf("brain = %#v, want channel brain to retain triage memory", brain)
+	}
+	results := service.SearchLocalMemory("cueboard drag upload", 5)
+	foundProjection := false
+	for _, result := range results {
+		if result.Kind == "triage_projection" && strings.Contains(result.Content, "already handled by another bot") {
+			foundProjection = true
+		}
+	}
+	if !foundProjection {
+		t.Fatalf("results = %#v, want searchable triage projection", results)
+	}
+}
+
 func signedSlackEventRequest(t *testing.T, router http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	timestamp, signature := signedSlackJSONBody("secret", body)

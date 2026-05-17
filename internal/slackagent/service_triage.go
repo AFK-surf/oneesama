@@ -623,6 +623,9 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	}
 	go s.maybeCompactDailyNotes(context.WithoutCancel(ctx))
 	if ok && decision.Summary != "" {
+		if err := s.cognition.RecordTriageSummary(ctx, workspaceID, channelID, threadTS, runPatch.SessionID, decision.Summary, slackTriageLedgerOutcome(ok, mutations, failures)); err != nil {
+			s.logger.Warn("slack thread ledger triage summary record failed", "error", err)
+		}
 		if _, err := s.cognition.UpsertChannelBrainSummary(ctx, workspaceID, channelID, decision.Summary); err != nil {
 			s.logger.Warn("slack channel brain summary update failed", "error", err)
 		}
@@ -665,6 +668,17 @@ func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspace
 		calls = append(calls, call)
 	}
 	return calls, failures
+}
+
+func slackTriageLedgerOutcome(ok bool, mutations int, failures int) string {
+	switch {
+	case !ok || failures > 0:
+		return "failed"
+	case mutations > 0:
+		return "acted"
+	default:
+		return "no_action"
+	}
 }
 
 func firstNonEmptyStringSlice(values []string, fallback []string) []string {

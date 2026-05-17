@@ -112,6 +112,40 @@ func (s *slackCognitionStore) RecordOutbound(ctx context.Context, workspaceID st
 	return s.RebuildChannelBrainSummary(ctx, workspaceID, channelID, 6)
 }
 
+func (s *slackCognitionStore) RecordTriageSummary(ctx context.Context, workspaceID string, channelID string, threadTS string, sessionID string, summary string, outcome string) error {
+	if s == nil || s.ledgers == nil || workspaceID == "" || channelID == "" || threadTS == "" {
+		return nil
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
+	id := threadLedgerID(workspaceID, channelID, threadTS)
+	previous, ok, err := s.ledgers.Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("load thread ledger: %w", err)
+	}
+	now := nowRFC3339()
+	record := previous
+	if !ok {
+		record = SlackThreadLedgerRecord{ID: id, WorkspaceID: workspaceID, ChannelID: channelID, ThreadTS: threadTS, Status: "active", CreatedAt: now}
+	}
+	record.AssistantSessionID = firstNonEmpty(sessionID, record.AssistantSessionID)
+	if record.Status == "" {
+		record.Status = "active"
+	}
+	if !strings.EqualFold(record.Status, "awaiting_confirmation") && !strings.EqualFold(record.LastActionStatus, "pending") {
+		record.LastActionType = "triage"
+		record.LastActionStatus = firstNonEmpty(strings.TrimSpace(outcome), "observed")
+	}
+	record.Summary = sanitizeThreadLedgerSummary(summary)
+	record.UpdatedAt = now
+	if err := s.ledgers.Set(ctx, id, record); err != nil {
+		return fmt.Errorf("record thread triage summary: %w", err)
+	}
+	return s.RebuildChannelBrainSummary(ctx, workspaceID, channelID, 6)
+}
+
 func (s *slackCognitionStore) RecordAction(ctx context.Context, workspaceID string, channelID string, threadTS string, actionType string, actionStatus string) error {
 	if s == nil || s.ledgers == nil || workspaceID == "" || channelID == "" || threadTS == "" || actionType == "" || actionStatus == "" {
 		return nil

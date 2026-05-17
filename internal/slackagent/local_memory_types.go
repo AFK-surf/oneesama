@@ -1,12 +1,15 @@
 package slackagent
 
 type SlackMemorySummary struct {
-	Enabled      bool                   `json:"enabled"`
-	RootDir      string                 `json:"rootDir"`
-	WorkspaceDir string                 `json:"workspaceDir"`
-	Manifest     map[string]any         `json:"manifest,omitempty"`
-	FileCount    int                    `json:"fileCount"`
-	Seed         SlackMemorySeedSummary `json:"seed"`
+	Enabled                 bool                   `json:"enabled"`
+	RootDir                 string                 `json:"rootDir"`
+	WorkspaceDir            string                 `json:"workspaceDir"`
+	Manifest                map[string]any         `json:"manifest,omitempty"`
+	FileCount               int                    `json:"fileCount"`
+	WorkspaceRootDir        string                 `json:"workspaceRootDir,omitempty"`
+	WorkspaceFileCount      int                    `json:"workspaceFileCount,omitempty"`
+	WorkspaceTriageContexts int                    `json:"workspaceTriageContexts,omitempty"`
+	Seed                    SlackMemorySeedSummary `json:"seed"`
 }
 
 type SlackMemorySeedSummary struct {
