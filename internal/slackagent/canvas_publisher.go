@@ -219,7 +219,7 @@ func (p *CanvasPublisher) ListPublished() ([]PublishedCanvasManifest, error) {
 
 func (p *CanvasPublisher) publishSlackCanvas(ctx context.Context, markdown string, input CanvasPublishInput) SlackCanvasAPIResult {
 	if strings.TrimSpace(input.CanvasID) != "" {
-		return EditSlackCanvas(
+		result := EditSlackCanvas(
 			ctx,
 			p.client,
 			p.botToken,
@@ -229,26 +229,76 @@ func (p *CanvasPublisher) publishSlackCanvas(ctx context.Context, markdown strin
 			input.Operation,
 			input.SectionID,
 		)
+		if !result.OK && canvasErrorIsValidationFailure(result.Error) {
+			sanitized := sanitizeMarkdownForSlackCanvas(markdown)
+			if sanitized != "" && sanitized != markdown {
+				retry := EditSlackCanvas(
+					ctx,
+					p.client,
+					p.botToken,
+					p.apiBaseURL,
+					input.CanvasID,
+					sanitized,
+					input.Operation,
+					input.SectionID,
+				)
+				if retry.OK {
+					retry.Detail = recordCanvasSanitizeFallback(retry.Detail, result.Error)
+					return retry
+				}
+			}
+		}
+		return result
 	}
 	channel := firstNonEmpty(input.Channel, p.channel)
 	if input.ForceSlackCanvas {
 		channel = ""
 	}
+	title := firstNonEmpty(input.Title, input.Artifact.Title, "Meeting summary")
 	result := CreateSlackCanvas(
 		ctx,
 		p.client,
 		p.botToken,
 		p.apiBaseURL,
-		firstNonEmpty(input.Title, input.Artifact.Title, "Meeting summary"),
+		title,
 		markdown,
 		channel,
 	)
+	if !result.OK && canvasErrorIsValidationFailure(result.Error) {
+		sanitized := sanitizeMarkdownForSlackCanvas(markdown)
+		if sanitized != "" && sanitized != markdown {
+			retry := CreateSlackCanvas(
+				ctx,
+				p.client,
+				p.botToken,
+				p.apiBaseURL,
+				title,
+				sanitized,
+				channel,
+			)
+			if retry.OK {
+				retry.Detail = recordCanvasSanitizeFallback(retry.Detail, result.Error)
+				result = retry
+			}
+		}
+	}
 	if result.OK && strings.TrimSpace(result.CanvasID) != "" {
 		auth := SlackAuthTest(ctx, p.client, p.botToken, p.apiBaseURL)
 		result.TeamID = auth.TeamID
 		result.Permalink = slackCanvasPermalink(auth.TeamID, result.CanvasID)
 	}
 	return result
+}
+
+// recordCanvasSanitizeFallback appends a stable marker to the result Detail
+// so manifests and audit endpoints can see when the sanitize-and-retry path
+// fired. The original validation error is captured for triage.
+func recordCanvasSanitizeFallback(detail, originalError string) string {
+	marker := "sanitized_markdown_retry_after:" + strings.TrimSpace(originalError)
+	if strings.TrimSpace(detail) == "" {
+		return marker
+	}
+	return detail + "; " + marker
 }
 
 func normalizeCanvasProvider(provider string) string {
