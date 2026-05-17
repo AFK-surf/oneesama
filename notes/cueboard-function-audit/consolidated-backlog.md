@@ -11,7 +11,7 @@ The marathon directive `task #174 "你俩合作，直到所有问题修完"` has
 - **Phase 2 thread ownership**: P0 mention queue + thread case lifecycle + scanner suppression + activeThread guard landed (`78a0905`). Durable-context guard (`looksLikeHandledTaskSummary`) landed (`1539917`). Pending-action card update on confirm/dismiss landed via driver Phase 3 (`495bbd0`).
 - **Phase 3 heartbeat loop**: pending-action loop closure (`ece0124`), heartbeat ticker (`495bbd0`), commitment/confirmed-action/meeting-action follow-up hooks (`fc0ae2c`), and startup heartbeat normalization (`cbadb08`) landed.
 - **Phase 4 Calendar approval scanner**: Google Calendar scan loop + OAuth refresh + real Slack root-message approval card + thread-case dedupe landed (`6d3f601`).
-- **Phase 5 context tools**: Canvas fetch (`1240484`), image fetch (`94cd49b`), Canvas sanitize+retry (`a353b79`), safe Block Kit blocks (`3dbdc9a`), DM/debug fallback Stage A (`9a27ca3`), Stage B event-post fallback wiring (`c6fd0d0`), and centralized post ledger (`c550bb0`) landed. Canvas create/edit decision and Cueboard-formatted `runtime_status` / `heartbeat_log` views remain open.
+- **Phase 5 context tools**: Canvas fetch (`1240484`), image fetch (`94cd49b`), Canvas sanitize+retry (`a353b79`), safe Block Kit blocks (`3dbdc9a`), DM/debug fallback Stage A (`9a27ca3`), Stage B event-post fallback wiring (`c6fd0d0`), centralized post ledger (`c550bb0`), Cueboard-formatted `runtime_status` / `heartbeat_log` views (`66d269b`), and `slack_api(add_reaction)` digest target resolution (`a3913d5`) landed. Canvas create/edit decision remains open.
 - **Phase 6 ops**: processutil consolidation landed (`75a3802`). Feedback markdown trim landed (`438104e`). JSON unknown-field policy and workspace-template embeds remain open as docs/decisions.
 
 Sources:
@@ -36,7 +36,7 @@ The remaining risky gaps cluster into five themes:
 2. **Duplicate/unsafe Slack behavior:** mention-thread ownership, active-thread tool guards, and generic Slack upload safety are incomplete.
 3. **Pending-action and heartbeat loops:** card/reservation/follow-up side effects, heartbeat ticker, follow-up hooks, and startup normalization now exist. Remaining heartbeat work is quality/observability: richer candidate ranking, upcoming-deadline context, and admin views.
 4. **Meeting automation:** direct/manual Meet join and Calendar-driven Slack approval scanner are now covered. Official Meet API fallback and ASR chunk production remain open product decisions.
-5. **Capability surfaces:** Canvas create/edit, centralized Slack post ledger, official Meet API fallback, and ASR chunk production are either missing or intentionally deferred.
+5. **Capability surfaces:** Canvas create/edit, official Meet API fallback, and ASR chunk production are either missing or intentionally deferred.
 
 Do **not** try to port Cueboard wholesale. The large Cueboard agent-framework, envhost/VM stack, credentialed integrations, and HTML admin cockpit are intentionally replaced or excluded. The backlog below only covers behavior that still matters for Oneesama's current product.
 
