@@ -83,6 +83,7 @@ type Service struct {
 	scannerCursors          *slackScannerCursorStore
 	workspaceState          *slackWorkspaceStore
 	threadCases             *slackThreadCaseStore
+	mentionQueue            *slackMentionQueue
 	localMemory             *localSlackMemory
 	followups               *slackHeartbeatStore
 	improvements            *slackImprovementStore
@@ -223,6 +224,7 @@ func NewService(cfg Config) *Service {
 		scannerCursors:          newSlackScannerCursorStore(cfg.Persistence, logger),
 		workspaceState:          newSlackWorkspaceStore(cfg.Persistence, logger),
 		threadCases:             newSlackThreadCaseStore(cfg.Persistence, logger),
+		mentionQueue:            newSlackMentionQueue(),
 		localMemory:             newLocalSlackMemory(cfg.Slack.Memory),
 		followups:               newSlackHeartbeatStore(cfg.Persistence, logger),
 		improvements:            newSlackImprovementStore(cfg.Persistence, logger),

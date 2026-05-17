@@ -184,6 +184,45 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 		}
 	}
 
+	mentionWorkspaceID := firstNonEmpty(envelope.TeamID, "workspace")
+	mentionThreadTS := firstNonEmpty(event.ThreadTS, event.TS, event.EventTS)
+	mentionChannel := strings.TrimSpace(event.Channel)
+	mentionThreadOwned := false
+	if mentionMode && s.mentionQueue != nil && mentionChannel != "" && mentionThreadTS != "" {
+		startWorker, postAck := s.mentionQueue.enqueue(mentionWorkspaceID, mentionChannel, mentionThreadTS, event)
+		if !startWorker {
+			if postAck {
+				ackInput := PostMessageInput{
+					Channel:  mentionChannel,
+					ThreadTS: mentionThreadTS,
+					Text:     "Got it — finishing the earlier mention in this thread, will reply once that lands.",
+					DedupKey: slackEventDedupKey(envelope.EventID, event) + ":queued_ack",
+				}
+				go s.dispatchEventPost(context.WithoutCancel(ctx), ackInput)
+			}
+			s.logger.Info(
+				"slack mention coalesced into running worker",
+				"mode", mode,
+				"event_id", strings.TrimSpace(envelope.EventID),
+				"channel", mentionChannel,
+				"thread_ts", mentionThreadTS,
+				"posted_ack", postAck,
+			)
+			return SlackEventResponse{
+				OK:        true,
+				Ignored:   true,
+				Mode:      mode,
+				EventType: event.Type,
+				EventID:   strings.TrimSpace(envelope.EventID),
+				Reason:    "mention_thread_busy",
+			}
+		}
+		mentionThreadOwned = true
+		s.beginMentionThreadCase(ctx, mentionChannel, mentionThreadTS, envelope.EventID)
+		defer s.endMentionThreadCase(context.WithoutCancel(ctx), mentionWorkspaceID, mentionChannel, mentionThreadTS, envelope.EventID)
+	}
+	_ = mentionThreadOwned
+
 	var richContext *SlackAppMentionContext
 	if mentionMode {
 		richContext = s.buildSlackAppMentionContext(ctx, firstNonEmpty(envelope.TeamID, "workspace"), event)
@@ -308,6 +347,63 @@ func isSlackMentionCommandMode(mode string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// beginMentionThreadCase records an active mention claim for the given thread
+// so duplicate-reply guards (scanner suppression, slack_api activeThread) can
+// see the bot is currently working on it. Errors are logged and swallowed —
+// thread-case durability is best-effort observability, not a hard gate for
+// the worker.
+func (s *Service) beginMentionThreadCase(ctx context.Context, channelID, threadTS, eventID string) {
+	if s == nil || s.threadCases == nil {
+		return
+	}
+	source := strings.TrimSpace(eventID)
+	if source == "" {
+		source = "app_mention"
+	}
+	if _, err := s.threadCases.UpsertThreadCase(ctx, SlackThreadCase{
+		ChannelID: channelID,
+		ThreadTS:  threadTS,
+		Owner:     SlackThreadCaseOwnerMention,
+		Status:    SlackThreadCaseStatusActive,
+		Source:    source,
+	}); err != nil && s.logger != nil {
+		s.logger.Warn(
+			"slack mention thread case upsert failed",
+			"channel", channelID,
+			"thread_ts", threadTS,
+			"error", err,
+		)
+	}
+}
+
+// endMentionThreadCase closes the active mention thread case after a worker
+// completes, freeing the thread for future mention claims. If additional
+// mentions arrived during execution, the queue dequeues them and the next
+// app_mention event will re-claim the thread.
+func (s *Service) endMentionThreadCase(ctx context.Context, workspaceID, channelID, threadTS, eventID string) {
+	if s == nil {
+		return
+	}
+	if s.mentionQueue != nil {
+		s.mentionQueue.dequeueOrStop(workspaceID, channelID, threadTS)
+	}
+	if s.threadCases == nil {
+		return
+	}
+	source := strings.TrimSpace(eventID)
+	if source == "" {
+		source = "app_mention"
+	}
+	if _, err := s.threadCases.MarkClosed(ctx, channelID, threadTS, SlackThreadCaseOwnerMention, source); err != nil && s.logger != nil {
+		s.logger.Warn(
+			"slack mention thread case close failed",
+			"channel", channelID,
+			"thread_ts", threadTS,
+			"error", err,
+		)
 	}
 }
 

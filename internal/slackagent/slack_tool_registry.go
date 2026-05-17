@@ -223,6 +223,18 @@ func slackToolError(tool, err string) SlackToolCallResponse {
 	return SlackToolCallResponse{OK: false, Schema: "oneesama.slack-tool-result.v1", Tool: tool, Error: err}
 }
 
+// isActiveMentionThread is the live activeThread callback wired into
+// slackAPITool. When the bot is currently handling a mention on this thread
+// (claim recorded via slack_thread_cases by beginMentionThreadCase), the tool
+// refuses chat.postMessage to the same thread to prevent duplicate replies —
+// the worker output is delivered through the assistant pipeline already.
+func (s *Service) isActiveMentionThread(channelID, threadTS string) bool {
+	if s == nil || s.threadCases == nil {
+		return false
+	}
+	return s.threadCases.IsActive(context.Background(), channelID, threadTS)
+}
+
 func slackToolFromTextResult(tool string, result slackAPIToolResult, err error) (SlackToolCallResponse, error) {
 	if err != nil {
 		return SlackToolCallResponse{}, err
@@ -246,6 +258,7 @@ func (s *Service) executeSlackAPITool(ctx context.Context, role string, args map
 		apiURL:       defaultSlackAPIBaseURL,
 		token:        s.botToken,
 		workspaceDir: s.workspaceDir,
+		activeThread: s.isActiveMentionThread,
 	}
 	result, err := tool.Execute(ctx, args)
 	return slackToolFromTextResult("slack_api", result, err)

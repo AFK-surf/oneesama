@@ -228,6 +228,14 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 	sort.Slice(messages, func(i, j int) bool {
 		return slackTSLess(firstNonEmpty(messages[i].TS, messages[i].EventTS), firstNonEmpty(messages[j].TS, messages[j].EventTS))
 	})
+	messages, suppressedCount := s.filterMessagesActiveMentionThreads(ctx, channelID, messages)
+	if suppressedCount > 0 && s.logger != nil {
+		s.logger.Info(
+			"slack scanner suppressed messages on mention-owned thread",
+			"channel", channelID,
+			"suppressed", suppressedCount,
+		)
+	}
 	sweep := s.SweepSlackScanner(ctx, SlackScannerSweepRequest{
 		WorkspaceID: "workspace",
 		Flush:       boolPtr(true),
@@ -258,6 +266,43 @@ func slackScannerBackoffResult(channelID string, until time.Time) *SlackScannerC
 		Source:    "slack_web_api",
 		Error:     "slack_history_rate_limited_until:" + until.Format(time.RFC3339),
 	}
+}
+
+// filterMessagesActiveMentionThreads removes messages whose thread is
+// currently owned by an active mention worker. The triage scanner re-runs
+// every 3 minutes, so without this filter a follow-up reply inside a
+// mention-owned thread would be triaged independently — duplicating the
+// answer the mention worker is about to post. The returned count records how
+// many messages were suppressed so operators can see the guard at work.
+func (s *Service) filterMessagesActiveMentionThreads(ctx context.Context, channelID string, messages []SlackMessage) ([]SlackMessage, int) {
+	if s == nil || s.threadCases == nil || len(messages) == 0 {
+		return messages, 0
+	}
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return messages, 0
+	}
+	activeByThread := make(map[string]bool, 4)
+	filtered := messages[:0]
+	suppressed := 0
+	for _, message := range messages {
+		threadTS := strings.TrimSpace(message.ThreadTS)
+		if threadTS == "" || threadTS == firstNonEmpty(message.TS, message.EventTS) {
+			filtered = append(filtered, message)
+			continue
+		}
+		active, known := activeByThread[threadTS]
+		if !known {
+			active = s.threadCases.IsActive(ctx, channelID, threadTS)
+			activeByThread[threadTS] = active
+		}
+		if active {
+			suppressed++
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	return filtered, suppressed
 }
 
 // persistScannerChannel upserts the durable channel record so workspace

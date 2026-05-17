@@ -15,6 +15,23 @@ func (s *Service) InboundStatus() SlackInboundState {
 
 func (s *Service) BufferSlackInboundEvent(ctx context.Context, envelope SlackEventEnvelope, event SlackEventPayload) SlackInboundBufferResult {
 	message := slackInboundMessageFromEvent(envelope, event)
+	if s != nil && s.threadCases != nil {
+		threadTS := strings.TrimSpace(message.ThreadTS)
+		if threadTS != "" && threadTS != message.TS && s.threadCases.IsActive(ctx, message.ChannelID, threadTS) {
+			s.logger.Info(
+				"slack inbound buffer suppressed on mention-owned thread",
+				"channel", message.ChannelID,
+				"thread_ts", threadTS,
+				"ts", message.TS,
+			)
+			return SlackInboundBufferResult{
+				Buffered:  false,
+				Ignored:   true,
+				Reason:    "mention_thread_owned",
+				ChannelID: message.ChannelID,
+			}
+		}
+	}
 	result := s.inbound.Buffer(message)
 	if result.Buffered {
 		if err := s.cognition.RecordInbound(ctx, firstNonEmpty(envelope.TeamID, "workspace"), message); err != nil {
