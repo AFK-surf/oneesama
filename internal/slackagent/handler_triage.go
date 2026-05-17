@@ -84,3 +84,17 @@ func (h *Handler) handleTriageRun(c *gin.Context) {
 		"inbound": h.service.InboundStatus(),
 	})
 }
+
+func (h *Handler) handleTriageProbe(c *gin.Context) {
+	triage, err := h.service.StartSlackTriageProbe(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":     true,
+		"probe":  true,
+		"triage": triage,
+		"status": triage.Finalization,
+	})
+}

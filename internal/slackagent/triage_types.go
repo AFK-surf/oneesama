@@ -129,18 +129,20 @@ type SlackTriageAuditFixture struct {
 }
 
 type SlackTriageAuditReport struct {
-	GeneratedAt   string                     `json:"generatedAt"`
-	WindowSeconds int64                      `json:"windowSeconds"`
-	Cutoff        string                     `json:"cutoff"`
-	RunCount      int                        `json:"runCount"`
-	Freshness     SlackTriageFreshness       `json:"freshness"`
-	Outcome       SlackTriageAuditOutcome    `json:"outcome"`
-	InputContext  SlackTriageInputContext    `json:"inputContext"`
-	ContextFetch  SlackTriageContextFetch    `json:"contextFetch"`
-	ProcessHealth SlackTriageProcessHealth   `json:"processHealth"`
-	Canary        SlackTriageCanarySummary   `json:"canary"`
-	Flags         []SlackTriageAuditFlag     `json:"flags,omitempty"`
-	RecentRuns    []SlackTriageAuditRunBrief `json:"recentRuns,omitempty"`
+	GeneratedAt   string                      `json:"generatedAt"`
+	WindowSeconds int64                       `json:"windowSeconds"`
+	Cutoff        string                      `json:"cutoff"`
+	RunCount      int                         `json:"runCount"`
+	Freshness     SlackTriageFreshness        `json:"freshness"`
+	Outcome       SlackTriageAuditOutcome     `json:"outcome"`
+	InputContext  SlackTriageInputContext     `json:"inputContext"`
+	ContextFetch  SlackTriageContextFetch     `json:"contextFetch"`
+	SkipReasons   map[string]int              `json:"skipReasons,omitempty"`
+	ProcessHealth SlackTriageProcessHealth    `json:"processHealth"`
+	Canary        SlackTriageCanarySummary    `json:"canary"`
+	LiveProbe     SlackTriageLiveProbeSummary `json:"liveProbe"`
+	Flags         []SlackTriageAuditFlag      `json:"flags,omitempty"`
+	RecentRuns    []SlackTriageAuditRunBrief  `json:"recentRuns,omitempty"`
 }
 
 type SlackTriageAuditOutcome struct {
@@ -161,9 +163,10 @@ type SlackTriageInputContext struct {
 }
 
 type SlackTriageContextFetch struct {
-	ChannelContextFetched int `json:"channelContextFetched"`
-	ThreadContextFetched  int `json:"threadContextFetched"`
-	ExternalLinksFetched  int `json:"externalLinksFetched"`
+	ChannelContextFetched int            `json:"channelContextFetched"`
+	ThreadContextFetched  int            `json:"threadContextFetched"`
+	ExternalLinksFetched  int            `json:"externalLinksFetched"`
+	Reasons               map[string]int `json:"reasons,omitempty"`
 }
 
 type SlackTriageProcessHealth struct {
@@ -186,6 +189,15 @@ type SlackTriageCanarySummary struct {
 	NeedsLiveSample  bool                      `json:"needsLiveSample"`
 }
 
+type SlackTriageLiveProbeSummary struct {
+	Total         int    `json:"total"`
+	Passed        int    `json:"passed"`
+	LatestRunID   int64  `json:"latestRunId,omitempty"`
+	LatestAt      string `json:"latestAt,omitempty"`
+	LatestOutcome string `json:"latestOutcome,omitempty"`
+	LatestSummary string `json:"latestSummary,omitempty"`
+}
+
 type SlackTriageAuditFlag struct {
 	Level   string `json:"level"`
 	Code    string `json:"code"`
@@ -198,9 +210,11 @@ type SlackTriageAuditRunBrief struct {
 	InputContextChars     int      `json:"inputContextChars,omitempty"`
 	ThreadContextFetched  bool     `json:"threadContextFetched,omitempty"`
 	ChannelContextFetched bool     `json:"channelContextFetched,omitempty"`
+	ContextFetchReason    string   `json:"contextFetchReason,omitempty"`
 	ExternalLinksFetched  int      `json:"externalLinksFetched,omitempty"`
 	Mutations             int      `json:"mutations"`
 	Actions               int      `json:"actions"`
 	SuppressedReason      string   `json:"suppressedReason,omitempty"`
+	SkipReasonBucket      string   `json:"skipReasonBucket,omitempty"`
 	Summary               string   `json:"summary,omitempty"`
 }

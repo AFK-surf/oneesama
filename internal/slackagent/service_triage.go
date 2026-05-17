@@ -19,6 +19,11 @@ const (
 	slackTriageAuditStaleSampleAfter   = 2 * time.Hour
 )
 
+type slackTriageStartOptions struct {
+	Probe         bool
+	ExtraMetadata map[string]any
+}
+
 func (s *Service) TriageStatus(ctx context.Context, limit int) (SlackTriageStatus, error) {
 	if limit <= 0 {
 		limit = slackTriageStatusDefaultLimit
@@ -86,7 +91,9 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		Outcome:       buildSlackTriageAuditOutcome(windowRuns),
 		InputContext:  buildSlackTriageInputContext(windowRuns),
 		ContextFetch:  buildSlackTriageContextFetch(windowRuns),
+		SkipReasons:   buildSlackTriageSkipReasons(windowRuns),
 		Canary:        canary,
+		LiveProbe:     buildSlackTriageLiveProbeSummary(windowRuns),
 		RecentRuns:    buildSlackTriageAuditRunBriefs(windowRuns, 20),
 	}
 	report.Flags = buildSlackTriageAuditFlags(report)
@@ -160,7 +167,7 @@ func buildSlackTriageInputContext(runs []SlackTriageContext) SlackTriageInputCon
 }
 
 func buildSlackTriageContextFetch(runs []SlackTriageContext) SlackTriageContextFetch {
-	var fetch SlackTriageContextFetch
+	fetch := SlackTriageContextFetch{Reasons: map[string]int{}}
 	for _, run := range runs {
 		if boolFromAny(run.Metadata["channel_context_fetched"], false) {
 			fetch.ChannelContextFetched++
@@ -169,8 +176,32 @@ func buildSlackTriageContextFetch(runs []SlackTriageContext) SlackTriageContextF
 			fetch.ThreadContextFetched++
 		}
 		fetch.ExternalLinksFetched += intFromAny(run.Metadata["external_links_fetched"])
+		if reason := slackTriageContextFetchReason(run); reason != "" {
+			fetch.Reasons[reason]++
+		}
+	}
+	if len(fetch.Reasons) == 0 {
+		fetch.Reasons = nil
 	}
 	return fetch
+}
+
+func buildSlackTriageSkipReasons(runs []SlackTriageContext) map[string]int {
+	reasons := map[string]int{}
+	for _, run := range runs {
+		if run.Mutations > 0 || len(run.Actions) > 0 {
+			continue
+		}
+		bucket := slackTriageSkipReasonBucket(run)
+		if bucket == "" {
+			continue
+		}
+		reasons[bucket]++
+	}
+	if len(reasons) == 0 {
+		return nil
+	}
+	return reasons
 }
 
 func (s *Service) slackTriageProcessHealth(window time.Duration) SlackTriageProcessHealth {
@@ -263,6 +294,38 @@ func buildSlackTriageCanarySummary(runs []SlackTriageContext) SlackTriageCanaryS
 	return canary
 }
 
+func buildSlackTriageLiveProbeSummary(runs []SlackTriageContext) SlackTriageLiveProbeSummary {
+	var summary SlackTriageLiveProbeSummary
+	for _, run := range runs {
+		if !boolFromAny(run.Metadata["live_positive_probe"], false) {
+			continue
+		}
+		summary.Total++
+		outcome := slackTriageLiveProbeOutcome(run)
+		if outcome == "ACT" || outcome == "MAYBE" {
+			summary.Passed++
+		}
+		summary.LatestRunID = run.ID
+		summary.LatestAt = run.Timestamp
+		summary.LatestOutcome = outcome
+		summary.LatestSummary = firstLine(run.Summary)
+	}
+	return summary
+}
+
+func slackTriageLiveProbeOutcome(run SlackTriageContext) string {
+	switch {
+	case run.Mutations > 0:
+		return "ACT"
+	case len(run.Actions) > 0:
+		return "MAYBE"
+	case strings.TrimSpace(run.Error) != "" || strings.EqualFold(strings.TrimSpace(run.Status), "failed"):
+		return "FAILED"
+	default:
+		return "SKIP"
+	}
+}
+
 func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAuditFlag {
 	var flags []SlackTriageAuditFlag
 	if report.RunCount == 0 {
@@ -302,14 +365,68 @@ func buildSlackTriageAuditRunBriefs(runs []SlackTriageContext, limit int) []Slac
 			InputContextChars:     intFromAny(run.Metadata["input_context_chars"]),
 			ThreadContextFetched:  boolFromAny(run.Metadata["thread_context_fetched"], false),
 			ChannelContextFetched: boolFromAny(run.Metadata["channel_context_fetched"], false),
+			ContextFetchReason:    slackTriageContextFetchReason(run),
 			ExternalLinksFetched:  intFromAny(run.Metadata["external_links_fetched"]),
 			Mutations:             run.Mutations,
 			Actions:               len(run.Actions),
 			SuppressedReason:      stringFromAny(run.Metadata["suppressed_reason"]),
+			SkipReasonBucket:      slackTriageSkipReasonBucket(run),
 			Summary:               firstLine(run.Summary),
 		})
 	}
 	return briefs
+}
+
+func slackTriageContextFetchReason(run SlackTriageContext) string {
+	if reason := strings.TrimSpace(stringFromAny(run.Metadata["context_fetch_reason"])); reason != "" {
+		return reason
+	}
+	if boolFromAny(run.Metadata["thread_context_fetched"], false) {
+		return "thread_context_fetched"
+	}
+	if intFromAny(run.Metadata["thread_context_count"]) > 0 {
+		return "thread_context_attempted_failed"
+	}
+	if boolFromAny(run.Metadata["channel_context_fetched"], false) {
+		return "channel_low_context_expansion"
+	}
+	if intFromAny(run.Metadata["message_count"]) == 0 {
+		return "no_messages"
+	}
+	return "standalone_digest"
+}
+
+func slackTriageSkipReasonBucket(run SlackTriageContext) string {
+	if reason := strings.TrimSpace(stringFromAny(run.Metadata["skip_reason_bucket"])); reason != "" {
+		return reason
+	}
+	if run.Mutations > 0 || len(run.Actions) > 0 {
+		return ""
+	}
+	text := strings.ToLower(run.Summary + "\n" + stringFromAny(run.Metadata["suppressed_reason"]))
+	switch {
+	case containsAnySubstring(text, "重复", "duplicate", "followup", "跟上一次", "一致"):
+		return "duplicate_or_followup"
+	case containsAnySubstring(text, "备忘", "个人操作", "点赞", "转发", "note"):
+		return "personal_note"
+	case containsAnySubstring(text, "已处理", "正在修复", "持续响应", "其他 bot", "target bot", "handled"):
+		return "handled_by_other_bot"
+	case containsAnySubstring(text, "纯技术", "开发", "实现", "pr ", "pr#", "cherry-pick", "ci"):
+		return "pure_dev_progress"
+	case strings.TrimSpace(stringFromAny(run.Metadata["suppressed_reason"])) == "no_actions":
+		return "no_action_other"
+	default:
+		return ""
+	}
+}
+
+func containsAnySubstring(text string, values ...string) bool {
+	for _, value := range values {
+		if strings.Contains(text, strings.ToLower(value)) {
+			return true
+		}
+	}
+	return false
 }
 
 func slackTriageRunParseFallback(run SlackTriageContext) bool {
@@ -425,6 +542,32 @@ func slackTriageAuditFixtureOutcome(actions []SlackTriageDecisionAction) (string
 }
 
 func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messages []SlackInboundMessage, digest string) (SlackTriageStartResult, error) {
+	return s.startSlackTriage(ctx, channelID, messages, digest, slackTriageStartOptions{})
+}
+
+func (s *Service) StartSlackTriageProbe(ctx context.Context) (SlackTriageStartResult, error) {
+	now := timeNow().UTC()
+	channelID := "C_TRIAGE_PROBE"
+	threadTS := fmt.Sprintf("probe.%d", now.UnixMilli())
+	messages := []SlackInboundMessage{{
+		TeamID:    "T_TRIAGE_PROBE",
+		ChannelID: channelID,
+		UserID:    "U_TRIAGE_PROBE",
+		Text:      "<@U_BOT> positive probe: please create a follow-up suggestion for verifying triage recall. Do not post a public reply.",
+		TS:        threadTS,
+	}}
+	digest := renderSlackActivityDigest(channelID, messages)
+	return s.startSlackTriage(ctx, channelID, messages, digest, slackTriageStartOptions{
+		Probe: true,
+		ExtraMetadata: map[string]any{
+			"live_positive_probe": true,
+			"probe_kind":          "maybe_follow_up",
+			"skip_reason_bucket":  "",
+		},
+	})
+}
+
+func (s *Service) startSlackTriage(ctx context.Context, channelID string, messages []SlackInboundMessage, digest string, options slackTriageStartOptions) (SlackTriageStartResult, error) {
 	if s.runner == nil {
 		return SlackTriageStartResult{}, fmt.Errorf("agent runner is not ready: %s", runnerErrorText(s.runnerErr))
 	}
@@ -442,6 +585,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 	}
 	externalLinks := fetchSlackExternalLinkContexts(ctx, messages)
 	auditMetadata := slackTriageAuditMetadata(digest, messages, threadContexts, channelContexts, externalLinks)
+	auditMetadata = mergeStringAnyMaps(auditMetadata, options.ExtraMetadata)
 	run, err := s.triage.RecordRun(ctx, SlackTriageContext{
 		SessionID: sessionID,
 		Status:    "pending",
@@ -507,6 +651,7 @@ func (s *Service) StartSlackTriage(ctx context.Context, channelID string, messag
 		"threadContexts":  threadContexts,
 		"channelContexts": channelContexts,
 		"triageAudit":     auditMetadata,
+		"triageProbe":     options.Probe,
 		"expectedOutput":  "JSON triage decision with summary and actions[]",
 	}
 	job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
@@ -577,8 +722,16 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		actions = nil
 		decision.Actions = nil
 	}
-	directToolCalls, directFailures := s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions)
+	probe := boolFromAny(job.Context["triageProbe"], false)
+	var directToolCalls []SlackTriageToolCall
+	var directFailures int
+	if !probe {
+		directToolCalls, directFailures = s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions)
+	}
 	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: len(actions), failures: directFailures}, nil)
+	if probe {
+		mutations = 0
+	}
 	if ok {
 		var reason string
 		ok, reason = triageDidSucceed(job.ID, mutations, failures, nil, rawOutput)
@@ -606,7 +759,10 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		Steps:     1,
 		Mutations: mutations,
 		Failures:  failures,
-		Metadata:  mergeStringAnyMaps(mapFromAnyOrEmpty(job.Context["triageAudit"]), map[string]any{"suppressed_reason": slackTriageSuppressedReason(decision, actions, ok)}),
+		Metadata: mergeStringAnyMaps(mapFromAnyOrEmpty(job.Context["triageAudit"]), map[string]any{
+			"suppressed_reason":  slackTriageSuppressedReason(decision, actions, ok),
+			"skip_reason_bucket": slackTriageSkipReasonBucketForDecision(decision, actions, ok),
+		}),
 	}
 	if !ok {
 		runPatch.Status = "failed"
@@ -630,7 +786,10 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 			s.logger.Warn("slack channel brain summary update failed", "error", err)
 		}
 	}
-	pendingActions := s.insertSlackTriagePendingActions(ctx, workspaceID, channelID, threadTS, job.ID, updatedRun, actions)
+	var pendingActions []SlackTriagePendingResult
+	if !probe {
+		pendingActions = s.insertSlackTriagePendingActions(ctx, workspaceID, channelID, threadTS, job.ID, updatedRun, actions)
+	}
 	finalization := &SlackTriageFinalization{Run: updatedRun, Decision: decision, PendingActions: pendingActions}
 	s.finalizedTriageResults[job.ID] = finalization
 	return finalization, nil
@@ -821,7 +980,7 @@ func slackTriageAuditMetadata(digest string, messages []SlackInboundMessage, thr
 			threadMessages += context.MessageCount
 		}
 	}
-	return map[string]any{
+	metadata := map[string]any{
 		"input_context_chars":      len([]rune(digest)),
 		"message_count":            len(messages),
 		"thread_context_fetched":   threadFetched,
@@ -831,6 +990,31 @@ func slackTriageAuditMetadata(digest string, messages []SlackInboundMessage, thr
 		"channel_context_messages": len(channelContexts),
 		"external_links_fetched":   len(externalLinks),
 	}
+	metadata["context_fetch_reason"] = slackTriageContextFetchReasonFromInputs(messages, threadContexts, channelContexts)
+	return metadata
+}
+
+func slackTriageContextFetchReasonFromInputs(messages []SlackInboundMessage, threadContexts []SlackTriageThreadContext, channelContexts []SlackInboundMessage) string {
+	if len(threadContexts) > 0 {
+		for _, context := range threadContexts {
+			if context.FetchOK {
+				return "thread_context_fetched"
+			}
+		}
+		return "thread_context_attempted_failed"
+	}
+	if len(channelContexts) > 0 {
+		return "channel_low_context_expansion"
+	}
+	if len(messages) == 0 {
+		return "no_messages"
+	}
+	for _, message := range messages {
+		if slackTriageThreadLookupTS(message) != "" {
+			return "thread_context_not_available"
+		}
+	}
+	return "standalone_digest"
 }
 
 func slackTriageSuppressedReason(decision SlackTriageDecision, actions []SlackTriageDecisionAction, ok bool) string {
@@ -844,6 +1028,16 @@ func slackTriageSuppressedReason(decision SlackTriageDecision, actions []SlackTr
 		return "no_actions"
 	}
 	return ""
+}
+
+func slackTriageSkipReasonBucketForDecision(decision SlackTriageDecision, actions []SlackTriageDecisionAction, ok bool) string {
+	if !ok || len(actions) > 0 {
+		return ""
+	}
+	return slackTriageSkipReasonBucket(SlackTriageContext{
+		Summary:  decision.Summary,
+		Metadata: map[string]any{"suppressed_reason": slackTriageSuppressedReason(decision, actions, ok)},
+	})
 }
 
 func mergeStringAnyMaps(values ...map[string]any) map[string]any {

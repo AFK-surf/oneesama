@@ -363,6 +363,15 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 	if report.ContextFetch.ChannelContextFetched != 1 || report.ContextFetch.ThreadContextFetched != 2 || report.ContextFetch.ExternalLinksFetched != 1 {
 		t.Fatalf("contextFetch = %#v", report.ContextFetch)
 	}
+	if report.ContextFetch.Reasons["channel_low_context_expansion"] != 1 || report.ContextFetch.Reasons["thread_context_fetched"] != 2 {
+		t.Fatalf("context fetch reasons = %#v", report.ContextFetch.Reasons)
+	}
+	if report.SkipReasons["no_action_other"] != 1 {
+		t.Fatalf("skip reasons = %#v, want no_action_other bucket", report.SkipReasons)
+	}
+	if len(report.RecentRuns) == 0 || report.RecentRuns[0].ContextFetchReason == "" || report.RecentRuns[0].SkipReasonBucket == "" {
+		t.Fatalf("recentRuns = %#v, want context reason and skip bucket", report.RecentRuns)
+	}
 	if report.Canary.Total != 3 || report.Canary.Passed != 3 || report.Canary.NeedsLiveSample {
 		t.Fatalf("canary = %#v", report.Canary)
 	}
@@ -399,6 +408,91 @@ func TestTriageAuditFlagsMissingLivePositiveSample(t *testing.T) {
 	}
 	if !report.Canary.NeedsLiveSample || !hasAuditFlag(report.Flags, "no_live_positive_samples") {
 		t.Fatalf("report = %#v, want live positive warning", report)
+	}
+}
+
+func TestTriageAuditClassifiesSkipReasonBuckets(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 17, 17, 46, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	for _, run := range []SlackTriageContext{
+		{Timestamp: now.Add(-time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "目标 bot 已处理并正在修复，无需助手介入。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+		{Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "用户补一条点赞转发个人操作备忘。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+		{Timestamp: now.Add(-3 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "纯技术开发实现进度，无需办公助手介入。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+		{Timestamp: now.Add(-4 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "与上一次 triage 结论一致，重复 followup。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+	} {
+		if _, err := service.triage.RecordRun(context.Background(), run); err != nil {
+			t.Fatalf("RecordRun: %v", err)
+		}
+	}
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	for _, want := range []string{"handled_by_other_bot", "personal_note", "pure_dev_progress", "duplicate_or_followup"} {
+		if report.SkipReasons[want] != 1 {
+			t.Fatalf("skipReasons = %#v, want one %s", report.SkipReasons, want)
+		}
+	}
+}
+
+func TestHandleTriageProbeRecordsLivePositiveWithoutSideEffects(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_probe_1",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"probe follow-up recognized","actions":[{"type":"follow_up","title":"Probe follow-up","message":"Verify recall path","confidence":0.91,"requiresConfirmation":true}]}`,
+	}}
+	router := newTestRouter(t, Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{
+				PostActions: true,
+			},
+		},
+		Runner: runner,
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/triage/probe", nil)
+	request.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"probe":true`) || strings.Contains(response.Body.String(), `"pendingActions"`) {
+		t.Fatalf("body = %s, want probe without pending action side effects", response.Body.String())
+	}
+	if runner.startInput.Context["triageProbe"] != true {
+		t.Fatalf("runner context = %#v, want triage probe flag", runner.startInput.Context)
+	}
+
+	auditResponse := httptest.NewRecorder()
+	auditRequest := httptest.NewRequest(http.MethodGet, "/slack/triage/audit?window=6h", nil)
+	auditRequest.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(auditResponse, auditRequest)
+	if auditResponse.Code != http.StatusOK {
+		t.Fatalf("audit status = %d, want 200: %s", auditResponse.Code, auditResponse.Body.String())
+	}
+	var payload struct {
+		OK    bool                   `json:"ok"`
+		Audit SlackTriageAuditReport `json:"audit"`
+	}
+	if err := json.Unmarshal(auditResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode audit: %v", err)
+	}
+	if payload.Audit.LiveProbe.Total != 1 || payload.Audit.LiveProbe.Passed != 1 || payload.Audit.LiveProbe.LatestOutcome != "MAYBE" {
+		t.Fatalf("liveProbe = %#v, want one passing MAYBE probe", payload.Audit.LiveProbe)
+	}
+	if payload.Audit.Canary.NeedsLiveSample || hasAuditFlag(payload.Audit.Flags, "no_live_positive_samples") {
+		t.Fatalf("audit = %#v, probe should satisfy live positive sample", payload.Audit)
 	}
 }
 
