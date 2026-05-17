@@ -103,14 +103,14 @@ func TestSlackAPIMethodParityBucketsRegisteredUnavailable(t *testing.T) {
 		methodStatus[m.Action] = m.Status
 	}
 
-	wantUnavailable := []string{"fetch_image", "create_canvas", "edit_canvas", "send_dm"}
+	wantUnavailable := []string{"create_canvas", "edit_canvas", "send_dm"}
 	for _, action := range wantUnavailable {
 		if methodStatus[action] != "registered_unavailable" {
 			t.Errorf("action %q status = %q, want registered_unavailable", action, methodStatus[action])
 		}
 	}
 
-	wantActive := []string{"post_message", "post_thread_reply", "fetch_thread", "fetch_channel_history", "upload_file", "add_reaction", "fetch_canvas"}
+	wantActive := []string{"post_message", "post_thread_reply", "fetch_thread", "fetch_channel_history", "upload_file", "add_reaction", "fetch_canvas", "fetch_image"}
 	for _, action := range wantActive {
 		if methodStatus[action] != "active" {
 			t.Errorf("action %q status = %q, want active", action, methodStatus[action])
@@ -134,7 +134,7 @@ func TestSlackAPIToolRegisteredUnavailableActionReturnsTruthfulError(t *testing.
 		token:  "xoxb-test",
 	}
 
-	cases := []string{"create_canvas", "edit_canvas", "send_dm", "fetch_image"}
+	cases := []string{"create_canvas", "edit_canvas", "send_dm"}
 	for _, action := range cases {
 		result, err := tool.Execute(context.Background(), map[string]any{
 			"action": action,
