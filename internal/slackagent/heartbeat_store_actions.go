@@ -14,6 +14,18 @@ func (s *slackHeartbeatStore) ReserveThreadRecommendation(ctx context.Context, r
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record = normalizeThreadRecommendation(record)
+	existing, err := s.recommendations.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list thread recommendations: %w", err)
+	}
+	for _, candidate := range existing {
+		if !threadRecommendationSameReservation(candidate, record) || strings.EqualFold(candidate.Status, "closed") || strings.EqualFold(candidate.Status, "done") {
+			continue
+		}
+		record.ID = candidate.ID
+		record.CreatedAt = candidate.CreatedAt
+		break
+	}
 	if record.ID == 0 {
 		record.ID = newHeartbeatID()
 	}
@@ -21,6 +33,43 @@ func (s *slackHeartbeatStore) ReserveThreadRecommendation(ctx context.Context, r
 		return nil, fmt.Errorf("record thread recommendation: %w", err)
 	}
 	return &record, nil
+}
+
+func (s *slackHeartbeatStore) ResolveFollowupBySourceRef(ctx context.Context, sourceRef string, status string, resolution string) (int, error) {
+	if s == nil || s.followups == nil || strings.TrimSpace(sourceRef) == "" {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	records, err := s.followups.List(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list heartbeat followups: %w", err)
+	}
+	resolved := 0
+	for _, record := range records {
+		if record.SourceRef != sourceRef || !strings.EqualFold(record.Status, "open") {
+			continue
+		}
+		record.Status = firstNonEmpty(status, "done")
+		record.UpdatedAt = nowRFC3339()
+		if strings.TrimSpace(resolution) != "" {
+			if record.Metadata == nil {
+				record.Metadata = map[string]any{}
+			}
+			record.Metadata["resolution"] = strings.TrimSpace(resolution)
+		}
+		if err := s.followups.Set(ctx, heartbeatKey(record.ID), normalizeHeartbeatFollowup(record)); err != nil {
+			return resolved, fmt.Errorf("resolve heartbeat followup by source ref: %w", err)
+		}
+		resolved++
+	}
+	return resolved, nil
+}
+
+func threadRecommendationSameReservation(left SlackThreadRecommendation, right SlackThreadRecommendation) bool {
+	return strings.TrimSpace(left.ChannelID) == strings.TrimSpace(right.ChannelID) &&
+		strings.TrimSpace(left.ThreadTS) == strings.TrimSpace(right.ThreadTS) &&
+		strings.TrimSpace(left.RecommendationType) == strings.TrimSpace(right.RecommendationType)
 }
 
 func (s *slackHeartbeatStore) ReserveOutboundAction(ctx context.Context, record SlackOutboundAction) (*SlackOutboundAction, error) {

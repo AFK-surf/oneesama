@@ -390,9 +390,11 @@ func (s *Service) executeSuggestActionTool(ctx context.Context, role string, arg
 }
 
 type slackSuggestActionResult struct {
-	Request       *slackSuggestActionRequest `json:"request"`
-	PendingAction SlackPendingAction         `json:"pending_action"`
-	Post          PostMessageResult          `json:"post"`
+	Request        *slackSuggestActionRequest `json:"request"`
+	PendingAction  SlackPendingAction         `json:"pending_action"`
+	Post           PostMessageResult          `json:"post"`
+	Recommendation *SlackThreadRecommendation `json:"recommendation,omitempty"`
+	Followup       *SlackHeartbeatFollowup    `json:"followup,omitempty"`
 }
 
 func (s *Service) createSuggestedPendingAction(ctx context.Context, request *slackSuggestActionRequest, args map[string]any) (*slackSuggestActionResult, error) {
@@ -442,9 +444,14 @@ func (s *Service) createSuggestedPendingAction(ctx context.Context, request *sla
 		} else {
 			record.CardTS = cardTS
 		}
+		recommendation, followup, err := s.createPendingActionSideEffects(ctx, *record, cardTS)
+		if err != nil {
+			return nil, err
+		}
 		if err := s.cognition.RecordOutbound(ctx, "workspace", request.Channel, request.ThreadTS, fmt.Sprintf("Suggested %s: %s", request.ActionType, request.Title)); err != nil {
 			s.logger.Warn("slack suggest_action outbound record failed", "error", err)
 		}
+		return &slackSuggestActionResult{Request: request, PendingAction: *record, Post: post, Recommendation: recommendation, Followup: followup}, nil
 	}
 	return &slackSuggestActionResult{Request: request, PendingAction: *record, Post: post}, nil
 }
