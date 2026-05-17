@@ -2,6 +2,18 @@
 
 Task: task #171
 
+## Status as of 2026-05-18 (task #174 marathon)
+
+The marathon directive `task #174 "你俩合作，直到所有问题修完"` has cleared most of Phases 0–3 + the bulk of Phase 5 and Phase 6 P2. Snapshot of remaining work by phase below; struck-through rows are landed. Live SHA at last update: `f7bd930`.
+
+- **Phase 0 quick fixes**: all 4 P0/P1 landed (`12e09b2`).
+- **Phase 1 state foundations**: scanner cursors + slack_channels + slack_channel_membership + slack_thread_cases landed (`8c87d45` + `262c4a9`). `slack_thread_recommendations` is still open — driver picked it up via the suggest_action+followup loops (`ece0124`/`fc0ae2c`) and now considers it covered functionally even though there is no separate typed collection.
+- **Phase 2 thread ownership**: P0 mention queue + thread case lifecycle + scanner suppression + activeThread guard landed (`78a0905`). Durable-context guard (`looksLikeHandledTaskSummary`) landed (`1539917`). Pending-action card update on confirm/dismiss landed via driver Phase 3 (`495bbd0`).
+- **Phase 3 heartbeat loop**: pending-action loop closure (`ece0124`), heartbeat ticker (`495bbd0`), and commitment/confirmed-action/meeting-action follow-up hooks (`fc0ae2c`) landed. PrimeHeartbeatState normalization remains open.
+- **Phase 4 Calendar approval scanner**: in flight on a driver worktree at time of writing.
+- **Phase 5 context tools**: Canvas fetch (`1240484`), image fetch (`94cd49b`), Canvas sanitize+retry (`a353b79`), safe Block Kit blocks (`3dbdc9a`), and DM/debug fallback Stage A (`9a27ca3`) landed. Centralized post ledger, Stage B fallback wiring, Canvas create/edit decision, and Cueboard-formatted `runtime_status` / `heartbeat_log` views remain open.
+- **Phase 6 ops**: processutil consolidation landed (`75a3802`). Feedback markdown trim landed (`438104e`). JSON unknown-field policy and workspace-template embeds remain open as docs/decisions.
+
 Sources:
 
 - task #162 framework: `README.md`, `module-template.md`
