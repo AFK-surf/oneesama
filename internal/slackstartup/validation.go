@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -34,7 +35,21 @@ func Validate(ctx context.Context, cfg appconfig.Config) error {
 	if err := ValidateWebhookListen(cfg.SlackAgent.Listen); err != nil {
 		return err
 	}
+	if err := ValidateBackendAuth(ctx, os.Getenv("BACKEND_URL"), os.Getenv("API_KEY")); err != nil {
+		return err
+	}
 	if err := agentrunner.Preflight(ctx, cfg.AgentRunner); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ValidateBackendAuth(ctx context.Context, backendURL string, apiKey string) error {
+	fatal, err := probeBackendAuth(ctx, backendURL, apiKey)
+	if err == nil {
+		return nil
+	}
+	if fatal {
 		return err
 	}
 	return nil

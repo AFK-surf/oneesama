@@ -19,6 +19,7 @@ type slackAPITool struct {
 	role          string
 	apiURL        string
 	token         string
+	workspaceDir  string
 	activeThread  func(channel, threadTS string) bool
 	httpTransport http.RoundTripper
 }
@@ -206,12 +207,17 @@ func (t *slackAPITool) actionFetchChannelHistory(ctx context.Context, params map
 }
 
 func (t *slackAPITool) actionUploadFile(ctx context.Context, params map[string]any) slackAPIToolResult {
+	rawPath := firstNonEmpty(stringFromAny(params["path"]), stringFromAny(params["file_path"]))
+	resolvedPath, err := slackWorkspaceFileResolver{workspaceDir: t.workspaceDir}.resolveLocalUploadPath(rawPath)
+	if err != nil {
+		return slackAPIToolResult{Success: false, Text: "Failed to upload file: " + err.Error()}
+	}
 	client := &http.Client{Transport: t.httpTransport}
 	if client.Transport == nil {
 		client.Transport = http.DefaultTransport
 	}
 	result := UploadSlackFile(ctx, client, t.token, t.apiURL, SlackFileUploadInput{
-		Path:           firstNonEmpty(stringFromAny(params["path"]), stringFromAny(params["file_path"])),
+		Path:           resolvedPath,
 		Filename:       stringFromAny(params["filename"]),
 		Title:          stringFromAny(params["title"]),
 		Channel:        firstNonEmpty(stringFromAny(params["channel"]), stringFromAny(params["channel_id"])),

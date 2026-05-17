@@ -44,9 +44,6 @@ func run(args []string, stderr io.Writer) int {
 	}
 
 	subcommand := args[0]
-	if subcommand == "slack-agent" {
-		slackstartup.ScrubProcessSecrets()
-	}
 	buildServer, ok := subcommands[subcommand]
 	if !ok {
 		fmt.Fprintf(stderr, "unknown subcommand: %s\n", subcommand)
@@ -54,16 +51,23 @@ func run(args []string, stderr io.Writer) int {
 	}
 
 	subcommandLogger := logger.With("subcommand", subcommand)
-	if subcommand == "slack-agent" && isSlackValidateMode(args[1:]) {
+	if subcommand == "slack-agent" {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		if err := slackstartup.Validate(ctx, cfg); err != nil {
 			subcommandLogger.Error("validate mode failed", "error", err)
-			fmt.Fprintf(stderr, "validate mode: %v\n", err)
+			if isSlackValidateMode(args[1:]) {
+				fmt.Fprintf(stderr, "validate mode: %v\n", err)
+			} else {
+				fmt.Fprintf(stderr, "slack-agent startup validation: %v\n", err)
+			}
 			return 1
 		}
-		subcommandLogger.Info("slack-agent validation succeeded; exiting because run mode is validate")
-		return 0
+		slackstartup.ScrubProcessSecrets()
+		if isSlackValidateMode(args[1:]) {
+			subcommandLogger.Info("slack-agent validation succeeded; exiting because run mode is validate")
+			return 0
+		}
 	}
 	if err := httpserver.Serve(subcommandLogger, buildServer(cfg, subcommandLogger)); err != nil {
 		subcommandLogger.Error("subcommand failed", "error", err)

@@ -35,12 +35,17 @@ func TestHandleSlackToolsParityReportsCueboardSurface(t *testing.T) {
 		`"name":"slack_api"`,
 		`"method":"conversations.replies"`,
 		`"method":"slack.uploadFile"`,
+		`"status":"validation_only"`,
+		`"status":"registered_unavailable"`,
 		`"status":"product_excluded"`,
 		`"name":"linear_api"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("parity report missing %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, `"status":"active_stub"`) {
+		t.Fatalf("parity report leaked deprecated active_stub status:\n%s", body)
 	}
 }
 
@@ -188,5 +193,53 @@ func TestHandleSlackToolCallSlackAPIConversationsReplies(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"messages"`) || !strings.Contains(response.Body.String(), "reply") {
 		t.Fatalf("body = %s, want thread messages", response.Body.String())
+	}
+}
+
+func TestHandleSlackToolCallSuggestActionCreatesPendingActionCard(t *testing.T) {
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	router := newTestRouter(t, Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{InternalAuthKey: "secret-key"},
+		Poster:      poster,
+	})
+
+	response := postInternalJSON(t, router, "/slack/tools/call", `{
+		"tool":"suggest_action",
+		"args":{
+			"channel":"C123",
+			"thread_ts":"177.123",
+			"action_type":"join_meeting",
+			"title":"Join the Meet",
+			"summary":"Join https://meet.google.com/yuf-wnes-yqt",
+			"params":{"meet_url":"https://meet.google.com/yuf-wnes-yqt"},
+			"confidence":0.91,
+			"reason":"meeting coordination is active"
+		}
+	}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, want := range []string{`"ok":true`, `"tool":"suggest_action"`, `"pending_action"`, `"action_type":"join_meeting"`, `"post"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+
+	poster.WaitForCalls(t, 1)
+	calls := poster.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("poster calls = %d, want 1", len(calls))
+	}
+	call := calls[0]
+	if call.Channel != "C123" || call.ThreadTS != "177.123" {
+		t.Fatalf("post input = %#v, want channel/thread", call)
+	}
+	if !strings.Contains(call.Text, "Triage suggestion") || !strings.Contains(call.Text, "Join the Meet") {
+		t.Fatalf("posted text = %q, want pending action card text", call.Text)
+	}
+	if len(call.Blocks) == 0 || !strings.Contains(call.DedupKey, "slack-suggest-action:") {
+		t.Fatalf("post input = %#v, want blocks and suggest_action dedup key", call)
 	}
 }

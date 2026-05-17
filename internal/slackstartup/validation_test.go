@@ -38,8 +38,65 @@ func TestValidateRequiresSlackTokens(t *testing.T) {
 	}
 }
 
+func TestValidateFailsOnFatalBackendAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/llm/models" {
+			t.Fatalf("backend probe path = %q, want /v1/llm/models", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer jwt-token" {
+			t.Fatalf("Authorization = %q, want Bearer jwt-token", got)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid token"}`))
+	}))
+	defer server.Close()
+
+	previousClient := backendProbeHTTPClient
+	backendProbeHTTPClient = server.Client()
+	t.Cleanup(func() { backendProbeHTTPClient = previousClient })
+	t.Setenv("BACKEND_URL", server.URL)
+	t.Setenv("API_KEY", "jwt-token")
+
+	cfg := validSlackStartupConfig()
+	err := Validate(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "status 401") {
+		t.Fatalf("Validate error = %v, want fatal backend auth status", err)
+	}
+}
+
+func TestValidateIgnoresNonFatalBackendProbeFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`gateway unavailable`))
+	}))
+	defer server.Close()
+
+	previousClient := backendProbeHTTPClient
+	backendProbeHTTPClient = server.Client()
+	t.Cleanup(func() { backendProbeHTTPClient = previousClient })
+	t.Setenv("BACKEND_URL", server.URL)
+	t.Setenv("API_KEY", "jwt-token")
+
+	cfg := validSlackStartupConfig()
+	if err := Validate(context.Background(), cfg); err != nil {
+		t.Fatalf("Validate should ignore non-fatal backend probe failure, got %v", err)
+	}
+}
+
 func TestValidateWebhookListenNormalizesPortOnlyAddress(t *testing.T) {
 	if err := ValidateWebhookListen("0"); err != nil {
 		t.Fatalf("expected port-only listen probe to pass: %v", err)
+	}
+}
+
+func validSlackStartupConfig() appconfig.Config {
+	return appconfig.Config{
+		SlackAgent:   appconfig.ServiceConfig{Listen: "127.0.0.1:0"},
+		MeetingAgent: appconfig.ServiceConfig{Listen: ""},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-valid-token",
+			AppToken: "xapp-valid-token",
+		},
+		AgentRunner: appconfig.AgentRunnerConfig{Provider: "dry-run", DryRun: true, JobTimeout: time.Minute},
 	}
 }

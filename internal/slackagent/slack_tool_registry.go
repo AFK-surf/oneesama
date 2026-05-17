@@ -36,15 +36,19 @@ type SlackAPIMethodSpec struct {
 }
 
 type SlackToolParityReport struct {
-	OK              bool                 `json:"ok"`
-	Schema          string               `json:"schema"`
-	GeneratedAt     string               `json:"generated_at"`
-	ActiveTools     []string             `json:"active_tools"`
-	PendingTools    []string             `json:"pending_tools"`
-	ExcludedTools   []string             `json:"excluded_tools"`
-	Tools           []SlackToolSpec      `json:"tools"`
-	SlackAPIMethods []SlackAPIMethodSpec `json:"slack_api_methods"`
-	Notes           []string             `json:"notes"`
+	OK                                   bool                 `json:"ok"`
+	Schema                               string               `json:"schema"`
+	GeneratedAt                          string               `json:"generated_at"`
+	ActiveTools                          []string             `json:"active_tools"`
+	ValidationOnlyTools                  []string             `json:"validation_only_tools"`
+	RegisteredUnavailableTools           []string             `json:"registered_unavailable_tools"`
+	PendingTools                         []string             `json:"pending_tools"`
+	ExcludedTools                        []string             `json:"excluded_tools"`
+	ValidationOnlySlackAPIMethods        []string             `json:"validation_only_slack_api_methods"`
+	RegisteredUnavailableSlackAPIMethods []string             `json:"registered_unavailable_slack_api_methods"`
+	Tools                                []SlackToolSpec      `json:"tools"`
+	SlackAPIMethods                      []SlackAPIMethodSpec `json:"slack_api_methods"`
+	Notes                                []string             `json:"notes"`
 }
 
 type SlackToolCallRequest struct {
@@ -76,7 +80,7 @@ var slackToolSpecs = []SlackToolSpec{
 	{Name: "memory_write", Source: "DefaultSystemPromptTemplate", Category: "memory", Registration: "framework_memory_tools", Adapter: "local_slack_memory", Status: "active"},
 	{Name: "exa_search", Source: "framework web tools", Category: "web", Registration: "framework_web_tools", Adapter: "jina_search_compat", Status: "active"},
 	{Name: "exa_contents", Source: "framework web tools", Category: "web", Registration: "framework_web_tools", Adapter: "jina_reader_compat", Status: "active"},
-	{Name: "usage_api", Source: "usage_tool.go", Category: "helper", Registration: "RegisterSlackHelperTools", Adapter: "local_usage_status_stub", Status: "active_stub"},
+	{Name: "usage_api", Source: "usage_tool.go", Category: "helper", Registration: "RegisterSlackHelperTools", Adapter: "local_usage_status_stub", Status: "validation_only"},
 	{Name: "manage_schedule", Source: "assistant_schedule_tool.go", Category: "assistant_schedule", Registration: "assistant prompt/defaults", Adapter: "assistant_thread_schedule_list", Status: "active"},
 	{Name: "notify_meeting_slack", Source: "meeting_slack_notify_tool.go", Category: "copilot", Registration: "RegisterCopilotHelperTools", Adapter: "slack_post_message", Status: "active"},
 	{Name: "send_meeting_chat", Source: "copilot_tools.go", Category: "copilot", Registration: "RegisterCopilotHelperTools", Adapter: "meeting_agent_chat", Status: "product_excluded", ProductScope: "Peng excluded meeting chat sending for task #147"},
@@ -103,17 +107,35 @@ func (s *Service) SlackToolParityReport() SlackToolParityReport {
 	}
 	for _, spec := range report.Tools {
 		switch spec.Status {
-		case "active", "active_stub":
+		case "active":
 			report.ActiveTools = append(report.ActiveTools, spec.Name)
+		case "validation_only":
+			report.ValidationOnlyTools = append(report.ValidationOnlyTools, spec.Name)
+			report.PendingTools = append(report.PendingTools, spec.Name)
+		case "registered_unavailable":
+			report.RegisteredUnavailableTools = append(report.RegisteredUnavailableTools, spec.Name)
+			report.PendingTools = append(report.PendingTools, spec.Name)
 		case "product_excluded":
 			report.ExcludedTools = append(report.ExcludedTools, spec.Name)
 		default:
 			report.PendingTools = append(report.PendingTools, spec.Name)
 		}
 	}
+	for _, method := range report.SlackAPIMethods {
+		switch method.Status {
+		case "validation_only":
+			report.ValidationOnlySlackAPIMethods = append(report.ValidationOnlySlackAPIMethods, method.Method)
+		case "registered_unavailable":
+			report.RegisteredUnavailableSlackAPIMethods = append(report.RegisteredUnavailableSlackAPIMethods, method.Method)
+		}
+	}
 	sort.Strings(report.ActiveTools)
+	sort.Strings(report.ValidationOnlyTools)
+	sort.Strings(report.RegisteredUnavailableTools)
 	sort.Strings(report.ExcludedTools)
 	sort.Strings(report.PendingTools)
+	sort.Strings(report.ValidationOnlySlackAPIMethods)
+	sort.Strings(report.RegisteredUnavailableSlackAPIMethods)
 	return report
 }
 
@@ -220,9 +242,10 @@ func (s *Service) executeSlackAPITool(ctx context.Context, role string, args map
 		role = slackAPIRoleAssistant
 	}
 	tool := &slackAPITool{
-		role:   role,
-		apiURL: defaultSlackAPIBaseURL,
-		token:  s.botToken,
+		role:         role,
+		apiURL:       defaultSlackAPIBaseURL,
+		token:        s.botToken,
+		workspaceDir: s.workspaceDir,
 	}
 	result, err := tool.Execute(ctx, args)
 	return slackToolFromTextResult("slack_api", result, err)
@@ -343,7 +366,74 @@ func (s *Service) executeSuggestActionTool(ctx context.Context, role string, arg
 	if validation != nil {
 		return SlackToolCallResponse{OK: validation.Success, Schema: "oneesama.slack-tool-result.v1", Tool: "suggest_action", Text: validation.Text, Error: "validation_failed"}
 	}
-	return slackToolOK("suggest_action", request)
+	result, err := s.createSuggestedPendingAction(ctx, request, args)
+	if err != nil {
+		return SlackToolCallResponse{OK: false, Schema: "oneesama.slack-tool-result.v1", Tool: "suggest_action", Error: err.Error()}
+	}
+	if !result.Post.OK {
+		return SlackToolCallResponse{OK: false, Schema: "oneesama.slack-tool-result.v1", Tool: "suggest_action", Error: "post_failed", Result: result}
+	}
+	return slackToolOK("suggest_action", result)
+}
+
+type slackSuggestActionResult struct {
+	Request       *slackSuggestActionRequest `json:"request"`
+	PendingAction SlackPendingAction         `json:"pending_action"`
+	Post          PostMessageResult          `json:"post"`
+}
+
+func (s *Service) createSuggestedPendingAction(ctx context.Context, request *slackSuggestActionRequest, args map[string]any) (*slackSuggestActionResult, error) {
+	if request == nil {
+		return nil, fmt.Errorf("request_required")
+	}
+	params := cloneStringAnyMap(request.Params)
+	params["source"] = "suggest_action"
+	params["title"] = request.Title
+	params["summary"] = request.Summary
+	record, err := s.triage.InsertPendingAction(ctx, SlackPendingAction{
+		ChannelID:  request.Channel,
+		ThreadTS:   request.ThreadTS,
+		ActionType: request.ActionType,
+		Params:     params,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("insert pending action: %w", err)
+	}
+	if record == nil {
+		return nil, fmt.Errorf("pending action store disabled")
+	}
+	if err := s.cognition.RecordAction(ctx, "workspace", request.Channel, request.ThreadTS, request.ActionType, "pending"); err != nil {
+		s.logger.Warn("slack suggest_action ledger action record failed", "error", err)
+	}
+	action := SlackTriageDecisionAction{
+		Type:                 request.ActionType,
+		Title:                request.Title,
+		Message:              firstNonEmpty(request.Summary, request.Title),
+		ChannelID:            request.Channel,
+		ThreadTS:             request.ThreadTS,
+		Confidence:           clampFloat(numberFromAny(args["confidence"], 1), 0, 1, 1),
+		Reason:               stringFromAny(args["reason"]),
+		RequiresConfirmation: true,
+	}
+	post := s.PostMessage(ctx, PostMessageInput{
+		Channel:  request.Channel,
+		ThreadTS: request.ThreadTS,
+		Text:     buildSlackTriageActionText(action, *record),
+		Blocks:   buildSlackTriageActionBlocks(action, *record),
+		DedupKey: fmt.Sprintf("slack-suggest-action:%s:%s:%s:%d", request.Channel, request.ThreadTS, request.ActionType, record.ID),
+	})
+	if post.OK {
+		cardTS := firstNonEmpty(post.TS, post.ThreadTS)
+		if err := s.triage.SetPendingActionCardTS(ctx, record.ID, cardTS); err != nil {
+			s.logger.Warn("slack suggest_action card ts update failed", "pending_action_id", record.ID, "error", err)
+		} else {
+			record.CardTS = cardTS
+		}
+		if err := s.cognition.RecordOutbound(ctx, "workspace", request.Channel, request.ThreadTS, fmt.Sprintf("Suggested %s: %s", request.ActionType, request.Title)); err != nil {
+			s.logger.Warn("slack suggest_action outbound record failed", "error", err)
+		}
+	}
+	return &slackSuggestActionResult{Request: request, PendingAction: *record, Post: post}, nil
 }
 
 func (s *Service) fetchThreadTranscriptForSuggestAction(ctx context.Context, channel, threadTS string) (string, error) {
