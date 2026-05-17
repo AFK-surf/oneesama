@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -16,12 +17,14 @@ const (
 )
 
 type slackAPITool struct {
-	role          string
-	apiURL        string
-	token         string
-	workspaceDir  string
-	activeThread  func(channel, threadTS string) bool
-	httpTransport http.RoundTripper
+	role                  string
+	apiURL                string
+	token                 string
+	workspaceDir          string
+	activeThread          func(channel, threadTS string) bool
+	httpTransport         http.RoundTripper
+	messageTargets        map[string]slackAPIMessageTarget
+	latestTargetByChannel map[string]slackAPIMessageTarget
 }
 
 type slackAPIToolResult struct {
@@ -63,7 +66,9 @@ func (t *slackAPITool) Execute(ctx context.Context, args map[string]any) (slackA
 		return t.actionFetchChannelHistory(ctx, params)
 	case "upload_file":
 		return t.actionUploadFile(ctx, params), nil
-	case "add_reaction", "delete_message", "edit_message", "list_emoji", "pin", "unpin", "set_topic", "set_purpose", "add_bookmark", "invite":
+	case "add_reaction":
+		return t.actionAddReaction(ctx, params)
+	case "delete_message", "edit_message", "list_emoji", "pin", "unpin", "set_topic", "set_purpose", "add_bookmark", "invite":
 		return t.actionGenericSlackForm(ctx, resolvedAction, params)
 	case "fetch_canvas":
 		return t.actionFetchCanvas(ctx, params), nil
@@ -247,6 +252,63 @@ func (t *slackAPITool) actionUploadFile(ctx context.Context, params map[string]a
 	return slackAPIToolResult{Success: true, Text: text}
 }
 
+func (t *slackAPITool) actionAddReaction(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
+	channel := strings.TrimSpace(firstNonEmpty(stringFromAny(params["channel"]), stringFromAny(params["channel_id"])))
+	timestamp := strings.TrimSpace(firstNonEmpty(
+		stringFromAny(params["timestamp"]),
+		stringFromAny(params["msg_ts"]),
+		stringFromAny(params["ts"]),
+		stringFromAny(params["thread_ts"]),
+	))
+	messageRef := strings.TrimSpace(firstNonEmpty(stringFromAny(params["message_ref"]), stringFromAny(params["target_ref"])))
+	if messageRef != "" {
+		target, ok := t.messageTargets[messageRef]
+		if !ok {
+			return slackAPIToolResult{Success: false, Text: fmt.Sprintf("Unknown message_ref %q. Use a ref from the digest such as m1, m2, ...", messageRef)}, nil
+		}
+		if channel == "" {
+			channel = target.ChannelID
+		}
+		if timestamp == "" {
+			timestamp = target.Timestamp
+		}
+	}
+	if channel != "" && timestamp == "" {
+		if target, ok := t.latestTargetByChannel[channel]; ok {
+			timestamp = target.Timestamp
+		}
+	}
+	emoji := normalizeSlackReactionName(firstNonEmpty(
+		stringFromAny(params["emoji"]),
+		stringFromAny(params["name"]),
+		stringFromAny(params["reaction"]),
+	))
+	if channel == "" || timestamp == "" || emoji == "" {
+		return slackAPIToolResult{Success: false, Text: "emoji and a target message are required. Prefer message_ref from the digest (for example m1). If you only provide channel, the tool will target the latest digest message in that channel when possible."}, nil
+	}
+	values := url.Values{}
+	values.Set("channel", channel)
+	values.Set("timestamp", timestamp)
+	values.Set("name", emoji)
+	client := &http.Client{Transport: t.httpTransport}
+	if client.Transport == nil {
+		client.Transport = http.DefaultTransport
+	}
+	var body map[string]any
+	result := callSlackFormAPI(ctx, client, t.token, t.apiURL, slackAPIMethodByAction["add_reaction"], values, &body)
+	if !result.OK {
+		return slackAPIToolResult{Success: false, Text: "Failed to call reactions.add: " + firstNonEmpty(result.Error, result.Detail)}, nil
+	}
+	if ok, _ := body["ok"].(bool); !ok {
+		errText := firstNonEmpty(stringFromAny(body["error"]), "slack_api_error")
+		if errText == "already_reacted" {
+			return slackAPIToolResult{Success: true, Text: "Already reacted with this emoji"}, nil
+		}
+		return slackAPIToolResult{Success: false, Text: "Failed to call reactions.add: " + errText}, nil
+	}
+	return slackAPIToolResult{Success: true, Text: fmt.Sprintf("Added :%s: reaction", emoji)}, nil
+}
+
 func (t *slackAPITool) actionGenericSlackForm(ctx context.Context, action string, params map[string]any) (slackAPIToolResult, error) {
 	method := slackAPIMethodByAction[action]
 	if method == "" {
@@ -272,6 +334,64 @@ func (t *slackAPITool) actionGenericSlackForm(ctx context.Context, action string
 		return slackAPIToolResult{Success: false, Text: "Failed to call " + method + ": " + firstNonEmpty(stringFromAny(body["error"]), "slack_api_error")}, nil
 	}
 	return slackAPIJSONTextResult(body)
+}
+
+type slackAPIMessageTarget struct {
+	ChannelID string
+	Timestamp string
+}
+
+var slackAPIDigestMessageRefPattern = regexp.MustCompile(`\[ref:([^\s\]]+)\s+msg_ts:([^\s\]]+)\]`)
+
+func slackAPIMessageTargetsFromArgs(args map[string]any, params map[string]any) (map[string]slackAPIMessageTarget, map[string]slackAPIMessageTarget) {
+	targets := map[string]slackAPIMessageTarget{}
+	latest := map[string]slackAPIMessageTarget{}
+	for _, raw := range []string{
+		stringFromAny(args["digest"]),
+		stringFromAny(args["slack_activity_digest"]),
+		stringFromAny(args["slackActivityDigest"]),
+		stringFromAny(params["digest"]),
+		stringFromAny(params["slack_activity_digest"]),
+		stringFromAny(params["slackActivityDigest"]),
+	} {
+		for ref, target := range slackAPIMessageTargetsFromDigest(raw) {
+			targets[ref] = target
+			if target.ChannelID != "" {
+				latest[target.ChannelID] = target
+			}
+		}
+	}
+	return targets, latest
+}
+
+func slackAPIMessageTargetsFromDigest(digest string) map[string]slackAPIMessageTarget {
+	targets := map[string]slackAPIMessageTarget{}
+	currentChannel := ""
+	for _, line := range strings.Split(digest, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") && !strings.Contains(trimmed, " ") {
+			currentChannel = strings.TrimPrefix(trimmed, "#")
+			continue
+		}
+		match := slackAPIDigestMessageRefPattern.FindStringSubmatch(trimmed)
+		if len(match) != 3 {
+			continue
+		}
+		ref := strings.TrimSpace(match[1])
+		timestamp := strings.TrimSpace(match[2])
+		if ref == "" || timestamp == "" {
+			continue
+		}
+		targets[ref] = slackAPIMessageTarget{ChannelID: currentChannel, Timestamp: timestamp}
+	}
+	return targets
+}
+
+func normalizeSlackReactionName(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, ":")
+	value = strings.TrimSuffix(value, ":")
+	return strings.TrimSpace(value)
 }
 
 func (t *slackAPITool) callSlackGET(ctx context.Context, baseURL string, method string, values url.Values, target any) slackFormAPIResult {

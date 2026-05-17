@@ -256,6 +256,11 @@ func (s *Service) executeSlackAPITool(ctx context.Context, role string, args map
 		workspaceDir: s.workspaceDir,
 		activeThread: s.isActiveMentionThread,
 	}
+	params, _ := args["params"].(map[string]any)
+	if params == nil {
+		params = map[string]any{}
+	}
+	tool.messageTargets, tool.latestTargetByChannel = slackAPIMessageTargetsFromArgs(args, params)
 	result, err := tool.Execute(ctx, args)
 	return slackToolFromTextResult("slack_api", result, err)
 }
