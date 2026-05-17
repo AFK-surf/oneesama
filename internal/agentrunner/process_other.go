@@ -2,13 +2,16 @@
 
 package agentrunner
 
-import "os/exec"
+import (
+	"os/exec"
 
-func prepareCommand(command *exec.Cmd) {}
+	"github.com/AFK-surf/oneesama/internal/processutil"
+)
+
+func prepareCommand(command *exec.Cmd) {
+	processutil.PrepareGroup(command)
+}
 
 func terminateCommand(command *exec.Cmd) error {
-	if command.Process == nil {
-		return nil
-	}
-	return command.Process.Kill()
+	return processutil.KillGroup("agent-runner", command)
 }
