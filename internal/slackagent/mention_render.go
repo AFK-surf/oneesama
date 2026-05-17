@@ -27,26 +27,7 @@ func buildSlackThreadReplyBlocks(text string, thinking string, footer []map[stri
 }
 
 func buildReplyFooterBlocks(sessionID string) []map[string]any {
-	text := ":robot_face: _Onee Sama Agent_"
-	if strings.TrimSpace(sessionID) != "" {
-		text += "  |  `" + shortSlackID(sessionID) + "`"
-	}
-	return []map[string]any{{
-		"type":     "section",
-		"block_id": replyFeedbackBlockID,
-		"text": map[string]any{
-			"type": "mrkdwn",
-			"text": text,
-		},
-		"accessory": map[string]any{
-			"type":      "overflow",
-			"action_id": "reply_feedback",
-			"options": []map[string]any{
-				{"value": "helpful", "text": map[string]any{"type": "plain_text", "text": "Helpful"}},
-				{"value": "not_helpful", "text": map[string]any{"type": "plain_text", "text": "Not helpful"}},
-			},
-		},
-	}}
+	return nil
 }
 
 func slackContextBlock(text string) map[string]any {

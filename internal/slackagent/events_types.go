@@ -28,6 +28,9 @@ type SlackEventPayload struct {
 	EventTS              string                `json:"event_ts,omitempty"`
 	BotID                string                `json:"bot_id,omitempty"`
 	Subtype              string                `json:"subtype,omitempty"`
+	Reaction             string                `json:"reaction,omitempty"`
+	ItemUser             string                `json:"item_user,omitempty"`
+	Item                 *SlackReactionItem    `json:"item,omitempty"`
 	Message              *SlackMessage         `json:"message,omitempty"`
 	PreviousMessage      *SlackMessage         `json:"previous_message,omitempty"`
 	LatestReply          string                `json:"latest_reply,omitempty"`
@@ -148,6 +151,12 @@ type SlackAttachment struct {
 type SlackReaction struct {
 	Name  string `json:"name,omitempty"`
 	Count int    `json:"count,omitempty"`
+}
+
+type SlackReactionItem struct {
+	Type    string `json:"type,omitempty"`
+	Channel string `json:"channel,omitempty"`
+	TS      string `json:"ts,omitempty"`
 }
 
 type SlackBlock struct {

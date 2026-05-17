@@ -14,7 +14,7 @@ var (
 	requiredBotScopes     = []string{"app_mentions:read", "assistant:write", "channels:history", "channels:join", "channels:read", "chat:write", "chat:write.public", "files:read", "files:write", "groups:history", "groups:read", "im:history", "im:read", "im:write", "pins:read", "pins:write", "reactions:read", "reactions:write", "users:read"}
 	recommendedBotScopes  = []string{"bookmarks:read", "bookmarks:write", "canvases:read", "canvases:write", "users:read.email"}
 	recommendedUserScopes = []string{"channels:history", "channels:read", "groups:history", "im:history"}
-	requiredBotEvents     = []string{"app_mention", "assistant_thread_context_changed", "assistant_thread_started", "message.channels", "message.groups", "message.im"}
+	requiredBotEvents     = []string{"app_mention", "assistant_thread_context_changed", "assistant_thread_started", "message.channels", "message.groups", "message.im", "reaction_added"}
 )
 
 type SlackManifest struct {

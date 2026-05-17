@@ -15,6 +15,17 @@ type SlackReplyFeedbackInteraction struct {
 	Summary   string
 }
 
+type SlackEmojiFeedbackEvent struct {
+	Kind       string
+	Emoji      string
+	UserID     string
+	ItemUserID string
+	ChannelID  string
+	ThreadTS   string
+	MessageTS  string
+	Summary    string
+}
+
 func parseReplyFeedbackInteraction(payload SlackInteractionPayload) *SlackReplyFeedbackInteraction {
 	if len(payload.Actions) == 0 {
 		return nil
@@ -42,6 +53,138 @@ func parseReplyFeedbackInteraction(payload SlackInteractionPayload) *SlackReplyF
 	}
 }
 
+func (s *Service) handleReactionFeedbackEvent(ctx context.Context, envelope SlackEventEnvelope) SlackEventResponse {
+	event := eventPayloadWithEnvelopeContext(envelope)
+	feedback, reason := s.emojiFeedbackFromReactionEvent(ctx, event)
+	if reason != "" {
+		return SlackEventResponse{
+			OK:        true,
+			Ignored:   true,
+			Mode:      "emoji_feedback",
+			EventType: event.Type,
+			EventID:   strings.TrimSpace(envelope.EventID),
+			Reason:    reason,
+		}
+	}
+	if err := s.recordFeedbackMemory(ctx, SlackFeedbackEntry{
+		Action:     feedback.Kind,
+		Channel:    feedback.ChannelID,
+		ThreadTS:   feedback.ThreadTS,
+		ActionType: replyFeedbackActionType,
+		Summary:    feedback.Summary,
+		UserID:     feedback.UserID,
+	}); err != nil {
+		s.logger.Warn("slack emoji feedback persistence failed", "error", err)
+	}
+	if err := s.recordEmojiFeedbackImprovement(ctx, feedback); err != nil {
+		s.logger.Warn("slack emoji feedback improvement failed", "error", err)
+	}
+	return SlackEventResponse{
+		OK:        true,
+		Handled:   true,
+		Mode:      "emoji_feedback",
+		EventType: event.Type,
+		EventID:   strings.TrimSpace(envelope.EventID),
+		Response: &AvatarCommandResponse{
+			OK:           true,
+			ResponseType: "ephemeral",
+			Text:         "Emoji feedback saved.",
+			Metadata: map[string]any{
+				"feedback": feedback,
+			},
+		},
+	}
+}
+
+func (s *Service) emojiFeedbackFromReactionEvent(ctx context.Context, event SlackEventPayload) (SlackEmojiFeedbackEvent, string) {
+	kind := feedbackKindForReactionEmoji(event.Reaction)
+	if kind == "" {
+		return SlackEmojiFeedbackEvent{}, "unmapped_reaction"
+	}
+	channelID := ""
+	messageTS := ""
+	itemType := ""
+	if event.Item != nil {
+		channelID = strings.TrimSpace(event.Item.Channel)
+		messageTS = strings.TrimSpace(event.Item.TS)
+		itemType = strings.TrimSpace(event.Item.Type)
+	}
+	if itemType != "" && itemType != "message" {
+		return SlackEmojiFeedbackEvent{}, "unsupported_reaction_item"
+	}
+	if channelID == "" || messageTS == "" {
+		return SlackEmojiFeedbackEvent{}, "missing_reaction_item"
+	}
+	userID := strings.TrimSpace(event.User)
+	if userID == "" {
+		return SlackEmojiFeedbackEvent{}, "missing_reaction_user"
+	}
+	if s.botUserID != "" && userID == s.botUserID {
+		return SlackEmojiFeedbackEvent{}, "bot_self_reaction"
+	}
+	itemUserID := strings.TrimSpace(event.ItemUser)
+	if s.botUserID != "" && itemUserID != s.botUserID {
+		return SlackEmojiFeedbackEvent{}, "non_bot_message"
+	}
+
+	message := s.reactionTargetMessage(ctx, event, channelID, messageTS)
+	threadTS := firstNonEmpty(message.ThreadTS, messageTS)
+	summary := messageSummaryForFeedback(message)
+	if strings.TrimSpace(summary) == "" {
+		summary = fmt.Sprintf(":%s: reaction on assistant reply %s", normalizeReactionEmojiKey(event.Reaction), messageTS)
+	} else {
+		summary = fmt.Sprintf(":%s: reaction on assistant reply: %s", normalizeReactionEmojiKey(event.Reaction), summary)
+	}
+	return SlackEmojiFeedbackEvent{
+		Kind:       kind,
+		Emoji:      normalizeReactionEmojiKey(event.Reaction),
+		UserID:     userID,
+		ItemUserID: itemUserID,
+		ChannelID:  channelID,
+		ThreadTS:   threadTS,
+		MessageTS:  messageTS,
+		Summary:    summary,
+	}, ""
+}
+
+func (s *Service) reactionTargetMessage(ctx context.Context, event SlackEventPayload, channelID string, messageTS string) SlackMessage {
+	if event.Message != nil {
+		message := *event.Message
+		if strings.TrimSpace(message.Channel) == "" {
+			message.Channel = channelID
+		}
+		if strings.TrimSpace(firstNonEmpty(message.TS, message.Timestamp, message.EventTS)) == "" {
+			message.TS = messageTS
+		}
+		return message
+	}
+	if strings.TrimSpace(s.botToken) == "" {
+		return SlackMessage{}
+	}
+	params := map[string]string{
+		"channel":   strings.TrimSpace(channelID),
+		"latest":    strings.TrimSpace(messageTS),
+		"limit":     "1",
+		"inclusive": "true",
+	}
+	var response slackConversationsHistoryResponse
+	if err := s.callSlackScannerAPI(ctx, "conversations.history", params, &response); err != nil {
+		s.logger.Warn("slack emoji feedback target fetch failed", "channel", channelID, "ts", messageTS, "error", err)
+		return SlackMessage{}
+	}
+	if !response.OK || len(response.Messages) == 0 {
+		if !response.OK {
+			s.logger.Warn("slack emoji feedback target fetch failed", "channel", channelID, "ts", messageTS, "error", firstNonEmpty(response.Error, "slack_api_error"))
+		}
+		return SlackMessage{}
+	}
+	message := response.Messages[0]
+	if firstNonEmpty(message.TS, message.Timestamp, message.EventTS) != strings.TrimSpace(messageTS) {
+		return SlackMessage{}
+	}
+	return message
+}
+
 func slackMessageFromInteraction(message *SlackInteractionMessage) SlackMessage {
 	if message == nil {
 		return SlackMessage{}
@@ -51,6 +194,34 @@ func slackMessageFromInteraction(message *SlackInteractionMessage) SlackMessage 
 		ThreadTS: message.ThreadTS,
 		Blocks:   message.Blocks,
 	}
+}
+
+func feedbackKindForReactionEmoji(emoji string) string {
+	normalized := normalizeReactionEmojiKey(emoji)
+	switch normalized {
+	case "+1", "thumbsup", "thumbs_up", "white_check_mark", "heavy_check_mark", "check", "checked", "done", "ok", "ok_hand", "heart", "green_heart", "tada", "clap", "lgtm", "shipit", "ship_it":
+		return replyFeedbackHelpful
+	case "-1", "thumbsdown", "thumbs_down", "x", "negative_squared_cross_mark", "no_entry", "warning", "confused", "face_with_raised_eyebrow", "thinking", "thinking_face", "bug", "broken", "wrong", "bad", "fail", "failed", "rollback":
+		return replyFeedbackNotHelpful
+	}
+	for _, token := range []string{"lgtm", "good", "approve", "approved", "ship", "pass", "done"} {
+		if strings.Contains(normalized, token) {
+			return replyFeedbackHelpful
+		}
+	}
+	for _, token := range []string{"fail", "bad", "wrong", "bug", "broken", "confus", "reject", "rollback", "concern"} {
+		if strings.Contains(normalized, token) {
+			return replyFeedbackNotHelpful
+		}
+	}
+	return ""
+}
+
+func normalizeReactionEmojiKey(emoji string) string {
+	emoji = strings.TrimSpace(strings.ToLower(emoji))
+	emoji = strings.Trim(emoji, ":")
+	emoji = strings.ReplaceAll(emoji, "-", "_")
+	return emoji
 }
 
 func (s *Service) HandleReplyFeedbackInteraction(ctx context.Context, interaction SlackReplyFeedbackInteraction) AvatarCommandResponse {
@@ -91,6 +262,33 @@ func (s *Service) recordFeedbackMemory(ctx context.Context, entry SlackFeedbackE
 		return err
 	}
 	return nil
+}
+
+func (s *Service) recordEmojiFeedbackImprovement(ctx context.Context, feedback SlackEmojiFeedbackEvent) error {
+	spec, ok := selfGrowthTopicSpecByTopic(improvementTopicReplyQuality)
+	if !ok {
+		return nil
+	}
+	signalType := improvementSignalTypeDismiss
+	if feedback.Kind == replyFeedbackHelpful {
+		signalType = improvementSignalTypeConfirm
+	}
+	return s.recordImprovementSignals(ctx, []SlackImprovementSignal{
+		newImprovementSignal(spec, improvementSignalOptions{
+			SignalType: signalType,
+			Summary:    feedback.Summary,
+			ChannelID:  feedback.ChannelID,
+			ThreadTS:   feedback.ThreadTS,
+			MsgTS:      feedback.MessageTS,
+			Metadata: map[string]any{
+				"source":        "emoji_feedback",
+				"feedback_kind": feedback.Kind,
+				"emoji":         feedback.Emoji,
+				"user_id":       feedback.UserID,
+				"item_user_id":  feedback.ItemUserID,
+			},
+		}),
+	})
 }
 
 func (s *Service) recordReplyFeedbackImprovement(ctx context.Context, interaction SlackReplyFeedbackInteraction) error {

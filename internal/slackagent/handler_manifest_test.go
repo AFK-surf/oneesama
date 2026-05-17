@@ -32,6 +32,9 @@ func TestHandleAppManifestReturnsExpectedURLs(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"request_url":"https://oneesama.example.com/slack/events"`) {
 		t.Fatalf("body = %s, want event request url", response.Body.String())
 	}
+	if !strings.Contains(response.Body.String(), `"reaction_added"`) {
+		t.Fatalf("body = %s, want reaction_added event for emoji feedback memory", response.Body.String())
+	}
 }
 
 func TestHandleValidateAppManifestAcceptsGeneratedManifest(t *testing.T) {

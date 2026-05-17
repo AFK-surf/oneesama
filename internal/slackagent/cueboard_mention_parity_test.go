@@ -153,12 +153,8 @@ func TestCueboardParityMentionQueueAndCompaction(t *testing.T) {
 
 func TestCueboardParityMentionReplyRenderingAndFeedbackSummary(t *testing.T) {
 	footer := buildReplyFooterBlocks("abc12345678")
-	if len(footer) != 1 || footer[0]["block_id"] != replyFeedbackBlockID {
-		t.Fatalf("footer = %#v", footer)
-	}
-	footerText := slackBlockText(footer[0])
-	if !strings.Contains(footerText, "Onee Sama Agent") || !strings.Contains(footerText, "`abc12345`") {
-		t.Fatalf("footer text = %q", footerText)
+	if len(footer) != 0 {
+		t.Fatalf("footer = %#v, want no proactive feedback footer", footer)
 	}
 	if got := softenSlackThreadReplyMarkdown("可以，Linear 里对应的是 *subscriber*。\n- 最稳的是 *轮询脚本*"); got != "可以，Linear 里对应的是 subscriber。\n- 最稳的是 轮询脚本" {
 		t.Fatalf("softened = %q", got)

@@ -86,6 +86,110 @@ func TestCueboardParityReplyFeedbackPersistsMemoryAndImprovementSignal(t *testin
 	}
 }
 
+func TestEmojiReactionFeedbackPersistsMemoryAndImprovementSignal(t *testing.T) {
+	withFeedbackMemoryClock(t, time.Date(2026, 5, 17, 14, 20, 0, 0, shanghaiLocation()))
+	workspaceDir := t.TempDir()
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotUserID:    "UBOT",
+			WorkspaceDir: workspaceDir,
+			Memory:       appconfig.SlackMemoryConfig{Enabled: true, Dir: t.TempDir()},
+		},
+	})
+
+	response := service.HandleSlackEvent(context.Background(), SlackEventEnvelope{
+		Type:    "event_callback",
+		EventID: "EvEmojiFeedback",
+		TeamID:  "T123",
+		Event: SlackEventPayload{
+			Type:     "reaction_added",
+			User:     "UFEEDBACK",
+			Reaction: "thumbsdown",
+			ItemUser: "UBOT",
+			Item:     &SlackReactionItem{Type: "message", Channel: "C123", TS: "1779000020.000003"},
+			Message: &SlackMessage{
+				TS:       "1779000020.000003",
+				ThreadTS: "1779000000.000001",
+				Text:     "I incorrectly claimed memory feedback was fully wired.",
+			},
+		},
+	}, SlackEventHeaders{})
+	if !response.OK || !response.Handled || response.Mode != "emoji_feedback" {
+		t.Fatalf("response = %#v, want handled emoji feedback", response)
+	}
+
+	entries, err := service.feedback.ListEntries(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %#v, want one feedback entry", entries)
+	}
+	entry := entries[0]
+	if entry.Action != replyFeedbackNotHelpful || entry.ActionType != replyFeedbackActionType || entry.Channel != "C123" || entry.ThreadTS != "1779000000.000001" {
+		t.Fatalf("entry = %#v, want emoji-derived reply feedback row", entry)
+	}
+	if !strings.Contains(entry.Summary, ":thumbsdown:") || !strings.Contains(entry.Summary, "memory feedback") {
+		t.Fatalf("summary = %q, want emoji key and target summary", entry.Summary)
+	}
+
+	projection := readFeedbackTestFile(t, filepath.Join(workspaceDir, "memory", "feedback", "2026-05-17.md"))
+	for _, want := range []string{"[14:20]", "not_helpful reply_quality #C123", ":thumbsdown:", "by UFEEDBACK"} {
+		if !strings.Contains(projection, want) {
+			t.Fatalf("projection = %q, missing %q", projection, want)
+		}
+	}
+
+	signals, err := service.improvements.ListSignals(context.Background(), 10, nil, time.Time{})
+	if err != nil {
+		t.Fatalf("ListSignals: %v", err)
+	}
+	if len(signals) != 1 || signals[0].Topic != improvementTopicReplyQuality || signals[0].SignalType != improvementSignalTypeDismiss {
+		t.Fatalf("signals = %#v, want emoji reply_quality dismiss signal", signals)
+	}
+	if signals[0].Metadata["source"] != "emoji_feedback" || signals[0].Metadata["emoji"] != "thumbsdown" {
+		t.Fatalf("signal metadata = %#v, want emoji provenance", signals[0].Metadata)
+	}
+}
+
+func TestEmojiReactionFeedbackIgnoresNoiseAndNonBotMessages(t *testing.T) {
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{BotUserID: "UBOT"},
+	})
+
+	noise := service.HandleSlackEvent(context.Background(), SlackEventEnvelope{
+		Type:    "event_callback",
+		EventID: "EvEmojiNoise",
+		Event: SlackEventPayload{
+			Type:     "reaction_added",
+			User:     "UFEEDBACK",
+			Reaction: "eyes",
+			ItemUser: "UBOT",
+			Item:     &SlackReactionItem{Type: "message", Channel: "C123", TS: "1779000020.000003"},
+		},
+	}, SlackEventHeaders{})
+	if !noise.Ignored || noise.Reason != "unmapped_reaction" {
+		t.Fatalf("noise response = %#v, want unmapped reaction ignored", noise)
+	}
+
+	nonBot := service.HandleSlackEvent(context.Background(), SlackEventEnvelope{
+		Type:    "event_callback",
+		EventID: "EvEmojiNonBot",
+		Event: SlackEventPayload{
+			Type:     "reaction_added",
+			User:     "UFEEDBACK",
+			Reaction: "white_check_mark",
+			ItemUser: "UOTHER",
+			Item:     &SlackReactionItem{Type: "message", Channel: "C123", TS: "1779000020.000003"},
+		},
+	}, SlackEventHeaders{})
+	if !nonBot.Ignored || nonBot.Reason != "non_bot_message" {
+		t.Fatalf("nonBot response = %#v, want non bot message ignored", nonBot)
+	}
+}
+
 func TestCueboardParityPendingActionChoicePersistsFeedbackMemory(t *testing.T) {
 	withFeedbackMemoryClock(t, time.Date(2026, 5, 17, 14, 5, 0, 0, shanghaiLocation()))
 	workspaceDir := t.TempDir()

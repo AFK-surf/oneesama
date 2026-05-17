@@ -68,6 +68,8 @@ func (s *Service) HandleSlackEvent(ctx context.Context, envelope SlackEventEnvel
 		}
 	case "app_mention":
 		return s.handleEventAvatarCommand(ctx, envelope, "app_mention")
+	case "reaction_added":
+		return s.handleReactionFeedbackEvent(ctx, envelope)
 	case "message":
 		if mentionEvent, ok := s.messageMentionFallbackEvent(ctx, event); ok {
 			envelope.Event = mentionEvent
