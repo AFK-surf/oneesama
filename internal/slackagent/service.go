@@ -85,6 +85,7 @@ type Service struct {
 	workspaceState          *slackWorkspaceStore
 	threadCases             *slackThreadCaseStore
 	mentionQueue            *slackMentionQueue
+	operatorFallback        *SlackOperatorFallback
 	localMemory             *localSlackMemory
 	followups               *slackHeartbeatStore
 	improvements            *slackImprovementStore
@@ -244,7 +245,16 @@ func NewService(cfg Config) *Service {
 		workspaceState:          newSlackWorkspaceStore(cfg.Persistence, logger),
 		threadCases:             newSlackThreadCaseStore(cfg.Persistence, logger),
 		mentionQueue:            newSlackMentionQueue(),
-		localMemory:             newLocalSlackMemory(cfg.Slack.Memory),
+		operatorFallback: &SlackOperatorFallback{
+			BotToken:       strings.TrimSpace(cfg.Slack.BotToken),
+			APIBaseURL:     defaultSlackAPIBaseURL,
+			Client:         nil,
+			PilotUserID:    strings.TrimSpace(cfg.Slack.PilotUserID),
+			DebugChannelID: strings.TrimSpace(cfg.Slack.DebugChannelID),
+			Poster:         poster,
+			DM:             newSlackDMPoster(),
+		},
+		localMemory: newLocalSlackMemory(cfg.Slack.Memory),
 		followups:               newSlackHeartbeatStore(cfg.Persistence, logger),
 		improvements:            newSlackImprovementStore(cfg.Persistence, logger),
 		feedback:                newSlackFeedbackStore(cfg.Persistence, logger),

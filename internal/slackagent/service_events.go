@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -424,4 +425,42 @@ func (s *Service) dispatchEventPost(ctx context.Context, input PostMessageInput)
 		"detail", result.Detail,
 		"status", result.Status,
 	)
+	s.notifyOperatorPostFailure(ctx, input, result)
+}
+
+// notifyOperatorPostFailure routes a chat.postMessage failure to the pilot
+// DM (or debug channel) when those surfaces are configured. The fallback is
+// best-effort observability — failures here are logged but don't block the
+// caller. Dedupe inside `SlackOperatorFallback` keeps retry storms from
+// flooding the operator inbox.
+func (s *Service) notifyOperatorPostFailure(ctx context.Context, input PostMessageInput, failure PostMessageResult) {
+	if s == nil || s.operatorFallback == nil {
+		return
+	}
+	if strings.TrimSpace(s.operatorFallback.PilotUserID) == "" && strings.TrimSpace(s.operatorFallback.DebugChannelID) == "" {
+		return
+	}
+	summary := fmt.Sprintf(
+		"oneesama: chat.postMessage failed in <#%s> (thread=%s, dedup_key=%s) — error=%s detail=%s status=%d",
+		firstNonEmpty(input.Channel, "unknown"),
+		firstNonEmpty(input.ThreadTS, "—"),
+		firstNonEmpty(input.DedupKey, "—"),
+		firstNonEmpty(failure.Error, "unknown"),
+		firstNonEmpty(failure.Detail, "—"),
+		failure.Status,
+	)
+	if pilotResult := s.operatorFallback.PostPilotDM(ctx, summary); !pilotResult.OK && !pilotResult.Skipped {
+		s.logger.Warn(
+			"slack operator pilot DM fallback failed",
+			"error", pilotResult.Reason,
+			"original_channel", input.Channel,
+		)
+	}
+	if debugResult := s.operatorFallback.PostDebugChannel(ctx, summary); !debugResult.OK && !debugResult.Skipped {
+		s.logger.Warn(
+			"slack operator debug channel fallback failed",
+			"error", debugResult.Reason,
+			"original_channel", input.Channel,
+		)
+	}
 }
