@@ -100,6 +100,18 @@ func (t *slackAPITool) actionPostMessage(ctx context.Context, params map[string]
 	if threadTS != "" {
 		form.Set("thread_ts", threadTS)
 	}
+	rawBlocks, hasBlocks := params["blocks"]
+	blocksAttached := 0
+	if hasBlocks && rawBlocks != nil {
+		blocksJSON, count, err := encodeSafeBlocks(rawBlocks)
+		if err != nil {
+			return slackAPIToolResult{Success: false, Text: "Failed to post blocks: " + err.Error()}, nil
+		}
+		if count > 0 {
+			form.Set("blocks", blocksJSON)
+			blocksAttached = count
+		}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL+"/chat.postMessage", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -116,7 +128,7 @@ func (t *slackAPITool) actionPostMessage(ctx context.Context, params map[string]
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return slackAPIToolResult{Success: false, Text: "Failed to post blocks: " + err.Error()}, nil
+		return slackAPIToolResult{Success: false, Text: "Failed to post chat.postMessage: " + err.Error()}, nil
 	}
 	defer resp.Body.Close()
 
@@ -130,9 +142,9 @@ func (t *slackAPITool) actionPostMessage(ctx context.Context, params map[string]
 		return slackAPIToolResult{Success: false, Text: "Failed to decode Slack response: " + err.Error()}, nil
 	}
 	if !body.OK {
-		return slackAPIToolResult{Success: false, Text: "Failed to post blocks: " + firstNonEmpty(body.Error, resp.Status)}, nil
+		return slackAPIToolResult{Success: false, Text: "Failed to post chat.postMessage: " + firstNonEmpty(body.Error, resp.Status)}, nil
 	}
-	return slackAPIToolResult{Success: true, Text: fmt.Sprintf("Message posted (ts: %s, 1 blocks)", body.TS)}, nil
+	return slackAPIToolResult{Success: true, Text: fmt.Sprintf("Message posted (ts: %s, %d blocks)", body.TS, blocksAttached)}, nil
 }
 
 func (t *slackAPITool) actionPostThreadReply(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
