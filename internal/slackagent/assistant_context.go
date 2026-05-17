@@ -23,9 +23,13 @@ func formatSlackDurableContext(ledger *SlackThreadLedgerRecord, brain *SlackChan
 		if ledger.LastActionType != "" && slackLedgerActionPending(ledger.LastActionStatus) {
 			lines = append(lines, fmt.Sprintf("- last requested action: %s (%s)", ledger.LastActionType, firstNonEmpty(ledger.LastActionStatus, "pending")))
 		}
-		if summary := strings.TrimSpace(ledger.Summary); summary != "" {
+		summary := strings.TrimSpace(ledger.Summary)
+		switch {
+		case summary != "" && looksLikeHandledTaskSummary(ledger):
 			lines = append(lines, "- recent handled task: "+summary)
-		} else if ledger.LastActionType != "" && ledger.LastActionStatus != "" && !slackLedgerActionPending(ledger.LastActionStatus) {
+		case summary != "":
+			lines = append(lines, "- recent thread note: "+summary)
+		case ledger.LastActionType != "" && ledger.LastActionStatus != "" && !slackLedgerActionPending(ledger.LastActionStatus) && !isNoActionLedgerOutcome(ledger.LastActionStatus):
 			lines = append(lines, fmt.Sprintf("- recent handled task: %s (%s)", ledger.LastActionType, ledger.LastActionStatus))
 		}
 		sections = append(sections, strings.Join(lines, "\n"))
@@ -139,6 +143,78 @@ func resolveSlackContextName(resolveName func(string) string, userID string) str
 
 func slackLedgerActionPending(status string) bool {
 	return strings.EqualFold(status, "pending") || strings.EqualFold(status, "awaiting_confirmation")
+}
+
+// looksLikeHandledTaskSummary mirrors Cueboard's guard of the same name. It
+// returns true when the ledger row represents a real handled action — a
+// summary that the bot should advertise as "recent handled task" in
+// assistant durable context. SKIP / no-action / failed triage outcomes are
+// rejected so the assistant prompt doesn't get a misleading "we already did
+// that" hint for messages that were intentionally not acted on.
+func looksLikeHandledTaskSummary(ledger *SlackThreadLedgerRecord) bool {
+	if ledger == nil {
+		return false
+	}
+	summary := strings.TrimSpace(ledger.Summary)
+	if summary == "" {
+		return false
+	}
+	if isNoActionLedgerOutcome(ledger.LastActionStatus) {
+		return false
+	}
+	if summaryDescribesSkippedAction(summary) {
+		return false
+	}
+	return true
+}
+
+// isNoActionLedgerOutcome reports whether the recorded last-action status
+// represents a deliberate non-action (triage SKIP, FAILED, NO-OP, etc.).
+// Status strings are case-insensitive so cueboard's "SKIP" and oneesama's
+// "skip" both bucket the same way.
+func isNoActionLedgerOutcome(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" {
+		return false
+	}
+	switch status {
+	case "skip", "skipped", "no_action", "noop", "no-op", "failed", "observed", "ignored":
+		return true
+	}
+	return false
+}
+
+// summaryDescribesSkippedAction matches summaries whose natural-language
+// content explicitly says no action was taken. We keep the prefix list small
+// and rooted in real Cueboard triage output so a legitimate summary that
+// happens to mention "skip" inside a sentence is still classified as a
+// handled task.
+func summaryDescribesSkippedAction(summary string) bool {
+	lower := strings.ToLower(strings.TrimSpace(summary))
+	if lower == "" {
+		return false
+	}
+	prefixes := []string{
+		"skip:",
+		"skip -",
+		"skip —",
+		"skip,",
+		"skipped:",
+		"no action:",
+		"no action needed",
+		"no action taken",
+		"no-op",
+		"noop:",
+		"no-decision",
+		"no decision needed",
+		"informational only",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func suppressDuplicateLedgerSummary(durableContext string, transcript string) string {
