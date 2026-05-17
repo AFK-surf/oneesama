@@ -251,7 +251,11 @@ func (s *Service) executeMemoryGetTool(args map[string]any) SlackToolCallRespons
 	if !isAllowedMemoryPath(relPath) {
 		return slackToolError("memory_get", "path_not_allowed")
 	}
-	raw, err := os.ReadFile(filepath.Join(s.localMemory.workspaceDir, filepath.FromSlash(filepath.ToSlash(relPath))))
+	root := s.memoryWriteRoot()
+	if strings.TrimSpace(root) == "" {
+		return slackToolError("memory_get", "memory_disabled")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(filepath.ToSlash(relPath))))
 	if err != nil {
 		return slackToolError("memory_get", "file_not_found")
 	}
@@ -270,7 +274,11 @@ func (s *Service) executeMemoryWriteTool(args map[string]any) SlackToolCallRespo
 	if !isAllowedMemoryPath(relPath) {
 		return slackToolError("memory_write", "path_not_allowed")
 	}
-	path := filepath.Join(s.localMemory.workspaceDir, filepath.FromSlash(filepath.ToSlash(relPath)))
+	root := s.memoryWriteRoot()
+	if strings.TrimSpace(root) == "" {
+		return slackToolError("memory_write", "memory_disabled")
+	}
+	path := filepath.Join(root, filepath.FromSlash(filepath.ToSlash(relPath)))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return slackToolError("memory_write", "mkdir_failed")
 	}
@@ -278,6 +286,19 @@ func (s *Service) executeMemoryWriteTool(args map[string]any) SlackToolCallRespo
 		return slackToolError("memory_write", "write_failed")
 	}
 	return slackToolOK("memory_write", map[string]any{"path": filepath.ToSlash(relPath), "bytes": len([]byte(content))})
+}
+
+func (s *Service) memoryWriteRoot() string {
+	if s == nil {
+		return ""
+	}
+	if strings.TrimSpace(s.workspaceDir) != "" {
+		return s.workspaceDir
+	}
+	if s.localMemory != nil {
+		return s.localMemory.workspaceDir
+	}
+	return ""
 }
 
 func (s *Service) executeFollowupMemoryTool(ctx context.Context, args map[string]any) (SlackToolCallResponse, error) {

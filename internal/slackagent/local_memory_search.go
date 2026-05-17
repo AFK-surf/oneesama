@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -214,8 +215,11 @@ func memoryKeywords(query string) []string {
 	return out
 }
 
-func isAllowedMemoryPath(path string) bool {
-	rel := filepath.ToSlash(path)
+func isAllowedMemoryPath(memoryPath string) bool {
+	rel := filepath.ToSlash(memoryPath)
+	if rel == "" || rel != filepath.ToSlash(path.Clean(rel)) || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return false
+	}
 	return rel == "MEMORY.md" || strings.HasPrefix(rel, "memory/") && strings.HasSuffix(rel, ".md")
 }
 

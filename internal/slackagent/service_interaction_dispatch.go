@@ -10,6 +10,10 @@ func (s *Service) HandleSlackInteraction(ctx context.Context, payload SlackInter
 		return s.HandlePendingActionInteraction(ctx, *pendingAction)
 	}
 
+	if replyFeedback := parseReplyFeedbackInteraction(payload); replyFeedback != nil {
+		return s.HandleReplyFeedbackInteraction(ctx, *replyFeedback)
+	}
+
 	if command, ok := joinSetupCommandInputFromInteraction(payload); ok {
 		return s.StartJoinSetupInteraction(ctx, command, payload.ResponseURL)
 	}

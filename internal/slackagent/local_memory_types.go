@@ -9,6 +9,7 @@ type SlackMemorySummary struct {
 	WorkspaceRootDir        string                 `json:"workspaceRootDir,omitempty"`
 	WorkspaceFileCount      int                    `json:"workspaceFileCount,omitempty"`
 	WorkspaceTriageContexts int                    `json:"workspaceTriageContexts,omitempty"`
+	FeedbackEntries         int                    `json:"feedbackEntries,omitempty"`
 	Seed                    SlackMemorySeedSummary `json:"seed"`
 }
 
@@ -30,9 +31,10 @@ type SlackMemoryResult struct {
 }
 
 type SlackMemoryAgentContext struct {
-	Enabled     bool                `json:"enabled"`
-	Provenance  string              `json:"provenance,omitempty"`
-	Query       string              `json:"query,omitempty"`
-	ResultCount int                 `json:"resultCount,omitempty"`
-	Results     []SlackMemoryResult `json:"results,omitempty"`
+	Enabled        bool                `json:"enabled"`
+	Provenance     string              `json:"provenance,omitempty"`
+	Query          string              `json:"query,omitempty"`
+	ResultCount    int                 `json:"resultCount,omitempty"`
+	Results        []SlackMemoryResult `json:"results,omitempty"`
+	RecentFeedback string              `json:"recentFeedback,omitempty"`
 }

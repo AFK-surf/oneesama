@@ -1,6 +1,9 @@
 package slackagent
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 func (s *Service) MemorySummary() SlackMemorySummary {
 	if s == nil {
@@ -15,7 +18,13 @@ func (s *Service) MemorySummary() SlackMemorySummary {
 		summary.WorkspaceFileCount = len(listDirectWorkspaceMemoryFiles(s.workspaceDir))
 		summary.WorkspaceTriageContexts = len(workspaceTriageContextsForMemory(s.workspaceDir))
 	}
-	summary.Enabled = summary.Enabled || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0
+	if s.feedback != nil {
+		count, err := s.feedback.CountEntries(context.Background())
+		if err == nil {
+			summary.FeedbackEntries = count
+		}
+	}
+	summary.Enabled = summary.Enabled || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0 || summary.FeedbackEntries > 0
 	return summary
 }
 
@@ -34,6 +43,9 @@ func (s *Service) SearchLocalMemory(query string, limit int) []SlackMemoryResult
 	if s.localMemory != nil {
 		results = append(results, s.localMemory.Search(query, limit)...)
 	}
+	if s.feedback != nil {
+		results = append(results, s.feedback.SearchResults(context.Background(), keywords, limit)...)
+	}
 	results = append(results, workspaceMemoryFileSearchResults(s.workspaceDir, keywords, limit)...)
 	results = append(results, workspaceTriageMemoryResults(s.workspaceDir, keywords, limit)...)
 	results = dedupeMemoryResults(results)
@@ -47,13 +59,18 @@ func (s *Service) buildLocalSlackMemoryContext(query string, limit int) SlackMem
 	}
 	results := s.SearchLocalMemory(query, limit)
 	summary := s.MemorySummary()
-	enabled := (s.localMemory != nil && s.localMemory.enabled) || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0
+	enabled := (s.localMemory != nil && s.localMemory.enabled) || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0 || summary.FeedbackEntries > 0
+	recentFeedback := ""
+	if s.feedback != nil {
+		recentFeedback = s.feedback.RecentMarkdown(context.Background(), 20)
+	}
 	return SlackMemoryAgentContext{
-		Enabled:     enabled,
-		Provenance:  "Local private Slack Agent D memory seed plus live workspace memory projections. Content stays on this machine and is not committed.",
-		Query:       strings.TrimSpace(query),
-		ResultCount: len(results),
-		Results:     results,
+		Enabled:        enabled,
+		Provenance:     "Local private Slack Agent D memory seed plus live workspace memory projections. Content stays on this machine and is not committed.",
+		Query:          strings.TrimSpace(query),
+		ResultCount:    len(results),
+		Results:        results,
+		RecentFeedback: recentFeedback,
 	}
 }
 
