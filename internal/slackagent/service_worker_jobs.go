@@ -85,16 +85,19 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 			s.logger.Warn("slack worker canvas publish failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "surface", manifest.Surface)
 		}
 	}
-	result := s.PostMessage(ctx, PostMessageInput{
+	postInput := PostMessageInput{
 		Channel:  ref.ChannelID,
 		ThreadTS: ref.ThreadTS,
 		Text:     markdownToSlackFallbackText(text),
 		Blocks:   buildSlackThreadReplyBlocks(text, "", nil),
 		DedupKey: dedupKey,
-	})
+	}
+	result := s.PostMessage(ctx, postInput)
 	if !result.OK {
 		s.logger.Warn("slack worker result post failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "error", result.Error, "detail", result.Detail)
+		return
 	}
+	s.recordSlackOutboundLedger(ctx, "workspace", postInput, result, "worker_result: "+firstTextLine(text))
 }
 
 func shouldPublishWorkerResultAsCanvas(job agentrunner.Job, text string) bool {

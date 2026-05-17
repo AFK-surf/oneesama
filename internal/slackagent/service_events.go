@@ -326,8 +326,26 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 		ThreadTS: postInput.ThreadTS,
 		DedupKey: postInput.DedupKey,
 	}
-	go s.dispatchEventPost(context.WithoutCancel(ctx), postInput)
+	workspaceID := firstNonEmpty(envelope.TeamID, "workspace")
+	ledgerSummary := slackEventReplyLedgerSummary(mode, postText)
+	go s.dispatchEventReplyWithLedger(context.WithoutCancel(ctx), workspaceID, postInput, ledgerSummary)
 	return response
+}
+
+// slackEventReplyLedgerSummary builds the short ledger summary recorded
+// for a durable event reply. The mode prefix lets future audit views
+// distinguish app_mention answers from DM responses without re-deriving
+// the source from raw text.
+func slackEventReplyLedgerSummary(mode, postText string) string {
+	prefix := mode
+	if strings.TrimSpace(prefix) == "" {
+		prefix = "event_reply"
+	}
+	body := strings.TrimSpace(firstTextLine(postText))
+	if body == "" {
+		return prefix
+	}
+	return prefix + ": " + body
 }
 
 func shouldRewriteMentionWorkerTask(commandText string, richContext *SlackAppMentionContext) bool {
@@ -426,6 +444,69 @@ func (s *Service) dispatchEventPost(ctx context.Context, input PostMessageInput)
 		"status", result.Status,
 	)
 	s.notifyOperatorPostFailure(ctx, input, result)
+}
+
+// dispatchEventReplyWithLedger is the durable-reply variant of
+// dispatchEventPost: it records the outbound into the cognition ledger on
+// success so the assistant's thread history stays consistent. Transient
+// surfaces (queued-ack on coalesced mentions, thinking status, operator
+// fallback notifications) continue to use dispatchEventPost without a
+// ledger write to keep the ledger focused on user-visible answer posts.
+func (s *Service) dispatchEventReplyWithLedger(ctx context.Context, workspaceID string, input PostMessageInput, ledgerSummary string) {
+	result := s.PostMessage(ctx, input)
+	if result.OK {
+		s.recordSlackOutboundLedger(ctx, workspaceID, input, result, ledgerSummary)
+		return
+	}
+	s.logger.Warn(
+		"slack events post dispatch failed",
+		"channel", input.Channel,
+		"thread_ts", input.ThreadTS,
+		"dedup_key", input.DedupKey,
+		"error", result.Error,
+		"detail", result.Detail,
+		"status", result.Status,
+	)
+	s.notifyOperatorPostFailure(ctx, input, result)
+}
+
+// recordSlackOutboundLedger captures a successful durable Slack post into
+// the cognition thread ledger. Centralizing the call here lets every
+// durable-reply call site reuse the same null-safety checks (no cognition
+// store / empty channel or thread / empty summary) so callers don't have
+// to special-case the no-store path. The summary text is truncated to keep
+// the ledger row from carrying full reply bodies.
+func (s *Service) recordSlackOutboundLedger(ctx context.Context, workspaceID string, input PostMessageInput, result PostMessageResult, summary string) {
+	if s == nil || s.cognition == nil {
+		return
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return
+	}
+	channelID := strings.TrimSpace(input.Channel)
+	threadTS := strings.TrimSpace(input.ThreadTS)
+	if threadTS == "" {
+		threadTS = strings.TrimSpace(result.ThreadTS)
+	}
+	if threadTS == "" {
+		threadTS = strings.TrimSpace(result.TS)
+	}
+	if channelID == "" || threadTS == "" {
+		return
+	}
+	ws := strings.TrimSpace(workspaceID)
+	if ws == "" {
+		ws = "workspace"
+	}
+	if err := s.cognition.RecordOutbound(ctx, ws, channelID, threadTS, truncateSlackContextText(summary, 400)); err != nil {
+		s.logger.Warn(
+			"slack outbound ledger record failed",
+			"channel", channelID,
+			"thread_ts", threadTS,
+			"error", err,
+		)
+	}
 }
 
 // notifyOperatorPostFailure routes a chat.postMessage failure to the pilot
