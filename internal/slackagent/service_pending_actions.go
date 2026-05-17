@@ -84,6 +84,7 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 		s.logger.Warn("slack pending action cognition update failed", "error", err)
 	}
 	s.syncPendingActionInteractionFollowup(ctx, *updated, interaction)
+	s.recordConfirmedActionFollowup(ctx, *updated, interaction)
 	s.recordPendingActionFeedback(ctx, *updated, interaction)
 	if interaction.Status == "confirmed" && updated.ActionType == slackActionTypeJoinMeeting {
 		go s.executeJoinMeetingPendingAction(context.WithoutCancel(ctx), *updated, interaction)

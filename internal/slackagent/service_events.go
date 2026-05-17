@@ -308,6 +308,9 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 	if strings.TrimSpace(postText) == "" || strings.TrimSpace(event.Channel) == "" {
 		return response
 	}
+	if mentionMode && command.OK {
+		s.maybeRecordAssistantCommitmentFollowup(ctx, ref, postText)
+	}
 
 	postInput := PostMessageInput{
 		Channel:  event.Channel,

@@ -139,6 +139,7 @@ func (s *Service) postMeetingSummaryResult(ctx context.Context, payload Normaliz
 		return MeetingWebhookResponse{OK: false, Event: payload.Event, MeetingID: payload.MeetingID, Error: "meeting_result_delivery_failed", Detail: err.Error(), Post: post, Published: published}
 	}
 	s.projectMeetingResultToTeamMemory(ctx, payload, ref)
+	s.enqueueMeetingActionFollowups(ctx, payload, ref)
 	status := s.scheduleAssistantThreadStatus(ctx, AssistantThreadRef{ChannelID: ref.ChannelID, ThreadTS: ref.ThreadTS}, "", true)
 	return MeetingWebhookResponse{OK: post == nil || post.OK, Event: payload.Event, MeetingID: payload.MeetingID, Status: firstNonEmpty(payload.Status, "done"), SlackRef: ref, Post: post, Published: published, AssistantStatus: &status, Delivery: delivery}
 }
