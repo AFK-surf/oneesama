@@ -172,15 +172,11 @@ func (s *Service) ExecuteSlackTool(ctx context.Context, request SlackToolCallReq
 	case "suggest_action":
 		return s.executeSuggestActionTool(ctx, request.Role, args), nil
 	case "runtime_status":
-		return slackToolOK(name, s.Status()), nil
+		return slackToolOK(name, s.executeRuntimeStatusTool(ctx)), nil
 	case "heartbeat_log":
 		limit := intFromAny(args["limit"])
-		path, lines, err := loadHeartbeatLogTail(limit)
-		result := map[string]any{"path": path, "lines": lines}
-		if err != nil {
-			result["error"] = err.Error()
-		}
-		return slackToolOK(name, result), nil
+		includeRaw := boolFromAny(args["include_raw"], true)
+		return slackToolOK(name, s.executeHeartbeatLogTool(ctx, limit, includeRaw)), nil
 	case "exa_contents":
 		return executeExaContentsTool(ctx, args), nil
 	case "exa_search":
