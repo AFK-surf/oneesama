@@ -26,11 +26,10 @@ Oneesama's low-level rendering ports are strong. `mrkdwn.go`, `mrkdwn_blocks.go`
 
 The Canvas and file layer is more mixed:
 
-- P0: `slack.uploadFile` is advertised active, but `slackAPITool.actionUploadFile` bypasses the ported workspace/temp-staging resolver and calls `UploadSlackFile` directly on the caller-provided path. Cueboard guarded Slack-triggered uploads with `resolveLocalUploadPath`, `ensurePathWithinWorkspace`, and `/tmp` staging. Oneesama has those helpers, but the gateway does not use them.
-- P1: post-meeting and long worker-result Canvas publishing are implemented and tested, including native `canvases.create`, thread notifications, dedupe keys, transcript/audio upload, and file manifests. But the generic `slack_api` Canvas actions (`fetch_canvas`, `create_canvas`, `edit_canvas`) still return `registered_unavailable`, so the runtime has internal Canvas capability that the assistant/tool surface cannot use.
-- P1: Canvas body fetch is still missing. Cueboard can download Slack Canvas HTML and convert it to Markdown; Oneesama detects Canvas references and has `htmlToMarkdown`, but no `downloadCanvasContent` / `downloadCanvasFromURL` path is wired into mention context or `slack_api`.
-- P1: Canvas publishing lacks Cueboard's create-failure sanitize/plain-markdown retry. Oneesama renders structured meeting Canvas Markdown safely, but arbitrary `SummaryMarkdown` / `SummaryPath` goes to `canvases.create` without the `sanitizeCanvasMarkdown` + `stripToPlainMarkdown` fallback Cueboard used.
-- P1: reply post memory side effects are uneven. Cueboard's `postSlackThreadReply` always records thread-ledger outbound after Slack post; Oneesama records direct triage replies and meeting delivery separately, but generic `Poster.PostMessage`, worker result posts, and event dispatch posts do not uniformly write the thread ledger.
+- **P0 RESOLVED (5/18, commit `12e09b2`):** `slack.uploadFile` now routes through `slackWorkspaceFileResolver.resolveLocalUploadPath`. Slack-triggered uploads are restricted to the workspace dir; `/tmp` / `/var/tmp` paths are auto-staged into `.tmp/slack-upload-staging/` before upload. Regression tests in `slack_api_tool_upload_safety_test.go`.
+- **P1 RESOLVED (5/18, commits `1240484` + `94cd49b`):** `slack_api(fetch_canvas)` and `slack_api(fetch_image)` are now `active`. Canvas fetch downloads HTML via files.info → url_private_download → `htmlToMarkdown` with size cap; image fetch downloads bytes and optionally returns inline base64 plus a mime data URL ready for multimodal models. `create_canvas` / `edit_canvas` remain `registered_unavailable` pending a product decision on whether assistant-visible Canvas authoring belongs in `slack_api` or stays internal to meeting/worker publication.
+- **P1 RESOLVED (5/18, commit `a353b79`):** `CanvasPublisher.publishSlackCanvas` now performs a sanitize-and-retry pass when Slack returns a validation-class error (`invalid_markdown` / `markdown_too_long` / `parse_error` etc.). `sanitizeMarkdownForSlackCanvas` strips raw HTML, flattens GFM tables to bullets, drops code-fence language hints, removes footnotes, collapses excessive blank lines. Successful retries are tagged `sanitized_markdown_retry_after:<original_error>` in `result.Detail` for audit visibility.
+- P1: reply post memory side effects are uneven. Cueboard's `postSlackThreadReply` always records thread-ledger outbound after Slack post; Oneesama records direct triage replies and meeting delivery separately, but generic `Poster.PostMessage`, worker result posts, and event dispatch posts do not uniformly write the thread ledger. **Still open** — Phase 5 P1 centralized post ledger work remains.
 
 ## Function Inventory
 
@@ -62,14 +61,16 @@ The Canvas and file layer is more mixed:
 
 ## P0 Gaps
 
-- `slack_api_tool_messages.go:208-225` should call the ported `slackWorkspaceFileResolver.resolveLocalUploadPath` before `UploadSlackFile`. Right now a Slack tool call can pass an arbitrary readable local path to `slack.uploadFile`, while Cueboard forced Slack-triggered upload paths under the workspace or staged trusted `/tmp` artifacts first. This is both a parity gap and a safety boundary bug.
+All P0 gaps in this audit slice are now closed.
+
+- ~~`slack_api_tool_messages.go:208-225` should call the ported `slackWorkspaceFileResolver.resolveLocalUploadPath` before `UploadSlackFile`.~~ **RESOLVED** (commit `12e09b2`): Slack uploads now route through the workspace resolver with `/tmp` auto-staging.
 
 ## P1 Gaps
 
-- `slack_api_tool_messages.go:67` and `:390-393` still mark `fetch_canvas`, `create_canvas`, and `edit_canvas` as registered-unavailable even though Oneesama's internal `CanvasPublisher` can create/edit Canvas. Either expose those actions through `slack_api` with the same safety model or make the tool matrix clearer that Canvas is only available through meeting/worker publication flows.
-- Cueboard `slack_api_tool_canvas.go:40-111` Canvas fetch is missing. This keeps `htmlToMarkdown` as a tested but mostly unused helper and leaves Slack Canvas body text unavailable to mention context, tool calls, and long-thread summarization.
-- `CanvasPublisher.publishSlackCanvas` should add Cueboard's sanitize/plain-markdown retry path. Structured meeting markdown is safe, but arbitrary `SummaryMarkdown` / `SummaryPath` can still fail Slack Canvas restrictions without `sanitizeCanvasMarkdown` / `stripToPlainMarkdown` fallback.
-- Slack post memory side effects should be centralized. Cueboard `postSlackThreadReply` always recorded outbound into the thread ledger; Oneesama currently records some direct triage replies and meeting deliveries, but worker result posts, app mention event posts, and generic tool posts can bypass durable thread memory.
+- ~~`slack_api_tool_messages.go:67` and `:390-393` still mark `fetch_canvas`, `create_canvas`, and `edit_canvas` as registered-unavailable~~ **PARTIALLY RESOLVED** (commits `1240484` + `94cd49b`): `fetch_canvas` and `fetch_image` are now `active`. `create_canvas` / `edit_canvas` remain `registered_unavailable` pending product decision on whether assistant-visible Canvas authoring belongs in `slack_api`.
+- ~~Cueboard `slack_api_tool_canvas.go:40-111` Canvas fetch is missing.~~ **RESOLVED** (commit `1240484`): `actionFetchCanvas` ports the Canvas download + htmlToMarkdown path with 8 KiB markdown / 512 KiB HTML safety caps.
+- ~~`CanvasPublisher.publishSlackCanvas` should add Cueboard's sanitize/plain-markdown retry path.~~ **RESOLVED** (commit `a353b79`): validation-class errors now trigger a single sanitize+retry; the fallback is tagged in `result.Detail`.
+- Slack post memory side effects should be centralized. Cueboard `postSlackThreadReply` always recorded outbound into the thread ledger; Oneesama currently records some direct triage replies and meeting deliveries, but worker result posts, app mention event posts, and generic tool posts can bypass durable thread memory. **STILL OPEN** — Phase 5 P1 centralized post ledger work.
 - Cueboard posts an action-item follow-up hint after meeting summaries. Oneesama publishes Canvas and projects team memory, but there is no equivalent user-facing "review/create follow-up issues" hint; this may be intentionally replaced by task #166 heartbeat followups, but it should be a product decision.
 
 ## Product Exclusions / Intentional Drift
