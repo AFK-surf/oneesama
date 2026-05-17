@@ -134,6 +134,15 @@ func (s *slackFeedbackStore) SearchResults(ctx context.Context, keywords []strin
 	return limitMemoryResults(results, limit)
 }
 
+// recentMarkdownDayBudget caps the rendered feedback markdown so the
+// assistant prompt's "recent feedback" section cannot grow unbounded. Mirrors
+// Cueboard's `renderFeedbackDays` trimming policy: keep newest days first and
+// drop entire older day blocks (never split a day) until the result fits
+// under the budget. The budget is generous enough for ~6–8 active days of
+// feedback in practice but bounded so a chatty week doesn't bury the rest of
+// the system prompt.
+const recentMarkdownDayBudget = 4096
+
 func (s *slackFeedbackStore) RecentMarkdown(ctx context.Context, limit int) string {
 	entries, err := s.ListEntries(ctx, limit)
 	if err != nil || len(entries) == 0 {
@@ -148,17 +157,87 @@ func (s *slackFeedbackStore) RecentMarkdown(ctx context.Context, limit int) stri
 		}
 		return entries[i].ID < entries[j].ID
 	})
-	var out []string
-	currentDate := ""
+	dayBlocks := renderFeedbackDayBlocks(entries)
+	return trimFeedbackDaysToBudget(dayBlocks, recentMarkdownDayBudget)
+}
+
+// renderFeedbackDayBlocks groups entries by EntryDate (already sorted) and
+// returns each day as a `#### <date>\n- ...\n- ...` block. Returning the
+// blocks separately lets the byte-budget trimmer drop entire days without
+// splitting one mid-list.
+func renderFeedbackDayBlocks(entries []SlackFeedbackEntry) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+	var (
+		blocks      []string
+		currentDate string
+		lines       []string
+	)
+	flush := func() {
+		if len(lines) == 0 {
+			return
+		}
+		blocks = append(blocks, strings.Join(lines, "\n"))
+		lines = lines[:0]
+	}
 	for _, entry := range entries {
 		if entry.EntryDate != currentDate {
+			flush()
 			currentDate = entry.EntryDate
-			out = append(out, "#### "+currentDate)
+			lines = append(lines, "#### "+currentDate)
 		}
-		out = append(out, fmt.Sprintf("- [%s] %s %s #%s — %q — by %s",
+		lines = append(lines, fmt.Sprintf("- [%s] %s %s #%s — %q — by %s",
 			entry.EntryTime, entry.Action, entry.ActionType, entry.Channel, entry.Summary, entry.UserID))
 	}
-	return strings.TrimSpace(strings.Join(out, "\n"))
+	flush()
+	return blocks
+}
+
+// trimFeedbackDaysToBudget keeps the newest day blocks first (the input is
+// ordered oldest→newest, so we walk backwards) and stops adding once the
+// running byte total would exceed budget. If any older day was dropped, a
+// single "[older feedback omitted ...]" line is prepended so the assistant
+// sees that earlier history existed.
+func trimFeedbackDaysToBudget(dayBlocks []string, budget int) string {
+	if len(dayBlocks) == 0 {
+		return ""
+	}
+	if budget <= 0 {
+		return strings.TrimSpace(strings.Join(dayBlocks, "\n"))
+	}
+	keptReversed := make([]string, 0, len(dayBlocks))
+	running := 0
+	dropped := 0
+	for i := len(dayBlocks) - 1; i >= 0; i-- {
+		block := dayBlocks[i]
+		// `\n\n` block separator counts toward the budget too.
+		cost := len(block)
+		if len(keptReversed) > 0 {
+			cost += 2
+		}
+		if running+cost > budget {
+			dropped = i + 1
+			break
+		}
+		keptReversed = append(keptReversed, block)
+		running += cost
+	}
+	if len(keptReversed) == 0 {
+		// Even the newest day exceeds the budget; keep it anyway so the
+		// caller has at least one feedback day in the prompt.
+		return strings.TrimSpace(dayBlocks[len(dayBlocks)-1])
+	}
+	// Reverse back to oldest→newest order for stable rendering.
+	kept := make([]string, len(keptReversed))
+	for i, block := range keptReversed {
+		kept[len(keptReversed)-1-i] = block
+	}
+	out := strings.Join(kept, "\n\n")
+	if dropped > 0 {
+		out = fmt.Sprintf("[older feedback omitted — %d earlier day block(s) trimmed to fit budget]\n\n", dropped) + out
+	}
+	return strings.TrimSpace(out)
 }
 
 func normalizeSlackFeedbackEntry(entry SlackFeedbackEntry) SlackFeedbackEntry {
