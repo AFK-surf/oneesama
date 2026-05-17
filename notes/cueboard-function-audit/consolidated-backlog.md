@@ -4,14 +4,14 @@ Task: task #171
 
 ## Status as of 2026-05-18 (task #174 marathon)
 
-The marathon directive `task #174 "你俩合作，直到所有问题修完"` has cleared most of Phases 0–3 + the bulk of Phase 5 and Phase 6 P2. Snapshot of remaining work by phase below; struck-through rows are landed. Live SHA at last update: `f7bd930`.
+The marathon directive `task #174 "你俩合作，直到所有问题修完"` has cleared most of Phases 0–4 + the bulk of Phase 5 and Phase 6 P2. Snapshot of remaining work by phase below; struck-through rows are landed. Live SHA at last update: `c6fd0d0`.
 
 - **Phase 0 quick fixes**: all 4 P0/P1 landed (`12e09b2`).
 - **Phase 1 state foundations**: scanner cursors + slack_channels + slack_channel_membership + slack_thread_cases landed (`8c87d45` + `262c4a9`). `slack_thread_recommendations` is still open — driver picked it up via the suggest_action+followup loops (`ece0124`/`fc0ae2c`) and now considers it covered functionally even though there is no separate typed collection.
 - **Phase 2 thread ownership**: P0 mention queue + thread case lifecycle + scanner suppression + activeThread guard landed (`78a0905`). Durable-context guard (`looksLikeHandledTaskSummary`) landed (`1539917`). Pending-action card update on confirm/dismiss landed via driver Phase 3 (`495bbd0`).
 - **Phase 3 heartbeat loop**: pending-action loop closure (`ece0124`), heartbeat ticker (`495bbd0`), and commitment/confirmed-action/meeting-action follow-up hooks (`fc0ae2c`) landed. PrimeHeartbeatState normalization remains open.
-- **Phase 4 Calendar approval scanner**: in flight on a driver worktree at time of writing.
-- **Phase 5 context tools**: Canvas fetch (`1240484`), image fetch (`94cd49b`), Canvas sanitize+retry (`a353b79`), safe Block Kit blocks (`3dbdc9a`), and DM/debug fallback Stage A (`9a27ca3`) landed. Centralized post ledger, Stage B fallback wiring, Canvas create/edit decision, and Cueboard-formatted `runtime_status` / `heartbeat_log` views remain open.
+- **Phase 4 Calendar approval scanner**: Google Calendar scan loop + OAuth refresh + real Slack root-message approval card + thread-case dedupe landed (`6d3f601`).
+- **Phase 5 context tools**: Canvas fetch (`1240484`), image fetch (`94cd49b`), Canvas sanitize+retry (`a353b79`), safe Block Kit blocks (`3dbdc9a`), DM/debug fallback Stage A (`9a27ca3`), and Stage B event-post fallback wiring (`c6fd0d0`) landed. Centralized post ledger, Canvas create/edit decision, and Cueboard-formatted `runtime_status` / `heartbeat_log` views remain open.
 - **Phase 6 ops**: processutil consolidation landed (`75a3802`). Feedback markdown trim landed (`438104e`). JSON unknown-field policy and workspace-template embeds remain open as docs/decisions.
 
 Sources:
@@ -35,8 +35,8 @@ The remaining risky gaps cluster into five themes:
 1. **State durability:** scanner cursors, channel membership, thread ownership, and recommendation reservations are not persisted like Cueboard.
 2. **Duplicate/unsafe Slack behavior:** mention-thread ownership, active-thread tool guards, and generic Slack upload safety are incomplete.
 3. **Pending-action and heartbeat loops:** `suggest_action` validates but does not execute Cueboard's card/reservation/follow-up side effects; heartbeat reminders can be stored but are not fully synced/surfaced.
-4. **Meeting automation:** direct/manual Meet join is strong, but Cueboard's Calendar-driven Slack approval scanner is missing.
-5. **Capability surfaces:** Canvas fetch/edit, Slack image fetch, DM/debug fallback, official Meet API fallback, and ASR chunk production are either missing or intentionally deferred.
+4. **Meeting automation:** direct/manual Meet join and Calendar-driven Slack approval scanner are now covered. Official Meet API fallback and ASR chunk production remain open product decisions.
+5. **Capability surfaces:** Canvas create/edit, centralized Slack post ledger, official Meet API fallback, and ASR chunk production are either missing or intentionally deferred.
 
 Do **not** try to port Cueboard wholesale. The large Cueboard agent-framework, envhost/VM stack, credentialed integrations, and HTML admin cockpit are intentionally replaced or excluded. The backlog below only covers behavior that still matters for Oneesama's current product.
 
@@ -96,13 +96,13 @@ This is the memory/self-growth loop Peng expected from Cueboard.
 
 Manual and direct Meet join are solid. This package is only needed if Oneesama should proactively suggest scheduled meetings like Cueboard.
 
-| Priority | Work                                                                      | Source audits  | Notes                                                                                                                                     | Acceptance                                                                                                     |
-| -------- | ------------------------------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| P0       | Implement Slack-agent Calendar meeting scanner loop.                      | #169/#170      | Pull Calendar events, select approval window, and post Slack approval card. Depends on real `suggest_action`.                             | Upcoming calendar meeting creates one deduped approval card in configured channel; approving schedules meetd.  |
-| P1       | Add config/migration story for Calendar credentials and approval channel. | #168/#170      | Cueboard had Google config knobs; Oneesama config is narrower.                                                                            | Required env/config keys are documented and validated; missing credentials produce clear startup/audit status. |
-| P1       | Add linked meeting thread lookup in notifications.                        | #168/#169/#165 | `notify_meeting_slack` should find the right thread and mention humans safely.                                                            | Meeting notification resolves linked Slack thread and user IDs without raw channel/thread text from model.     |
-| P2       | Decide official Google Meet API fallback.                                 | #169           | DOM/captions are product-primary. Official conference records/transcripts can improve post-meeting reliability but add credentials/scope. | Decision recorded: implement fallback or mark product-excluded with rationale.                                 |
-| P2       | Decide ASR chunk production.                                              | #169           | Current code consumes chunks and final audio but does not split/downsample long recordings.                                               | Long recording either produces chunks locally, or docs say caption/OpenAI/Gemini path is primary.              |
+| Priority | Work                                                                          | Source audits  | Notes                                                                                                                                                                                                                    | Acceptance                                                                                                                          |
+| -------- | ----------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| P0       | ~~Implement Slack-agent Calendar meeting scanner loop.~~                      | #169/#170      | **RESOLVED** (`6d3f601`): scanner fetches Google Calendar events, filters upcoming Meet links, posts a real Slack root-message approval anchor, then posts a deduped `suggest_action(join_meeting)` card in that thread. | `/slack/status.meeting_scanner` exposes disabled/configured/running/tick state; no `google_calendar_api` assistant tool is exposed. |
+| P1       | ~~Add config/migration story for Calendar credentials and approval channel.~~ | #168/#170      | **RESOLVED** (`6d3f601`): config/env keys cover enable flag, interval, approval channel, calendar ID, access token, refresh token/client credentials, API base URL, and token URL.                                       | Missing config fails closed with `disabled_reason`; live default is disabled and observable.                                        |
+| P1       | Add linked meeting thread lookup in notifications.                            | #168/#169/#165 | `notify_meeting_slack` should find the right thread and mention humans safely.                                                                                                                                           | Meeting notification resolves linked Slack thread and user IDs without raw channel/thread text from model.                          |
+| P2       | Decide official Google Meet API fallback.                                     | #169           | DOM/captions are product-primary. Official conference records/transcripts can improve post-meeting reliability but add credentials/scope.                                                                                | Decision recorded: implement fallback or mark product-excluded with rationale.                                                      |
+| P2       | Decide ASR chunk production.                                                  | #169           | Current code consumes chunks and final audio but does not split/downsample long recordings.                                                                                                                              | Long recording either produces chunks locally, or docs say caption/OpenAI/Gemini path is primary.                                   |
 
 ### 5. Complete Slack Context And Content Tools
 
@@ -158,8 +158,8 @@ These are implementation slices in dependency order. Each slice should include c
    - Periodic follow-up surfacing ticker.
    - Startup normalization/dedupe.
 6. **Ship Calendar meeting approval automation, if product still wants it.**
-   - Calendar scan loop.
-   - Slack approval card via real pending-action path.
+   - ~~Calendar scan loop.~~ (`6d3f601`)
+   - ~~Slack approval card via real pending-action path.~~ (`6d3f601`)
    - Meeting thread lookup and notification routing.
 7. **Fill high-value Slack context tools.**
    - Canvas fetch.
@@ -188,7 +188,7 @@ The audit found many Cueboard functions that should **not** become Oneesama work
 
 1. Should Oneesama scan only channels it has joined, or auto-join public channels on `not_in_channel` like Cueboard?
 2. Should the scanner bootstrap window remain the quieter 10 minutes, or restore Cueboard's 24 hour first sweep?
-3. Is Calendar-driven meeting auto-approval still a required product path, or is explicit Slack/Realtime join the primary path?
+3. Should Calendar-driven meeting auto-approval be enabled in live config, or should it remain shipped but fail-closed until operators provide an approval channel and Google credentials?
 4. Do operators need import/migration from legacy Cueboard `slack.db`, or is fresh state acceptable for cutover?
 5. Should official Google Meet API data be added as a reliability fallback, or should DOM/captions remain the only meeting awareness source?
 6. Should generic Slack Canvas create/edit be assistant-visible, or should Canvas authoring stay internal to meeting/worker publication?
