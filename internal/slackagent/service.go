@@ -53,6 +53,7 @@ type Config struct {
 
 type Service struct {
 	logger                  *slog.Logger
+	startedAt               time.Time
 	persistence             appconfig.PersistenceConfig
 	signingSecret           string
 	botToken                string
@@ -101,6 +102,8 @@ type Service struct {
 	scannerMu      sync.Mutex
 	scannerCancel  context.CancelFunc
 	scannerBackoff map[string]time.Time
+	scannerSweeps  []time.Time
+	scanner429s    []time.Time
 
 	eventMu    sync.Mutex
 	seenEvents map[string]time.Time
@@ -186,6 +189,7 @@ func NewService(cfg Config) *Service {
 
 	service = &Service{
 		logger:                  logger,
+		startedAt:               timeNow().UTC(),
 		persistence:             cfg.Persistence,
 		signingSecret:           strings.TrimSpace(cfg.Slack.SigningSecret),
 		botToken:                strings.TrimSpace(cfg.Slack.BotToken),

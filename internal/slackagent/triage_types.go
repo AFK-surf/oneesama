@@ -137,6 +137,7 @@ type SlackTriageAuditReport struct {
 	Outcome       SlackTriageAuditOutcome    `json:"outcome"`
 	InputContext  SlackTriageInputContext    `json:"inputContext"`
 	ContextFetch  SlackTriageContextFetch    `json:"contextFetch"`
+	ProcessHealth SlackTriageProcessHealth   `json:"processHealth"`
 	Canary        SlackTriageCanarySummary   `json:"canary"`
 	Flags         []SlackTriageAuditFlag     `json:"flags,omitempty"`
 	RecentRuns    []SlackTriageAuditRunBrief `json:"recentRuns,omitempty"`
@@ -163,6 +164,18 @@ type SlackTriageContextFetch struct {
 	ChannelContextFetched int `json:"channelContextFetched"`
 	ThreadContextFetched  int `json:"threadContextFetched"`
 	ExternalLinksFetched  int `json:"externalLinksFetched"`
+}
+
+type SlackTriageProcessHealth struct {
+	PID                         int     `json:"pid"`
+	UptimeSeconds               int64   `json:"uptimeSeconds"`
+	CPUPercent                  float64 `json:"cpuPct"`
+	ScannerSweepsLastWindow     int     `json:"scannerSweepsLastWindow"`
+	ScannerRateLimitsLastWindow int     `json:"scannerRateLimitsLastWindow"`
+	HTTP429LastWindow           int     `json:"http429LastWindow"`
+	SocketConnected             bool    `json:"socketConnected"`
+	SocketReconnectsTotal       int     `json:"socketReconnectsTotal"`
+	SocketReconnectsLastWindow  int     `json:"socketReconnectsLastWindow"`
 }
 
 type SlackTriageCanarySummary struct {

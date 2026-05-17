@@ -41,8 +41,9 @@ type SocketModeRunner struct {
 
 	writeMu sync.Mutex
 
-	stateMu sync.Mutex
-	state   SlackSocketModeStatus
+	stateMu          sync.Mutex
+	state            SlackSocketModeStatus
+	reconnectHistory []time.Time
 }
 
 func NewSocketModeRunner(cfg SocketModeRunnerConfig) *SocketModeRunner {
@@ -136,6 +137,15 @@ func (r *SocketModeRunner) Snapshot() SlackSocketModeStatus {
 	return r.state
 }
 
+func (r *SocketModeRunner) ReconnectsSince(cutoff time.Time) int {
+	if r == nil {
+		return 0
+	}
+	r.stateMu.Lock()
+	defer r.stateMu.Unlock()
+	return countTimeHistorySince(r.reconnectHistory, cutoff.UTC())
+}
+
 func (r *SocketModeRunner) runLoop(ctx context.Context) {
 	defer r.wg.Done()
 
@@ -217,6 +227,7 @@ func (r *SocketModeRunner) serveOnce(ctx context.Context) error {
 				state.Connecting = false
 				state.LastClosedAt = time.Now().UTC().Format(time.RFC3339Nano)
 				state.Reconnects++
+				r.reconnectHistory = appendPrunedTimeHistory(r.reconnectHistory, time.Now().UTC(), 24*time.Hour)
 			})
 			return err
 		}

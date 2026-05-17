@@ -402,6 +402,50 @@ func TestTriageAuditFlagsMissingLivePositiveSample(t *testing.T) {
 	}
 }
 
+func TestTriageAuditIncludesProcessHealthSignals(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 17, 11, 46, 29, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{AppToken: "xapp-test"},
+	})
+	service.recordSlackScannerSweep(now.Add(-7 * time.Hour))
+	service.recordSlackScannerSweep(now.Add(-30 * time.Minute))
+	service.recordSlackScannerRateLimit(now.Add(-8 * time.Hour))
+	service.recordSlackScannerRateLimit(now.Add(-time.Hour))
+
+	runner := NewSocketModeRunner(SocketModeRunnerConfig{Service: service, AppToken: "xapp-test"})
+	runner.stateMu.Lock()
+	runner.state.Connected = true
+	runner.state.Reconnects = 2
+	runner.reconnectHistory = []time.Time{now.Add(-7 * time.Hour), now.Add(-15 * time.Minute)}
+	runner.stateMu.Unlock()
+	service.socketModeMu.Lock()
+	service.socketMode = runner
+	service.socketModeMu.Unlock()
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	health := report.ProcessHealth
+	if health.PID == 0 || health.UptimeSeconds != 0 {
+		t.Fatalf("processHealth = %#v, want pid and deterministic zero uptime", health)
+	}
+	if health.ScannerSweepsLastWindow != 1 {
+		t.Fatalf("scanner sweeps = %d, want 1", health.ScannerSweepsLastWindow)
+	}
+	if health.ScannerRateLimitsLastWindow != 1 || health.HTTP429LastWindow != 1 {
+		t.Fatalf("rate limits = %#v, want one 429-style rate limit in window", health)
+	}
+	if !health.SocketConnected || health.SocketReconnectsTotal != 2 || health.SocketReconnectsLastWindow != 1 {
+		t.Fatalf("socket health = %#v, want connected with one reconnect in window", health)
+	}
+}
+
 func TestHandleTriageAuditReturnsSelfServeReport(t *testing.T) {
 	previousClock := timeNow
 	now := time.Date(2026, 5, 17, 1, 0, 0, 0, time.UTC)

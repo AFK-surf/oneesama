@@ -113,7 +113,9 @@ func (s *Service) runSlackHistoryScanner(ctx context.Context, interval time.Dura
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			if result, err := s.scanSlackHistoryOnce(ctx, slackHistoryScannerBootstrapLookback); err != nil {
+			result, err := s.scanSlackHistoryOnce(ctx, slackHistoryScannerBootstrapLookback)
+			s.recordSlackScannerSweep(timeNow().UTC())
+			if err != nil {
 				s.logger.Warn("slack history scanner sweep failed", "error", err)
 			} else if result.OK {
 				s.logger.Info("slack history scanner sweep complete", "channels", len(result.Sweeps))
@@ -430,6 +432,7 @@ func (s *Service) callSlackScannerAPI(ctx context.Context, method string, params
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		_ = json.Unmarshal(raw, out)
+		s.recordSlackScannerRateLimit(timeNow().UTC())
 		return slackScannerRateLimitError{
 			Method:     method,
 			RetryAfter: slackScannerRetryAfter(response.Header.Get("Retry-After")),
@@ -450,6 +453,66 @@ func slackScannerRetryAfter(value string) time.Duration {
 		return slackScannerDefaultRateLimitBackoff
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func (s *Service) recordSlackScannerSweep(timestamp time.Time) {
+	if s == nil || timestamp.IsZero() {
+		return
+	}
+	s.scannerMu.Lock()
+	defer s.scannerMu.Unlock()
+	s.scannerSweeps = appendPrunedTimeHistory(s.scannerSweeps, timestamp.UTC(), 24*time.Hour)
+}
+
+func (s *Service) recordSlackScannerRateLimit(timestamp time.Time) {
+	if s == nil || timestamp.IsZero() {
+		return
+	}
+	s.scannerMu.Lock()
+	defer s.scannerMu.Unlock()
+	s.scanner429s = appendPrunedTimeHistory(s.scanner429s, timestamp.UTC(), 24*time.Hour)
+}
+
+func (s *Service) slackScannerSweepCountSince(cutoff time.Time) int {
+	if s == nil {
+		return 0
+	}
+	s.scannerMu.Lock()
+	defer s.scannerMu.Unlock()
+	return countTimeHistorySince(s.scannerSweeps, cutoff.UTC())
+}
+
+func (s *Service) slackScannerRateLimitCountSince(cutoff time.Time) int {
+	if s == nil {
+		return 0
+	}
+	s.scannerMu.Lock()
+	defer s.scannerMu.Unlock()
+	return countTimeHistorySince(s.scanner429s, cutoff.UTC())
+}
+
+func appendPrunedTimeHistory(values []time.Time, timestamp time.Time, keep time.Duration) []time.Time {
+	if keep <= 0 {
+		keep = 24 * time.Hour
+	}
+	cutoff := timestamp.Add(-keep)
+	out := values[:0]
+	for _, value := range values {
+		if !value.IsZero() && !value.Before(cutoff) {
+			out = append(out, value)
+		}
+	}
+	return append(out, timestamp)
+}
+
+func countTimeHistorySince(values []time.Time, cutoff time.Time) int {
+	count := 0
+	for _, value := range values {
+		if !value.IsZero() && !value.Before(cutoff) {
+			count++
+		}
+	}
+	return count
 }
 
 func slackScannerInboundMessages(channel slackScannerConversation, messages []SlackMessage) []SlackInboundMessage {

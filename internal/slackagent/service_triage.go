@@ -3,8 +3,10 @@ package slackagent
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
@@ -57,7 +59,9 @@ func (s *Service) TriageAudit(ctx context.Context, window time.Duration, limit i
 	if err != nil {
 		return SlackTriageAuditReport{}, err
 	}
-	return buildSlackTriageAuditReport(runs, window), nil
+	report := buildSlackTriageAuditReport(runs, window)
+	report.ProcessHealth = s.slackTriageProcessHealth(window)
+	return report, nil
 }
 
 func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration) SlackTriageAuditReport {
@@ -167,6 +171,76 @@ func buildSlackTriageContextFetch(runs []SlackTriageContext) SlackTriageContextF
 		fetch.ExternalLinksFetched += intFromAny(run.Metadata["external_links_fetched"])
 	}
 	return fetch
+}
+
+func (s *Service) slackTriageProcessHealth(window time.Duration) SlackTriageProcessHealth {
+	if window <= 0 {
+		window = slackTriageAuditDefaultWindow
+	}
+	now := timeNow().UTC()
+	cutoff := now.Add(-window)
+	startedAt := now
+	if s != nil && !s.startedAt.IsZero() {
+		startedAt = s.startedAt.UTC()
+	}
+	uptime := now.Sub(startedAt)
+	if uptime < 0 {
+		uptime = 0
+	}
+	socket := SlackSocketModeStatus{}
+	if s != nil {
+		socket = s.socketModeStatus()
+	}
+	rateLimits := 0
+	if s != nil {
+		rateLimits = s.slackScannerRateLimitCountSince(cutoff)
+	}
+	health := SlackTriageProcessHealth{
+		PID:                         os.Getpid(),
+		UptimeSeconds:               int64(uptime.Seconds()),
+		CPUPercent:                  slackProcessCPUPercent(uptime),
+		ScannerRateLimitsLastWindow: rateLimits,
+		HTTP429LastWindow:           rateLimits,
+		SocketConnected:             socket.Connected,
+		SocketReconnectsTotal:       socket.Reconnects,
+	}
+	if s != nil {
+		health.ScannerSweepsLastWindow = s.slackScannerSweepCountSince(cutoff)
+		health.SocketReconnectsLastWindow = s.socketModeReconnectsSince(cutoff)
+	}
+	return health
+}
+
+func (s *Service) socketModeReconnectsSince(cutoff time.Time) int {
+	if s == nil {
+		return 0
+	}
+	s.socketModeMu.Lock()
+	runner := s.socketMode
+	s.socketModeMu.Unlock()
+	if runner == nil {
+		return 0
+	}
+	return runner.ReconnectsSince(cutoff)
+}
+
+func slackProcessCPUPercent(uptime time.Duration) float64 {
+	if uptime <= 0 {
+		return 0
+	}
+	var usage syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
+		return 0
+	}
+	cpu := slackTimevalDuration(usage.Utime) + slackTimevalDuration(usage.Stime)
+	if cpu <= 0 {
+		return 0
+	}
+	return float64(cpu) / float64(uptime) * 100
+}
+
+func slackTimevalDuration(value syscall.Timeval) time.Duration {
+	return time.Duration(value.Sec)*time.Second + time.Duration(value.Usec)*time.Microsecond
 }
 
 func buildSlackTriageCanarySummary(runs []SlackTriageContext) SlackTriageCanarySummary {
