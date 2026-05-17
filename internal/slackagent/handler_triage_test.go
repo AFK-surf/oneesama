@@ -426,6 +426,11 @@ func TestTriageAuditClassifiesSkipReasonBuckets(t *testing.T) {
 		{Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "用户补一条点赞转发个人操作备忘。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
 		{Timestamp: now.Add(-3 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "纯技术开发实现进度，无需办公助手介入。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
 		{Timestamp: now.Add(-4 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "与上一次 triage 结论一致，重复 followup。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+		{Timestamp: now.Add(-5 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "用户继续追问 cueboard PR #1915 进度，bot internal issue 后尚未恢复。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+		{Timestamp: now.Add(-6 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "团队成员同步日程：一人请假、一人赶飞机。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+		{Timestamp: now.Add(-7 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "用户分享 bridge.surf 链接，属于技术内容。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+		{Timestamp: now.Add(-8 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "单条 file_share 截图，上下文不足无法判断。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
+		{Timestamp: now.Add(-9 * time.Minute).Format(time.RFC3339Nano), Status: "ok", Summary: "工具行为观察/报备，无协调需求。", Metadata: map[string]any{"suppressed_reason": "no_actions"}},
 	} {
 		if _, err := service.triage.RecordRun(context.Background(), run); err != nil {
 			t.Fatalf("RecordRun: %v", err)
@@ -436,10 +441,73 @@ func TestTriageAuditClassifiesSkipReasonBuckets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TriageAudit: %v", err)
 	}
-	for _, want := range []string{"handled_by_other_bot", "personal_note", "pure_dev_progress", "duplicate_or_followup"} {
+	for _, want := range []string{
+		"handled_by_other_bot",
+		"personal_note",
+		"pure_dev_progress",
+		"duplicate_or_followup",
+		"dev_bot_stuck_or_handoff",
+		"schedule_note",
+		"link_share",
+		"low_signal_file_share",
+		"observation_only",
+	} {
 		if report.SkipReasons[want] != 1 {
 			t.Fatalf("skipReasons = %#v, want one %s", report.SkipReasons, want)
 		}
+	}
+	if !hasAuditFlag(report.Flags, "dev_bot_stuck_or_handoff") {
+		t.Fatalf("flags = %#v, want stuck/handoff signal", report.Flags)
+	}
+}
+
+func TestTriageAuditSplitsRealAndProbeOutcomes(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 17, 23, 47, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	runs := []SlackTriageContext{
+		{
+			Timestamp: now.Add(-time.Minute).Format(time.RFC3339Nano),
+			Status:    "ok",
+			Summary:   "real user direct reply",
+			Mutations: 1,
+			Metadata:  map[string]any{"suppressed_reason": "posted"},
+		},
+		{
+			Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339Nano),
+			Status:    "failed",
+			Summary:   "early live positive probe failed",
+			Error:     "provider temporarily failed",
+			Metadata: map[string]any{
+				"live_positive_probe": true,
+				"probe_kind":          "maybe_follow_up",
+			},
+		},
+	}
+	for _, run := range runs {
+		if _, err := service.triage.RecordRun(context.Background(), run); err != nil {
+			t.Fatalf("RecordRun: %v", err)
+		}
+	}
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if report.Outcome.FailedRuns != 1 || report.Outcome.OutboundRuns != 1 {
+		t.Fatalf("outcome = %#v, want aggregate failure plus real outbound", report.Outcome)
+	}
+	if report.RealOutcome.FailedRuns != 0 || report.RealOutcome.OutboundRuns != 1 {
+		t.Fatalf("realOutcome = %#v, want real outbound without probe failure", report.RealOutcome)
+	}
+	if report.ProbeOutcome.FailedRuns != 1 || report.ProbeOutcome.OutboundRuns != 0 {
+		t.Fatalf("probeOutcome = %#v, want probe failure isolated", report.ProbeOutcome)
 	}
 }
 

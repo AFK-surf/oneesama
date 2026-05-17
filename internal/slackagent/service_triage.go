@@ -89,6 +89,8 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		RunCount:      len(windowRuns),
 		Freshness:     *freshness,
 		Outcome:       buildSlackTriageAuditOutcome(windowRuns),
+		RealOutcome:   buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, false)),
+		ProbeOutcome:  buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, true)),
 		InputContext:  buildSlackTriageInputContext(windowRuns),
 		ContextFetch:  buildSlackTriageContextFetch(windowRuns),
 		SkipReasons:   buildSlackTriageSkipReasons(windowRuns),
@@ -137,6 +139,16 @@ func buildSlackTriageAuditOutcome(runs []SlackTriageContext) SlackTriageAuditOut
 		}
 	}
 	return outcome
+}
+
+func filterSlackTriageProbeRuns(runs []SlackTriageContext, probe bool) []SlackTriageContext {
+	out := make([]SlackTriageContext, 0, len(runs))
+	for _, run := range runs {
+		if slackTriageRunIsProbe(run) == probe {
+			out = append(out, run)
+		}
+	}
+	return out
 }
 
 func buildSlackTriageInputContext(runs []SlackTriageContext) SlackTriageInputContext {
@@ -326,6 +338,10 @@ func slackTriageLiveProbeOutcome(run SlackTriageContext) string {
 	}
 }
 
+func slackTriageRunIsProbe(run SlackTriageContext) bool {
+	return boolFromAny(run.Metadata["live_positive_probe"], false) || strings.TrimSpace(stringFromAny(run.Metadata["probe_kind"])) != ""
+}
+
 func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAuditFlag {
 	var flags []SlackTriageAuditFlag
 	if report.RunCount == 0 {
@@ -339,6 +355,9 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 	}
 	if report.Outcome.ParseFallbacks > 0 {
 		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "parse_fallbacks", Message: "Some triage runs required parser fallback handling."})
+	}
+	if report.SkipReasons["dev_bot_stuck_or_handoff"] > 0 {
+		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "dev_bot_stuck_or_handoff", Message: "Some skipped development threads look like a bot is stuck, handing off, or being repeatedly chased."})
 	}
 	if report.Canary.NeedsLiveSample {
 		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "no_live_positive_samples", Message: "No real ACT/MAYBE triage samples appeared in this window; rely on canary controls until live positives occur."})
@@ -409,15 +428,32 @@ func slackTriageSkipReasonBucket(run SlackTriageContext) string {
 		return "duplicate_or_followup"
 	case containsAnySubstring(text, "备忘", "个人操作", "点赞", "转发", "note"):
 		return "personal_note"
+	case slackTriageLooksLikeDevBotStuckOrHandoff(text):
+		return "dev_bot_stuck_or_handoff"
 	case containsAnySubstring(text, "已处理", "正在修复", "持续响应", "其他 bot", "target bot", "handled"):
 		return "handled_by_other_bot"
 	case containsAnySubstring(text, "纯技术", "开发", "实现", "pr ", "pr#", "cherry-pick", "ci"):
 		return "pure_dev_progress"
+	case containsAnySubstring(text, "日程", "请假", "赶飞机", "同步", "schedule"):
+		return "schedule_note"
+	case containsAnySubstring(text, "file_share", "截图", "上下文不足", "低信号", "low signal"):
+		return "low_signal_file_share"
+	case containsAnySubstring(text, "链接", "link", "http://", "https://", "分享"):
+		return "link_share"
+	case containsAnySubstring(text, "观察", "报备", "无协调需求", "observation"):
+		return "observation_only"
 	case strings.TrimSpace(stringFromAny(run.Metadata["suppressed_reason"])) == "no_actions":
 		return "no_action_other"
 	default:
 		return ""
 	}
+}
+
+func slackTriageLooksLikeDevBotStuckOrHandoff(text string) bool {
+	hasDev := containsAnySubstring(text, "纯技术", "开发", "实现", "pr ", "pr#", "cueboard", "openbridge", "bot ")
+	hasChase := containsAnySubstring(text, "追问", "尚未", "未回复", "没有回复", "internal issue", "follow-up", "续跑", "卡住", "stuck")
+	hasHandoff := containsAnySubstring(text, "交接", "新 bot", "旧 bot", "session ready", "handoff")
+	return (hasDev && hasChase) || hasHandoff
 }
 
 func containsAnySubstring(text string, values ...string) bool {

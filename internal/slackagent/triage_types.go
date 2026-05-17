@@ -135,6 +135,8 @@ type SlackTriageAuditReport struct {
 	RunCount      int                         `json:"runCount"`
 	Freshness     SlackTriageFreshness        `json:"freshness"`
 	Outcome       SlackTriageAuditOutcome     `json:"outcome"`
+	RealOutcome   SlackTriageAuditOutcome     `json:"realOutcome"`
+	ProbeOutcome  SlackTriageAuditOutcome     `json:"probeOutcome"`
 	InputContext  SlackTriageInputContext     `json:"inputContext"`
 	ContextFetch  SlackTriageContextFetch     `json:"contextFetch"`
 	SkipReasons   map[string]int              `json:"skipReasons,omitempty"`
