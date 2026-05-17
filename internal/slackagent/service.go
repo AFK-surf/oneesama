@@ -69,6 +69,7 @@ type Service struct {
 	meetingAgentURL         string
 	meetWebhookSecret       string
 	publicBaseURL           string
+	meetingScanner          meetingScannerConfig
 	defaultCaptionLanguage  string
 	oauthExchanger          OAuthExchanger
 	poster                  PosterService
@@ -109,6 +110,15 @@ type Service struct {
 	scannerBackoff map[string]time.Time
 	scannerSweeps  []time.Time
 	scanner429s    []time.Time
+
+	meetingScannerMu          sync.Mutex
+	meetingScannerCancel      context.CancelFunc
+	meetingScannerTicks       []time.Time
+	meetingScannerLastTickAt  time.Time
+	meetingScannerLastError   string
+	meetingScannerLastScanned int
+	meetingScannerLastPosted  int
+	meetingScannerLastSkipped int
 
 	heartbeatMu          sync.Mutex
 	heartbeatCancel      context.CancelFunc
@@ -218,6 +228,7 @@ func NewService(cfg Config) *Service {
 		meetingAgentURL:         strings.TrimSpace(cfg.MeetingAgentURL),
 		meetWebhookSecret:       strings.TrimSpace(cfg.MeetWebhookSecret),
 		publicBaseURL:           strings.TrimSpace(cfg.Slack.PublicBaseURL),
+		meetingScanner:          newMeetingScannerConfig(cfg.Slack.MeetingScanner),
 		defaultCaptionLanguage:  strings.TrimSpace(cfg.DefaultCaptionLanguage),
 		oauthExchanger:          oauthExchanger,
 		poster:                  poster,

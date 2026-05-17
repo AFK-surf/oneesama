@@ -19,6 +19,10 @@ const (
 	defaultSlackEventDebounce           = 30 * time.Second
 	defaultSlackTriagePostActions       = true
 	defaultSlackTriageHeuristicFallback = true
+	defaultSlackMeetingScannerInterval  = time.Minute
+	defaultGoogleCalendarID             = "primary"
+	defaultGoogleCalendarAPIBaseURL     = "https://www.googleapis.com/calendar/v3"
+	defaultGoogleOAuthTokenURL          = "https://oauth2.googleapis.com/token"
 	defaultMeetdWatch                   = time.Minute
 	defaultOpenAIBaseURL                = "https://api.openai.com/v1"
 	defaultOpenAIRealtimeModel          = "gpt-realtime-2"

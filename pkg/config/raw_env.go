@@ -102,6 +102,39 @@ func applySlackMemoryEnvOverrides(cfg *Config) {
 	}
 }
 
+func applySlackMeetingScannerEnvOverrides(cfg *Config) {
+	if value, ok := getenvBool("ONEESAMA_SLACK_MEETING_SCANNER", "MAB_SLACK_MEETING_SCANNER"); ok {
+		cfg.Slack.MeetingScanner.Enabled = value
+	}
+	if value, ok := getenvDuration("ONEESAMA_SLACK_MEETING_SCANNER_INTERVAL", "MAB_SLACK_MEETING_SCANNER_INTERVAL", "MEETING_SCANNER_INTERVAL"); ok {
+		cfg.Slack.MeetingScanner.Interval = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_MEETING_APPROVAL_CHANNEL", "MAB_MEETING_APPROVAL_CHANNEL", "MEET_APPROVAL_CHANNEL")); value != "" {
+		cfg.Slack.MeetingScanner.ApprovalChannel = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_GOOGLE_CALENDAR_ID", "GOOGLE_CALENDAR_ID")); value != "" {
+		cfg.Slack.MeetingScanner.CalendarID = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_GOOGLE_CALENDAR_ACCESS_TOKEN", "GOOGLE_ACCESS_TOKEN")); value != "" {
+		cfg.Slack.MeetingScanner.AccessToken = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_GOOGLE_CALENDAR_REFRESH_TOKEN", "GOOGLE_REFRESH_TOKEN")); value != "" {
+		cfg.Slack.MeetingScanner.RefreshToken = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_GOOGLE_CALENDAR_CLIENT_ID", "GOOGLE_CLIENT_ID")); value != "" {
+		cfg.Slack.MeetingScanner.ClientID = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_GOOGLE_CALENDAR_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET")); value != "" {
+		cfg.Slack.MeetingScanner.ClientSecret = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_GOOGLE_CALENDAR_API_BASE_URL", "GOOGLE_CALENDAR_API_BASE_URL")); value != "" {
+		cfg.Slack.MeetingScanner.APIBaseURL = strings.TrimRight(value, "/")
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_GOOGLE_OAUTH_TOKEN_URL", "GOOGLE_OAUTH_TOKEN_URL")); value != "" {
+		cfg.Slack.MeetingScanner.TokenURL = value
+	}
+}
+
 func applyMeetdEnvOverrides(cfg *Config) {
 	if value, ok := getenvDuration("ONEESAMA_MEETD_WATCH_INTERVAL", "MEET_WATCH_INTERVAL", "MAB_MEET_WATCH_INTERVAL"); ok {
 		cfg.Meetd.WatchInterval = value

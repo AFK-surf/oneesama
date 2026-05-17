@@ -43,6 +43,7 @@ type SlackConfig struct {
 	EventBuffer     SlackEventBufferConfig
 	Triage          SlackTriageConfig
 	Memory          SlackMemoryConfig
+	MeetingScanner  SlackMeetingScannerConfig
 }
 
 type SlackEventBufferConfig struct {
@@ -60,6 +61,19 @@ type SlackTriageConfig struct {
 type SlackMemoryConfig struct {
 	Enabled bool
 	Dir     string
+}
+
+type SlackMeetingScannerConfig struct {
+	Enabled         bool
+	Interval        time.Duration
+	ApprovalChannel string
+	CalendarID      string
+	AccessToken     string
+	RefreshToken    string
+	ClientID        string
+	ClientSecret    string
+	APIBaseURL      string
+	TokenURL        string
 }
 
 type AgentRunnerConfig struct {

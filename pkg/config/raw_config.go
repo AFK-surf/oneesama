@@ -42,6 +42,7 @@ type rawSlackConfig struct {
 	EventBuffer     rawSlackEventBufferConfig `json:"event_buffer"`
 	Triage          rawSlackTriageConfig      `json:"triage"`
 	Memory          rawSlackMemoryConfig      `json:"memory"`
+	MeetingScanner  rawSlackMeetingScanner    `json:"meeting_scanner"`
 }
 
 type rawSlackEventBufferConfig struct {
@@ -59,6 +60,19 @@ type rawSlackTriageConfig struct {
 type rawSlackMemoryConfig struct {
 	Enabled bool   `json:"enabled"`
 	Dir     string `json:"dir"`
+}
+
+type rawSlackMeetingScanner struct {
+	Enabled         bool   `json:"enabled"`
+	Interval        string `json:"interval"`
+	ApprovalChannel string `json:"approval_channel"`
+	CalendarID      string `json:"calendar_id"`
+	AccessToken     string `json:"access_token"`
+	RefreshToken    string `json:"refresh_token"`
+	ClientID        string `json:"client_id"`
+	ClientSecret    string `json:"client_secret"`
+	APIBaseURL      string `json:"api_base_url"`
+	TokenURL        string `json:"token_url"`
 }
 
 type rawAgentRunner struct {
@@ -183,6 +197,18 @@ func (r rawConfig) toConfig(path string) Config {
 				Enabled: r.Slack.Memory.Enabled,
 				Dir:     stringOrDefault(r.Slack.Memory.Dir, defaultSlackMemoryDir),
 			},
+			MeetingScanner: SlackMeetingScannerConfig{
+				Enabled:         r.Slack.MeetingScanner.Enabled,
+				Interval:        durationOrDefault(r.Slack.MeetingScanner.Interval, defaultSlackMeetingScannerInterval),
+				ApprovalChannel: strings.TrimSpace(r.Slack.MeetingScanner.ApprovalChannel),
+				CalendarID:      stringOrDefault(r.Slack.MeetingScanner.CalendarID, defaultGoogleCalendarID),
+				AccessToken:     strings.TrimSpace(r.Slack.MeetingScanner.AccessToken),
+				RefreshToken:    strings.TrimSpace(r.Slack.MeetingScanner.RefreshToken),
+				ClientID:        strings.TrimSpace(r.Slack.MeetingScanner.ClientID),
+				ClientSecret:    strings.TrimSpace(r.Slack.MeetingScanner.ClientSecret),
+				APIBaseURL:      stringOrDefault(r.Slack.MeetingScanner.APIBaseURL, defaultGoogleCalendarAPIBaseURL),
+				TokenURL:        stringOrDefault(r.Slack.MeetingScanner.TokenURL, defaultGoogleOAuthTokenURL),
+			},
 		},
 		AgentRunner: buildAgentRunnerConfig(r.AgentRunner),
 		Meetd: MeetdConfig{
@@ -228,6 +254,7 @@ func applyEnvOverrides(cfg *Config) {
 	applySlackEventBufferEnvOverrides(cfg)
 	applySlackTriageEnvOverrides(cfg)
 	applySlackMemoryEnvOverrides(cfg)
+	applySlackMeetingScannerEnvOverrides(cfg)
 	applyAgentRunnerEnvOverrides(cfg)
 	applyMeetdEnvOverrides(cfg)
 	applyOpenAIEnvOverrides(cfg)

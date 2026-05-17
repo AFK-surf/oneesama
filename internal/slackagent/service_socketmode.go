@@ -4,6 +4,7 @@ import "context"
 
 func (s *Service) Start() error {
 	s.startSlackHistoryScanner()
+	s.startMeetingApprovalScanner()
 	s.startHeartbeatTicker()
 
 	if s == nil || s.appToken == "" {
@@ -29,6 +30,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	s.stopSlackHistoryScanner()
+	s.stopMeetingApprovalScanner()
 	s.stopHeartbeatTicker()
 	s.socketModeMu.Lock()
 	runner := s.socketMode
