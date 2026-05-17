@@ -79,17 +79,19 @@ The main risk is that several Cueboard mechanisms were ported as isolated helper
 
 ## P0 Gaps
 
-- `mention.go:56-204` / `mention_state.go:91-144`: live per-thread mention queue is not wired. Oneesama defines and tests `slackMentionQueue`, but `handleEventAvatarCommand` bypasses it. A second mention in the same thread will start a separate command/job instead of merging into the running mention and suppressing stale replies.
-- `mention_state.go:41-85`: active mention-thread registry is missing. Cueboard registers the current thread and uses it to stop assistant code from posting duplicate Slack replies to the same thread. Oneesama's `slackAPITool.activeThread` field is never set by `executeSlackAPITool`, so the guard is effectively dead.
+All P0 gaps in this audit slice are now closed.
+
+- ~~`mention.go:56-204` / `mention_state.go:91-144`: live per-thread mention queue is not wired.~~ **RESOLVED** (commit `78a0905`): `handleEventAvatarCommand` now calls `slackMentionQueue.enqueue`. A second mention in the same thread merges with an ack post and does not start a duplicate worker.
+- ~~`mention_state.go:41-85`: active mention-thread registry is missing.~~ **RESOLVED** (commit `78a0905`): `Service.executeSlackAPITool` wires `activeThread: s.isActiveMentionThread`, which checks `slack_thread_cases` for an active mention claim. `chat.postMessage` to the active thread is refused with a clear retry hint.
 
 ## P1 Gaps
 
-- `assistant_history.go:49-223`: incremental assistant history forwarding is helper-only. If Oneesama wants Cueboard-level Slack mention UX, the agent-runner path needs a live history listener/flush bridge or an explicit product decision to stay final-response-only.
-- `mention_context.go:532-567`: live meeting context is not fetched by Slack thread. Oneesama should query its meeting store / meeting-agent by `(channel_id, thread_ts)` and inject recent captions/speakers when a Slack thread has an active Meet.
-- `mention_context.go:174-296`: Canvas body context is not fetched. Oneesama detects Canvas IDs/files but does not download Canvas content snippets, so Canvas-comment mentions remain thinner than Cueboard.
-- `interaction.go:37-76` and `763-819`: pending action cards are not consistently updated after confirm/dismiss/feedback. Old cards can remain clickable-looking even after the store state has changed.
-- `interaction.go:136-195` / `425-441`: pending-action confirmation only executes `join_meeting`. Confirmed `create_channel` is a real missing Slack-side side effect; direct Linear/Calendar action execution remains product-excluded.
-- `assistant_context.go:159-195`: durable context should reuse Cueboard's `looksLikeHandledTaskSummary` guard. Otherwise SKIP/no-action ledger summaries can appear as "recent handled task" in assistant prompts.
+- `assistant_history.go:49-223`: incremental assistant history forwarding is helper-only. If Oneesama wants Cueboard-level Slack mention UX, the agent-runner path needs a live history listener/flush bridge or an explicit product decision to stay final-response-only. **Open product decision.**
+- `mention_context.go:532-567`: live meeting context is not fetched by Slack thread. Oneesama should query its meeting store / meeting-agent by `(channel_id, thread_ts)` and inject recent captions/speakers when a Slack thread has an active Meet. **Still open.**
+- ~~`mention_context.go:174-296`: Canvas body context is not fetched.~~ **PARTIALLY RESOLVED** (commit `1240484`): `slack_api(fetch_canvas)` is live as a tool. Wiring the same fetcher into `buildSlackAppMentionContext` so a Canvas-comment mention auto-inlines Canvas text without an extra tool call is still open.
+- ~~`interaction.go:37-76` and `763-819`: pending action cards are not consistently updated after confirm/dismiss/feedback.~~ **RESOLVED** (commit `495bbd0`): driver landed card replace-on-decision for confirm/dismiss.
+- `interaction.go:136-195` / `425-441`: pending-action confirmation only executes `join_meeting`. Confirmed `create_channel` is a real missing Slack-side side effect; direct Linear/Calendar action execution remains product-excluded. **Open product decision** (see Open Questions).
+- ~~`assistant_context.go:159-195`: durable context should reuse Cueboard's `looksLikeHandledTaskSummary` guard.~~ **RESOLVED** (commit `1539917`): `formatSlackDurableContext` now demotes SKIP / failed / observed ledger summaries to "recent thread note" instead of "recent handled task", and rejects "SKIP:" / "No action needed" prefix patterns.
 
 ## Product Exclusions
 
