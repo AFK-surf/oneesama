@@ -166,7 +166,7 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 			}
 		}
 		if nextCursor != previousCursor {
-			s.inbound.SetCursor(channel.ID, nextCursor)
+			s.setInboundCursor(ctx, channel.ID, nextCursor)
 		}
 		var flushed *SlackInboundFlushResult
 		if flush && buffered > 0 {

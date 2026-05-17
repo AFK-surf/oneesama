@@ -202,7 +202,7 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 	}
 	if previousCursor == "" {
 		cursor := firstNonEmpty(latestTS, formatSlackTimestamp(time.Now()))
-		s.inbound.SetCursor(channelID, cursor)
+		s.setInboundCursor(ctx, channelID, cursor)
 		return &SlackScannerChannelResult{
 			ChannelID:      channelID,
 			OK:             true,
@@ -214,7 +214,7 @@ func (s *Service) scanSlackHistoryChannel(ctx context.Context, channel slackScan
 		}, nil
 	}
 	if latestTS != "" {
-		defer s.inbound.SetCursor(channelID, latestTS)
+		defer s.setInboundCursor(ctx, channelID, latestTS)
 	}
 	if len(messages) == 0 {
 		return &SlackScannerChannelResult{
@@ -260,6 +260,29 @@ func slackScannerBackoffResult(channelID string, until time.Time) *SlackScannerC
 	}
 }
 
+// persistScannerChannel upserts the durable channel record so workspace
+// inventory survives restart. Errors are logged but never block scanning —
+// the scanner remains the source of truth in-flight; the durable copy is
+// best-effort observability.
+func (s *Service) persistScannerChannel(ctx context.Context, channel slackScannerConversation) {
+	if s == nil || s.workspaceState == nil {
+		return
+	}
+	if strings.TrimSpace(channel.ID) == "" {
+		return
+	}
+	record := SlackChannelRecord{
+		ID:         channel.ID,
+		Name:       channel.Name,
+		IsPrivate:  channel.IsPrivate,
+		IsArchived: channel.IsArchived,
+		IsMember:   channel.IsMember,
+	}
+	if _, err := s.workspaceState.UpsertChannel(ctx, record); err != nil && s.logger != nil {
+		s.logger.Warn("slack workspace channel upsert failed", "channel_id", channel.ID, "error", err)
+	}
+}
+
 func (s *Service) listSlackScannerChannels(ctx context.Context) ([]slackScannerConversation, error) {
 	var channels []slackScannerConversation
 	cursor := ""
@@ -277,6 +300,7 @@ func (s *Service) listSlackScannerChannels(ctx context.Context) ([]slackScannerC
 			return nil, fmt.Errorf("conversations.list: %s", firstNonEmpty(response.Error, "slack_api_error"))
 		}
 		for _, channel := range response.Channels {
+			s.persistScannerChannel(ctx, channel)
 			if channel.IsMember && !channel.IsArchived {
 				channels = append(channels, channel)
 			}

@@ -80,6 +80,9 @@ type Service struct {
 	inbound                 *slackInboundBuffer
 	triage                  *slackTriageStore
 	cognition               *slackCognitionStore
+	scannerCursors          *slackScannerCursorStore
+	workspaceState          *slackWorkspaceStore
+	threadCases             *slackThreadCaseStore
 	localMemory             *localSlackMemory
 	followups               *slackHeartbeatStore
 	improvements            *slackImprovementStore
@@ -217,6 +220,9 @@ func NewService(cfg Config) *Service {
 		inbound:                 newSlackInboundBuffer(cfg.Slack.EventBuffer, nil),
 		triage:                  newSlackTriageStore(cfg.Persistence, logger),
 		cognition:               newSlackCognitionStore(cfg.Persistence, logger),
+		scannerCursors:          newSlackScannerCursorStore(cfg.Persistence, logger),
+		workspaceState:          newSlackWorkspaceStore(cfg.Persistence, logger),
+		threadCases:             newSlackThreadCaseStore(cfg.Persistence, logger),
 		localMemory:             newLocalSlackMemory(cfg.Slack.Memory),
 		followups:               newSlackHeartbeatStore(cfg.Persistence, logger),
 		improvements:            newSlackImprovementStore(cfg.Persistence, logger),
@@ -241,6 +247,7 @@ func NewService(cfg Config) *Service {
 			service.logger.Warn("slack inbound buffer flush failed", "channel", channelID, "error", err)
 		}
 	}
+	service.loadScannerCursors(context.Background())
 	if service.workspaceDir != "" {
 		result := EnsureWorkspaceFiles(EnsureWorkspaceFilesOptions{WorkspaceDir: service.workspaceDir})
 		if !result.OK {

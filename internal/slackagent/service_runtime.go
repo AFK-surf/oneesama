@@ -16,16 +16,19 @@ type StatusResponse struct {
 }
 
 type SlackStatus struct {
-	SigningSecretConfigured bool                  `json:"signing_secret_configured"`
-	BotTokenConfigured      bool                  `json:"bot_token_configured"`
-	AppTokenConfigured      bool                  `json:"app_token_configured"`
-	BotUserID               string                `json:"bot_user_id,omitempty"`
-	PosterMode              string                `json:"poster_mode"`
-	CanvasProvider          string                `json:"canvas_provider"`
-	ScheduleManagerReady    bool                  `json:"schedule_manager_ready"`
-	WorkspaceDir            string                `json:"workspace_dir"`
-	InternalAuthConfigured  bool                  `json:"internal_auth_configured"`
-	SocketMode              SlackSocketModeStatus `json:"socket_mode"`
+	SigningSecretConfigured bool                     `json:"signing_secret_configured"`
+	BotTokenConfigured      bool                     `json:"bot_token_configured"`
+	AppTokenConfigured      bool                     `json:"app_token_configured"`
+	BotUserID               string                   `json:"bot_user_id,omitempty"`
+	PosterMode              string                   `json:"poster_mode"`
+	CanvasProvider          string                   `json:"canvas_provider"`
+	ScheduleManagerReady    bool                     `json:"schedule_manager_ready"`
+	WorkspaceDir            string                   `json:"workspace_dir"`
+	InternalAuthConfigured  bool                     `json:"internal_auth_configured"`
+	SocketMode              SlackSocketModeStatus    `json:"socket_mode"`
+	ScannerCursors          SlackScannerCursorStats  `json:"scanner_cursors"`
+	WorkspaceState          SlackWorkspaceStateStats `json:"workspace_state"`
+	ThreadCases             SlackThreadCaseStats     `json:"thread_cases"`
 }
 
 type AgentRunnerStatus struct {
@@ -63,7 +66,20 @@ type AvatarCommandResponse struct {
 }
 
 func (s *Service) Status() StatusResponse {
-	runnerStatus := s.agentRunnerStatus(context.Background())
+	ctx := context.Background()
+	runnerStatus := s.agentRunnerStatus(ctx)
+	scannerCursorStats := SlackScannerCursorStats{}
+	if s.scannerCursors != nil {
+		scannerCursorStats = s.scannerCursors.Stats(ctx)
+	}
+	workspaceStats := SlackWorkspaceStateStats{}
+	if s.workspaceState != nil {
+		workspaceStats = s.workspaceState.Stats(ctx)
+	}
+	threadCaseStats := SlackThreadCaseStats{}
+	if s.threadCases != nil {
+		threadCaseStats = s.threadCases.Stats(ctx)
+	}
 	return StatusResponse{
 		OK:      true,
 		Service: "slack-agent",
@@ -84,6 +100,9 @@ func (s *Service) Status() StatusResponse {
 			WorkspaceDir:            s.workspaceDir,
 			InternalAuthConfigured:  s.internalAuthKey != "",
 			SocketMode:              s.socketModeStatus(),
+			ScannerCursors:          scannerCursorStats,
+			WorkspaceState:          workspaceStats,
+			ThreadCases:             threadCaseStats,
 		},
 		AgentRunner: runnerStatus,
 	}
