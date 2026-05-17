@@ -34,11 +34,106 @@ func (s *Service) BuildHeartbeatContext(ctx context.Context) (string, error) {
 	sections := []string{
 		formatHeartbeatCandidateDigest(followups, 3),
 		formatHeartbeatFollowupDigest(followups),
+		formatHeartbeatUpcomingDigest(followups, timeNow(), heartbeatUpcomingHorizon),
 		formatHeartbeatRecentThreadsDigest(recentThreads),
 		formatHeartbeatMeetingDigest(loadRecentMeetingActionItems(s.workspaceDir, timeNow(), 3)),
 		formatHeartbeatRecentSurfaceDigest(recentSurfaces),
 	}
 	return strings.Join(sections, "\n\n"), nil
+}
+
+// heartbeatUpcomingHorizon is the look-ahead window for the "upcoming
+// deadlines" section. Cueboard's analog used 24h; we keep the same default
+// so the heartbeat prompt highlights work that is due before the next
+// scheduled wake-up rather than burying it inside the open-followup list.
+const heartbeatUpcomingHorizon = 24 * time.Hour
+
+// formatHeartbeatUpcomingDigest emits the "Upcoming follow-up deadlines"
+// section the BuildHeartbeatContext prompt was missing. We sort open
+// followups whose NextCheckAt (or DueAt) falls inside the next `horizon`
+// window in ascending order and emit one line each so the assistant can see
+// which item is most urgent without re-parsing the longer open-followup
+// list.
+func formatHeartbeatUpcomingDigest(followups []SlackHeartbeatFollowup, now time.Time, horizon time.Duration) string {
+	lines := []string{"Upcoming follow-up deadlines (next " + horizon.String() + "):"}
+	upcoming := selectUpcomingHeartbeatFollowups(followups, now, horizon)
+	if len(upcoming) == 0 {
+		return heartbeatEmpty(lines)
+	}
+	for _, item := range upcoming {
+		deadlineRaw, source := firstHeartbeatDeadline(item)
+		deadlineLabel := deadlineRaw
+		if parsed, err := time.Parse(time.RFC3339Nano, deadlineRaw); err == nil {
+			deadlineLabel = parsed.UTC().Format("2006-01-02 15:04Z")
+		} else if parsed, err := time.Parse(time.RFC3339, deadlineRaw); err == nil {
+			deadlineLabel = parsed.UTC().Format("2006-01-02 15:04Z")
+		}
+		lines = append(lines, fmt.Sprintf("- #%d %s — due %s (%s)", item.ID, firstNonEmpty(item.Title, item.Summary), deadlineLabel, source))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// selectUpcomingHeartbeatFollowups filters followups whose effective deadline
+// (NextCheckAt or DueAt) is between now and now+horizon. Items with no
+// parseable deadline are excluded — the open-followups list already covers
+// those.
+func selectUpcomingHeartbeatFollowups(followups []SlackHeartbeatFollowup, now time.Time, horizon time.Duration) []SlackHeartbeatFollowup {
+	if horizon <= 0 || len(followups) == 0 {
+		return nil
+	}
+	endsAt := now.Add(horizon)
+	type ranked struct {
+		item     SlackHeartbeatFollowup
+		deadline time.Time
+	}
+	var ordered []ranked
+	for _, item := range followups {
+		deadlineRaw, _ := firstHeartbeatDeadline(item)
+		if strings.TrimSpace(deadlineRaw) == "" {
+			continue
+		}
+		var deadline time.Time
+		var err error
+		deadline, err = time.Parse(time.RFC3339Nano, deadlineRaw)
+		if err != nil {
+			deadline, err = time.Parse(time.RFC3339, deadlineRaw)
+		}
+		if err != nil {
+			continue
+		}
+		if deadline.Before(now) || deadline.After(endsAt) {
+			continue
+		}
+		ordered = append(ordered, ranked{item: item, deadline: deadline})
+	}
+	if len(ordered) == 0 {
+		return nil
+	}
+	// Stable insertion sort keeps deterministic output for tests with the
+	// same deadline timestamps.
+	for i := 1; i < len(ordered); i++ {
+		for j := i; j > 0 && ordered[j].deadline.Before(ordered[j-1].deadline); j-- {
+			ordered[j], ordered[j-1] = ordered[j-1], ordered[j]
+		}
+	}
+	out := make([]SlackHeartbeatFollowup, 0, len(ordered))
+	for _, entry := range ordered {
+		out = append(out, entry.item)
+	}
+	return out
+}
+
+// firstHeartbeatDeadline returns the NextCheckAt timestamp if set, otherwise
+// the DueAt timestamp, plus a label so the digest line can tell the reader
+// which clock fired.
+func firstHeartbeatDeadline(item SlackHeartbeatFollowup) (string, string) {
+	if strings.TrimSpace(item.NextCheckAt) != "" {
+		return item.NextCheckAt, "next_check_at"
+	}
+	if strings.TrimSpace(item.DueAt) != "" {
+		return item.DueAt, "due_at"
+	}
+	return "", ""
 }
 
 func formatHeartbeatCandidateDigest(followups []SlackHeartbeatFollowup, limit int) string {
