@@ -65,7 +65,9 @@ func (t *slackAPITool) Execute(ctx context.Context, args map[string]any) (slackA
 		return t.actionUploadFile(ctx, params), nil
 	case "add_reaction", "delete_message", "edit_message", "list_emoji", "pin", "unpin", "set_topic", "set_purpose", "add_bookmark", "invite":
 		return t.actionGenericSlackForm(ctx, resolvedAction, params)
-	case "fetch_image", "fetch_canvas", "create_canvas", "edit_canvas", "send_dm":
+	case "fetch_canvas":
+		return t.actionFetchCanvas(ctx, params), nil
+	case "fetch_image", "create_canvas", "edit_canvas", "send_dm":
 		return slackAPIToolResult{Success: false, Text: fmt.Sprintf("Action %q is registered in the matrix but not available in this Go runtime yet", resolvedAction)}, nil
 	default:
 		return slackAPIToolResult{Success: false, Text: fmt.Sprintf("Action %q is not implemented by the current Slack API parity shim", resolvedAction)}, nil
@@ -406,7 +408,7 @@ func slackAPIMethodMatrix() []SlackAPIMethodSpec {
 		"add_bookmark":          "active",
 		"invite":                "active",
 		"fetch_image":           "registered_unavailable",
-		"fetch_canvas":          "registered_unavailable",
+		"fetch_canvas":          "active",
 		"create_canvas":         "registered_unavailable",
 		"edit_canvas":           "registered_unavailable",
 		"send_dm":               "registered_unavailable",
