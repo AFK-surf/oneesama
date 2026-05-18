@@ -16,6 +16,8 @@ export function failure(id: JsonRpcRequest["id"], message: string): JsonRpcFailu
   return { jsonrpc: "2.0", id, error: { code: -32000, message } };
 }
 
+// IMPORTANT: stdout is the Go <-> meet-runner JSON-RPC channel.
+// Use stderr/console.error for diagnostics; any stdout log can corrupt join responses.
 export function writeResponse(response: JsonRpcSuccess | JsonRpcFailure): void {
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
