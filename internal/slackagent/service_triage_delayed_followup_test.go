@@ -2,6 +2,8 @@ package slackagent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +88,25 @@ func TestSlackTriageDoesNotRecordDelayedNoReplyForLowSignalChatter(t *testing.T)
 	}
 	if len(followups) != 0 {
 		t.Fatalf("followups = %#v, want none for low-signal chatter", followups)
+	}
+}
+
+func TestDelayedNoReplyTitleUsesTemplateOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "delayed_no_reply_title.zh.tmpl"), []byte("自定义 followup 标题：{{.Classification}}\n"), 0o644); err != nil {
+		t.Fatalf("write template override: %v", err)
+	}
+	t.Setenv("ONEESAMA_TRIAGE_TEMPLATE_DIR", dir)
+
+	candidate, ok := slackDelayedNoReplyCandidateFor(
+		SlackTriageDecision{},
+		[]SlackInboundMessage{{Text: "这个架构问题是不是应该让 Pi persona 接住？"}},
+	)
+	if !ok {
+		t.Fatal("slackDelayedNoReplyCandidateFor returned false, want candidate")
+	}
+	if candidate.Title != "自定义 followup 标题：unanswered_question" {
+		t.Fatalf("candidate.Title = %q, want template override", candidate.Title)
 	}
 }
 

@@ -68,16 +68,7 @@ func slackDelayedNoReplyCandidateFor(decision SlackTriageDecision, messages []Sl
 		return slackDelayedNoReplyCandidate{}, false
 	}
 	classification := slackDelayedNoReplyClassification(summary, messages)
-	title := map[string]string{
-		"stale_wait_for_human":      "补一下这条没人接的讨论",
-		"unanswered_question":       "补一下这个开放问题",
-		"stuck_or_handoff":          "补一下这个卡住点",
-		"link_followup_candidate":   "补读这条分享",
-		"synthesis_eligible_thread": "补一下这条讨论",
-	}[classification]
-	if title == "" {
-		title = "补一下这条消息"
-	}
+	title := buildDelayedNoReplyTitle(classification, messageText)
 	summary = buildDelayedNoReplySummary(classification, messageText)
 	if strings.TrimSpace(summary) == "" {
 		return slackDelayedNoReplyCandidate{}, false
@@ -204,6 +195,21 @@ func slackDelayedNoReplyLooksLowSignal(text string) bool {
 		}
 	}
 	return len([]rune(normalized)) < 12 && !strings.ContainsAny(normalized, "?？")
+}
+
+func buildDelayedNoReplyTitle(classification string, messageText string) string {
+	language := "en"
+	if containsCJK(messageText) {
+		language = "zh"
+	}
+	if rendered, err := renderTriageReplyTemplate("delayed_no_reply_title", language, triageReplyTemplateData{
+		Classification: classification,
+		MessageText:    messageText,
+		Language:       language,
+	}); err == nil && strings.TrimSpace(rendered) != "" {
+		return rendered
+	}
+	return strings.ReplaceAll(strings.TrimSpace(classification), "_", " ")
 }
 
 func buildDelayedNoReplySummary(classification string, messageText string) string {
