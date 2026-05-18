@@ -236,6 +236,9 @@ func markBackfillCandidateQuality(candidate SlackBackfillCandidate) SlackBackfil
 	case strings.Contains(candidate.OriginalText, "<@"):
 		candidate.ReviewStatus = BackfillReviewNeedsContext
 		candidate.ReviewReason = "message mentions specific people; verify ownership/context before posting"
+	case backfillCandidateNeedsTechnicalContext(candidate.OriginalText):
+		candidate.ReviewStatus = BackfillReviewNeedsContext
+		candidate.ReviewReason = "technical workflow question; inspect the linked repo/CI/runtime context before posting"
 	case strings.TrimSpace(candidate.Draft) == "":
 		candidate.ReviewStatus = BackfillReviewNeedsContext
 		candidate.ReviewReason = "missing draft text"
@@ -249,6 +252,38 @@ func markBackfillCandidateQuality(candidate SlackBackfillCandidate) SlackBackfil
 func backfillCandidateReviewStatus(candidate SlackBackfillCandidate) (string, string) {
 	candidate = markBackfillCandidateQuality(candidate)
 	return strings.TrimSpace(candidate.ReviewStatus), strings.TrimSpace(candidate.ReviewReason)
+}
+
+func backfillCandidateNeedsTechnicalContext(text string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(text)), " "))
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"ci",
+		"build",
+		"test",
+		"macos",
+		"runner",
+		"workflow",
+		"pr ",
+		"pull request",
+		"merge",
+		"deploy",
+		"合并",
+		"测试",
+		"巡检",
+		"生产环境",
+		"被跳过",
+		"接口",
+		"后端",
+		"前端",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // candidateSourceLabel renders the (FromPersistedState, OriginalText)

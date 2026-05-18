@@ -84,8 +84,9 @@ Every rendered candidate carries a `Quality gate` line:
   `Draft reply`.
 - `needs_link_read` — the item is a readable-link lead, but the
   linked body has not been fetched/synthesized yet.
-- `needs_context` — the message mentions a specific owner/user or has
-  other context that must be verified before posting.
+- `needs_context` — the message mentions a specific owner/user, asks a
+  technical workflow / CI / deploy question, or otherwise needs repo /
+  runtime context before posting.
 - `needs_thread_refetch` — the item came only from persisted
   `delayed_no_reply` state; the thread must be refetched before any
   reply is considered.

@@ -175,6 +175,26 @@ func TestClassifyBackfillMessageMarksUnansweredQuestion(t *testing.T) {
 	}
 }
 
+func TestClassifyBackfillMessageMarksTechnicalWorkflowNeedsContext(t *testing.T) {
+	msg := SlackInboundMessage{
+		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
+		Text: "合并的时候不是有 macOS test 吗，被跳过了？",
+	}
+	candidate, ok := ClassifyBackfillMessage(msg, nil, nil)
+	if !ok {
+		t.Fatal("expected technical workflow question to classify")
+	}
+	if candidate.Classification != "unanswered_question" {
+		t.Fatalf("classification = %q, want unanswered_question", candidate.Classification)
+	}
+	if candidate.ReviewStatus != BackfillReviewNeedsContext {
+		t.Fatalf("ReviewStatus = %q, want %s", candidate.ReviewStatus, BackfillReviewNeedsContext)
+	}
+	if !strings.Contains(candidate.ReviewReason, "technical workflow") {
+		t.Fatalf("ReviewReason = %q, want technical workflow reason", candidate.ReviewReason)
+	}
+}
+
 func TestClassifyBackfillMessageRejectsOperationalGitHubPRReview(t *testing.T) {
 	msg := SlackInboundMessage{
 		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
