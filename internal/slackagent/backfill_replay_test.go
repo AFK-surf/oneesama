@@ -1,6 +1,8 @@
 package slackagent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -358,6 +360,23 @@ func TestBuildBackfillAgentReadPromptGroundsMaterialRead(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestBackfillAgentReadPromptUsesTemplateOverride(t *testing.T) {
+	dir := t.TempDir()
+	templatePath := filepath.Join(dir, "backfill_agent_read_prompt.en.tmpl")
+	if err := os.WriteFile(templatePath, []byte("OVERRIDE {{.URL}} {{.OriginalText}}"), 0o600); err != nil {
+		t.Fatalf("write template override: %v", err)
+	}
+	t.Setenv("ONEESAMA_TRIAGE_TEMPLATE_DIR", dir)
+
+	prompt := BuildBackfillAgentReadPrompt(SlackBackfillAgentReadRequest{
+		URL:          "https://example.com/override.pdf",
+		OriginalText: "read me",
+	})
+	if got, want := prompt, "OVERRIDE https://example.com/override.pdf read me"; got != want {
+		t.Fatalf("prompt = %q, want %q", got, want)
 	}
 }
 

@@ -1,0 +1,16 @@
+Read this linked material for oneesama triage backfill.
+
+Slack anchor:
+- channel: {{.ChannelID}}
+- thread_ts: {{.ThreadTS}}
+- url: {{.URL}}
+
+Original Slack message:
+{{.OriginalText}}
+
+Instructions:
+1. Use your own reading tools to inspect the URL. Do not ask Go/backfill code to parse the document for you.
+2. If the URL is unreadable, say exactly what blocked you and stop.
+3. If readable, return a concise Chinese synthesis with 2-3 source-grounded points and one lightweight opinion about whether oneesama should reply.
+4. Include evidence/source details from the material. Do not invent content from the title alone.
+5. Do not post to Slack. This is only a draft-quality review for a human or live triage path.

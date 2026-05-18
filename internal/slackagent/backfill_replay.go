@@ -442,35 +442,46 @@ func BuildBackfillAgentReadPrompt(request SlackBackfillAgentReadRequest) string 
 	if original == "" {
 		original = "(original Slack message unavailable)"
 	}
-	return fmt.Sprintf(`Read this linked material for oneesama triage backfill.
-
-Slack anchor:
-- channel: %s
-- thread_ts: %s
-- url: %s
-
-Original Slack message:
-%s
-
-Instructions:
-1. Use your own reading tools to inspect the URL. Do not ask Go/backfill code to parse the document for you.
-2. If the URL is unreadable, say exactly what blocked you and stop.
-3. If readable, return a concise Chinese synthesis with 2-3 source-grounded points and one lightweight opinion about whether oneesama should reply.
-4. Include evidence/source details from the material. Do not invent content from the title alone.
-5. Do not post to Slack. This is only a draft-quality review for a human or live triage path.`,
-		firstNonEmpty(strings.TrimSpace(request.ChannelID), "(unknown)"),
-		firstNonEmpty(strings.TrimSpace(request.ThreadTS), "(unknown)"),
-		strings.TrimSpace(request.URL),
-		original,
-	)
+	rendered, err := renderTriageReplyTemplate("backfill_agent_read_prompt", "en", triageReplyTemplateData{
+		ChannelID:    firstNonEmpty(strings.TrimSpace(request.ChannelID), "(unknown)"),
+		ThreadTS:     firstNonEmpty(strings.TrimSpace(request.ThreadTS), "(unknown)"),
+		URL:          strings.TrimSpace(request.URL),
+		OriginalText: original,
+		MessageText:  original,
+		Title:        strings.TrimSpace(request.Title),
+		Language:     "en",
+	})
+	if err == nil && strings.TrimSpace(rendered) != "" {
+		return rendered
+	}
+	return strings.TrimSpace("Read URL: " + strings.TrimSpace(request.URL) + "\nDo not post to Slack. Return source-backed notes only.")
 }
 
 func backfillAgentReadContextNote(candidate SlackBackfillCandidate) string {
 	urls := extractSlackExternalLinkURLs([]SlackInboundMessage{{Text: candidate.OriginalText}})
-	if len(urls) == 0 {
-		return "这是一个高信息链接候选，但还没有正文阅读证据；需要委托 connected agent 读取材料后再判断是否回复。"
+	url := ""
+	if len(urls) > 0 {
+		url = urls[0]
 	}
-	return fmt.Sprintf("这是一个高信息链接候选，但当前只是线索，不是回复草稿。需要委托 connected agent 读取 <%s>，拿到正文证据和初步判断后，才能升级为可发回复。", urls[0])
+	language := "en"
+	if containsCJK(candidate.OriginalText) {
+		language = "zh"
+	}
+	rendered, err := renderTriageReplyTemplate("backfill_agent_read_note", language, triageReplyTemplateData{
+		Classification: strings.TrimSpace(candidate.Classification),
+		MessageText:    strings.TrimSpace(candidate.OriginalText),
+		Snippet:        truncateSlackContextText(strings.Join(strings.Fields(candidate.OriginalText), " "), 180),
+		Title:          strings.TrimSpace(candidate.Title),
+		URL:            strings.TrimSpace(url),
+		Language:       language,
+	})
+	if err == nil && strings.TrimSpace(rendered) != "" {
+		return rendered
+	}
+	if len(urls) == 0 {
+		return "Needs delegated connected-agent reading before reply."
+	}
+	return fmt.Sprintf("Needs delegated connected-agent reading for <%s> before reply.", urls[0])
 }
 
 func backfillCandidateNeedsTechnicalContext(text string) bool {

@@ -15,12 +15,15 @@ var triageReplyTemplateFS embed.FS
 
 type triageReplyTemplateData struct {
 	Classification string
+	ChannelID      string
+	ThreadTS       string
 	MessageText    string
 	Snippet        string
 	Title          string
 	Subject        string
 	Excerpt        string
 	URL            string
+	OriginalText   string
 	Evidence       string
 	Language       string
 }

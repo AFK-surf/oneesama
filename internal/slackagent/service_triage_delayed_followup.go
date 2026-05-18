@@ -78,10 +78,14 @@ func slackDelayedNoReplyCandidateFor(decision SlackTriageDecision, messages []Sl
 	if title == "" {
 		title = "补一下这条消息"
 	}
+	summary = buildDelayedNoReplySummary(classification, messageText)
+	if strings.TrimSpace(summary) == "" {
+		return slackDelayedNoReplyCandidate{}, false
+	}
 	return slackDelayedNoReplyCandidate{
 		Classification: classification,
 		Title:          title,
-		Summary:        buildDelayedNoReplySummary(classification, messageText),
+		Summary:        summary,
 	}, true
 }
 
@@ -216,24 +220,7 @@ func buildDelayedNoReplySummary(classification string, messageText string) strin
 	}); err == nil && strings.TrimSpace(rendered) != "" {
 		return rendered
 	}
-	if containsCJK(messageText) {
-		switch classification {
-		case "link_followup_candidate":
-			return fmt.Sprintf("补一下这条分享：我理解它是在抛一个值得读的材料。我的初步看法：先抓它和当前产品/技术判断的关系；如果继续聊，可以从“它支持或反对哪个方案”切入。原话：%s", snippet)
-		case "stuck_or_handoff":
-			return fmt.Sprintf("补一下这个卡住点：我理解现在的问题是“%s”。我的初步建议是先确认复现路径和失败边界，再决定是继续排查还是拆给 owner。", snippet)
-		default:
-			return fmt.Sprintf("补一下这条：我理解是在问“%s”。我的初步判断：先把可选项和判断标准列出来；如果没人继续接，可以先选一个最小可验证下一步。", snippet)
-		}
-	}
-	switch classification {
-	case "link_followup_candidate":
-		return fmt.Sprintf("Adding a quick read on this share: it looks like material worth discussing. My initial take is to connect it to the current product/technical decision first. Source message: %s", snippet)
-	case "stuck_or_handoff":
-		return fmt.Sprintf("Adding a quick unblock note: I read the stuck point as \"%s\". I would first pin down the repro path and failure boundary, then decide whether to keep debugging or hand it to an owner.", snippet)
-	default:
-		return fmt.Sprintf("Adding a quick take on this unanswered thread: I read the question as \"%s\". I would list the options and decision criteria, then choose one smallest verifiable next step.", snippet)
-	}
+	return ""
 }
 
 func delayedNoReplyTemplateName(classification string) string {

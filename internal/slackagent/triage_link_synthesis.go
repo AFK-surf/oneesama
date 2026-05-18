@@ -1,7 +1,6 @@
 package slackagent
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 	"unicode"
@@ -154,10 +153,7 @@ func buildSharedLinkSynthesisReply(context SlackExternalLinkContext, messageText
 		}); err == nil && strings.TrimSpace(rendered) != "" {
 			return rendered
 		}
-		if excerpt != "" {
-			return fmt.Sprintf("我粗读了一下%s。核心信息是：%s\n\n我的初步判断：这类内容适合作为讨论引子；如果继续聊，最好把它和当前产品/技术判断具体连起来。", subject, excerpt)
-		}
-		return fmt.Sprintf("我粗读了一下%s。我的初步判断：它像是一篇值得展开讨论的材料，可以先从它对当前产品/技术判断的影响聊起。", subject)
+		return ""
 	}
 	subject := "this link"
 	if title != "" {
@@ -173,10 +169,7 @@ func buildSharedLinkSynthesisReply(context SlackExternalLinkContext, messageText
 	}); err == nil && strings.TrimSpace(rendered) != "" {
 		return rendered
 	}
-	if excerpt != "" {
-		return fmt.Sprintf("I skimmed %s. Core signal: %s\n\nMy initial take: this is worth using as a discussion prompt; the useful next step is connecting it back to the current product or technical decision.", subject, excerpt)
-	}
-	return fmt.Sprintf("I skimmed %s. My initial take: it looks worth discussing, especially if we connect it back to the current product or technical decision.", subject)
+	return ""
 }
 
 func trimSharedLinkSnippet(value string) string {
