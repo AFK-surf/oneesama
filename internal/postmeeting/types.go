@@ -72,6 +72,7 @@ type PostProcessInput struct {
 	MeetChatMessages  []ChatMessageInput       `json:"meet_chat_messages,omitempty"`
 	Participants      []string                 `json:"participants,omitempty"`
 	AudioPath         string                   `json:"audio_path,omitempty"`
+	AudioChunks       []string                 `json:"audio_chunks,omitempty"`
 	RootDir           string                   `json:"root_dir,omitempty"`
 	Source            string                   `json:"source,omitempty"`
 	Summary           *Summary                 `json:"summary,omitempty"`

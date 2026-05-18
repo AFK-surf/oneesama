@@ -104,6 +104,19 @@ func (p *fakeASRProvider) Transcribe(_ context.Context, request ASRRequest) (ASR
 	return p.transcript, p.err
 }
 
+type chunkRecordingASRProvider struct {
+	requests []ASRRequest
+}
+
+func (p *chunkRecordingASRProvider) Transcribe(_ context.Context, request ASRRequest) (ASRTranscript, error) {
+	p.requests = append(p.requests, request)
+	chunkName := filepath.Base(request.AudioPath)
+	return ASRTranscript{
+		Provider: "fake",
+		Text:     "Peng: transcript from " + chunkName,
+	}, nil
+}
+
 type fakePipelineSummarizer struct {
 	summary           Summary
 	err               error
@@ -131,6 +144,68 @@ func (s *fakePipelineSummarizer) Calibrate(_ context.Context, captionTranscript,
 		return "", s.calibrateErr
 	}
 	return s.calibrated, nil
+}
+
+func TestPipelineTranscribesAudioChunksAndRecordsManifest(t *testing.T) {
+	t.Parallel()
+
+	sourceDir := t.TempDir()
+	audioPath := filepath.Join(sourceDir, "audio.mp3")
+	if err := os.WriteFile(audioPath, []byte("final mp3"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	chunkA := filepath.Join(sourceDir, "audio_chunk_000.mp3")
+	chunkB := filepath.Join(sourceDir, "audio_chunk_001.mp3")
+	if err := os.WriteFile(chunkA, []byte("chunk 0"), 0o644); err != nil {
+		t.Fatalf("write chunk A: %v", err)
+	}
+	if err := os.WriteFile(chunkB, []byte("chunk 1"), 0o644); err != nil {
+		t.Fatalf("write chunk B: %v", err)
+	}
+
+	asr := &chunkRecordingASRProvider{}
+	pipeline := NewPipeline(t.TempDir(), WithASRProvider(asr))
+	result, err := pipeline.PostProcess(context.Background(), PostProcessInput{
+		ArtifactID: "chunked-audio",
+		Title:      "Chunked audio",
+		AudioPath:  audioPath,
+	})
+	if err != nil {
+		t.Fatalf("PostProcess() error = %v", err)
+	}
+	if len(asr.requests) != 2 {
+		t.Fatalf("ASR requests = %d, want 2 chunk requests", len(asr.requests))
+	}
+	for index, request := range asr.requests {
+		if request.AudioPath == audioPath {
+			t.Fatalf("request %d used final audio path; want chunk path", index)
+		}
+		if request.ChunkIndex != index || request.ChunkCount != 2 {
+			t.Fatalf("request %d chunk index/count = %d/%d, want %d/2", index, request.ChunkIndex, request.ChunkCount, index)
+		}
+		if request.ParentAudioPath != audioPath {
+			t.Fatalf("request %d parent audio = %q, want %q", index, request.ParentAudioPath, audioPath)
+		}
+	}
+	if !strings.Contains(result.Transcript.Provider, "fake:chunked") {
+		t.Fatalf("transcript provider = %q, want fake:chunked marker", result.Transcript.Provider)
+	}
+	if !strings.Contains(result.Transcript.Text, "audio_chunk_000.mp3") || !strings.Contains(result.Transcript.Text, "audio_chunk_001.mp3") {
+		t.Fatalf("transcript text = %q, want both chunk transcripts", result.Transcript.Text)
+	}
+	if len(result.Artifact.Files.AudioChunks) != 2 {
+		t.Fatalf("manifest audio chunks = %#v, want 2", result.Artifact.Files.AudioChunks)
+	}
+	artifactDir := filepath.Dir(result.Artifact.Files.Manifest)
+	for _, name := range []string{"asr_chunk_000.txt", "asr_chunk_001.txt"} {
+		body, err := os.ReadFile(filepath.Join(artifactDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if !strings.Contains(string(body), "audio_chunk_") {
+			t.Fatalf("%s = %q, want chunk transcript text", name, string(body))
+		}
+	}
 }
 
 func TestPipelineUsesConfiguredASRCalibrationAndLLMSummary(t *testing.T) {

@@ -26,16 +26,20 @@ type ASRProvider interface {
 }
 
 type ASRRequest struct {
-	AudioPath    string
-	ArtifactDir  string
-	Language     string
-	Participants []string
+	AudioPath       string
+	ArtifactDir     string
+	Language        string
+	Participants    []string
+	ParentAudioPath string
+	ChunkIndex      int
+	ChunkCount      int
 }
 
 type ASRTranscript struct {
-	Provider string
-	Text     string
-	Segments []NormalizedSegment
+	Provider    string
+	Text        string
+	Segments    []NormalizedSegment
+	AudioChunks []string
 }
 
 type ASRProviderConfig struct {

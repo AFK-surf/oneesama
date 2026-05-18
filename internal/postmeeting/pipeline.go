@@ -71,9 +71,13 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 	participants := participantList(input, segments)
 	chatMessages := normalizeChatMessages(input)
 	chatLinks := collectChatLinks(chatMessages)
+	audioChunks := discoverASRAudioChunks(input, dir)
 	transcriptProvider := "caption"
 	summaryInput := input
 	if asrTranscript, err := p.transcribeAudio(ctx, input, dir, participants); err == nil && firstNonEmpty(asrTranscript.Text) != "" {
+		if len(asrTranscript.AudioChunks) > 0 {
+			audioChunks = asrTranscript.AudioChunks
+		}
 		summaryInput.ASRTranscriptText = firstNonEmpty(asrTranscript.Text)
 		summaryInput.ASRProvider = asrTranscript.Provider
 		if calibrated := p.calibrateTranscript(ctx, segments, asrTranscript); calibrated != "" {
@@ -103,6 +107,7 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 		Manifest:       filepath.Join(dir, "manifest.json"),
 		Chat:           filepath.Join(dir, "chat.json"),
 		Audio:          firstNonEmpty(input.AudioPath),
+		AudioChunks:    audioChunks,
 	}
 
 	transcript := TranscriptArtifact{
@@ -179,14 +184,22 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 }
 
 func (p *Pipeline) transcribeAudio(ctx context.Context, input PostProcessInput, artifactDir string, participants []string) (ASRTranscript, error) {
-	if p.asr == nil || firstNonEmpty(input.AudioPath) == "" {
+	if p.asr == nil {
 		return ASRTranscript{}, nil
 	}
-	transcript, err := p.asr.Transcribe(ctx, ASRRequest{
+	chunks := discoverASRAudioChunks(input, artifactDir)
+	if firstNonEmpty(input.AudioPath) == "" && len(chunks) == 0 {
+		return ASRTranscript{}, nil
+	}
+	request := ASRRequest{
 		AudioPath:    input.AudioPath,
 		ArtifactDir:  artifactDir,
 		Participants: participants,
-	})
+	}
+	if len(chunks) > 0 {
+		return transcribeAudioChunks(ctx, p.asr, request, chunks)
+	}
+	transcript, err := p.asr.Transcribe(ctx, request)
 	if err != nil {
 		return ASRTranscript{}, err
 	}
