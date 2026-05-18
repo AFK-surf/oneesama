@@ -21,7 +21,7 @@
   };
   window.MAB_WORKER_RESULT_BRIDGE = state;
 
-  const log = (...args) => console.log("[meeting-avatar-worker-result]", ...args);
+  const log = (...args) => console.error("[meeting-avatar-worker-result]", ...args);
 
   function rememberError(error) {
     state.errors.push({

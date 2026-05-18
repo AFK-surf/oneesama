@@ -194,8 +194,17 @@ func (s *Session) readLoop(stdout io.Reader) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxRPCMessageBytes)
 	for scanner.Scan() {
+		line := scanner.Bytes()
+		trimmed := strings.TrimSpace(string(line))
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "{") {
+			_, _ = s.stderr.Write([]byte("[meet-runner stdout] " + trimmed + "\n"))
+			continue
+		}
 		var response rpcResponse
-		if err := json.Unmarshal(scanner.Bytes(), &response); err != nil {
+		if err := json.Unmarshal([]byte(trimmed), &response); err != nil {
 			s.readErr <- fmt.Errorf("decode response: %w", err)
 			return
 		}

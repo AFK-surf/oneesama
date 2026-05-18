@@ -1,12 +1,16 @@
 package meetrunner
 
-import "bytes"
+import (
+	"bytes"
+	"sync"
+)
 
 type limitedBuffer struct {
 	buffer    bytes.Buffer
 	maxBytes  int
 	written   int
 	truncated bool
+	mu        sync.Mutex
 }
 
 func newLimitedBuffer(maxBytes int) *limitedBuffer {
@@ -14,6 +18,9 @@ func newLimitedBuffer(maxBytes int) *limitedBuffer {
 }
 
 func (b *limitedBuffer) Write(payload []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	b.written += len(payload)
 	remaining := b.maxBytes - b.buffer.Len()
 	if remaining <= 0 {
@@ -29,6 +36,9 @@ func (b *limitedBuffer) Write(payload []byte) (int, error) {
 }
 
 func (b *limitedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	if !b.truncated {
 		return b.buffer.String()
 	}

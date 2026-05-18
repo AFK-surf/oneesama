@@ -1939,7 +1939,7 @@ function logMeetingAwarenessDebug(
       : null,
     pushResult: pushResult || null,
   };
-  console.log(`[meeting-awareness] ${JSON.stringify(detail)}`);
+  console.error(`[meeting-awareness] ${JSON.stringify(detail)}`);
   if (activeSpeaker?.name && !activeSpeaker.identity?.resolved) {
     console.warn(
       `[meeting-awareness-identity-unresolved] ${JSON.stringify({
