@@ -5,7 +5,7 @@ path. It scans a batch of recent Slack messages, classifies which ones
 oneesama probably should have caught, and emits a Markdown report for a
 human to review. **Nothing is posted.** The report distinguishes
 postable `Draft reply` entries from non-postable leads that still need
-more context or link reading.
+more context or delegated link/article reading.
 
 This is the response to Peng's 5/18 ask:
 
@@ -70,11 +70,12 @@ Quality gates added after the 2026-05-18 dogfood report:
   lightweight article synthesis.
 - GitHub readable documents remain eligible when they are actually
   material to read, e.g. `/blob/.../*.pdf`, `.md`, `.txt`, or notebooks.
-- Link/article candidates must fetch the linked body and run the same
-  shared-link synthesis path as live triage before they are labelled
-  `review_ready`. If the body cannot be fetched or is not substantive
-  enough, the report marks the item `needs_link_read` and labels its
-  text `Context note (not a reply)`.
+- Link/article candidates must be handed to the connected agent/runner
+  for source-backed reading before they are labelled `review_ready`.
+  Backfill does not grow built-in PDF/article parsers in Go; it emits a
+  delegated read request instead. Until an agent returns evidence, the
+  report marks the item `needs_agent_read` and labels its text
+  `Context note (not a reply)`.
 
 ## Report quality gates
 
@@ -82,8 +83,9 @@ Every rendered candidate carries a `Quality gate` line:
 
 - `review_ready` — local quality gates passed; the text is labelled
   `Draft reply`.
-- `needs_link_read` — the item is a readable-link lead, but the
-  linked body has not been fetched/synthesized yet.
+- `needs_agent_read` — the item is a readable-link lead, but the
+  linked material has not yet been read by the connected agent with
+  source evidence.
 - `needs_context` — the message mentions a specific owner/user, asks a
   technical workflow / CI / deploy question, or otherwise needs repo /
   runtime context before posting.
@@ -94,6 +96,23 @@ Every rendered candidate carries a `Quality gate` line:
 This is intentionally stricter than "candidate found == reply ready".
 Dogfood showed that generic fallback text can look like oneesama is
 pretending to read a PR/article when it has not.
+
+## Delegated reading requests
+
+When the report contains `needs_agent_read` candidates, it also appends
+a `Delegated agent read requests` section. Each request is a ready
+prompt for the connected agent/runner:
+
+- It names the Slack channel/thread anchor and the URL.
+- It includes the original Slack message.
+- It explicitly says not to post to Slack.
+- It requires source-backed synthesis and an honest blocker if the URL
+  cannot be read.
+
+This is deliberate. Backfill is an orchestration layer, not a document
+parser or cognition engine. PDFs, articles, and rich pages should be
+read by the agent that already owns browsing / file / code-reading
+tools; only that result can later promote a lead to `review_ready`.
 
 ## Triage reply templates
 
@@ -246,10 +265,11 @@ candidates only with a stderr warning — non-fatal.
   persisted-only threads when a Slack token is available and drops
   leads that humans already answered, but it does not yet write
   `superseded_by_human` back into live followup state.
-- **Full LLM re-run for backfill.** Link candidates reuse the live
-  shared-link synthesis helper after fetching the body. The broader
-  "rerun the complete triage LLM prompt over each candidate" path is
-  still future work.
+- **Automatic delegated read execution.** Link candidates now render
+  agent read requests, but the CLI does not yet submit those requests
+  to a runner and merge the returned evidence.
+- **Full LLM re-run for backfill.** The broader "rerun the complete
+  triage LLM prompt over each candidate" path is still future work.
 
 ## Why dry-run first
 

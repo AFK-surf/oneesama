@@ -471,7 +471,7 @@ Why tests did not catch it:
 
 - Tests asserted that a candidate was produced, not whether the reply was safe to
   post.
-- There was no report-level quality gate (`review_ready`, `needs_link_read`,
+- There was no report-level quality gate (`review_ready`, `needs_agent_read`,
   `needs_thread_refetch`) to make non-postable leads explicit.
 - Migration audit looked for function coverage but did not require prompt /
   template / workspace policy parity evidence.
@@ -483,8 +483,10 @@ New hard rules:
   hidden Go string literals.
 - Backfill reports must label candidate quality. A non-ready lead must not be
   called a "Draft reply".
-- Link/article candidates must fetch and synthesize linked content before they
-  can be `review_ready`; otherwise they are `needs_link_read`.
+- Link/article candidates must be read by the connected agent/runner with source
+  evidence before they can be `review_ready`; otherwise they are
+  `needs_agent_read`. Do not bolt a PDF/article parser into Go just because one
+  link failed to fetch.
 - Persisted-only followups are leads, not replies. They must be refetched before
   posting.
 

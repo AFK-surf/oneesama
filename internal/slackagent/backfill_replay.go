@@ -153,6 +153,7 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 	if len(candidates) == 0 {
 		return "# Triage backfill replay\n\n_No candidate messages found in the scan window._\n"
 	}
+	readRequests := BackfillAgentReadRequests(candidates)
 	byClass := make(map[string][]SlackBackfillCandidate)
 	for _, c := range candidates {
 		key := firstNonEmpty(c.Classification, "uncategorised")
@@ -213,13 +214,27 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 			fmt.Fprintf(&b, "---\n\n")
 		}
 	}
+	if len(readRequests) > 0 {
+		fmt.Fprintf(&b, "## Delegated agent read requests (%d)\n\n", len(readRequests))
+		fmt.Fprintf(&b, "These are not Slack replies. Hand one request to the connected agent/runner,\n")
+		fmt.Fprintf(&b, "let it read the linked material with its own tools, and only promote the\n")
+		fmt.Fprintf(&b, "candidate after it returns source-backed synthesis.\n\n")
+		for i, request := range readRequests {
+			fmt.Fprintf(&b, "### %d. %s\n\n", i+1, firstNonEmpty(request.Title, "Read linked material"))
+			fmt.Fprintf(&b, "- **Channel**: `%s`\n", request.ChannelID)
+			fmt.Fprintf(&b, "- **Thread / message ts**: `%s`\n", request.ThreadTS)
+			fmt.Fprintf(&b, "- **URL**: <%s>\n\n", request.URL)
+			fmt.Fprintf(&b, "```text\n%s\n```\n\n", request.Prompt)
+		}
+	}
 	return b.String()
 }
 
 const (
 	BackfillReviewReady              = "review_ready"
 	BackfillReviewNeedsContext       = "needs_context"
-	BackfillReviewNeedsLinkRead      = "needs_link_read"
+	BackfillReviewNeedsAgentRead     = "needs_agent_read"
+	BackfillReviewNeedsLinkRead      = "needs_link_read" // legacy report value kept readable for old fixtures.
 	BackfillReviewNeedsThreadRefetch = "needs_thread_refetch"
 )
 
@@ -232,8 +247,9 @@ func markBackfillCandidateQuality(candidate SlackBackfillCandidate) SlackBackfil
 		candidate.ReviewStatus = BackfillReviewNeedsThreadRefetch
 		candidate.ReviewReason = "persisted-only lead; refetch the thread before posting"
 	case strings.EqualFold(strings.TrimSpace(candidate.Classification), "link_followup_candidate"):
-		candidate.ReviewStatus = BackfillReviewNeedsLinkRead
-		candidate.ReviewReason = "link body has not been fetched and synthesized"
+		candidate.ReviewStatus = BackfillReviewNeedsAgentRead
+		candidate.ReviewReason = "linked material must be delegated to the connected agent for source-backed reading before posting"
+		candidate.Draft = backfillAgentReadContextNote(candidate)
 	case strings.Contains(candidate.OriginalText, "<@"):
 		candidate.ReviewStatus = BackfillReviewNeedsContext
 		candidate.ReviewReason = "message mentions specific people; verify ownership/context before posting"
@@ -253,6 +269,93 @@ func markBackfillCandidateQuality(candidate SlackBackfillCandidate) SlackBackfil
 func backfillCandidateReviewStatus(candidate SlackBackfillCandidate) (string, string) {
 	candidate = markBackfillCandidateQuality(candidate)
 	return strings.TrimSpace(candidate.ReviewStatus), strings.TrimSpace(candidate.ReviewReason)
+}
+
+type SlackBackfillAgentReadRequest struct {
+	ChannelID      string `json:"channel_id"`
+	ThreadTS       string `json:"thread_ts"`
+	OriginatorTS   string `json:"originator_ts,omitempty"`
+	Classification string `json:"classification"`
+	Title          string `json:"title"`
+	URL            string `json:"url"`
+	OriginalText   string `json:"original_text"`
+	Prompt         string `json:"prompt"`
+	FollowupID     int64  `json:"followup_id,omitempty"`
+}
+
+func BackfillAgentReadRequests(candidates []SlackBackfillCandidate) []SlackBackfillAgentReadRequest {
+	requests := make([]SlackBackfillAgentReadRequest, 0)
+	for _, candidate := range candidates {
+		status, _ := backfillCandidateReviewStatus(candidate)
+		if !backfillStatusNeedsAgentRead(status) {
+			continue
+		}
+		urls := extractSlackExternalLinkURLs([]SlackInboundMessage{{Text: candidate.OriginalText}})
+		if len(urls) == 0 {
+			continue
+		}
+		thread := firstNonEmpty(strings.TrimSpace(candidate.ThreadTS), strings.TrimSpace(candidate.OriginatorTS))
+		for _, rawURL := range urls {
+			request := SlackBackfillAgentReadRequest{
+				ChannelID:      strings.TrimSpace(candidate.ChannelID),
+				ThreadTS:       thread,
+				OriginatorTS:   strings.TrimSpace(candidate.OriginatorTS),
+				Classification: strings.TrimSpace(candidate.Classification),
+				Title:          strings.TrimSpace(candidate.Title),
+				URL:            strings.TrimSpace(rawURL),
+				OriginalText:   strings.TrimSpace(candidate.OriginalText),
+				FollowupID:     candidate.FollowupID,
+			}
+			request.Prompt = BuildBackfillAgentReadPrompt(request)
+			requests = append(requests, request)
+		}
+	}
+	return requests
+}
+
+func backfillStatusNeedsAgentRead(status string) bool {
+	switch strings.TrimSpace(status) {
+	case BackfillReviewNeedsAgentRead, BackfillReviewNeedsLinkRead:
+		return true
+	default:
+		return false
+	}
+}
+
+func BuildBackfillAgentReadPrompt(request SlackBackfillAgentReadRequest) string {
+	original := strings.Join(strings.Fields(strings.TrimSpace(request.OriginalText)), " ")
+	if original == "" {
+		original = "(original Slack message unavailable)"
+	}
+	return fmt.Sprintf(`Read this linked material for oneesama triage backfill.
+
+Slack anchor:
+- channel: %s
+- thread_ts: %s
+- url: %s
+
+Original Slack message:
+%s
+
+Instructions:
+1. Use your own reading tools to inspect the URL. Do not ask Go/backfill code to parse the document for you.
+2. If the URL is unreadable, say exactly what blocked you and stop.
+3. If readable, return a concise Chinese synthesis with 2-3 source-grounded points and one lightweight opinion about whether oneesama should reply.
+4. Include evidence/source details from the material. Do not invent content from the title alone.
+5. Do not post to Slack. This is only a draft-quality review for a human or live triage path.`,
+		firstNonEmpty(strings.TrimSpace(request.ChannelID), "(unknown)"),
+		firstNonEmpty(strings.TrimSpace(request.ThreadTS), "(unknown)"),
+		strings.TrimSpace(request.URL),
+		original,
+	)
+}
+
+func backfillAgentReadContextNote(candidate SlackBackfillCandidate) string {
+	urls := extractSlackExternalLinkURLs([]SlackInboundMessage{{Text: candidate.OriginalText}})
+	if len(urls) == 0 {
+		return "这是一个高信息链接候选，但还没有正文阅读证据；需要委托 connected agent 读取材料后再判断是否回复。"
+	}
+	return fmt.Sprintf("这是一个高信息链接候选，但当前只是线索，不是回复草稿。需要委托 connected agent 读取 <%s>，拿到正文证据和初步判断后，才能升级为可发回复。", urls[0])
 }
 
 func backfillCandidateNeedsTechnicalContext(text string) bool {

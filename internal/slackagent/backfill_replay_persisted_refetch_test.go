@@ -116,7 +116,7 @@ func TestMergeAndRefetchPersistedDropsHumanRepliedFollowups(t *testing.T) {
 // TestMergeAndRefetchPersistedKeepsCleanFollowups confirms the
 // "no human reply yet" verdict: the candidate surfaces but the
 // caller (driver's quality-gate work) is responsible for marking it
-// `needs_link_read` / `needs_thread_refetch_done` per renderer rules.
+// `needs_agent_read` / `needs_thread_refetch_done` per renderer rules.
 func TestMergeAndRefetchPersistedKeepsCleanFollowups(t *testing.T) {
 	followups := []SlackHeartbeatFollowup{
 		{ID: 9, Kind: slackDelayedNoReplyFollowupKind, ChannelID: "C2", ThreadTS: "200.000",
@@ -208,8 +208,8 @@ func TestMergeAndRefetchPersistedSkipsOverlapWithFresh(t *testing.T) {
 func TestMergeAndRefetchPersistedSkipsLowValueBeforeRefetch(t *testing.T) {
 	followups := []SlackHeartbeatFollowup{
 		{ID: 15, Kind: slackDelayedNoReplyFollowupKind, ChannelID: "C5", ThreadTS: "500.000",
-			Title: "补读这条分享",
-			Summary: "<https://github.com/AFK-surf/cueboard/pull/1917> <@U123> 来 review",
+			Title:    "补读这条分享",
+			Summary:  "<https://github.com/AFK-surf/cueboard/pull/1917> <@U123> 来 review",
 			Metadata: map[string]any{"classification": "link_followup_candidate"}},
 	}
 	refetcherCalled := false

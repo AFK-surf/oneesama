@@ -247,8 +247,11 @@ func TestClassifyBackfillMessageKeepsReadablePDFLink(t *testing.T) {
 	if candidate.Classification != "link_followup_candidate" {
 		t.Fatalf("classification = %q, want link_followup_candidate", candidate.Classification)
 	}
-	if candidate.ReviewStatus != BackfillReviewNeedsLinkRead {
-		t.Fatalf("ReviewStatus = %q, want %s", candidate.ReviewStatus, BackfillReviewNeedsLinkRead)
+	if candidate.ReviewStatus != BackfillReviewNeedsAgentRead {
+		t.Fatalf("ReviewStatus = %q, want %s", candidate.ReviewStatus, BackfillReviewNeedsAgentRead)
+	}
+	if !strings.Contains(candidate.Draft, "connected agent") {
+		t.Fatalf("Draft = %q, want delegated-agent context note", candidate.Draft)
 	}
 }
 
@@ -302,17 +305,59 @@ func TestRenderBackfillCandidatesMarkdownLabelsNonPostableContextNotes(t *testin
 		ThreadTS:       "1",
 		Draft:          "generic link note",
 		OriginalText:   "https://example.com/article.pdf",
-		ReviewStatus:   BackfillReviewNeedsLinkRead,
-		ReviewReason:   "link body has not been fetched",
+		ReviewStatus:   BackfillReviewNeedsAgentRead,
+		ReviewReason:   "linked material needs delegated reading",
 	}})
-	if !strings.Contains(out, "**Quality gate**: `needs_link_read`") {
-		t.Fatalf("missing needs_link_read gate:\n%s", out)
+	if !strings.Contains(out, "**Quality gate**: `needs_agent_read`") {
+		t.Fatalf("missing needs_agent_read gate:\n%s", out)
 	}
 	if !strings.Contains(out, "**Context note (not a reply)**") {
 		t.Fatalf("non-ready candidate should be labelled as context, not a draft:\n%s", out)
 	}
 	if strings.Contains(out, "**Draft reply**") {
 		t.Fatalf("non-ready candidate was labelled as postable draft:\n%s", out)
+	}
+}
+
+func TestRenderBackfillCandidatesMarkdownIncludesDelegatedAgentReadRequest(t *testing.T) {
+	out := RenderBackfillCandidatesMarkdown([]SlackBackfillCandidate{{
+		Classification: "link_followup_candidate",
+		Title:          "补读这条分享",
+		ChannelID:      "C1",
+		ThreadTS:       "1",
+		OriginatorTS:   "1",
+		OriginalText:   "看看这个 https://github.com/hangli-hl/AI-Articles/blob/main/llm-thinking.pdf",
+		ReviewStatus:   BackfillReviewNeedsAgentRead,
+		ReviewReason:   "linked material needs delegated reading",
+	}})
+	for _, want := range []string{
+		"## Delegated agent read requests (1)",
+		"https://github.com/hangli-hl/AI-Articles/blob/main/llm-thinking.pdf",
+		"Use your own reading tools",
+		"Do not post to Slack",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestBuildBackfillAgentReadPromptGroundsMaterialRead(t *testing.T) {
+	prompt := BuildBackfillAgentReadPrompt(SlackBackfillAgentReadRequest{
+		ChannelID:    "C1",
+		ThreadTS:     "1",
+		URL:          "https://example.com/paper.pdf",
+		OriginalText: "这篇 paper 怎么看？",
+	})
+	for _, want := range []string{
+		"https://example.com/paper.pdf",
+		"Do not ask Go/backfill code to parse",
+		"Include evidence/source details",
+		"Do not post to Slack",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
 	}
 }
 
