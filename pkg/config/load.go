@@ -1,13 +1,16 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 func Load() (Config, error) {
@@ -22,8 +25,8 @@ func Load() (Config, error) {
 
 	var raw rawConfig
 	if len(data) > 0 {
-		if err := json.Unmarshal(data, &raw); err != nil {
-			return Config{}, fmt.Errorf("parse config: %w", err)
+		if err := decodeRawConfigStrict(data, &raw); err != nil {
+			return Config{}, decorateParseError(resolvedPath, data, err)
 		}
 	}
 
@@ -37,6 +40,91 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// decodeRawConfigStrict decodes config JSON with `DisallowUnknownFields` so
+// typos (`slcak_agent:` instead of `slack_agent:`) fail loudly instead of
+// being silently ignored. Cueboard's old loader used strict unknown-field
+// rejection on YAML; we match that contract on JSON.
+func decodeRawConfigStrict(data []byte, raw *rawConfig) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(raw); err != nil {
+		return err
+	}
+	// After a successful single-value decode, the next read should
+	// return io.EOF. Any other outcome — a real token from a second
+	// top-level JSON object, a parse error from stray YAML below, etc.
+	// — is trailing content that we want to surface, not silently
+	// accept.
+	tok, err := dec.Token()
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("unexpected trailing content: %w", err)
+	}
+	return fmt.Errorf("unexpected trailing content after first JSON object: %v", tok)
+}
+
+// decorateParseError adds a YAML-detection hint to JSON parse errors so users
+// upgrading from cueboard's YAML loader see an actionable migration message
+// instead of a bare `invalid character '-'` style failure.
+func decorateParseError(resolvedPath string, data []byte, err error) error {
+	base := fmt.Errorf("parse config: %w", err)
+	if !looksLikeYAML(data) {
+		return base
+	}
+	suffix := "looks like YAML"
+	if strings.TrimSpace(resolvedPath) != "" {
+		suffix += fmt.Sprintf(" at %s", resolvedPath)
+	}
+	suffix += "; run `oneesama-config-migrate --input <yaml> --output <json>` to convert (see docs/config-migrate.md)"
+	return fmt.Errorf("%w (%s)", base, suffix)
+}
+
+// looksLikeYAML is a heuristic: cueboard YAML configs typically start with
+// `---`, contain top-level `slack_agent:` style mappings without surrounding
+// braces, or contain comment lines beginning with `#`. JSON never has any of
+// those at the top level.
+func looksLikeYAML(data []byte) bool {
+	trimmed := bytes.TrimLeftFunc(data, unicode.IsSpace)
+	if len(trimmed) == 0 {
+		return false
+	}
+	if bytes.HasPrefix(trimmed, []byte("---")) {
+		return true
+	}
+	// JSON must start with `{`, `[`, or a quoted/numeric/keyword literal.
+	first := rune(trimmed[0])
+	if first == '{' || first == '[' || first == '"' || first == '-' || first == 't' || first == 'f' || first == 'n' || (first >= '0' && first <= '9') {
+		return false
+	}
+	if first == '#' {
+		return true
+	}
+	// Lines like `slack_agent:` with no leading brace are YAML.
+	if idx := bytes.IndexByte(trimmed, ':'); idx > 0 && idx < 64 {
+		head := trimmed[:idx]
+		if isYAMLKey(head) {
+			return true
+		}
+	}
+	return false
+}
+
+func isYAMLKey(head []byte) bool {
+	for _, b := range head {
+		switch {
+		case b >= 'a' && b <= 'z':
+		case b >= 'A' && b <= 'Z':
+		case b >= '0' && b <= '9':
+		case b == '_' || b == '-':
+		default:
+			return false
+		}
+	}
+	return len(head) > 0
 }
 
 func loadFile() ([]byte, string, error) {
