@@ -721,6 +721,16 @@ func buildSlackTriageAuditFixtures() []SlackTriageAuditFixture {
 			expected: "SKIP",
 			raw:      "No action.\n\n闲聊自然收尾，无需助手介入。",
 		},
+		{
+			name:     "skip_malformed_no_action_unescaped_cjk_quotes",
+			expected: "SKIP",
+			raw:      `{"summary":"No action. 用户只是说"蹲"一下，暂时不用接话。","actions":[]}`,
+		},
+		{
+			name:     "skip_no_action_cjk_punctuation",
+			expected: "SKIP",
+			raw:      "【无需操作】这条只是“蹲一下 / 围观”，没有明确请求；继续观察。",
+		},
 	}
 	results := make([]SlackTriageAuditFixture, 0, len(fixtures))
 	for _, item := range fixtures {

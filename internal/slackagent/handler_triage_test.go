@@ -174,6 +174,37 @@ func TestSlackTriageDecisionStripsInlineNoActionPrefix(t *testing.T) {
 	}
 }
 
+func TestSlackTriageDecisionRepairsMalformedNoActionWithUnescapedCJKQuotes(t *testing.T) {
+	raw := `{"summary":"No action. 用户只是说"蹲"一下，暂时不用接话。","actions":[]}`
+	decision := parseSlackTriageDecision(raw, slackTriageFallback{Summary: "fallback summary", Channel: "C123", ThreadTS: "123.456"})
+	if !decision.ParseOK {
+		t.Fatalf("decision = %#v, want malformed no-action output repaired", decision)
+	}
+	if len(decision.Actions) != 0 {
+		t.Fatalf("actions = %#v, want no actions", decision.Actions)
+	}
+	if !strings.Contains(decision.Summary, "蹲") {
+		t.Fatalf("summary = %q, want repaired summary to retain CJK quoted text", decision.Summary)
+	}
+	if reason := slackTriageSuppressedReason(decision, decision.Actions, true); reason != "no_actions" {
+		t.Fatalf("suppressed reason = %q, want no_actions after repair", reason)
+	}
+}
+
+func TestSlackTriageDecisionRepairsCJKPunctuationNoAction(t *testing.T) {
+	raw := "【无需操作】这条只是“蹲一下 / 围观”，没有明确请求；继续观察。"
+	decision := parseSlackTriageDecision(raw, slackTriageFallback{Summary: "fallback summary", Channel: "C123", ThreadTS: "123.456"})
+	if !decision.ParseOK {
+		t.Fatalf("decision = %#v, want CJK punctuation no-action output repaired", decision)
+	}
+	if len(decision.Actions) != 0 {
+		t.Fatalf("actions = %#v, want no actions", decision.Actions)
+	}
+	if !strings.Contains(decision.Summary, "围观") {
+		t.Fatalf("summary = %q, want repaired summary to retain CJK punctuation text", decision.Summary)
+	}
+}
+
 func TestSlackTriageDecisionStripsParsedNoActionSummaryPrefix(t *testing.T) {
 	raw := `{"summary":"No action. U123 已经接住问题，无需助手介入。","actions":[]}`
 	decision := parseSlackTriageDecision(raw, slackTriageFallback{Summary: "fallback summary", Channel: "C123", ThreadTS: "123.456"})
@@ -277,7 +308,7 @@ func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TriageStatus: %v", err)
 	}
-	if len(status.AuditFixtures) != 9 {
+	if len(status.AuditFixtures) != 11 {
 		t.Fatalf("fixtures = %#v, want parse controls plus memory-backed canaries", status.AuditFixtures)
 	}
 	byName := map[string]SlackTriageAuditFixture{}
@@ -298,6 +329,12 @@ func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
 	}
 	if byName["skip_no_action"].Outcome != "SKIP" || byName["skip_no_action"].Actions != 0 || byName["skip_no_action"].SuppressedReason != "no_actions" {
 		t.Fatalf("SKIP fixture = %#v", byName["skip_no_action"])
+	}
+	for _, name := range []string{"skip_malformed_no_action_unescaped_cjk_quotes", "skip_no_action_cjk_punctuation"} {
+		fixture := byName[name]
+		if fixture.Outcome != "SKIP" || fixture.Actions != 0 || fixture.SuppressedReason != "no_actions" {
+			t.Fatalf("parse fallback fixture %s = %#v, want safe SKIP", name, fixture)
+		}
 	}
 	for _, name := range []string{
 		"aha_unanswered_question_with_recent_memory",
@@ -412,7 +449,7 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 	if len(report.RecentRuns) == 0 || report.RecentRuns[0].ContextFetchReason == "" || report.RecentRuns[0].SkipReasonBucket == "" {
 		t.Fatalf("recentRuns = %#v, want context reason and skip bucket", report.RecentRuns)
 	}
-	if report.Canary.Total != 9 || report.Canary.Passed != 9 || report.Canary.NeedsLiveSample {
+	if report.Canary.Total != 11 || report.Canary.Passed != 11 || report.Canary.NeedsLiveSample {
 		t.Fatalf("canary = %#v", report.Canary)
 	}
 	if !hasAuditFlag(report.Flags, "stale_sample") || !hasAuditFlag(report.Flags, "low_context_samples") {
@@ -958,7 +995,7 @@ func TestHandleTriageAuditReturnsSelfServeReport(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 9 || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
+	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 11 || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
 		t.Fatalf("payload = %#v", payload)
 	}
 }
