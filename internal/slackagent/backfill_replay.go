@@ -151,8 +151,24 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 	return b.String()
 }
 
+// isAuthoredByBot recognises a message as bot-authored when ANY of:
+//   - `bot_id` is populated (canonical Slack signal for app/bot messages)
+//   - `subtype == "bot_message"` (legacy Slack convention used by
+//     Slackbot, some integrations, and incoming-webhook posts that
+//     omit `bot_id`). This is the audit-blocker driver caught in
+//     `35d80d9` slice 2: subtype-only bot messages were sneaking
+//     through both as candidates (bot's own root) and as "human reply"
+//     suppressors (bot acks compressing the candidate).
+//   - the user id matches a known oneesama bot id from `--bot-user-ids`
+//
+// We intentionally do NOT treat other subtypes (`file_share`,
+// `message_replied`, etc.) as bot-authored — those are user posts
+// with extra metadata and would over-filter.
 func isAuthoredByBot(message SlackInboundMessage, botUserIDs []string) bool {
 	if strings.TrimSpace(message.BotID) != "" || strings.TrimSpace(message.BotIDSnake) != "" {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(message.Subtype), "bot_message") {
 		return true
 	}
 	user := strings.TrimSpace(firstNonEmpty(message.UserID, message.UserIDSnake, message.User))

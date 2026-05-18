@@ -51,6 +51,48 @@ func TestClassifyBackfillMessageRejectsMessagesWithHumanReply(t *testing.T) {
 	}
 }
 
+// TestClassifyBackfillMessageRejectsSubtypeBotMessageRoot is the
+// regression for driver's slice-2 audit blocker (35d80d9 → fix in this
+// same commit family). A message with `subtype: "bot_message"` but no
+// `bot_id` (e.g. Slackbot, incoming webhooks) must be treated as
+// bot-authored and excluded from candidates.
+func TestClassifyBackfillMessageRejectsSubtypeBotMessageRoot(t *testing.T) {
+	msg := SlackInboundMessage{
+		ChannelID: "C1",
+		TS:        "100.000",
+		UserID:    "USLACKBOT",
+		Subtype:   "bot_message",
+		Text:      "我们要不要看一下 ASR chunk？",
+	}
+	if _, ok := ClassifyBackfillMessage(msg, nil, nil); ok {
+		t.Fatal("expected subtype=bot_message root to be skipped")
+	}
+}
+
+// TestClassifyBackfillMessageBotOnlyReplyWithSubtypeStillSurfacesCandidate
+// is the companion: when the bot reply uses `subtype: "bot_message"`
+// (no `bot_id`), `humanReplyExists` must NOT count it as a human
+// reply, and the original root should still produce a candidate.
+func TestClassifyBackfillMessageBotOnlyReplyWithSubtypeStillSurfacesCandidate(t *testing.T) {
+	msg := SlackInboundMessage{
+		ChannelID:  "C1",
+		TS:         "100.000",
+		UserID:     "U_PENG",
+		Text:       "我们要不要看一下 ASR chunk？",
+		ReplyCount: 1,
+	}
+	replies := []SlackInboundMessage{
+		{ChannelID: "C1", TS: "101.000", UserID: "USLACKBOT", Subtype: "bot_message", Text: "bot ack"},
+	}
+	candidate, ok := ClassifyBackfillMessage(msg, replies, nil)
+	if !ok {
+		t.Fatal("expected bot-only subtype=bot_message reply to still allow a candidate")
+	}
+	if candidate.Classification == "" {
+		t.Fatalf("classification empty, got %+v", candidate)
+	}
+}
+
 // TestClassifyBackfillMessageAllowsBotOnlyReplies confirms that a
 // previous bot reply does NOT count as "human caught it" — we still
 // want oneesama to follow up if only the bot answered.
