@@ -77,6 +77,61 @@ func TestBackfillReplayLiveHappyPath(t *testing.T) {
 	}
 }
 
+func TestBackfillReplayLiveHydratesReadableLinkCandidate(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		writeFakeSlackJSON(t, w, backfillLiveHistoryResponse{
+			OK: true,
+			Messages: []SlackMessage{{
+				TS:   "1779000300.000",
+				User: "U_PENG",
+				Text: "https://github.com/hangli-hl/AI-Articles/blob/main/llm-thinking.pdf",
+			}},
+		})
+	})
+	mux.HandleFunc("/reader", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`Title: Why LLMs appear to think
+
+Markdown Content:
+这篇文章讨论大语言模型如何从预测下一个 token 的训练目标中涌现推理能力，也解释了训练数据、模型规模、反馈学习、工具使用和评测环境如何共同影响表现。它不是单纯介绍一个技巧，而是在帮助读者区分模型表面语言能力、可验证推理链路、以及产品里应该如何设置评价标准。`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	setLiveBaseURL(t, server.URL)
+
+	oldClient := slackExternalLinkHTTPClient
+	oldReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkHTTPClient = server.Client()
+	slackExternalLinkReaderURL = func(rawURL string) string { return server.URL + "/reader" }
+	t.Cleanup(func() {
+		slackExternalLinkHTTPClient = oldClient
+		slackExternalLinkReaderURL = oldReaderURL
+	})
+
+	candidates, stats, err := BackfillReplayLive(context.Background(), SlackBackfillReplayLiveOptions{
+		BotToken:   "xoxb-test",
+		BotUserIDs: []string{"U_BOT"},
+		ChannelID:  "C1",
+		Since:      24 * time.Hour,
+		Now:        time.Unix(1779000400, 0),
+	})
+	if err != nil {
+		t.Fatalf("BackfillReplayLive: %v", err)
+	}
+	if stats.CandidatesFound != 1 || len(candidates) != 1 {
+		t.Fatalf("candidates=%d stats=%d, want 1", len(candidates), stats.CandidatesFound)
+	}
+	candidate := candidates[0]
+	if candidate.ReviewStatus != BackfillReviewReady {
+		t.Fatalf("ReviewStatus = %q (%s), want review_ready", candidate.ReviewStatus, candidate.ReviewReason)
+	}
+	for _, want := range []string{"我粗读了一下", "Why LLMs appear to think", "核心信息"} {
+		if !strings.Contains(candidate.Draft, want) {
+			t.Fatalf("hydrated draft missing %q:\n%s", want, candidate.Draft)
+		}
+	}
+}
+
 // TestBackfillReplayLiveFollowsPagination confirms next_cursor is
 // honoured until the channel is fully drained or the truncation cap
 // hits — and that truncation flips the Truncated stat.

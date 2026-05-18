@@ -445,6 +445,49 @@ New hard rules:
 - Fetched-link synthesis must reject low-signal social status/login-wall output
   unless the model deliberately produces a reply from the fetched context.
 
+### 2026-05-18: Backfill Replay Used Hard-Coded Generic Templates Instead Of Cueboard-Style Triage Judgment
+
+Symptom:
+
+- The 24h backfill report surfaced a GitHub PR review request as a "补读这条分享"
+  candidate and generated a generic "this is a material worth discussing" reply.
+- For a shared PDF/article, the report produced a generic link-share template
+  instead of reading the linked body and giving a real lightweight opinion.
+- Peng correctly pointed out that Cueboard's triage quality was higher because
+  workspace-specific prompt/template behavior was part of the product, not a
+  hard-coded Go fallback.
+
+Root cause:
+
+- The Go rewrite treated triage reply text as implementation detail (`fmt.Sprintf`
+  literals in `buildDelayedNoReplySummary` and `buildSharedLinkSynthesisReply`)
+  instead of a workspace behavior contract.
+- Backfill replay reused the delayed-no-reply classifier/template path but did
+  not reuse live triage's fetched-link synthesis path.
+- "Candidate found" was presented as "Draft reply" even when the candidate only
+  had a generic fallback note or persisted state without fresh thread context.
+
+Why tests did not catch it:
+
+- Tests asserted that a candidate was produced, not whether the reply was safe to
+  post.
+- There was no report-level quality gate (`review_ready`, `needs_link_read`,
+  `needs_thread_refetch`) to make non-postable leads explicit.
+- Migration audit looked for function coverage but did not require prompt /
+  template / workspace policy parity evidence.
+
+New hard rules:
+
+- Prompt text, reply templates, workspace tone rules, and "when to speak" policy
+  are migration contracts. They belong in templates/workspace overrides, not
+  hidden Go string literals.
+- Backfill reports must label candidate quality. A non-ready lead must not be
+  called a "Draft reply".
+- Link/article candidates must fetch and synthesize linked content before they
+  can be `review_ready`; otherwise they are `needs_link_read`.
+- Persisted-only followups are leads, not replies. They must be refetched before
+  posting.
+
 ## Where To Record Future Lessons
 
 - Add incident-specific rows to this file.

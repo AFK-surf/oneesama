@@ -137,10 +137,30 @@ func BackfillReplayLive(ctx context.Context, opts SlackBackfillReplayLiveOptions
 		if !ok {
 			continue
 		}
+		candidate = hydrateBackfillLinkCandidate(ctx, root, candidate)
 		candidates = append(candidates, candidate)
 	}
 	stats.CandidatesFound = len(candidates)
 	return candidates, stats, nil
+}
+
+func hydrateBackfillLinkCandidate(ctx context.Context, root SlackInboundMessage, candidate SlackBackfillCandidate) SlackBackfillCandidate {
+	if !strings.EqualFold(strings.TrimSpace(candidate.Classification), "link_followup_candidate") {
+		return candidate
+	}
+	root = normalizeSlackInboundMessage(root)
+	contexts := fetchSlackExternalLinkContexts(ctx, []SlackInboundMessage{root})
+	action, ok := slackTriageSharedLinkSynthesisAction(candidate.ChannelID, candidate.ThreadTS, []SlackInboundMessage{root}, contexts)
+	if !ok || strings.TrimSpace(action.Message) == "" {
+		candidate.ReviewStatus = BackfillReviewNeedsLinkRead
+		candidate.ReviewReason = "link body could not be fetched or was not substantive enough for synthesis"
+		return candidate
+	}
+	candidate.Title = firstNonEmpty(strings.TrimSpace(action.Title), candidate.Title)
+	candidate.Draft = strings.TrimSpace(action.Message)
+	candidate.ReviewStatus = BackfillReviewReady
+	candidate.ReviewReason = "link body fetched and rendered with shared-link synthesis"
+	return candidate
 }
 
 type historyScanStats struct {

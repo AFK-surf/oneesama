@@ -204,6 +204,18 @@ func slackDelayedNoReplyLooksLowSignal(text string) bool {
 
 func buildDelayedNoReplySummary(classification string, messageText string) string {
 	snippet := truncateSlackContextText(strings.Join(strings.Fields(messageText), " "), 180)
+	language := "en"
+	if containsCJK(messageText) {
+		language = "zh"
+	}
+	if rendered, err := renderTriageReplyTemplate(delayedNoReplyTemplateName(classification), language, triageReplyTemplateData{
+		Classification: classification,
+		MessageText:    messageText,
+		Snippet:        snippet,
+		Language:       language,
+	}); err == nil && strings.TrimSpace(rendered) != "" {
+		return rendered
+	}
 	if containsCJK(messageText) {
 		switch classification {
 		case "link_followup_candidate":
@@ -221,5 +233,16 @@ func buildDelayedNoReplySummary(classification string, messageText string) strin
 		return fmt.Sprintf("Adding a quick unblock note: I read the stuck point as \"%s\". I would first pin down the repro path and failure boundary, then decide whether to keep debugging or hand it to an owner.", snippet)
 	default:
 		return fmt.Sprintf("Adding a quick take on this unanswered thread: I read the question as \"%s\". I would list the options and decision criteria, then choose one smallest verifiable next step.", snippet)
+	}
+}
+
+func delayedNoReplyTemplateName(classification string) string {
+	switch strings.TrimSpace(classification) {
+	case "link_followup_candidate":
+		return "delayed_no_reply_link"
+	case "stuck_or_handoff":
+		return "delayed_no_reply_stuck"
+	default:
+		return "delayed_no_reply_default"
 	}
 }

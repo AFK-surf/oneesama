@@ -40,7 +40,7 @@ func TestHandleWorkspaceBootstrapCreatesTemplates(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", response.Code)
 	}
-	if !strings.Contains(response.Body.String(), `"template_count":9`) {
+	if !strings.Contains(response.Body.String(), `"template_count":18`) {
 		t.Fatalf("body = %s, want created templates", response.Body.String())
 	}
 }

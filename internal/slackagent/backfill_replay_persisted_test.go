@@ -95,6 +95,9 @@ func TestMergePersistedDelayedNoReplyPersistedOnlyUsesFollowupTitleSummary(t *te
 	if c.FollowupID != 42 {
 		t.Errorf("FollowupID = %d, want 42", c.FollowupID)
 	}
+	if c.ReviewStatus != BackfillReviewNeedsThreadRefetch {
+		t.Errorf("ReviewStatus = %q, want %s", c.ReviewStatus, BackfillReviewNeedsThreadRefetch)
+	}
 }
 
 func TestMergePersistedDelayedNoReplySkipsLowValuePersistedLinkFollowups(t *testing.T) {
@@ -247,6 +250,9 @@ func TestRenderBackfillCandidatesMarkdownLabelsSource(t *testing.T) {
 	}
 	if !strings.Contains(out, "**Followup ID**: 8") {
 		t.Errorf("missing FollowupID for persisted-only:\n%s", out)
+	}
+	if !strings.Contains(out, "**Quality gate**: `needs_thread_refetch`") {
+		t.Errorf("persisted-only candidate should require thread refetch:\n%s", out)
 	}
 	if !strings.Contains(out, "no fresh scan match") {
 		t.Errorf("persisted-only candidate should explain missing OriginalText:\n%s", out)

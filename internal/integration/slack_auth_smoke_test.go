@@ -128,7 +128,7 @@ func TestSlackAndMeetingAuthSecuritySmoke(t *testing.T) {
 			t.Fatalf("workspace bootstrap status = %d, want 200", response.StatusCode)
 		}
 		bootstrapBody := readBody(t, response)
-		if !strings.Contains(string(bootstrapBody), `"template_count":9`) {
+		if !strings.Contains(string(bootstrapBody), `"template_count":18`) {
 			t.Fatalf("workspace bootstrap body = %s, want successful bootstrap", bootstrapBody)
 		}
 	})

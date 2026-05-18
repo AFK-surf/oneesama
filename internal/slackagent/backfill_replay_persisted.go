@@ -85,7 +85,7 @@ func MergePersistedDelayedNoReply(fresh []SlackBackfillCandidate, followups []Sl
 	out := make([]SlackBackfillCandidate, 0, len(fresh)+len(followups))
 	freshIndex := make(map[string]int, len(fresh))
 	for i := range fresh {
-		out = append(out, fresh[i])
+		out = append(out, markBackfillCandidateQuality(fresh[i]))
 		freshIndex[backfillCandidateDedupeKey(out[i].ChannelID, out[i].ThreadTS, out[i].Classification)] = i
 	}
 
@@ -103,9 +103,10 @@ func MergePersistedDelayedNoReply(fresh []SlackBackfillCandidate, followups []Sl
 		if i, ok := freshIndex[key]; ok {
 			out[i].FromPersistedState = true
 			out[i].FollowupID = followup.ID
+			out[i] = markBackfillCandidateQuality(out[i])
 			continue
 		}
-		out = append(out, SlackBackfillCandidate{
+		out = append(out, markBackfillCandidateQuality(SlackBackfillCandidate{
 			ChannelID:          channel,
 			ThreadTS:           thread,
 			OriginatorTS:       thread,
@@ -115,7 +116,7 @@ func MergePersistedDelayedNoReply(fresh []SlackBackfillCandidate, followups []Sl
 			OriginalText:       "",
 			FromPersistedState: true,
 			FollowupID:         followup.ID,
-		})
+		}))
 	}
 	return out
 }

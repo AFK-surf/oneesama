@@ -227,6 +227,9 @@ func TestClassifyBackfillMessageKeepsReadablePDFLink(t *testing.T) {
 	if candidate.Classification != "link_followup_candidate" {
 		t.Fatalf("classification = %q, want link_followup_candidate", candidate.Classification)
 	}
+	if candidate.ReviewStatus != BackfillReviewNeedsLinkRead {
+		t.Fatalf("ReviewStatus = %q, want %s", candidate.ReviewStatus, BackfillReviewNeedsLinkRead)
+	}
 }
 
 // TestRenderBackfillCandidatesMarkdownEmpty confirms the empty-state
@@ -253,6 +256,12 @@ func TestRenderBackfillCandidatesMarkdownGroupsByClassification(t *testing.T) {
 	if !strings.Contains(out, "## stuck_or_handoff (2)") {
 		t.Fatalf("output missing stuck_or_handoff group header, got %q", out)
 	}
+	if !strings.Contains(out, "**Quality gate**: `review_ready`") {
+		t.Fatalf("output missing review quality gate, got %q", out)
+	}
+	if !strings.Contains(out, "**Draft reply**") {
+		t.Fatalf("output missing postable draft label, got %q", out)
+	}
 	if !strings.Contains(out, "## unanswered_question (1)") {
 		t.Fatalf("output missing unanswered_question group header, got %q", out)
 	}
@@ -262,6 +271,28 @@ func TestRenderBackfillCandidatesMarkdownGroupsByClassification(t *testing.T) {
 	unansweredIdx := strings.Index(out, "unanswered_question")
 	if stuckIdx > unansweredIdx {
 		t.Fatalf("groups not sorted alphabetically: stuck idx=%d, unanswered idx=%d", stuckIdx, unansweredIdx)
+	}
+}
+
+func TestRenderBackfillCandidatesMarkdownLabelsNonPostableNotes(t *testing.T) {
+	out := RenderBackfillCandidatesMarkdown([]SlackBackfillCandidate{{
+		Classification: "link_followup_candidate",
+		Title:          "补读这条分享",
+		ChannelID:      "C1",
+		ThreadTS:       "1",
+		Draft:          "generic link note",
+		OriginalText:   "https://example.com/article.pdf",
+		ReviewStatus:   BackfillReviewNeedsLinkRead,
+		ReviewReason:   "link body has not been fetched",
+	}})
+	if !strings.Contains(out, "**Quality gate**: `needs_link_read`") {
+		t.Fatalf("missing needs_link_read gate:\n%s", out)
+	}
+	if !strings.Contains(out, "**Draft note (not postable yet)**") {
+		t.Fatalf("non-ready candidate should not be labelled Draft reply:\n%s", out)
+	}
+	if strings.Contains(out, "**Draft reply**") {
+		t.Fatalf("non-ready candidate was labelled as postable draft:\n%s", out)
 	}
 }
 

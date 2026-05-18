@@ -2,9 +2,10 @@
 
 `oneesama-triage-replay` is the dry-run companion to the live triage
 path. It scans a batch of recent Slack messages, classifies which ones
-oneesama probably should have caught, and emits a Markdown report with
-draft replies for a human to review. **Nothing is posted.** That's the
-whole point of slice 1 — the operator is the safety toggle.
+oneesama probably should have caught, and emits a Markdown report for a
+human to review. **Nothing is posted.** The report distinguishes
+postable `Draft reply` entries from non-postable leads that still need
+more context or link reading.
 
 This is the response to Peng's 5/18 ask:
 
@@ -69,6 +70,49 @@ Quality gates added after the 2026-05-18 dogfood report:
   lightweight article synthesis.
 - GitHub readable documents remain eligible when they are actually
   material to read, e.g. `/blob/.../*.pdf`, `.md`, `.txt`, or notebooks.
+- Link/article candidates must fetch the linked body and run the same
+  shared-link synthesis path as live triage before they are labelled
+  `review_ready`. If the body cannot be fetched or is not substantive
+  enough, the report marks the item `needs_link_read` and labels its
+  text `Draft note (not postable yet)`.
+
+## Report quality gates
+
+Every rendered candidate carries a `Quality gate` line:
+
+- `review_ready` — local quality gates passed; the text is labelled
+  `Draft reply`.
+- `needs_link_read` — the item is a readable-link lead, but the
+  linked body has not been fetched/synthesized yet.
+- `needs_context` — the message mentions a specific owner/user or has
+  other context that must be verified before posting.
+- `needs_thread_refetch` — the item came only from persisted
+  `delayed_no_reply` state; the thread must be refetched before any
+  reply is considered.
+
+This is intentionally stricter than "candidate found == reply ready".
+Dogfood showed that generic fallback text can look like oneesama is
+pretending to read a PR/article when it has not.
+
+## Triage reply templates
+
+Default reply wording lives under `internal/slackagent/templates/triage/`
+and is also bootstrapped into the runtime workspace at
+`templates/triage/`. Operators can override the same filenames via:
+
+- `ONEESAMA_TRIAGE_TEMPLATE_DIR=/path/to/templates/triage`
+- `$ONEESAMA_SLACK_WORKSPACE_DIR/templates/triage/`
+
+Current default template names:
+
+- `link_synthesis.{zh,en}.tmpl`
+- `delayed_no_reply_link.{zh,en}.tmpl`
+- `delayed_no_reply_stuck.{zh,en}.tmpl`
+- `delayed_no_reply_default.{zh,en}.tmpl`
+
+The templates are a workspace behaviour contract, not an implementation
+detail. They exist because each Slack workspace has its own norms for
+how "lightweight opinion" replies should sound.
 
 ## Live mode (slice 2)
 
@@ -178,11 +222,10 @@ The merge runs after fresh classification, using
   has channel history context), but mark `FromPersistedState=true`
   and cite the followup id.
 - **`persisted` (only)** — the followup exists in live state but the
-  backfill scan didn't see the root (e.g. window cut it off). The
-  candidate is synthesized using the followup's Title + Summary
-  **verbatim**, no re-classification or paraphrasing — the live
-  triage already wrote those with full thread context and the
-  backfill report respects that authority.
+  backfill scan didn't see the root (e.g. window cut it off). These
+  entries are leads, not postable candidates: they are labelled
+  `needs_thread_refetch` because the current thread state may have
+  changed since the followup was recorded.
 - **`fresh`** — backfill scan only; no matching followup.
 
 Each candidate in the rendered Markdown shows a `Source` line with
@@ -194,19 +237,17 @@ the report contains only fresh candidates. If the dir exists but
 opening the collection fails, the merge falls back to fresh
 candidates only with a stderr warning — non-fatal.
 
-## What's NOT in slice 2 yet
+## What's NOT implemented yet
 
-- **`--post`**. Driver owns the live `--post` toggle path. The dry-run
-  CLI cannot send Slack messages.
-- **Auto-discovery of channels**. You still pass `--channel` explicitly.
-  Auto-pulling the bot's joined channel list from `slack_channels`
-  typed collection is queued for a later slice.
-- **Persisted-state merge**. Driver's #186 persists "wait-for-human"
-  decisions; reading those to enrich/dedupe candidates is queued for
-  a later slice.
-- **External link content enrichment**. The classifier already detects
-  shared-link / article shares; pulling the article body for richer
-  drafts is a follow-up.
+- **`--post`**. The dry-run CLI cannot send Slack messages. The live
+  triage path remains the only component allowed to post.
+- **Persisted-only refetch/resolve.** Persisted-only leads are labelled
+  `needs_thread_refetch`; a later slice should refetch those threads
+  and automatically resolve followups that humans already answered.
+- **Full LLM re-run for backfill.** Link candidates reuse the live
+  shared-link synthesis helper after fetching the body. The broader
+  "rerun the complete triage LLM prompt over each candidate" path is
+  still future work.
 
 ## Why dry-run first
 

@@ -37,6 +37,8 @@ type SlackBackfillCandidate struct {
 	Title          string `json:"title"`
 	Draft          string `json:"draft"`
 	OriginalText   string `json:"original_text"`
+	ReviewStatus   string `json:"review_status,omitempty"`
+	ReviewReason   string `json:"review_reason,omitempty"`
 	// FromPersistedState is true when this candidate matches (or was
 	// promoted from) a row in the `slack_heartbeat_followups`
 	// collection populated by driver's #186 delayed_no_reply path.
@@ -132,7 +134,7 @@ func ClassifyBackfillMessage(message SlackInboundMessage, replies []SlackInbound
 		return SlackBackfillCandidate{}, false
 	}
 	thread := firstNonEmpty(strings.TrimSpace(message.ThreadTS), strings.TrimSpace(message.TS))
-	return SlackBackfillCandidate{
+	return markBackfillCandidateQuality(SlackBackfillCandidate{
 		ChannelID:      strings.TrimSpace(message.ChannelID),
 		ThreadTS:       thread,
 		OriginatorTS:   strings.TrimSpace(message.TS),
@@ -140,7 +142,7 @@ func ClassifyBackfillMessage(message SlackInboundMessage, replies []SlackInbound
 		Title:          candidate.Title,
 		Draft:          candidate.Summary,
 		OriginalText:   strings.TrimSpace(message.Text),
-	}, true
+	}), true
 }
 
 // RenderBackfillCandidatesMarkdown groups candidates by classification
@@ -166,7 +168,8 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 	fmt.Fprintf(&b, "# Triage backfill replay\n\n")
 	fmt.Fprintf(&b, "%d candidate(s) found. Each entry shows the classification, the\n", len(candidates))
 	fmt.Fprintf(&b, "channel/thread anchor, the original message excerpt, and a draft\n")
-	fmt.Fprintf(&b, "reply for human review. Nothing is posted; this is dry-run output.\n\n")
+	fmt.Fprintf(&b, "reply for human review. Entries marked `needs_*` are leads, not postable\n")
+	fmt.Fprintf(&b, "drafts. Nothing is posted; this is dry-run output.\n\n")
 	for _, key := range keys {
 		group := byClass[key]
 		fmt.Fprintf(&b, "## %s (%d)\n\n", key, len(group))
@@ -188,18 +191,64 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 			if c.FollowupID > 0 {
 				fmt.Fprintf(&b, "- **Followup ID**: %d\n", c.FollowupID)
 			}
+			status, reason := backfillCandidateReviewStatus(c)
+			fmt.Fprintf(&b, "- **Quality gate**: `%s`", status)
+			if reason != "" {
+				fmt.Fprintf(&b, " — %s", reason)
+			}
+			fmt.Fprintf(&b, "\n")
 			original := c.OriginalText
 			if original == "" {
-				original = "_(no fresh scan match; draft comes verbatim from the persisted followup)_"
+				original = "_(no fresh scan match; note comes verbatim from the persisted followup and needs thread refetch)_"
 			} else {
 				original = "> " + truncateForMarkdown(original, 240)
 			}
 			fmt.Fprintf(&b, "- **Original**:\n  %s\n\n", original)
-			fmt.Fprintf(&b, "**Draft reply**:\n\n%s\n\n", c.Draft)
+			label := "Draft reply"
+			if status != BackfillReviewReady {
+				label = "Draft note (not postable yet)"
+			}
+			fmt.Fprintf(&b, "**%s**:\n\n%s\n\n", label, c.Draft)
 			fmt.Fprintf(&b, "---\n\n")
 		}
 	}
 	return b.String()
+}
+
+const (
+	BackfillReviewReady              = "review_ready"
+	BackfillReviewNeedsContext       = "needs_context"
+	BackfillReviewNeedsLinkRead      = "needs_link_read"
+	BackfillReviewNeedsThreadRefetch = "needs_thread_refetch"
+)
+
+func markBackfillCandidateQuality(candidate SlackBackfillCandidate) SlackBackfillCandidate {
+	if strings.TrimSpace(candidate.ReviewStatus) != "" {
+		return candidate
+	}
+	switch {
+	case candidate.FromPersistedState && strings.TrimSpace(candidate.OriginalText) == "":
+		candidate.ReviewStatus = BackfillReviewNeedsThreadRefetch
+		candidate.ReviewReason = "persisted-only lead; refetch the thread before posting"
+	case strings.EqualFold(strings.TrimSpace(candidate.Classification), "link_followup_candidate"):
+		candidate.ReviewStatus = BackfillReviewNeedsLinkRead
+		candidate.ReviewReason = "link body has not been fetched and synthesized"
+	case strings.Contains(candidate.OriginalText, "<@"):
+		candidate.ReviewStatus = BackfillReviewNeedsContext
+		candidate.ReviewReason = "message mentions specific people; verify ownership/context before posting"
+	case strings.TrimSpace(candidate.Draft) == "":
+		candidate.ReviewStatus = BackfillReviewNeedsContext
+		candidate.ReviewReason = "missing draft text"
+	default:
+		candidate.ReviewStatus = BackfillReviewReady
+		candidate.ReviewReason = "candidate passes local quality gates"
+	}
+	return candidate
+}
+
+func backfillCandidateReviewStatus(candidate SlackBackfillCandidate) (string, string) {
+	candidate = markBackfillCandidateQuality(candidate)
+	return strings.TrimSpace(candidate.ReviewStatus), strings.TrimSpace(candidate.ReviewReason)
 }
 
 // candidateSourceLabel renders the (FromPersistedState, OriginalText)

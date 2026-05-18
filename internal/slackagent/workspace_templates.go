@@ -1,6 +1,6 @@
 package slackagent
 
-var DefaultWorkspaceTemplates = []WorkspaceTemplate{
+var DefaultWorkspaceTemplates = append([]WorkspaceTemplate{
 	{
 		Path: "AGENTS.md",
 		Content: `# Onee-sama Workspace
@@ -23,4 +23,4 @@ files and logs. Prefer concrete command output over vague summaries.
 	{Path: "docs/post-blocks.md", Content: "# Post Blocks\n\nUse Block Kit for structured reports and always include fallback text.\n"},
 	{Path: "docs/run-command.md", Content: "# Run Command\n\nUse specific runtime tools and repo scripts before ad-hoc shell.\n"},
 	{Path: "memory/.gitkeep", Content: ""},
-}
+}, defaultTriageWorkspaceTemplates()...)

@@ -121,6 +121,16 @@ func buildSharedLinkSynthesisReply(context SlackExternalLinkContext, messageText
 		if title != "" {
 			subject = "《" + title + "》"
 		}
+		if rendered, err := renderTriageReplyTemplate("link_synthesis", "zh", triageReplyTemplateData{
+			Title:       title,
+			Subject:     subject,
+			Excerpt:     excerpt,
+			URL:         strings.TrimSpace(context.URL),
+			MessageText: messageText,
+			Language:    "zh",
+		}); err == nil && strings.TrimSpace(rendered) != "" {
+			return rendered
+		}
 		if excerpt != "" {
 			return fmt.Sprintf("我粗读了一下%s。核心信息是：%s\n\n我的初步判断：这类内容适合作为讨论引子；如果继续聊，最好把它和当前产品/技术判断具体连起来。", subject, excerpt)
 		}
@@ -129,6 +139,16 @@ func buildSharedLinkSynthesisReply(context SlackExternalLinkContext, messageText
 	subject := "this link"
 	if title != "" {
 		subject = "\"" + title + "\""
+	}
+	if rendered, err := renderTriageReplyTemplate("link_synthesis", "en", triageReplyTemplateData{
+		Title:       title,
+		Subject:     subject,
+		Excerpt:     excerpt,
+		URL:         strings.TrimSpace(context.URL),
+		MessageText: messageText,
+		Language:    "en",
+	}); err == nil && strings.TrimSpace(rendered) != "" {
+		return rendered
 	}
 	if excerpt != "" {
 		return fmt.Sprintf("I skimmed %s. Core signal: %s\n\nMy initial take: this is worth using as a discussion prompt; the useful next step is connecting it back to the current product or technical decision.", subject, excerpt)
