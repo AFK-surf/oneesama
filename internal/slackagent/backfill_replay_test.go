@@ -51,6 +51,32 @@ func TestClassifyBackfillMessageRejectsMessagesWithHumanReply(t *testing.T) {
 	}
 }
 
+// TestClassifyBackfillMessageDraftIgnoresBotReplyText is the
+// regression for driver's slice-2 non-blocking nit: bot-only replies
+// must not leak into the candidate `Draft` text. The classifier hands
+// `slackDelayedNoReplyCandidateFor` only the human-authored bundle so
+// the draft summary reflects the root's question, not a bot's "ack".
+func TestClassifyBackfillMessageDraftIgnoresBotReplyText(t *testing.T) {
+	const botAckText = "bot acknowledged but did nothing"
+	msg := SlackInboundMessage{
+		ChannelID:  "C1",
+		TS:         "100.000",
+		UserID:     "U_PENG",
+		Text:       "我们要不要回滚 canvas writes 的发布？",
+		ReplyCount: 1,
+	}
+	replies := []SlackInboundMessage{
+		{ChannelID: "C1", TS: "101.000", UserID: "USLACKBOT", Subtype: "bot_message", Text: botAckText},
+	}
+	candidate, ok := ClassifyBackfillMessage(msg, replies, nil)
+	if !ok {
+		t.Fatal("expected candidate when only bot replied")
+	}
+	if strings.Contains(candidate.Draft, botAckText) {
+		t.Fatalf("draft leaked bot reply text; got Draft=%q", candidate.Draft)
+	}
+}
+
 // TestClassifyBackfillMessageRejectsSubtypeBotMessageRoot is the
 // regression for driver's slice-2 audit blocker (35d80d9 → fix in this
 // same commit family). A message with `subtype: "bot_message"` but no

@@ -91,7 +91,20 @@ func ClassifyBackfillMessage(message SlackInboundMessage, replies []SlackInbound
 		return SlackBackfillCandidate{}, false
 	}
 
-	bundle := append([]SlackInboundMessage{message}, normalizedReplies...)
+	// Bot replies (Slackbot acks, app pings, our own previous replies)
+	// must not leak into the draft summary. driver caught this as a
+	// non-blocking quality nit on fbb6c46: `slackDelayedNoReplyCandidateFor`
+	// uses `joinSlackMessageTexts` over the whole bundle, and bot
+	// chatter would otherwise shape the "我理解是在问..." line. Filter
+	// here so only the root's text drives the draft.
+	humanReplies := make([]SlackInboundMessage, 0, len(normalizedReplies))
+	for _, reply := range normalizedReplies {
+		if isAuthoredByBot(reply, botUserIDs) {
+			continue
+		}
+		humanReplies = append(humanReplies, reply)
+	}
+	bundle := append([]SlackInboundMessage{message}, humanReplies...)
 	candidate, ok := slackDelayedNoReplyCandidateFor(SlackTriageDecision{}, bundle)
 	if !ok {
 		return SlackBackfillCandidate{}, false
