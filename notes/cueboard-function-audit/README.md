@@ -72,12 +72,17 @@ Example:
 - task #169: Meeting / ASR / summary / joiner.
 - task #170: Shared runtime / integrations / entrypoints.
 - task #171: consolidation backlog and implementation order.
+- task #194: Cueboard / OpenClaw-style related-memory recall inventory and
+  acceptance fixtures.
 
 The consolidated implementation backlog lives in
 `notes/cueboard-function-audit/consolidated-backlog.md`.
 
 Reusable migration lessons and guardrails live in
 `notes/cueboard-function-audit/migration-lessons.md`.
+
+Memory recall behavior parity for the OpenClaw-style unanswered-question "Aha"
+path lives in `notes/cueboard-function-audit/memory-recall-parity-inventory.md`.
 
 ## Review Workflow
 
