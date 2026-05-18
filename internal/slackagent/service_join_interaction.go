@@ -27,10 +27,17 @@ func (s *Service) StartJoinSetupInteraction(ctx context.Context, command AvatarC
 	return s.startJoinSetupInteraction(ctx, command, responseURL, joinSetupHTTPMode)
 }
 
+// StartJoinSetupSocketInteraction is the Socket Mode entry point for the
+// "join meeting" button. It MUST return before the ack window expires —
+// startJoinSetupInteraction may synchronously POST to response_url, which
+// can take longer than Slack's ~3s ack budget. LaunchAsyncInteraction
+// (service_interaction_async.go) is the standard ack-first wrapper; do
+// not inline-call startJoinSetupInteraction here without first
+// establishing why the slow path is safe.
 func (s *Service) StartJoinSetupSocketInteraction(ctx context.Context, command AvatarCommandInput, responseURL string) {
-	go func() {
-		_ = s.startJoinSetupInteraction(ctx, command, responseURL, joinSetupSocketMode)
-	}()
+	s.LaunchAsyncInteraction(ctx, "join_setup_socket", func(detached context.Context) {
+		_ = s.startJoinSetupInteraction(detached, command, responseURL, joinSetupSocketMode)
+	})
 }
 
 func (s *Service) startJoinSetupInteraction(ctx context.Context, command AvatarCommandInput, responseURL string, mode joinSetupInteractionMode) AvatarCommandResponse {

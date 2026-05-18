@@ -1,3 +1,18 @@
+// Socket Mode envelope dispatcher.
+//
+// IMPORTANT — protocol boundary discipline:
+//
+// Slack Socket Mode requires the agent to ACK every envelope within ~3
+// seconds of receipt. If we miss that window Slack re-sends the envelope
+// (double-processing) and the user sees the originating button as "no
+// reaction" because no `response_action` is rendered. Every handler in
+// this file MUST call `ack(...)` quickly. Slow work (HTTP POST to
+// response_url, agent runner spawn, meeting-agent calls, follow-up
+// fetches) MUST happen on a goroutine spawned BEFORE the ack returns.
+// Helper: see `Service.launchAsyncInteraction` in service_interaction_async.go
+// for the standard ack-first pattern + log line. New handlers added here
+// must either go through that helper or document why they can ack
+// inline.
 package slackagent
 
 import (
