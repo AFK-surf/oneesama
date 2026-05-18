@@ -96,6 +96,9 @@ func MergePersistedDelayedNoReply(fresh []SlackBackfillCandidate, followups []Sl
 		if channel == "" || thread == "" {
 			continue
 		}
+		if persistedFollowupLooksLowValueForBackfill(followup, classification) {
+			continue
+		}
 		key := backfillCandidateDedupeKey(channel, thread, classification)
 		if i, ok := freshIndex[key]; ok {
 			out[i].FromPersistedState = true
@@ -115,6 +118,17 @@ func MergePersistedDelayedNoReply(fresh []SlackBackfillCandidate, followups []Sl
 		})
 	}
 	return out
+}
+
+func persistedFollowupLooksLowValueForBackfill(followup SlackHeartbeatFollowup, classification string) bool {
+	if !strings.EqualFold(strings.TrimSpace(classification), "link_followup_candidate") {
+		return false
+	}
+	text := strings.TrimSpace(followup.Summary + "\n" + followup.Title)
+	if text == "" {
+		return false
+	}
+	return backfillMessageHasLowValueLinkOnly(SlackInboundMessage{Text: text})
 }
 
 // backfillCandidateDedupeKey is the canonical (channel, thread,

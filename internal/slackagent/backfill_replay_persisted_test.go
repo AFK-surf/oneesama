@@ -97,6 +97,37 @@ func TestMergePersistedDelayedNoReplyPersistedOnlyUsesFollowupTitleSummary(t *te
 	}
 }
 
+func TestMergePersistedDelayedNoReplySkipsLowValuePersistedLinkFollowups(t *testing.T) {
+	followups := []SlackHeartbeatFollowup{
+		{
+			ID:        11,
+			Kind:      slackDelayedNoReplyFollowupKind,
+			ChannelID: "C1",
+			ThreadTS:  "100.000",
+			Title:     "补读这条分享",
+			Summary:   "补一下这条分享：<https://github.com/AFK-surf/cueboard/pull/1917> <@U123> 来 review，没问题就 approve",
+			Metadata:  map[string]any{"classification": "link_followup_candidate"},
+		},
+		{
+			ID:        12,
+			Kind:      slackDelayedNoReplyFollowupKind,
+			ChannelID: "C1",
+			ThreadTS:  "101.000",
+			Title:     "补读这条分享",
+			Summary:   "补一下这条分享：https://github.com/hangli-hl/AI-Articles/blob/main/llm-thinking.pdf",
+			Metadata:  map[string]any{"classification": "link_followup_candidate"},
+		},
+	}
+
+	merged := MergePersistedDelayedNoReply(nil, followups)
+	if len(merged) != 1 {
+		t.Fatalf("merged len = %d, want only the readable PDF followup", len(merged))
+	}
+	if merged[0].FollowupID != 12 {
+		t.Fatalf("surviving FollowupID = %d, want 12", merged[0].FollowupID)
+	}
+}
+
 // TestMergePersistedDelayedNoReplyKeysOnClassificationToAvoidWrongMerge
 // is the regression for the (channel, thread, **classification**) key
 // design: two persisted followups in the same thread but with
