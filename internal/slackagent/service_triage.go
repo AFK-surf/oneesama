@@ -996,6 +996,10 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	if !probe {
 		directToolCalls, directFailures, directMutations = s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions, messages)
 	}
+	var personaShadow *SlackPersonaShadowResult
+	if !probe {
+		personaShadow = s.shadowSlackTriagePersona(ctx, channelID, threadTS, messages, decision, slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"]))
+	}
 	mutationCandidates := len(actions) - countSlackTriageDirectReplyActions(actions) + directMutations
 	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: mutationCandidates, failures: directFailures}, nil)
 	if probe {
@@ -1008,6 +1012,28 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 			job.Error = reason
 		}
 	}
+	toolCalls := append([]SlackTriageToolCall{{
+		Tool:    "agent_runner",
+		Action:  "slack_triage",
+		Args:    marshalTriageArgs(job.Provider, job.ID, decision.ParseOK),
+		Success: ok,
+		Brief:   mapBool(ok, "AgentRunner triage completed", "AgentRunner triage failed"),
+		Result:  rawOutput,
+	}}, directToolCalls...)
+	extraMetadata := map[string]any{
+		"suppressed_reason":  slackTriageSuppressedReason(decision, actions, ok),
+		"skip_reason_bucket": slackTriageSkipReasonBucketForDecision(decision, actions, ok),
+	}
+	if personaShadow != nil {
+		toolCalls = append(toolCalls, SlackTriageToolCall{
+			Tool:    "persona_runtime",
+			Action:  "shadow_triage",
+			Success: personaShadow.Success,
+			Brief:   mapBool(personaShadow.Success, "Persona runtime shadow accepted triage request", "Persona runtime shadow failed"),
+			Result:  firstNonEmpty(personaShadow.Decision, personaShadow.Error),
+		})
+		extraMetadata["persona_shadow"] = personaShadow
+	}
 	runPatch := SlackTriageContext{
 		ID:        runID,
 		SessionID: stringFromContext(job.Context, "sessionId", "session_id"),
@@ -1017,21 +1043,11 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		Digest:    stringFromContext(job.Context, "digest"),
 		Channels:  firstNonEmptyStringSlice(extractChannelNames(stringFromContext(job.Context, "digest")), []string{channelID}),
 		Actions:   triageActionRows(actions),
-		ToolCalls: append([]SlackTriageToolCall{{
-			Tool:    "agent_runner",
-			Action:  "slack_triage",
-			Args:    marshalTriageArgs(job.Provider, job.ID, decision.ParseOK),
-			Success: ok,
-			Brief:   mapBool(ok, "AgentRunner triage completed", "AgentRunner triage failed"),
-			Result:  rawOutput,
-		}}, directToolCalls...),
+		ToolCalls: toolCalls,
 		Steps:     1,
 		Mutations: mutations,
 		Failures:  failures,
-		Metadata: mergeStringAnyMaps(mapFromAnyOrEmpty(job.Context["triageAudit"]), map[string]any{
-			"suppressed_reason":  slackTriageSuppressedReason(decision, actions, ok),
-			"skip_reason_bucket": slackTriageSkipReasonBucketForDecision(decision, actions, ok),
-		}),
+		Metadata:  mergeStringAnyMaps(mapFromAnyOrEmpty(job.Context["triageAudit"]), extraMetadata),
 	}
 	if !ok {
 		runPatch.Status = "failed"

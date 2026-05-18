@@ -187,6 +187,18 @@ ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=1
 The current scaffold is intentionally not wired into live reply generation. It
 only establishes the runtime boundary and observability surface.
 
+Implemented shadow replay in task #202:
+
+- Live Slack triage finalization builds a `slack_triage` persona request and
+  sends it to the configured non-legacy persona runtime in `shadow` mode.
+- `oneesama-triage-replay` accepts `--persona-runtime fake|http|pi` plus
+  `--persona-runtime-base-url` to replay backfill candidates through the same
+  sidecar contract.
+- Shadow replay records runtime, decision, latency, reason, error, and
+  citations in triage metadata / Markdown reports.
+- Shadow replay is never allowed to post Slack replies; `live` mode is rejected
+  by the replay CLI until the foreground cutover phase.
+
 ### Phase 2: Build A Pi-Style Memory Context Adapter
 
 - [ ] Build an adapter that can assemble a `<memory-context>` style bundle for
@@ -246,7 +258,7 @@ Acceptance:
 ### Phase 5: Cutover And Rollback
 
 - [ ] Add a feature flag such as `ONEESAMA_PERSONA_RUNTIME=legacy|pi`.
-- [ ] Start with dry-run/shadow evaluation on backfill reports.
+- [x] Start with dry-run/shadow evaluation on backfill reports.
 - [ ] Move selected Slack channels or meeting sessions to Pi runtime canary.
 - [ ] Keep rollback to legacy foreground mode.
 - [ ] Track per-run quality signals: answered, stayed silent, delegated worker,

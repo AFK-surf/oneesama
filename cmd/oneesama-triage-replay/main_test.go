@@ -8,7 +8,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/AFK-surf/oneesama/internal/persona"
 	"github.com/AFK-surf/oneesama/internal/slackagent"
 )
 
@@ -429,6 +431,54 @@ func TestRunPersistenceMergeMissingDirFailsGracefully(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "C1") {
 		t.Errorf("fresh candidate missing from output:\n%s", stdout.String())
+	}
+}
+
+func TestRunPersonaShadowReplayAgainstHTTPRuntime(t *testing.T) {
+	var seen persona.Request
+	mux := http.NewServeMux()
+	mux.HandleFunc("/persona/decide", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&seen); err != nil {
+			t.Fatalf("decode persona request: %v", err)
+		}
+		writeFakeSlackJSON(t, w, persona.Response{
+			Runtime:    persona.ProviderPi,
+			Decision:   persona.DecisionStaySilent,
+			Reason:     "shadow replay accepted",
+			ShadowOnly: true,
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	ndjson := `{"channelId":"C1","user_id":"U_PENG","ts":"100.000","text":"我们要不要把 meeting avatar foreground 切到 Pi sidecar？"}`
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--persona-runtime", "pi", "--persona-runtime-base-url", server.URL, "--quiet"},
+		strings.NewReader(ndjson), &stdout, &stderr,
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if seen.ID == "" || seen.Mode != persona.ModeShadow || seen.Event.Kind != "slack_backfill_candidate" {
+		t.Fatalf("seen persona request = %#v, want backfill shadow request", seen)
+	}
+	if seen.Anchor.ChannelID != "C1" || seen.Anchor.ThreadTS != "100.000" {
+		t.Fatalf("seen anchor = %#v, want Slack root anchor", seen.Anchor)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "## Persona runtime shadow replay") ||
+		!strings.Contains(out, "`pi`") ||
+		!strings.Contains(out, "`stay_silent`") ||
+		!strings.Contains(out, "shadow replay accepted") {
+		t.Errorf("output missing persona shadow section:\n%s", out)
+	}
+}
+
+func TestRunPersonaShadowReplayRejectsLiveMode(t *testing.T) {
+	_, err := runPersonaShadowReplay(nil, "fake", persona.ModeLive, "", time.Second)
+	if err == nil || !strings.Contains(err.Error(), "requires --persona-runtime-mode=shadow") {
+		t.Fatalf("err = %v, want shadow-mode guard", err)
 	}
 }
 

@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/persona"
 	"github.com/AFK-surf/oneesama/internal/slackagent"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
@@ -151,6 +152,14 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	fs.StringVar(&persistenceProvider, "persistence-provider", "", "Optional: persistence provider (e.g. 'json-file' or 'sqlite'). Defaults to runtime config default.")
 	var workspaceDir string
 	fs.StringVar(&workspaceDir, "workspace-dir", "", "Optional: Slack workspace memory directory. Defaults to ONEESAMA_SLACK_WORKSPACE_DIR / MAB_SLACK_WORKSPACE_DIR when set; enables related-memory evidence in the report.")
+	var personaRuntimeProvider string
+	fs.StringVar(&personaRuntimeProvider, "persona-runtime", "", "Optional: shadow-replay candidates through a persona runtime provider (fake, http, or pi). Defaults to ONEESAMA_PERSONA_RUNTIME / MAB_PERSONA_RUNTIME when set.")
+	var personaRuntimeMode string
+	fs.StringVar(&personaRuntimeMode, "persona-runtime-mode", "shadow", "Persona runtime mode for shadow replay. Must stay shadow until live cutover.")
+	var personaRuntimeBaseURL string
+	fs.StringVar(&personaRuntimeBaseURL, "persona-runtime-base-url", "", "Optional: local Pi/http sidecar base URL for persona shadow replay. Defaults to ONEESAMA_PERSONA_RUNTIME_BASE_URL / MAB_PERSONA_RUNTIME_BASE_URL.")
+	var personaRuntimeTimeout time.Duration
+	fs.DurationVar(&personaRuntimeTimeout, "persona-runtime-timeout", 10*time.Second, "Persona runtime request timeout for shadow replay.")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: oneesama-triage-replay [--output PATH] [--bot-user-ids U_BOT,U_OTHER] [--quiet]\n")
 		fmt.Fprintf(stderr, "       oneesama-triage-replay --live --channel C123,C456 [--since 24h] [--token xoxb-...] [--max-messages-per-channel 200]\n\n")
@@ -227,10 +236,24 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	if workspaceDir != "" {
 		candidates = enrichBackfillRelatedMemory(candidates, workspaceDir, persistenceDir, persistenceSQLite, persistenceProvider)
 	}
+	personaShadowResults, personaShadowErr := runPersonaShadowReplay(
+		candidates,
+		personaRuntimeProvider,
+		personaRuntimeMode,
+		personaRuntimeBaseURL,
+		personaRuntimeTimeout,
+	)
+	if personaShadowErr != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-replay: persona shadow replay: %v\n", personaShadowErr)
+		return 1
+	}
 
 	markdown := slackagent.RenderBackfillCandidatesMarkdown(candidates)
 	if liveMode {
 		markdown = appendLiveStatsSection(markdown, liveStats)
+	}
+	if len(personaShadowResults) > 0 {
+		markdown = appendPersonaShadowSection(markdown, personaShadowResults)
 	}
 	// Footer should count actual rendered persisted candidates (the
 	// reality the operator sees in the report), not the raw load
@@ -273,6 +296,34 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		)
 	}
 	return 0
+}
+
+func runPersonaShadowReplay(candidates []slackagent.SlackBackfillCandidate, provider string, mode string, baseURL string, timeout time.Duration) ([]slackagent.SlackPersonaShadowResult, error) {
+	provider = strings.TrimSpace(firstNonEmpty(provider, os.Getenv("ONEESAMA_PERSONA_RUNTIME"), os.Getenv("MAB_PERSONA_RUNTIME")))
+	if provider == "" || persona.NormalizeProvider(provider) == persona.ProviderLegacy {
+		return nil, nil
+	}
+	baseURL = strings.TrimSpace(firstNonEmpty(baseURL, os.Getenv("ONEESAMA_PERSONA_RUNTIME_BASE_URL"), os.Getenv("MAB_PERSONA_RUNTIME_BASE_URL")))
+	mode = persona.NormalizeMode(mode)
+	if mode != persona.ModeShadow {
+		return nil, fmt.Errorf("persona shadow replay requires --persona-runtime-mode=shadow; got %q", mode)
+	}
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	runtime, err := persona.NewRuntime(persona.Config{
+		Provider:   provider,
+		Mode:       mode,
+		BaseURL:    baseURL,
+		Timeout:    timeout,
+		ShadowOnly: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), maxDuration(timeout*time.Duration(maxInt(1, len(candidates))), timeout))
+	defer cancel()
+	return slackagent.ShadowPersonaBackfillCandidates(ctx, runtime, candidates), nil
 }
 
 func enrichBackfillRelatedMemory(candidates []slackagent.SlackBackfillCandidate, workspaceDir string, persistenceDir string, persistenceSQLite string, persistenceProvider string) []slackagent.SlackBackfillCandidate {
@@ -428,6 +479,41 @@ func appendLiveStatsSection(markdown string, stats []slackagent.SlackBackfillRep
 	return b.String()
 }
 
+func appendPersonaShadowSection(markdown string, results []slackagent.SlackPersonaShadowResult) string {
+	if len(results) == 0 {
+		return markdown
+	}
+	var b strings.Builder
+	b.WriteString(markdown)
+	if !strings.HasSuffix(markdown, "\n\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("## Persona runtime shadow replay\n\n")
+	b.WriteString("Shadow replay sends the same candidate evidence to the configured persona runtime. It does not post Slack replies.\n\n")
+	b.WriteString("| Source | Channel | Thread | Classification | Runtime | Decision | Latency | Result |\n")
+	b.WriteString("|---|---|---|---|---|---|---:|---|\n")
+	for _, result := range results {
+		outcome := "ok"
+		if !result.Success {
+			outcome = "error: " + result.Error
+		} else if result.Reason != "" {
+			outcome = result.Reason
+		}
+		b.WriteString(fmt.Sprintf(
+			"| `%s` | `%s` | `%s` | `%s` | `%s` | `%s` | %dms | %s |\n",
+			result.Source,
+			result.ChannelID,
+			result.ThreadTS,
+			result.Classification,
+			result.Runtime,
+			result.Decision,
+			result.LatencyMS,
+			strings.ReplaceAll(outcome, "|", "\\|"),
+		))
+	}
+	return b.String()
+}
+
 // classifyAll groups messages by (channel, thread root), feeds each
 // group to slackagent.ClassifyBackfillMessage, and returns the
 // candidates in input order. Grouping is needed because the
@@ -531,4 +617,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func maxInt(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxDuration(a time.Duration, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }
