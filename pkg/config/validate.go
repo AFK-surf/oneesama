@@ -30,6 +30,9 @@ func Validate(cfg Config) error {
 	if err := validateAgentRunner(cfg.AgentRunner); err != nil {
 		errs = errors.Join(errs, err)
 	}
+	if err := validatePersonaRuntime(cfg.PersonaRuntime); err != nil {
+		errs = errors.Join(errs, err)
+	}
 	if cfg.Meetd.WatchInterval <= 0 {
 		errs = errors.Join(errs, errors.New("meetd.watch_interval must be positive"))
 	}
@@ -64,6 +67,31 @@ func Validate(cfg Config) error {
 		errs = errors.Join(errs, errors.New("slack.event_buffer.debounce must be positive"))
 	}
 
+	return errs
+}
+
+func validatePersonaRuntime(cfg PersonaRuntimeConfig) error {
+	var errs error
+	provider := normalizePersonaRuntimeProvider(cfg.Provider)
+	switch provider {
+	case "legacy", "fake", "http", "pi":
+	default:
+		errs = errors.Join(errs, fmt.Errorf("persona_runtime.provider is unsupported: %q", cfg.Provider))
+	}
+	mode := normalizePersonaRuntimeMode(cfg.Mode)
+	switch mode {
+	case "shadow", "live":
+	default:
+		errs = errors.Join(errs, fmt.Errorf("persona_runtime.mode must be shadow or live; got %q", cfg.Mode))
+	}
+	if provider == "http" || provider == "pi" {
+		if strings.TrimSpace(cfg.BaseURL) == "" {
+			errs = errors.Join(errs, fmt.Errorf("persona_runtime.base_url is required for %s provider", provider))
+		}
+	}
+	if cfg.Timeout <= 0 {
+		errs = errors.Join(errs, errors.New("persona_runtime.timeout must be greater than zero"))
+	}
 	return errs
 }
 

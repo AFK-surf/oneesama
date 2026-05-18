@@ -22,6 +22,7 @@ func NewServer(cfg config.Config, logger *slog.Logger) *httpserver.ManagedServer
 		Persistence:            cfg.Persistence,
 		Slack:                  slackConfig,
 		AgentRunner:            cfg.AgentRunner,
+		PersonaRuntime:         cfg.PersonaRuntime,
 		DefaultCaptionLanguage: cfg.Meetd.CaptionLanguage,
 		MeetingAgentURL:        localServiceURL(cfg.MeetingAgent.Listen),
 		MeetWebhookSecret:      cfg.Meetd.WebhookSecret,

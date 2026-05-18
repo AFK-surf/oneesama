@@ -7,6 +7,7 @@ type Config struct {
 	MeetingAgent    ServiceConfig
 	Slack           SlackConfig
 	AgentRunner     AgentRunnerConfig
+	PersonaRuntime  PersonaRuntimeConfig
 	Meetd           MeetdConfig
 	OpenAI          OpenAIConfig
 	Dialog          DialogConfig
@@ -83,6 +84,14 @@ type AgentRunnerConfig struct {
 	Codex      CodexRunnerConfig
 	Claude     ClaudeRunnerConfig
 	Ollama     OllamaRunnerConfig
+}
+
+type PersonaRuntimeConfig struct {
+	Provider   string
+	Mode       string
+	BaseURL    string
+	Timeout    time.Duration
+	ShadowOnly bool
 }
 
 type MeetdConfig struct {

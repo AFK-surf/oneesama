@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/AFK-surf/oneesama/internal/persona"
 )
 
 type StatusResponse struct {
@@ -13,6 +15,7 @@ type StatusResponse struct {
 	Persistence map[string]string `json:"persistence"`
 	Slack       SlackStatus       `json:"slack"`
 	AgentRunner AgentRunnerStatus `json:"agent_runner"`
+	Persona     PersonaStatus     `json:"persona_runtime"`
 }
 
 type SlackStatus struct {
@@ -42,6 +45,21 @@ type AgentRunnerStatus struct {
 	BaseURL       string `json:"base_url,omitempty"`
 	Jobs          int    `json:"jobs"`
 	Error         string `json:"error,omitempty"`
+}
+
+type PersonaStatus struct {
+	Provider      string         `json:"provider"`
+	Mode          string         `json:"mode"`
+	Ready         bool           `json:"ready"`
+	Healthy       bool           `json:"healthy"`
+	ShadowOnly    bool           `json:"shadow_only"`
+	Version       string         `json:"version,omitempty"`
+	BaseURL       string         `json:"base_url,omitempty"`
+	LastRequestAt string         `json:"last_request_at,omitempty"`
+	LastLatencyMS int64          `json:"last_latency_ms,omitempty"`
+	LastError     string         `json:"last_error,omitempty"`
+	StateSummary  map[string]any `json:"state_summary,omitempty"`
+	Error         string         `json:"error,omitempty"`
 }
 
 type AvatarCommandInput struct {
@@ -109,6 +127,7 @@ func (s *Service) Status() StatusResponse {
 			ThreadCases:             threadCaseStats,
 		},
 		AgentRunner: runnerStatus,
+		Persona:     s.personaStatus(ctx),
 	}
 }
 
@@ -203,5 +222,51 @@ func (s *Service) agentRunnerStatus(ctx context.Context) AgentRunnerStatus {
 	if status.Provider == "" {
 		status.Provider = "dry-run"
 	}
+	return status
+}
+
+func (s *Service) personaStatus(ctx context.Context) PersonaStatus {
+	status := PersonaStatus{
+		Provider:   strings.TrimSpace(s.personaRuntimeConfig.Provider),
+		Mode:       strings.TrimSpace(s.personaRuntimeConfig.Mode),
+		ShadowOnly: s.personaRuntimeConfig.ShadowOnly,
+		BaseURL:    strings.TrimSpace(s.personaRuntimeConfig.BaseURL),
+	}
+	if status.Provider == "" {
+		status.Provider = "legacy"
+	}
+	if status.Mode == "" {
+		status.Mode = "shadow"
+	}
+	if s.personaRuntimeErr != nil {
+		status.Error = s.personaRuntimeErr.Error()
+		status.LastError = status.Error
+		return status
+	}
+	if s.personaRuntime == nil {
+		status.Error = "persona runtime unavailable"
+		status.LastError = status.Error
+		return status
+	}
+	remote := s.personaRuntime.Status(ctx)
+	return personaStatusFromRuntime(remote, status)
+}
+
+func personaStatusFromRuntime(remote persona.Status, fallback PersonaStatus) PersonaStatus {
+	status := fallback
+	if strings.TrimSpace(remote.Provider) != "" {
+		status.Provider = remote.Provider
+	}
+	if strings.TrimSpace(remote.Mode) != "" {
+		status.Mode = remote.Mode
+	}
+	status.Ready = remote.Ready
+	status.Healthy = remote.Healthy
+	status.ShadowOnly = remote.ShadowOnly || fallback.ShadowOnly
+	status.Version = remote.Version
+	status.LastRequestAt = remote.LastRequestAt
+	status.LastLatencyMS = remote.LastLatencyMS
+	status.LastError = remote.LastError
+	status.StateSummary = remote.StateSummary
 	return status
 }

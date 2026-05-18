@@ -6,16 +6,17 @@ import (
 )
 
 type rawConfig struct {
-	SlackAgent   rawServiceConfig `json:"slack_agent"`
-	MeetingAgent rawServiceConfig `json:"meeting_agent"`
-	Slack        rawSlackConfig   `json:"slack"`
-	AgentRunner  rawAgentRunner   `json:"agent_runner"`
-	Meetd        rawMeetdConfig   `json:"meetd"`
-	OpenAI       rawOpenAIConfig  `json:"openai"`
-	Dialog       rawDialogConfig  `json:"dialog"`
-	Logging      rawLoggingConfig `json:"logging"`
-	Paths        rawPathsConfig   `json:"paths"`
-	Persistence  rawPersistence   `json:"persistence"`
+	SlackAgent   rawServiceConfig  `json:"slack_agent"`
+	MeetingAgent rawServiceConfig  `json:"meeting_agent"`
+	Slack        rawSlackConfig    `json:"slack"`
+	AgentRunner  rawAgentRunner    `json:"agent_runner"`
+	Persona      rawPersonaRuntime `json:"persona_runtime"`
+	Meetd        rawMeetdConfig    `json:"meetd"`
+	OpenAI       rawOpenAIConfig   `json:"openai"`
+	Dialog       rawDialogConfig   `json:"dialog"`
+	Logging      rawLoggingConfig  `json:"logging"`
+	Paths        rawPathsConfig    `json:"paths"`
+	Persistence  rawPersistence    `json:"persistence"`
 }
 
 type rawServiceConfig struct {
@@ -82,6 +83,14 @@ type rawAgentRunner struct {
 	Codex      rawCodexRunnerConfig  `json:"codex"`
 	Claude     rawClaudeRunnerConfig `json:"claude"`
 	Ollama     rawOllamaRunnerConfig `json:"ollama"`
+}
+
+type rawPersonaRuntime struct {
+	Provider   string `json:"provider"`
+	Mode       string `json:"mode"`
+	BaseURL    string `json:"base_url"`
+	Timeout    string `json:"timeout"`
+	ShadowOnly *bool  `json:"shadow_only"`
 }
 
 type rawMeetdConfig struct {
@@ -211,6 +220,13 @@ func (r rawConfig) toConfig(path string) Config {
 			},
 		},
 		AgentRunner: buildAgentRunnerConfig(r.AgentRunner),
+		PersonaRuntime: PersonaRuntimeConfig{
+			Provider:   stringOrDefault(r.Persona.Provider, defaultPersonaRuntimeProvider),
+			Mode:       stringOrDefault(r.Persona.Mode, defaultPersonaRuntimeMode),
+			BaseURL:    trimURL(r.Persona.BaseURL),
+			Timeout:    durationOrDefault(r.Persona.Timeout, defaultPersonaRuntimeTimeout),
+			ShadowOnly: boolPtrOrDefault(r.Persona.ShadowOnly, true),
+		},
 		Meetd: MeetdConfig{
 			WatchInterval:   durationOrDefault(r.Meetd.WatchInterval, defaultMeetdWatch),
 			WebhookURL:      strings.TrimSpace(r.Meetd.WebhookURL),
@@ -256,6 +272,7 @@ func applyEnvOverrides(cfg *Config) {
 	applySlackMemoryEnvOverrides(cfg)
 	applySlackMeetingScannerEnvOverrides(cfg)
 	applyAgentRunnerEnvOverrides(cfg)
+	applyPersonaRuntimeEnvOverrides(cfg)
 	applyMeetdEnvOverrides(cfg)
 	applyOpenAIEnvOverrides(cfg)
 	applyDialogEnvOverrides(cfg)

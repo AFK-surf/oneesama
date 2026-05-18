@@ -141,13 +141,13 @@ Acceptance:
 
 ### Phase 1: Define The Persona Runtime Contract
 
-- [ ] Add a `PersonaRuntime` contract with a narrow request/response schema.
-- [ ] Keep the contract language-neutral: it must support a JS/TS sidecar, a Go
+- [x] Add a `PersonaRuntime` contract with a narrow request/response schema.
+- [x] Keep the contract language-neutral: it must support a JS/TS sidecar, a Go
       fake, or a later Go port without changing Slack/Meet code.
-- [ ] Request fields should include event kind, speaker/user identity, Slack or
+- [x] Request fields should include event kind, speaker/user identity, Slack or
       meeting anchor, recent local context, evidence bundle, memory context, and
       safety constraints.
-- [ ] Response fields should include visible text/speech intent, optional worker
+- [x] Response fields should include visible text/speech intent, optional worker
       requests, optional memory/world writes, confidence, citations, and whether
       to stay silent.
 - [ ] The contract must support "do not answer yet, wait for humans" and "wake
@@ -160,6 +160,32 @@ Acceptance:
 - [ ] Cross-process implementations expose health, version, state summary,
       request latency, and last error back to Go audit/status endpoints.
 - [ ] Worker requests are explicit structured outputs, not hidden prompt text.
+
+Implemented scaffold in task #201:
+
+- `internal/persona` defines the language-neutral request/response/status
+  contract.
+- `legacy` and `fake` local runtimes let Go tests exercise the contract without
+  depending on Pi-agent.
+- `http`/`pi` runtime providers call a sidecar over:
+  - `POST /persona/decide`
+  - `GET /persona/status`
+- Slack status now exposes `persona_runtime`, including provider, mode,
+  shadow-only flag, readiness, health, version, state summary, request latency,
+  and last error.
+
+Config flags:
+
+```bash
+ONEESAMA_PERSONA_RUNTIME=legacy   # legacy | fake | http | pi
+ONEESAMA_PERSONA_RUNTIME_MODE=shadow
+ONEESAMA_PERSONA_RUNTIME_BASE_URL=http://127.0.0.1:8799
+ONEESAMA_PERSONA_RUNTIME_TIMEOUT=10s
+ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=1
+```
+
+The current scaffold is intentionally not wired into live reply generation. It
+only establishes the runtime boundary and observability surface.
 
 ### Phase 2: Build A Pi-Style Memory Context Adapter
 

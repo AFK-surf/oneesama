@@ -9,6 +9,7 @@ import (
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/persistence"
+	"github.com/AFK-surf/oneesama/internal/persona"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
@@ -36,6 +37,7 @@ type Config struct {
 	Persistence            appconfig.PersistenceConfig
 	Slack                  appconfig.SlackConfig
 	AgentRunner            appconfig.AgentRunnerConfig
+	PersonaRuntime         appconfig.PersonaRuntimeConfig
 	DefaultCaptionLanguage string
 	MeetingAgentURL        string
 	MeetWebhookSecret      string
@@ -93,6 +95,9 @@ type Service struct {
 	agentRunner             appconfig.AgentRunnerConfig
 	runner                  agentrunner.Runner
 	runnerErr               error
+	personaRuntime          persona.Runtime
+	personaRuntimeErr       error
+	personaRuntimeConfig    appconfig.PersonaRuntimeConfig
 	triagePostActions       bool
 	triageHeuristicFallback bool
 
@@ -197,6 +202,16 @@ func NewService(cfg Config) *Service {
 			logger.Warn("agent runner init failed", "error", runnerErr)
 		}
 	}
+	personaRuntime, personaRuntimeErr := persona.NewRuntime(persona.Config{
+		Provider:   cfg.PersonaRuntime.Provider,
+		Mode:       cfg.PersonaRuntime.Mode,
+		BaseURL:    cfg.PersonaRuntime.BaseURL,
+		Timeout:    cfg.PersonaRuntime.Timeout,
+		ShadowOnly: cfg.PersonaRuntime.ShadowOnly,
+	})
+	if personaRuntimeErr != nil {
+		logger.Warn("persona runtime init failed", "error", personaRuntimeErr)
+	}
 
 	canvasConfig := cfg.CanvasPublisherConfig
 	if strings.TrimSpace(canvasConfig.Provider) == "" {
@@ -212,39 +227,39 @@ func NewService(cfg Config) *Service {
 	}
 
 	service = &Service{
-		logger:                  logger,
-		startedAt:               timeNow().UTC(),
-		persistence:             cfg.Persistence,
-		signingSecret:           strings.TrimSpace(cfg.Slack.SigningSecret),
-		botToken:                strings.TrimSpace(cfg.Slack.BotToken),
-		appToken:                strings.TrimSpace(cfg.Slack.AppToken),
-		botUserID:               strings.TrimSpace(cfg.Slack.BotUserID),
-		clientID:                strings.TrimSpace(cfg.Slack.ClientID),
-		clientSecret:            strings.TrimSpace(cfg.Slack.ClientSecret),
-		redirectURI:             strings.TrimSpace(cfg.Slack.RedirectURI),
-		workspaceDir:            strings.TrimSpace(cfg.Slack.WorkspaceDir),
-		internalAuthKey:         strings.TrimSpace(cfg.Slack.InternalAuthKey),
-		configFilePath:          strings.TrimSpace(cfg.ConfigFilePath),
-		secretsFilePath:         strings.TrimSpace(cfg.SecretsFilePath),
-		meetingAgentURL:         strings.TrimSpace(cfg.MeetingAgentURL),
-		meetWebhookSecret:       strings.TrimSpace(cfg.MeetWebhookSecret),
-		publicBaseURL:           strings.TrimSpace(cfg.Slack.PublicBaseURL),
-		meetingScanner:          newMeetingScannerConfig(cfg.Slack.MeetingScanner),
-		defaultCaptionLanguage:  strings.TrimSpace(cfg.DefaultCaptionLanguage),
-		oauthExchanger:          oauthExchanger,
-		poster:                  poster,
-		assistant:               assistant,
-		reactions:               reactions,
-		scheduleManager:         cfg.ScheduleManager,
-		slackContext:            newSlackContextStore(cfg.Persistence, logger),
-		meetingWebhooks:         newMeetingWebhookStore(cfg.Persistence, logger),
-		inbound:                 newSlackInboundBuffer(cfg.Slack.EventBuffer, nil),
-		triage:                  newSlackTriageStore(cfg.Persistence, logger),
-		cognition:               newSlackCognitionStore(cfg.Persistence, logger),
-		scannerCursors:          newSlackScannerCursorStore(cfg.Persistence, logger),
-		workspaceState:          newSlackWorkspaceStore(cfg.Persistence, logger),
-		threadCases:             newSlackThreadCaseStore(cfg.Persistence, logger),
-		mentionQueue:            newSlackMentionQueue(),
+		logger:                 logger,
+		startedAt:              timeNow().UTC(),
+		persistence:            cfg.Persistence,
+		signingSecret:          strings.TrimSpace(cfg.Slack.SigningSecret),
+		botToken:               strings.TrimSpace(cfg.Slack.BotToken),
+		appToken:               strings.TrimSpace(cfg.Slack.AppToken),
+		botUserID:              strings.TrimSpace(cfg.Slack.BotUserID),
+		clientID:               strings.TrimSpace(cfg.Slack.ClientID),
+		clientSecret:           strings.TrimSpace(cfg.Slack.ClientSecret),
+		redirectURI:            strings.TrimSpace(cfg.Slack.RedirectURI),
+		workspaceDir:           strings.TrimSpace(cfg.Slack.WorkspaceDir),
+		internalAuthKey:        strings.TrimSpace(cfg.Slack.InternalAuthKey),
+		configFilePath:         strings.TrimSpace(cfg.ConfigFilePath),
+		secretsFilePath:        strings.TrimSpace(cfg.SecretsFilePath),
+		meetingAgentURL:        strings.TrimSpace(cfg.MeetingAgentURL),
+		meetWebhookSecret:      strings.TrimSpace(cfg.MeetWebhookSecret),
+		publicBaseURL:          strings.TrimSpace(cfg.Slack.PublicBaseURL),
+		meetingScanner:         newMeetingScannerConfig(cfg.Slack.MeetingScanner),
+		defaultCaptionLanguage: strings.TrimSpace(cfg.DefaultCaptionLanguage),
+		oauthExchanger:         oauthExchanger,
+		poster:                 poster,
+		assistant:              assistant,
+		reactions:              reactions,
+		scheduleManager:        cfg.ScheduleManager,
+		slackContext:           newSlackContextStore(cfg.Persistence, logger),
+		meetingWebhooks:        newMeetingWebhookStore(cfg.Persistence, logger),
+		inbound:                newSlackInboundBuffer(cfg.Slack.EventBuffer, nil),
+		triage:                 newSlackTriageStore(cfg.Persistence, logger),
+		cognition:              newSlackCognitionStore(cfg.Persistence, logger),
+		scannerCursors:         newSlackScannerCursorStore(cfg.Persistence, logger),
+		workspaceState:         newSlackWorkspaceStore(cfg.Persistence, logger),
+		threadCases:            newSlackThreadCaseStore(cfg.Persistence, logger),
+		mentionQueue:           newSlackMentionQueue(),
 		operatorFallback: &SlackOperatorFallback{
 			BotToken:       strings.TrimSpace(cfg.Slack.BotToken),
 			APIBaseURL:     defaultSlackAPIBaseURL,
@@ -254,13 +269,16 @@ func NewService(cfg Config) *Service {
 			Poster:         poster,
 			DM:             newSlackDMPoster(),
 		},
-		localMemory: newLocalSlackMemory(cfg.Slack.Memory),
+		localMemory:             newLocalSlackMemory(cfg.Slack.Memory),
 		followups:               newSlackHeartbeatStore(cfg.Persistence, logger),
 		improvements:            newSlackImprovementStore(cfg.Persistence, logger),
 		feedback:                newSlackFeedbackStore(cfg.Persistence, logger),
 		agentRunner:             cfg.AgentRunner,
 		runner:                  runner,
 		runnerErr:               runnerErr,
+		personaRuntime:          personaRuntime,
+		personaRuntimeErr:       personaRuntimeErr,
+		personaRuntimeConfig:    cfg.PersonaRuntime,
 		triagePostActions:       cfg.Slack.Triage.PostActions,
 		triageHeuristicFallback: cfg.Slack.Triage.HeuristicFallback,
 		canvasConfig:            canvasConfig,
