@@ -191,12 +191,7 @@ func (s *Service) ExecuteSlackTool(ctx context.Context, request SlackToolCallReq
 		}, ExecuteAssistantScheduleToolOptions{ScheduleManager: s.scheduleManager})
 		return slackToolOK(name, result), nil
 	case "notify_meeting_slack":
-		result := s.poster.PostMessage(ctx, PostMessageInput{
-			Channel:  firstNonEmpty(stringFromAny(args["channel"]), stringFromAny(args["channel_id"])),
-			ThreadTS: firstNonEmpty(stringFromAny(args["thread_ts"]), stringFromAny(args["threadTs"])),
-			Text:     firstNonEmpty(stringFromAny(args["text"]), stringFromAny(args["message"])),
-		})
-		return slackToolOK(name, result), nil
+		return s.executeNotifyMeetingSlackTool(ctx, args), nil
 	default:
 		return slackToolError(name, "tool_not_available"), nil
 	}
