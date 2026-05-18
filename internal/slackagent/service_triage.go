@@ -415,6 +415,8 @@ func buildSlackTriagePersonaQuality(runs []SlackTriageContext) SlackTriagePerson
 		if boolFromAny(raw["shadow_only"], false) {
 			quality.ShadowOnlyResponses++
 		}
+		quality.WorkerRequests += lenStringSliceFromAny(raw["worker_requests"])
+		quality.MemoryWriteIntents += lenStringSliceFromAny(raw["memory_writes"])
 		decision := stringFromAny(raw["decision"])
 		if strings.EqualFold(decision, persona.DecisionReply) || stringFromAny(raw["visible_text"]) != "" {
 			quality.Replies++
@@ -430,6 +432,23 @@ func buildSlackTriagePersonaQuality(runs []SlackTriageContext) SlackTriagePerson
 		}
 	}
 	return quality
+}
+
+func lenStringSliceFromAny(value any) int {
+	switch typed := value.(type) {
+	case []string:
+		return len(typed)
+	case []any:
+		count := 0
+		for _, item := range typed {
+			if strings.TrimSpace(fmt.Sprint(item)) != "" {
+				count++
+			}
+		}
+		return count
+	default:
+		return 0
+	}
 }
 
 func slackTriageLiveProbeOutcome(run SlackTriageContext) string {

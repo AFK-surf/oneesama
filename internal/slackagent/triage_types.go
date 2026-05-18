@@ -217,6 +217,8 @@ type SlackTriagePersonaQuality struct {
 	Replies              int    `json:"replies"`
 	Failures             int    `json:"failures"`
 	ShadowOnlyResponses  int    `json:"shadowOnlyResponses"`
+	WorkerRequests       int    `json:"workerRequests"`
+	MemoryWriteIntents   int    `json:"memoryWriteIntents"`
 	LatestRunID          int64  `json:"latestRunId,omitempty"`
 	LatestAt             string `json:"latestAt,omitempty"`
 	LatestDecision       string `json:"latestDecision,omitempty"`

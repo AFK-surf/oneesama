@@ -272,7 +272,16 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 		VisibleText: "Pi 读完后给一个轻量回复。",
 		Reason:      "persona foreground owns the visible reply",
 		Confidence:  0.82,
-		ShadowOnly:  false,
+		WorkerRequests: []persona.WorkerRequest{{
+			Kind:   "agent_read",
+			Prompt: "read linked article before next follow-up",
+		}},
+		MemoryWrites: []persona.MemoryWrite{{
+			Kind:      "episode",
+			Text:      "Peng asked Oneesama to use Pi persona for memory-backed replies.",
+			SourceRef: "slack:C_TRIAGE:200.000",
+		}},
+		ShadowOnly: false,
 	}}
 	service.personaRuntime = runtime
 	service.personaRuntimeErr = nil
@@ -325,6 +334,13 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 	}
 	if updated.Metadata["persona_foreground_queued"] != false {
 		t.Fatalf("metadata = %#v, want foreground queue cleared", updated.Metadata)
+	}
+	foreground, ok := mapFromAny(updated.Metadata["persona_foreground"])
+	if !ok {
+		t.Fatalf("persona_foreground = %#v, want metadata object", updated.Metadata["persona_foreground"])
+	}
+	if lenStringSliceFromAny(foreground["worker_requests"]) != 1 || lenStringSliceFromAny(foreground["memory_writes"]) != 1 {
+		t.Fatalf("persona_foreground = %#v, want worker request and memory write intent summaries", foreground)
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()

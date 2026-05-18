@@ -891,11 +891,13 @@ func TestTriageAuditSummarizesPersonaForegroundQuality(t *testing.T) {
 			Mutations: 1,
 			Metadata: map[string]any{
 				"persona_foreground": map[string]any{
-					"success":      true,
-					"decision":     persona.DecisionReply,
-					"visible_text": "Pi foreground live ok.",
-					"shadow_only":  false,
-					"latency_ms":   int64(1200),
+					"success":         true,
+					"decision":        persona.DecisionReply,
+					"visible_text":    "Pi foreground live ok.",
+					"worker_requests": []any{"agent_read: inspect source"},
+					"memory_writes":   []any{"episode: Peng prefers Pi memory"},
+					"shadow_only":     false,
+					"latency_ms":      int64(1200),
 				},
 			},
 		},
@@ -917,7 +919,7 @@ func TestTriageAuditSummarizesPersonaForegroundQuality(t *testing.T) {
 		},
 	}, 6*time.Hour)
 	quality := report.PersonaQuality
-	if quality.ForegroundRuns != 2 || quality.ForegroundQueuedRuns != 1 || quality.Successes != 1 || quality.Replies != 1 || quality.Failures != 1 || quality.ShadowOnlyResponses != 1 {
+	if quality.ForegroundRuns != 2 || quality.ForegroundQueuedRuns != 1 || quality.Successes != 1 || quality.Replies != 1 || quality.Failures != 1 || quality.ShadowOnlyResponses != 1 || quality.WorkerRequests != 1 || quality.MemoryWriteIntents != 1 {
 		t.Fatalf("persona quality = %#v, want queued/success/reply/failure summary", quality)
 	}
 	if quality.LatestRunID != 12 || quality.LatestDecision != persona.DecisionStaySilent || quality.LatestError != "timeout" || quality.LatestLatencyMS != 90000 {

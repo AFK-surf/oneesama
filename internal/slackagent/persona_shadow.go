@@ -21,6 +21,7 @@ type SlackPersonaShadowResult struct {
 	VisibleText    string   `json:"visible_text,omitempty"`
 	Confidence     float64  `json:"confidence,omitempty"`
 	WorkerRequests []string `json:"worker_requests,omitempty"`
+	MemoryWrites   []string `json:"memory_writes,omitempty"`
 	ShadowOnly     bool     `json:"shadow_only"`
 	Success        bool     `json:"success"`
 	Error          string   `json:"error,omitempty"`
@@ -375,6 +376,7 @@ func callPersonaShadow(ctx context.Context, runtime persona.Runtime, source stri
 	result.VisibleText = resp.VisibleText
 	result.Confidence = resp.Confidence
 	result.WorkerRequests = personaWorkerRequestSummaries(resp.WorkerRequests)
+	result.MemoryWrites = personaMemoryWriteSummaries(resp.MemoryWrites)
 	result.ShadowOnly = resp.ShadowOnly
 	result.Reason = resp.Reason
 	result.Citations = personaCitationRefs(resp.Citations)
@@ -393,6 +395,25 @@ func personaWorkerRequestSummaries(requests []persona.WorkerRequest) []string {
 			summary = summary + ": " + truncateSlackContextText(prompt, 160)
 		}
 		out = append(out, summary)
+	}
+	return out
+}
+
+func personaMemoryWriteSummaries(writes []persona.MemoryWrite) []string {
+	out := make([]string, 0, len(writes))
+	for _, write := range writes {
+		text := strings.TrimSpace(write.Text)
+		if text == "" {
+			continue
+		}
+		kind := strings.TrimSpace(write.Kind)
+		if kind != "" {
+			text = kind + ": " + text
+		}
+		if source := strings.TrimSpace(write.SourceRef); source != "" {
+			text = text + " [" + source + "]"
+		}
+		out = append(out, truncateSlackContextText(text, 220))
 	}
 	return out
 }
