@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
+	"github.com/AFK-surf/oneesama/internal/persona"
 )
 
 const (
@@ -66,6 +67,7 @@ func (s *Service) TriageAudit(ctx context.Context, window time.Duration, limit i
 	}
 	report := buildSlackTriageAuditReport(runs, window)
 	report.ProcessHealth = s.slackTriageProcessHealth(window)
+	report.PersonaRuntime = s.slackTriagePersonaRuntimeHealth(ctx)
 	report.Flags = buildSlackTriageAuditFlags(report)
 	return report, nil
 }
@@ -95,6 +97,7 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		InputContext:   buildSlackTriageInputContext(windowRuns),
 		ContextFetch:   buildSlackTriageContextFetch(windowRuns),
 		SkipReasons:    buildSlackTriageSkipReasons(windowRuns),
+		PersonaQuality: buildSlackTriagePersonaQuality(windowRuns),
 		Canary:         canary,
 		LiveProbe:      buildSlackTriageLiveProbeSummary(windowRuns),
 		FailureSamples: buildSlackTriageFailureSamples(windowRuns, 5),
@@ -296,6 +299,30 @@ func (s *Service) slackTriageProcessHealth(window time.Duration) SlackTriageProc
 	return health
 }
 
+func (s *Service) slackTriagePersonaRuntimeHealth(ctx context.Context) SlackTriagePersonaRuntime {
+	if s == nil {
+		return SlackTriagePersonaRuntime{}
+	}
+	status := s.personaStatus(ctx)
+	provider := persona.NormalizeProvider(status.Provider)
+	return SlackTriagePersonaRuntime{
+		Configured:        provider != "" && provider != persona.ProviderLegacy,
+		ForegroundEnabled: s.foregroundPersonaRuntimeEnabled(),
+		Provider:          status.Provider,
+		Mode:              status.Mode,
+		Ready:             status.Ready,
+		Healthy:           status.Healthy,
+		ShadowOnly:        status.ShadowOnly,
+		Version:           status.Version,
+		BaseURL:           status.BaseURL,
+		LastRequestAt:     status.LastRequestAt,
+		LastLatencyMS:     status.LastLatencyMS,
+		LastError:         status.LastError,
+		StateSummary:      status.StateSummary,
+		Error:             status.Error,
+	}
+}
+
 func (s *Service) socketModeReconnectsSince(cutoff time.Time) int {
 	if s == nil {
 		return 0
@@ -367,6 +394,44 @@ func buildSlackTriageLiveProbeSummary(runs []SlackTriageContext) SlackTriageLive
 	return summary
 }
 
+func buildSlackTriagePersonaQuality(runs []SlackTriageContext) SlackTriagePersonaQuality {
+	var quality SlackTriagePersonaQuality
+	var latest time.Time
+	for _, run := range runs {
+		if boolFromAny(run.Metadata["persona_foreground_queued"], false) {
+			quality.ForegroundQueuedRuns++
+		}
+		raw, ok := mapFromAny(run.Metadata["persona_foreground"])
+		if !ok {
+			continue
+		}
+		quality.ForegroundRuns++
+		success := boolFromAny(raw["success"], false)
+		if success {
+			quality.Successes++
+		} else {
+			quality.Failures++
+		}
+		if boolFromAny(raw["shadow_only"], false) {
+			quality.ShadowOnlyResponses++
+		}
+		decision := stringFromAny(raw["decision"])
+		if strings.EqualFold(decision, persona.DecisionReply) || stringFromAny(raw["visible_text"]) != "" {
+			quality.Replies++
+		}
+		timestamp := parseTriageTimestamp(run.Timestamp)
+		if !timestamp.IsZero() && (latest.IsZero() || timestamp.After(latest)) {
+			latest = timestamp
+			quality.LatestRunID = run.ID
+			quality.LatestAt = run.Timestamp
+			quality.LatestDecision = decision
+			quality.LatestError = stringFromAny(raw["error"])
+			quality.LatestLatencyMS = int64FromAny(raw["latency_ms"])
+		}
+	}
+	return quality
+}
+
 func slackTriageLiveProbeOutcome(run SlackTriageContext) string {
 	switch {
 	case run.Mutations > 0:
@@ -408,6 +473,20 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 	}
 	if report.ProcessHealth.CodexRequiredEnvKey != "" && !report.ProcessHealth.CodexRequiredEnvPresent {
 		flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "codex_provider_env_missing", Message: fmt.Sprintf("Required Codex provider env %s is not exported in the slack-agent process.", report.ProcessHealth.CodexRequiredEnvKey)})
+	}
+	if report.PersonaRuntime.ForegroundEnabled {
+		if !report.PersonaRuntime.Ready || !report.PersonaRuntime.Healthy || strings.TrimSpace(firstNonEmpty(report.PersonaRuntime.Error, report.PersonaRuntime.LastError)) != "" {
+			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_runtime_unhealthy", Message: "Foreground persona runtime is enabled but its health/status check is not healthy."})
+		}
+		if persona.NormalizeMode(report.PersonaRuntime.Mode) != persona.ModeLive || report.PersonaRuntime.ShadowOnly {
+			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_runtime_not_live", Message: "Foreground persona runtime is enabled but status does not report live non-shadow mode."})
+		}
+		if report.PersonaQuality.Failures > 0 {
+			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_failures", Message: fmt.Sprintf("%d persona foreground triage run(s) failed in the audit window.", report.PersonaQuality.Failures)})
+		}
+		if report.PersonaQuality.ShadowOnlyResponses > 0 {
+			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_shadow_only", Message: "Persona foreground returned shadow-only responses while live mode was enabled."})
+		}
 	}
 	if report.InputContext.LowUnder200 > 0 {
 		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "low_context_samples", Message: "Some triage runs had less than 200 characters of input context."})

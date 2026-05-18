@@ -11,8 +11,21 @@ import (
 	"time"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
+	"github.com/AFK-surf/oneesama/internal/persona"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
+
+type statusOnlyPersonaRuntime struct {
+	status persona.Status
+}
+
+func (r statusOnlyPersonaRuntime) Decide(context.Context, persona.Request) (persona.Response, error) {
+	return persona.Response{Runtime: r.status.Provider, Decision: persona.DecisionStaySilent, ShadowOnly: r.status.ShadowOnly}, nil
+}
+
+func (r statusOnlyPersonaRuntime) Status(context.Context) persona.Status {
+	return r.status
+}
 
 func TestHandleTriageRunDoesNotInventFallbackActionCards(t *testing.T) {
 	router := newTestRouter(t, Config{
@@ -786,6 +799,135 @@ func TestTriageAuditFlagsMissingCodexProviderEnv(t *testing.T) {
 	}
 	if !hasAuditFlagLevel(report.Flags, "codex_provider_env_missing", "red") {
 		t.Fatalf("flags = %#v, want red codex env flag", report.Flags)
+	}
+}
+
+func TestTriageAuditReportsLivePersonaRuntimeHealth(t *testing.T) {
+	now := time.Date(2026, 5, 18, 22, 55, 0, 0, time.UTC)
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider:   persona.ProviderFake,
+			Mode:       persona.ModeLive,
+			ShadowOnly: false,
+		},
+	})
+	service.personaRuntime = statusOnlyPersonaRuntime{status: persona.Status{
+		Provider:      persona.ProviderPi,
+		Mode:          persona.ModeLive,
+		Ready:         true,
+		Healthy:       true,
+		ShadowOnly:    false,
+		Version:       "persona-sidecar-live-v1",
+		LastRequestAt: now.Format(time.RFC3339Nano),
+		LastLatencyMS: 321,
+	}}
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	runtime := report.PersonaRuntime
+	if !runtime.Configured || !runtime.ForegroundEnabled || runtime.Provider != persona.ProviderPi || runtime.Mode != persona.ModeLive {
+		t.Fatalf("persona runtime = %#v, want live pi foreground", runtime)
+	}
+	if !runtime.Ready || !runtime.Healthy || runtime.ShadowOnly || runtime.Version != "persona-sidecar-live-v1" || runtime.LastLatencyMS != 321 {
+		t.Fatalf("persona runtime = %#v, want healthy live status", runtime)
+	}
+	if hasAuditFlag(report.Flags, "persona_runtime_unhealthy") || hasAuditFlag(report.Flags, "persona_runtime_not_live") {
+		t.Fatalf("flags = %#v, healthy live runtime should not flag", report.Flags)
+	}
+}
+
+func TestTriageAuditFlagsPersonaRuntimeHealthFailures(t *testing.T) {
+	report := SlackTriageAuditReport{
+		PersonaRuntime: SlackTriagePersonaRuntime{
+			ForegroundEnabled: true,
+			Provider:          persona.ProviderPi,
+			Mode:              persona.ModeLive,
+			Ready:             false,
+			Healthy:           false,
+			LastError:         "sidecar refused connection",
+		},
+		PersonaQuality: SlackTriagePersonaQuality{
+			Failures:            1,
+			ShadowOnlyResponses: 1,
+		},
+	}
+	flags := buildSlackTriageAuditFlags(report)
+	for _, code := range []string{"persona_runtime_unhealthy", "persona_foreground_failures", "persona_foreground_shadow_only"} {
+		if !hasAuditFlagLevel(flags, code, "red") {
+			t.Fatalf("flags = %#v, want red %s", flags, code)
+		}
+	}
+	if hasAuditFlag(flags, "persona_runtime_not_live") {
+		t.Fatalf("flags = %#v, mode is live so not_live should not fire", flags)
+	}
+}
+
+func TestTriageAuditSummarizesPersonaForegroundQuality(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 18, 22, 58, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	report := buildSlackTriageAuditReport([]SlackTriageContext{
+		{
+			ID:        10,
+			Timestamp: now.Add(-3 * time.Minute).Format(time.RFC3339Nano),
+			Status:    "ok",
+			Summary:   "persona queued",
+			Metadata:  map[string]any{"persona_foreground_queued": true},
+		},
+		{
+			ID:        11,
+			Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339Nano),
+			Status:    "ok",
+			Summary:   "persona replied",
+			Mutations: 1,
+			Metadata: map[string]any{
+				"persona_foreground": map[string]any{
+					"success":      true,
+					"decision":     persona.DecisionReply,
+					"visible_text": "Pi foreground live ok.",
+					"shadow_only":  false,
+					"latency_ms":   int64(1200),
+				},
+			},
+		},
+		{
+			ID:        12,
+			Timestamp: now.Add(-time.Minute).Format(time.RFC3339Nano),
+			Status:    "failed",
+			Summary:   "persona failed",
+			Error:     "persona foreground failed",
+			Metadata: map[string]any{
+				"persona_foreground": map[string]any{
+					"success":     false,
+					"decision":    persona.DecisionStaySilent,
+					"error":       "timeout",
+					"shadow_only": true,
+					"latency_ms":  int64(90000),
+				},
+			},
+		},
+	}, 6*time.Hour)
+	quality := report.PersonaQuality
+	if quality.ForegroundRuns != 2 || quality.ForegroundQueuedRuns != 1 || quality.Successes != 1 || quality.Replies != 1 || quality.Failures != 1 || quality.ShadowOnlyResponses != 1 {
+		t.Fatalf("persona quality = %#v, want queued/success/reply/failure summary", quality)
+	}
+	if quality.LatestRunID != 12 || quality.LatestDecision != persona.DecisionStaySilent || quality.LatestError != "timeout" || quality.LatestLatencyMS != 90000 {
+		t.Fatalf("persona quality latest = %#v, want latest failed run details", quality)
+	}
+
+	report.PersonaRuntime = SlackTriagePersonaRuntime{ForegroundEnabled: true, Provider: persona.ProviderPi, Mode: persona.ModeLive, Ready: true, Healthy: true}
+	report.Flags = buildSlackTriageAuditFlags(report)
+	if !hasAuditFlagLevel(report.Flags, "persona_foreground_failures", "red") || !hasAuditFlagLevel(report.Flags, "persona_foreground_shadow_only", "red") {
+		t.Fatalf("flags = %#v, want persona foreground quality red flags", report.Flags)
 	}
 }
 

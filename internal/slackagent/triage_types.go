@@ -143,6 +143,8 @@ type SlackTriageAuditReport struct {
 	ContextFetch   SlackTriageContextFetch     `json:"contextFetch"`
 	SkipReasons    map[string]int              `json:"skipReasons,omitempty"`
 	ProcessHealth  SlackTriageProcessHealth    `json:"processHealth"`
+	PersonaRuntime SlackTriagePersonaRuntime   `json:"personaRuntime"`
+	PersonaQuality SlackTriagePersonaQuality   `json:"personaQuality"`
 	Canary         SlackTriageCanarySummary    `json:"canary"`
 	LiveProbe      SlackTriageLiveProbeSummary `json:"liveProbe"`
 	FailureSamples []SlackTriageFailureSample  `json:"failureSamples,omitempty"`
@@ -189,6 +191,37 @@ type SlackTriageProcessHealth struct {
 	SocketLastEventAt           string  `json:"socketLastEventAt,omitempty"`
 	CodexRequiredEnvKey         string  `json:"codexRequiredEnvKey,omitempty"`
 	CodexRequiredEnvPresent     bool    `json:"codexRequiredEnvPresent,omitempty"`
+}
+
+type SlackTriagePersonaRuntime struct {
+	Configured        bool           `json:"configured"`
+	ForegroundEnabled bool           `json:"foregroundEnabled"`
+	Provider          string         `json:"provider,omitempty"`
+	Mode              string         `json:"mode,omitempty"`
+	Ready             bool           `json:"ready"`
+	Healthy           bool           `json:"healthy"`
+	ShadowOnly        bool           `json:"shadowOnly"`
+	Version           string         `json:"version,omitempty"`
+	BaseURL           string         `json:"baseUrl,omitempty"`
+	LastRequestAt     string         `json:"lastRequestAt,omitempty"`
+	LastLatencyMS     int64          `json:"lastLatencyMs,omitempty"`
+	LastError         string         `json:"lastError,omitempty"`
+	StateSummary      map[string]any `json:"stateSummary,omitempty"`
+	Error             string         `json:"error,omitempty"`
+}
+
+type SlackTriagePersonaQuality struct {
+	ForegroundRuns       int    `json:"foregroundRuns"`
+	ForegroundQueuedRuns int    `json:"foregroundQueuedRuns"`
+	Successes            int    `json:"successes"`
+	Replies              int    `json:"replies"`
+	Failures             int    `json:"failures"`
+	ShadowOnlyResponses  int    `json:"shadowOnlyResponses"`
+	LatestRunID          int64  `json:"latestRunId,omitempty"`
+	LatestAt             string `json:"latestAt,omitempty"`
+	LatestDecision       string `json:"latestDecision,omitempty"`
+	LatestError          string `json:"latestError,omitempty"`
+	LatestLatencyMS      int64  `json:"latestLatencyMs,omitempty"`
 }
 
 type SlackTriageCanarySummary struct {
