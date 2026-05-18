@@ -1,6 +1,17 @@
 # Architecture
 
-Meeting Avatar Bot is a thin shell around meeting runtime, workspace control, and user-selected agent providers. It ports an existing `slack-agentd` / `meetd` deployment shape into this repo, but it does not bake in the old private agent brain; complex work routes into whichever local or remote runner the operator selects, with Codex as the primary migration path.
+Meeting Avatar Bot is a thin shell around meeting runtime, workspace control,
+and a foreground persona runtime. It ports an existing `slack-agentd` / `meetd`
+deployment shape into this repo, but it does not bake private agent cognition
+into the Go services.
+
+The foreground meeting avatar should be a Pi/OpenClaw-style persona runtime:
+memory-native, socially present, and continuously stateful. Codex, Claude Code,
+Ollama, command runners, and HTTP runners are delegated worker providers for
+bounded tasks. They are not the avatar's long-term persona or memory brain.
+
+See [Meeting Avatar Persona Runtime](persona-runtime.md) for the product/runtime
+boundary and migration plan.
 
 ## System Shape
 
@@ -14,7 +25,8 @@ flowchart LR
     MeetingAgent --> Dialog[Dialog bridge]
     Dialog --> STT[STT provider]
     Dialog --> TTS[TTS provider]
-    Dialog --> Runner[AgentRunner provider]
+    Dialog --> Persona[Persona runtime]
+    Persona --> Runner[AgentRunner provider]
     Runner --> Codex[Codex CLI]
     Runner --> Claude[Claude Code CLI]
     Runner --> Ollama[Ollama HTTP API]
@@ -27,15 +39,16 @@ flowchart LR
 
 ## Core Boundaries
 
-| Boundary            | Owned Here                                                                                  | Replaceable Provider                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Workspace control   | Slack slash-command HTTP surface, session lifecycle, join/status/stop/help commands, and natural-language mention routing | Slack app deployment mode, poster backend, old Slack Agent D adapter                              |
-| Meeting runtime     | Playwright Google Meet joiner, fake mic/cam injection, diagnostics, stop-before-start guard | Meeting provider, browser strategy, real-room canary policy                                       |
-| Avatar output       | Hiyori/fallback renderer contract, fake camera track, fake mic bus                          | Avatar model/runtime, true Live2D WebGL gate                                                      |
-| Dialog input/output | Browser-side local dialog bridge and optional Realtime bridge                               | STT provider, TTS provider, OpenAI Realtime endpoint                                              |
-| Agent work          | Job payload format, status/result reporting, delivery dedup, Slack/Meet worker handoff      | Codex as primary replacement backend, plus Claude Code, Ollama, command, HTTP, OpenHands wrappers |
-| Persistence         | State provider contract for sessions and worker reports                                     | memory, json-file, sqlite, future Postgres/Redis                                                  |
-| Cutover             | shadow/canary/rollback decisions and evidence reports                                       | legacy old-stack transmitter hook, live canary cohorts                                            |
+| Boundary            | Owned Here                                                                                                                | Replaceable Provider                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Workspace control   | Slack slash-command HTTP surface, session lifecycle, join/status/stop/help commands, and natural-language mention routing | Slack app deployment mode, poster backend, old Slack Agent D adapter               |
+| Meeting runtime     | Playwright Google Meet joiner, fake mic/cam injection, diagnostics, stop-before-start guard                               | Meeting provider, browser strategy, real-room canary policy                        |
+| Avatar output       | Hiyori/fallback renderer contract, fake camera track, fake mic bus                                                        | Avatar model/runtime, true Live2D WebGL gate                                       |
+| Dialog input/output | Browser-side local dialog bridge and optional Realtime bridge                                                             | STT provider, TTS provider, OpenAI Realtime endpoint                               |
+| Persona runtime     | Foreground avatar voice, memory/social judgment, worker-delegation decisions, memory/world write intent                   | Pi/OpenClaw-style local persona runtime, legacy foreground fallback                |
+| Agent work          | Job payload format, status/result reporting, delivery dedup, Slack/Meet worker handoff                                    | Codex/Claude Code/Ollama/command/HTTP as delegated workers, not foreground persona |
+| Persistence         | State provider contract for sessions and worker reports                                                                   | memory, json-file, sqlite, future Postgres/Redis                                   |
+| Cutover             | shadow/canary/rollback decisions and evidence reports                                                                     | legacy old-stack transmitter hook, live canary cohorts                             |
 
 ## Request Flow
 
@@ -46,6 +59,7 @@ sequenceDiagram
     participant M as Meeting Agent
     participant G as Google Meet
     participant D as Dialog Bridge
+    participant P as Persona Runtime
     participant R as AgentRunner
     participant T as TTS Provider
 
@@ -56,9 +70,11 @@ sequenceDiagram
     G-->>M: participant audio / meeting state
     U->>G: speaks in meeting
     G-->>D: STT event or Realtime event
-    D->>R: run selected provider with task payload
-    R-->>D: text result
-    D->>T: synthesize response audio
+    D->>P: assemble event + evidence + memory context
+    P->>R: optionally delegate bounded worker task
+    R-->>P: worker result
+    P-->>D: visible reply / stay silent / memory write intent
+    D->>T: synthesize persona response audio
     T-->>D: WAV/data URL/stream
     D->>G: route audio to avatar fake mic
     M->>S: worker/job result available
@@ -67,7 +83,16 @@ sequenceDiagram
 
 ## Provider Selection
 
-Agent runners are selected with `MAB_AGENT_RUNNER`:
+The foreground persona runtime is selected separately from worker providers.
+Legacy mode keeps the current foreground path while the Pi-style runtime is
+being integrated:
+
+```bash
+ONEESAMA_PERSONA_RUNTIME=legacy
+ONEESAMA_PERSONA_RUNTIME=pi
+```
+
+Worker agent runners are selected with `MAB_AGENT_RUNNER`:
 
 ```bash
 MAB_AGENT_RUNNER=dry-run
@@ -79,7 +104,11 @@ MAB_AGENT_RUNNER=command
 MAB_AGENT_RUNNER=http
 ```
 
-For the primary Codex migration path, `MAB_AGENT_RUNNER=codex-app-server` keeps stable Codex App Server threads per Slack thread or Meet session. See [Codex App Server Session Management](codex-app-server-session-management.md) for the exact session-key rules and restart behavior.
+`MAB_AGENT_RUNNER=codex-app-server` keeps stable Codex App Server threads per
+Slack thread or Meet session for delegated worker continuity. It should not be
+treated as the avatar's persona memory. See
+[Codex App Server Session Management](codex-app-server-session-management.md)
+for the exact session-key rules and restart behavior.
 
 Speech is split into independent seams:
 

@@ -1,10 +1,19 @@
 # Codex App Server Session Management
 
-This note documents how `MAB_AGENT_RUNNER=codex-app-server` maps Slack and Meet business conversations to persistent Codex App Server threads.
+This note documents how `MAB_AGENT_RUNNER=codex-app-server` maps Slack and Meet
+business conversations to persistent Codex App Server threads for delegated
+worker tasks.
+
+Codex App Server is not the foreground meeting-avatar persona runtime. It gives
+code/repo/analysis work stable worker continuity after the persona delegates a
+bounded task. See [Meeting Avatar Persona Runtime](persona-runtime.md) for the
+foreground persona boundary.
 
 ## Why App Server Mode
 
-The Slack Agent and Meeting Agent should not spawn one unrelated Codex process per event. In App Server mode, `meeting-avatar-bot` keeps a stable mapping from a product-level conversation to a Codex App Server thread:
+The Slack Agent and Meeting Agent should not spawn one unrelated Codex process
+per delegated worker event. In App Server mode, `meeting-avatar-bot` keeps a
+stable mapping from a product-level conversation to a Codex App Server thread:
 
 ```mermaid
 flowchart LR

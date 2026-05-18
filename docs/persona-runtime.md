@@ -1,0 +1,226 @@
+# Meeting Avatar Persona Runtime
+
+Task: #200
+
+## Decision
+
+Meeting Avatar's foreground agent should be a Pi/OpenClaw-style persona
+runtime, not Codex.
+
+Codex, Claude Code, Ollama, command runners, and HTTP runners stay in the
+system as delegated workers. They can inspect repositories, write patches, run
+tests, and answer bounded technical tasks. They should not be treated as the
+long-lived meeting avatar itself.
+
+Peng's product language for this is "the meeting avatar is a lobster": it should
+feel continuously present, remember relationships and recent context, develop
+over time, and create Aha moments when humans leave a useful question or link
+unanswered. A stateless Codex process can help the lobster work, but it is not
+the lobster.
+
+## Why We Are Pivoting
+
+The previous migration direction tried to recover Cueboard behavior by making Go
+services and Codex prompts carry more memory. That creates the same class of
+drift Peng has been calling out:
+
+- Go starts hardcoding social/cognitive behavior that belonged to the agent.
+- Codex prompt tuning becomes a substitute for a memory-native persona.
+- "Tool exists" is mistaken for "the avatar behaves like a present teammate".
+- Backfill and triage templates produce plausible but low-quality replies.
+
+The better boundary is:
+
+- The persona runtime owns identity, memory, social timing, lightweight
+  synthesis, and relationship continuity.
+- The Go services own Slack/Meet IO, persistence, safety, evidence collection,
+  and routing.
+- Worker agents own delegated specialist work.
+
+## Target Shape
+
+```mermaid
+flowchart LR
+    Slack[Slack events / threads] --> Orchestrator[Oneesama Slack service]
+    Meet[Meeting audio / captions / chat] --> Orchestrator
+    Orchestrator --> Evidence[Evidence bundle]
+    Evidence --> Persona[Pi-style persona runtime]
+    Persona --> Reply[Visible reply / avatar speech]
+    Persona --> MemoryWrite[Episode + working memory + world updates]
+    Persona --> WorkerRequest[Delegated worker request]
+    WorkerRequest --> Codex[Codex worker]
+    WorkerRequest --> Claude[Claude Code worker]
+    WorkerRequest --> Other[Other runners]
+    Codex --> WorkerResult[Bounded task result]
+    Claude --> WorkerResult
+    Other --> WorkerResult
+    WorkerResult --> Persona
+```
+
+The closest existing local reference is
+`/Users/pengx17/Documents/telegram-pi-agent/src/runtime/memory.ts`, where the
+runtime builds a `<memory-context>` from semantic memory, working memory,
+today/yesterday episodes, historical memory, world state, and persona state.
+`/Users/pengx17/Documents/telegram-pi-agent/docs/world-model.md` adds the
+entity/event/arc/state model and source-reference discipline.
+
+Oneesama should use that style of context assembly instead of feeding raw Slack
+memory blobs into Codex.
+
+## Responsibilities
+
+| Layer                           | Owns                                                                                                                       | Must Not Own                                                             |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Persona runtime                 | Foreground avatar voice, memory-native social judgment, Aha replies, relationship continuity, memory/world writes          | Repo patching, shell commands, Slack API details, raw persistence schema |
+| Oneesama Slack/Meeting services | Slack/Meet ingress, thread/caption/history fetch, evidence bundle assembly, safety gates, persistence, worker routing      | Persona cognition, long-term identity, hardcoded social reply templates  |
+| Evidence providers              | Related-memory records, thread context, delegated link reads, meeting transcript chunks, triage/backfill candidates        | Final social judgment                                                    |
+| Worker providers                | Bounded technical execution such as code review, repo inspection, tests, patch generation, document reading when delegated | Foreground persona continuity                                            |
+
+## How Existing Work Fits
+
+- task #195 related-memory search becomes evidence plumbing for the persona
+  runtime. It is not "Codex memory".
+- task #196 backfill memory gating becomes a quality gate: if evidence is weak,
+  the item stays `needs_context` until the persona or delegated reader has enough
+  context.
+- task #197 canaries should validate persona behavior and citations, not just
+  that Codex saw more prompt text.
+- task #198 delegated link/article reading is the right direction: Go emits a
+  read request, and an agent with appropriate tools reads and reasons.
+- task #199 must flag any new Go/Codex path that turns into foreground avatar
+  cognition.
+
+## Implementation Plan
+
+### Phase 0: Stop The Wrong Investment
+
+- [ ] Mark Codex App Server session management as worker-session management, not
+      persona memory.
+- [ ] In task #199, add a quality gate: "Does this code make Go or Codex carry
+      avatar cognition?"
+- [ ] Keep #195/#196 evidence plumbing, but avoid adding more Codex memory prompt
+      polish as a product solution.
+- [ ] Document the current runtime as legacy foreground mode until a persona
+      adapter is live.
+
+Acceptance:
+
+- [ ] New code reviews can reject "Codex remembers better" patches as drift.
+- [ ] Docs consistently describe Codex as a delegated worker.
+
+### Phase 1: Define The Persona Runtime Contract
+
+- [ ] Add a `PersonaRuntime` contract with a narrow request/response schema.
+- [ ] Request fields should include event kind, speaker/user identity, Slack or
+      meeting anchor, recent local context, evidence bundle, memory context, and
+      safety constraints.
+- [ ] Response fields should include visible text/speech intent, optional worker
+      requests, optional memory/world writes, confidence, citations, and whether
+      to stay silent.
+- [ ] The contract must support "do not answer yet, wait for humans" and "wake
+      up later if still unanswered".
+
+Acceptance:
+
+- [ ] The same request can be handled by legacy fallback, a Pi adapter, or a test
+      fake without Slack/Meet code changes.
+- [ ] Worker requests are explicit structured outputs, not hidden prompt text.
+
+### Phase 2: Build A Pi-Style Memory Context Adapter
+
+- [ ] Build an adapter that can assemble a `<memory-context>` style bundle for
+      Oneesama from:
+  - current Slack/Meet thread context
+  - related-memory records from task #195
+  - recent episodes / session tail
+  - working memory
+  - durable people/project/team memory
+  - delegated link-read outputs
+  - source refs and line ranges
+- [ ] Prefer reusing the Pi-agent memory context shape over inventing another
+      prompt format.
+- [ ] Preserve source refs and read-back metrics.
+
+Acceptance:
+
+- [ ] A replay fixture can show the exact memory/context bundle seen by the
+      persona.
+- [ ] The persona can answer an Aha-style unanswered question with cited
+      evidence.
+- [ ] Weak memory hits remain weak; they do not become confident replies.
+
+### Phase 3: Route Foreground Social Replies Through Persona Runtime
+
+- [ ] Route live triage social replies through the persona runtime.
+- [ ] Route delayed no-reply surfacing through the persona runtime.
+- [ ] Route backfill review-ready drafts through the persona runtime or mark them
+      as delegated-reader pending.
+- [ ] Keep direct Slack/Meet IO and safety checks in Go.
+- [ ] Codex remains available only through explicit worker delegation.
+
+Acceptance:
+
+- [ ] A shared link with no human reply becomes a lightweight persona opinion
+      only after the persona receives link/evidence context.
+- [ ] A PR review request is not treated as an article opinion; it becomes a
+      workflow/context item or a worker delegation.
+- [ ] The visible voice no longer sounds like a code worker unless the persona is
+      explicitly reporting worker output.
+
+### Phase 4: Add Persona Behavior Canaries
+
+- [ ] `aha_unanswered_question_with_recent_memory`
+- [ ] `shared_article_with_prior_decision`
+- [ ] `review_request_is_workflow_not_opinion`
+- [ ] `weak_memory_hit_stays_needs_context`
+- [ ] `persona_delegates_code_work_to_codex`
+- [ ] `persona_updates_episode_or_world_state_after_useful_interaction`
+
+Acceptance:
+
+- [ ] Each canary checks behavior, citations, and whether the persona stayed
+      silent when context was insufficient.
+- [ ] A passing canary cannot be achieved by simply exposing a tool name.
+
+### Phase 5: Cutover And Rollback
+
+- [ ] Add a feature flag such as `ONEESAMA_PERSONA_RUNTIME=legacy|pi`.
+- [ ] Start with dry-run/shadow evaluation on backfill reports.
+- [ ] Move selected Slack channels or meeting sessions to Pi runtime canary.
+- [ ] Keep rollback to legacy foreground mode.
+- [ ] Track per-run quality signals: answered, stayed silent, delegated worker,
+      memory citations, human follow-up, and duplicate/awkward replies.
+
+Acceptance:
+
+- [ ] Pi runtime can be enabled per environment without changing worker
+      providers.
+- [ ] Rollback does not lose Slack/Meet state or worker session state.
+- [ ] Human spot checks show fewer generic replies and more context-aware Aha
+      moments.
+
+## Code Quality Rules For task #199
+
+During the post-memory/backfill quality pass, flag the following as drift:
+
+- Go code generating persona opinions from hardcoded templates.
+- Codex prompts carrying long-term identity, relationship memory, or social
+  judgment as the foreground avatar.
+- A worker session id being described as persona memory.
+- Link/PDF/article reading implemented directly in Go when the product needs a
+  delegated reader.
+- Memory results without source refs being used as confident reply evidence.
+- Any implementation that cannot be consumed by a Pi-style persona runtime
+  without knowing Slack internals.
+
+## Open Questions
+
+- Should the Pi-style runtime be embedded in-process, called as a local HTTP
+  service, or invoked through an agent protocol?
+- Which parts of `telegram-pi-agent` memory/context can be reused directly, and
+  which should become a shared library?
+- Where should Oneesama store episode memory and world-state updates so they can
+  be shared by Slack and Meet?
+- Which channels/meeting sessions should be the first canary cohort?
+- What is the minimum "lobster" dogfood script: one meeting, one Slack thread,
+  or both?
