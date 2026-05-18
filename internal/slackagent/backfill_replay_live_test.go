@@ -259,6 +259,95 @@ func TestBackfillReplayLiveSurfacesRepliesFetchError(t *testing.T) {
 	}
 }
 
+// TestListBackfillJoinedChannelsFiltersArchivedAndNonMember pins the
+// audit-safety rules from driver's slice-3 design review: archived
+// channels and channels the bot is no longer a member of are excluded
+// (even though Slack should not return them via users.conversations,
+// we defensively filter so a future Slack API behaviour drift can't
+// silently widen the scan).
+func TestListBackfillJoinedChannelsFiltersArchivedAndNonMember(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
+		// Audit: confirm the request asks for the narrow channel
+		// types and excludes archived. If a future edit drops these
+		// query params, this test catches it.
+		if got := r.URL.Query().Get("types"); got != "public_channel,private_channel" {
+			t.Errorf("types = %q, want public_channel,private_channel", got)
+		}
+		if got := r.URL.Query().Get("exclude_archived"); got != "true" {
+			t.Errorf("exclude_archived = %q, want true", got)
+		}
+		writeFakeSlackJSON(t, w, slackUsersConversationsResponse{
+			OK: true,
+			Channels: []SlackBackfillJoinedChannel{
+				{ID: "C_OK", Name: "open-channel", IsMember: true},
+				{ID: "C_ARCH", Name: "stale-channel", IsMember: true, IsArchived: true},
+				{ID: "C_GONE", Name: "left-channel", IsMember: false},
+				{ID: "C_PRIV", Name: "private-but-joined", IsMember: true, IsPrivate: true},
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	setLiveBaseURL(t, server.URL)
+
+	channels, err := ListBackfillJoinedChannels(context.Background(), "xoxb-test")
+	if err != nil {
+		t.Fatalf("ListBackfillJoinedChannels: %v", err)
+	}
+	got := make([]string, 0, len(channels))
+	for _, ch := range channels {
+		got = append(got, ch.ID)
+	}
+	if len(got) != 2 {
+		t.Fatalf("returned channels = %v, want [C_OK, C_PRIV]", got)
+	}
+	if got[0] != "C_OK" || got[1] != "C_PRIV" {
+		t.Errorf("returned channels = %v, want [C_OK, C_PRIV]", got)
+	}
+}
+
+// TestListBackfillJoinedChannelsFollowsPagination confirms next_cursor
+// is honoured for users.conversations the same way it is for
+// conversations.history.
+func TestListBackfillJoinedChannelsFollowsPagination(t *testing.T) {
+	mux := http.NewServeMux()
+	var calls int
+	mux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			writeFakeSlackJSON(t, w, slackUsersConversationsResponse{
+				OK:               true,
+				Channels:         []SlackBackfillJoinedChannel{{ID: "C1", IsMember: true}},
+				ResponseMetadata: backfillLiveHistoryResponseCursor{NextCursor: "page-2"},
+			})
+		default:
+			if got := r.URL.Query().Get("cursor"); got != "page-2" {
+				t.Errorf("page 2 cursor = %q, want page-2", got)
+			}
+			writeFakeSlackJSON(t, w, slackUsersConversationsResponse{
+				OK:       true,
+				Channels: []SlackBackfillJoinedChannel{{ID: "C2", IsMember: true}},
+			})
+		}
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	setLiveBaseURL(t, server.URL)
+
+	channels, err := ListBackfillJoinedChannels(context.Background(), "xoxb-test")
+	if err != nil {
+		t.Fatalf("ListBackfillJoinedChannels: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2", calls)
+	}
+	if len(channels) != 2 {
+		t.Errorf("channels = %v, want 2", channels)
+	}
+}
+
 // TestBackfillReplayLiveRequiresInputs guards against silent bad
 // invocations.
 func TestBackfillReplayLiveRequiresInputs(t *testing.T) {

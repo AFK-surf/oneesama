@@ -325,6 +325,76 @@ func doSlackGetWithRetry(ctx context.Context, token string, method string, value
 	return lastErr
 }
 
+// SlackBackfillJoinedChannel is the minimal channel shape the CLI
+// auto-discovery path returns. Production callers may pass these
+// directly back into BackfillReplayLive(opts.ChannelID = c.ID).
+type SlackBackfillJoinedChannel struct {
+	ID         string `json:"id"`
+	Name       string `json:"name,omitempty"`
+	IsArchived bool   `json:"is_archived,omitempty"`
+	IsMember   bool   `json:"is_member,omitempty"`
+	IsPrivate  bool   `json:"is_private,omitempty"`
+}
+
+type slackUsersConversationsResponse struct {
+	OK               bool                              `json:"ok"`
+	Error            string                            `json:"error,omitempty"`
+	Channels         []SlackBackfillJoinedChannel      `json:"channels,omitempty"`
+	ResponseMetadata backfillLiveHistoryResponseCursor `json:"response_metadata,omitempty"`
+}
+
+// ListBackfillJoinedChannels asks Slack for the channels the bot user
+// currently belongs to, paginating through `users.conversations`
+// until exhausted. Used by the CLI's `--channel auto` mode so the
+// operator doesn't have to remember channel ids by hand.
+//
+// Audit-safety rules (per driver's slice-3 design review):
+//   - Only public + private channels (`types=public_channel,private_channel`).
+//     No mpim/im — DMs are scoped to specific humans, scanning them
+//     would be the wrong product behaviour.
+//   - `exclude_archived=true` so the scan doesn't waste budget on
+//     dead channels.
+//   - The function does NOT join channels it isn't in. Slack already
+//     enforces that `users.conversations` returns only joined
+//     channels; this comment is a contract note so future edits
+//     don't quietly relax it.
+func ListBackfillJoinedChannels(ctx context.Context, token string) ([]SlackBackfillJoinedChannel, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("ListBackfillJoinedChannels: token is required")
+	}
+	out := make([]SlackBackfillJoinedChannel, 0)
+	cursor := ""
+	for {
+		values := url.Values{
+			"types":            {"public_channel,private_channel"},
+			"exclude_archived": {"true"},
+			"limit":            {"200"},
+		}
+		if cursor != "" {
+			values.Set("cursor", cursor)
+		}
+		var resp slackUsersConversationsResponse
+		if err := doSlackGetWithRetry(ctx, token, "users.conversations", values, &resp, nil); err != nil {
+			return nil, err
+		}
+		if !resp.OK {
+			return nil, fmt.Errorf("users.conversations returned ok=false (%s)", resp.Error)
+		}
+		for _, ch := range resp.Channels {
+			if ch.IsArchived || !ch.IsMember {
+				continue
+			}
+			out = append(out, ch)
+		}
+		next := strings.TrimSpace(resp.ResponseMetadata.NextCursor)
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	return out, nil
+}
+
 func parseRetryAfterSeconds(raw string) time.Duration {
 	value := strings.TrimSpace(raw)
 	if value == "" {

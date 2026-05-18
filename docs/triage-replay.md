@@ -99,6 +99,38 @@ The Markdown report ends with a `## Live scan coverage` table:
 | `C1` | 47 | 3 | 4 | false | 0 | — |
 | `C2` | 200 | 18 | 12 | true | 1 | — |
 
+## Channel auto-discovery (slice 3)
+
+Slice 3 added `--channel auto`, which asks Slack which channels the
+bot already belongs to instead of requiring the operator to hand-roll
+the list:
+
+```
+oneesama-triage-replay --live --channel auto --since 24h > replay.md
+```
+
+Audit-safety rules:
+
+1. **No joins.** Auto-discovery uses
+   `users.conversations?types=public_channel,private_channel&exclude_archived=true`
+   which only returns channels the bot is already a member of. The
+   CLI never calls `conversations.invite` or any other join API.
+2. **No DMs / group DMs.** `mpim` and `im` types are deliberately
+   excluded — those are scoped to specific humans and scanning them
+   would be the wrong product behaviour.
+3. **No archived.** `exclude_archived=true` and a defensive client-side
+   filter on `is_archived` keep dead channels out of the scan, even
+   if Slack's API behaviour drifts.
+4. **No mixing modes.** Passing `--channel auto,C1` is rejected with
+   a clear error. An operator gets either auto-discovery or an
+   explicit list; the union mode is not supported, because the
+   "I'll just add one extra" pattern usually means the operator
+   doesn't actually know what's in scope.
+5. **Zero channels = explicit failure.** If auto-discovery returns
+   nothing, the CLI exits non-zero with a hint to invite the bot
+   somewhere. Silent "0 candidates" reports are a confusing
+   anti-pattern.
+
 ## What's NOT in slice 2 yet
 
 - **`--post`**. Driver owns the live `--post` toggle path. The dry-run

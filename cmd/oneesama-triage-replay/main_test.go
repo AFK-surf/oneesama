@@ -231,6 +231,104 @@ func TestRunLiveModeEndToEndAgainstFakeSlack(t *testing.T) {
 	}
 }
 
+// TestRunLiveAutoChannelDiscoveryFailsOnZero verifies driver's
+// audit-required failure mode: `--channel auto` with no joined channels
+// must produce a non-zero exit + an explicit error message, not a
+// silent "0 candidates" report.
+func TestRunLiveAutoChannelDiscoveryFailsOnZero(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
+		writeFakeSlackJSON(t, w, map[string]any{"ok": true, "channels": []any{}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	previous := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = server.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previous })
+
+	t.Setenv("ONEESAMA_SLACK_BOT_TOKEN", "xoxb-fake")
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--live", "--channel", "auto"},
+		strings.NewReader(""), &stdout, &stderr,
+	)
+	if code == 0 {
+		t.Fatal("expected non-zero exit when auto-discovery returns no channels")
+	}
+	if !strings.Contains(stderr.String(), "discovered 0 joined channels") {
+		t.Errorf("stderr = %q, want explicit 0-channel diagnostic", stderr.String())
+	}
+}
+
+// TestRunLiveRejectsMixedAutoAndExplicitChannel pins the
+// audit-required user-error guard from driver's review: an operator
+// passing `--channel auto,C1` must be told "pick one mode" instead of
+// having the tool silently union the two.
+func TestRunLiveRejectsMixedAutoAndExplicitChannel(t *testing.T) {
+	t.Setenv("ONEESAMA_SLACK_BOT_TOKEN", "xoxb-fake")
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--live", "--channel", "auto,C1"},
+		strings.NewReader(""), &stdout, &stderr,
+	)
+	if code == 0 {
+		t.Fatal("expected non-zero exit when --channel mixes auto with explicit ids")
+	}
+	if !strings.Contains(stderr.String(), "cannot mix 'auto' with explicit channel ids") {
+		t.Errorf("stderr = %q, want explicit mixing diagnostic", stderr.String())
+	}
+}
+
+// TestRunLiveAutoChannelDiscoveryHappyPath confirms the end-to-end
+// auto path: users.conversations returns N joined channels, they get
+// scanned, the coverage table includes each.
+func TestRunLiveAutoChannelDiscoveryHappyPath(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
+		writeFakeSlackJSON(t, w, map[string]any{
+			"ok": true,
+			"channels": []map[string]any{
+				{"id": "C_AUTO_1", "is_member": true},
+				{"id": "C_AUTO_2", "is_member": true},
+			},
+		})
+	})
+	mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		// Empty pages keep the test focused on the discovery path.
+		writeFakeSlackJSON(t, w, map[string]any{"ok": true, "messages": []any{}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	previous := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = server.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previous })
+
+	t.Setenv("ONEESAMA_SLACK_BOT_TOKEN", "xoxb-fake")
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--live", "--channel", "auto"},
+		strings.NewReader(""), &stdout, &stderr,
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "discovered 2 channel(s)") {
+		t.Errorf("stderr = %q, want discovery summary", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "| `C_AUTO_1` |") || !strings.Contains(out, "| `C_AUTO_2` |") {
+		t.Errorf("coverage table missing auto-discovered channels:\n%s", out)
+	}
+}
+
+func writeFakeSlackJSON(t *testing.T, w http.ResponseWriter, body any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		t.Fatalf("encode fake response: %v", err)
+	}
+}
+
 // TestRunInvalidFlagReturnsTwo guards exit-code contract.
 func TestRunInvalidFlagReturnsTwo(t *testing.T) {
 	var stdout, stderr bytes.Buffer

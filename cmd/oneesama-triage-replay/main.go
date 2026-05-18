@@ -127,11 +127,31 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 // One channel failing (bad token, channel not found) does not abort the
 // whole run; we collect per-channel error into the warnings of that
 // channel's stats so the Markdown report carries the diagnostic.
+//
+// `--channel auto` is a special value that triggers
+// `slackagent.ListBackfillJoinedChannels` to fill the list from
+// `users.conversations` (only joined, non-archived public/private
+// channels). Audit-safety: `auto` and explicit channel ids are NOT
+// allowed to mix in the same `--channel` value — driver flagged the
+// risk that an operator would assume union semantics.
 func runLive(stderr io.Writer, channels string, since time.Duration, tokenFlag string, maxPerChan int, botUserIDs []string) ([]slackagent.SlackBackfillCandidate, []slackagent.SlackBackfillReplayLiveStats, int, error) {
-	chList := splitCSV(channels)
-	if len(chList) == 0 {
-		return nil, nil, 0, fmt.Errorf("--live requires --channel with at least one channel id")
+	requested := splitCSV(channels)
+	if len(requested) == 0 {
+		return nil, nil, 0, fmt.Errorf("--live requires --channel <ids|auto> with at least one value")
 	}
+	hasAuto := false
+	hasExplicit := false
+	for _, value := range requested {
+		if strings.EqualFold(strings.TrimSpace(value), "auto") {
+			hasAuto = true
+		} else {
+			hasExplicit = true
+		}
+	}
+	if hasAuto && hasExplicit {
+		return nil, nil, 0, fmt.Errorf("--channel cannot mix 'auto' with explicit channel ids; use one mode at a time")
+	}
+
 	token := strings.TrimSpace(tokenFlag)
 	if token == "" {
 		token = strings.TrimSpace(os.Getenv("ONEESAMA_SLACK_BOT_TOKEN"))
@@ -142,6 +162,26 @@ func runLive(stderr io.Writer, channels string, since time.Duration, tokenFlag s
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+
+	chList := requested
+	if hasAuto {
+		discovered, err := slackagent.ListBackfillJoinedChannels(ctx, token)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("--channel auto: %w", err)
+		}
+		if len(discovered) == 0 {
+			// Driver-required audit safety: empty auto-discovery
+			// is a hard failure, not a silent empty report. If the
+			// bot isn't in any channel something is wrong on the
+			// Slack side and the operator needs to know.
+			return nil, nil, 0, fmt.Errorf("--channel auto discovered 0 joined channels; check bot is invited to at least one channel")
+		}
+		chList = make([]string, 0, len(discovered))
+		for _, ch := range discovered {
+			chList = append(chList, ch.ID)
+		}
+		fmt.Fprintf(stderr, "oneesama-triage-replay: --channel auto discovered %d channel(s)\n", len(chList))
+	}
 
 	var (
 		allCandidates []slackagent.SlackBackfillCandidate
