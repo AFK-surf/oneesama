@@ -264,8 +264,8 @@ func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TriageStatus: %v", err)
 	}
-	if len(status.AuditFixtures) != 4 {
-		t.Fatalf("fixtures = %#v, want ACT/MAYBE/link-synthesis/SKIP controls", status.AuditFixtures)
+	if len(status.AuditFixtures) != 9 {
+		t.Fatalf("fixtures = %#v, want parse controls plus memory-backed canaries", status.AuditFixtures)
 	}
 	byName := map[string]SlackTriageAuditFixture{}
 	for _, fixture := range status.AuditFixtures {
@@ -285,6 +285,30 @@ func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
 	}
 	if byName["skip_no_action"].Outcome != "SKIP" || byName["skip_no_action"].Actions != 0 || byName["skip_no_action"].SuppressedReason != "no_actions" {
 		t.Fatalf("SKIP fixture = %#v", byName["skip_no_action"])
+	}
+	for _, name := range []string{
+		"aha_unanswered_question_with_recent_memory",
+		"delayed_no_reply_uses_memory_before_reply",
+		"backfill_review_ready_requires_memory_or_agent_read",
+		"weak_memory_hit_stays_needs_context",
+		"person_project_memory_cites_source",
+	} {
+		fixture, ok := byName[name]
+		if !ok {
+			t.Fatalf("missing memory-backed canary %q in %#v", name, status.AuditFixtures)
+		}
+		if fixture.Category != "memory_backed_triage" || !fixture.Pass {
+			t.Fatalf("memory-backed canary %s = %#v, want passing category", name, fixture)
+		}
+	}
+	if byName["aha_unanswered_question_with_recent_memory"].Expected != "prompt_cites_related_memory" || len(byName["aha_unanswered_question_with_recent_memory"].Evidence) == 0 {
+		t.Fatalf("Aha memory canary = %#v", byName["aha_unanswered_question_with_recent_memory"])
+	}
+	if byName["weak_memory_hit_stays_needs_context"].Outcome != BackfillReviewNeedsContext {
+		t.Fatalf("weak memory canary = %#v", byName["weak_memory_hit_stays_needs_context"])
+	}
+	if byName["person_project_memory_cites_source"].Outcome != BackfillReviewReady || len(byName["person_project_memory_cites_source"].Evidence) == 0 {
+		t.Fatalf("person/project memory canary = %#v", byName["person_project_memory_cites_source"])
 	}
 }
 
@@ -375,7 +399,7 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 	if len(report.RecentRuns) == 0 || report.RecentRuns[0].ContextFetchReason == "" || report.RecentRuns[0].SkipReasonBucket == "" {
 		t.Fatalf("recentRuns = %#v, want context reason and skip bucket", report.RecentRuns)
 	}
-	if report.Canary.Total != 4 || report.Canary.Passed != 4 || report.Canary.NeedsLiveSample {
+	if report.Canary.Total != 9 || report.Canary.Passed != 9 || report.Canary.NeedsLiveSample {
 		t.Fatalf("canary = %#v", report.Canary)
 	}
 	if !hasAuditFlag(report.Flags, "stale_sample") || !hasAuditFlag(report.Flags, "low_context_samples") {
@@ -790,7 +814,7 @@ func TestHandleTriageAuditReturnsSelfServeReport(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 4 || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
+	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 9 || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
 		t.Fatalf("payload = %#v", payload)
 	}
 }

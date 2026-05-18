@@ -117,15 +117,17 @@ type SlackTriageFreshness struct {
 }
 
 type SlackTriageAuditFixture struct {
-	Name             string `json:"name"`
-	Expected         string `json:"expected"`
-	Outcome          string `json:"outcome"`
-	Pass             bool   `json:"pass"`
-	ParseOK          bool   `json:"parseOk"`
-	Actions          int    `json:"actions"`
-	Mutations        int    `json:"mutations"`
-	SuppressedReason string `json:"suppressedReason,omitempty"`
-	Summary          string `json:"summary,omitempty"`
+	Name             string   `json:"name"`
+	Category         string   `json:"category,omitempty"`
+	Expected         string   `json:"expected"`
+	Outcome          string   `json:"outcome"`
+	Pass             bool     `json:"pass"`
+	ParseOK          bool     `json:"parseOk"`
+	Actions          int      `json:"actions"`
+	Mutations        int      `json:"mutations"`
+	SuppressedReason string   `json:"suppressedReason,omitempty"`
+	Summary          string   `json:"summary,omitempty"`
+	Evidence         []string `json:"evidence,omitempty"`
 }
 
 type SlackTriageAuditReport struct {
