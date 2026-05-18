@@ -718,6 +718,95 @@ Caveat: It won't fix system architecture for ya, so you still need BRAIN as mast
 	}
 }
 
+func TestSlackHistoryScannerDoesNotOverrideExplicitNoActionForExternalLink(t *testing.T) {
+	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`Title: Fiachra on X: the era of discomorphism has arrived
+
+Markdown Content:
+Log in
+Sign up
+Post
+Conversation
+the era of discomorphism has arrived
+Trending now`))
+	}))
+	defer reader.Close()
+	previousReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkReaderURL = func(rawURL string) string {
+		return reader.URL + "/?url=" + url.QueryEscape(rawURL)
+	}
+	defer func() { slackExternalLinkReaderURL = previousReaderURL }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"bridge-app","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://x.com/FiachraRM/status/2056172311620075824?s=20 今天都在发这个 蹭一下？","ts":"1779090616.617509"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_x_link_no_action",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"casual trend link; no action needed","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+			Triage: appconfig.SlackTriageConfig{
+				PostActions:       true,
+				HeuristicFallback: true,
+			},
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.inbound.SetCursor("C123", "1779090000.000000")
+
+	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("scanSlackHistoryOnce: %v", err)
+	}
+	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
+		t.Fatalf("result = %#v, want flushed scanner result", result)
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want explicit no-action to remain silent", calls)
+	}
+	status, err := service.TriageStatus(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("TriageStatus: %v", err)
+	}
+	if len(status.Runs) == 0 || len(status.Runs[0].Actions) != 0 || status.Runs[0].Mutations != 0 {
+		t.Fatalf("recent run = %#v, want no fallback direct reply", status.Runs)
+	}
+}
+
 func TestSlackHistoryScannerDoesNotAskBeforeReadingExternalLink(t *testing.T) {
 	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`Title: Peter Steinberger on X: codex review loop
@@ -802,7 +891,7 @@ Wrote a skill that runs codex /review in a loop until there's no booboos anymore
 	}
 }
 
-func TestSlackHistoryScannerSynthesizesSharedArticleWhenModelSkips(t *testing.T) {
+func TestSlackHistoryScannerDoesNotSynthesizeSharedArticleWhenModelSkips(t *testing.T) {
 	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`Title: 大语言模型为什么能像人一样说话和思考？
 
@@ -874,22 +963,8 @@ Markdown Content:
 	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
 		t.Fatalf("result = %#v, want flushed scanner result", result)
 	}
-	poster.WaitForCalls(t, 1)
-	calls := poster.Calls()
-	if len(calls) != 1 {
-		t.Fatalf("poster calls = %d, want one fallback synthesis reply", len(calls))
-	}
-	call := calls[0]
-	if call.Channel != "C123" || call.ThreadTS != "1779076415.945449" {
-		t.Fatalf("post call = %#v, want reply in source thread", call)
-	}
-	for _, want := range []string{"我粗读了一下", "大语言模型为什么能像人一样说话和思考", "核心信息", "初步判断"} {
-		if !strings.Contains(call.Text, want) {
-			t.Fatalf("post text = %q, want %q", call.Text, want)
-		}
-	}
-	if len(call.Blocks) == 0 || !strings.Contains(call.DedupKey, "slack-triage-direct:") {
-		t.Fatalf("post call = %#v, want direct reply blocks with triage dedup", call)
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want explicit model skip to stay silent", calls)
 	}
 }
 

@@ -835,7 +835,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	decision := parseSlackTriageDecision(rawOutput, fallback)
 	ok := job.Status == agentrunner.StatusCompleted
 	actions := append([]SlackTriageDecisionAction(nil), decision.Actions...)
-	if ok && len(actions) == 0 {
+	if ok && !decision.ParseOK && len(actions) == 0 {
 		if action, ok := slackTriageSharedLinkSynthesisAction(channelID, threadTS, messages, slackExternalLinksFromContext(job.Context["externalLinks"])); ok {
 			actions = append(actions, action)
 			decision.Summary = firstNonEmpty(decision.Summary, "Shared link is synthesis-eligible; posting a lightweight initial opinion.")
@@ -940,14 +940,14 @@ func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspace
 		effectiveChannel := firstNonEmpty(action.ChannelID, channelID)
 		effectiveThread := firstNonEmpty(action.ThreadTS, threadTS)
 		snapshotTS := slackTriageSnapshotLatestTS(messages, effectiveChannel, effectiveThread)
-		if newer, newerTS := s.slackTriageThreadHasNewerHumanActivity(ctx, effectiveChannel, effectiveThread, snapshotTS); newer {
+		if newer, newerTS, reason := s.slackTriageThreadHasNewerBlockingActivity(ctx, effectiveChannel, effectiveThread, snapshotTS); newer {
 			calls = append(calls, SlackTriageToolCall{
 				Tool:    "slack_api",
 				Action:  "post_thread_reply",
 				Args:    marshalTriageArgs("conversations.replies", newerTS, true),
 				Success: true,
 				Brief:   firstNonEmpty(action.Title, "skipped stale thread reply"),
-				Result:  "thread_has_newer_activity",
+				Result:  reason,
 			})
 			continue
 		}
@@ -1007,29 +1007,29 @@ func slackTriageSnapshotLatestTS(messages []SlackInboundMessage, channelID strin
 	return latest
 }
 
-func (s *Service) slackTriageThreadHasNewerHumanActivity(ctx context.Context, channelID string, threadTS string, snapshotTS string) (bool, string) {
+func (s *Service) slackTriageThreadHasNewerBlockingActivity(ctx context.Context, channelID string, threadTS string, snapshotTS string) (bool, string, string) {
 	if s == nil || strings.TrimSpace(s.botToken) == "" || strings.TrimSpace(channelID) == "" || strings.TrimSpace(threadTS) == "" || strings.TrimSpace(threadTS) == "channel-root" || strings.TrimSpace(snapshotTS) == "" {
-		return false, ""
+		return false, "", ""
 	}
 	response, err := s.callSlackConversationsReplies(ctx, channelID, threadTS)
 	if err != nil {
 		s.logger.Warn("slack triage direct reply freshness check failed", "channel", channelID, "thread_ts", threadTS, "error", err)
-		return false, ""
+		return false, "", ""
 	}
 	if !response.OK {
 		s.logger.Warn("slack triage direct reply freshness check returned slack error", "channel", channelID, "thread_ts", threadTS, "error", response.Error)
-		return false, ""
+		return false, "", ""
 	}
 	for _, message := range slackInboundMessagesFromThreadMessages(channelID, response.Messages) {
 		if !slackTSGreater(firstNonEmpty(message.TS, message.EventTS), snapshotTS) {
 			continue
 		}
 		if isAuthoredByBot(message, []string{s.botUserID}) {
-			continue
+			return true, firstNonEmpty(message.TS, message.EventTS), "thread_has_newer_bot_activity"
 		}
-		return true, firstNonEmpty(message.TS, message.EventTS)
+		return true, firstNonEmpty(message.TS, message.EventTS), "thread_has_newer_activity"
 	}
-	return false, ""
+	return false, "", ""
 }
 
 func slackTriageLedgerOutcome(ok bool, mutations int, failures int) string {

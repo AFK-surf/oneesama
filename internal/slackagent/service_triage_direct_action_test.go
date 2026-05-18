@@ -52,7 +52,7 @@ func TestTriageDirectReplySkipsWhenThreadHasNewerHumanActivity(t *testing.T) {
 	}
 }
 
-func TestTriageDirectReplyIgnoresNewerBotOnlyActivity(t *testing.T) {
+func TestTriageDirectReplySkipsWhenThreadAlreadyHasBotReply(t *testing.T) {
 	restore := installSlackRepliesFixture(t, []SlackMessage{
 		{TS: "100.000", User: "U_ASKER", Text: "read this"},
 		{TS: "101.000", User: "U_BOT", BotID: "B123", Subtype: "bot_message", Text: "bot ack"},
@@ -78,10 +78,15 @@ func TestTriageDirectReplyIgnoresNewerBotOnlyActivity(t *testing.T) {
 		RequiresConfirmation: false,
 	}}, []SlackInboundMessage{{ChannelID: "C123", UserID: "U_ASKER", TS: "100.000", Text: "read this"}})
 
-	if failures != 0 || mutations != 1 || len(calls) != 1 || !calls[0].Success {
-		t.Fatalf("calls=%#v failures=%d mutations=%d, want one posted mutation", calls, failures, mutations)
+	if failures != 0 || mutations != 0 || len(calls) != 1 || !calls[0].Success {
+		t.Fatalf("calls=%#v failures=%d mutations=%d, want skipped successful no-mutation call", calls, failures, mutations)
 	}
-	poster.WaitForCalls(t, 1)
+	if calls[0].Result != "thread_has_newer_bot_activity" {
+		t.Fatalf("call result = %q, want thread_has_newer_bot_activity", calls[0].Result)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want duplicate bot reply suppressed", got)
+	}
 }
 
 func installSlackRepliesFixture(t *testing.T, messages []SlackMessage) func() {

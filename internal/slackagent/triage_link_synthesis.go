@@ -71,6 +71,9 @@ func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext) (Sl
 		if strings.TrimSpace(context.Error) != "" || strings.TrimSpace(context.URL) == "" {
 			continue
 		}
+		if looksLikeLowSignalSocialStatusURL(context.URL) {
+			continue
+		}
 		if title == "" && len([]rune(excerpt)) < slackSharedLinkSynthesisExcerptMin {
 			continue
 		}
@@ -80,6 +83,15 @@ func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext) (Sl
 		return context, true
 	}
 	return SlackExternalLinkContext{}, false
+}
+
+func looksLikeLowSignalSocialStatusURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.Trim(rawURL, "<>|.,，。)）]】"))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "x.com" || strings.HasSuffix(host, ".x.com") || host == "twitter.com" || strings.HasSuffix(host, ".twitter.com")
 }
 
 func looksLikeArticleOrDocumentURL(rawURL string) bool {

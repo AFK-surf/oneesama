@@ -406,6 +406,45 @@ Ask these before merging any future migration slice:
 
 If any answer is missing, the migration is not done.
 
+## Incident Log
+
+### 2026-05-18: Link Synthesis Replied Twice With Low-Quality X Summary
+
+Symptom:
+
+- In `C09KVPBMLJ3/1779090616.617509`, oneesama posted the same link-synthesis
+  reply twice about one minute apart.
+- The reply quality was poor: it summarized X/Jina login/signup/trending
+  boilerplate as if it were substantive content.
+
+Root cause:
+
+- The model explicitly returned `actions: []`, but Go finalization still
+  injected a deterministic `slackTriageSharedLinkSynthesisAction` fallback
+  because the message had an external-link context.
+- The stale-direct-reply guard skipped bot-authored messages when deciding
+  whether the thread had newer activity, so oneesama's own first reply did not
+  block the second direct reply.
+- The deterministic link-synthesis fallback treated low-signal social status
+  pages (`x.com` / `twitter.com`) as synthesis-eligible when the reader output
+  contained enough boilerplate text.
+
+Why tests did not catch it:
+
+- Tests covered "model chooses a direct link reply" but not "model explicitly
+  says no action and fallback must not override it".
+- Tests intentionally allowed bot-only activity to be ignored, which is right
+  for human-answer detection but wrong for duplicate direct-reply prevention.
+- No negative test existed for login-wall/social-status reader output.
+
+New hard rules:
+
+- Deterministic helpers may not override a parsed explicit `actions: []`.
+- Before posting a direct reply, freshness must treat this bot's own newer
+  thread reply as a blocking activity.
+- Fetched-link synthesis must reject low-signal social status/login-wall output
+  unless the model deliberately produces a reply from the fetched context.
+
 ## Where To Record Future Lessons
 
 - Add incident-specific rows to this file.
