@@ -294,7 +294,7 @@ func TestRenderBackfillCandidatesMarkdownGroupsByClassification(t *testing.T) {
 	}
 }
 
-func TestRenderBackfillCandidatesMarkdownLabelsNonPostableNotes(t *testing.T) {
+func TestRenderBackfillCandidatesMarkdownLabelsNonPostableContextNotes(t *testing.T) {
 	out := RenderBackfillCandidatesMarkdown([]SlackBackfillCandidate{{
 		Classification: "link_followup_candidate",
 		Title:          "补读这条分享",
@@ -308,8 +308,8 @@ func TestRenderBackfillCandidatesMarkdownLabelsNonPostableNotes(t *testing.T) {
 	if !strings.Contains(out, "**Quality gate**: `needs_link_read`") {
 		t.Fatalf("missing needs_link_read gate:\n%s", out)
 	}
-	if !strings.Contains(out, "**Draft note (not postable yet)**") {
-		t.Fatalf("non-ready candidate should not be labelled Draft reply:\n%s", out)
+	if !strings.Contains(out, "**Context note (not a reply)**") {
+		t.Fatalf("non-ready candidate should be labelled as context, not a draft:\n%s", out)
 	}
 	if strings.Contains(out, "**Draft reply**") {
 		t.Fatalf("non-ready candidate was labelled as postable draft:\n%s", out)

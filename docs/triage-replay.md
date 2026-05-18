@@ -74,7 +74,7 @@ Quality gates added after the 2026-05-18 dogfood report:
   shared-link synthesis path as live triage before they are labelled
   `review_ready`. If the body cannot be fetched or is not substantive
   enough, the report marks the item `needs_link_read` and labels its
-  text `Draft note (not postable yet)`.
+  text `Context note (not a reply)`.
 
 ## Report quality gates
 
@@ -242,9 +242,10 @@ candidates only with a stderr warning — non-fatal.
 
 - **`--post`**. The dry-run CLI cannot send Slack messages. The live
   triage path remains the only component allowed to post.
-- **Persisted-only refetch/resolve.** Persisted-only leads are labelled
-  `needs_thread_refetch`; a later slice should refetch those threads
-  and automatically resolve followups that humans already answered.
+- **Persisted followup auto-resolve.** The CLI now refetches
+  persisted-only threads when a Slack token is available and drops
+  leads that humans already answered, but it does not yet write
+  `superseded_by_human` back into live followup state.
 - **Full LLM re-run for backfill.** Link candidates reuse the live
   shared-link synthesis helper after fetching the body. The broader
   "rerun the complete triage LLM prompt over each candidate" path is

@@ -167,9 +167,10 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Triage backfill replay\n\n")
 	fmt.Fprintf(&b, "%d candidate(s) found. Each entry shows the classification, the\n", len(candidates))
-	fmt.Fprintf(&b, "channel/thread anchor, the original message excerpt, and a draft\n")
-	fmt.Fprintf(&b, "reply for human review. Entries marked `needs_*` are leads, not postable\n")
-	fmt.Fprintf(&b, "drafts. Nothing is posted; this is dry-run output.\n\n")
+	fmt.Fprintf(&b, "channel/thread anchor, the original message excerpt, and either a\n")
+	fmt.Fprintf(&b, "postable draft or a non-postable context note for human review. Entries\n")
+	fmt.Fprintf(&b, "marked `needs_*` are leads, not reply drafts. Nothing is posted; this is\n")
+	fmt.Fprintf(&b, "dry-run output.\n\n")
 	for _, key := range keys {
 		group := byClass[key]
 		fmt.Fprintf(&b, "## %s (%d)\n\n", key, len(group))
@@ -206,7 +207,7 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 			fmt.Fprintf(&b, "- **Original**:\n  %s\n\n", original)
 			label := "Draft reply"
 			if status != BackfillReviewReady {
-				label = "Draft note (not postable yet)"
+				label = "Context note (not a reply)"
 			}
 			fmt.Fprintf(&b, "**%s**:\n\n%s\n\n", label, c.Draft)
 			fmt.Fprintf(&b, "---\n\n")
