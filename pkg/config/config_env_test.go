@@ -32,6 +32,19 @@ func TestLoadHonorsSlackEventBufferEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadIgnoresLegacySlackEventBufferMillisecondDebounce(t *testing.T) {
+	t.Setenv(oneesamaConfigEnvOverrideKey, "")
+	t.Setenv("ONEESAMA_SLACK_EVENT_DEBOUNCE", "")
+	t.Setenv("MAB_SLACK_EVENT_DEBOUNCE", "")
+	t.Setenv("SCAN_DEBOUNCE", "")
+	t.Setenv("MAB_SLACK_EVENT_DEBOUNCE_MS", "5000")
+
+	cfg := loadInTempDir(t)
+	if cfg.Slack.EventBuffer.Debounce != 5*time.Minute {
+		t.Fatalf("Slack.EventBuffer.Debounce = %v, want Cueboard-style default instead of stale _MS override", cfg.Slack.EventBuffer.Debounce)
+	}
+}
+
 func TestLoadRebuildsSQLitePathWhenDataDirOverrideChanges(t *testing.T) {
 	t.Setenv(oneesamaConfigEnvOverrideKey, "")
 	t.Setenv("ONEESAMA_STATE_PROVIDER", "")

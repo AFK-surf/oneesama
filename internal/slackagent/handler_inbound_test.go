@@ -74,6 +74,23 @@ func TestSlackHistoryScannerIntervalMatchesCueboardDefault(t *testing.T) {
 	}
 }
 
+func TestSlackEventBufferDefaultDebounceWaitsForHumanReplyWindow(t *testing.T) {
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled: true,
+			},
+		},
+	})
+	if service.inbound == nil {
+		t.Fatal("service inbound buffer is nil")
+	}
+	if got := service.inbound.debounce; got != 5*time.Minute {
+		t.Fatalf("event buffer debounce = %s, want Cueboard-style 5m wait-for-human window", got)
+	}
+}
+
 func TestHandleInboundFlushReturnsDigest(t *testing.T) {
 	router := newTestRouter(t, Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},

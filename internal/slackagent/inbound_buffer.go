@@ -13,7 +13,7 @@ import (
 
 const (
 	slackInboundDefaultMaxBatch = 10
-	slackInboundDefaultDebounce = 30 * time.Second
+	slackInboundDefaultDebounce = 5 * time.Minute
 	slackInboundConversationGap = 5 * time.Minute
 )
 

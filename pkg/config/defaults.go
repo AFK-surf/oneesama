@@ -16,7 +16,7 @@ const (
 	defaultSlackWorkspaceDir            = "./runtime/slack-workspace"
 	defaultSlackMemoryDir               = "./runtime/slack-memory"
 	defaultSlackEventMaxBatch           = 10
-	defaultSlackEventDebounce           = 30 * time.Second
+	defaultSlackEventDebounce           = 5 * time.Minute
 	defaultSlackTriagePostActions       = true
 	defaultSlackTriageHeuristicFallback = true
 	defaultSlackMeetingScannerInterval  = time.Minute

@@ -76,6 +76,9 @@ Example:
 The consolidated implementation backlog lives in
 `notes/cueboard-function-audit/consolidated-backlog.md`.
 
+Reusable migration lessons and guardrails live in
+`notes/cueboard-function-audit/migration-lessons.md`.
+
 ## Review Workflow
 
 1. Generate the module inventory with `cmd/cueboard-function-inventory`.

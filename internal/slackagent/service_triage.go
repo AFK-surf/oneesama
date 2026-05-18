@@ -850,10 +850,12 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	probe := boolFromAny(job.Context["triageProbe"], false)
 	var directToolCalls []SlackTriageToolCall
 	var directFailures int
+	var directMutations int
 	if !probe {
-		directToolCalls, directFailures = s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions)
+		directToolCalls, directFailures, directMutations = s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions, messages)
 	}
-	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: len(actions), failures: directFailures}, nil)
+	mutationCandidates := len(actions) - countSlackTriageDirectReplyActions(actions) + directMutations
+	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: mutationCandidates, failures: directFailures}, nil)
 	if probe {
 		mutations = 0
 	}
@@ -923,15 +925,32 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	return finalization, nil
 }
 
-func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspaceID string, channelID string, threadTS string, runID int64, actions []SlackTriageDecisionAction) ([]SlackTriageToolCall, int) {
+func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspaceID string, channelID string, threadTS string, runID int64, actions []SlackTriageDecisionAction, snapshotMessages ...[]SlackInboundMessage) ([]SlackTriageToolCall, int, int) {
 	calls := make([]SlackTriageToolCall, 0)
 	var failures int
+	var mutations int
+	var messages []SlackInboundMessage
+	if len(snapshotMessages) > 0 {
+		messages = snapshotMessages[0]
+	}
 	for _, action := range actions {
 		if !slackTriageDirectReplyAction(action) {
 			continue
 		}
 		effectiveChannel := firstNonEmpty(action.ChannelID, channelID)
 		effectiveThread := firstNonEmpty(action.ThreadTS, threadTS)
+		snapshotTS := slackTriageSnapshotLatestTS(messages, effectiveChannel, effectiveThread)
+		if newer, newerTS := s.slackTriageThreadHasNewerHumanActivity(ctx, effectiveChannel, effectiveThread, snapshotTS); newer {
+			calls = append(calls, SlackTriageToolCall{
+				Tool:    "slack_api",
+				Action:  "post_thread_reply",
+				Args:    marshalTriageArgs("conversations.replies", newerTS, true),
+				Success: true,
+				Brief:   firstNonEmpty(action.Title, "skipped stale thread reply"),
+				Result:  "thread_has_newer_activity",
+			})
+			continue
+		}
 		result := s.PostMessage(ctx, PostMessageInput{
 			Channel:  effectiveChannel,
 			ThreadTS: effectiveThread,
@@ -952,9 +971,65 @@ func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspace
 		} else if err := s.cognition.RecordOutbound(ctx, workspaceID, effectiveChannel, effectiveThread, "Triage replied: "+firstNonEmpty(action.Title, firstLine(action.Message))); err != nil {
 			s.logger.Warn("slack thread ledger direct reply record failed", "error", err)
 		}
+		mutations++
 		calls = append(calls, call)
 	}
-	return calls, failures
+	return calls, failures, mutations
+}
+
+func countSlackTriageDirectReplyActions(actions []SlackTriageDecisionAction) int {
+	count := 0
+	for _, action := range actions {
+		if slackTriageDirectReplyAction(action) {
+			count++
+		}
+	}
+	return count
+}
+
+func slackTriageSnapshotLatestTS(messages []SlackInboundMessage, channelID string, threadTS string) string {
+	channelID = strings.TrimSpace(channelID)
+	threadTS = strings.TrimSpace(threadTS)
+	var latest string
+	for _, message := range messages {
+		message = normalizeSlackInboundMessage(message)
+		if channelID != "" && message.ChannelID != "" && message.ChannelID != channelID {
+			continue
+		}
+		messageThread := firstNonEmpty(message.ThreadTS, message.TS)
+		if threadTS != "" && messageThread != "" && messageThread != threadTS {
+			continue
+		}
+		if ts := firstNonEmpty(message.TS, message.EventTS); slackTSGreater(ts, latest) {
+			latest = ts
+		}
+	}
+	return latest
+}
+
+func (s *Service) slackTriageThreadHasNewerHumanActivity(ctx context.Context, channelID string, threadTS string, snapshotTS string) (bool, string) {
+	if s == nil || strings.TrimSpace(s.botToken) == "" || strings.TrimSpace(channelID) == "" || strings.TrimSpace(threadTS) == "" || strings.TrimSpace(threadTS) == "channel-root" || strings.TrimSpace(snapshotTS) == "" {
+		return false, ""
+	}
+	response, err := s.callSlackConversationsReplies(ctx, channelID, threadTS)
+	if err != nil {
+		s.logger.Warn("slack triage direct reply freshness check failed", "channel", channelID, "thread_ts", threadTS, "error", err)
+		return false, ""
+	}
+	if !response.OK {
+		s.logger.Warn("slack triage direct reply freshness check returned slack error", "channel", channelID, "thread_ts", threadTS, "error", response.Error)
+		return false, ""
+	}
+	for _, message := range slackInboundMessagesFromThreadMessages(channelID, response.Messages) {
+		if !slackTSGreater(firstNonEmpty(message.TS, message.EventTS), snapshotTS) {
+			continue
+		}
+		if isAuthoredByBot(message, []string{s.botUserID}) {
+			continue
+		}
+		return true, firstNonEmpty(message.TS, message.EventTS)
+	}
+	return false, ""
 }
 
 func slackTriageLedgerOutcome(ok bool, mutations int, failures int) string {

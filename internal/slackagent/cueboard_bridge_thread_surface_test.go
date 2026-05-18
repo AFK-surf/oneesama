@@ -50,7 +50,7 @@ func TestCueboardParityTriageDirectReplyUsesMrkdwnBlocks(t *testing.T) {
 		Poster:      poster,
 	})
 
-	calls, failures := service.executeSlackTriageDirectActions(context.Background(), "W1", "C123", "1778772007.043069", 42, []SlackTriageDecisionAction{{
+	calls, failures, mutations := service.executeSlackTriageDirectActions(context.Background(), "W1", "C123", "1778772007.043069", 42, []SlackTriageDecisionAction{{
 		Type:                 "post_thread_reply",
 		Title:                "补充说明",
 		Message:              "## 说明\n\n**这条**可以直接回答。",
@@ -58,8 +58,8 @@ func TestCueboardParityTriageDirectReplyUsesMrkdwnBlocks(t *testing.T) {
 		ThreadTS:             "1778772007.043069",
 		RequiresConfirmation: false,
 	}})
-	if failures != 0 || len(calls) != 1 || !calls[0].Success {
-		t.Fatalf("calls=%#v failures=%d, want one successful direct reply", calls, failures)
+	if failures != 0 || mutations != 1 || len(calls) != 1 || !calls[0].Success {
+		t.Fatalf("calls=%#v failures=%d mutations=%d, want one successful direct reply", calls, failures, mutations)
 	}
 	poster.WaitForCalls(t, 1)
 	call := poster.Calls()[0]
