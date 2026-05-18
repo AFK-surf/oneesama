@@ -2,6 +2,7 @@ package meetingagent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -101,6 +102,12 @@ func (fakeEmptyCaptionMeetRunner) StopSession(_ context.Context, input meetrunne
 		Reason:  input.Reason,
 		Runtime: map[string]any{"beforeStop": map[string]any{"active": map[string]any{"captions": map[string]any{"tail": []map[string]any{}}}}},
 	}, nil
+}
+
+type fakeMissingStatusMeetRunner struct{ fakeMeetRunner }
+
+func (fakeMissingStatusMeetRunner) StatusSession(context.Context, meetrunner.StatusSessionInput) (meetrunner.StatusSessionResult, error) {
+	return meetrunner.StatusSessionResult{}, errors.New("meet-runner session session_join_stale not found")
 }
 
 type fakeMeetRunnerWithRuntime struct {
@@ -232,6 +239,35 @@ func TestHandleJoinLifecycle(t *testing.T) {
 	if !strings.Contains(stopResponse.Body.String(), `"post_meeting"`) ||
 		!strings.Contains(stopResponse.Body.String(), `"Ship the real join flow."`) {
 		t.Fatalf("body = %s, want post-meeting artifact from flushed captions", stopResponse.Body.String())
+	}
+}
+
+func TestJoinStatusMarksPersistedSessionStaleWhenRunnerSessionMissing(t *testing.T) {
+	t.Parallel()
+
+	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", fakeMissingStatusMeetRunner{})
+	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_stale","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`))
+	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
+	joinRequest.Header.Set("Content-Type", "application/json")
+	joinResponse := httptest.NewRecorder()
+	router.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
+	}
+
+	statusRequest := httptest.NewRequest(http.MethodGet, "/join/status?session_id=session_join_stale", nil)
+	statusRequest.Header.Set(internalauth.HeaderName, "secret-key")
+	statusResponse := httptest.NewRecorder()
+	router.ServeHTTP(statusResponse, statusRequest)
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	body := statusResponse.Body.String()
+	if !strings.Contains(body, `"status":"stale"`) {
+		t.Fatalf("body = %s, want stale session status", body)
+	}
+	if !strings.Contains(body, `"stale_reason":"meet_runner_session_missing"`) {
+		t.Fatalf("body = %s, want stale reason metadata", body)
 	}
 }
 

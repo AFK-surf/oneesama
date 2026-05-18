@@ -145,6 +145,10 @@ func (s *Service) JoinStatus(ctx context.Context, sessionID string) (JoinStatusR
 			if refreshed := s.sessionFromRuntimeStatus(ctx, *active, status); refreshed != nil {
 				active = refreshed
 			}
+		} else if runnerSessionMissing(err) {
+			if stale := s.markJoinSessionStale(ctx, *active, err); stale != nil {
+				active = stale
+			}
 		} else {
 			s.logger.Warn("meet-runner status failed", "session_id", active.ID, "error", err)
 		}
@@ -243,6 +247,43 @@ func (s *Service) sessionFromRuntimeStatus(ctx context.Context, session SessionR
 	return &updated
 }
 
+func (s *Service) markJoinSessionStale(ctx context.Context, session SessionRecord, cause error) *SessionRecord {
+	metadata := cloneMap(session.Metadata)
+	if len(metadata) == 0 {
+		metadata = map[string]any{}
+	}
+	metadata["stale_reason"] = "meet_runner_session_missing"
+	if cause != nil {
+		metadata["runtime_status_error"] = cause.Error()
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	metadata["stale_at"] = now
+	updated, err := s.UpsertSession(ctx, SessionUpsertInput{
+		ID:               session.ID,
+		MeetingID:        session.MeetingID,
+		MeetingURL:       session.MeetingURL,
+		Status:           "stale",
+		Title:            session.Title,
+		ParticipantCount: session.ParticipantCount,
+		StartedAt:        session.StartedAt,
+		EndedAt:          firstNonEmpty(session.EndedAt, now),
+		Metadata:         metadata,
+	})
+	if err != nil {
+		s.logger.Warn("persist stale join status failed", "session_id", session.ID, "error", err)
+		return nil
+	}
+	return &updated
+}
+
+func runnerSessionMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "meet-runner session") && strings.Contains(msg, "not found")
+}
+
 func runtimeMeetPageStatus(active any) string {
 	fields := map[string]any{}
 	raw, err := json.Marshal(active)
@@ -296,7 +337,7 @@ func (s *Service) resolveJoinSession(ctx context.Context, sessionID string) (*Se
 
 func isTerminalSessionStatus(status string) bool {
 	switch strings.TrimSpace(status) {
-	case "stopped", "done", "failed", "cancelled", "canceled":
+	case "stopped", "done", "failed", "cancelled", "canceled", "stale":
 		return true
 	default:
 		return false
