@@ -74,6 +74,9 @@ func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext) (Sl
 		if looksLikeLowSignalSocialStatusURL(context.URL) {
 			continue
 		}
+		if slackExternalLinkContextLooksBoilerplate(context) {
+			continue
+		}
 		if title == "" && len([]rune(excerpt)) < slackSharedLinkSynthesisExcerptMin {
 			continue
 		}
@@ -83,6 +86,26 @@ func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext) (Sl
 		return context, true
 	}
 	return SlackExternalLinkContext{}, false
+}
+
+func slackExternalLinkContextLooksBoilerplate(context SlackExternalLinkContext) bool {
+	excerpt := strings.ToLower(strings.Join(strings.Fields(context.Excerpt), " "))
+	if excerpt == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"github copilot write better code with ai",
+		"github spark build and deploy intelligent apps",
+		"github models manage and compare prompts",
+		"mcp registry new integrate external tools",
+		"automate any workflow packages host and manage packages",
+		"sign in to github",
+	} {
+		if strings.Contains(excerpt, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeLowSignalSocialStatusURL(rawURL string) bool {

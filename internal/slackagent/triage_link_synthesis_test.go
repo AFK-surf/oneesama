@@ -15,3 +15,17 @@ func TestSharedLinkSynthesisRejectsLowSignalSocialStatus(t *testing.T) {
 		t.Fatal("low-signal X status should not trigger deterministic link synthesis")
 	}
 }
+
+func TestSharedLinkSynthesisRejectsGitHubChromeBoilerplate(t *testing.T) {
+	t.Parallel()
+
+	_, ok := firstSynthesisEligibleExternalLink([]SlackExternalLinkContext{{
+		URL:     "https://github.com/hangli-hl/AI-Articles/blob/main/llm-thinking.pdf",
+		Title:   "AI-Articles/llm-thinking.pdf at main · hangli-hl/AI-Articles",
+		Excerpt: "AI CODE CREATION GitHub Copilot Write better code with AI GitHub Spark Build and deploy intelligent apps GitHub Models Manage and compare prompts MCP Registry New Integrate external tools Developer workflow",
+		Source:  "jina_reader",
+	}})
+	if ok {
+		t.Fatal("GitHub chrome/marketing boilerplate should not be treated as linked article content")
+	}
+}
