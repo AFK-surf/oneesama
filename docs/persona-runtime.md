@@ -67,6 +67,37 @@ entity/event/arc/state model and source-reference discipline.
 Oneesama should use that style of context assembly instead of feeding raw Slack
 memory blobs into Codex.
 
+## Language And Deployment Options
+
+The runtime boundary must be designed before choosing a language. Pi-agent is
+currently JavaScript/TypeScript, while Oneesama's surrounding services are Go.
+That is acceptable only if the cross-process contract is narrow and typed.
+
+Existing Oneesama already uses this pattern:
+
+- `meet-runner` is a TypeScript subprocess driven by Go over JSON-RPC.
+- Codex/Claude/Ollama/command providers are delegated workers behind a Go
+  runner interface.
+
+The persona runtime should follow the same discipline: Go orchestrates,
+persists, audits, and routes; the persona process owns cognition and memory.
+
+| Option                   | Shape                                                                                                                | Pros                                                                                         | Risks                                                                                           | When To Use                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| JS/TS Pi sidecar         | Run the existing Pi-style runtime as a local subprocess or HTTP service; Go calls it through `PersonaRuntime`.       | Fastest path to reuse memory-native behavior; avoids reimplementing the lobster brain in Go. | Two runtimes to supervise; persona state and health must be exposed across process boundaries.  | First production-shaped canary and behavior validation.                       |
+| Go Pi-style port         | Reimplement the Pi/OpenClaw memory context builder, episode model, and persona decision loop in Go.                  | Single binary/runtime; easier deploy and observability once correct.                         | High migration risk; easy to repeat the "tool surface migrated, behavior did not" failure mode. | Only after JS sidecar behavior fixtures are stable and the contract is known. |
+| Hybrid shadow-first path | Start with JS sidecar in shadow/dry-run, define golden request/response fixtures, then decide whether to port to Go. | Lets us validate behavior before investing in language migration.                            | Requires maintaining the adapter seam during the shadow period.                                 | Recommended path.                                                             |
+
+Decision for now: **hybrid shadow-first**. Do not start by searching for or
+building a "Go pi-agent" clone. First lock the persona protocol and behavior
+fixtures, run a JS/Pi-style sidecar behind that protocol, and only then decide
+whether a Go port is worth the cost.
+
+The code quality implication is important: a future Go implementation is fine
+only if it implements the same persona-runtime contract and passes the same
+behavior fixtures. A pile of Go heuristics that produces similar-looking text is
+not a Go implementation of Pi-agent.
+
 ## Responsibilities
 
 | Layer                           | Owns                                                                                                                       | Must Not Own                                                             |
@@ -111,6 +142,8 @@ Acceptance:
 ### Phase 1: Define The Persona Runtime Contract
 
 - [ ] Add a `PersonaRuntime` contract with a narrow request/response schema.
+- [ ] Keep the contract language-neutral: it must support a JS/TS sidecar, a Go
+      fake, or a later Go port without changing Slack/Meet code.
 - [ ] Request fields should include event kind, speaker/user identity, Slack or
       meeting anchor, recent local context, evidence bundle, memory context, and
       safety constraints.
@@ -124,6 +157,8 @@ Acceptance:
 
 - [ ] The same request can be handled by legacy fallback, a Pi adapter, or a test
       fake without Slack/Meet code changes.
+- [ ] Cross-process implementations expose health, version, state summary,
+      request latency, and last error back to Go audit/status endpoints.
 - [ ] Worker requests are explicit structured outputs, not hidden prompt text.
 
 ### Phase 2: Build A Pi-Style Memory Context Adapter
