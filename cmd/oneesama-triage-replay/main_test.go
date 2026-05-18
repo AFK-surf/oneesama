@@ -123,6 +123,28 @@ func TestRunQuietSuppressesStderrSummary(t *testing.T) {
 	}
 }
 
+// TestRunNormalizesSnakeCaseChannelID is the regression for the bug
+// driver caught in the audit of slice 1 (97f01a7): NDJSON with
+// `channel_id` (snake) was not getting aliased to `ChannelID` before
+// grouping, so candidates came out with an empty channel field. With
+// `NormalizeSlackInboundMessage` applied at read time, snake-case
+// inputs should produce the same output as camelCase inputs.
+func TestRunNormalizesSnakeCaseChannelID(t *testing.T) {
+	ndjson := `{"channel_id":"C1","user_id":"U_PENG","ts":"100.000","text":"CI 在 main 整体卡住了，要不要看一下？"}`
+	var stdout, stderr bytes.Buffer
+	code := run(nil, strings.NewReader(ndjson), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "**Channel**: `C1`") {
+		t.Errorf("snake_case channel_id should populate Channel field, got:\n%s", out)
+	}
+	if strings.Contains(out, "**Channel**: ``") {
+		t.Errorf("empty Channel render indicates normalization bug:\n%s", out)
+	}
+}
+
 // TestRunInvalidFlagReturnsTwo guards exit-code contract.
 func TestRunInvalidFlagReturnsTwo(t *testing.T) {
 	var stdout, stderr bytes.Buffer

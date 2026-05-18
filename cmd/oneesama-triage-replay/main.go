@@ -157,7 +157,10 @@ func readMessages(stdin io.Reader) ([]slackagent.SlackInboundMessage, error) {
 		if err := json.Unmarshal([]byte(line), &m); err != nil {
 			return nil, fmt.Errorf("line %d: %w", lineNo, err)
 		}
-		out = append(out, m)
+		// Slack exports / fixtures freely mix `channel_id` and
+		// `channelId`; normalize once at read time so downstream
+		// grouping and classification see a single canonical shape.
+		out = append(out, slackagent.NormalizeSlackInboundMessage(m))
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err

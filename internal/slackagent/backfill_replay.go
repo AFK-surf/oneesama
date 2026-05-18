@@ -6,6 +6,22 @@ import (
 	"strings"
 )
 
+// NormalizeSlackInboundMessage canonicalises snake_case / camelCase /
+// legacy field aliases on a `SlackInboundMessage` so consumers can pass
+// data from any source (Slack export tools, conversations.history dumps,
+// fixtures handwritten by humans) without having to care which casing
+// convention the upstream used.
+//
+// This is a thin uppercase wrapper around `normalizeSlackInboundMessage`
+// (in inbound_buffer.go) — it exists so cmd/oneesama-triage-replay can
+// normalize its NDJSON inputs at read time, before grouping by
+// (channel, thread root). Without this, a `{"channel_id": "C1"}`
+// record would have `ChannelID == ""` and the grouping would
+// incorrectly bucket it under the empty-channel key.
+func NormalizeSlackInboundMessage(message SlackInboundMessage) SlackInboundMessage {
+	return normalizeSlackInboundMessage(message)
+}
+
 // SlackBackfillCandidate is one suggested oneesama follow-up surfaced by
 // the 24-hour replay scan. It mirrors the shape of the in-line
 // `slackDelayedNoReplyCandidate` (shipped in 46459b7) so the backfill
@@ -47,7 +63,18 @@ type SlackBackfillReplayInput struct {
 // Exposed (capitalized) so cmd/oneesama-triage-replay can call it. The
 // underlying lowercase helpers remain internal; this wrapper is the
 // stable public contract.
+//
+// Inputs are normalized via `normalizeSlackInboundMessage` so the
+// caller may pass either camelCase (`channelId`) or snake_case
+// (`channel_id`) shapes — Slack exports / direct API dumps / fixtures
+// all mix conventions, and a CLI consumer should not have to care.
 func ClassifyBackfillMessage(message SlackInboundMessage, replies []SlackInboundMessage, botUserIDs []string) (SlackBackfillCandidate, bool) {
+	message = normalizeSlackInboundMessage(message)
+	normalizedReplies := make([]SlackInboundMessage, 0, len(replies))
+	for _, reply := range replies {
+		normalizedReplies = append(normalizedReplies, normalizeSlackInboundMessage(reply))
+	}
+
 	if isAuthoredByBot(message, botUserIDs) {
 		return SlackBackfillCandidate{}, false
 	}
@@ -60,11 +87,11 @@ func ClassifyBackfillMessage(message SlackInboundMessage, replies []SlackInbound
 	// If any non-bot human has already replied, the backfill scan
 	// should NOT add a candidate — the message has been "caught" by a
 	// human and oneesama jumping in would just be noise.
-	if humanReplyExists(replies, botUserIDs) {
+	if humanReplyExists(normalizedReplies, botUserIDs) {
 		return SlackBackfillCandidate{}, false
 	}
 
-	bundle := append([]SlackInboundMessage{message}, replies...)
+	bundle := append([]SlackInboundMessage{message}, normalizedReplies...)
 	candidate, ok := slackDelayedNoReplyCandidateFor(SlackTriageDecision{}, bundle)
 	if !ok {
 		return SlackBackfillCandidate{}, false
