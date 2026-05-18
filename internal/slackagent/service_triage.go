@@ -932,6 +932,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	sessionID := fmt.Sprintf("triage:%s:%d", channelID, timeNow().UnixMilli())
 	threadContexts := s.fetchSlackTriageThreadContexts(ctx, channelID, messages)
 	channelContexts := s.fetchSlackTriageChannelContexts(ctx, channelID, messages, digest, threadContexts)
+	threadContexts, summaryMetadata := s.maybeSummarizeOversizedSlackTriageThreadContexts(ctx, channelID, threadTS, messages, digest, threadContexts)
 	if len(channelContexts) > 0 {
 		digest = renderSlackActivityDigestWithContext(channelID, channelContexts, messages)
 	}
@@ -940,6 +941,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	}
 	externalLinks := fetchSlackExternalLinkContexts(ctx, messages)
 	auditMetadata := slackTriageAuditMetadata(digest, messages, threadContexts, channelContexts, externalLinks)
+	auditMetadata = mergeStringAnyMaps(auditMetadata, summaryMetadata)
 	auditMetadata = mergeStringAnyMaps(auditMetadata, options.ExtraMetadata)
 	run, err := s.triage.RecordRun(ctx, SlackTriageContext{
 		SessionID: sessionID,
