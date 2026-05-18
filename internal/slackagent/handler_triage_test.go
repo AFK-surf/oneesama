@@ -264,8 +264,8 @@ func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TriageStatus: %v", err)
 	}
-	if len(status.AuditFixtures) != 3 {
-		t.Fatalf("fixtures = %#v, want ACT/MAYBE/SKIP controls", status.AuditFixtures)
+	if len(status.AuditFixtures) != 4 {
+		t.Fatalf("fixtures = %#v, want ACT/MAYBE/link-synthesis/SKIP controls", status.AuditFixtures)
 	}
 	byName := map[string]SlackTriageAuditFixture{}
 	for _, fixture := range status.AuditFixtures {
@@ -279,6 +279,9 @@ func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
 	}
 	if byName["maybe_follow_up"].Outcome != "MAYBE" || byName["maybe_follow_up"].Actions != 1 || byName["maybe_follow_up"].Mutations != 0 {
 		t.Fatalf("MAYBE fixture = %#v", byName["maybe_follow_up"])
+	}
+	if byName["synthesis_link_reply"].Outcome != "ACT" || byName["synthesis_link_reply"].Actions != 1 || byName["synthesis_link_reply"].Mutations != 1 {
+		t.Fatalf("link synthesis fixture = %#v", byName["synthesis_link_reply"])
 	}
 	if byName["skip_no_action"].Outcome != "SKIP" || byName["skip_no_action"].Actions != 0 || byName["skip_no_action"].SuppressedReason != "no_actions" {
 		t.Fatalf("SKIP fixture = %#v", byName["skip_no_action"])
@@ -372,7 +375,7 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 	if len(report.RecentRuns) == 0 || report.RecentRuns[0].ContextFetchReason == "" || report.RecentRuns[0].SkipReasonBucket == "" {
 		t.Fatalf("recentRuns = %#v, want context reason and skip bucket", report.RecentRuns)
 	}
-	if report.Canary.Total != 3 || report.Canary.Passed != 3 || report.Canary.NeedsLiveSample {
+	if report.Canary.Total != 4 || report.Canary.Passed != 4 || report.Canary.NeedsLiveSample {
 		t.Fatalf("canary = %#v", report.Canary)
 	}
 	if !hasAuditFlag(report.Flags, "stale_sample") || !hasAuditFlag(report.Flags, "low_context_samples") {
@@ -787,7 +790,7 @@ func TestHandleTriageAuditReturnsSelfServeReport(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 3 || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
+	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 4 || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
 		t.Fatalf("payload = %#v", payload)
 	}
 }

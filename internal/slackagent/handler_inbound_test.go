@@ -785,6 +785,174 @@ Wrote a skill that runs codex /review in a loop until there's no booboos anymore
 	}
 }
 
+func TestSlackHistoryScannerSynthesizesSharedArticleWhenModelSkips(t *testing.T) {
+	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`Title: 大语言模型为什么能像人一样说话和思考？
+
+Markdown Content:
+本文讨论 LLM 的语言和思考能力是怎样形成的。主要观点是：LLM 学习到的不只是词汇和语法的低阶模式，也包括语义、语用、世界知识和推理的高阶模式；NTP 只是表层形式，整体能力来自数据、Transformer、SGD、预训练、后训练和推理时搜索共同作用。文章也提醒幻觉、具身认知和严谨数学推理仍是局限。`))
+	}))
+	defer reader.Close()
+	previousReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkReaderURL = func(rawURL string) string {
+		return reader.URL + "/?url=" + url.QueryEscape(rawURL)
+	}
+	defer func() { slackExternalLinkReaderURL = previousReaderURL }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://github.com/hangli-hl/AI-Articles/blob/main/llm-thinking.pdf","ts":"1779076415.945449"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_shared_article_skip",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   "No action.\n\n只是分享链接，无需助手介入。",
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+			Triage: appconfig.SlackTriageConfig{
+				PostActions:       true,
+				HeuristicFallback: true,
+			},
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.inbound.SetCursor("C123", "1779076000.000000")
+
+	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("scanSlackHistoryOnce: %v", err)
+	}
+	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
+		t.Fatalf("result = %#v, want flushed scanner result", result)
+	}
+	poster.WaitForCalls(t, 1)
+	calls := poster.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("poster calls = %d, want one fallback synthesis reply", len(calls))
+	}
+	call := calls[0]
+	if call.Channel != "C123" || call.ThreadTS != "1779076415.945449" {
+		t.Fatalf("post call = %#v, want reply in source thread", call)
+	}
+	for _, want := range []string{"我粗读了一下", "大语言模型为什么能像人一样说话和思考", "核心信息", "初步判断"} {
+		if !strings.Contains(call.Text, want) {
+			t.Fatalf("post text = %q, want %q", call.Text, want)
+		}
+	}
+	if len(call.Blocks) == 0 || !strings.Contains(call.DedupKey, "slack-triage-direct:") {
+		t.Fatalf("post call = %#v, want direct reply blocks with triage dedup", call)
+	}
+}
+
+func TestSlackHistoryScannerKeepsLowSignalLinksSilentWhenModelSkips(t *testing.T) {
+	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`Title: hi
+
+Markdown Content:
+lol`))
+	}))
+	defer reader.Close()
+	previousReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkReaderURL = func(rawURL string) string {
+		return reader.URL + "/?url=" + url.QueryEscape(rawURL)
+	}
+	defer func() { slackExternalLinkReaderURL = previousReaderURL }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/conversations.list":
+			_, _ = w.Write([]byte(`{"ok":true,"channels":[{"id":"C123","name":"drylab","is_member":true,"is_channel":true}]}`))
+		case "/conversations.history":
+			if r.Form.Get("latest") != "" {
+				_, _ = w.Write([]byte(`{"ok":true,"messages":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"messages":[{"type":"message","user":"U123","text":"https://example.com/u/1","ts":"1779076415.945449"}]}`))
+		default:
+			t.Fatalf("unexpected Slack API path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	previousBaseURL := slackScannerAPIBaseURL
+	slackScannerAPIBaseURL = server.URL
+	defer func() { slackScannerAPIBaseURL = previousBaseURL }()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_low_signal_link_skip",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   "No action.\n\n低信号链接，无需助手介入。",
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken: "xoxb-test",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				Triage:   true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+			Triage: appconfig.SlackTriageConfig{
+				PostActions:       true,
+				HeuristicFallback: true,
+			},
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.inbound.SetCursor("C123", "1779076000.000000")
+
+	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
+	if err != nil {
+		t.Fatalf("scanSlackHistoryOnce: %v", err)
+	}
+	if !result.OK || len(result.Sweeps) != 1 || result.Sweeps[0].Flushed == nil {
+		t.Fatalf("result = %#v, want flushed scanner result", result)
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want low-signal link to remain silent", calls)
+	}
+}
+
 func TestSlackHistoryScannerIgnoresBareSlackPermalinkActions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {

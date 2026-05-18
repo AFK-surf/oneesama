@@ -127,6 +127,8 @@ func TestCueboardParityTriagePromptPolicyRails(t *testing.T) {
 		"Do not let follow-ups evaporate",
 		"Know your lane: technical implementation is not your job",
 		"Match the language of the thread you act on",
+		"shared article, PDF, technical post, RFC, or long-form thread",
+		"Shared article/PDF links are synthesis-eligible",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("triage prompt missing %q:\n%s", want, prompt)

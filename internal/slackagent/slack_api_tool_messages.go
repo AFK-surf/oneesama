@@ -357,11 +357,25 @@ func slackAPIMessageTargetsFromArgs(args map[string]any, params map[string]any) 
 		for ref, target := range slackAPIMessageTargetsFromDigest(raw) {
 			targets[ref] = target
 			if target.ChannelID != "" {
-				latest[target.ChannelID] = target
+				if previous, ok := latest[target.ChannelID]; !ok || slackTimestampLess(previous.Timestamp, target.Timestamp) {
+					latest[target.ChannelID] = target
+				}
 			}
 		}
 	}
 	return targets, latest
+}
+
+func slackTimestampLess(left string, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == "" {
+		return right != ""
+	}
+	if right == "" {
+		return false
+	}
+	return left < right
 }
 
 func slackAPIMessageTargetsFromDigest(digest string) map[string]slackAPIMessageTarget {

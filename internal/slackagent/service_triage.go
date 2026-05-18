@@ -614,6 +614,11 @@ func buildSlackTriageAuditFixtures() []SlackTriageAuditFixture {
 			raw:      `{"summary":"用户提出需要后续确认的事项。","actions":[{"type":"follow_up","title":"确认 owner","message":"确认 owner 并跟进阻塞事项。","channelId":"C_AUDIT","threadTs":"123.456","confidence":0.8,"requiresConfirmation":true}]}`,
 		},
 		{
+			name:     "synthesis_link_reply",
+			expected: "ACT",
+			raw:      `{"summary":"分享的长文链接值得轻量读后感。","actions":[{"type":"post_thread_reply","title":"链接初步看法","message":"我粗读了一下，这篇文章的核心是把模型能力和可验证机制分开看。","channelId":"C_AUDIT","threadTs":"123.456","confidence":0.7,"requiresConfirmation":false}]}`,
+		},
+		{
 			name:     "skip_no_action",
 			expected: "SKIP",
 			raw:      "No action.\n\n闲聊自然收尾，无需助手介入。",
@@ -829,7 +834,14 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	rawOutput := firstNonEmpty(job.Result, job.Error)
 	decision := parseSlackTriageDecision(rawOutput, fallback)
 	ok := job.Status == agentrunner.StatusCompleted
-	actions := filterSlackTriageActionsForMessages(decision.Actions, messages, s.botUserID)
+	actions := append([]SlackTriageDecisionAction(nil), decision.Actions...)
+	if ok && len(actions) == 0 {
+		if action, ok := slackTriageSharedLinkSynthesisAction(channelID, threadTS, messages, slackExternalLinksFromContext(job.Context["externalLinks"])); ok {
+			actions = append(actions, action)
+			decision.Summary = firstNonEmpty(decision.Summary, "Shared link is synthesis-eligible; posting a lightweight initial opinion.")
+		}
+	}
+	actions = filterSlackTriageActionsForMessages(actions, messages, s.botUserID)
 	decision.Actions = actions
 	if !ok {
 		actions = nil
