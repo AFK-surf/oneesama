@@ -79,6 +79,30 @@ func (t *slackSuggestActionTool) normalizeRequest(ctx context.Context, args map[
 		if strings.TrimSpace(firstNonEmpty(stringFromAny(params["channel_name"]), stringFromAny(params["channelName"]))) == "" {
 			return nil, &slackSuggestActionValidationResult{Success: false, Text: "create_channel requires params.channel_name"}
 		}
+	case slackActionTypeCreateCanvas:
+		if strings.TrimSpace(stringFromAny(params["markdown"])) == "" {
+			return nil, &slackSuggestActionValidationResult{Success: false, Text: "create_canvas requires params.markdown"}
+		}
+		if strings.TrimSpace(firstNonEmpty(stringFromAny(params["canvas_title"]), stringFromAny(params["canvasTitle"]), title)) == "" {
+			return nil, &slackSuggestActionValidationResult{Success: false, Text: "create_canvas requires params.canvas_title (or top-level title) for safety dedupe"}
+		}
+	case slackActionTypeEditCanvas:
+		if strings.TrimSpace(firstNonEmpty(stringFromAny(params["file_id"]), stringFromAny(params["fileId"]), stringFromAny(params["canvas_id"]), stringFromAny(params["canvasId"]))) == "" {
+			return nil, &slackSuggestActionValidationResult{Success: false, Text: "edit_canvas requires params.file_id (Slack canvas file ID); refuse to blindly edit canvases without an explicit target"}
+		}
+		if strings.TrimSpace(stringFromAny(params["markdown"])) == "" {
+			return nil, &slackSuggestActionValidationResult{Success: false, Text: "edit_canvas requires params.markdown"}
+		}
+		op := strings.TrimSpace(strings.ToLower(stringFromAny(params["op"])))
+		if op == "" {
+			op = "insert_at_end"
+		}
+		switch op {
+		case "insert_at_end", "insert_at_start", "replace":
+		default:
+			return nil, &slackSuggestActionValidationResult{Success: false, Text: fmt.Sprintf("edit_canvas op %q is not allowed; use insert_at_end (default), insert_at_start, or replace", op)}
+		}
+		params["op"] = op
 	}
 
 	return &slackSuggestActionRequest{
@@ -132,7 +156,7 @@ func (t *slackSuggestActionTool) fetchTranscript(ctx context.Context, channel, t
 
 func isSupportedSuggestActionType(actionType string) bool {
 	switch actionType {
-	case slackActionTypeCreateIssue, slackActionTypeAddComment, slackActionTypeCreateEvent, slackActionTypeJoinMeeting, slackActionTypeCreateChannel:
+	case slackActionTypeCreateIssue, slackActionTypeAddComment, slackActionTypeCreateEvent, slackActionTypeJoinMeeting, slackActionTypeCreateChannel, slackActionTypeCreateCanvas, slackActionTypeEditCanvas:
 		return true
 	default:
 		return false

@@ -8,6 +8,8 @@ const (
 	slackActionTypeCreateEvent   = "create_event"
 	slackActionTypeJoinMeeting   = "join_meeting"
 	slackActionTypeCreateChannel = "create_channel"
+	slackActionTypeCreateCanvas  = "create_canvas"
+	slackActionTypeEditCanvas    = "edit_canvas"
 )
 
 func summarizeHandledThreadAction(actionType, resultText string) string {

@@ -110,3 +110,188 @@ func TestCueboardParitySuggestActionNormalizeCreateIssueRejectsExplicitDirectAut
 		t.Fatalf("unexpected direct-create gate message: %q", result.Text)
 	}
 }
+
+// Canvas suggest_action parity — assistant is allowed to propose create_canvas
+// and edit_canvas writes only through the confirmation flow, with strict
+// validation. Direct slack_api(create_canvas / edit_canvas) calls stay
+// registered_unavailable elsewhere; these tests cover the suggest path.
+
+func TestCueboardParitySuggestActionNormalizeCreateCanvasRequiresMarkdown(t *testing.T) {
+	tool := &slackSuggestActionTool{}
+
+	_, result := tool.normalizeRequest(context.Background(), map[string]any{
+		"channel":     "C123",
+		"thread_ts":   "123.456",
+		"action_type": slackActionTypeCreateCanvas,
+		"title":       "Project canvas",
+		"params": map[string]any{
+			"canvas_title": "Project canvas",
+		},
+	})
+	if result == nil || result.Success {
+		t.Fatal("expected missing markdown to fail")
+	}
+	if !strings.Contains(result.Text, "create_canvas requires params.markdown") {
+		t.Fatalf("unexpected validation message: %q", result.Text)
+	}
+}
+
+func TestCueboardParitySuggestActionNormalizeCreateCanvasAcceptsTopLevelTitleAsCanvasTitle(t *testing.T) {
+	tool := &slackSuggestActionTool{}
+
+	req, result := tool.normalizeRequest(context.Background(), map[string]any{
+		"channel":     "C123",
+		"thread_ts":   "123.456",
+		"action_type": slackActionTypeCreateCanvas,
+		"title":       "Project plan",
+		"params": map[string]any{
+			"markdown": "# Plan\n\nDraft.",
+		},
+	})
+	if result != nil {
+		t.Fatalf("normalizeRequest returned failure: %q", result.Text)
+	}
+	if req == nil {
+		t.Fatal("expected request, got nil")
+	}
+	if got := strings.TrimSpace(stringFromAny(req.Params["markdown"])); got != "# Plan\n\nDraft." {
+		t.Fatalf("markdown lost: %q", got)
+	}
+}
+
+func TestCueboardParitySuggestActionNormalizeEditCanvasRequiresFileID(t *testing.T) {
+	tool := &slackSuggestActionTool{}
+
+	_, result := tool.normalizeRequest(context.Background(), map[string]any{
+		"channel":     "C123",
+		"thread_ts":   "123.456",
+		"action_type": slackActionTypeEditCanvas,
+		"title":       "Edit project canvas",
+		"params": map[string]any{
+			"markdown": "Adding section.",
+		},
+	})
+	if result == nil || result.Success {
+		t.Fatal("expected edit_canvas without file_id to be rejected")
+	}
+	if !strings.Contains(result.Text, "edit_canvas requires params.file_id") {
+		t.Fatalf("unexpected validation message: %q", result.Text)
+	}
+}
+
+func TestCueboardParitySuggestActionNormalizeEditCanvasRequiresMarkdown(t *testing.T) {
+	tool := &slackSuggestActionTool{}
+
+	_, result := tool.normalizeRequest(context.Background(), map[string]any{
+		"channel":     "C123",
+		"thread_ts":   "123.456",
+		"action_type": slackActionTypeEditCanvas,
+		"title":       "Edit project canvas",
+		"params": map[string]any{
+			"file_id": "F0123456",
+		},
+	})
+	if result == nil || result.Success {
+		t.Fatal("expected edit_canvas without markdown to be rejected")
+	}
+	if !strings.Contains(result.Text, "edit_canvas requires params.markdown") {
+		t.Fatalf("unexpected validation message: %q", result.Text)
+	}
+}
+
+func TestCueboardParitySuggestActionNormalizeEditCanvasRejectsUnknownOp(t *testing.T) {
+	tool := &slackSuggestActionTool{}
+
+	_, result := tool.normalizeRequest(context.Background(), map[string]any{
+		"channel":     "C123",
+		"thread_ts":   "123.456",
+		"action_type": slackActionTypeEditCanvas,
+		"title":       "Edit project canvas",
+		"params": map[string]any{
+			"file_id":  "F0123456",
+			"markdown": "Adding section.",
+			"op":       "delete_everything",
+		},
+	})
+	if result == nil || result.Success {
+		t.Fatal("expected edit_canvas to reject unsupported op")
+	}
+	if !strings.Contains(result.Text, `edit_canvas op "delete_everything" is not allowed`) {
+		t.Fatalf("unexpected validation message: %q", result.Text)
+	}
+}
+
+func TestCueboardParitySuggestActionNormalizeEditCanvasDefaultsOpToInsertAtEnd(t *testing.T) {
+	tool := &slackSuggestActionTool{}
+
+	req, result := tool.normalizeRequest(context.Background(), map[string]any{
+		"channel":     "C123",
+		"thread_ts":   "123.456",
+		"action_type": slackActionTypeEditCanvas,
+		"title":       "Edit project canvas",
+		"params": map[string]any{
+			"file_id":  "F0123456",
+			"markdown": "Adding section.",
+		},
+	})
+	if result != nil {
+		t.Fatalf("normalizeRequest returned failure: %q", result.Text)
+	}
+	if req == nil {
+		t.Fatal("expected request, got nil")
+	}
+	if got := stringFromAny(req.Params["op"]); got != "insert_at_end" {
+		t.Fatalf("default op = %q, want insert_at_end", got)
+	}
+}
+
+func TestCueboardParitySuggestActionNormalizeEditCanvasNormalizesOpCase(t *testing.T) {
+	tool := &slackSuggestActionTool{}
+
+	req, result := tool.normalizeRequest(context.Background(), map[string]any{
+		"channel":     "C123",
+		"thread_ts":   "123.456",
+		"action_type": slackActionTypeEditCanvas,
+		"title":       "Edit project canvas",
+		"params": map[string]any{
+			"file_id":  "F0123456",
+			"markdown": "Replacing canvas.",
+			"op":       "Replace",
+		},
+	})
+	if result != nil {
+		t.Fatalf("normalizeRequest returned failure: %q", result.Text)
+	}
+	if req == nil {
+		t.Fatal("expected request, got nil")
+	}
+	if got := stringFromAny(req.Params["op"]); got != "replace" {
+		t.Fatalf("op = %q, want lowercased replace", got)
+	}
+}
+
+func TestCueboardParitySuggestActionNormalizeEditCanvasAcceptsCanvasIDAlias(t *testing.T) {
+	tool := &slackSuggestActionTool{}
+
+	req, result := tool.normalizeRequest(context.Background(), map[string]any{
+		"channel":     "C123",
+		"thread_ts":   "123.456",
+		"action_type": slackActionTypeEditCanvas,
+		"title":       "Edit project canvas",
+		"params": map[string]any{
+			"canvas_id": "F0123456",
+			"markdown":  "Adding section.",
+		},
+	})
+	if result != nil {
+		t.Fatalf("normalizeRequest returned failure: %q", result.Text)
+	}
+	if req == nil {
+		t.Fatal("expected request, got nil")
+	}
+	// canvas_id alias should be accepted but the executor reads
+	// firstNonEmpty(file_id, fileId, canvas_id, canvasId) — the
+	// normalize stage doesn't have to rewrite the key. Just confirm
+	// the request was accepted; the executor test covers the alias
+	// resolution.
+}

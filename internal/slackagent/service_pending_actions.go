@@ -86,19 +86,50 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 	s.syncPendingActionInteractionFollowup(ctx, *updated, interaction)
 	s.recordConfirmedActionFollowup(ctx, *updated, interaction)
 	s.recordPendingActionFeedback(ctx, *updated, interaction)
-	if interaction.Status == "confirmed" && updated.ActionType == slackActionTypeJoinMeeting {
-		go s.executeJoinMeetingPendingAction(context.WithoutCancel(ctx), *updated, interaction)
-		return AvatarCommandResponse{
-			OK:              true,
-			ResponseType:    "ephemeral",
-			Text:            fmt.Sprintf("Pending action %d marked confirmed; executing join_meeting.", updated.ID),
-			Blocks:          buildPendingActionResolvedBlocks(*updated, interaction, "executing join_meeting"),
-			ReplaceOriginal: true,
-			Metadata: map[string]any{
-				"pending_action": updated,
-				"interaction":    interaction,
-				"execution":      "started",
-			},
+	if interaction.Status == "confirmed" {
+		switch updated.ActionType {
+		case slackActionTypeJoinMeeting:
+			go s.executeJoinMeetingPendingAction(context.WithoutCancel(ctx), *updated, interaction)
+			return AvatarCommandResponse{
+				OK:              true,
+				ResponseType:    "ephemeral",
+				Text:            fmt.Sprintf("Pending action %d marked confirmed; executing join_meeting.", updated.ID),
+				Blocks:          buildPendingActionResolvedBlocks(*updated, interaction, "executing join_meeting"),
+				ReplaceOriginal: true,
+				Metadata: map[string]any{
+					"pending_action": updated,
+					"interaction":    interaction,
+					"execution":      "started",
+				},
+			}
+		case slackActionTypeCreateCanvas:
+			go s.executeCreateCanvasPendingAction(context.WithoutCancel(ctx), *updated, interaction)
+			return AvatarCommandResponse{
+				OK:              true,
+				ResponseType:    "ephemeral",
+				Text:            fmt.Sprintf("Pending action %d marked confirmed; executing create_canvas.", updated.ID),
+				Blocks:          buildPendingActionResolvedBlocks(*updated, interaction, "executing create_canvas"),
+				ReplaceOriginal: true,
+				Metadata: map[string]any{
+					"pending_action": updated,
+					"interaction":    interaction,
+					"execution":      "started",
+				},
+			}
+		case slackActionTypeEditCanvas:
+			go s.executeEditCanvasPendingAction(context.WithoutCancel(ctx), *updated, interaction)
+			return AvatarCommandResponse{
+				OK:              true,
+				ResponseType:    "ephemeral",
+				Text:            fmt.Sprintf("Pending action %d marked confirmed; executing edit_canvas.", updated.ID),
+				Blocks:          buildPendingActionResolvedBlocks(*updated, interaction, "executing edit_canvas"),
+				ReplaceOriginal: true,
+				Metadata: map[string]any{
+					"pending_action": updated,
+					"interaction":    interaction,
+					"execution":      "started",
+				},
+			}
 		}
 	}
 	text := fmt.Sprintf("Pending action %d marked %s.", updated.ID, interaction.Status)
