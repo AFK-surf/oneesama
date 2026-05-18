@@ -72,6 +72,16 @@ Start services:
 ./oneesama slack-agent
 ```
 
+Live restarts should use the checked wrapper so env files are sourced with
+exports preserved and provider tokens are preflighted before the child process
+starts:
+
+```bash
+scripts/oneesama-live.sh slack-agent
+scripts/oneesama-live.sh --preflight-only slack-agent
+scripts/oneesama-live.sh --check-pid "$PID" slack-agent
+```
+
 Minimal live Slack env:
 
 ```bash
