@@ -911,6 +911,9 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 			s.logger.Warn("slack channel brain summary update failed", "error", err)
 		}
 	}
+	if ok && !probe && len(actions) == 0 {
+		s.maybeRecordDelayedNoReplyFollowup(ctx, workspaceID, channelID, threadTS, updatedRun, decision, messages)
+	}
 	var pendingActions []SlackTriagePendingResult
 	if !probe {
 		pendingActions = s.insertSlackTriagePendingActions(ctx, workspaceID, channelID, threadTS, job.ID, updatedRun, actions)

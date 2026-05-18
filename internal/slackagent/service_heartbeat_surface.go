@@ -68,7 +68,16 @@ func (s *Service) surfaceOneFollowup(ctx context.Context, followup SlackHeartbea
 		return s.followups.RecordSurface(ctx, heartbeatSurfaceFromPlan(followup, plan, heartbeatSurfaceStatusFailed, "", err.Error()))
 	}
 	if plan.DeliveredSurface == "" {
-		return s.followups.RecordSurface(ctx, heartbeatSurfaceFromPlan(followup, plan, heartbeatSurfaceStatusBlocked, plan.BlockReason, ""))
+		surface, err := s.followups.RecordSurface(ctx, heartbeatSurfaceFromPlan(followup, plan, heartbeatSurfaceStatusBlocked, plan.BlockReason, ""))
+		if err == nil && heartbeatFollowupClosesAfterSurface(followup) && plan.BlockReason == "thread_has_newer_activity" {
+			followup.Status = "done"
+			if followup.Metadata == nil {
+				followup.Metadata = map[string]any{}
+			}
+			followup.Metadata["resolution"] = "thread_has_newer_activity"
+			_, _ = s.followups.UpdateFollowup(ctx, followup)
+		}
+		return surface, err
 	}
 	message := buildHeartbeatSurfaceMessage(followup.Title, followup.Summary)
 	post := s.poster.PostMessage(ctx, PostMessageInput{
@@ -93,12 +102,26 @@ func (s *Service) surfaceOneFollowup(ctx context.Context, followup SlackHeartbea
 	}
 	if status == heartbeatSurfaceStatusSent || status == heartbeatSurfaceStatusFallbackSent {
 		followup.LastSurfacedAt = now.UTC().Format(time.RFC3339Nano)
+		if heartbeatFollowupClosesAfterSurface(followup) {
+			followup.Status = "done"
+			if followup.Metadata == nil {
+				followup.Metadata = map[string]any{}
+			}
+			followup.Metadata["resolution"] = "surfaced_once"
+		}
 		_, _ = s.followups.UpdateFollowup(ctx, followup)
 		if plan.DeliveredSurface == heartbeatSurfaceThread && plan.ChannelID != "" && plan.ThreadTS != "" && s.cognition != nil {
 			_ = s.cognition.RecordOutbound(ctx, "workspace", plan.ChannelID, plan.ThreadTS, message.LedgerText)
 		}
 	}
 	return surface, nil
+}
+
+func heartbeatFollowupClosesAfterSurface(followup SlackHeartbeatFollowup) bool {
+	if strings.EqualFold(followup.Kind, slackDelayedNoReplyFollowupKind) {
+		return true
+	}
+	return boolFromAny(followup.Metadata["one_shot"], false)
 }
 
 type heartbeatDeliveryPlan struct {
