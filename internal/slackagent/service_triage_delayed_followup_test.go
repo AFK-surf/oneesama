@@ -60,6 +60,46 @@ func TestSlackTriageRecordsDelayedNoReplyFollowupForDeferredQuestion(t *testing.
 	}
 }
 
+func TestSlackTriageUsesDeferredKeywordTemplateOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "delayed_no_reply_deferred_keywords.en.tmpl"), []byte("owner should answer later\n"), 0o600); err != nil {
+		t.Fatalf("write deferred keyword override: %v", err)
+	}
+	t.Setenv("ONEESAMA_TRIAGE_TEMPLATE_DIR", dir)
+
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_delayed_no_reply_override",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"owner should answer later; no action yet.","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{Triage: appconfig.SlackTriageConfig{HeuristicFallback: true}},
+		Runner:      runner,
+	})
+
+	if _, err := service.StartSlackTriage(context.Background(), "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "Should someone reply here?",
+		TS:        "1779076415.945449",
+	}}, "#meeting-avatar: Should someone reply here?"); err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	followups, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups: %v", err)
+	}
+	if len(followups) != 1 {
+		t.Fatalf("followups = %#v, want one delayed no-reply candidate", followups)
+	}
+	if got := followups[0].Metadata["classification"]; got != "stale_wait_for_human" {
+		t.Fatalf("classification = %v, want stale_wait_for_human", got)
+	}
+}
+
 func TestSlackTriageDoesNotRecordDelayedNoReplyForLowSignalChatter(t *testing.T) {
 	runner := &fakeRunner{job: agentrunner.Job{
 		ID:       "job_low_signal_no_delay",

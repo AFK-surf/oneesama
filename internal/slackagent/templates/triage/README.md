@@ -23,3 +23,9 @@ Supported template data fields:
 - `OriginalText`
 - `Evidence`
 - `Language`
+
+Keyword templates ending in `_keywords.en.tmpl` are newline-delimited marker
+lists used for routing/classification, not user-visible replies. Blank lines
+and `#` comments are ignored. Keep them workspace-specific and conservative:
+they decide whether a candidate needs more context or should be treated as
+owner-directed operational work.

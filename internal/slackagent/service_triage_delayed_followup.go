@@ -85,7 +85,7 @@ func slackTriageDecisionLooksDeferred(summary string) bool {
 	if normalized == "" {
 		return false
 	}
-	for _, phrase := range []string{
+	for _, phrase := range loadTriageKeywordListTemplate("delayed_no_reply_deferred_keywords", []string{
 		"wait for human",
 		"wait for humans",
 		"waiting for human",
@@ -101,7 +101,7 @@ func slackTriageDecisionLooksDeferred(summary string) bool {
 		"暂不回复",
 		"先观察",
 		"看看有没有人",
-	} {
+	}) {
 		if strings.Contains(normalized, phrase) {
 			return true
 		}
@@ -130,7 +130,7 @@ func slackMessagesLookLikeUnansweredQuestion(messages []SlackInboundMessage) boo
 	if strings.ContainsAny(text, "?？") {
 		return true
 	}
-	for _, phrase := range []string{
+	for _, phrase := range loadTriageKeywordListTemplate("delayed_no_reply_question_keywords", []string{
 		"要不要",
 		"是不是",
 		"能不能",
@@ -144,7 +144,7 @@ func slackMessagesLookLikeUnansweredQuestion(messages []SlackInboundMessage) boo
 		"can we",
 		"any thoughts",
 		"wdyt",
-	} {
+	}) {
 		if strings.Contains(text, phrase) {
 			return true
 		}
@@ -154,7 +154,7 @@ func slackMessagesLookLikeUnansweredQuestion(messages []SlackInboundMessage) boo
 
 func slackMessagesLookLikeStuckHelp(messages []SlackInboundMessage) bool {
 	text := strings.ToLower(joinSlackMessageTexts(messages))
-	for _, phrase := range []string{
+	for _, phrase := range loadTriageKeywordListTemplate("delayed_no_reply_stuck_keywords", []string{
 		"卡住",
 		"没反应",
 		"失败",
@@ -167,7 +167,7 @@ func slackMessagesLookLikeStuckHelp(messages []SlackInboundMessage) bool {
 		"broken",
 		"error",
 		"handoff",
-	} {
+	}) {
 		if strings.Contains(text, phrase) {
 			return true
 		}
@@ -189,7 +189,7 @@ func slackDelayedNoReplyLooksLowSignal(text string) bool {
 	if normalized == "" {
 		return true
 	}
-	for _, phrase := range []string{"哈哈", "lol", "lgtm", "+1", "收到", "ack", "ok", "thanks", "谢谢"} {
+	for _, phrase := range loadTriageKeywordListTemplate("delayed_no_reply_low_signal_keywords", []string{"哈哈", "lol", "lgtm", "+1", "收到", "ack", "ok", "thanks", "谢谢"}) {
 		if normalized == phrase {
 			return true
 		}

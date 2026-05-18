@@ -197,6 +197,26 @@ func TestClassifyBackfillMessageMarksTechnicalWorkflowNeedsContext(t *testing.T)
 	}
 }
 
+func TestClassifyBackfillMessageUsesTechnicalContextKeywordOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "backfill_technical_context_keywords.en.tmpl"), []byte("flaky-special\n"), 0o600); err != nil {
+		t.Fatalf("write keyword override: %v", err)
+	}
+	t.Setenv("ONEESAMA_TRIAGE_TEMPLATE_DIR", dir)
+
+	msg := SlackInboundMessage{
+		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
+		Text: "能不能看一下 flaky-special 这条？",
+	}
+	candidate, ok := ClassifyBackfillMessage(msg, nil, nil)
+	if !ok {
+		t.Fatal("expected overridden technical workflow keyword to classify")
+	}
+	if candidate.ReviewStatus != BackfillReviewNeedsContext {
+		t.Fatalf("ReviewStatus = %q, want %s", candidate.ReviewStatus, BackfillReviewNeedsContext)
+	}
+}
+
 func TestClassifyBackfillMessageRejectsOperationalGitHubPRReview(t *testing.T) {
 	msg := SlackInboundMessage{
 		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
@@ -224,6 +244,22 @@ func TestClassifyBackfillMessageRejectsOperationalGitHubIssueAndPR(t *testing.T)
 	}
 	if _, ok := ClassifyBackfillMessage(msg, nil, nil); ok {
 		t.Fatal("expected owner-directed GitHub issue/PR work instruction to be skipped")
+	}
+}
+
+func TestClassifyBackfillMessageUsesOperationalGitHubKeywordOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "backfill_operational_github_keywords.en.tmpl"), []byte("shipit-owner\n"), 0o600); err != nil {
+		t.Fatalf("write keyword override: %v", err)
+	}
+	t.Setenv("ONEESAMA_TRIAGE_TEMPLATE_DIR", dir)
+
+	msg := SlackInboundMessage{
+		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
+		Text: "https://github.com/AFK-surf/cueboard/pull/1917 shipit-owner",
+	}
+	if _, ok := ClassifyBackfillMessage(msg, nil, nil); ok {
+		t.Fatal("expected overridden owner-directed GitHub marker to be skipped")
 	}
 }
 

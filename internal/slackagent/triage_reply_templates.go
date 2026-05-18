@@ -127,3 +127,37 @@ func normalizeTriageTemplateLanguage(language string) string {
 		return "en"
 	}
 }
+
+func loadTriageKeywordListTemplate(name string, fallback []string) []string {
+	raw, err := loadTriageReplyTemplate(name, "en")
+	if err != nil {
+		return fallback
+	}
+	markers := parseTriageKeywordList(raw)
+	if len(markers) == 0 {
+		return fallback
+	}
+	return markers
+}
+
+func parseTriageKeywordList(raw string) []string {
+	var markers []string
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(raw, "\n") {
+		marker := strings.TrimSpace(line)
+		if marker == "" || strings.HasPrefix(marker, "#") {
+			continue
+		}
+		marker = strings.TrimSpace(strings.TrimPrefix(marker, "-"))
+		marker = strings.ToLower(strings.TrimSpace(marker))
+		if marker == "" {
+			continue
+		}
+		if _, ok := seen[marker]; ok {
+			continue
+		}
+		seen[marker] = struct{}{}
+		markers = append(markers, marker)
+	}
+	return markers
+}

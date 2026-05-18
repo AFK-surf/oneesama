@@ -489,7 +489,7 @@ func backfillCandidateNeedsTechnicalContext(text string) bool {
 	if normalized == "" {
 		return false
 	}
-	for _, marker := range []string{
+	for _, marker := range loadTriageKeywordListTemplate("backfill_technical_context_keywords", []string{
 		"ci",
 		"build",
 		"test",
@@ -508,7 +508,7 @@ func backfillCandidateNeedsTechnicalContext(text string) bool {
 		"接口",
 		"后端",
 		"前端",
-	} {
+	}) {
 		if strings.Contains(normalized, marker) {
 			return true
 		}
@@ -604,7 +604,7 @@ func backfillMessageLooksLikeOperationalGitHubWork(text string, urls []string) b
 	if normalized == "" {
 		return true
 	}
-	for _, marker := range []string{
+	for _, marker := range loadTriageKeywordListTemplate("backfill_operational_github_keywords", []string{
 		"<@",
 		"review",
 		"approve",
@@ -626,7 +626,7 @@ func backfillMessageLooksLikeOperationalGitHubWork(text string, urls []string) b
 		"上线",
 		"合一下",
 		"拉一下",
-	} {
+	}) {
 		if strings.Contains(normalized, marker) {
 			return true
 		}
