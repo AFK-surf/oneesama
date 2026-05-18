@@ -136,8 +136,11 @@ func buildSlackTriageAuditOutcome(runs []SlackTriageContext) SlackTriageAuditOut
 			outcome.NoActionRuns++
 		}
 		outcome.Mutations += run.Mutations
-		if run.Failures > 0 || strings.TrimSpace(run.Error) != "" || strings.EqualFold(strings.TrimSpace(run.Status), "failed") {
+		if slackTriageRunFailed(run) {
 			outcome.FailedRuns++
+			if slackTriageRunHasRetryScheduled(run) {
+				outcome.RetryScheduledFailures++
+			}
 		}
 		if slackTriageRunParseFallback(run) {
 			outcome.ParseFallbacks++
@@ -485,7 +488,12 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 		flags = append(flags, SlackTriageAuditFlag{Level: level, Code: code, Message: message})
 	}
 	if report.RealOutcome.FailedRuns > 0 {
-		flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "real_outcome_failures", Message: fmt.Sprintf("%d real triage run(s) failed in the audit window.", report.RealOutcome.FailedRuns)})
+		unhandled := report.RealOutcome.FailedRuns - report.RealOutcome.RetryScheduledFailures
+		if unhandled > 0 {
+			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "real_outcome_failures", Message: fmt.Sprintf("%d unhandled real triage failure(s) in the audit window.", unhandled)})
+		} else {
+			flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "real_outcome_failures_retry_scheduled", Message: fmt.Sprintf("%d real triage failure(s) already have retry follow-up scheduled.", report.RealOutcome.RetryScheduledFailures)})
+		}
 	}
 	if report.ProbeOutcome.FailedRuns > 0 {
 		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "probe_outcome_failures", Message: fmt.Sprintf("%d synthetic triage probe run(s) failed in the audit window.", report.ProbeOutcome.FailedRuns)})
@@ -527,6 +535,11 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 
 func slackTriageRunFailed(run SlackTriageContext) bool {
 	return run.Failures > 0 || strings.TrimSpace(run.Error) != "" || strings.EqualFold(strings.TrimSpace(run.Status), "failed")
+}
+
+func slackTriageRunHasRetryScheduled(run SlackTriageContext) bool {
+	return boolFromAny(run.Metadata["triage_timeout_needs_retry"], false) ||
+		boolFromAny(run.Metadata["triage_empty_final_needs_retry"], false)
 }
 
 func slackTriageFailureSampleText(value string) string {

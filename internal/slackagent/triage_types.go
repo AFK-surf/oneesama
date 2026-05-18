@@ -153,12 +153,13 @@ type SlackTriageAuditReport struct {
 }
 
 type SlackTriageAuditOutcome struct {
-	OutboundRuns   int `json:"outboundRuns"`
-	Mutations      int `json:"mutations"`
-	NoActionRuns   int `json:"noActionRuns"`
-	FailedRuns     int `json:"failedRuns"`
-	ParseFallbacks int `json:"parseFallbacks"`
-	MaybeRuns      int `json:"maybeRuns"`
+	OutboundRuns           int `json:"outboundRuns"`
+	Mutations              int `json:"mutations"`
+	NoActionRuns           int `json:"noActionRuns"`
+	FailedRuns             int `json:"failedRuns"`
+	RetryScheduledFailures int `json:"retryScheduledFailures,omitempty"`
+	ParseFallbacks         int `json:"parseFallbacks"`
+	MaybeRuns              int `json:"maybeRuns"`
 }
 
 type SlackTriageInputContext struct {

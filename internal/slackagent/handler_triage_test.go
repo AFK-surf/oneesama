@@ -651,6 +651,45 @@ func TestTriageAuditFlagsRealOutcomeFailures(t *testing.T) {
 	}
 }
 
+func TestTriageAuditDowngradesRetryScheduledRealFailures(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 19, 2, 41, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	if _, err := service.triage.RecordRun(context.Background(), SlackTriageContext{
+		Timestamp: now.Add(-time.Minute).Format(time.RFC3339Nano),
+		Status:    "failed",
+		Summary:   "Triage failed: empty final response with no mutations",
+		Error:     "empty final response with no mutations",
+		Channels:  []string{"C123"},
+		Failures:  1,
+		Metadata: map[string]any{
+			"triage_empty_final_needs_retry": true,
+		},
+	}); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if report.RealOutcome.FailedRuns != 1 || report.RealOutcome.RetryScheduledFailures != 1 {
+		t.Fatalf("realOutcome = %#v, want one retry-scheduled failure", report.RealOutcome)
+	}
+	if hasAuditFlagLevel(report.Flags, "real_outcome_failures", "red") {
+		t.Fatalf("flags = %#v, want no red for retry-scheduled failure", report.Flags)
+	}
+	if !hasAuditFlagLevel(report.Flags, "real_outcome_failures_retry_scheduled", "yellow") {
+		t.Fatalf("flags = %#v, want yellow handled retry flag", report.Flags)
+	}
+}
+
 func TestTriageAuditDowngradesStaleSampleWhenScannerAndSocketHealthy(t *testing.T) {
 	previousClock := timeNow
 	now := time.Date(2026, 5, 18, 11, 47, 0, 0, time.UTC)
