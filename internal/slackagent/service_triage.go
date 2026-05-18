@@ -66,6 +66,7 @@ func (s *Service) TriageAudit(ctx context.Context, window time.Duration, limit i
 	}
 	report := buildSlackTriageAuditReport(runs, window)
 	report.ProcessHealth = s.slackTriageProcessHealth(window)
+	report.Flags = buildSlackTriageAuditFlags(report)
 	return report, nil
 }
 
@@ -83,20 +84,21 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 	freshness.GeneratedAt = now.Format(time.RFC3339Nano)
 	canary := buildSlackTriageCanarySummary(windowRuns)
 	report := SlackTriageAuditReport{
-		GeneratedAt:   now.Format(time.RFC3339Nano),
-		WindowSeconds: int64(window.Seconds()),
-		Cutoff:        cutoff.Format(time.RFC3339Nano),
-		RunCount:      len(windowRuns),
-		Freshness:     *freshness,
-		Outcome:       buildSlackTriageAuditOutcome(windowRuns),
-		RealOutcome:   buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, false)),
-		ProbeOutcome:  buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, true)),
-		InputContext:  buildSlackTriageInputContext(windowRuns),
-		ContextFetch:  buildSlackTriageContextFetch(windowRuns),
-		SkipReasons:   buildSlackTriageSkipReasons(windowRuns),
-		Canary:        canary,
-		LiveProbe:     buildSlackTriageLiveProbeSummary(windowRuns),
-		RecentRuns:    buildSlackTriageAuditRunBriefs(windowRuns, 20),
+		GeneratedAt:    now.Format(time.RFC3339Nano),
+		WindowSeconds:  int64(window.Seconds()),
+		Cutoff:         cutoff.Format(time.RFC3339Nano),
+		RunCount:       len(windowRuns),
+		Freshness:      *freshness,
+		Outcome:        buildSlackTriageAuditOutcome(windowRuns),
+		RealOutcome:    buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, false)),
+		ProbeOutcome:   buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, true)),
+		InputContext:   buildSlackTriageInputContext(windowRuns),
+		ContextFetch:   buildSlackTriageContextFetch(windowRuns),
+		SkipReasons:    buildSlackTriageSkipReasons(windowRuns),
+		Canary:         canary,
+		LiveProbe:      buildSlackTriageLiveProbeSummary(windowRuns),
+		FailureSamples: buildSlackTriageFailureSamples(windowRuns, 5),
+		RecentRuns:     buildSlackTriageAuditRunBriefs(windowRuns, 20),
 	}
 	report.Flags = buildSlackTriageAuditFlags(report)
 	return report
@@ -139,6 +141,37 @@ func buildSlackTriageAuditOutcome(runs []SlackTriageContext) SlackTriageAuditOut
 		}
 	}
 	return outcome
+}
+
+func buildSlackTriageFailureSamples(runs []SlackTriageContext, limit int) []SlackTriageFailureSample {
+	if limit <= 0 || len(runs) == 0 {
+		return nil
+	}
+	ordered := append([]SlackTriageContext(nil), runs...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return parseTriageTimestamp(ordered[i].Timestamp).After(parseTriageTimestamp(ordered[j].Timestamp))
+	})
+	samples := make([]SlackTriageFailureSample, 0, limit)
+	for _, run := range ordered {
+		if len(samples) >= limit {
+			break
+		}
+		if !slackTriageRunFailed(run) {
+			continue
+		}
+		samples = append(samples, SlackTriageFailureSample{
+			Timestamp: run.Timestamp,
+			Channels:  run.Channels,
+			Probe:     slackTriageRunIsProbe(run),
+			Status:    strings.TrimSpace(run.Status),
+			Summary:   slackTriageFailureSampleText(run.Summary),
+			Error:     slackTriageFailureSampleText(run.Error),
+		})
+	}
+	if len(samples) == 0 {
+		return nil
+	}
+	return samples
 }
 
 func filterSlackTriageProbeRuns(runs []SlackTriageContext, probe bool) []SlackTriageContext {
@@ -246,6 +279,15 @@ func (s *Service) slackTriageProcessHealth(window time.Duration) SlackTriageProc
 		HTTP429LastWindow:           rateLimits,
 		SocketConnected:             socket.Connected,
 		SocketReconnectsTotal:       socket.Reconnects,
+		SocketLastConnectedAt:       socket.LastConnectedAt,
+		SocketLastClosedAt:          socket.LastClosedAt,
+		SocketLastEventAt:           socket.LastEventAt,
+	}
+	if s != nil {
+		if envKey := agentrunner.RequiredCodexProviderEnvKey(s.agentRunner.Codex); envKey != "" {
+			health.CodexRequiredEnvKey = envKey
+			health.CodexRequiredEnvPresent = strings.TrimSpace(os.Getenv(envKey)) != ""
+		}
 	}
 	if s != nil {
 		health.ScannerSweepsLastWindow = s.slackScannerSweepCountSince(cutoff)
@@ -348,7 +390,24 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "no_recent_runs", Message: "No triage runs were recorded in the audit window."})
 	}
 	if report.Freshness.NewestRunAgeSeconds > int64(slackTriageAuditStaleSampleAfter.Seconds()) {
-		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "stale_sample", Message: fmt.Sprintf("Newest triage run is older than %s.", slackTriageAuditStaleSampleAfter)})
+		level := "yellow"
+		code := "stale_sample"
+		message := fmt.Sprintf("Newest triage run is older than %s.", slackTriageAuditStaleSampleAfter)
+		if report.ProcessHealth.SocketConnected && report.ProcessHealth.ScannerSweepsLastWindow > 10 {
+			level = "info"
+			code = "quiet_window"
+			message = fmt.Sprintf("Newest triage run is older than %s, but scanner sweeps and Socket Mode look healthy.", slackTriageAuditStaleSampleAfter)
+		}
+		flags = append(flags, SlackTriageAuditFlag{Level: level, Code: code, Message: message})
+	}
+	if report.RealOutcome.FailedRuns > 0 {
+		flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "real_outcome_failures", Message: fmt.Sprintf("%d real triage run(s) failed in the audit window.", report.RealOutcome.FailedRuns)})
+	}
+	if report.ProbeOutcome.FailedRuns > 0 {
+		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "probe_outcome_failures", Message: fmt.Sprintf("%d synthetic triage probe run(s) failed in the audit window.", report.ProbeOutcome.FailedRuns)})
+	}
+	if report.ProcessHealth.CodexRequiredEnvKey != "" && !report.ProcessHealth.CodexRequiredEnvPresent {
+		flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "codex_provider_env_missing", Message: fmt.Sprintf("Required Codex provider env %s is not exported in the slack-agent process.", report.ProcessHealth.CodexRequiredEnvKey)})
 	}
 	if report.InputContext.LowUnder200 > 0 {
 		flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "low_context_samples", Message: "Some triage runs had less than 200 characters of input context."})
@@ -366,6 +425,24 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 		flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "canary_failed", Message: "One or more deterministic ACT/MAYBE/SKIP canary controls failed."})
 	}
 	return flags
+}
+
+func slackTriageRunFailed(run SlackTriageContext) bool {
+	return run.Failures > 0 || strings.TrimSpace(run.Error) != "" || strings.EqualFold(strings.TrimSpace(run.Status), "failed")
+}
+
+func slackTriageFailureSampleText(value string) string {
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
+	if value == "" {
+		return ""
+	}
+	value = firstLine(value)
+	const maxFailureSampleText = 200
+	runes := []rune(value)
+	if len(runes) <= maxFailureSampleText {
+		return value
+	}
+	return string(runes[:maxFailureSampleText]) + "..."
 }
 
 func buildSlackTriageAuditRunBriefs(runs []SlackTriageContext, limit int) []SlackTriageAuditRunBrief {

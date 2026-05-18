@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -22,7 +23,10 @@ func Preflight(ctx context.Context, cfg appconfig.AgentRunnerConfig) error {
 
 	switch provider {
 	case "codex":
-		return validateRunnerBinary("codex", cfg.Codex.Bin)
+		if err := validateRunnerBinary("codex", cfg.Codex.Bin); err != nil {
+			return err
+		}
+		return validateCodexProviderEnv(cfg.Codex)
 	case "claude", "claude-code":
 		return validateRunnerBinary("claude", cfg.Claude.Bin)
 	case "ollama", "ollama-http", "local-ollama":
@@ -41,6 +45,33 @@ func validateRunnerBinary(provider string, bin string) error {
 		return fmt.Errorf("%s binary %q is not available: %w", provider, bin, err)
 	}
 	return nil
+}
+
+func validateCodexProviderEnv(cfg appconfig.CodexRunnerConfig) error {
+	envKey := RequiredCodexProviderEnvKey(cfg)
+	if envKey == "" {
+		return nil
+	}
+	if value := strings.TrimSpace(os.Getenv(envKey)); value == "" {
+		return fmt.Errorf("codex provider env %s is required but not exported", envKey)
+	}
+	return nil
+}
+
+func RequiredCodexProviderEnvKey(cfg appconfig.CodexRunnerConfig) string {
+	provider := strings.TrimSpace(cfg.ModelProvider)
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if provider == "" && baseURL != "" {
+		provider = "openrouter"
+	}
+	if provider == "" || baseURL == "" {
+		return ""
+	}
+	envKey := strings.TrimSpace(cfg.EnvKey)
+	if envKey == "" {
+		envKey = defaultCodexProviderEnvKey(baseURL)
+	}
+	return envKey
 }
 
 func validateOllama(ctx context.Context, cfg appconfig.OllamaRunnerConfig) error {

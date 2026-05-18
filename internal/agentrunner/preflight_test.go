@@ -47,6 +47,51 @@ func TestPreflightCommandProviderFindsBinary(t *testing.T) {
 	}
 }
 
+func TestPreflightCodexProviderRequiresExportedEnvKey(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "codex")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Preflight(context.Background(), appconfig.AgentRunnerConfig{
+		Provider: "codex",
+		Codex: appconfig.CodexRunnerConfig{
+			Bin:           bin,
+			ModelProvider: "cf_openrouter",
+			BaseURL:       "https://gateway.example.test/openrouter",
+			EnvKey:        "ONEESAMA_TEST_MISSING_CODEX_TOKEN",
+		},
+		JobTimeout: time.Minute,
+	})
+	if err == nil || !strings.Contains(err.Error(), "ONEESAMA_TEST_MISSING_CODEX_TOKEN") {
+		t.Fatalf("expected missing codex provider env error, got %v", err)
+	}
+}
+
+func TestPreflightCodexProviderAcceptsExportedEnvKey(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "codex")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ONEESAMA_TEST_CODEX_TOKEN", "token")
+
+	err := Preflight(context.Background(), appconfig.AgentRunnerConfig{
+		Provider: "codex",
+		Codex: appconfig.CodexRunnerConfig{
+			Bin:           bin,
+			ModelProvider: "cf_openrouter",
+			BaseURL:       "https://gateway.example.test/openrouter",
+			EnvKey:        "ONEESAMA_TEST_CODEX_TOKEN",
+		},
+		JobTimeout: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("expected codex provider env preflight to pass: %v", err)
+	}
+}
+
 func TestPreflightOllamaProbesTags(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/tags" {

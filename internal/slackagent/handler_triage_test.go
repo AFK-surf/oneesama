@@ -509,6 +509,108 @@ func TestTriageAuditSplitsRealAndProbeOutcomes(t *testing.T) {
 	if report.ProbeOutcome.FailedRuns != 1 || report.ProbeOutcome.OutboundRuns != 0 {
 		t.Fatalf("probeOutcome = %#v, want probe failure isolated", report.ProbeOutcome)
 	}
+	if !hasAuditFlag(report.Flags, "probe_outcome_failures") {
+		t.Fatalf("flags = %#v, want probe failure warning", report.Flags)
+	}
+	if len(report.FailureSamples) != 1 || !report.FailureSamples[0].Probe || report.FailureSamples[0].Error == "" {
+		t.Fatalf("failureSamples = %#v, want probe failure sample", report.FailureSamples)
+	}
+}
+
+func TestTriageAuditFlagsRealOutcomeFailures(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 18, 11, 47, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{},
+	})
+	for _, run := range []SlackTriageContext{
+		{
+			Timestamp: now.Add(-time.Minute).Format(time.RFC3339Nano),
+			Status:    "failed",
+			Summary:   "Triage failed: provider env missing\nvery long debug omitted",
+			Error:     "Missing environment variable: CLOUDFLARE_API_TOKEN",
+			Channels:  []string{"C123"},
+		},
+		{
+			Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339Nano),
+			Status:    "failed",
+			Summary:   "probe failed too",
+			Error:     "probe provider failed",
+			Channels:  []string{"C_TRIAGE_PROBE"},
+			Metadata:  map[string]any{"live_positive_probe": true},
+		},
+	} {
+		if _, err := service.triage.RecordRun(context.Background(), run); err != nil {
+			t.Fatalf("RecordRun: %v", err)
+		}
+	}
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if report.RealOutcome.FailedRuns != 1 || report.ProbeOutcome.FailedRuns != 1 {
+		t.Fatalf("real/probe outcome = %#v / %#v, want one failure each", report.RealOutcome, report.ProbeOutcome)
+	}
+	if !hasAuditFlagLevel(report.Flags, "real_outcome_failures", "red") {
+		t.Fatalf("flags = %#v, want red real failure flag", report.Flags)
+	}
+	if !hasAuditFlagLevel(report.Flags, "probe_outcome_failures", "yellow") {
+		t.Fatalf("flags = %#v, want yellow probe failure flag", report.Flags)
+	}
+	if len(report.FailureSamples) != 2 || report.FailureSamples[0].Probe == report.FailureSamples[1].Probe {
+		t.Fatalf("failureSamples = %#v, want one real sample and one probe sample", report.FailureSamples)
+	}
+	realSample := report.FailureSamples[0]
+	if realSample.Probe {
+		realSample = report.FailureSamples[1]
+	}
+	if strings.Contains(realSample.Summary, "\n") || !strings.Contains(realSample.Error, "CLOUDFLARE_API_TOKEN") {
+		t.Fatalf("failureSamples = %#v, want sanitized single-line sample", report.FailureSamples)
+	}
+}
+
+func TestTriageAuditDowngradesStaleSampleWhenScannerAndSocketHealthy(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 18, 11, 47, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{AppToken: "xapp-test"},
+	})
+	for i := 0; i < 11; i++ {
+		service.recordSlackScannerSweep(now.Add(-time.Duration(i+1) * time.Minute))
+	}
+	runner := NewSocketModeRunner(SocketModeRunnerConfig{Service: service, AppToken: "xapp-test"})
+	runner.stateMu.Lock()
+	runner.state.Connected = true
+	runner.state.LastConnectedAt = now.Add(-time.Hour).Format(time.RFC3339Nano)
+	runner.stateMu.Unlock()
+	service.socketModeMu.Lock()
+	service.socketMode = runner
+	service.socketModeMu.Unlock()
+	if _, err := service.triage.RecordRun(context.Background(), SlackTriageContext{
+		Timestamp: now.Add(-3 * time.Hour).Format(time.RFC3339Nano),
+		Status:    "ok",
+		Summary:   "quiet skip",
+		Metadata:  map[string]any{"input_context_chars": 400, "suppressed_reason": "no_actions"},
+	}); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if hasAuditFlag(report.Flags, "stale_sample") || !hasAuditFlagLevel(report.Flags, "quiet_window", "info") {
+		t.Fatalf("flags = %#v, want info quiet_window instead of stale_sample", report.Flags)
+	}
 }
 
 func TestHandleTriageProbeRecordsLivePositiveWithoutSideEffects(t *testing.T) {
@@ -583,6 +685,9 @@ func TestTriageAuditIncludesProcessHealthSignals(t *testing.T) {
 	runner.stateMu.Lock()
 	runner.state.Connected = true
 	runner.state.Reconnects = 2
+	runner.state.LastConnectedAt = now.Add(-20 * time.Minute).Format(time.RFC3339Nano)
+	runner.state.LastClosedAt = now.Add(-15 * time.Minute).Format(time.RFC3339Nano)
+	runner.state.LastEventAt = now.Add(-10 * time.Minute).Format(time.RFC3339Nano)
 	runner.reconnectHistory = []time.Time{now.Add(-7 * time.Hour), now.Add(-15 * time.Minute)}
 	runner.stateMu.Unlock()
 	service.socketModeMu.Lock()
@@ -605,6 +710,55 @@ func TestTriageAuditIncludesProcessHealthSignals(t *testing.T) {
 	}
 	if !health.SocketConnected || health.SocketReconnectsTotal != 2 || health.SocketReconnectsLastWindow != 1 {
 		t.Fatalf("socket health = %#v, want connected with one reconnect in window", health)
+	}
+	if health.SocketLastConnectedAt == "" || health.SocketLastClosedAt == "" || health.SocketLastEventAt == "" {
+		t.Fatalf("socket health = %#v, want socket timestamps", health)
+	}
+}
+
+func TestTriageAuditProcessHealthReportsCodexProviderEnvPresence(t *testing.T) {
+	t.Setenv("ONEESAMA_TEST_CODEX_PROVIDER_TOKEN", "token")
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		AgentRunner: appconfig.AgentRunnerConfig{
+			Provider: "codex",
+			Codex: appconfig.CodexRunnerConfig{
+				ModelProvider: "cf_openrouter",
+				BaseURL:       "https://gateway.example.test/openrouter",
+				EnvKey:        "ONEESAMA_TEST_CODEX_PROVIDER_TOKEN",
+			},
+		},
+	})
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if report.ProcessHealth.CodexRequiredEnvKey != "ONEESAMA_TEST_CODEX_PROVIDER_TOKEN" || !report.ProcessHealth.CodexRequiredEnvPresent {
+		t.Fatalf("processHealth = %#v, want codex env presence", report.ProcessHealth)
+	}
+}
+
+func TestTriageAuditFlagsMissingCodexProviderEnv(t *testing.T) {
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		AgentRunner: appconfig.AgentRunnerConfig{
+			Provider: "codex",
+			Codex: appconfig.CodexRunnerConfig{
+				ModelProvider: "cf_openrouter",
+				BaseURL:       "https://gateway.example.test/openrouter",
+				EnvKey:        "ONEESAMA_TEST_MISSING_AUDIT_CODEX_TOKEN",
+			},
+		},
+	})
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 0)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if report.ProcessHealth.CodexRequiredEnvKey != "ONEESAMA_TEST_MISSING_AUDIT_CODEX_TOKEN" || report.ProcessHealth.CodexRequiredEnvPresent {
+		t.Fatalf("processHealth = %#v, want missing codex env", report.ProcessHealth)
+	}
+	if !hasAuditFlagLevel(report.Flags, "codex_provider_env_missing", "red") {
+		t.Fatalf("flags = %#v, want red codex env flag", report.Flags)
 	}
 }
 
@@ -641,6 +795,15 @@ func TestHandleTriageAuditReturnsSelfServeReport(t *testing.T) {
 func hasAuditFlag(flags []SlackTriageAuditFlag, code string) bool {
 	for _, flag := range flags {
 		if flag.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAuditFlagLevel(flags []SlackTriageAuditFlag, code string, level string) bool {
+	for _, flag := range flags {
+		if flag.Code == code && flag.Level == level {
 			return true
 		}
 	}
