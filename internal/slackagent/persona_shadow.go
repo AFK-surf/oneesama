@@ -96,13 +96,74 @@ func (s *Service) shadowPersonaRuntimeEnabled() bool {
 	return provider != "" && provider != persona.ProviderLegacy
 }
 
-func (s *Service) shadowSlackTriagePersona(ctx context.Context, channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) *SlackPersonaShadowResult {
-	if !s.shadowPersonaRuntimeEnabled() {
-		return nil
+func (s *Service) queueSlackTriagePersonaShadow(ctx context.Context, runID int64, channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) bool {
+	if !s.shadowPersonaRuntimeEnabled() || runID == 0 {
+		return false
 	}
 	request := BuildSlackTriagePersonaRequest(channelID, threadTS, messages, decision, relatedMemory)
-	result := callPersonaShadow(ctx, s.personaRuntime, "triage", request)
-	return &result
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
+		defer cancel()
+		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
+		if err := s.recordSlackTriagePersonaShadowResult(ctx, runID, result); err != nil {
+			s.logger.Warn("persona runtime shadow triage result record failed", "triage_run_id", runID, "error", err)
+		}
+	}()
+	return true
+}
+
+func (s *Service) personaRuntimeShadowTimeout() time.Duration {
+	if s != nil && s.personaRuntimeConfig.Timeout > 0 {
+		return s.personaRuntimeConfig.Timeout
+	}
+	return 90 * time.Second
+}
+
+func (s *Service) recordSlackTriagePersonaShadowResult(ctx context.Context, runID int64, result SlackPersonaShadowResult) error {
+	if s == nil || s.triage == nil || runID == 0 {
+		return nil
+	}
+	current, err := s.triage.GetRun(ctx, runID)
+	if err != nil || current == nil {
+		return err
+	}
+	patch := *current
+	patch.ToolCalls = replacePersonaShadowToolCall(current.ToolCalls, slackPersonaShadowToolCall(result))
+	metadata := mergeStringAnyMaps(current.Metadata, map[string]any{
+		"persona_shadow":         result,
+		"persona_shadow_queued":  false,
+		"persona_shadow_done_at": nowRFC3339(),
+	})
+	patch.Metadata = metadata
+	updated, err := s.triage.UpdateRun(ctx, patch)
+	if err != nil {
+		return err
+	}
+	if updated != nil {
+		persistTriageContext(s.workspaceDir, *updated)
+	}
+	return nil
+}
+
+func slackPersonaShadowToolCall(result SlackPersonaShadowResult) SlackTriageToolCall {
+	return SlackTriageToolCall{
+		Tool:    "persona_runtime",
+		Action:  "shadow_triage",
+		Success: result.Success,
+		Brief:   mapBool(result.Success, "Persona runtime shadow accepted triage request", "Persona runtime shadow failed"),
+		Result:  firstNonEmpty(result.Decision, result.Error),
+	}
+}
+
+func replacePersonaShadowToolCall(calls []SlackTriageToolCall, call SlackTriageToolCall) []SlackTriageToolCall {
+	out := make([]SlackTriageToolCall, 0, len(calls)+1)
+	for _, existing := range calls {
+		if existing.Tool == "persona_runtime" && existing.Action == "shadow_triage" {
+			continue
+		}
+		out = append(out, existing)
+	}
+	return append(out, call)
 }
 
 func BuildSlackTriagePersonaRequest(channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) persona.Request {

@@ -37,6 +37,11 @@ The better boundary is:
   and routing.
 - Worker agents own delegated specialist work.
 
+The language-neutral wire contract is documented in
+[Persona Runtime Protocol](persona-protocol.md). Implementations plug in through
+`internal/persona.Runtime` or the HTTP adapter; Slack/triage business logic
+should not depend on Pi-specific code.
+
 ## Target Shape
 
 ```mermaid
@@ -180,7 +185,7 @@ Config flags:
 ONEESAMA_PERSONA_RUNTIME=legacy   # legacy | fake | http | pi
 ONEESAMA_PERSONA_RUNTIME_MODE=shadow
 ONEESAMA_PERSONA_RUNTIME_BASE_URL=http://127.0.0.1:8799
-ONEESAMA_PERSONA_RUNTIME_TIMEOUT=10s
+ONEESAMA_PERSONA_RUNTIME_TIMEOUT=90s
 ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=1
 ```
 
@@ -190,7 +195,9 @@ only establishes the runtime boundary and observability surface.
 Implemented shadow replay in task #202:
 
 - Live Slack triage finalization builds a `slack_triage` persona request and
-  sends it to the configured non-legacy persona runtime in `shadow` mode.
+  queues it for the configured non-legacy persona runtime in `shadow` mode.
+  The live triage finalize path does not wait for the sidecar; slow Pi requests
+  write back shadow metadata later.
 - `oneesama-triage-replay` accepts `--persona-runtime fake|http|pi` plus
   `--persona-runtime-base-url` to replay backfill candidates through the same
   sidecar contract.

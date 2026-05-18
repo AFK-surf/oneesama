@@ -996,10 +996,6 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	if !probe {
 		directToolCalls, directFailures, directMutations = s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions, messages)
 	}
-	var personaShadow *SlackPersonaShadowResult
-	if !probe {
-		personaShadow = s.shadowSlackTriagePersona(ctx, channelID, threadTS, messages, decision, slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"]))
-	}
 	mutationCandidates := len(actions) - countSlackTriageDirectReplyActions(actions) + directMutations
 	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: mutationCandidates, failures: directFailures}, nil)
 	if probe {
@@ -1024,15 +1020,9 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		"suppressed_reason":  slackTriageSuppressedReason(decision, actions, ok),
 		"skip_reason_bucket": slackTriageSkipReasonBucketForDecision(decision, actions, ok),
 	}
-	if personaShadow != nil {
-		toolCalls = append(toolCalls, SlackTriageToolCall{
-			Tool:    "persona_runtime",
-			Action:  "shadow_triage",
-			Success: personaShadow.Success,
-			Brief:   mapBool(personaShadow.Success, "Persona runtime shadow accepted triage request", "Persona runtime shadow failed"),
-			Result:  firstNonEmpty(personaShadow.Decision, personaShadow.Error),
-		})
-		extraMetadata["persona_shadow"] = personaShadow
+	personaShadowQueued := ok && !probe && s.shadowPersonaRuntimeEnabled()
+	if personaShadowQueued {
+		extraMetadata["persona_shadow_queued"] = true
 	}
 	runPatch := SlackTriageContext{
 		ID:        runID,
@@ -1061,6 +1051,10 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	}
 	if updatedRun != nil {
 		persistTriageContext(s.workspaceDir, *updatedRun)
+	}
+	if personaShadowQueued && updatedRun != nil {
+		relatedMemory := slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"])
+		s.queueSlackTriagePersonaShadow(context.WithoutCancel(ctx), updatedRun.ID, channelID, threadTS, messages, decision, relatedMemory)
 	}
 	go s.maybeCompactDailyNotes(context.WithoutCancel(ctx))
 	if ok && decision.Summary != "" {

@@ -39,7 +39,7 @@ const (
 	defaultAgentJobTimeout              = 10 * time.Minute
 	defaultPersonaRuntimeProvider       = "legacy"
 	defaultPersonaRuntimeMode           = "shadow"
-	defaultPersonaRuntimeTimeout        = 10 * time.Second
+	defaultPersonaRuntimeTimeout        = 90 * time.Second
 	defaultCodexBin                     = "codex"
 	defaultCodexModel                   = "gpt-5.5"
 	defaultClaudeBin                    = "claude"

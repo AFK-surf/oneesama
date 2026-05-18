@@ -2,7 +2,9 @@ package persona
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestFakeRuntimeConsumesPersonaRequest(t *testing.T) {
@@ -65,5 +67,26 @@ func TestNewRuntimeRejectsUnknownProvider(t *testing.T) {
 	_, err := NewRuntime(Config{Provider: "lobster-in-go"})
 	if err == nil {
 		t.Fatal("NewRuntime() error = nil, want unsupported provider")
+	}
+}
+
+func TestRegisterRuntimeFactoryAllowsExternalPersonaAdapters(t *testing.T) {
+	provider := fmt.Sprintf("test-runtime-adapter-%d", time.Now().UnixNano())
+	err := RegisterRuntimeFactory(provider, func(cfg Config) (Runtime, error) {
+		if cfg.Provider != provider || cfg.Mode != ModeShadow || !cfg.ShadowOnly {
+			t.Fatalf("factory cfg = %#v, want normalized shadow config", cfg)
+		}
+		return NewFakeRuntime(LocalConfig{Provider: cfg.Provider, Mode: cfg.Mode, ShadowOnly: cfg.ShadowOnly}), nil
+	})
+	if err != nil {
+		t.Fatalf("RegisterRuntimeFactory: %v", err)
+	}
+	runtime, err := NewRuntime(Config{Provider: provider, Mode: ModeShadow, ShadowOnly: true})
+	if err != nil {
+		t.Fatalf("NewRuntime custom provider: %v", err)
+	}
+	status := runtime.Status(context.Background())
+	if status.Provider != provider {
+		t.Fatalf("Status.Provider = %q, want custom provider", status.Provider)
 	}
 }

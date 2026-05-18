@@ -159,7 +159,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	var personaRuntimeBaseURL string
 	fs.StringVar(&personaRuntimeBaseURL, "persona-runtime-base-url", "", "Optional: local Pi/http sidecar base URL for persona shadow replay. Defaults to ONEESAMA_PERSONA_RUNTIME_BASE_URL / MAB_PERSONA_RUNTIME_BASE_URL.")
 	var personaRuntimeTimeout time.Duration
-	fs.DurationVar(&personaRuntimeTimeout, "persona-runtime-timeout", 10*time.Second, "Persona runtime request timeout for shadow replay.")
+	fs.DurationVar(&personaRuntimeTimeout, "persona-runtime-timeout", 90*time.Second, "Persona runtime request timeout for shadow replay.")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: oneesama-triage-replay [--output PATH] [--bot-user-ids U_BOT,U_OTHER] [--quiet]\n")
 		fmt.Fprintf(stderr, "       oneesama-triage-replay --live --channel C123,C456 [--since 24h] [--token xoxb-...] [--max-messages-per-channel 200]\n\n")
@@ -309,7 +309,7 @@ func runPersonaShadowReplay(candidates []slackagent.SlackBackfillCandidate, prov
 		return nil, fmt.Errorf("persona shadow replay requires --persona-runtime-mode=shadow; got %q", mode)
 	}
 	if timeout <= 0 {
-		timeout = 10 * time.Second
+		timeout = 90 * time.Second
 	}
 	runtime, err := persona.NewRuntime(persona.Config{
 		Provider:   provider,

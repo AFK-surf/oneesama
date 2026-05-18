@@ -44,7 +44,7 @@ func NewHTTPRuntime(cfg HTTPConfig) (*HTTPRuntime, error) {
 	if client == nil {
 		timeout := cfg.Timeout
 		if timeout <= 0 {
-			timeout = 10 * time.Second
+			timeout = 90 * time.Second
 		}
 		client = httputil.NewHTTPClient(timeout)
 	}

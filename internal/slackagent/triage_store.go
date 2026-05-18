@@ -93,6 +93,22 @@ func (s *slackTriageStore) UpdateRun(ctx context.Context, run SlackTriageContext
 	return &merged, nil
 }
 
+func (s *slackTriageStore) GetRun(ctx context.Context, id int64) (*SlackTriageContext, error) {
+	if s == nil || s.runs == nil || id == 0 {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok, err := s.runs.Get(ctx, triageKey(id))
+	if err != nil {
+		return nil, fmt.Errorf("load triage run %d: %w", id, err)
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &run, nil
+}
+
 func (s *slackTriageStore) recordRunLocked(ctx context.Context, run SlackTriageContext) (*SlackTriageContext, error) {
 	run = normalizeTriageContext(run)
 	if run.ID == 0 {
