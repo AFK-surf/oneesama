@@ -87,12 +87,29 @@ func (s *Store) List(ctx context.Context) ([]Job, error) {
 		return nil, fmt.Errorf("list agent runner jobs: %w", err)
 	}
 	sort.SliceStable(jobs, func(i int, j int) bool {
-		if jobs[i].CreatedAt == jobs[j].CreatedAt {
-			return jobs[i].ID < jobs[j].ID
-		}
-		return jobs[i].CreatedAt < jobs[j].CreatedAt
+		return agentRunnerJobCreatedBefore(jobs[i], jobs[j])
 	})
 	return jobs, nil
+}
+
+func agentRunnerJobCreatedBefore(a Job, b Job) bool {
+	aTime, aOK := parseAgentRunnerJobTime(a.CreatedAt)
+	bTime, bOK := parseAgentRunnerJobTime(b.CreatedAt)
+	if aOK && bOK && !aTime.Equal(bTime) {
+		return aTime.Before(bTime)
+	}
+	if a.CreatedAt != b.CreatedAt {
+		return a.CreatedAt < b.CreatedAt
+	}
+	return a.ID < b.ID
+}
+
+func parseAgentRunnerJobTime(value string) (time.Time, bool) {
+	timestamp, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return timestamp, true
 }
 
 func buildStoreProvider(raw string) persistence.Provider {

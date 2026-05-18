@@ -187,6 +187,11 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	if err != nil || current == nil {
 		return err
 	}
+	personaEmptyFinal := slackPersonaForegroundEmptyFinal(result)
+	if personaEmptyFinal {
+		result.Success = false
+		result.Error = firstNonEmpty(result.Error, "empty persona foreground response with no visible reply")
+	}
 	patch := *current
 	patch.Actions = triageActionRows(actions)
 	patch.ToolCalls = replacePersonaRuntimeToolCall(append(current.ToolCalls, actionToolCalls...), "foreground_triage", slackPersonaForegroundToolCall(result))
@@ -218,6 +223,15 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	if updated != nil {
 		persistTriageContext(s.workspaceDir, *updated)
 	}
+	if personaEmptyFinal && updated != nil {
+		s.maybeRecordTriageEmptyFinalFollowup(ctx, workspaceID, result.ChannelID, result.ThreadTS, updated, nil, map[string]any{
+			"failure_source":     "persona_foreground",
+			"persona_runtime":    strings.TrimSpace(result.Runtime),
+			"persona_request_id": strings.TrimSpace(result.RequestID),
+			"persona_decision":   strings.TrimSpace(result.Decision),
+			"error":              truncateSlackContextText(result.Error, 400),
+		})
+	}
 	if result.ChannelID != "" && result.ThreadTS != "" {
 		summary := firstNonEmpty(result.VisibleText, result.Reason, patch.Summary)
 		outcome := slackTriageLedgerOutcome(result.Success, mutations, failures)
@@ -231,6 +245,18 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		}
 	}
 	return nil
+}
+
+func slackPersonaForegroundEmptyFinal(result SlackPersonaShadowResult) bool {
+	if !result.Success || result.ShadowOnly {
+		return false
+	}
+	visibleText := strings.TrimSpace(result.VisibleText)
+	decision := strings.TrimSpace(result.Decision)
+	if strings.EqualFold(decision, persona.DecisionReply) && visibleText == "" {
+		return true
+	}
+	return decision == "" && visibleText == "" && len(result.WorkerRequests) == 0 && len(result.MemoryWrites) == 0
 }
 
 func slackPersonaShadowToolCall(result SlackPersonaShadowResult) SlackTriageToolCall {

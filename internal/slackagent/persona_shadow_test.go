@@ -442,6 +442,81 @@ func TestSlackTriageLivePersonaForegroundFailureSuppressesCodexFallback(t *testi
 	}
 }
 
+func TestSlackTriageLivePersonaEmptyReplyRecordsRetryFollowup(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 19, 1, 50, 0, 0, time.UTC)
+	previousClock := timeNow
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_live_persona_empty",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"codex saw a candidate reply","actions":[{"type":"post_thread_reply","title":"codex reply","message":"codex visible reply","channelId":"C_TRIAGE","threadTs":"201.000"}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = &capturePersonaRuntime{response: persona.Response{
+		Runtime:    persona.ProviderPi,
+		Decision:   persona.DecisionReply,
+		ShadowOnly: false,
+	}}
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "这条没人接，Pi 如果要回复就必须给 visible_text。",
+		TS:             "201.000",
+	}}, "#meeting-avatar: 这条没人接，Pi 如果要回复就必须给 visible_text。")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want no empty persona or Codex fallback post", got)
+	}
+	if updated.Status != "failed" || !strings.Contains(updated.Error, "empty persona foreground response") {
+		t.Fatalf("run status/error = %q/%q, want empty persona failure", updated.Status, updated.Error)
+	}
+	foreground, ok := mapFromAny(updated.Metadata["persona_foreground"])
+	if !ok || boolFromAny(foreground["success"], true) || foreground["error"] == nil {
+		t.Fatalf("persona_foreground = %#v, want failed empty persona metadata", updated.Metadata["persona_foreground"])
+	}
+
+	followups, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups: %v", err)
+	}
+	if len(followups) != 1 {
+		t.Fatalf("followups = %#v, want one empty-final retry followup", followups)
+	}
+	got := followups[0]
+	if got.Kind != slackTriageEmptyFinalFollowupKind || got.SourceRef != "triage_empty_final_retry:C_TRIAGE:201.000" {
+		t.Fatalf("followup = %#v, want persona empty-final retry", got)
+	}
+	if got.NextCheckAt != now.Add(slackTriageEmptyFinalFollowupDelay).Format(time.RFC3339Nano) {
+		t.Fatalf("NextCheckAt = %q, want 15m retry delay", got.NextCheckAt)
+	}
+	if got.Metadata["failure_source"] != "persona_foreground" || got.Metadata["persona_decision"] != persona.DecisionReply || got.Metadata["persona_runtime"] != persona.ProviderPi {
+		t.Fatalf("metadata = %#v, want persona empty-final metadata", got.Metadata)
+	}
+}
+
 func waitForPersonaShadowRun(t *testing.T, service *Service, runID int64) SlackTriageContext {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

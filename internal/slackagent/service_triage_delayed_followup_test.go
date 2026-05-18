@@ -233,6 +233,73 @@ func TestSlackTriageDoesNotRecordTimeoutRetryFollowupForGenericFailure(t *testin
 	}
 }
 
+func TestSlackTriageRecordsEmptyFinalRetryFollowupForEmptyCompletedJob(t *testing.T) {
+	now := time.Date(2026, 5, 19, 1, 40, 0, 0, time.UTC)
+	previousClock := timeNow
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_empty_final",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   "",
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{Triage: appconfig.SlackTriageConfig{HeuristicFallback: true}},
+		Runner:      runner,
+	})
+
+	started, err := service.StartSlackTriage(context.Background(), "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "这条 thread 明明该有人补一个判断，但 runner 没吐最终答案。",
+		TS:        "1779090000.000004",
+	}}, "#meeting-avatar: 这条 thread 明明该有人补一个判断，但 runner 没吐最终答案。")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if started.Finalization == nil || started.Finalization.Run == nil {
+		t.Fatalf("started = %#v, want finalized triage run", started)
+	}
+	run := started.Finalization.Run
+	if run.Status != "failed" || run.Metadata["triage_empty_final_needs_retry"] != true {
+		t.Fatalf("run = %#v, want failed run marked triage_empty_final_needs_retry", run)
+	}
+	if run.Metadata["triage_timeout_needs_retry"] != nil {
+		t.Fatalf("metadata = %#v, want empty-final retry without timeout marker", run.Metadata)
+	}
+
+	followups, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups: %v", err)
+	}
+	if len(followups) != 1 {
+		t.Fatalf("followups = %#v, want one empty-final retry followup", followups)
+	}
+	got := followups[0]
+	if got.Kind != slackTriageEmptyFinalFollowupKind || got.ChannelID != "C123" || got.ThreadTS != "1779090000.000004" {
+		t.Fatalf("followup = %#v, want empty-final retry thread followup", got)
+	}
+	if got.SourceRef != "triage_empty_final_retry:C123:1779090000.000004" || got.Priority != heartbeatFollowupPriorityNormal {
+		t.Fatalf("followup = %#v, want stable source ref and normal priority", got)
+	}
+	if got.NextCheckAt != now.Add(slackTriageEmptyFinalFollowupDelay).Format(time.RFC3339Nano) {
+		t.Fatalf("NextCheckAt = %q, want 15m retry delay", got.NextCheckAt)
+	}
+	if got.Metadata["classification"] != "triage_empty_final_needs_retry" || got.Metadata["failure_source"] != "agent_runner" || got.Metadata["job_status"] != string(agentrunner.StatusCompleted) || got.Metadata["one_shot"] != true {
+		t.Fatalf("metadata = %#v, want empty-final retry metadata", got.Metadata)
+	}
+	if got.Metadata["error"] != "empty final response with no mutations" {
+		t.Fatalf("metadata = %#v, want empty final error", got.Metadata)
+	}
+	if !strings.Contains(got.Title, "未完成判断") || !strings.Contains(got.Summary, "没有产出可用判断") {
+		t.Fatalf("followup = %#v, want templated empty-final retry copy", got)
+	}
+}
+
 func TestTriageTimeoutRetryFollowupUsesTemplateOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "triage_timeout_title.zh.tmpl"), []byte("自定义 timeout 标题：{{.ThreadTS}}\n"), 0o644); err != nil {
