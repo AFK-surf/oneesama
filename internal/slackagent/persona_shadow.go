@@ -2,8 +2,11 @@ package slackagent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,6 +25,7 @@ type SlackPersonaShadowResult struct {
 	Confidence     float64  `json:"confidence,omitempty"`
 	WorkerRequests []string `json:"worker_requests,omitempty"`
 	MemoryWrites   []string `json:"memory_writes,omitempty"`
+	memoryRecords  []persona.MemoryWrite
 	ShadowOnly     bool     `json:"shadow_only"`
 	Success        bool     `json:"success"`
 	Error          string   `json:"error,omitempty"`
@@ -189,6 +193,7 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	patch.Steps = current.Steps + 1
 	patch.Mutations = maxInt(current.Mutations, mutations)
 	patch.Failures = maxInt(current.Failures, failures)
+	memoryWritePersistence := s.persistPersonaForegroundMemoryWrites(ctx, result)
 	if !result.Success {
 		patch.Status = "failed"
 		patch.Error = firstNonEmpty(result.Error, "persona_runtime_failed")
@@ -202,6 +207,9 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		"persona_foreground_queued":       false,
 		"persona_foreground_done_at":      nowRFC3339(),
 		"persona_foreground_action_count": len(actions),
+		"persona_memory_write_files":      memoryWritePersistence.Files,
+		"persona_memory_write_errors":     memoryWritePersistence.Errors,
+		"persona_memory_write_redactions": memoryWritePersistence.Redactions,
 	})
 	updated, err := s.triage.UpdateRun(ctx, patch)
 	if err != nil {
@@ -377,10 +385,115 @@ func callPersonaShadow(ctx context.Context, runtime persona.Runtime, source stri
 	result.Confidence = resp.Confidence
 	result.WorkerRequests = personaWorkerRequestSummaries(resp.WorkerRequests)
 	result.MemoryWrites = personaMemoryWriteSummaries(resp.MemoryWrites)
+	result.memoryRecords = append([]persona.MemoryWrite(nil), resp.MemoryWrites...)
 	result.ShadowOnly = resp.ShadowOnly
 	result.Reason = resp.Reason
 	result.Citations = personaCitationRefs(resp.Citations)
 	return result
+}
+
+type personaMemoryWritePersistence struct {
+	Files      []string
+	Errors     []string
+	Redactions int
+}
+
+func (s *Service) persistPersonaForegroundMemoryWrites(ctx context.Context, result SlackPersonaShadowResult) personaMemoryWritePersistence {
+	out := personaMemoryWritePersistence{}
+	if !result.Success || len(result.memoryRecords) == 0 {
+		return out
+	}
+	root := s.memoryWriteRoot()
+	if strings.TrimSpace(root) == "" {
+		out.Errors = append(out.Errors, "memory_disabled")
+		return out
+	}
+	for _, record := range result.memoryRecords {
+		if err := ctx.Err(); err != nil {
+			out.Errors = append(out.Errors, err.Error())
+			return out
+		}
+		text := strings.TrimSpace(record.Text)
+		if text == "" {
+			continue
+		}
+		body, redactions := renderPersonaMemoryWrite(result, record)
+		out.Redactions += redactions
+		rel := personaMemoryWritePath(result, record)
+		if err := legacySlackWriteGeneratedFile(root, rel, []byte(body), true); err != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", rel, err))
+			continue
+		}
+		out.Files = append(out.Files, rel)
+	}
+	return out
+}
+
+func personaMemoryWritePath(result SlackPersonaShadowResult, record persona.MemoryWrite) string {
+	kind := sanitizePersonaMemoryPathComponent(firstNonEmpty(record.Kind, "memory"))
+	day := timeNow().UTC().Format("2006-01-02")
+	h := sha256.Sum256([]byte(strings.Join([]string{
+		result.RequestID,
+		result.ChannelID,
+		result.ThreadTS,
+		record.Kind,
+		record.SourceRef,
+		record.Text,
+	}, "\n")))
+	return filepath.ToSlash(filepath.Join("memory", "persona", "writes", day, kind+"-"+hex.EncodeToString(h[:])[:12]+".md"))
+}
+
+func renderPersonaMemoryWrite(result SlackPersonaShadowResult, record persona.MemoryWrite) (string, int) {
+	text, redactions := redactSlockWorkspaceSecrets(strings.TrimSpace(record.Text))
+	metadata, err := json.MarshalIndent(record.Metadata, "", "  ")
+	if err != nil || string(metadata) == "null" {
+		metadata = nil
+	}
+	metadataText := ""
+	if len(metadata) > 0 {
+		var metadataRedactions int
+		metadataText, metadataRedactions = redactSlockWorkspaceSecrets(string(metadata))
+		redactions += metadataRedactions
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Persona memory write: %s\n\n", firstNonEmpty(record.Kind, "memory"))
+	legacySlackWriteBullet(&b, "Request", result.RequestID)
+	legacySlackWriteBullet(&b, "Runtime", result.Runtime)
+	legacySlackWriteBullet(&b, "Decision", result.Decision)
+	legacySlackWriteBullet(&b, "Channel", result.ChannelID)
+	legacySlackWriteBullet(&b, "Thread", result.ThreadTS)
+	legacySlackWriteBullet(&b, "Source", record.SourceRef)
+	legacySlackWriteBullet(&b, "Imported at", timeNow().UTC().Format(time.RFC3339Nano))
+	b.WriteString("\n## Memory\n\n")
+	b.WriteString(text)
+	b.WriteString("\n")
+	if strings.TrimSpace(metadataText) != "" {
+		b.WriteString("\n## Metadata\n\n```json\n")
+		b.WriteString(metadataText)
+		b.WriteString("\n```\n")
+	}
+	return b.String(), redactions
+}
+
+func sanitizePersonaMemoryPathComponent(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "memory"
+	}
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "memory"
+	}
+	return out
 }
 
 func personaWorkerRequestSummaries(requests []persona.WorkerRequest) []string {

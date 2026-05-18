@@ -3,6 +3,9 @@ package slackagent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -249,6 +252,7 @@ func TestQueueSlackTriagePersonaShadowDoesNotBlockAndRecordsLater(t *testing.T) 
 
 func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t *testing.T) {
 	ctx := context.Background()
+	workspaceDir := t.TempDir()
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	runner := &fakeRunner{job: agentrunner.Job{
 		ID:       "job_live_persona",
@@ -258,6 +262,7 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 	}}
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
 			Mode:     persona.ModeLive,
@@ -342,10 +347,51 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 	if lenStringSliceFromAny(foreground["worker_requests"]) != 1 || lenStringSliceFromAny(foreground["memory_writes"]) != 1 {
 		t.Fatalf("persona_foreground = %#v, want worker request and memory write intent summaries", foreground)
 	}
+	files := stringSliceFromAny(updated.Metadata["persona_memory_write_files"])
+	if len(files) != 1 {
+		t.Fatalf("persona_memory_write_files = %#v, want one durable memory file", updated.Metadata["persona_memory_write_files"])
+	}
+	raw, err := os.ReadFile(filepath.Join(workspaceDir, filepath.FromSlash(files[0])))
+	if err != nil {
+		t.Fatalf("read persona memory write %s: %v", files[0], err)
+	}
+	if text := string(raw); !strings.Contains(text, "Peng asked Oneesama to use Pi persona") || !strings.Contains(text, "slack:C_TRIAGE:200.000") {
+		t.Fatalf("persona memory file = %q, want Pi supplied memory text and source", text)
+	}
+	search := service.SearchRelatedMemory("Pi persona memory-backed replies", SlackRelatedMemorySearchOptions{Limit: 5})
+	if record := firstPersonaRelatedMemory(search.Results); record == nil {
+		t.Fatalf("search results = %#v, want durable persona memory evidence", search.Results)
+	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	if len(runtime.requests) != 1 || runtime.requests[0].Mode != persona.ModeLive {
 		t.Fatalf("persona requests = %#v, want one live request", runtime.requests)
+	}
+}
+
+func firstPersonaRelatedMemory(records []SlackRelatedMemoryRecord) *SlackRelatedMemoryRecord {
+	for index := range records {
+		if strings.HasPrefix(records[index].SourcePath, "memory/persona/writes/") {
+			return &records[index]
+		}
+	}
+	return nil
+}
+
+func stringSliceFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return typed
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
 }
 
