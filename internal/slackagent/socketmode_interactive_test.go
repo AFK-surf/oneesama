@@ -145,6 +145,90 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 	assertStatusCalls(t, assistant.Calls(), []string{"Recording meeting..."})
 }
 
+func TestSocketModeInteractiveJoinSetupAcksBeforeResponseURLUpdate(t *testing.T) {
+	meetURL := "https://meet.google.com/abc-defg-hij"
+	releaseResponseURL := make(chan struct{})
+	responseURLHit := make(chan struct{}, 1)
+	responseURLServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		select {
+		case responseURLHit <- struct{}{}:
+		default:
+		}
+		<-releaseResponseURL
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer responseURLServer.Close()
+	defer close(releaseResponseURL)
+
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"ok":true,"accepted":true,"started":true,"session":{"id":"session_socket_ack","meeting_url":"` + meetURL + `","status":"joined"}}`))
+	}))
+	defer meetingAgent.Close()
+
+	service := NewService(Config{
+		MeetingAgentURL: meetingAgent.URL,
+		Slack: appconfig.SlackConfig{
+			InternalAuthKey: "secret-key",
+		},
+	})
+	runner := NewSocketModeRunner(SocketModeRunnerConfig{
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Service:  service,
+		AppToken: "app-token",
+	})
+	buttonValue := joinSetupActionValueJSON(joinSetupActionValue{
+		Kind:        joinSetupKind,
+		MeetingURL:  meetURL,
+		DryRun:      false,
+		Realtime:    false,
+		ConfirmJoin: true,
+	})
+	rawPayload := fmt.Sprintf(`{
+		"team":{"id":"T123"},
+		"channel":{"id":"C123"},
+		"user":{"id":"U123","username":"peng"},
+		"message":{"thread_ts":"123.456"},
+		"response_url":%q,
+		"actions":[{"action_id":%q,"value":%q}]
+	}`, responseURLServer.URL, joinSetupPlainActionID, buttonValue)
+
+	ackCh := make(chan any, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- runner.handleEnvelope(context.Background(), SlackSocketEnvelope{
+			Type:       "interactive",
+			EnvelopeID: "EnInteractiveJoinAckFirst",
+			Payload:    []byte(rawPayload),
+		}, func(payload any) error {
+			ackCh <- payload
+			return nil
+		})
+	}()
+
+	select {
+	case payload := <-ackCh:
+		if payload != nil {
+			t.Fatalf("ack payload = %#v, want nil socket envelope ack", payload)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("timed out waiting for socket ack before response_url update completed")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handle envelope: %v", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("socket handler did not return after ack")
+	}
+	select {
+	case <-responseURLHit:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for async response_url update to start")
+	}
+}
+
 func TestSocketModeInteractiveJoinSetupFallsBackToMessageBlockValue(t *testing.T) {
 	meetURL := "https://meet.google.com/czf-aaws-fgv"
 	joinRequestCh := make(chan meetingAgentJoinRequest, 1)

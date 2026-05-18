@@ -28,7 +28,9 @@ func (s *Service) StartJoinSetupInteraction(ctx context.Context, command AvatarC
 }
 
 func (s *Service) StartJoinSetupSocketInteraction(ctx context.Context, command AvatarCommandInput, responseURL string) {
-	_ = s.startJoinSetupInteraction(ctx, command, responseURL, joinSetupSocketMode)
+	go func() {
+		_ = s.startJoinSetupInteraction(ctx, command, responseURL, joinSetupSocketMode)
+	}()
 }
 
 func (s *Service) startJoinSetupInteraction(ctx context.Context, command AvatarCommandInput, responseURL string, mode joinSetupInteractionMode) AvatarCommandResponse {

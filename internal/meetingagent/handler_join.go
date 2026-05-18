@@ -15,6 +15,7 @@ func (h *Handler) handleJoinGoogleMeet(c *gin.Context) {
 	}
 	result, err := h.service.JoinGoogleMeet(c.Request.Context(), request)
 	if err != nil {
+		h.service.logger.Warn("join google meet failed", "meeting_url", request.MeetingURL, "session_id", request.SessionID, "error", err)
 		httputil.AbortWithError(c, httputil.InternalServerError("join google meet failed", gin.H{"reason": err.Error()}))
 		return
 	}

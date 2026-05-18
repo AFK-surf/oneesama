@@ -1,6 +1,12 @@
 import readline from "node:readline";
 
 import { createGoogleMeetJoiner } from "../../packages/core/src/meeting/google-meet-joiner.ts";
+import {
+  deriveStartedStatus,
+  hasJoinAcceptedEvidence,
+  joinFailureMessage,
+  recoverAcceptedJoinAfterError,
+} from "./join-result.ts";
 import { buildPlan, normalizeBrowserIslandOptions } from "./join-plan.ts";
 import { failure, parseRequestLine, success, writeResponse } from "./protocol.ts";
 import { statusSession } from "./session-status.ts";
@@ -44,19 +50,6 @@ function setSession(state: RunnerSessionState) {
     title: state.title,
     updated_at: state.updated_at,
   };
-}
-
-function deriveStartedStatus(result: any): string {
-  if (result?.fixtureState?.joined === true || result?.meetPage?.inMeeting === true) {
-    return "joined";
-  }
-  if (result?.admission?.state === "waiting" || result?.meetPage?.waitingForAdmit === true) {
-    return "waiting";
-  }
-  if (result?.clickedJoinSelector) {
-    return "join_requested";
-  }
-  return "starting";
 }
 
 function handleDryRunJoin(params: PrepareJoinParams) {
@@ -108,7 +101,9 @@ async function handleJoinRequest(params: PrepareJoinParams) {
   const sessionId = firstNonEmpty(params.session_id, `session_${Date.now().toString(36)}`);
   const title = firstNonEmpty(params.title, "Google Meet join plan");
   const displayName = firstNonEmpty(params.display_name);
-  const joinResult = await joiner.join({
+  let joinResult: any;
+  let recoveredAfterError = "";
+  const joinInput = {
     sessionId,
     meetUrl: meetingUrl,
     botName: displayName,
@@ -151,9 +146,19 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     screenShareWidth: params.screen_share_width,
     screenShareHeight: params.screen_share_height,
     screenShareFps: params.screen_share_fps,
-  });
+  };
+  try {
+    joinResult = await joiner.join(joinInput);
+  } catch (error) {
+    joinResult = await recoverAcceptedJoinAfterError(error, joiner);
+    recoveredAfterError = String(joinResult.recovered_after_error || "");
+  }
+  if (!joinResult?.ok && !hasJoinAcceptedEvidence(joinResult)) {
+    throw new Error(joinFailureMessage(joinResult));
+  }
   if (!joinResult?.ok) {
-    throw new Error(firstNonEmpty(joinResult?.error, "google meet join failed"));
+    recoveredAfterError = joinFailureMessage(joinResult);
+    joinResult = { ...joinResult, ok: true };
   }
 
   const session = setSession({
@@ -169,7 +174,12 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     accepted: true,
     started: true,
     bridge_mode: bridgeMode,
-    note: "TS meet-runner bridge launched the Playwright joiner and kept the browser session attached to this worker. Browser-island install flags and fixture-state collection now follow the explicit Go join request through this worker.",
+    note: firstNonEmpty(
+      recoveredAfterError
+        ? `TS meet-runner bridge recovered an accepted Google Meet join after a post-join error: ${recoveredAfterError}`
+        : "",
+      "TS meet-runner bridge launched the Playwright joiner and kept the browser session attached to this worker. Browser-island install flags and fixture-state collection now follow the explicit Go join request through this worker.",
+    ),
     session,
     plan: buildPlan(params, meetingUrl),
   };
@@ -228,9 +238,17 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
             entry: "src/index.ts",
             bridge_mode: bridgeMode,
             capabilities: [
-              "runner.ping", "join.google_meet.prepare", "join.session.status", "join.session.stop",
-              "worker.result.inject", "screen_share.start", "screen_share.present",
-              "screen_share.video", "screen_share.apps", "screen_share.app", "screen_share.stop",
+              "runner.ping",
+              "join.google_meet.prepare",
+              "join.session.status",
+              "join.session.stop",
+              "worker.result.inject",
+              "screen_share.start",
+              "screen_share.present",
+              "screen_share.video",
+              "screen_share.apps",
+              "screen_share.app",
+              "screen_share.stop",
             ],
           }),
         );
@@ -254,7 +272,9 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
         );
         return;
       case "worker.result.inject":
-        writeResponse(success(request.id, await joiner.injectWorkerResult((request.params as any)?.job)));
+        writeResponse(
+          success(request.id, await joiner.injectWorkerResult((request.params as any)?.job)),
+        );
         return;
       case "screen_share.start":
         writeResponse(success(request.id, await joiner.startScreenShare(request.params ?? {})));
