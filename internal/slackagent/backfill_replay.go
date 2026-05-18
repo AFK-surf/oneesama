@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -99,6 +100,9 @@ func ClassifyBackfillMessage(message SlackInboundMessage, replies []SlackInbound
 	if slackDelayedNoReplyLooksLowSignal(message.Text) {
 		return SlackBackfillCandidate{}, false
 	}
+	if backfillMessageHasLowValueLinkOnly(message) {
+		return SlackBackfillCandidate{}, false
+	}
 	// If any non-bot human has already replied, the backfill scan
 	// should NOT add a candidate — the message has been "caught" by a
 	// human and oneesama jumping in would just be noise.
@@ -122,6 +126,9 @@ func ClassifyBackfillMessage(message SlackInboundMessage, replies []SlackInbound
 	bundle := append([]SlackInboundMessage{message}, humanReplies...)
 	candidate, ok := slackDelayedNoReplyCandidateFor(SlackTriageDecision{}, bundle)
 	if !ok {
+		return SlackBackfillCandidate{}, false
+	}
+	if candidate.Classification == "link_followup_candidate" && !backfillMessagesHaveHighSignalReadableLink(bundle) {
 		return SlackBackfillCandidate{}, false
 	}
 	thread := firstNonEmpty(strings.TrimSpace(message.ThreadTS), strings.TrimSpace(message.TS))
@@ -207,6 +214,132 @@ func candidateSourceLabel(c SlackBackfillCandidate) string {
 	default:
 		return "`fresh` (backfill scan only)"
 	}
+}
+
+func backfillMessageHasLowValueLinkOnly(message SlackInboundMessage) bool {
+	urls := extractSlackExternalLinkURLs([]SlackInboundMessage{message})
+	if len(urls) == 0 {
+		return false
+	}
+	allSocialStatus := true
+	for _, rawURL := range urls {
+		if !looksLikeLowSignalSocialStatusURL(rawURL) {
+			allSocialStatus = false
+			break
+		}
+	}
+	if allSocialStatus {
+		return true
+	}
+	return backfillMessageLooksLikeOperationalGitHubWork(message.Text, urls)
+}
+
+func backfillMessagesHaveHighSignalReadableLink(messages []SlackInboundMessage) bool {
+	for _, rawURL := range extractSlackExternalLinkURLs(messages) {
+		if looksLikeBackfillHighSignalReadableURL(rawURL) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeBackfillHighSignalReadableURL(rawURL string) bool {
+	parsed, err := parseSlackExternalURL(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	path := strings.ToLower(parsed.Path)
+	if looksLikeLowSignalSocialStatusURL(rawURL) {
+		return false
+	}
+	if strings.HasSuffix(path, ".pdf") || strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".txt") {
+		return true
+	}
+	if strings.Contains(path, "/articles/") || strings.Contains(path, "/article/") || strings.Contains(path, "/blog/") || strings.Contains(path, "/docs/") {
+		return true
+	}
+	if strings.Contains(host, "arxiv.org") || strings.Contains(host, "medium.com") || strings.Contains(host, "substack.com") {
+		return true
+	}
+	if strings.Contains(host, "docs.") || strings.Contains(host, "blog.") {
+		return true
+	}
+	if (host == "github.com" || strings.HasSuffix(host, ".github.com")) && strings.Contains(path, "/blob/") {
+		return strings.HasSuffix(path, ".pdf") ||
+			strings.HasSuffix(path, ".md") ||
+			strings.HasSuffix(path, ".markdown") ||
+			strings.HasSuffix(path, ".txt") ||
+			strings.HasSuffix(path, ".ipynb")
+	}
+	return false
+}
+
+func backfillMessageLooksLikeOperationalGitHubWork(text string, urls []string) bool {
+	var hasOperationalGitHub bool
+	for _, rawURL := range urls {
+		if looksLikeOperationalGitHubURL(rawURL) {
+			hasOperationalGitHub = true
+			break
+		}
+	}
+	if !hasOperationalGitHub {
+		return false
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(text)), " "))
+	if normalized == "" {
+		return true
+	}
+	for _, marker := range []string{
+		"<@",
+		"review",
+		"approve",
+		"cherry-pick",
+		"cherry pick",
+		"checkout",
+		"preprod",
+		"deploy",
+		"merge",
+		"pull request",
+		"pr ",
+		"issue",
+		"来 review",
+		"没问题就 approve",
+		"看一下",
+		"看看",
+		"测一下",
+		"发版",
+		"上线",
+		"合一下",
+		"拉一下",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeOperationalGitHubURL(rawURL string) bool {
+	parsed, err := parseSlackExternalURL(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host != "github.com" && !strings.HasSuffix(host, ".github.com") {
+		return false
+	}
+	path := strings.ToLower(parsed.Path)
+	for _, marker := range []string{"/pull/", "/issues/", "/commit/", "/compare/", "/actions/runs/"} {
+		if strings.Contains(path, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSlackExternalURL(rawURL string) (*url.URL, error) {
+	return url.Parse(strings.Trim(rawURL, "<>|.,，。)）]】"))
 }
 
 // isAuthoredByBot recognises a message as bot-authored when ANY of:

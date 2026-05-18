@@ -175,6 +175,60 @@ func TestClassifyBackfillMessageMarksUnansweredQuestion(t *testing.T) {
 	}
 }
 
+func TestClassifyBackfillMessageRejectsOperationalGitHubPRReview(t *testing.T) {
+	msg := SlackInboundMessage{
+		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
+		Text: "https://github.com/AFK-surf/cueboard/pull/1917 @U123 来 review，没问题就 approve",
+	}
+	if _, ok := ClassifyBackfillMessage(msg, nil, nil); ok {
+		t.Fatal("expected owner-directed GitHub PR review link to be skipped")
+	}
+}
+
+func TestClassifyBackfillMessageRejectsOperationalGitHubCherryPick(t *testing.T) {
+	msg := SlackInboundMessage{
+		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
+		Text: "cherry-pick https://github.com/AFK-surf/willow/commit/abcdef123456 to preprod",
+	}
+	if _, ok := ClassifyBackfillMessage(msg, nil, nil); ok {
+		t.Fatal("expected cherry-pick/deploy GitHub link to be skipped")
+	}
+}
+
+func TestClassifyBackfillMessageRejectsOperationalGitHubIssueAndPR(t *testing.T) {
+	msg := SlackInboundMessage{
+		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
+		Text: "看一下 issue https://github.com/AFK-surf/oneesama/issues/29 再看看 PR https://github.com/AFK-surf/oneesama/pull/30",
+	}
+	if _, ok := ClassifyBackfillMessage(msg, nil, nil); ok {
+		t.Fatal("expected owner-directed GitHub issue/PR work instruction to be skipped")
+	}
+}
+
+func TestClassifyBackfillMessageRejectsLowSignalSocialStatusLink(t *testing.T) {
+	msg := SlackInboundMessage{
+		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
+		Text: "https://x.com/FiachraRM/status/2056172311620075824?s=20 今天都在发这个 蹭一下？",
+	}
+	if _, ok := ClassifyBackfillMessage(msg, nil, nil); ok {
+		t.Fatal("expected low-signal X/Twitter status to be skipped")
+	}
+}
+
+func TestClassifyBackfillMessageKeepsReadablePDFLink(t *testing.T) {
+	msg := SlackInboundMessage{
+		ChannelID: "C123", TS: "111.000", UserID: "U_PENG",
+		Text: "https://github.com/hangli-hl/AI-Articles/blob/main/llm-thinking.pdf",
+	}
+	candidate, ok := ClassifyBackfillMessage(msg, nil, nil)
+	if !ok {
+		t.Fatal("expected readable PDF/article link to stay eligible")
+	}
+	if candidate.Classification != "link_followup_candidate" {
+		t.Fatalf("classification = %q, want link_followup_candidate", candidate.Classification)
+	}
+}
+
 // TestRenderBackfillCandidatesMarkdownEmpty confirms the empty-state
 // rendering — when nothing is found, the operator should see an
 // explicit "no candidates" note instead of a blank file.

@@ -7,6 +7,7 @@ draft replies for a human to review. **Nothing is posted.** That's the
 whole point of slice 1 — the operator is the safety toggle.
 
 This is the response to Peng's 5/18 ask:
+
 > 我觉得你们可以扫一下过去的所有消息，然后想一想哪些其实是值得回的，
 > 尤其是那种长时间没有人回的消息。
 
@@ -54,6 +55,21 @@ the live triage path and the backfill scan classify the same way:
 - `synthesis_eligible_thread` — discussion thread that's worth a brief
   synthesis even though no specific question was asked.
 
+Quality gates added after the 2026-05-18 dogfood report:
+
+- X / Twitter status URLs are treated as low-signal by default. They
+  may be interesting socially, but a raw status link without readable
+  article context produced generic "I skimmed this" replies in
+  dogfood, so replay skips them.
+- GitHub PR / issue / commit / compare / Actions links are skipped
+  when the surrounding message looks like an owner-directed work
+  instruction (`review`, `approve`, `cherry-pick`, `preprod`, `看一下`,
+  direct Slack mention, etc.). Those should be handled by the assigned
+  human or the normal engineering workflow, not by oneesama doing a
+  lightweight article synthesis.
+- GitHub readable documents remain eligible when they are actually
+  material to read, e.g. `/blob/.../*.pdf`, `.md`, `.txt`, or notebooks.
+
 ## Live mode (slice 2)
 
 Slice 2 added a `--live` mode that calls Slack
@@ -95,9 +111,9 @@ Live-mode guardrails applied (per driver audit of `97f01a7`):
 The Markdown report ends with a `## Live scan coverage` table:
 
 | Channel | Scanned | Replies fetched | Candidates | Truncated | 429 retries | Warnings |
-|---|---:|---:|---:|---|---:|---|
-| `C1` | 47 | 3 | 4 | false | 0 | — |
-| `C2` | 200 | 18 | 12 | true | 1 | — |
+| ------- | ------: | --------------: | ---------: | --------- | ----------: | -------- |
+| `C1`    |      47 |               3 |          4 | false     |           0 | —        |
+| `C2`    |     200 |              18 |         12 | true      |           1 | —        |
 
 ## Channel auto-discovery (slice 3)
 
@@ -126,7 +142,13 @@ Audit-safety rules:
    explicit list; the union mode is not supported, because the
    "I'll just add one extra" pattern usually means the operator
    doesn't actually know what's in scope.
-5. **Zero channels = explicit failure.** If auto-discovery returns
+5. **Fallback before zero.** Auto-discovery first tries
+   `users.conversations`. If that returns zero joined channels, the
+   CLI falls back to `conversations.list` and filters
+   `is_member=true`. This exists because live dogfood saw
+   `users.conversations` return zero while `conversations.list`
+   correctly showed dozens of joined channels.
+6. **Zero channels = explicit failure.** If both discovery paths return
    nothing, the CLI exits non-zero with a hint to invite the bot
    somewhere. Silent "0 candidates" reports are a confusing
    anti-pattern.

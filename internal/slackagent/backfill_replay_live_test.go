@@ -348,6 +348,50 @@ func TestListBackfillJoinedChannelsFollowsPagination(t *testing.T) {
 	}
 }
 
+// TestListBackfillJoinedChannelsFallsBackToConversationsList pins the
+// 2026-05-18 live failure mode: users.conversations returned an empty
+// list for the bot token while conversations.list correctly showed
+// joined channels via `is_member=true`.
+func TestListBackfillJoinedChannelsFallsBackToConversationsList(t *testing.T) {
+	mux := http.NewServeMux()
+	var usersCalls, listCalls int
+	mux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
+		usersCalls++
+		writeFakeSlackJSON(t, w, slackUsersConversationsResponse{OK: true})
+	})
+	mux.HandleFunc("/conversations.list", func(w http.ResponseWriter, r *http.Request) {
+		listCalls++
+		if got := r.URL.Query().Get("types"); got != "public_channel,private_channel" {
+			t.Errorf("types = %q, want public_channel,private_channel", got)
+		}
+		if got := r.URL.Query().Get("exclude_archived"); got != "true" {
+			t.Errorf("exclude_archived = %q, want true", got)
+		}
+		writeFakeSlackJSON(t, w, slackBackfillConversationsListResponse{
+			OK: true,
+			Channels: []SlackBackfillJoinedChannel{
+				{ID: "C_JOINED", IsMember: true},
+				{ID: "C_LEFT", IsMember: false},
+				{ID: "C_ARCH", IsMember: true, IsArchived: true},
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	setLiveBaseURL(t, server.URL)
+
+	channels, err := ListBackfillJoinedChannels(context.Background(), "xoxb-test")
+	if err != nil {
+		t.Fatalf("ListBackfillJoinedChannels: %v", err)
+	}
+	if usersCalls != 1 || listCalls != 1 {
+		t.Fatalf("usersCalls/listCalls = %d/%d, want 1/1", usersCalls, listCalls)
+	}
+	if len(channels) != 1 || channels[0].ID != "C_JOINED" {
+		t.Fatalf("channels = %+v, want only C_JOINED", channels)
+	}
+}
+
 // TestBackfillReplayLiveRequiresInputs guards against silent bad
 // invocations.
 func TestBackfillReplayLiveRequiresInputs(t *testing.T) {

@@ -232,14 +232,24 @@ func TestRunLiveModeEndToEndAgainstFakeSlack(t *testing.T) {
 	}
 }
 
-// TestRunLiveAutoChannelDiscoveryFailsOnZero verifies driver's
-// audit-required failure mode: `--channel auto` with no joined channels
-// must produce a non-zero exit + an explicit error message, not a
-// silent "0 candidates" report.
-func TestRunLiveAutoChannelDiscoveryFailsOnZero(t *testing.T) {
+// TestRunLiveAutoChannelDiscoveryFallsBackBeforeZero verifies the
+// 2026-05-18 live failure mode: `users.conversations` returned zero
+// channels for the bot token, but `conversations.list` still exposed
+// joined channels via `is_member=true`. Auto-discovery must fall back
+// before declaring the scan empty.
+func TestRunLiveAutoChannelDiscoveryFallsBackBeforeZero(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
 		writeFakeSlackJSON(t, w, map[string]any{"ok": true, "channels": []any{}})
+	})
+	mux.HandleFunc("/conversations.list", func(w http.ResponseWriter, r *http.Request) {
+		writeFakeSlackJSON(t, w, map[string]any{"ok": true, "channels": []map[string]any{
+			{"id": "C_FALLBACK", "is_member": true},
+			{"id": "C_LEFT", "is_member": false},
+		}})
+	})
+	mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		writeFakeSlackJSON(t, w, map[string]any{"ok": true, "messages": []any{}})
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -253,11 +263,14 @@ func TestRunLiveAutoChannelDiscoveryFailsOnZero(t *testing.T) {
 		[]string{"--live", "--channel", "auto"},
 		strings.NewReader(""), &stdout, &stderr,
 	)
-	if code == 0 {
-		t.Fatal("expected non-zero exit when auto-discovery returns no channels")
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "discovered 0 joined channels") {
-		t.Errorf("stderr = %q, want explicit 0-channel diagnostic", stderr.String())
+	if !strings.Contains(stderr.String(), "discovered 1 channel(s)") {
+		t.Errorf("stderr = %q, want fallback discovery summary", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "| `C_FALLBACK` |") {
+		t.Errorf("stdout missing fallback channel coverage row:\n%s", stdout.String())
 	}
 }
 

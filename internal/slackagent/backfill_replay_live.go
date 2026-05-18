@@ -66,16 +66,16 @@ type SlackBackfillReplayLiveOptions struct {
 // SlackBackfillReplayLiveStats reports what a single channel scan
 // actually did so the Markdown report can be honest about coverage.
 type SlackBackfillReplayLiveStats struct {
-	ChannelID        string
-	MessagesScanned  int
-	RepliesFetched   int
-	CandidatesFound  int
-	Truncated        bool
-	OldestScannedTS  string
-	NewestScannedTS  string
-	Warnings         []string
-	APIRetriesTotal  int
-	APIRetries429    int
+	ChannelID       string
+	MessagesScanned int
+	RepliesFetched  int
+	CandidatesFound int
+	Truncated       bool
+	OldestScannedTS string
+	NewestScannedTS string
+	Warnings        []string
+	APIRetriesTotal int
+	APIRetries429   int
 }
 
 // BackfillReplayLive scans a single Slack channel for the past
@@ -343,6 +343,13 @@ type slackUsersConversationsResponse struct {
 	ResponseMetadata backfillLiveHistoryResponseCursor `json:"response_metadata,omitempty"`
 }
 
+type slackBackfillConversationsListResponse struct {
+	OK               bool                              `json:"ok"`
+	Error            string                            `json:"error,omitempty"`
+	Channels         []SlackBackfillJoinedChannel      `json:"channels,omitempty"`
+	ResponseMetadata backfillLiveHistoryResponseCursor `json:"response_metadata,omitempty"`
+}
+
 // ListBackfillJoinedChannels asks Slack for the channels the bot user
 // currently belongs to, paginating through `users.conversations`
 // until exhausted. Used by the CLI's `--channel auto` mode so the
@@ -354,14 +361,27 @@ type slackUsersConversationsResponse struct {
 //     would be the wrong product behaviour.
 //   - `exclude_archived=true` so the scan doesn't waste budget on
 //     dead channels.
-//   - The function does NOT join channels it isn't in. Slack already
-//     enforces that `users.conversations` returns only joined
-//     channels; this comment is a contract note so future edits
-//     don't quietly relax it.
+//   - The function does NOT join channels it isn't in. `users.conversations`
+//     should normally return only joined channels. If that endpoint
+//     returns an empty list for a bot token, we fall back to
+//     `conversations.list` filtered by `is_member=true`; this mirrors
+//     the live 2026-05-18 incident where users.conversations returned
+//     zero while conversations.list showed the bot in 44 channels.
 func ListBackfillJoinedChannels(ctx context.Context, token string) ([]SlackBackfillJoinedChannel, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, fmt.Errorf("ListBackfillJoinedChannels: token is required")
 	}
+	out, err := listBackfillJoinedChannelsViaUsersConversations(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+	return listBackfillJoinedChannelsViaConversationsList(ctx, token)
+}
+
+func listBackfillJoinedChannelsViaUsersConversations(ctx context.Context, token string) ([]SlackBackfillJoinedChannel, error) {
 	out := make([]SlackBackfillJoinedChannel, 0)
 	cursor := ""
 	for {
@@ -379,6 +399,40 @@ func ListBackfillJoinedChannels(ctx context.Context, token string) ([]SlackBackf
 		}
 		if !resp.OK {
 			return nil, fmt.Errorf("users.conversations returned ok=false (%s)", resp.Error)
+		}
+		for _, ch := range resp.Channels {
+			if ch.IsArchived || !ch.IsMember {
+				continue
+			}
+			out = append(out, ch)
+		}
+		next := strings.TrimSpace(resp.ResponseMetadata.NextCursor)
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	return out, nil
+}
+
+func listBackfillJoinedChannelsViaConversationsList(ctx context.Context, token string) ([]SlackBackfillJoinedChannel, error) {
+	out := make([]SlackBackfillJoinedChannel, 0)
+	cursor := ""
+	for {
+		values := url.Values{
+			"types":            {"public_channel,private_channel"},
+			"exclude_archived": {"true"},
+			"limit":            {"200"},
+		}
+		if cursor != "" {
+			values.Set("cursor", cursor)
+		}
+		var resp slackBackfillConversationsListResponse
+		if err := doSlackGetWithRetry(ctx, token, "conversations.list", values, &resp, nil); err != nil {
+			return nil, err
+		}
+		if !resp.OK {
+			return nil, fmt.Errorf("conversations.list returned ok=false (%s)", resp.Error)
 		}
 		for _, ch := range resp.Channels {
 			if ch.IsArchived || !ch.IsMember {
