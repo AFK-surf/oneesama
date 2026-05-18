@@ -361,6 +361,109 @@ func TestBuildBackfillAgentReadPromptGroundsMaterialRead(t *testing.T) {
 	}
 }
 
+func TestEnrichBackfillCandidatesRequiresMemoryEvidenceForReadyCandidate(t *testing.T) {
+	candidates := []SlackBackfillCandidate{{
+		Classification: "unanswered_question",
+		Title:          "补一下这个开放问题",
+		ChannelID:      "C1",
+		ThreadTS:       "1",
+		OriginalText:   "这个 lobster avatar 的记忆应该怎么接？",
+		Draft:          "可以轻量补一句。",
+		ReviewStatus:   BackfillReviewReady,
+	}}
+
+	enriched := EnrichBackfillCandidatesWithRelatedMemory(candidates, func(string) SlackRelatedMemorySearchResult {
+		return SlackRelatedMemorySearchResult{Status: "no_relevant_memory", NoRelevantMemory: true}
+	}, 3)
+
+	if len(enriched) != 1 {
+		t.Fatalf("enriched = %#v, want one candidate", enriched)
+	}
+	if enriched[0].ReviewStatus != BackfillReviewNeedsContext {
+		t.Fatalf("ReviewStatus = %q, want %s", enriched[0].ReviewStatus, BackfillReviewNeedsContext)
+	}
+	if !strings.Contains(enriched[0].ReviewReason, "related memory evidence") {
+		t.Fatalf("ReviewReason = %q, want related memory evidence gate", enriched[0].ReviewReason)
+	}
+}
+
+func TestEnrichBackfillCandidatesWithoutSearchDemotesReadyCandidate(t *testing.T) {
+	candidates := []SlackBackfillCandidate{{
+		Classification: "unanswered_question",
+		Title:          "补一下这个开放问题",
+		ChannelID:      "C1",
+		ThreadTS:       "1",
+		OriginalText:   "这个 lobster avatar 的记忆应该怎么接？",
+		Draft:          "可以轻量补一句。",
+		ReviewStatus:   BackfillReviewReady,
+	}}
+
+	enriched := EnrichBackfillCandidatesWithRelatedMemory(candidates, nil, 3)
+
+	if enriched[0].ReviewStatus != BackfillReviewNeedsContext {
+		t.Fatalf("ReviewStatus = %q, want %s", enriched[0].ReviewStatus, BackfillReviewNeedsContext)
+	}
+	if !strings.Contains(enriched[0].ReviewReason, "not configured") {
+		t.Fatalf("ReviewReason = %q, want not configured reason", enriched[0].ReviewReason)
+	}
+}
+
+func TestEnrichBackfillCandidatesLeavesAgentReadLeadNonPostable(t *testing.T) {
+	candidates := []SlackBackfillCandidate{{
+		Classification: "link_followup_candidate",
+		Title:          "补读这条分享",
+		ChannelID:      "C1",
+		ThreadTS:       "1",
+		OriginalText:   "看看这个 https://example.com/paper.pdf",
+		Draft:          "needs agent read",
+		ReviewStatus:   BackfillReviewNeedsAgentRead,
+	}}
+
+	enriched := EnrichBackfillCandidatesWithRelatedMemory(candidates, nil, 3)
+
+	if enriched[0].ReviewStatus != BackfillReviewNeedsAgentRead {
+		t.Fatalf("ReviewStatus = %q, want %s", enriched[0].ReviewStatus, BackfillReviewNeedsAgentRead)
+	}
+}
+
+func TestEnrichBackfillCandidatesKeepsReadyWithCitedMemoryEvidence(t *testing.T) {
+	candidates := []SlackBackfillCandidate{{
+		Classification: "unanswered_question",
+		Title:          "补一下这个开放问题",
+		ChannelID:      "C1",
+		ThreadTS:       "1",
+		OriginalText:   "这个 lobster avatar 的记忆应该怎么接？",
+		Draft:          "可以轻量补一句。",
+		ReviewStatus:   BackfillReviewReady,
+	}}
+
+	enriched := EnrichBackfillCandidatesWithRelatedMemory(candidates, func(string) SlackRelatedMemorySearchResult {
+		return SlackRelatedMemorySearchResult{
+			Status: "ok",
+			Results: []SlackRelatedMemoryRecord{{
+				Kind:       "team_decision",
+				SourcePath: "memory/team/decisions/avatar-memory.md",
+				StartLine:  1,
+				EndLine:    4,
+				Content:    "Avatar memory should use a Pi-style memory agent and delegate Codex for code work.",
+				Score:      0.72,
+				Reasons:    []string{"lexical_match:0.72", "family_boost:team_decision"},
+			}},
+		}
+	}, 3)
+
+	if enriched[0].ReviewStatus != BackfillReviewReady {
+		t.Fatalf("ReviewStatus = %q, want %s", enriched[0].ReviewStatus, BackfillReviewReady)
+	}
+	if len(enriched[0].RelatedMemory) != 1 {
+		t.Fatalf("RelatedMemory = %#v, want one cited record", enriched[0].RelatedMemory)
+	}
+	out := RenderBackfillCandidatesMarkdown(enriched)
+	if !strings.Contains(out, "**Related memory**") || !strings.Contains(out, "memory/team/decisions/avatar-memory.md:1-4") {
+		t.Fatalf("rendered output missing related memory citation:\n%s", out)
+	}
+}
+
 // TestTruncateForMarkdownCollapsesWhitespace ensures the Markdown
 // excerpt is compact — Slack's plain-text export has \n line breaks
 // and Markdown quote blocks ("> ") render those badly without

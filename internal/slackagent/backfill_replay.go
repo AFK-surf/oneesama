@@ -54,6 +54,12 @@ type SlackBackfillCandidate struct {
 	// so an operator can correlate a candidate with the live
 	// followup entry in heartbeat surfaces / debug views.
 	FollowupID int64 `json:"followup_id,omitempty"`
+	// RelatedMemory contains evidence-rich memory records found for
+	// this candidate. Backfill reports use this as a quality gate:
+	// if a candidate would otherwise be postable but has no memory
+	// evidence and no delegated-agent read result, it must remain
+	// `needs_context` instead of pretending a generic draft is ready.
+	RelatedMemory []SlackRelatedMemoryRecord `json:"related_memory,omitempty"`
 }
 
 // SlackBackfillReplayInput is what the backfill scanner consumes. The
@@ -199,6 +205,7 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 				fmt.Fprintf(&b, " — %s", reason)
 			}
 			fmt.Fprintf(&b, "\n")
+			writeBackfillRelatedMemoryMarkdown(&b, c.RelatedMemory)
 			original := c.OriginalText
 			if original == "" {
 				original = "_(no fresh scan match; note comes verbatim from the persisted followup and needs thread refetch)_"
@@ -228,6 +235,24 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 		}
 	}
 	return b.String()
+}
+
+func writeBackfillRelatedMemoryMarkdown(b *strings.Builder, records []SlackRelatedMemoryRecord) {
+	if len(records) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "- **Related memory**:\n")
+	for _, record := range records {
+		source := firstNonEmpty(record.SourcePath, record.Source, record.SourceRef)
+		if record.StartLine > 0 {
+			source = fmt.Sprintf("%s:%d", source, record.StartLine)
+			if record.EndLine > record.StartLine {
+				source = fmt.Sprintf("%s-%d", source, record.EndLine)
+			}
+		}
+		snippet := truncateForMarkdown(record.Content, 180)
+		fmt.Fprintf(b, "  - `%s` `%s` score=%.2f — %s\n", firstNonEmpty(record.Kind, "memory"), source, record.Score, snippet)
+	}
 }
 
 const (
@@ -264,6 +289,96 @@ func markBackfillCandidateQuality(candidate SlackBackfillCandidate) SlackBackfil
 		candidate.ReviewReason = "candidate passes local quality gates"
 	}
 	return candidate
+}
+
+func EnrichBackfillCandidatesWithRelatedMemory(candidates []SlackBackfillCandidate, search func(string) SlackRelatedMemorySearchResult, limit int) []SlackBackfillCandidate {
+	if limit <= 0 {
+		limit = 3
+	}
+	out := make([]SlackBackfillCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = markBackfillCandidateQuality(candidate)
+		if search == nil {
+			if backfillCandidateNeedsMemoryEvidence(candidate) {
+				candidate.ReviewStatus = BackfillReviewNeedsContext
+				candidate.ReviewReason = "backfill related-memory search is not configured"
+			}
+			out = append(out, candidate)
+			continue
+		}
+		{
+			query := backfillRelatedMemoryQuery(candidate)
+			if strings.TrimSpace(query) != "" {
+				result := search(query)
+				candidate.RelatedMemory = credibleBackfillRelatedMemory(result.Results, limit)
+			}
+		}
+		if backfillCandidateNeedsMemoryEvidence(candidate) && len(candidate.RelatedMemory) == 0 {
+			candidate.ReviewStatus = BackfillReviewNeedsContext
+			candidate.ReviewReason = "backfill requires related memory evidence or delegated agent read before posting"
+		} else if strings.TrimSpace(candidate.ReviewStatus) == BackfillReviewReady && len(candidate.RelatedMemory) > 0 {
+			candidate.ReviewReason = "candidate passes local quality gates with related memory evidence"
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func backfillCandidateNeedsMemoryEvidence(candidate SlackBackfillCandidate) bool {
+	status, _ := backfillCandidateReviewStatus(candidate)
+	return status == BackfillReviewReady
+}
+
+func backfillRelatedMemoryQuery(candidate SlackBackfillCandidate) string {
+	parts := []string{
+		candidate.Classification,
+		candidate.Title,
+		candidate.OriginalText,
+	}
+	// The draft is useful only as a weak query-expansion source. It
+	// must not be rendered as evidence; related memory records still
+	// carry their own source/path/line citations.
+	if !strings.Contains(candidate.Draft, "connected agent") {
+		parts = append(parts, candidate.Draft)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func credibleBackfillRelatedMemory(records []SlackRelatedMemoryRecord, limit int) []SlackRelatedMemoryRecord {
+	if len(records) == 0 || limit <= 0 {
+		return nil
+	}
+	out := make([]SlackRelatedMemoryRecord, 0, limit)
+	for _, record := range records {
+		if !backfillRelatedMemoryRecordCredible(record) {
+			continue
+		}
+		out = append(out, record)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func backfillRelatedMemoryRecordCredible(record SlackRelatedMemoryRecord) bool {
+	if strings.TrimSpace(record.Content) == "" || strings.TrimSpace(firstNonEmpty(record.SourcePath, record.Source, record.SourceRef)) == "" {
+		return false
+	}
+	if record.Score >= 0.35 {
+		return true
+	}
+	for _, reason := range record.Reasons {
+		switch {
+		case strings.HasPrefix(reason, "family_boost:"),
+			reason == "project_or_repo_boost",
+			reason == "recent_memory",
+			reason == "feedback_match",
+			reason == "triage_projection_match":
+			return true
+		}
+	}
+	return false
 }
 
 func backfillCandidateReviewStatus(candidate SlackBackfillCandidate) (string, string) {

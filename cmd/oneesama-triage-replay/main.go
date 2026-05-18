@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -148,6 +149,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	fs.BoolVar(&resolveStaleFollowups, "persistence-resolve", false, "When set, the CLI writes `done` + resolution metadata back to the runtime store for followups dropped by TTL (expired) or refetch (superseded_by_human). Off by default — dry-run preserves replay determinism.")
 	var persistenceProvider string
 	fs.StringVar(&persistenceProvider, "persistence-provider", "", "Optional: persistence provider (e.g. 'json-file' or 'sqlite'). Defaults to runtime config default.")
+	var workspaceDir string
+	fs.StringVar(&workspaceDir, "workspace-dir", "", "Optional: Slack workspace memory directory. Defaults to ONEESAMA_SLACK_WORKSPACE_DIR / MAB_SLACK_WORKSPACE_DIR when set; enables related-memory evidence in the report.")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: oneesama-triage-replay [--output PATH] [--bot-user-ids U_BOT,U_OTHER] [--quiet]\n")
 		fmt.Fprintf(stderr, "       oneesama-triage-replay --live --channel C123,C456 [--since 24h] [--token xoxb-...] [--max-messages-per-channel 200]\n\n")
@@ -220,6 +223,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 			resolvedCount = resolved
 		}
 	}
+	workspaceDir = firstNonEmpty(strings.TrimSpace(workspaceDir), strings.TrimSpace(os.Getenv("ONEESAMA_SLACK_WORKSPACE_DIR")), strings.TrimSpace(os.Getenv("MAB_SLACK_WORKSPACE_DIR")))
+	if workspaceDir != "" {
+		candidates = enrichBackfillRelatedMemory(candidates, workspaceDir, persistenceDir, persistenceSQLite, persistenceProvider)
+	}
 
 	markdown := slackagent.RenderBackfillCandidatesMarkdown(candidates)
 	if liveMode {
@@ -266,6 +273,27 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		)
 	}
 	return 0
+}
+
+func enrichBackfillRelatedMemory(candidates []slackagent.SlackBackfillCandidate, workspaceDir string, persistenceDir string, persistenceSQLite string, persistenceProvider string) []slackagent.SlackBackfillCandidate {
+	workspaceDir = strings.TrimSpace(workspaceDir)
+	if workspaceDir == "" || len(candidates) == 0 {
+		return candidates
+	}
+	cfg := appconfig.PersistenceConfig{
+		Provider:   strings.TrimSpace(persistenceProvider),
+		DataDir:    strings.TrimSpace(persistenceDir),
+		SQLitePath: strings.TrimSpace(persistenceSQLite),
+	}
+	service := slackagent.NewService(slackagent.Config{
+		Persistence: cfg,
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: filepath.Clean(workspaceDir),
+		},
+	})
+	return slackagent.EnrichBackfillCandidatesWithRelatedMemory(candidates, func(query string) slackagent.SlackRelatedMemorySearchResult {
+		return service.SearchRelatedMemory(query, slackagent.SlackRelatedMemorySearchOptions{Limit: 5})
+	}, 3)
 }
 
 // runLive iterates --channel values and fans out to BackfillReplayLive.
