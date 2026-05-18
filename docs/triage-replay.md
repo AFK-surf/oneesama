@@ -131,6 +131,47 @@ Audit-safety rules:
    somewhere. Silent "0 candidates" reports are a confusing
    anti-pattern.
 
+## Persisted state merge (slice 3 piece A)
+
+Driver's #186 ships a live triage path that persists "wait for human,
+revisit in 90 min" decisions into `slack_heartbeat_followups`. Slice 3
+piece A makes the backfill report respect that state instead of
+re-discovering everything from scratch.
+
+Opt in via `--persistence-dir`:
+
+```
+oneesama-triage-replay \
+  --live --channel auto --since 24h \
+  --persistence-dir /var/lib/oneesama/state \
+  --persistence-provider json-file \
+  > replay.md
+```
+
+The merge runs after fresh classification, using
+`(channelID, threadRootTS, classification)` as the dedupe key:
+
+- **`persisted+fresh`** — backfill scan found the candidate AND a
+  live #186 followup matches the same key. Keep the fresh draft (it
+  has channel history context), but mark `FromPersistedState=true`
+  and cite the followup id.
+- **`persisted` (only)** — the followup exists in live state but the
+  backfill scan didn't see the root (e.g. window cut it off). The
+  candidate is synthesized using the followup's Title + Summary
+  **verbatim**, no re-classification or paraphrasing — the live
+  triage already wrote those with full thread context and the
+  backfill report respects that authority.
+- **`fresh`** — backfill scan only; no matching followup.
+
+Each candidate in the rendered Markdown shows a `Source` line with
+one of those three labels plus the `Followup ID` when applicable so
+the reviewer can correlate against live debug surfaces.
+
+If `--persistence-dir` is omitted, the merge is skipped silently and
+the report contains only fresh candidates. If the dir exists but
+opening the collection fails, the merge falls back to fresh
+candidates only with a stderr warning — non-fatal.
+
 ## What's NOT in slice 2 yet
 
 - **`--post`**. Driver owns the live `--post` toggle path. The dry-run

@@ -36,6 +36,21 @@ type SlackBackfillCandidate struct {
 	Title          string `json:"title"`
 	Draft          string `json:"draft"`
 	OriginalText   string `json:"original_text"`
+	// FromPersistedState is true when this candidate matches (or was
+	// promoted from) a row in the `slack_heartbeat_followups`
+	// collection populated by driver's #186 delayed_no_reply path.
+	// Driver-locked semantics from the slice-3 design thread:
+	//   - fresh + persisted overlap → existing fresh candidate keeps
+	//     its Draft, FromPersistedState flips true.
+	//   - persisted-only → synthesized candidate uses the followup's
+	//     Title + Summary verbatim; we do NOT re-classify or
+	//     paraphrase. The live triage already wrote those fields with
+	//     full thread context; the backfill report respects that.
+	FromPersistedState bool `json:"from_persisted_state,omitempty"`
+	// FollowupID lets the report cite the underlying persisted record
+	// so an operator can correlate a candidate with the live
+	// followup entry in heartbeat surfaces / debug views.
+	FollowupID int64 `json:"followup_id,omitempty"`
 }
 
 // SlackBackfillReplayInput is what the backfill scanner consumes. The
@@ -156,12 +171,42 @@ func RenderBackfillCandidatesMarkdown(candidates []SlackBackfillCandidate) strin
 			fmt.Fprintf(&b, "### %d. %s\n\n", i+1, c.Title)
 			fmt.Fprintf(&b, "- **Channel**: `%s`\n", c.ChannelID)
 			fmt.Fprintf(&b, "- **Thread / message ts**: `%s`\n", anchor)
-			fmt.Fprintf(&b, "- **Original**:\n  > %s\n\n", truncateForMarkdown(c.OriginalText, 240))
+			// Driver-audit-required source label (slice 3 piece A).
+			// `fresh` = found by this scan only.
+			// `persisted+fresh` = also matches a live #186 followup.
+			// `persisted` = surfaced only because of #186 state; the
+			//               24h scan window did not see the root.
+			source := candidateSourceLabel(c)
+			fmt.Fprintf(&b, "- **Source**: %s\n", source)
+			if c.FollowupID > 0 {
+				fmt.Fprintf(&b, "- **Followup ID**: %d\n", c.FollowupID)
+			}
+			original := c.OriginalText
+			if original == "" {
+				original = "_(no fresh scan match; draft comes verbatim from the persisted followup)_"
+			} else {
+				original = "> " + truncateForMarkdown(original, 240)
+			}
+			fmt.Fprintf(&b, "- **Original**:\n  %s\n\n", original)
 			fmt.Fprintf(&b, "**Draft reply**:\n\n%s\n\n", c.Draft)
 			fmt.Fprintf(&b, "---\n\n")
 		}
 	}
 	return b.String()
+}
+
+// candidateSourceLabel renders the (FromPersistedState, OriginalText)
+// combination as a single short label. Used in the per-candidate
+// Markdown header so a reviewer can sort by trust signal at a glance.
+func candidateSourceLabel(c SlackBackfillCandidate) string {
+	switch {
+	case c.FromPersistedState && strings.TrimSpace(c.OriginalText) == "":
+		return "`persisted` (only #186 state; backfill scan did not see root)"
+	case c.FromPersistedState:
+		return "`persisted+fresh` (matched live #186 followup AND backfill scan)"
+	default:
+		return "`fresh` (backfill scan only)"
+	}
 }
 
 // isAuthoredByBot recognises a message as bot-authored when ANY of:

@@ -33,7 +33,40 @@ import (
 	"time"
 
 	"github.com/AFK-surf/oneesama/internal/slackagent"
+	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
+
+// mergePersistedState loads the runtime's persisted `delayed_no_reply`
+// followups and folds them into the fresh candidate list using the
+// (channel, thread, classification) dedupe key. Returns the new
+// candidate list and the count of persisted records that were merged
+// (for the stderr breadcrumb + Markdown footer).
+//
+// Failure to open the store is treated as non-fatal by the caller —
+// we still surface fresh candidates instead of zero-output.
+func mergePersistedState(
+	candidates []slackagent.SlackBackfillCandidate,
+	dataDir string,
+	sqlitePath string,
+	provider string,
+) ([]slackagent.SlackBackfillCandidate, int, error) {
+	cfg := appconfig.PersistenceConfig{
+		Provider:   strings.TrimSpace(provider),
+		DataDir:    strings.TrimSpace(dataDir),
+		SQLitePath: strings.TrimSpace(sqlitePath),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	followups, err := slackagent.LoadDelayedNoReplyFollowups(ctx, cfg)
+	if err != nil {
+		return candidates, 0, err
+	}
+	if len(followups) == 0 {
+		return candidates, 0, nil
+	}
+	merged := slackagent.MergePersistedDelayedNoReply(candidates, followups)
+	return merged, len(followups), nil
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
@@ -60,6 +93,12 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	fs.DurationVar(&sinceFlag, "since", 24*time.Hour, "Live mode: only consider messages newer than this duration.")
 	fs.StringVar(&token, "token", "", "Live mode: Slack bot token (xoxb-...). Falls back to ONEESAMA_SLACK_BOT_TOKEN env var.")
 	fs.IntVar(&maxPerChan, "max-messages-per-channel", 200, "Live mode: stop scanning a channel after this many messages (truncation flag set when hit).")
+	var persistenceDir string
+	fs.StringVar(&persistenceDir, "persistence-dir", "", "Optional: directory of the live runtime's persistence state (slice 3 piece A). When set, merges delayed_no_reply followups into the report so persisted 'wait for human' state isn't lost from candidates.")
+	var persistenceSQLite string
+	fs.StringVar(&persistenceSQLite, "persistence-sqlite", "", "Optional: explicit SQLite file path for runtime persistence (overrides --persistence-dir/state.sqlite3 default).")
+	var persistenceProvider string
+	fs.StringVar(&persistenceProvider, "persistence-provider", "", "Optional: persistence provider (e.g. 'json-file' or 'sqlite'). Defaults to runtime config default.")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: oneesama-triage-replay [--output PATH] [--bot-user-ids U_BOT,U_OTHER] [--quiet]\n")
 		fmt.Fprintf(stderr, "       oneesama-triage-replay --live --channel C123,C456 [--since 24h] [--token xoxb-...] [--max-messages-per-channel 200]\n\n")
@@ -98,9 +137,29 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 
+	// Slice 3 piece A: optional persisted-state merge. Opt-in via
+	// --persistence-dir; the CLI stays usable without runtime state
+	// access (e.g. when running against a stale Slack export).
+	persistedMerged := 0
+	if strings.TrimSpace(persistenceDir) != "" || strings.TrimSpace(persistenceSQLite) != "" {
+		merged, mergeStats, mergeErr := mergePersistedState(
+			candidates, persistenceDir, persistenceSQLite, persistenceProvider,
+		)
+		if mergeErr != nil {
+			fmt.Fprintf(stderr, "oneesama-triage-replay: persisted state merge: %v\n", mergeErr)
+			// Non-fatal: keep going with fresh candidates only.
+		} else {
+			candidates = merged
+			persistedMerged = mergeStats
+		}
+	}
+
 	markdown := slackagent.RenderBackfillCandidatesMarkdown(candidates)
 	if liveMode {
 		markdown = appendLiveStatsSection(markdown, liveStats)
+	}
+	if persistedMerged > 0 {
+		markdown += fmt.Sprintf("\n_Persisted state merged: %d delayed_no_reply followup(s) from runtime store._\n", persistedMerged)
 	}
 
 	dest, closeFn, openErr := openOutput(outputPath, stdout)

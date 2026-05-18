@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -326,6 +327,95 @@ func writeFakeSlackJSON(t *testing.T, w http.ResponseWriter, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		t.Fatalf("encode fake response: %v", err)
+	}
+}
+
+// TestRunPersistenceMergeFolds186StateIntoReport is the end-to-end
+// proof for slice 3 piece A: write a `slack_heartbeat_followups`
+// json-file collection (the simplest persistence backend), point the
+// CLI at the dir via --persistence-dir, and confirm the persisted
+// delayed_no_reply followup appears in the candidate report with
+// `FromPersistedState=true` source label.
+func TestRunPersistenceMergeFolds186StateIntoReport(t *testing.T) {
+	dir := t.TempDir()
+	// json-file persistence uses one file per collection at
+	// {dataDir}/{collection}.json, with an envelope listing entries.
+	// Mirror that layout so the CLI sees a realistic runtime state
+	// snapshot when it points --persistence-dir at this temp dir.
+	collectionPath := dir + "/slack_heartbeat_followups.json"
+	envelope := `{
+		"schema": "oneesama.collection.v1",
+		"collection": "slack_heartbeat_followups",
+		"updated_at": "2026-05-18T05:00:00Z",
+		"items": [
+			{
+				"id": "99",
+				"value": {
+					"id": 99,
+					"kind": "delayed_no_reply",
+					"channel_id": "C_PERSISTED",
+					"thread_ts": "1779009000.000",
+					"title": "补一下这个开放问题",
+					"summary": "我理解是在问\"canvas writes 是否安全上线?\"。建议先确认 dry-run 报告...",
+					"status": "scheduled",
+					"created_at": "2026-05-18T05:00:00Z",
+					"updated_at": "2026-05-18T05:00:00Z",
+					"metadata": {"classification": "unanswered_question"}
+				}
+			}
+		]
+	}`
+	if err := os.WriteFile(collectionPath, []byte(envelope), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Run the CLI in stdin/NDJSON mode (no live fetch needed; we
+	// only care that the persistence merge runs against a known
+	// disk state) with one fresh candidate that does NOT match the
+	// persisted record's dedupe key.
+	ndjson := `{"channelId":"C_FRESH","user_id":"U_PENG","ts":"100.000","text":"为什么 build cache 一直不命中？"}`
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--persistence-dir", dir, "--persistence-provider", "json-file", "--quiet"},
+		strings.NewReader(ndjson), &stdout, &stderr,
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "C_FRESH") {
+		t.Errorf("fresh candidate missing from output:\n%s", out)
+	}
+	if !strings.Contains(out, "C_PERSISTED") {
+		t.Errorf("persisted candidate missing from output:\n%s", out)
+	}
+	if !strings.Contains(out, "`persisted` (only #186 state") {
+		t.Errorf("persisted-only source label missing:\n%s", out)
+	}
+	if !strings.Contains(out, "**Followup ID**: 99") {
+		t.Errorf("FollowupID citation missing:\n%s", out)
+	}
+	if !strings.Contains(out, "Persisted state merged: 1 delayed_no_reply followup(s)") {
+		t.Errorf("merge footer missing:\n%s", out)
+	}
+}
+
+// TestRunPersistenceMergeMissingDirFailsGracefully ensures the
+// persistence merge is non-fatal: pointing at a non-existent path
+// emits a stderr warning but keeps the fresh candidates in the
+// output.
+func TestRunPersistenceMergeMissingDirFailsGracefully(t *testing.T) {
+	ndjson := `{"channelId":"C1","user_id":"U_PENG","ts":"100.000","text":"为什么 build cache 一直不命中？"}`
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--persistence-dir", "/nonexistent/path/that/should/not/exist/" + t.Name(), "--persistence-provider", "json-file"},
+		strings.NewReader(ndjson), &stdout, &stderr,
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, expected 0 (non-fatal); stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "C1") {
+		t.Errorf("fresh candidate missing from output:\n%s", stdout.String())
 	}
 }
 
