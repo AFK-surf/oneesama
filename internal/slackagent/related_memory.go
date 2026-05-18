@@ -83,6 +83,16 @@ func (s *Service) SearchRelatedMemory(query string, options SlackRelatedMemorySe
 	return result
 }
 
+func (s *Service) searchSlackTriageRelatedMemory(query string, limit int) SlackRelatedMemorySearchResult {
+	result := s.SearchRelatedMemory(query, SlackRelatedMemorySearchOptions{Limit: limit})
+	result.Results = credibleBackfillRelatedMemory(result.Results, limit)
+	if len(result.Results) == 0 {
+		result.Status = "no_relevant_memory"
+		result.NoRelevantMemory = true
+	}
+	return result
+}
+
 func relatedMemoryWorkspaceRecords(workspaceDir string, tokens []string, now time.Time) []SlackRelatedMemoryRecord {
 	if strings.TrimSpace(workspaceDir) == "" {
 		return nil

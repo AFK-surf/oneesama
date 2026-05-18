@@ -50,6 +50,9 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 	if recentMemory != "" {
 		contextBlocks = append(contextBlocks, "Relevant local memory:\n"+recentMemory)
 	}
+	if relatedMemory := formatSlackRelatedMemoryEvidence(input.RelatedMemory, 5); relatedMemory != "" {
+		contextBlocks = append(contextBlocks, "Related memory evidence (cite source path/lines when using; ignore weak or irrelevant hits):\n"+relatedMemory)
+	}
 	if input.PreviousTriage != "" {
 		contextBlocks = append(contextBlocks, input.PreviousTriage)
 	}
@@ -116,6 +119,7 @@ type SlackTriagePromptInput struct {
 	Digest         string
 	ChannelBrain   *SlackChannelBrain
 	LocalMemory    []SlackTriageMemoryEntry
+	RelatedMemory  []SlackRelatedMemoryRecord
 	PreviousTriage string
 	ExternalLinks  []SlackExternalLinkContext
 	ThreadContexts []SlackTriageThreadContext
@@ -141,6 +145,46 @@ func formatSlackTriageMemory(entries []SlackTriageMemoryEntry) string {
 		lines = append(lines, strconv.Itoa(index+1)+". "+label+": "+content)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatSlackRelatedMemoryEvidence(records []SlackRelatedMemoryRecord, limit int) string {
+	if len(records) == 0 || limit <= 0 {
+		return ""
+	}
+	lines := make([]string, 0, limit)
+	for index, record := range records {
+		if index >= limit {
+			break
+		}
+		content := truncateSlackContextText(strings.TrimSpace(record.Content), 420)
+		if content == "" {
+			continue
+		}
+		citation := slackRelatedMemoryCitation(record)
+		if citation == "" {
+			continue
+		}
+		kind := strings.TrimSpace(record.Kind)
+		if kind != "" {
+			kind = " [" + kind + "]"
+		}
+		lines = append(lines, strconv.Itoa(len(lines)+1)+". "+citation+kind+": "+content)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func slackRelatedMemoryCitation(record SlackRelatedMemoryRecord) string {
+	source := strings.TrimSpace(firstNonEmpty(record.SourcePath, record.Source, record.SourceRef))
+	if source == "" {
+		return ""
+	}
+	if record.StartLine > 0 {
+		if record.EndLine > 0 && record.EndLine != record.StartLine {
+			return source + ":" + strconv.Itoa(record.StartLine) + "-" + strconv.Itoa(record.EndLine)
+		}
+		return source + ":" + strconv.Itoa(record.StartLine)
+	}
+	return source
 }
 
 func formatSlackTriageThreadContexts(contexts []SlackTriageThreadContext) string {

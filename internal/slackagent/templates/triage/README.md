@@ -18,5 +18,5 @@ Supported template data fields:
 - `Subject`
 - `Excerpt`
 - `URL`
+- `Evidence`
 - `Language`
-

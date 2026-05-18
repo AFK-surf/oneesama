@@ -721,12 +721,14 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
 	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(digest, 5), digest)
+	relatedMemory := s.searchSlackTriageRelatedMemory(digest, 5)
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
 		ChannelID:      channelID,
 		Messages:       messages,
 		Digest:         digest,
 		ChannelBrain:   channelBrain,
 		LocalMemory:    localMemory,
+		RelatedMemory:  relatedMemory.Results,
 		PreviousTriage: formatTriageContexts(previous),
 		ExternalLinks:  externalLinks,
 		ThreadContexts: threadContexts,
@@ -752,6 +754,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 			"query":   digest,
 			"limit":   5,
 		},
+		"relatedMemory": relatedMemory,
 		"domainContext": map[string]any{
 			"channelBrain": channelBrain,
 			"recentThreads": func() []SlackThreadLedgerRecord {

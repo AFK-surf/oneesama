@@ -79,7 +79,8 @@ func (s *Service) surfaceOneFollowup(ctx context.Context, followup SlackHeartbea
 		}
 		return surface, err
 	}
-	message := buildHeartbeatSurfaceMessage(followup.Title, followup.Summary)
+	surfaceSummary, relatedMemory := s.enrichDelayedNoReplySurfaceSummary(followup)
+	message := buildHeartbeatSurfaceMessage(followup.Title, surfaceSummary)
 	post := s.poster.PostMessage(ctx, PostMessageInput{
 		Channel:  plan.ChannelID,
 		ThreadTS: heartbeatPostThreadTS(plan),
@@ -102,6 +103,14 @@ func (s *Service) surfaceOneFollowup(ctx context.Context, followup SlackHeartbea
 	}
 	if status == heartbeatSurfaceStatusSent || status == heartbeatSurfaceStatusFallbackSent {
 		followup.LastSurfacedAt = now.UTC().Format(time.RFC3339Nano)
+		if len(relatedMemory) > 0 {
+			if followup.Metadata == nil {
+				followup.Metadata = map[string]any{}
+			}
+			followup.Metadata["related_memory_checked_at"] = now.UTC().Format(time.RFC3339Nano)
+			followup.Metadata["related_memory_count"] = len(relatedMemory)
+			followup.Metadata["related_memory_sources"] = relatedMemorySources(relatedMemory)
+		}
 		if heartbeatFollowupClosesAfterSurface(followup) {
 			followup.Status = "done"
 			if followup.Metadata == nil {
@@ -115,6 +124,56 @@ func (s *Service) surfaceOneFollowup(ctx context.Context, followup SlackHeartbea
 		}
 	}
 	return surface, nil
+}
+
+func (s *Service) enrichDelayedNoReplySurfaceSummary(followup SlackHeartbeatFollowup) (string, []SlackRelatedMemoryRecord) {
+	summary := strings.TrimSpace(followup.Summary)
+	if !strings.EqualFold(followup.Kind, slackDelayedNoReplyFollowupKind) {
+		return summary, nil
+	}
+	query := strings.Join([]string{
+		strings.TrimSpace(followup.Title),
+		summary,
+		strings.TrimSpace(stringFromAny(followup.Metadata["classification"])),
+		strings.TrimSpace(followup.ChannelID),
+		strings.TrimSpace(followup.ThreadTS),
+	}, "\n")
+	result := s.searchSlackTriageRelatedMemory(query, 3)
+	if len(result.Results) == 0 {
+		return summary, nil
+	}
+	evidence := formatSlackRelatedMemoryEvidence(result.Results, 3)
+	if evidence == "" {
+		return summary, nil
+	}
+	return strings.TrimSpace(summary + "\n\n" + renderRelatedMemoryEvidenceFooter(evidence, summary)), result.Results
+}
+
+func relatedMemorySources(records []SlackRelatedMemoryRecord) []string {
+	sources := make([]string, 0, len(records))
+	for _, record := range records {
+		if source := slackRelatedMemoryCitation(record); source != "" {
+			sources = append(sources, source)
+		}
+	}
+	return sources
+}
+
+func renderRelatedMemoryEvidenceFooter(evidence string, contextText string) string {
+	language := "en"
+	if containsCJK(contextText) {
+		language = "zh"
+	}
+	if rendered, err := renderTriageReplyTemplate("related_memory_evidence", language, triageReplyTemplateData{
+		Evidence: evidence,
+		Language: language,
+	}); err == nil && strings.TrimSpace(rendered) != "" {
+		return rendered
+	}
+	if language == "zh" {
+		return "相关记忆证据：\n" + evidence
+	}
+	return "Related memory evidence:\n" + evidence
 }
 
 func heartbeatFollowupClosesAfterSurface(followup SlackHeartbeatFollowup) bool {

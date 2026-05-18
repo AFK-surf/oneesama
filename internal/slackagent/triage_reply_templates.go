@@ -21,6 +21,7 @@ type triageReplyTemplateData struct {
 	Subject        string
 	Excerpt        string
 	URL            string
+	Evidence       string
 	Language       string
 }
 

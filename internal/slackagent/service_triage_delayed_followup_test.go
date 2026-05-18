@@ -129,6 +129,61 @@ func TestDelayedNoReplyFollowupSurfacesOnceAndCloses(t *testing.T) {
 	}
 }
 
+func TestDelayedNoReplyFollowupSurfacesWithFreshRelatedMemoryEvidence(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	previousClock := timeNow
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/team/questions/bridge-memory.md", strings.Join([]string{
+		"# Bridge memory Aha",
+		"",
+		"Bridge memory Aha Moment replies should cite related-topic recall evidence before speaking.",
+		"The avatar should separate memory evidence from worker implementation details.",
+	}, "\n"))
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+		Poster:      poster,
+	})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{
+		Kind:        slackDelayedNoReplyFollowupKind,
+		Title:       "补一下这个开放问题",
+		Summary:     "补一下这条：bridge memory Aha Moment 没人接时应该引用记忆证据。",
+		SourceKind:  heartbeatSourceKindThread,
+		ChannelID:   "C123",
+		ThreadTS:    "123.456",
+		SourceRef:   "delayed_no_reply:C123:123.456",
+		Priority:    heartbeatFollowupPriorityUrgent,
+		NextCheckAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+		Metadata:    map[string]any{"one_shot": true, "classification": "unanswered_question"},
+	})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	calls := poster.Calls()
+	if len(response.Posted) != 1 || len(calls) != 1 {
+		t.Fatalf("response=%#v calls=%#v, want one post", response, calls)
+	}
+	if !strings.Contains(calls[0].Text, "相关记忆证据") || !strings.Contains(calls[0].Text, "memory/team/questions/bridge-memory.md:1-4") {
+		t.Fatalf("posted text missing related memory citation:\n%s", calls[0].Text)
+	}
+	updated, err := service.followups.GetFollowup(context.Background(), record.ID)
+	if err != nil {
+		t.Fatalf("GetFollowup: %v", err)
+	}
+	if updated == nil || intFromAny(updated.Metadata["related_memory_count"]) != 1 {
+		t.Fatalf("updated = %#v, want related memory metadata", updated)
+	}
+}
+
 func TestDelayedNoReplyFollowupSkipsWhenThreadHasNewerActivity(t *testing.T) {
 	createdAt := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	current := createdAt

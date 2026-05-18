@@ -60,6 +60,35 @@ func TestBuildSlackTriagePromptUsesCueboardTwoPassPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildSlackTriagePromptIncludesRelatedMemoryEvidenceWithCitations(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
+		ChannelID: "C123",
+		Digest:    "为什么 bridge memory 没接住 Aha Moment?",
+		RelatedMemory: []SlackRelatedMemoryRecord{{
+			Kind:       "team_question",
+			Source:     "memory/team/questions/bridge-memory.md",
+			SourcePath: "memory/team/questions/bridge-memory.md",
+			StartLine:  3,
+			EndLine:    5,
+			Content:    "Bridge memory Aha moments should cite related-topic recall evidence before replying.",
+			Score:      0.72,
+		}},
+	})
+	for _, want := range []string{
+		"Related memory evidence",
+		"cite source path/lines",
+		"memory/team/questions/bridge-memory.md:3-5",
+		"[team_question]",
+		"Bridge memory Aha moments",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing related memory evidence %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestCueboardDefaultPromptsCarryLegacyToolFirstRules(t *testing.T) {
 	t.Parallel()
 
