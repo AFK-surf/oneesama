@@ -38,9 +38,13 @@ import (
 
 // mergePersistedState loads the runtime's persisted `delayed_no_reply`
 // followups and folds them into the fresh candidate list using the
-// (channel, thread, classification) dedupe key. Returns the new
-// candidate list and the count of persisted records that were merged
-// (for the stderr breadcrumb + Markdown footer).
+// (channel, thread, classification) dedupe key. When `token` is
+// non-empty, persisted-only candidates are re-verified against Slack
+// (conversations.replies) BEFORE surfacing: if a human already
+// replied, the followup is reported as superseded and dropped from
+// the candidate list so the report never shows stale persisted leads
+// as postable. The returned `supersededCount` is the number of
+// followups dropped by refetch verification.
 //
 // Failure to open the store is treated as non-fatal by the caller —
 // we still surface fresh candidates instead of zero-output.
@@ -49,23 +53,26 @@ func mergePersistedState(
 	dataDir string,
 	sqlitePath string,
 	provider string,
-) ([]slackagent.SlackBackfillCandidate, int, error) {
+	token string,
+	botUserIDs []string,
+) ([]slackagent.SlackBackfillCandidate, int, int, error) {
 	cfg := appconfig.PersistenceConfig{
 		Provider:   strings.TrimSpace(provider),
 		DataDir:    strings.TrimSpace(dataDir),
 		SQLitePath: strings.TrimSpace(sqlitePath),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	followups, err := slackagent.LoadDelayedNoReplyFollowups(ctx, cfg)
 	if err != nil {
-		return candidates, 0, err
+		return candidates, 0, 0, err
 	}
 	if len(followups) == 0 {
-		return candidates, 0, nil
+		return candidates, 0, 0, nil
 	}
-	merged := slackagent.MergePersistedDelayedNoReply(candidates, followups)
-	return merged, len(followups), nil
+	refetcher := slackagent.NewBackfillSlackRefetcher(token, botUserIDs)
+	merged, superseded := slackagent.MergeAndRefetchPersistedDelayedNoReply(ctx, candidates, followups, refetcher)
+	return merged, len(followups), len(superseded), nil
 }
 
 func main() {
@@ -137,20 +144,33 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 
-	// Slice 3 piece A: optional persisted-state merge. Opt-in via
-	// --persistence-dir; the CLI stays usable without runtime state
-	// access (e.g. when running against a stale Slack export).
+	// Slice 3 piece A + refetch upgrade: optional persisted-state
+	// merge. Opt-in via --persistence-dir; the CLI stays usable
+	// without runtime state access (e.g. when running against a
+	// stale Slack export). When a live bot token is available
+	// (either --token flag or ONEESAMA_SLACK_BOT_TOKEN env), the
+	// merger re-checks each persisted-only thread via
+	// conversations.replies BEFORE surfacing — followups whose thread
+	// has since gotten a human reply are dropped from the report so
+	// stale persisted leads do not appear as postable candidates.
 	persistenceAttempted := false
+	supersededCount := 0
 	if strings.TrimSpace(persistenceDir) != "" || strings.TrimSpace(persistenceSQLite) != "" {
 		persistenceAttempted = true
-		merged, _, mergeErr := mergePersistedState(
+		refetchToken := strings.TrimSpace(token)
+		if refetchToken == "" {
+			refetchToken = strings.TrimSpace(os.Getenv("ONEESAMA_SLACK_BOT_TOKEN"))
+		}
+		merged, _, superseded, mergeErr := mergePersistedState(
 			candidates, persistenceDir, persistenceSQLite, persistenceProvider,
+			refetchToken, botUserIDs,
 		)
 		if mergeErr != nil {
 			fmt.Fprintf(stderr, "oneesama-triage-replay: persisted state merge: %v\n", mergeErr)
 			// Non-fatal: keep going with fresh candidates only.
 		} else {
 			candidates = merged
+			supersededCount = superseded
 		}
 	}
 
@@ -169,8 +189,11 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 				fromPersisted++
 			}
 		}
-		if fromPersisted > 0 {
-			markdown += fmt.Sprintf("\n_Persisted state merged: %d candidate(s) carry FromPersistedState=true in the rendered report._\n", fromPersisted)
+		if fromPersisted > 0 || supersededCount > 0 {
+			markdown += fmt.Sprintf(
+				"\n_Persisted state merged: %d candidate(s) carry FromPersistedState=true; %d superseded by human reply (dropped from report)._\n",
+				fromPersisted, supersededCount,
+			)
 		}
 	}
 
