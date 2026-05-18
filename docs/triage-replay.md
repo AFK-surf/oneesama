@@ -54,18 +54,64 @@ the live triage path and the backfill scan classify the same way:
 - `synthesis_eligible_thread` — discussion thread that's worth a brief
   synthesis even though no specific question was asked.
 
-## What's NOT in slice 1
+## Live mode (slice 2)
+
+Slice 2 added a `--live` mode that calls Slack
+`conversations.history` + `conversations.replies` directly so the
+operator doesn't have to materialise NDJSON manually:
+
+```
+oneesama-triage-replay \
+  --live \
+  --channel C0AQ0C0KVMH,C0123ABC \
+  --since 24h \
+  --token "$ONEESAMA_SLACK_BOT_TOKEN" \
+  --bot-user-ids U_BOT \
+  --max-messages-per-channel 200 \
+  > replay.md
+```
+
+If `--token` is omitted, the CLI reads `ONEESAMA_SLACK_BOT_TOKEN`
+from the environment.
+
+Live-mode guardrails applied (per driver audit of `97f01a7`):
+
+1. **Two-stage replies fetch.** History is fetched first; only when
+   `reply_count > 0` does the CLI issue a follow-up
+   `conversations.replies` call. Saves quota on quiet channels.
+2. **Pagination.** `response_metadata.next_cursor` is followed until
+   the window is drained or the `--max-messages-per-channel` cap is
+   hit.
+3. **Truncation flag.** When the cap fires, the per-channel coverage
+   row carries `Truncated=true` so the report never misrepresents
+   coverage.
+4. **429 retry hard cap.** Slack rate-limit responses honour the
+   `Retry-After` header up to 3 attempts per call; afterwards the
+   failure surfaces as a warning entry, not a whole-run abort.
+5. **No-post.** Live mode still emits a Markdown report and nothing
+   else. The driver's live triage path is the only place that
+   actually posts. `--post` is intentionally absent from this CLI.
+
+The Markdown report ends with a `## Live scan coverage` table:
+
+| Channel | Scanned | Replies fetched | Candidates | Truncated | 429 retries | Warnings |
+|---|---:|---:|---:|---|---:|---|
+| `C1` | 47 | 3 | 4 | false | 0 | — |
+| `C2` | 200 | 18 | 12 | true | 1 | — |
+
+## What's NOT in slice 2 yet
 
 - **`--post`**. Driver owns the live `--post` toggle path. The dry-run
   CLI cannot send Slack messages.
-- **Live `conversations.history` fetch**. The CLI does not call Slack.
-  Slice 2 will add `--live --channel C123 --since 24h` so the operator
-  doesn't need to materialise NDJSON manually.
-- **Persistence**. Candidates are not stored anywhere — re-running the
-  CLI on the same input produces the same report (the algorithm is
-  pure). Driver's #186 already persists "wait-for-human" decisions in
-  live triage state; future slices can read that state to enrich
-  candidates.
+- **Auto-discovery of channels**. You still pass `--channel` explicitly.
+  Auto-pulling the bot's joined channel list from `slack_channels`
+  typed collection is queued for a later slice.
+- **Persisted-state merge**. Driver's #186 persists "wait-for-human"
+  decisions; reading those to enrich/dedupe candidates is queued for
+  a later slice.
+- **External link content enrichment**. The classifier already detects
+  shared-link / article shares; pulling the article body for richer
+  drafts is a follow-up.
 
 ## Why dry-run first
 

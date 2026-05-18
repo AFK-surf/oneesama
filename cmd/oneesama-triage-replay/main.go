@@ -22,6 +22,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -29,6 +30,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/AFK-surf/oneesama/internal/slackagent"
 )
@@ -44,19 +46,31 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		outputPath string
 		botIDsFlag string
 		quiet      bool
+		liveMode   bool
+		channels   string
+		sinceFlag  time.Duration
+		token      string
+		maxPerChan int
 	)
 	fs.StringVar(&outputPath, "output", "", "Markdown report path. Use '-' or omit for stdout.")
 	fs.StringVar(&botIDsFlag, "bot-user-ids", "", "Comma-separated Slack user ids for oneesama bots; messages from these users are excluded.")
 	fs.BoolVar(&quiet, "quiet", false, "Suppress informational stderr summary (errors still print).")
+	fs.BoolVar(&liveMode, "live", false, "Live mode: call Slack conversations.history directly instead of reading NDJSON from stdin.")
+	fs.StringVar(&channels, "channel", "", "Comma-separated channel ids to scan (required in --live mode). Example: C0AQ0C0KVMH,C0123ABC.")
+	fs.DurationVar(&sinceFlag, "since", 24*time.Hour, "Live mode: only consider messages newer than this duration.")
+	fs.StringVar(&token, "token", "", "Live mode: Slack bot token (xoxb-...). Falls back to ONEESAMA_SLACK_BOT_TOKEN env var.")
+	fs.IntVar(&maxPerChan, "max-messages-per-channel", 200, "Live mode: stop scanning a channel after this many messages (truncation flag set when hit).")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: oneesama-triage-replay [--output PATH] [--bot-user-ids U_BOT,U_OTHER] [--quiet]\n\n")
-		fmt.Fprintf(stderr, "Reads NDJSON SlackInboundMessage objects from stdin and emits a\n")
-		fmt.Fprintf(stderr, "Markdown report of candidate follow-up replies. Nothing is posted —\n")
-		fmt.Fprintf(stderr, "this is a dry-run surface. Use it to review what oneesama would\n")
-		fmt.Fprintf(stderr, "say before wiring a live --post path.\n\n")
-		fmt.Fprintf(stderr, "Input format: one JSON object per line with at minimum `channelId`,\n")
-		fmt.Fprintf(stderr, "`ts`, `user_id`, `text`. Replies belonging to a thread share the\n")
-		fmt.Fprintf(stderr, "thread root via the `thread_ts` field.\n\n")
+		fmt.Fprintf(stderr, "Usage: oneesama-triage-replay [--output PATH] [--bot-user-ids U_BOT,U_OTHER] [--quiet]\n")
+		fmt.Fprintf(stderr, "       oneesama-triage-replay --live --channel C123,C456 [--since 24h] [--token xoxb-...] [--max-messages-per-channel 200]\n\n")
+		fmt.Fprintf(stderr, "Two input modes:\n\n")
+		fmt.Fprintf(stderr, "  Default (NDJSON):  Reads one SlackInboundMessage per stdin line.\n")
+		fmt.Fprintf(stderr, "                     Useful for fixtures, exports, replay testing.\n")
+		fmt.Fprintf(stderr, "  --live:            Calls Slack conversations.history + .replies\n")
+		fmt.Fprintf(stderr, "                     directly for each --channel. Pagination, 429\n")
+		fmt.Fprintf(stderr, "                     retry, and truncation flags are handled.\n\n")
+		fmt.Fprintf(stderr, "Both modes are dry-run: nothing is posted to Slack. The output is\n")
+		fmt.Fprintf(stderr, "a Markdown report of candidate follow-up replies for human review.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -68,37 +82,137 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 
 	botUserIDs := splitCSV(botIDsFlag)
 
-	messages, err := readMessages(stdin)
-	if err != nil {
-		fmt.Fprintf(stderr, "oneesama-triage-replay: read messages: %v\n", err)
-		return 1
+	var (
+		candidates []slackagent.SlackBackfillCandidate
+		liveStats  []slackagent.SlackBackfillReplayLiveStats
+		scanned    int
+		err        error
+	)
+	if liveMode {
+		candidates, liveStats, scanned, err = runLive(stderr, channels, sinceFlag, token, maxPerChan, botUserIDs)
+	} else {
+		candidates, scanned, err = runStdin(stdin, botUserIDs)
 	}
-	if len(messages) == 0 {
-		fmt.Fprintf(stderr, "oneesama-triage-replay: input contained no SlackInboundMessage records\n")
+	if err != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-replay: %v\n", err)
 		return 1
 	}
 
-	candidates := classifyAll(messages, botUserIDs)
 	markdown := slackagent.RenderBackfillCandidatesMarkdown(candidates)
+	if liveMode {
+		markdown = appendLiveStatsSection(markdown, liveStats)
+	}
 
-	dest, closeFn, err := openOutput(outputPath, stdout)
-	if err != nil {
-		fmt.Fprintf(stderr, "oneesama-triage-replay: open output: %v\n", err)
+	dest, closeFn, openErr := openOutput(outputPath, stdout)
+	if openErr != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-replay: open output: %v\n", openErr)
 		return 1
 	}
 	defer closeFn()
-	if _, err := dest.Write([]byte(markdown)); err != nil {
-		fmt.Fprintf(stderr, "oneesama-triage-replay: write output: %v\n", err)
+	if _, writeErr := dest.Write([]byte(markdown)); writeErr != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-replay: write output: %v\n", writeErr)
 		return 1
 	}
 
 	if !quiet {
 		fmt.Fprintf(stderr,
 			"oneesama-triage-replay: scanned %d message(s), produced %d candidate(s) → %s\n",
-			len(messages), len(candidates), describeOutput(outputPath),
+			scanned, len(candidates), describeOutput(outputPath),
 		)
 	}
 	return 0
+}
+
+// runLive iterates --channel values and fans out to BackfillReplayLive.
+// One channel failing (bad token, channel not found) does not abort the
+// whole run; we collect per-channel error into the warnings of that
+// channel's stats so the Markdown report carries the diagnostic.
+func runLive(stderr io.Writer, channels string, since time.Duration, tokenFlag string, maxPerChan int, botUserIDs []string) ([]slackagent.SlackBackfillCandidate, []slackagent.SlackBackfillReplayLiveStats, int, error) {
+	chList := splitCSV(channels)
+	if len(chList) == 0 {
+		return nil, nil, 0, fmt.Errorf("--live requires --channel with at least one channel id")
+	}
+	token := strings.TrimSpace(tokenFlag)
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("ONEESAMA_SLACK_BOT_TOKEN"))
+	}
+	if token == "" {
+		return nil, nil, 0, fmt.Errorf("--live requires --token or ONEESAMA_SLACK_BOT_TOKEN env var")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	var (
+		allCandidates []slackagent.SlackBackfillCandidate
+		allStats      []slackagent.SlackBackfillReplayLiveStats
+		totalScanned  int
+	)
+	for _, ch := range chList {
+		cs, st, err := slackagent.BackfillReplayLive(ctx, slackagent.SlackBackfillReplayLiveOptions{
+			BotToken:              token,
+			BotUserIDs:            botUserIDs,
+			ChannelID:             ch,
+			Since:                 since,
+			MaxMessagesPerChannel: maxPerChan,
+		})
+		if err != nil {
+			// Promote the channel-fatal error into the stats
+			// warnings so the operator sees it in the report; do
+			// NOT abort the whole run on a single bad channel.
+			st.ChannelID = ch
+			st.Warnings = append(st.Warnings, fmt.Sprintf("scan failed: %v", err))
+			fmt.Fprintf(stderr, "oneesama-triage-replay: channel %s scan failed: %v\n", ch, err)
+		}
+		allCandidates = append(allCandidates, cs...)
+		allStats = append(allStats, st)
+		totalScanned += st.MessagesScanned
+	}
+	return allCandidates, allStats, totalScanned, nil
+}
+
+// runStdin is the slice-1 path: read NDJSON, classify, render. Kept as
+// a fallback so fixtures and replay testing keep working in --live's
+// shadow.
+func runStdin(stdin io.Reader, botUserIDs []string) ([]slackagent.SlackBackfillCandidate, int, error) {
+	messages, err := readMessages(stdin)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read messages: %w", err)
+	}
+	if len(messages) == 0 {
+		return nil, 0, fmt.Errorf("input contained no SlackInboundMessage records")
+	}
+	return classifyAll(messages, botUserIDs), len(messages), nil
+}
+
+// appendLiveStatsSection adds a per-channel coverage section to the
+// rendered Markdown so the operator can see which channels were
+// truncated, how many messages were scanned, and which channels
+// failed. Without this the Markdown could silently misrepresent
+// coverage (audit point #5).
+func appendLiveStatsSection(markdown string, stats []slackagent.SlackBackfillReplayLiveStats) string {
+	if len(stats) == 0 {
+		return markdown
+	}
+	var b strings.Builder
+	b.WriteString(markdown)
+	if !strings.HasSuffix(markdown, "\n\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("## Live scan coverage\n\n")
+	b.WriteString("| Channel | Scanned | Replies fetched | Candidates | Truncated | 429 retries | Warnings |\n")
+	b.WriteString("|---|---:|---:|---:|---|---:|---|\n")
+	for _, s := range stats {
+		warnings := "—"
+		if len(s.Warnings) > 0 {
+			warnings = strings.Join(s.Warnings, "; ")
+		}
+		b.WriteString(fmt.Sprintf(
+			"| `%s` | %d | %d | %d | %v | %d | %s |\n",
+			s.ChannelID, s.MessagesScanned, s.RepliesFetched, s.CandidatesFound, s.Truncated, s.APIRetries429, warnings,
+		))
+	}
+	return b.String()
 }
 
 // classifyAll groups messages by (channel, thread root), feeds each

@@ -2,8 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/AFK-surf/oneesama/internal/slackagent"
 )
 
 // TestRunOnFlatNDJSONProducesCandidates covers the happy path: a small
@@ -142,6 +147,87 @@ func TestRunNormalizesSnakeCaseChannelID(t *testing.T) {
 	}
 	if strings.Contains(out, "**Channel**: ``") {
 		t.Errorf("empty Channel render indicates normalization bug:\n%s", out)
+	}
+}
+
+// TestRunLiveModeRequiresChannel ensures the operator can't trip over
+// a silent zero-output --live run.
+func TestRunLiveModeRequiresChannel(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--live"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit when --live lacks --channel")
+	}
+	if !strings.Contains(stderr.String(), "--channel") {
+		t.Errorf("stderr = %q, want --channel hint", stderr.String())
+	}
+}
+
+// TestRunLiveModeRequiresToken catches another silent-failure path.
+func TestRunLiveModeRequiresToken(t *testing.T) {
+	t.Setenv("ONEESAMA_SLACK_BOT_TOKEN", "")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--live", "--channel", "C1"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit when --live lacks token")
+	}
+	if !strings.Contains(stderr.String(), "ONEESAMA_SLACK_BOT_TOKEN") {
+		t.Errorf("stderr = %q, want token env hint", stderr.String())
+	}
+}
+
+// TestRunLiveModeEndToEndAgainstFakeSlack is the headline test for
+// slice 2: CLI in --live mode hits a fake Slack server, scans 2
+// channels, renders a Markdown report with per-channel coverage table.
+func TestRunLiveModeEndToEndAgainstFakeSlack(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		channel := r.URL.Query().Get("channel")
+		w.Header().Set("Content-Type", "application/json")
+		switch channel {
+		case "C1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok": true,
+				"messages": []map[string]any{
+					{"ts": "1779000300.000", "user": "U_PENG", "text": "我们要不要先回滚 canvas writes 的发布？"},
+				},
+			})
+		case "C2":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":       true,
+				"messages": []map[string]any{},
+			})
+		default:
+			t.Fatalf("unexpected channel %q", channel)
+		}
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	// Reuse the same hook the unit tests use to redirect to fake server.
+	previous := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = server.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previous })
+
+	t.Setenv("ONEESAMA_SLACK_BOT_TOKEN", "xoxb-fake")
+
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--live", "--channel", "C1,C2", "--since", "24h", "--bot-user-ids", "U_BOT"},
+		strings.NewReader(""), &stdout, &stderr,
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "**Channel**: `C1`") {
+		t.Errorf("output missing C1 candidate channel field:\n%s", out)
+	}
+	if !strings.Contains(out, "## Live scan coverage") {
+		t.Errorf("output missing live scan coverage section:\n%s", out)
+	}
+	if !strings.Contains(out, "| `C1` |") || !strings.Contains(out, "| `C2` |") {
+		t.Errorf("coverage table missing per-channel rows:\n%s", out)
 	}
 }
 
