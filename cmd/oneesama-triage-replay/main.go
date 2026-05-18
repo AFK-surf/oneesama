@@ -140,9 +140,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	// Slice 3 piece A: optional persisted-state merge. Opt-in via
 	// --persistence-dir; the CLI stays usable without runtime state
 	// access (e.g. when running against a stale Slack export).
-	persistedMerged := 0
+	persistenceAttempted := false
 	if strings.TrimSpace(persistenceDir) != "" || strings.TrimSpace(persistenceSQLite) != "" {
-		merged, mergeStats, mergeErr := mergePersistedState(
+		persistenceAttempted = true
+		merged, _, mergeErr := mergePersistedState(
 			candidates, persistenceDir, persistenceSQLite, persistenceProvider,
 		)
 		if mergeErr != nil {
@@ -150,7 +151,6 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 			// Non-fatal: keep going with fresh candidates only.
 		} else {
 			candidates = merged
-			persistedMerged = mergeStats
 		}
 	}
 
@@ -158,8 +158,20 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	if liveMode {
 		markdown = appendLiveStatsSection(markdown, liveStats)
 	}
-	if persistedMerged > 0 {
-		markdown += fmt.Sprintf("\n_Persisted state merged: %d delayed_no_reply followup(s) from runtime store._\n", persistedMerged)
+	// Footer should count actual rendered persisted candidates (the
+	// reality the operator sees in the report), not the raw load
+	// count. Driver flagged this on 13cba6e: if a malformed followup
+	// gets dropped during merge, raw count would be optimistic.
+	if persistenceAttempted {
+		var fromPersisted int
+		for _, c := range candidates {
+			if c.FromPersistedState {
+				fromPersisted++
+			}
+		}
+		if fromPersisted > 0 {
+			markdown += fmt.Sprintf("\n_Persisted state merged: %d candidate(s) carry FromPersistedState=true in the rendered report._\n", fromPersisted)
+		}
 	}
 
 	dest, closeFn, openErr := openOutput(outputPath, stdout)

@@ -395,8 +395,8 @@ func TestRunPersistenceMergeFolds186StateIntoReport(t *testing.T) {
 	if !strings.Contains(out, "**Followup ID**: 99") {
 		t.Errorf("FollowupID citation missing:\n%s", out)
 	}
-	if !strings.Contains(out, "Persisted state merged: 1 delayed_no_reply followup(s)") {
-		t.Errorf("merge footer missing:\n%s", out)
+	if !strings.Contains(out, "Persisted state merged: 1 candidate(s) carry FromPersistedState=true") {
+		t.Errorf("merge footer missing or incorrect count semantics:\n%s", out)
 	}
 }
 
