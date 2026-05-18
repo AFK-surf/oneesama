@@ -40,7 +40,7 @@ func TestHandleWorkspaceBootstrapCreatesTemplates(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", response.Code)
 	}
-	if !strings.Contains(response.Body.String(), `"template_count":25`) || !strings.Contains(response.Body.String(), `backfill_agent_read_prompt.en.tmpl`) || !strings.Contains(response.Body.String(), `related_memory_evidence.zh.tmpl`) {
+	if !strings.Contains(response.Body.String(), `"template_count":29`) || !strings.Contains(response.Body.String(), `backfill_agent_read_prompt.en.tmpl`) || !strings.Contains(response.Body.String(), `related_memory_evidence.zh.tmpl`) || !strings.Contains(response.Body.String(), `triage_timeout_summary.zh.tmpl`) {
 		t.Fatalf("body = %s, want created templates", response.Body.String())
 	}
 }

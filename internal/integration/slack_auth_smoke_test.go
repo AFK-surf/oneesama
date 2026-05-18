@@ -128,7 +128,7 @@ func TestSlackAndMeetingAuthSecuritySmoke(t *testing.T) {
 			t.Fatalf("workspace bootstrap status = %d, want 200", response.StatusCode)
 		}
 		bootstrapBody := readBody(t, response)
-		if !strings.Contains(string(bootstrapBody), `"template_count":25`) || !strings.Contains(string(bootstrapBody), "backfill_agent_read_prompt.en.tmpl") || !strings.Contains(string(bootstrapBody), "related_memory_evidence.zh.tmpl") {
+		if !strings.Contains(string(bootstrapBody), `"template_count":29`) || !strings.Contains(string(bootstrapBody), "backfill_agent_read_prompt.en.tmpl") || !strings.Contains(string(bootstrapBody), "related_memory_evidence.zh.tmpl") || !strings.Contains(string(bootstrapBody), "triage_timeout_summary.zh.tmpl") {
 			t.Fatalf("workspace bootstrap body = %s, want successful bootstrap", bootstrapBody)
 		}
 	})

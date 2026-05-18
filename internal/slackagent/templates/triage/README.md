@@ -12,6 +12,8 @@ same names, or by placing overrides under:
 Supported template data fields:
 
 - `Classification`
+- `ChannelID`
+- `ThreadTS`
 - `MessageText`
 - `Snippet`
 - `Title`

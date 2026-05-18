@@ -1123,6 +1123,11 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		"suppressed_reason":  slackTriageSuppressedReason(decision, actions, ok),
 		"skip_reason_bucket": slackTriageSkipReasonBucketForDecision(decision, actions, ok),
 	}
+	triageTimedOut := !ok && slackTriageJobTimedOut(job)
+	if triageTimedOut {
+		extraMetadata["triage_timeout_needs_retry"] = true
+		extraMetadata["triage_timeout_job_status"] = string(job.Status)
+	}
 	personaShadowQueued := ok && !probe && !personaForegroundQueued && s.shadowPersonaRuntimeEnabled()
 	if personaShadowQueued {
 		extraMetadata["persona_shadow_queued"] = true
@@ -1158,6 +1163,9 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	}
 	if updatedRun != nil {
 		persistTriageContext(s.workspaceDir, *updatedRun)
+	}
+	if triageTimedOut && !probe {
+		s.maybeRecordTriageTimeoutFollowup(ctx, workspaceID, channelID, threadTS, updatedRun, job, messages)
 	}
 	if personaForegroundQueued && updatedRun != nil {
 		relatedMemory := slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"])

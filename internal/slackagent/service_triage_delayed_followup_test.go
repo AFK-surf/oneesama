@@ -91,6 +91,149 @@ func TestSlackTriageDoesNotRecordDelayedNoReplyForLowSignalChatter(t *testing.T)
 	}
 }
 
+func TestSlackTriageRecordsTimeoutRetryFollowupForTimedOutJob(t *testing.T) {
+	now := time.Date(2026, 5, 18, 16, 0, 0, 0, time.UTC)
+	previousClock := timeNow
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_timeout",
+		Provider: "codex",
+		Status:   agentrunner.StatusTimeout,
+		Error:    "job timed out",
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{Triage: appconfig.SlackTriageConfig{HeuristicFallback: true}},
+		Runner:      runner,
+	})
+
+	started, err := service.StartSlackTriage(context.Background(), "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "这条长线程有很多上下文，需要 oneesama 补一个判断。",
+		TS:        "1779090000.000001",
+	}}, "#meeting-avatar: 这条长线程有很多上下文，需要 oneesama 补一个判断。")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if started.Finalization == nil || started.Finalization.Run == nil {
+		t.Fatalf("started = %#v, want finalized timeout triage run", started)
+	}
+	run := started.Finalization.Run
+	if run.Status != "failed" || run.Metadata["triage_timeout_needs_retry"] != true {
+		t.Fatalf("run = %#v, want failed run marked triage_timeout_needs_retry", run)
+	}
+
+	followups, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups: %v", err)
+	}
+	if len(followups) != 1 {
+		t.Fatalf("followups = %#v, want one timeout retry followup", followups)
+	}
+	got := followups[0]
+	if got.Kind != slackTriageTimeoutFollowupKind || got.ChannelID != "C123" || got.ThreadTS != "1779090000.000001" {
+		t.Fatalf("followup = %#v, want timeout retry thread followup", got)
+	}
+	if got.SourceRef != "triage_timeout_retry:C123:1779090000.000001" || got.Priority != heartbeatFollowupPriorityNormal {
+		t.Fatalf("followup = %#v, want stable source ref and normal priority", got)
+	}
+	if got.NextCheckAt != now.Add(slackTriageTimeoutFollowupDelay).Format(time.RFC3339Nano) {
+		t.Fatalf("NextCheckAt = %q, want 15m retry delay", got.NextCheckAt)
+	}
+	if got.Metadata["classification"] != "triage_timeout_needs_retry" || got.Metadata["job_status"] != string(agentrunner.StatusTimeout) || got.Metadata["one_shot"] != true {
+		t.Fatalf("metadata = %#v, want timeout retry metadata", got.Metadata)
+	}
+	if got.Metadata["input_context_chars"] == nil || got.Metadata["error"] != "job timed out" {
+		t.Fatalf("metadata = %#v, want audit context and timeout error", got.Metadata)
+	}
+	if !strings.Contains(got.Title, "补看") || !strings.Contains(got.Summary, "没有完整判断") {
+		t.Fatalf("followup = %#v, want templated timeout retry copy", got)
+	}
+}
+
+func TestSlackTriageDoesNotRecordTimeoutRetryFollowupForGenericFailure(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_generic_failure",
+		Provider: "codex",
+		Status:   agentrunner.StatusFailed,
+		Error:    "invalid response",
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{Triage: appconfig.SlackTriageConfig{HeuristicFallback: true}},
+		Runner:      runner,
+	})
+
+	started, err := service.StartSlackTriage(context.Background(), "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "这个问题需要讨论一下吗？",
+		TS:        "1779090000.000002",
+	}}, "#meeting-avatar: 这个问题需要讨论一下吗？")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if started.Finalization == nil || started.Finalization.Run == nil {
+		t.Fatalf("started = %#v, want finalized triage run", started)
+	}
+	if started.Finalization.Run.Metadata["triage_timeout_needs_retry"] != nil {
+		t.Fatalf("metadata = %#v, want no timeout retry marker for generic failure", started.Finalization.Run.Metadata)
+	}
+	followups, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups: %v", err)
+	}
+	if len(followups) != 0 {
+		t.Fatalf("followups = %#v, want no timeout retry followup for generic failure", followups)
+	}
+}
+
+func TestTriageTimeoutRetryFollowupUsesTemplateOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "triage_timeout_title.zh.tmpl"), []byte("自定义 timeout 标题：{{.ThreadTS}}\n"), 0o644); err != nil {
+		t.Fatalf("write title template override: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "triage_timeout_summary.zh.tmpl"), []byte("自定义 timeout 摘要：{{.Snippet}}\n"), 0o644); err != nil {
+		t.Fatalf("write summary template override: %v", err)
+	}
+	t.Setenv("ONEESAMA_TRIAGE_TEMPLATE_DIR", dir)
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_triage_timeout_template",
+		Provider: "codex",
+		Status:   agentrunner.StatusTimeout,
+		Error:    "timeout",
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Runner:      runner,
+	})
+
+	if _, err := service.StartSlackTriage(context.Background(), "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "这条中文长讨论需要补看。",
+		TS:        "1779090000.000003",
+	}}, "#meeting-avatar: 这条中文长讨论需要补看。"); err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	followups, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups: %v", err)
+	}
+	if len(followups) != 1 {
+		t.Fatalf("followups = %#v, want one timeout retry followup", followups)
+	}
+	if followups[0].Title != "自定义 timeout 标题：1779090000.000003" || !strings.Contains(followups[0].Summary, "自定义 timeout 摘要") {
+		t.Fatalf("followup = %#v, want timeout template overrides", followups[0])
+	}
+}
+
 func TestDelayedNoReplyTitleUsesTemplateOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "delayed_no_reply_title.zh.tmpl"), []byte("自定义 followup 标题：{{.Classification}}\n"), 0o644); err != nil {
