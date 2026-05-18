@@ -990,13 +990,18 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		decision.Actions = nil
 	}
 	probe := boolFromAny(job.Context["triageProbe"], false)
+	personaForegroundQueued := ok && !probe && s.foregroundPersonaRuntimeEnabled()
 	var directToolCalls []SlackTriageToolCall
 	var directFailures int
 	var directMutations int
-	if !probe {
+	if !probe && !personaForegroundQueued {
 		directToolCalls, directFailures, directMutations = s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions, messages)
 	}
-	mutationCandidates := len(actions) - countSlackTriageDirectReplyActions(actions) + directMutations
+	mutationCandidateActions := actions
+	if personaForegroundQueued {
+		mutationCandidateActions = nil
+	}
+	mutationCandidates := len(mutationCandidateActions) - countSlackTriageDirectReplyActions(mutationCandidateActions) + directMutations
 	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: mutationCandidates, failures: directFailures}, nil)
 	if probe {
 		mutations = 0
@@ -1020,9 +1025,13 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		"suppressed_reason":  slackTriageSuppressedReason(decision, actions, ok),
 		"skip_reason_bucket": slackTriageSkipReasonBucketForDecision(decision, actions, ok),
 	}
-	personaShadowQueued := ok && !probe && s.shadowPersonaRuntimeEnabled()
+	personaShadowQueued := ok && !probe && !personaForegroundQueued && s.shadowPersonaRuntimeEnabled()
 	if personaShadowQueued {
 		extraMetadata["persona_shadow_queued"] = true
+	}
+	if personaForegroundQueued {
+		extraMetadata["persona_foreground_queued"] = true
+		extraMetadata["codex_suggested_actions"] = len(actions)
 	}
 	runPatch := SlackTriageContext{
 		ID:        runID,
@@ -1032,7 +1041,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		RawOutput: rawOutput,
 		Digest:    stringFromContext(job.Context, "digest"),
 		Channels:  firstNonEmptyStringSlice(extractChannelNames(stringFromContext(job.Context, "digest")), []string{channelID}),
-		Actions:   triageActionRows(actions),
+		Actions:   triageActionRows(mutationCandidateActions),
 		ToolCalls: toolCalls,
 		Steps:     1,
 		Mutations: mutations,
@@ -1052,7 +1061,10 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	if updatedRun != nil {
 		persistTriageContext(s.workspaceDir, *updatedRun)
 	}
-	if personaShadowQueued && updatedRun != nil {
+	if personaForegroundQueued && updatedRun != nil {
+		relatedMemory := slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"])
+		s.queueSlackTriagePersonaForeground(context.WithoutCancel(ctx), workspaceID, updatedRun.ID, channelID, threadTS, messages, decision, relatedMemory)
+	} else if personaShadowQueued && updatedRun != nil {
 		relatedMemory := slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"])
 		s.queueSlackTriagePersonaShadow(context.WithoutCancel(ctx), updatedRun.ID, channelID, threadTS, messages, decision, relatedMemory)
 	}
@@ -1065,11 +1077,11 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 			s.logger.Warn("slack channel brain summary update failed", "error", err)
 		}
 	}
-	if ok && !probe && len(actions) == 0 {
+	if ok && !probe && !personaForegroundQueued && len(actions) == 0 {
 		s.maybeRecordDelayedNoReplyFollowup(ctx, workspaceID, channelID, threadTS, updatedRun, decision, messages)
 	}
 	var pendingActions []SlackTriagePendingResult
-	if !probe {
+	if !probe && !personaForegroundQueued {
 		pendingActions = s.insertSlackTriagePendingActions(ctx, workspaceID, channelID, threadTS, job.ID, updatedRun, actions)
 	}
 	finalization := &SlackTriageFinalization{Run: updatedRun, Decision: decision, PendingActions: pendingActions}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/persona"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
@@ -246,6 +247,139 @@ func TestQueueSlackTriagePersonaShadowDoesNotBlockAndRecordsLater(t *testing.T) 
 	}
 }
 
+func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t *testing.T) {
+	ctx := context.Background()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_live_persona",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"codex suggested a reply","actions":[{"type":"post_thread_reply","title":"codex reply","message":"codex visible reply","channelId":"C_TRIAGE","threadTs":"200.000"}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:     persona.ProviderPi,
+		Decision:    persona.DecisionReply,
+		VisibleText: "Pi 读完后给一个轻量回复。",
+		Reason:      "persona foreground owns the visible reply",
+		Confidence:  0.82,
+		ShadowOnly:  false,
+	}}
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "这个没人回，oneesama 应该补一下吗？",
+		TS:             "200.000",
+	}}, "#meeting-avatar: 这个没人回，oneesama 应该补一下吗？")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if started.Finalization == nil || started.Finalization.Run == nil {
+		t.Fatalf("started = %#v, want finalization", started)
+	}
+	if started.Finalization.Run.Metadata["persona_foreground_queued"] != true {
+		t.Fatalf("metadata = %#v, want persona_foreground_queued", started.Finalization.Run.Metadata)
+	}
+
+	poster.WaitForCalls(t, 1)
+	calls := poster.Calls()
+	if got := calls[0].Text; !strings.Contains(got, "Pi 读完后") || strings.Contains(got, "codex visible reply") {
+		t.Fatalf("posted text = %q, want Pi reply and no Codex visible reply", got)
+	}
+
+	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
+	if updated.Mutations != 1 || updated.Failures != 0 {
+		t.Fatalf("updated mutations/failures = %d/%d, want 1/0; run=%#v", updated.Mutations, updated.Failures, updated)
+	}
+	if len(updated.Actions) != 1 || !strings.Contains(updated.Actions[0].Brief, "Persona reply") {
+		t.Fatalf("actions = %#v, want one persona action", updated.Actions)
+	}
+	var sawForeground bool
+	var sawPost bool
+	for _, call := range updated.ToolCalls {
+		if call.Tool == "persona_runtime" && call.Action == "foreground_triage" && call.Success && call.Result == persona.DecisionReply {
+			sawForeground = true
+		}
+		if call.Tool == "slack_api" && call.Action == "post_thread_reply" && call.Success {
+			sawPost = true
+		}
+	}
+	if !sawForeground || !sawPost {
+		t.Fatalf("tool calls = %#v, want persona foreground + Slack post", updated.ToolCalls)
+	}
+	if updated.Metadata["persona_foreground_queued"] != false {
+		t.Fatalf("metadata = %#v, want foreground queue cleared", updated.Metadata)
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.requests) != 1 || runtime.requests[0].Mode != persona.ModeLive {
+		t.Fatalf("persona requests = %#v, want one live request", runtime.requests)
+	}
+}
+
+func TestSlackTriageLivePersonaForegroundFailureSuppressesCodexFallback(t *testing.T) {
+	ctx := context.Background()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_live_persona_error",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"codex suggested a reply","actions":[{"type":"post_thread_reply","title":"codex reply","message":"codex visible reply","channelId":"C_TRIAGE","threadTs":"200.000"}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = &capturePersonaRuntime{err: errors.New("pi sidecar unavailable")}
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "请补一下这个 thread。",
+		TS:             "200.000",
+	}}, "#meeting-avatar: 请补一下这个 thread。")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want no Codex fallback post when persona foreground fails", got)
+	}
+	if updated.Status != "failed" || !strings.Contains(updated.Error, "pi sidecar unavailable") {
+		t.Fatalf("run status/error = %q/%q, want foreground failure recorded", updated.Status, updated.Error)
+	}
+	if updated.Mutations != 0 || updated.Failures != 1 {
+		t.Fatalf("run mutations/failures = %d/%d, want 0/1", updated.Mutations, updated.Failures)
+	}
+}
+
 func waitForPersonaShadowRun(t *testing.T, service *Service, runID int64) SlackTriageContext {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -266,6 +400,29 @@ func waitForPersonaShadowRun(t *testing.T, service *Service, runID int64) SlackT
 		t.Fatalf("persona shadow result was not recorded; run missing")
 	}
 	t.Fatalf("persona shadow result was not recorded; metadata=%#v toolCalls=%#v", run.Metadata, run.ToolCalls)
+	return SlackTriageContext{}
+}
+
+func waitForPersonaForegroundRun(t *testing.T, service *Service, runID int64) SlackTriageContext {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		run, err := service.triage.GetRun(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		if run != nil {
+			if _, ok := run.Metadata["persona_foreground"]; ok {
+				return *run
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	run, _ := service.triage.GetRun(context.Background(), runID)
+	if run == nil {
+		t.Fatalf("persona foreground result was not recorded; run missing")
+	}
+	t.Fatalf("persona foreground result was not recorded; metadata=%#v toolCalls=%#v", run.Metadata, run.ToolCalls)
 	return SlackTriageContext{}
 }
 

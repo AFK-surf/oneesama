@@ -189,8 +189,9 @@ ONEESAMA_PERSONA_RUNTIME_TIMEOUT=90s
 ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=1
 ```
 
-The current scaffold is intentionally not wired into live reply generation. It
-only establishes the runtime boundary and observability surface.
+The initial scaffold was intentionally not wired into live reply generation; it
+established the runtime boundary and observability surface first. task #206 adds
+the first live foreground path for Slack triage replies.
 
 Implemented shadow replay in task #202:
 
@@ -231,12 +232,13 @@ Acceptance:
 
 ### Phase 3: Route Foreground Social Replies Through Persona Runtime
 
-- [ ] Route live triage social replies through the persona runtime.
+- [x] Route live triage social replies through the persona runtime.
 - [ ] Route delayed no-reply surfacing through the persona runtime.
 - [ ] Route backfill review-ready drafts through the persona runtime or mark them
       as delegated-reader pending.
-- [ ] Keep direct Slack/Meet IO and safety checks in Go.
-- [ ] Codex remains available only through explicit worker delegation.
+- [x] Keep direct Slack/Meet IO and safety checks in Go.
+- [x] Codex remains available only through explicit worker delegation for the
+      live triage foreground path.
 
 Acceptance:
 
@@ -246,6 +248,32 @@ Acceptance:
       workflow/context item or a worker delegation.
 - [ ] The visible voice no longer sounds like a code worker unless the persona is
       explicitly reporting worker output.
+
+Implemented foreground triage cutover in task #206:
+
+- When `persona_runtime.provider` is non-legacy, `persona_runtime.mode=live`,
+  and `persona_runtime.shadow_only=false`, Slack triage no longer posts Codex
+  `post_thread_reply` actions directly.
+- Go queues a live `slack_triage` `persona.Request` to the configured
+  `PersonaRuntime`.
+- If the persona returns `decision=reply` with `visible_text`, Go posts that
+  text through the existing Slack direct-reply path, preserving freshness checks,
+  duplicate suppression, Slack ledger writes, and cognition outbound records.
+- If the persona fails or stays silent, Go records the foreground result and does
+  not fall back to a Codex-authored visible reply.
+- Worker requests are recorded in the triage metadata/tool call result; routing
+  those requests to a worker is the next explicit delegation slice.
+
+Live cutover requires both sides to run in live mode:
+
+```bash
+ONEESAMA_PERSONA_RUNTIME=pi
+ONEESAMA_PERSONA_RUNTIME_MODE=live
+ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=0
+ONEESAMA_PERSONA_RUNTIME_BASE_URL=http://127.0.0.1:8799
+
+PERSONA_SIDECAR_MODE=live npm run persona:start
+```
 
 ### Phase 4: Add Persona Behavior Canaries
 
