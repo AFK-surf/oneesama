@@ -37,14 +37,26 @@ import (
 )
 
 // mergePersistedState loads the runtime's persisted `delayed_no_reply`
-// followups and folds them into the fresh candidate list using the
-// (channel, thread, classification) dedupe key. When `token` is
-// non-empty, persisted-only candidates are re-verified against Slack
-// (conversations.replies) BEFORE surfacing: if a human already
-// replied, the followup is reported as superseded and dropped from
-// the candidate list so the report never shows stale persisted leads
-// as postable. The returned `supersededCount` is the number of
-// followups dropped by refetch verification.
+// followups, applies a TTL filter (`maxAge`) to drop stale records,
+// folds the surviving leads into the fresh candidate list using the
+// (channel, thread, classification) dedupe key, and re-verifies
+// persisted-only leads against Slack when `token` is non-empty.
+//
+// When `resolveStaleAndSuperseded` is true, the function ALSO writes
+// the runtime store: expired (TTL filter) and superseded (refetch
+// found a human reply) followups are marked `done` with the
+// appropriate `metadata.resolution`. This keeps the next replay
+// run's report clean instead of resurfacing the same stale leads.
+//
+// Returns:
+//   - merged candidates
+//   - count of loaded followups (raw, before TTL)
+//   - count of refetch-superseded
+//   - count of TTL-expired
+//   - count of records actually mutated by resolve (only non-zero
+//     when resolveStaleAndSuperseded is true)
+//   - error if the load or resolve writes failed; merge errors are
+//     non-fatal and folded into supersededCount via stats.
 //
 // Failure to open the store is treated as non-fatal by the caller —
 // we still surface fresh candidates instead of zero-output.
@@ -55,24 +67,50 @@ func mergePersistedState(
 	provider string,
 	token string,
 	botUserIDs []string,
-) ([]slackagent.SlackBackfillCandidate, int, int, error) {
+	maxAge time.Duration,
+	resolveStaleAndSuperseded bool,
+) ([]slackagent.SlackBackfillCandidate, int, int, int, int, error) {
 	cfg := appconfig.PersistenceConfig{
 		Provider:   strings.TrimSpace(provider),
 		DataDir:    strings.TrimSpace(dataDir),
 		SQLitePath: strings.TrimSpace(sqlitePath),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	followups, err := slackagent.LoadDelayedNoReplyFollowups(ctx, cfg)
 	if err != nil {
-		return candidates, 0, 0, err
+		return candidates, 0, 0, 0, 0, err
 	}
 	if len(followups) == 0 {
-		return candidates, 0, 0, nil
+		return candidates, 0, 0, 0, 0, nil
 	}
+
+	// TTL filter first — saves refetch API quota on records we know
+	// we won't use.
+	kept, expired := slackagent.FilterBackfillFollowupsByAge(followups, maxAge, time.Time{})
+
 	refetcher := slackagent.NewBackfillSlackRefetcher(token, botUserIDs)
-	merged, superseded := slackagent.MergeAndRefetchPersistedDelayedNoReply(ctx, candidates, followups, refetcher)
-	return merged, len(followups), len(superseded), nil
+	merged, superseded := slackagent.MergeAndRefetchPersistedDelayedNoReply(ctx, candidates, kept, refetcher)
+
+	resolved := 0
+	if resolveStaleAndSuperseded {
+		ids := make([]int64, 0, len(superseded)+len(expired))
+		for _, f := range superseded {
+			ids = append(ids, f.ID)
+		}
+		expiredIDs := make([]int64, 0, len(expired))
+		for _, f := range expired {
+			expiredIDs = append(expiredIDs, f.ID)
+		}
+		if n, rerr := slackagent.BackfillResolveDelayedNoReplyFollowups(ctx, cfg, ids, "superseded_by_human"); rerr == nil {
+			resolved += n
+		}
+		if n, rerr := slackagent.BackfillResolveDelayedNoReplyFollowups(ctx, cfg, expiredIDs, "expired"); rerr == nil {
+			resolved += n
+		}
+	}
+
+	return merged, len(followups), len(superseded), len(expired), resolved, nil
 }
 
 func main() {
@@ -104,6 +142,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	fs.StringVar(&persistenceDir, "persistence-dir", "", "Optional: directory of the live runtime's persistence state (slice 3 piece A). When set, merges delayed_no_reply followups into the report so persisted 'wait for human' state isn't lost from candidates.")
 	var persistenceSQLite string
 	fs.StringVar(&persistenceSQLite, "persistence-sqlite", "", "Optional: explicit SQLite file path for runtime persistence (overrides --persistence-dir/state.sqlite3 default).")
+	var persistenceMaxAge time.Duration
+	fs.DurationVar(&persistenceMaxAge, "persistence-max-age", slackagent.DefaultBackfillPersistedMaxAge, "Stale persisted delayed_no_reply followups older than this duration are dropped from the report (and resolved as `expired` when --persistence-resolve is set). Set to 0 to disable.")
+	var resolveStaleFollowups bool
+	fs.BoolVar(&resolveStaleFollowups, "persistence-resolve", false, "When set, the CLI writes `done` + resolution metadata back to the runtime store for followups dropped by TTL (expired) or refetch (superseded_by_human). Off by default — dry-run preserves replay determinism.")
 	var persistenceProvider string
 	fs.StringVar(&persistenceProvider, "persistence-provider", "", "Optional: persistence provider (e.g. 'json-file' or 'sqlite'). Defaults to runtime config default.")
 	fs.Usage = func() {
@@ -155,15 +197,18 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	// stale persisted leads do not appear as postable candidates.
 	persistenceAttempted := false
 	supersededCount := 0
+	expiredCount := 0
+	resolvedCount := 0
 	if strings.TrimSpace(persistenceDir) != "" || strings.TrimSpace(persistenceSQLite) != "" {
 		persistenceAttempted = true
 		refetchToken := strings.TrimSpace(token)
 		if refetchToken == "" {
 			refetchToken = strings.TrimSpace(os.Getenv("ONEESAMA_SLACK_BOT_TOKEN"))
 		}
-		merged, _, superseded, mergeErr := mergePersistedState(
+		merged, _, superseded, expired, resolved, mergeErr := mergePersistedState(
 			candidates, persistenceDir, persistenceSQLite, persistenceProvider,
 			refetchToken, botUserIDs,
+			persistenceMaxAge, resolveStaleFollowups,
 		)
 		if mergeErr != nil {
 			fmt.Fprintf(stderr, "oneesama-triage-replay: persisted state merge: %v\n", mergeErr)
@@ -171,6 +216,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		} else {
 			candidates = merged
 			supersededCount = superseded
+			expiredCount = expired
+			resolvedCount = resolved
 		}
 	}
 
@@ -189,10 +236,14 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 				fromPersisted++
 			}
 		}
-		if fromPersisted > 0 || supersededCount > 0 {
+		if fromPersisted > 0 || supersededCount > 0 || expiredCount > 0 {
+			extras := ""
+			if resolvedCount > 0 {
+				extras = fmt.Sprintf("; %d resolved via --persistence-resolve writeback", resolvedCount)
+			}
 			markdown += fmt.Sprintf(
-				"\n_Persisted state merged: %d candidate(s) carry FromPersistedState=true; %d superseded by human reply (dropped from report)._\n",
-				fromPersisted, supersededCount,
+				"\n_Persisted state merged: %d candidate(s) carry FromPersistedState=true; %d superseded by human reply (dropped); %d expired by TTL (dropped)%s._\n",
+				fromPersisted, supersededCount, expiredCount, extras,
 			)
 		}
 	}

@@ -4,7 +4,123 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/AFK-surf/oneesama/internal/persistence"
+	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
+
+// DefaultBackfillPersistedMaxAge is how stale a persisted
+// delayed_no_reply followup can be before the backfill treats it as
+// `expired` (caller resolves it as `done` with reason `expired`).
+// 72h chosen so weekend-old followups still get one verify pass on
+// Monday morning, but week-old followups stop polluting the report.
+const DefaultBackfillPersistedMaxAge = 72 * time.Hour
+
+// FilterBackfillFollowupsByAge splits a list of persisted followups
+// into (kept, expired) by record age. `expired` is everything whose
+// last-known activity (UpdatedAt, falling back to LastSurfacedAt,
+// then CreatedAt) is older than `maxAge` relative to `now`. The
+// returned slices share no aliasing with the input — caller is free
+// to mutate either.
+//
+// Pure function so unit tests do not have to pin a persistence
+// backend; the CLI wraps it after LoadDelayedNoReplyFollowups.
+func FilterBackfillFollowupsByAge(followups []SlackHeartbeatFollowup, maxAge time.Duration, now time.Time) (kept, expired []SlackHeartbeatFollowup) {
+	if maxAge <= 0 {
+		return append([]SlackHeartbeatFollowup(nil), followups...), nil
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	cutoff := now.Add(-maxAge)
+	for _, followup := range followups {
+		ref := backfillFollowupLastTouch(followup)
+		if ref.IsZero() || ref.After(cutoff) {
+			kept = append(kept, followup)
+			continue
+		}
+		expired = append(expired, followup)
+	}
+	return kept, expired
+}
+
+// backfillFollowupLastTouch returns the most-recent timestamp known
+// for a followup, picking the freshest of UpdatedAt / LastSurfacedAt /
+// CreatedAt. Returns zero time if none parse — caller treats that as
+// "no age info" and keeps the followup.
+func backfillFollowupLastTouch(followup SlackHeartbeatFollowup) time.Time {
+	var newest time.Time
+	for _, candidate := range []string{followup.UpdatedAt, followup.LastSurfacedAt, followup.CreatedAt} {
+		parsed := parseHeartbeatTime(candidate)
+		if parsed == nil {
+			continue
+		}
+		if newest.IsZero() || parsed.After(newest) {
+			newest = *parsed
+		}
+	}
+	return newest
+}
+
+// BackfillResolveDelayedNoReplyFollowups marks the given followups as
+// resolved with the given reason (`expired`, `superseded_by_human`,
+// etc.). Opens the runtime store with the standard typed-collection
+// helper, mutates each matching record, and returns the count of
+// records that were actually written.
+//
+// Write-side complement to LoadDelayedNoReplyFollowups (read-only).
+// Slice 3 piece A's `MergeAndRefetchPersisted` returns a `superseded`
+// slice for the caller to feed here; the new TTL filter does the
+// same for `expired`.
+//
+// Failure to open the store or to write individual records is
+// returned as a non-nil error; the count reflects the records that
+// were successfully written before the first failure.
+func BackfillResolveDelayedNoReplyFollowups(ctx context.Context, cfg appconfig.PersistenceConfig, followupIDs []int64, reason string) (int, error) {
+	if len(followupIDs) == 0 {
+		return 0, nil
+	}
+	store, err := persistence.OpenTyped[SlackHeartbeatFollowup](persistence.Options{
+		Provider:   persistence.NormalizeProvider(cfg.Provider),
+		Collection: slackHeartbeatFollowupsCollection,
+		DataDir:    cfg.DataDir,
+		SQLitePath: cfg.SQLitePath,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("open slack_heartbeat_followups for resolve: %w", err)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "resolved_by_backfill"
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	count := 0
+	for _, id := range followupIDs {
+		record, ok, err := store.Get(ctx, heartbeatKey(id))
+		if err != nil {
+			return count, fmt.Errorf("load followup %d: %w", id, err)
+		}
+		if !ok {
+			continue
+		}
+		if isResolvedFollowupStatus(record.Status) {
+			// Already resolved by another path; skip silently.
+			continue
+		}
+		record.Status = "done"
+		record.UpdatedAt = now
+		if record.Metadata == nil {
+			record.Metadata = map[string]any{}
+		}
+		record.Metadata["resolution"] = reason
+		if err := store.Set(ctx, heartbeatKey(id), normalizeHeartbeatFollowup(record)); err != nil {
+			return count, fmt.Errorf("resolve followup %d: %w", id, err)
+		}
+		count++
+	}
+	return count, nil
+}
 
 // NewBackfillSlackRefetcher builds a BackfillPersistedRefetcher backed
 // by Slack's `conversations.replies` API + the standard

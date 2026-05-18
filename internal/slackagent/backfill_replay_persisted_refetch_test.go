@@ -5,7 +5,71 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestFilterBackfillFollowupsByAgeSplitsOnCutoff pins the TTL
+// contract: followups whose last-known-touch is older than maxAge
+// move to `expired`; the rest stay in `kept`.
+func TestFilterBackfillFollowupsByAgeSplitsOnCutoff(t *testing.T) {
+	now := time.Date(2026, 5, 18, 17, 0, 0, 0, time.UTC)
+	followups := []SlackHeartbeatFollowup{
+		{ID: 1, UpdatedAt: now.Add(-12 * time.Hour).Format(time.RFC3339Nano)},
+		{ID: 2, UpdatedAt: now.Add(-71 * time.Hour).Format(time.RFC3339Nano)},
+		{ID: 3, UpdatedAt: now.Add(-73 * time.Hour).Format(time.RFC3339Nano)},
+		{ID: 4, UpdatedAt: now.Add(-200 * time.Hour).Format(time.RFC3339Nano)},
+	}
+	kept, expired := FilterBackfillFollowupsByAge(followups, 72*time.Hour, now)
+	if len(kept) != 2 {
+		t.Fatalf("kept len = %d, want 2 (ids 1+2)", len(kept))
+	}
+	if len(expired) != 2 {
+		t.Fatalf("expired len = %d, want 2 (ids 3+4)", len(expired))
+	}
+}
+
+// TestFilterBackfillFollowupsByAgeZeroMaxAgeKeepsAll: --persistence-max-age 0
+// means "don't expire anything".
+func TestFilterBackfillFollowupsByAgeZeroMaxAgeKeepsAll(t *testing.T) {
+	now := time.Now()
+	followups := []SlackHeartbeatFollowup{
+		{ID: 1, UpdatedAt: now.Add(-9999 * time.Hour).Format(time.RFC3339Nano)},
+	}
+	kept, expired := FilterBackfillFollowupsByAge(followups, 0, now)
+	if len(kept) != 1 || len(expired) != 0 {
+		t.Fatalf("kept=%d expired=%d, want kept=1 expired=0", len(kept), len(expired))
+	}
+}
+
+// TestFilterBackfillFollowupsByAgeFallsBackToLastSurfaced: priority
+// is freshest-of(UpdatedAt, LastSurfacedAt, CreatedAt).
+func TestFilterBackfillFollowupsByAgeFallsBackToLastSurfaced(t *testing.T) {
+	now := time.Date(2026, 5, 18, 17, 0, 0, 0, time.UTC)
+	followups := []SlackHeartbeatFollowup{
+		{
+			ID:             1,
+			CreatedAt:      now.Add(-200 * time.Hour).Format(time.RFC3339Nano),
+			LastSurfacedAt: now.Add(-1 * time.Hour).Format(time.RFC3339Nano),
+		},
+	}
+	kept, expired := FilterBackfillFollowupsByAge(followups, 72*time.Hour, now)
+	if len(kept) != 1 || len(expired) != 0 {
+		t.Fatalf("kept=%d expired=%d; should keep because LastSurfacedAt is fresh", len(kept), len(expired))
+	}
+}
+
+// TestFilterBackfillFollowupsByAgeKeepsRecordsWithNoParsableTime:
+// defensive — unparsable timestamps don't auto-expire.
+func TestFilterBackfillFollowupsByAgeKeepsRecordsWithNoParsableTime(t *testing.T) {
+	now := time.Now()
+	followups := []SlackHeartbeatFollowup{
+		{ID: 1, UpdatedAt: "garbage-not-a-timestamp"},
+	}
+	kept, expired := FilterBackfillFollowupsByAge(followups, 72*time.Hour, now)
+	if len(kept) != 1 || len(expired) != 0 {
+		t.Fatalf("kept=%d expired=%d; unparsable timestamps should keep the record", len(kept), len(expired))
+	}
+}
 
 // TestMergeAndRefetchPersistedNilRefetcherFallsBack confirms that
 // callers without a Slack token (e.g. NDJSON-only CLI mode) keep the
