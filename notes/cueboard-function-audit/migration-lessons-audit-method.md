@@ -822,6 +822,47 @@ Audit rule:
 
 Reference audit: `notes/cueboard-function-audit/multimodal-memory-ingestion-parity-audit-2026-05-19.md`.
 
+## No-action traces are not answer evidence (worked example, task #235)
+
+The quota reset case showed a self-reinforcing Memory failure:
+Oneesama skipped a direct question, then the skip itself became a
+high-overlap `triage_projection` Memory record. On the next search,
+"we skipped this" could outrank the imported team fact that actually
+answered the user.
+
+The production shape was:
+
+- user asked `没付费的用户 reset quota 了吗`;
+- old Bridge answered from meeting/team Memory;
+- new Oneesama saw the message but classified it as out of scope;
+- the digest-level Memory query included stale context about `bridge`
+  and `apple watch`;
+- the no-action triage projection competed with the real meeting 84
+  fact.
+
+Task #235 fixes the contract:
+
+- scanner triage searches Memory from the fresh message text/files,
+  not the full low-context expansion digest;
+- no-action / skip / stay-silent triage projections are suppressed as
+  related-memory evidence;
+- source-cited team facts and meeting memories get a narrow boost for
+  quota/reset/user questions;
+- the fixture asserts meeting 84 wins over stale digest context and
+  the bad no-action projection.
+
+Audit rule:
+
+- Triage projections are useful history only when they carry a real
+  action, decision, or unresolved follow-up. A "no action" projection
+  must not become evidence for why a later identical question should
+  be skipped again.
+- For low-context scanner messages, separate **fresh user ask** from
+  **channel expansion context**. Use the fresh ask for Memory
+  retrieval and the expansion only for conversational disambiguation.
+
+Reference audit: `notes/cueboard-function-audit/triage-memory-question-parity-audit-2026-05-19.md`.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.

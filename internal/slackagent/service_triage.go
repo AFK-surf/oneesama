@@ -993,8 +993,9 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	channelBrain, _ := s.cognition.GetChannelBrain(ctx, workspaceID, channelID)
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
-	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(digest, 5), digest)
-	relatedMemory := s.searchSlackTriageRelatedMemory(digest, 5)
+	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest)
+	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(memoryQuery, 5), memoryQuery)
+	relatedMemory := s.searchSlackTriageRelatedMemory(memoryQuery, 5)
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
 		ChannelID:              channelID,
 		Messages:               messages,
@@ -1025,7 +1026,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 		"triage_run_id": run.ID,
 		"localSlackMemory": map[string]any{
 			"results": localMemory,
-			"query":   digest,
+			"query":   memoryQuery,
 			"limit":   5,
 		},
 		"relatedMemory": relatedMemory,
@@ -1085,6 +1086,28 @@ func (s *Service) recordSlackTriageOnly(ctx context.Context, channelID string, m
 		persistTriageContext(s.workspaceDir, *run)
 	}
 	return run, err
+}
+
+func slackTriageRelatedMemoryQuery(messages []SlackInboundMessage, digest string) string {
+	messages = normalizeSlackInboundMessages(messages)
+	lines := make([]string, 0, len(messages))
+	for _, message := range messages {
+		text := strings.TrimSpace(message.Text)
+		if text == "" {
+			continue
+		}
+		lines = append(lines, text)
+		for _, file := range message.Files {
+			fileText := strings.TrimSpace(strings.Join([]string{file.Title, file.Name, file.Mimetype, file.Filetype}, " "))
+			if fileText != "" {
+				lines = append(lines, fileText)
+			}
+		}
+	}
+	if query := strings.TrimSpace(strings.Join(lines, "\n")); query != "" {
+		return query
+	}
+	return strings.TrimSpace(digest)
 }
 
 func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Job) (*SlackTriageFinalization, error) {

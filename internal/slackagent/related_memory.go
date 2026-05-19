@@ -178,6 +178,9 @@ func (s *Service) relatedMemoryFeedbackRecords(tokens []string, limit int) []Sla
 func relatedMemoryTriageProjectionRecords(workspaceDir string, tokens []string) []SlackRelatedMemoryRecord {
 	var records []SlackRelatedMemoryRecord
 	for _, context := range workspaceTriageContextsForMemory(workspaceDir) {
+		if slackTriageContextSuppressesMemoryProjection(context) {
+			continue
+		}
 		content := triageContextMemoryText(context)
 		base := relatedMemoryTextScore(content, tokens)
 		if base <= 0 {
@@ -200,6 +203,39 @@ func relatedMemoryTriageProjectionRecords(workspaceDir string, tokens []string) 
 		})
 	}
 	return records
+}
+
+func slackTriageContextSuppressesMemoryProjection(context SlackTriageContext) bool {
+	if context.Mutations > 0 || len(context.Actions) > 0 {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		context.Status,
+		context.Summary,
+		stringFromAny(context.Metadata["skip_reason_bucket"]),
+		stringFromAny(context.Metadata["suppressed_reason"]),
+	}, "\n")))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"no action",
+		"no_actions",
+		"stay_silent",
+		"skip",
+		"无动作",
+		"无行动",
+		"不需要动作",
+		"无需动作",
+		"无需介入",
+		"不介入",
+		"不回复",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 type relatedMemoryChunk struct {
@@ -349,6 +385,10 @@ func relatedMemoryFamilyBoost(kind string, tokens []string) float64 {
 	case "team_question":
 		if hasAny("question", "why", "how", "问题", "为什么", "怎么") {
 			return 0.16
+		}
+	case "team_fact", "team_meeting":
+		if hasAny("quota", "reset", "配额", "额度", "付费", "免费", "用户", "事实", "站会", "meeting") {
+			return 0.22
 		}
 	case "lesson_candidate":
 		if hasAny("bug", "incident", "mistake", "regression", "教训", "复盘", "错误") {

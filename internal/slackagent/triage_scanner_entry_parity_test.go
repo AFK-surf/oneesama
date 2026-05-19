@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -143,4 +144,116 @@ func TestSlackHistoryScannerTriageCarriesMemoryAndPlannerContext(t *testing.T) {
 	if !ok || len(results) == 0 || results[0].Source != "workspace:memory/team/calypso-cumulon.md" {
 		t.Fatalf("localSlackMemory results = %#v, want scanner parity memory as top evidence", localMemory["results"])
 	}
+}
+
+func TestSlackTriageRelatedMemoryUsesFreshQuestionOverDigestContext(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(workspaceDir, "memory", "legacy", "slack-agent-d", "workspace", "memory", "team", "facts", "meeting-84.md"), strings.Join([]string{
+		"# Meeting 84 stable facts",
+		"",
+		"- 所有付费用户订阅额度已全部重置拉满，免费送的用户也需要重置",
+	}, "\n"))
+	writeTestFile(t, filepath.Join(workspaceDir, "memory", "legacy", "slack-agent-d", "workspace", "memory", "team", "meetings", "meeting-84.md"), strings.Join([]string{
+		"# Meeting 84",
+		"",
+		"Action item: 重置免费用户（送的）的额度，三到五天内最高额度。",
+	}, "\n"))
+	writeTestFile(t, filepath.Join(workspaceDir, "memory", "people", "bridge-apple.md"), strings.Join([]string{
+		"# Entity graph noise",
+		"",
+		"Bridge contact is Apple.",
+		"Apple organization is Watch.",
+	}, "\n"))
+	writeNoActionTriageProjection(t, workspaceDir, SlackTriageContext{
+		SessionID: "triage:C09KVPBMLJ3:1779179367129",
+		Timestamp: "2026-05-19T08:29:27Z",
+		Status:    "ok",
+		Channels:  []string{"C09KVPBMLJ3"},
+		Summary:   "Nicole 问没付费用户是否 reset quota，属于产品/技术问题，超出 office helper 范围，无动作。",
+		Digest:    "没付费的用户 reset quota 了吗",
+		Metadata: map[string]any{
+			"suppressed_reason":  "no_actions",
+			"skip_reason_bucket": "no_action_other",
+		},
+	})
+
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_quota_memory_question",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"fixture","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Memory:       appconfig.SlackMemoryConfig{Enabled: true},
+		},
+		Runner: runner,
+	})
+	messages := []SlackInboundMessage{{
+		ChannelID: "C09KVPBMLJ3",
+		TeamID:    "T123",
+		TS:        "1779179299.144449",
+		UserID:    "U09L4CPK3BL",
+		Text:      "没付费的用户 reset quota 了吗",
+	}}
+	digest := strings.Join([]string{
+		"=== Slack Activity ===",
+		"",
+		"#C09KVPBMLJ3",
+		"  (context) <@U09L4CPK3BL>: \"bridge 能接 apple watch 吗\"",
+		"  (context) <@U09L0U0SJ3F>: \"首先得有ios app\"",
+		"  (context) <@U09L4CPK3BL>: \"刚刷到一个在手表上玩吃鸡的。。\"",
+		"  --- new messages ---",
+		"  • [ref:m1 msg_ts:1779179299.144449] <@U09L4CPK3BL>: \"没付费的用户 reset quota 了吗\"",
+	}, "\n")
+
+	if _, err := service.startSlackTriage(context.Background(), "C09KVPBMLJ3", messages, digest, slackTriageStartOptions{}); err != nil {
+		t.Fatalf("startSlackTriage: %v", err)
+	}
+
+	localMemory, ok := runner.startInput.Context["localSlackMemory"].(map[string]any)
+	if !ok {
+		t.Fatalf("localSlackMemory = %#v, want map context", runner.startInput.Context["localSlackMemory"])
+	}
+	query, _ := localMemory["query"].(string)
+	if query != "没付费的用户 reset quota 了吗" {
+		t.Fatalf("memory query = %q, want fresh question only", query)
+	}
+	if strings.Contains(strings.ToLower(query), "apple") || strings.Contains(strings.ToLower(query), "bridge") {
+		t.Fatalf("memory query leaked stale digest context: %q", query)
+	}
+
+	related, ok := runner.startInput.Context["relatedMemory"].(SlackRelatedMemorySearchResult)
+	if !ok {
+		t.Fatalf("relatedMemory = %#v, want search result", runner.startInput.Context["relatedMemory"])
+	}
+	if len(related.Results) == 0 {
+		t.Fatalf("related memory empty, want meeting fact evidence")
+	}
+	top := related.Results[0]
+	if top.Kind != "team_fact" && top.Kind != "team_meeting" {
+		t.Fatalf("top related memory kind = %q, want team fact/meeting before digest/entity noise; results = %#v", top.Kind, related.Results)
+	}
+	if !strings.Contains(top.Content, "免费送的用户也需要重置") && !strings.Contains(top.Content, "重置免费用户") {
+		t.Fatalf("top related memory = %q, want quota reset meeting evidence", top.Content)
+	}
+	for _, record := range related.Results {
+		if record.Kind == "triage_projection" && strings.Contains(record.Content, "无动作") {
+			t.Fatalf("related memory included no-action projection as evidence: %#v", record)
+		}
+		if record.Kind == "entity_graph" && strings.Contains(record.Content, "Apple") {
+			t.Fatalf("related memory was polluted by stale digest entity graph context: %#v", record)
+		}
+	}
+}
+
+func writeNoActionTriageProjection(t *testing.T, workspaceDir string, context SlackTriageContext) {
+	t.Helper()
+	raw, err := json.Marshal([]SlackTriageContext{context})
+	if err != nil {
+		t.Fatalf("Marshal triage context: %v", err)
+	}
+	writeTestFile(t, filepath.Join(workspaceDir, "memory", triageContextFile), string(raw))
 }
