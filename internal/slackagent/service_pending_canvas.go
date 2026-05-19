@@ -8,13 +8,12 @@ import (
 
 // Canvas-action confirmation executors.
 //
-// Peng explicitly approved exposing canvases.create / canvases.edit to the
-// assistant on 5/18, but only via the suggest_action confirmation flow —
-// the model proposes a canvas write, a user clicks confirm on the Slack
-// card, and only then does the bot actually call Slack's canvases API.
-// Direct slack_api(create_canvas) / slack_api(edit_canvas) calls remain
-// registered_unavailable because they would bypass user consent and the
-// guardrails below.
+// This file implements the suggest_action confirmation flow for Canvas writes:
+// the model proposes a canvas write, a user clicks confirm on the Slack card,
+// and the bot then calls Slack's canvases API. The direct slack_api
+// create_canvas / edit_canvas tools are also active for old Agent D parity; this
+// confirmation path remains the safer consent-first route for autonomous
+// suggestions.
 //
 // Guardrails applied to every confirmed canvas action:
 //   - sanitize+retry on validation-class errors (reusing the helper from

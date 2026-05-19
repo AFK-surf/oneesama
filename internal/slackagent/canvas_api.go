@@ -83,13 +83,14 @@ func CallSlackAPI(ctx context.Context, client *http.Client, botToken string, api
 	}
 
 	return SlackCanvasAPIResult{
-		OK:       response.StatusCode >= 200 && response.StatusCode < 300 && body.OK,
-		Status:   response.StatusCode,
-		Method:   method,
-		Error:    slackCanvasError(response.StatusCode, body),
-		CanvasID: canvasIDFromBody(&body),
-		TeamID:   strings.TrimSpace(body.TeamID),
-		Body:     &body,
+		OK:        response.StatusCode >= 200 && response.StatusCode < 300 && body.OK,
+		Status:    response.StatusCode,
+		Method:    method,
+		Error:     slackCanvasError(response.StatusCode, body),
+		CanvasID:  canvasIDFromBody(&body),
+		TeamID:    strings.TrimSpace(body.TeamID),
+		Permalink: strings.TrimSpace(body.URL),
+		Body:      &body,
 	}
 }
 

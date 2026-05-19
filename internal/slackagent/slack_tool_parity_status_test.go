@@ -91,9 +91,8 @@ func TestSlackToolParityReportBucketsByFourClassStatus(t *testing.T) {
 }
 
 // TestSlackAPIMethodParityBucketsRegisteredUnavailable confirms the slack_api
-// method matrix flags the Canvas / DM / image methods as
-// `registered_unavailable` so the parity surface stays honest about what the
-// Go runtime can actually call into.
+// method matrix keeps unsupported methods marked `registered_unavailable` while
+// old-Agent-D parity methods stay active.
 func TestSlackAPIMethodParityBucketsRegisteredUnavailable(t *testing.T) {
 	svc := &Service{}
 	report := svc.SlackToolParityReport()
@@ -103,14 +102,14 @@ func TestSlackAPIMethodParityBucketsRegisteredUnavailable(t *testing.T) {
 		methodStatus[m.Action] = m.Status
 	}
 
-	wantUnavailable := []string{"create_canvas", "edit_canvas", "send_dm"}
+	wantUnavailable := []string{"send_dm"}
 	for _, action := range wantUnavailable {
 		if methodStatus[action] != "registered_unavailable" {
 			t.Errorf("action %q status = %q, want registered_unavailable", action, methodStatus[action])
 		}
 	}
 
-	wantActive := []string{"post_message", "post_thread_reply", "fetch_thread", "fetch_channel_history", "upload_file", "add_reaction", "fetch_canvas", "fetch_image"}
+	wantActive := []string{"post_message", "post_thread_reply", "fetch_thread", "fetch_channel_history", "upload_file", "add_reaction", "fetch_canvas", "fetch_image", "create_canvas", "edit_canvas"}
 	for _, action := range wantActive {
 		if methodStatus[action] != "active" {
 			t.Errorf("action %q status = %q, want active", action, methodStatus[action])
@@ -118,7 +117,7 @@ func TestSlackAPIMethodParityBucketsRegisteredUnavailable(t *testing.T) {
 	}
 
 	if len(report.RegisteredUnavailableSlackAPIMethods) == 0 {
-		t.Fatalf("RegisteredUnavailableSlackAPIMethods is empty, want Canvas/DM/image methods")
+		t.Fatalf("RegisteredUnavailableSlackAPIMethods is empty, want unsupported methods")
 	}
 }
 
@@ -134,7 +133,7 @@ func TestSlackAPIToolRegisteredUnavailableActionReturnsTruthfulError(t *testing.
 		token:  "xoxb-test",
 	}
 
-	cases := []string{"create_canvas", "edit_canvas", "send_dm"}
+	cases := []string{"send_dm"}
 	for _, action := range cases {
 		result, err := tool.Execute(context.Background(), map[string]any{
 			"action": action,

@@ -33,3 +33,25 @@ func TestShouldNotPublishShortWorkerResultAsCanvasWithoutIntent(t *testing.T) {
 		t.Fatal("short worker result without Canvas intent should remain a thread reply")
 	}
 }
+
+func TestWorkerResultCanvasInputReusesExistingCanvasFile(t *testing.T) {
+	job := agentrunner.Job{
+		ID: "job_123",
+		Context: map[string]any{
+			"slackAppMention": SlackAppMentionContext{
+				CanvasFiles: []SlackThreadFile{{ID: "F0B4GEERALD", Title: "What's New"}},
+			},
+		},
+	}
+
+	input := workerResultCanvasInput(job, AssistantThreadRef{ChannelID: "C123", ThreadTS: "123.456"}, "# What's New\n\n- shipped", "job_123")
+	if input.CanvasID != "F0B4GEERALD" {
+		t.Fatalf("CanvasID = %q, want existing canvas file", input.CanvasID)
+	}
+	if input.Operation != "insert_at_end" {
+		t.Fatalf("Operation = %q, want insert_at_end", input.Operation)
+	}
+	if input.Title != "What's New" {
+		t.Fatalf("Title = %q, want existing canvas title", input.Title)
+	}
+}

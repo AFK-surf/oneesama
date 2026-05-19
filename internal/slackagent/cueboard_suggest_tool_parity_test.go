@@ -112,9 +112,9 @@ func TestCueboardParitySuggestActionNormalizeCreateIssueRejectsExplicitDirectAut
 }
 
 // Canvas suggest_action parity — assistant is allowed to propose create_canvas
-// and edit_canvas writes only through the confirmation flow, with strict
-// validation. Direct slack_api(create_canvas / edit_canvas) calls stay
-// registered_unavailable elsewhere; these tests cover the suggest path.
+// and edit_canvas writes through a confirmation flow with strict validation.
+// Direct slack_api(create_canvas / edit_canvas) is also active for old Agent D
+// parity; these tests cover the consent-first suggest path.
 
 func TestCueboardParitySuggestActionNormalizeCreateCanvasRequiresMarkdown(t *testing.T) {
 	tool := &slackSuggestActionTool{}

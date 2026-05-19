@@ -132,7 +132,7 @@ func workerResultCanvasInput(job agentrunner.Job, ref AssistantThreadRef, text s
 	files := slackAppMentionCanvasFiles(job.Context)
 	revision := len(files) > 0
 	title := workerResultCanvasTitle(text, files)
-	return CanvasPublishInput{
+	input := CanvasPublishInput{
 		ArtifactID:       "slack-worker-" + firstNonEmpty(job.ID, "result"),
 		Title:            title,
 		SummaryMarkdown:  text,
@@ -142,6 +142,11 @@ func workerResultCanvasInput(job agentrunner.Job, ref AssistantThreadRef, text s
 		NotificationText: workerResultCanvasNotification(title, revision),
 		ForceSlackCanvas: true,
 	}
+	if revision {
+		input.CanvasID = strings.TrimSpace(files[0].ID)
+		input.Operation = "insert_at_end"
+	}
+	return input
 }
 
 func workerResultCanvasTitle(text string, files []SlackThreadFile) string {

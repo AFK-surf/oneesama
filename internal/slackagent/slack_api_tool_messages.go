@@ -74,7 +74,11 @@ func (t *slackAPITool) Execute(ctx context.Context, args map[string]any) (slackA
 		return t.actionFetchCanvas(ctx, params), nil
 	case "fetch_image":
 		return t.actionFetchImage(ctx, params), nil
-	case "create_canvas", "edit_canvas", "send_dm":
+	case "create_canvas":
+		return t.actionCreateCanvas(ctx, params), nil
+	case "edit_canvas":
+		return t.actionEditCanvas(ctx, params), nil
+	case "send_dm":
 		return slackAPIToolResult{Success: false, Text: fmt.Sprintf("Action %q is registered in the matrix but not available in this Go runtime yet", resolvedAction)}, nil
 	default:
 		return slackAPIToolResult{Success: false, Text: fmt.Sprintf("Action %q is not implemented by the current Slack API parity shim", resolvedAction)}, nil
@@ -545,8 +549,8 @@ func slackAPIMethodMatrix() []SlackAPIMethodSpec {
 		"invite":                "active",
 		"fetch_image":           "active",
 		"fetch_canvas":          "active",
-		"create_canvas":         "registered_unavailable",
-		"edit_canvas":           "registered_unavailable",
+		"create_canvas":         "active",
+		"edit_canvas":           "active",
 		"send_dm":               "registered_unavailable",
 	}
 	roleByAction := map[string]string{
