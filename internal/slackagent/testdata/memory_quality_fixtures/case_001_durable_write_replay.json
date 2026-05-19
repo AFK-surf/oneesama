@@ -1,0 +1,28 @@
+{
+  "case_id": "case_001_durable_write_replay",
+  "source": {
+    "occurred_at": "2026-05-19T15:00:00+08:00",
+    "notes": "Anchor case for #226 / #232: prove Pi memory_write tool invocation reaches Memory provider OnMemoryWrite hook. Validates the wiring driver shipped in a4e874e."
+  },
+  "scenario": {
+    "type": "durable_write_replay",
+    "memory_write": {
+      "path": "memory/team/case-001-anchor.md",
+      "content": "Bridge case 001 anchor memory: the new Oneesama memory provider must receive this content via OnMemoryWrite.",
+      "mode": "append",
+      "session_id": "session_canary_case_001"
+    }
+  },
+  "expected_provider_events": {
+    "on_memory_write_count": 1,
+    "on_memory_write_target_contains": "memory/team/case-001-anchor.md",
+    "on_memory_write_content_contains": "Bridge case 001 anchor memory"
+  },
+  "expected_search_result_anchors": [],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "localhost:8780"
+  ]
+}

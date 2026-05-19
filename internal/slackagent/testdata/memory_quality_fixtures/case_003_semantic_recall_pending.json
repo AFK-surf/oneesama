@@ -1,0 +1,27 @@
+{
+  "case_id": "case_003_semantic_recall_pending",
+  "source": {
+    "occurred_at": "2026-05-19T15:00:00+08:00",
+    "notes": "STUB fixture for #229 semantic/vector recall. When task #229 ships a non-Noop semantic provider, replace 'pending: true' with concrete embedding query + expected nearest-neighbor anchors. Until then, runMemoryQualityFixture logs t.Skip() for the assertion body."
+  },
+  "scenario": {
+    "type": "semantic_recall",
+    "pending": true,
+    "pending_reason": "awaiting_task_229_semantic_provider",
+    "search": {
+      "query": "what did the team decide about Bridge handling cold-open montage assets last week",
+      "limit": 5
+    },
+    "intended_evidence": [
+      "Vector backend should connect this semantically similar query to bridge_cold_open_montage_v15.mp4 thread + adjacent meeting note, even when no lexical keyword matches."
+    ]
+  },
+  "expected_provider_events": {},
+  "expected_search_result_anchors": [],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "localhost:8780"
+  ]
+}

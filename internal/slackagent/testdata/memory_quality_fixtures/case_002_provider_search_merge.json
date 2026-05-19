@@ -1,0 +1,36 @@
+{
+  "case_id": "case_002_provider_search_merge",
+  "source": {
+    "occurred_at": "2026-05-19T15:00:00+08:00",
+    "notes": "Anchor case for #232: prove that records returned by a registered Memory provider are merged into SearchRelatedMemory results via slackMemoryProviderManager.Search. This is the precondition for #229 semantic recall: once a vector provider is registered, its records reach the same code path."
+  },
+  "scenario": {
+    "type": "provider_search_merge",
+    "search": {
+      "query": "case 002 anchor query about memory provider integration",
+      "limit": 5
+    },
+    "provider_seed_records": [
+      {
+        "path": "external/memory/case-002-anchor.md",
+        "content": "Case 002 provider-side anchor record about memory provider integration.",
+        "kind": "external_memory",
+        "score": 0.92
+      }
+    ]
+  },
+  "expected_provider_events": {
+    "search_query_contains": "case 002 anchor query",
+    "search_records_returned_min": 1
+  },
+  "expected_search_result_anchors": [
+    "external/memory/case-002-anchor.md",
+    "memory provider integration"
+  ],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "localhost:8780"
+  ]
+}
