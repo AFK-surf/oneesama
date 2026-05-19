@@ -190,7 +190,7 @@ same `app_mention` entry-point:
 | 1    | App_mention worker prompt missing related-memory evidence            | `36993d1`   | shape ≠ contract (caller drift)                |
 | 2    | Job orphaned by deploy restart                                       | `a6407dc`   | lifecycle invariant (persisted ↔ runtime)      |
 | 3    | Socket app_mention event lost; scanner cursor advanced without compensation | `f9629fe` | compensation path partial implementation       |
-| 4    | meet-runner pipe closed; meeting-agent kept polling joined state     | (in flight) | lifecycle invariant (persisted ↔ runtime)      |
+| 4    | meet-runner pipe closed; meeting-agent kept polling joined state     | `9f9f99d`   | lifecycle invariant (persisted ↔ runtime)      |
 
 Three separate bugs in the same entry-point in one diagnostic session
 is the proof that "by subsystem" audit was wrong and "by user entry"
@@ -209,9 +209,9 @@ new shape is a per-entry-point parity contract. For `app_mention`:
 2. Socket event lost but scanner sees @bot → compensation creates job (`f9629fe`)
 3. Job survives across restart / orphan recovery (`a6407dc`)
 4. Worker prompt injected with related-memory evidence (`36993d1`)
-5. Worker can read/write/reuse Slack Canvas (`b2114ff`)
-6. Worker hits person/project memory for entity attribution (open)
-7. Worker tool failure is fail-closed; never exposes localhost/curl/internals to user (open)
+5. Worker can read/write/reuse Slack Canvas (`b2114ff`; old-code parity completed by `240d9e2`)
+6. Worker hits person/project memory for entity attribution (`555feac`)
+7. Worker tool failure is fail-closed; never exposes localhost/curl/internals to user (tool-fail-closed change)
 
 The contract is in the canonical doc style: each item has a fixture
 test. `TestAppMentionContextIncludesRelatedMemoryEvidence` is the
@@ -388,6 +388,35 @@ What this proves:
 - Old runtime traces are memory. They are not disposable logs when
   they contain the tool calls and evidence that made a prior answer
   good.
+
+## Worked example: tool fail-closed and prompt-as-implementation
+
+The follow-up audit
+`notes/cueboard-function-audit/tool-fail-closed-parity-audit-2026-05-19.md`
+applies the same method to the app-mention worker tool failure case.
+
+What it found:
+
+1. Old Slack Agent D registered Slack helpers, memory, search/content,
+   and action tools as native `agent.Tool` implementations via
+   `RegisterSlackTools`.
+2. New Oneesama had re-derived that behavior as prompt text telling
+   Codex to curl `127.0.0.1:8780/slack/tools/call`.
+3. When the command-provider runtime could not reach that loopback
+   gateway, the worker final answer exposed `curl`, localhost, and
+   connection failure details to the Slack thread.
+
+What this proves:
+
+- Prompt text is not a tool bridge. If the old runtime had a native
+  tool registry, a migration is not complete just because the new
+  prompt describes a way to call tools.
+- Delivery must be fail-closed at the user boundary. Even when an
+  internal worker leaks a gateway or stack detail, Slack-visible output
+  should be user-safe.
+- Fresh search parity remains an entry-level behavior, not a wording
+  promise. Unknown future entities need either a real worker tool
+  bridge or a delegated-reader/persona path that can cite evidence.
 
 ## Where this file sits
 

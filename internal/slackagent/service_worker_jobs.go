@@ -306,10 +306,46 @@ func slackRefForWorkerJob(job agentrunner.Job) (AssistantThreadRef, bool) {
 }
 
 func slackWorkerResultText(job agentrunner.Job) string {
+	var text string
 	if job.Status == agentrunner.StatusCompleted {
-		return firstNonEmpty(strings.TrimSpace(job.Result), "我这边处理完了。")
+		text = firstNonEmpty(strings.TrimSpace(job.Result), "我这边处理完了。")
+	} else {
+		text = "我这边处理失败了：" + firstNonEmpty(strings.TrimSpace(job.Error), strings.TrimSpace(job.Result), "unknown error")
 	}
-	return "我这边处理失败了：" + firstNonEmpty(strings.TrimSpace(job.Error), strings.TrimSpace(job.Result), "unknown error")
+	if safe, replaced := failClosedSlackWorkerVisibleText(text); replaced {
+		return safe
+	}
+	return text
+}
+
+const slackWorkerInternalToolFailureText = "我这次没能安全拿到需要的工具结果，先不强答。可以再 @ 我让我重试，或者等工具桥接恢复后再处理。"
+
+func failClosedSlackWorkerVisibleText(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", false
+	}
+	lower := strings.ToLower(trimmed)
+	for _, marker := range []string{
+		"127.0.0.1:8780",
+		"localhost:8780",
+		"/slack/tools/call",
+		"x-oneesama-internal-key",
+		"local slack tool gateway",
+	} {
+		if strings.Contains(lower, marker) {
+			return slackWorkerInternalToolFailureText, true
+		}
+	}
+	if (strings.Contains(lower, "127.0.0.1") || strings.Contains(lower, "localhost")) &&
+		strings.Contains(lower, "curl") &&
+		(strings.Contains(lower, "connection refused") ||
+			strings.Contains(lower, "failed to connect") ||
+			strings.Contains(lower, "could not connect") ||
+			strings.Contains(lower, "exit status 7")) {
+		return slackWorkerInternalToolFailureText, true
+	}
+	return trimmed, false
 }
 
 func assistantStatusTextForJob(job agentrunner.Job) string {

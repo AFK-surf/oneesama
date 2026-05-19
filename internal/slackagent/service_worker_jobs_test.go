@@ -1,6 +1,7 @@
 package slackagent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
@@ -53,5 +54,30 @@ func TestWorkerResultCanvasInputReusesExistingCanvasFile(t *testing.T) {
 	}
 	if input.Title != "What's New" {
 		t.Fatalf("Title = %q, want existing canvas title", input.Title)
+	}
+}
+
+func TestSlackWorkerResultTextFailClosesInternalGatewayLeak(t *testing.T) {
+	job := agentrunner.Job{
+		Status: agentrunner.StatusCompleted,
+		Result: "我试着 curl http://127.0.0.1:8780/slack/tools/call，但是 connection refused，所以拿不到资料。",
+	}
+
+	got := slackWorkerResultText(job)
+	for _, forbidden := range []string{"127.0.0.1", "/slack/tools/call", "curl", "connection refused"} {
+		if strings.Contains(strings.ToLower(got), forbidden) {
+			t.Fatalf("slackWorkerResultText() leaked %q in %q", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "工具") || !strings.Contains(got, "不强答") {
+		t.Fatalf("slackWorkerResultText() = %q, want user-safe fail-closed wording", got)
+	}
+}
+
+func TestSlackWorkerResultTextKeepsNormalWorkerAnswer(t *testing.T) {
+	const answer = "我看完了，这个线程主要是在讨论 Canvas parity。"
+	got := slackWorkerResultText(agentrunner.Job{Status: agentrunner.StatusCompleted, Result: answer})
+	if got != answer {
+		t.Fatalf("slackWorkerResultText() = %q, want unchanged answer %q", got, answer)
 	}
 }

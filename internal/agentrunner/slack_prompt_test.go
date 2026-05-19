@@ -50,7 +50,7 @@ func TestBuildPromptReadsSlackAppMentionPromptFromGenericContext(t *testing.T) {
 	}
 }
 
-func TestBuildPromptMentionsLocalSlackToolGateway(t *testing.T) {
+func TestBuildPromptDoesNotTellSlackWorkerToCurlLocalGateway(t *testing.T) {
 	prompt := buildPrompt(WithSessionCapabilities(StartInput{
 		Task: "读一下这个 X 链接",
 		Context: map[string]any{
@@ -58,15 +58,21 @@ func TestBuildPromptMentionsLocalSlackToolGateway(t *testing.T) {
 		},
 	}, SessionKindSlack))
 
-	for _, want := range []string{
-		"Local Slack tool gateway",
+	for _, forbidden := range []string{
 		"http://127.0.0.1:8780/slack/tools/call",
-		`"tool":"exa_contents"`,
-		`"tool":"memory_search"`,
-		"do not mention localhost",
+		"curl http://127.0.0.1",
+		"Local Slack tool gateway",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt leaked local gateway instruction %q:\n%s", forbidden, prompt)
+		}
+	}
+	for _, want := range []string{
+		"Do not attempt to reach localhost",
+		"cannot safely verify",
 	} {
 		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+			t.Fatalf("prompt missing fail-closed guidance %q:\n%s", want, prompt)
 		}
 	}
 }
