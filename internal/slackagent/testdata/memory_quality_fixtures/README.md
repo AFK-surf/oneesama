@@ -65,10 +65,9 @@ Each `case_NNN_<slug>.json`:
 - `durable_write_replay`: invoke the memory_write tool, assert the
   Memory provider receives `OnMemoryWrite`, then assert subsequent
   `SearchRelatedMemory` (which polls providers) returns evidence.
-- `semantic_recall`: STUB until #229 ships a real
-  semantic/vector provider. The fixture is shipped with stub
-  data; `runMemoryQualityFixture` will skip the assertion with a
-  `t.Logf` until a non-`SlackMemoryNoopProvider` impl is registered.
+- `semantic_recall`: writes a fixture-local semantic-memory index,
+  enables the local semantic provider, and asserts `SearchRelatedMemory`
+  returns the expected provider-backed anchors.
 - `provider_hook_wiring`: trigger lifecycle / pre-compress /
   delegation events through service code paths (when wired through
   manager). Currently only `OnMemoryWrite` and `Search` are routed
@@ -78,8 +77,8 @@ Each `case_NNN_<slug>.json`:
 
 ## Provider double
 
-`memory_quality_canary_test.go` defines a test-only
-`recordingMemoryProvider` that:
+`memory_quality_canary_test.go` reuses the test-only
+`simpleRecordingMemoryProvider` from `memory_provider_test.go`, which:
 
 - Records every hook invocation (search requests, write events,
   turns, compressions, delegations).

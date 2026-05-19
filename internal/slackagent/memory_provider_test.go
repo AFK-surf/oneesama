@@ -9,7 +9,7 @@ import (
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
-type recordingMemoryProvider struct {
+type simpleRecordingMemoryProvider struct {
 	SlackMemoryNoopProvider
 	name       string
 	available  bool
@@ -19,26 +19,26 @@ type recordingMemoryProvider struct {
 	searchHits []SlackRelatedMemoryRecord
 }
 
-func (p *recordingMemoryProvider) Name() string { return p.name }
+func (p *simpleRecordingMemoryProvider) Name() string { return p.name }
 
-func (p *recordingMemoryProvider) Available() bool {
+func (p *simpleRecordingMemoryProvider) Available() bool {
 	if !p.available {
 		return false
 	}
 	return true
 }
 
-func (p *recordingMemoryProvider) Initialize(_ context.Context, init SlackMemoryProviderInit) error {
+func (p *simpleRecordingMemoryProvider) Initialize(_ context.Context, init SlackMemoryProviderInit) error {
 	p.init = init
 	return nil
 }
 
-func (p *recordingMemoryProvider) Search(_ context.Context, request SlackMemoryProviderSearchRequest) (SlackMemoryProviderSearchResult, error) {
+func (p *simpleRecordingMemoryProvider) Search(_ context.Context, request SlackMemoryProviderSearchRequest) (SlackMemoryProviderSearchResult, error) {
 	p.searches = append(p.searches, request)
 	return SlackMemoryProviderSearchResult{Provider: p.name, Status: "ok", Records: p.searchHits}, nil
 }
 
-func (p *recordingMemoryProvider) OnMemoryWrite(_ context.Context, event SlackMemoryProviderWriteEvent) error {
+func (p *simpleRecordingMemoryProvider) OnMemoryWrite(_ context.Context, event SlackMemoryProviderWriteEvent) error {
 	p.writes = append(p.writes, event)
 	return nil
 }
@@ -46,7 +46,7 @@ func (p *recordingMemoryProvider) OnMemoryWrite(_ context.Context, event SlackMe
 func TestSearchRelatedMemoryMergesExternalProviderRecords(t *testing.T) {
 	t.Parallel()
 
-	provider := &recordingMemoryProvider{
+	provider := &simpleRecordingMemoryProvider{
 		name:      "semantic_fake",
 		available: true,
 		searchHits: []SlackRelatedMemoryRecord{{
@@ -78,7 +78,7 @@ func TestSearchRelatedMemoryMergesExternalProviderRecords(t *testing.T) {
 	if got.Source != "semantic://jc-case-study" || !stringSliceContains(got.Reasons, "memory_provider:semantic_fake") {
 		t.Fatalf("provider result = %#v, want normalized provider provenance", got)
 	}
-	if len(service.MemorySummary().Providers) != 1 || service.MemorySummary().Providers[0].Name != "semantic_fake" {
+	if !memoryProviderStatusIncludes(service.MemorySummary().Providers, "semantic_fake", true) {
 		t.Fatalf("memory summary providers = %#v, want semantic_fake", service.MemorySummary().Providers)
 	}
 }
@@ -87,7 +87,7 @@ func TestMemoryWriteMirrorsToProvider(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	provider := &recordingMemoryProvider{name: "mirror_fake", available: true}
+	provider := &simpleRecordingMemoryProvider{name: "mirror_fake", available: true}
 	service := NewService(Config{
 		Slack: appconfig.SlackConfig{
 			Memory: appconfig.SlackMemoryConfig{Enabled: true, Dir: filepath.Join(root, "memory")},
@@ -109,4 +109,13 @@ func TestMemoryWriteMirrorsToProvider(t *testing.T) {
 	if got.Action != "write" || got.Target != "workspace" || got.Path != "memory/notes/provider-mirror.md" || !strings.Contains(got.Content, "Provider mirror note") {
 		t.Fatalf("mirrored write = %#v, want workspace write event", got)
 	}
+}
+
+func memoryProviderStatusIncludes(items []SlackMemoryProviderStatus, name string, initialized bool) bool {
+	for _, item := range items {
+		if item.Name == name && item.Initialized == initialized {
+			return true
+		}
+	}
+	return false
 }

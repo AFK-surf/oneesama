@@ -59,8 +59,10 @@ type rawSlackTriageConfig struct {
 }
 
 type rawSlackMemoryConfig struct {
-	Enabled bool   `json:"enabled"`
-	Dir     string `json:"dir"`
+	Enabled           bool   `json:"enabled"`
+	Dir               string `json:"dir"`
+	SemanticEnabled   bool   `json:"semantic_enabled"`
+	SemanticIndexPath string `json:"semantic_index_path"`
 }
 
 type rawSlackMeetingScanner struct {
@@ -203,8 +205,10 @@ func (r rawConfig) toConfig(path string) Config {
 				HeuristicFallback: boolPtrOrDefault(r.Slack.Triage.HeuristicFallback, defaultSlackTriageHeuristicFallback),
 			},
 			Memory: SlackMemoryConfig{
-				Enabled: r.Slack.Memory.Enabled,
-				Dir:     stringOrDefault(r.Slack.Memory.Dir, defaultSlackMemoryDir),
+				Enabled:           r.Slack.Memory.Enabled,
+				Dir:               stringOrDefault(r.Slack.Memory.Dir, defaultSlackMemoryDir),
+				SemanticEnabled:   r.Slack.Memory.SemanticEnabled,
+				SemanticIndexPath: strings.TrimSpace(r.Slack.Memory.SemanticIndexPath),
 			},
 			MeetingScanner: SlackMeetingScannerConfig{
 				Enabled:         r.Slack.MeetingScanner.Enabled,

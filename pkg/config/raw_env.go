@@ -100,6 +100,12 @@ func applySlackMemoryEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_MEMORY_DIR", "MAB_SLACK_MEMORY_DIR")); value != "" {
 		cfg.Slack.Memory.Dir = value
 	}
+	if value, ok := getenvBool("ONEESAMA_SLACK_MEMORY_SEMANTIC_ENABLED", "MAB_SLACK_MEMORY_SEMANTIC_ENABLED"); ok {
+		cfg.Slack.Memory.SemanticEnabled = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_MEMORY_SEMANTIC_INDEX_PATH", "ONEESAMA_SLACK_MEMORY_SEMANTIC_INDEX", "MAB_SLACK_MEMORY_SEMANTIC_INDEX_PATH", "MAB_SLACK_MEMORY_SEMANTIC_INDEX")); value != "" {
+		cfg.Slack.Memory.SemanticIndexPath = value
+	}
 }
 
 func applySlackMeetingScannerEnvOverrides(cfg *Config) {

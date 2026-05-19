@@ -27,8 +27,17 @@ func (s *Service) MemorySummary() SlackMemorySummary {
 	if s.memoryProviders != nil {
 		summary.Providers = s.memoryProviders.Status()
 	}
-	summary.Enabled = summary.Enabled || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0 || summary.FeedbackEntries > 0 || len(summary.Providers) > 0
+	summary.Enabled = summary.Enabled || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0 || summary.FeedbackEntries > 0 || memorySummaryHasAvailableProvider(summary.Providers)
 	return summary
+}
+
+func memorySummaryHasAvailableProvider(providers []SlackMemoryProviderStatus) bool {
+	for _, provider := range providers {
+		if provider.Available && provider.Initialized {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) SearchLocalMemory(query string, limit int) []SlackMemoryResult {

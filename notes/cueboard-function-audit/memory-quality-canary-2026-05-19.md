@@ -31,12 +31,10 @@ What lands here:
   pins the search-merge hook: a `SearchRelatedMemory` invocation
   must see the provider's records appear in merged results when the
   provider returns seed records.
-- `internal/slackagent/testdata/memory_quality_fixtures/case_003_semantic_recall_pending.json`
-  is a STUB fixture for the #229 semantic recall path. It is marked
-  `pending: true` so the canary suite logs and skips, instead of
-  failing or passing under false pretense. When #229 ships a
-  non-Noop semantic provider, the pending flag flips off and the
-  fixture's `intended_evidence` becomes the assertion.
+- `internal/slackagent/testdata/memory_quality_fixtures/case_003_semantic_recall.json`
+  pins the #229 semantic recall path by creating a fixture-local
+  semantic index, enabling the local semantic provider, and asserting
+  the provider-backed anchors appear in `SearchRelatedMemory`.
 - `internal/slackagent/memory_quality_canary_test.go::
   TestMemoryQualityCanaries` loads every `case_*.json` file under
   the fixtures dir, builds a fresh `Service` with the provider
@@ -46,10 +44,6 @@ What lands here:
 
 What is NOT in this ship:
 
-- A real semantic / vector provider implementation — that is task
-  #229 and lands separately. Case 003 is the pre-built fixture slot
-  for that work; #229 only needs to drop in a provider, not
-  re-author the canary scaffold.
 - Assertions for `SyncTurn`, `OnPreCompress`, `OnDelegation` hooks.
   These exist on the `SlackMemoryProvider` interface (commit
   `a4e874e`) but are not yet routed through
@@ -82,24 +76,29 @@ This suite is the operational form of the audit method in
 - Failing a fixture is the regression signal; the fix is to restore
   hook wiring or contract behavior, not to relax the fixture.
 
-When `#229` ships a semantic provider, the next case file shape is:
+Semantic recall fixtures use this shape:
 
-```
-case_NNN_semantic_<slug>.json:
-  scenario.type = "semantic_recall"
-  scenario.pending = false       # flip from true
-  scenario.search.query = "<the semantic-only query>"
-  expected_search_result_anchors = [ <the semantically-adjacent evidence> ]
+```json
+{
+  "scenario": {
+    "type": "semantic_recall",
+    "search": {"query": "<semantic query>", "limit": 5},
+    "provider_seed_records": [
+      {"path": "semantic/example.md", "content": "<indexable evidence>", "kind": "semantic_memory"}
+    ]
+  },
+  "expected_search_result_anchors": ["semantic/example.md", "<evidence anchor>", "memory_provider:local_semantic"]
+}
 ```
 
-The canary scaffold already routes that type to a scenario branch
-(currently a permissive log). #229's task is to add the assertion
-body to that branch + ship a real provider.
+The test creates a fixture-local semantic index from
+`provider_seed_records`, so it does not depend on live workspace data
+or an external embedding backend.
 
 ## Coordination with #229 / #230 / #231 / #233
 
-- #229 (semantic recall): unlocks case_003 stub. Replace pending=
-  true with a concrete query + anchor list.
+- #229 (semantic recall): owns case_003 and the local semantic
+  provider implementation.
 - #230 (auto-extraction): new scenario type `sync_turn_extraction` —
   drive a turn through the service, assert provider's `SyncTurn`
   hook fired (requires the manager to route `SyncTurn`, which is
@@ -115,10 +114,11 @@ body to that branch + ship a real provider.
 
 ## Status
 
-- Scaffold + 3 fixtures shipped.
+- Scaffold + 3 fixtures shipped; case_003 was flipped from pending
+  to active by task #229.
 - C232-A `durable_write_replay`: green.
 - C232-B `provider_search_merge`: green.
-- C232-C `semantic_recall_pending`: skipped (pending #229).
+- C232-C `semantic_recall`: green.
 - `go test ./internal/slackagent -count=1`: green.
 
 ## Open follow-ups

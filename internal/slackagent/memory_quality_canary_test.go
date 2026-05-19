@@ -150,7 +150,7 @@ func runMemoryQualityFixture(t *testing.T, fixture memoryQualityFixture) {
 	case "provider_search_merge":
 		runMemoryProviderSearchMerge(t, fixture, service, provider)
 	case "semantic_recall":
-		t.Logf("[%s] semantic_recall fixture present but not marked pending; ensure a non-Noop semantic provider is registered before asserting", fixture.CaseID)
+		runMemorySemanticRecall(t, fixture)
 	default:
 		t.Fatalf("[%s] unknown scenario.type %q", fixture.CaseID, fixture.Scenario.Type)
 	}
@@ -252,11 +252,70 @@ func runMemoryProviderSearchMerge(t *testing.T, fixture memoryQualityFixture, se
 	}
 }
 
+func runMemorySemanticRecall(t *testing.T, fixture memoryQualityFixture) {
+	t.Helper()
+	search := fixture.Scenario.Search
+	if search == nil {
+		t.Fatalf("[%s] semantic_recall scenario missing search", fixture.CaseID)
+	}
+	if len(fixture.Scenario.ProviderSeedRecords) == 0 {
+		t.Fatalf("[%s] semantic_recall scenario missing provider_seed_records", fixture.CaseID)
+	}
+	workspaceDir := t.TempDir()
+	indexPath := filepath.Join(workspaceDir, "semantic-memory.json")
+	index := semanticMemoryIndexFile{
+		Schema:    "oneesama.semantic-memory.v1",
+		Dimension: 64,
+	}
+	for _, seed := range fixture.Scenario.ProviderSeedRecords {
+		index.Documents = append(index.Documents, semanticMemoryDocument{
+			ID:         seed.Path,
+			Kind:       firstNonEmpty(seed.Kind, "semantic_memory"),
+			Source:     seed.Path,
+			SourcePath: seed.Path,
+			Content:    seed.Content,
+		})
+	}
+	raw, err := json.Marshal(index)
+	if err != nil {
+		t.Fatalf("[%s] marshal semantic index: %v", fixture.CaseID, err)
+	}
+	if err := os.WriteFile(indexPath, raw, 0o644); err != nil {
+		t.Fatalf("[%s] write semantic index: %v", fixture.CaseID, err)
+	}
+	service := NewService(Config{Slack: appconfig.SlackConfig{
+		WorkspaceDir: workspaceDir,
+		Memory: appconfig.SlackMemoryConfig{
+			SemanticEnabled:   true,
+			SemanticIndexPath: indexPath,
+		},
+	}})
+	limit := search.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	result := service.SearchRelatedMemory(search.Query, SlackRelatedMemorySearchOptions{Limit: limit})
+	expected := fixture.ExpectedProviderEvents
+	if expected.SearchRecordsReturnedMin > 0 && len(result.Results) < expected.SearchRecordsReturnedMin {
+		t.Fatalf("[%s] semantic SearchRelatedMemory returned %d records, want >= %d; result: %#v", fixture.CaseID, len(result.Results), expected.SearchRecordsReturnedMin, result)
+	}
+	joined := strings.Join(searchResultAnchorBlobs(result), "\n")
+	for _, anchor := range fixture.ExpectedSearchResultAnchors {
+		if anchor == "" {
+			continue
+		}
+		if !strings.Contains(joined, anchor) {
+			t.Fatalf("[%s] semantic SearchRelatedMemory result missing anchor %q; full blob: %q", fixture.CaseID, anchor, joined)
+		}
+	}
+}
+
 func searchResultAnchorBlobs(result SlackRelatedMemorySearchResult) []string {
 	out := make([]string, 0, len(result.Results))
 	for _, record := range result.Results {
 		out = append(out, record.Source)
 		out = append(out, record.SourcePath)
+		out = append(out, strings.Join(record.Reasons, " "))
 		out = append(out, record.Content)
 	}
 	return out

@@ -227,6 +227,10 @@ func NewService(cfg Config) *Service {
 			canvasConfig.Poster = typedPoster
 		}
 	}
+	memoryProviders := append([]SlackMemoryProvider(nil), cfg.MemoryProviders...)
+	if cfg.Slack.Memory.SemanticEnabled {
+		memoryProviders = append([]SlackMemoryProvider{newSemanticMemoryProvider(cfg.Slack.Memory)}, memoryProviders...)
+	}
 
 	service = &Service{
 		logger:                 logger,
@@ -275,7 +279,7 @@ func NewService(cfg Config) *Service {
 		memoryProviders: newSlackMemoryProviderManager(logger, SlackMemoryProviderInit{
 			WorkspaceDir: strings.TrimSpace(cfg.Slack.WorkspaceDir),
 			MemoryDir:    strings.TrimSpace(cfg.Slack.Memory.Dir),
-		}, cfg.MemoryProviders...),
+		}, memoryProviders...),
 		followups:               newSlackHeartbeatStore(cfg.Persistence, logger),
 		improvements:            newSlackImprovementStore(cfg.Persistence, logger),
 		feedback:                newSlackFeedbackStore(cfg.Persistence, logger),

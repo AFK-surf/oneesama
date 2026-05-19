@@ -60,8 +60,10 @@ type SlackTriageConfig struct {
 }
 
 type SlackMemoryConfig struct {
-	Enabled bool
-	Dir     string
+	Enabled           bool
+	Dir               string
+	SemanticEnabled   bool
+	SemanticIndexPath string
 }
 
 type SlackMeetingScannerConfig struct {

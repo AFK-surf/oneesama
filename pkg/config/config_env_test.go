@@ -16,6 +16,8 @@ func TestLoadHonorsSlackEventBufferEnvOverrides(t *testing.T) {
 	t.Setenv("ONEESAMA_SLACK_TRIAGE_HEURISTIC_FALLBACK", "false")
 	t.Setenv("ONEESAMA_SLACK_MEMORY_ENABLED", "true")
 	t.Setenv("ONEESAMA_SLACK_MEMORY_DIR", "/tmp/oneesama-slack-memory")
+	t.Setenv("ONEESAMA_SLACK_MEMORY_SEMANTIC_ENABLED", "true")
+	t.Setenv("ONEESAMA_SLACK_MEMORY_SEMANTIC_INDEX_PATH", "/tmp/oneesama-semantic-memory.json")
 
 	cfg := loadInTempDir(t)
 	if !cfg.Slack.EventBuffer.Enabled || !cfg.Slack.EventBuffer.Triage {
@@ -29,6 +31,9 @@ func TestLoadHonorsSlackEventBufferEnvOverrides(t *testing.T) {
 	}
 	if !cfg.Slack.Memory.Enabled || cfg.Slack.Memory.Dir != "/tmp/oneesama-slack-memory" {
 		t.Fatalf("Slack.Memory = %#v, want env overrides", cfg.Slack.Memory)
+	}
+	if !cfg.Slack.Memory.SemanticEnabled || cfg.Slack.Memory.SemanticIndexPath != "/tmp/oneesama-semantic-memory.json" {
+		t.Fatalf("Slack.Memory = %#v, want semantic env overrides", cfg.Slack.Memory)
 	}
 }
 

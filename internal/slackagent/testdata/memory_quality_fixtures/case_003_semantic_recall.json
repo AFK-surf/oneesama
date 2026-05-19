@@ -1,0 +1,36 @@
+{
+  "case_id": "case_003_semantic_recall",
+  "source": {
+    "occurred_at": "2026-05-19T15:00:00+08:00",
+    "notes": "Anchor case for #229: prove the local semantic Memory provider can feed SearchRelatedMemory through the same provider merge path used by production Memory providers."
+  },
+  "scenario": {
+    "type": "semantic_recall",
+    "search": {
+      "query": "what did the team decide about Bridge handling cold-open montage assets last week",
+      "limit": 5
+    },
+    "provider_seed_records": [
+      {
+        "path": "semantic/bridge-cold-open-montage-assets.md",
+        "content": "Bridge cold-open montage asset decision: the team should collect bridge_cold_open_montage_v15.mp4, poster.png, and adjacent meeting notes as bounded media evidence; do not claim to have watched binary video contents without a delegated reader result.",
+        "kind": "semantic_memory",
+        "score": 0.95
+      }
+    ]
+  },
+  "expected_provider_events": {
+    "search_records_returned_min": 1
+  },
+  "expected_search_result_anchors": [
+    "semantic/bridge-cold-open-montage-assets.md",
+    "bridge_cold_open_montage_v15.mp4",
+    "memory_provider:local_semantic"
+  ],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "localhost:8780"
+  ]
+}
