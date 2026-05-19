@@ -209,20 +209,26 @@ func slackTriageContextSuppressesMemoryProjection(context SlackTriageContext) bo
 	if context.Mutations > 0 || len(context.Actions) > 0 {
 		return false
 	}
-	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{
-		context.Status,
-		context.Summary,
+	summaryText := strings.ToLower(strings.TrimSpace(context.Summary))
+	for _, marker := range []string{"already handled", "handled by", "已处理", "已经处理", "有人接", "已经有人"} {
+		if strings.Contains(summaryText, marker) {
+			return false
+		}
+	}
+	metadataText := strings.ToLower(strings.TrimSpace(strings.Join([]string{
 		stringFromAny(context.Metadata["skip_reason_bucket"]),
 		stringFromAny(context.Metadata["suppressed_reason"]),
 	}, "\n")))
-	if text == "" {
-		return false
-	}
 	for _, marker := range []string{
-		"no action",
 		"no_actions",
 		"stay_silent",
-		"skip",
+		"no_action_other",
+	} {
+		if strings.Contains(metadataText, marker) {
+			return true
+		}
+	}
+	for _, marker := range []string{
 		"无动作",
 		"无行动",
 		"不需要动作",
@@ -231,7 +237,7 @@ func slackTriageContextSuppressesMemoryProjection(context SlackTriageContext) bo
 		"不介入",
 		"不回复",
 	} {
-		if strings.Contains(text, marker) {
+		if strings.Contains(summaryText, marker) {
 			return true
 		}
 	}

@@ -78,6 +78,7 @@ func workspaceMemoryFileSearchResults(workspaceDir string, keywords []string, li
 		if score <= 0 {
 			continue
 		}
+		score += workspaceMemoryFileBoost(relPath, keywords)
 		results = append(results, SlackMemoryResult{
 			Kind:    "workspace_memory_file",
 			Source:  "workspace:" + relPath,
@@ -93,6 +94,9 @@ func workspaceTriageMemoryResults(workspaceDir string, keywords []string, limit 
 	contexts := workspaceTriageContextsForMemory(workspaceDir)
 	var results []SlackMemoryResult
 	for _, context := range contexts {
+		if slackTriageContextSuppressesMemoryProjection(context) {
+			continue
+		}
 		content := triageContextMemoryText(context)
 		score := scoreMemoryText(content, keywords)
 		if score <= 0 {
@@ -116,6 +120,23 @@ func workspaceTriageMemoryResults(workspaceDir string, keywords []string, limit 
 	}
 	sortMemoryResults(results)
 	return limitMemoryResults(results, limit)
+}
+
+func workspaceMemoryFileBoost(relPath string, keywords []string) float64 {
+	kind := relatedMemoryKindForPath(relPath)
+	if kind != "team_fact" && kind != "team_meeting" {
+		return 0
+	}
+	tokenSet := make(map[string]struct{}, len(keywords))
+	for _, keyword := range keywords {
+		tokenSet[strings.ToLower(strings.TrimSpace(keyword))] = struct{}{}
+	}
+	for _, value := range []string{"quota", "reset", "配额", "额度", "付费", "免费", "用户", "站会", "meeting"} {
+		if _, ok := tokenSet[value]; ok {
+			return 0.35
+		}
+	}
+	return 0
 }
 
 func workspaceTriageContextsForMemory(workspaceDir string) []SlackTriageContext {
@@ -205,7 +226,12 @@ func listDirectWorkspaceMemoryFiles(workspaceDir string) []string {
 func memoryKeywords(query string) []string {
 	seen := map[string]struct{}{}
 	var out []string
-	for _, field := range strings.Fields(strings.ToLower(strings.TrimSpace(query))) {
+	candidates := append(strings.Fields(strings.ToLower(strings.TrimSpace(query))), relatedMemoryTokens(query)...)
+	for _, field := range candidates {
+		field = strings.ToLower(strings.TrimSpace(field))
+		if field == "" {
+			continue
+		}
 		if _, ok := seen[field]; ok {
 			continue
 		}

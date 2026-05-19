@@ -40,7 +40,10 @@ workspace Memory:
   from the fresh Slack message text and file metadata, falling back to
   the full digest only when there is no usable message text.
 - No-action / skip / stay-silent triage projections are no longer
-  indexed as related-memory evidence.
+  indexed as either local-memory or related-memory evidence.
+- Local memory keyword extraction now reuses the CJK / mixed-language
+  token expansion used by related Memory, so Chinese questions like
+  `没付费的用户` can match stored facts containing `付费用户` / `用户`.
 - Team facts and meeting memories receive a narrow family boost for
   quota/reset/user terms so source-cited meeting facts can beat
   generic projections or entity noise.
@@ -58,8 +61,9 @@ reproduces the production shape:
 The test asserts:
 
 - the Memory query is the fresh question only;
-- the top related-memory record is `team_fact` or `team_meeting`;
-- no no-action `triage_projection` enters related memory;
+- the top local-memory and related-memory records are `team_fact` or
+  `team_meeting`;
+- no no-action `triage_projection` enters local or related Memory;
 - stale digest entity-graph context does not pollute the evidence set.
 
 ## Decision

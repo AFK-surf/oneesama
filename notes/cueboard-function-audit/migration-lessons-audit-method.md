@@ -845,7 +845,10 @@ Task #235 fixes the contract:
 - scanner triage searches Memory from the fresh message text/files,
   not the full low-context expansion digest;
 - no-action / skip / stay-silent triage projections are suppressed as
-  related-memory evidence;
+  local-memory and related-memory evidence;
+- local Memory keyword extraction uses the same CJK / mixed-language
+  token expansion as related Memory, so Chinese questions can match
+  stored facts phrased with slightly different word boundaries;
 - source-cited team facts and meeting memories get a narrow boost for
   quota/reset/user questions;
 - the fixture asserts meeting 84 wins over stale digest context and

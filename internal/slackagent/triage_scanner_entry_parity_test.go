@@ -224,6 +224,18 @@ func TestSlackTriageRelatedMemoryUsesFreshQuestionOverDigestContext(t *testing.T
 	if strings.Contains(strings.ToLower(query), "apple") || strings.Contains(strings.ToLower(query), "bridge") {
 		t.Fatalf("memory query leaked stale digest context: %q", query)
 	}
+	localResults, ok := localMemory["results"].([]SlackTriageMemoryEntry)
+	if !ok || len(localResults) == 0 {
+		t.Fatalf("localSlackMemory results = %#v, want meeting fact evidence", localMemory["results"])
+	}
+	if !strings.Contains(localResults[0].Content, "免费送的用户也需要重置") && !strings.Contains(localResults[0].Content, "重置免费用户") {
+		t.Fatalf("top local memory = %#v, want quota reset meeting evidence", localResults[0])
+	}
+	for _, result := range localResults {
+		if result.Kind == "triage_projection" && strings.Contains(result.Content, "无动作") {
+			t.Fatalf("local memory included no-action projection as evidence: %#v", result)
+		}
+	}
 
 	related, ok := runner.startInput.Context["relatedMemory"].(SlackRelatedMemorySearchResult)
 	if !ok {
