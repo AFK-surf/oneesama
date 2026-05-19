@@ -2,7 +2,6 @@ package config
 
 import (
 	"os"
-	"strings"
 	"testing"
 	"time"
 )
@@ -68,8 +67,6 @@ func TestLoadHonorsSlackSecretEnvOverrides(t *testing.T) {
 	t.Setenv("ONEESAMA_SLACK_SIGNING_SECRET", "env-signing-secret")
 	t.Setenv("ONEESAMA_SLACK_BOT_TOKEN", "env-bot-token")
 	t.Setenv("ONEESAMA_SLACK_APP_TOKEN", "env-app-token")
-	t.Setenv("ONEESAMA_SLACK_BOT_USER_ID", "U_CURRENT")
-	t.Setenv("ONEESAMA_SLACK_BOT_MENTION_USER_IDS", "U_LEGACY, U_STAGING")
 	t.Setenv("ONEESAMA_SLACK_CLIENT_ID", "env-client-id")
 	t.Setenv("ONEESAMA_SLACK_CLIENT_SECRET", "env-client-secret")
 	t.Setenv("ONEESAMA_SLACK_REDIRECT_URI", "https://env.oneesama.dev/slack/oauth")
@@ -86,12 +83,6 @@ func TestLoadHonorsSlackSecretEnvOverrides(t *testing.T) {
 	}
 	if cfg.Slack.AppToken != "env-app-token" {
 		t.Fatalf("Slack.AppToken = %q, want %q", cfg.Slack.AppToken, "env-app-token")
-	}
-	if cfg.Slack.BotUserID != "U_CURRENT" {
-		t.Fatalf("Slack.BotUserID = %q, want %q", cfg.Slack.BotUserID, "U_CURRENT")
-	}
-	if got := strings.Join(cfg.Slack.BotMentionUserIDs, ","); got != "U_LEGACY,U_STAGING" {
-		t.Fatalf("Slack.BotMentionUserIDs = %q, want configured aliases", got)
 	}
 	if cfg.Slack.ClientID != "env-client-id" {
 		t.Fatalf("Slack.ClientID = %q, want %q", cfg.Slack.ClientID, "env-client-id")

@@ -61,7 +61,6 @@ type Service struct {
 	botToken                string
 	appToken                string
 	botUserID               string
-	botMentionUserIDs       []string
 	clientID                string
 	clientSecret            string
 	redirectURI             string
@@ -235,7 +234,6 @@ func NewService(cfg Config) *Service {
 		botToken:               strings.TrimSpace(cfg.Slack.BotToken),
 		appToken:               strings.TrimSpace(cfg.Slack.AppToken),
 		botUserID:              strings.TrimSpace(cfg.Slack.BotUserID),
-		botMentionUserIDs:      slackBotMentionUserIDs(cfg.Slack.BotUserID, cfg.Slack.BotMentionUserIDs),
 		clientID:               strings.TrimSpace(cfg.Slack.ClientID),
 		clientSecret:           strings.TrimSpace(cfg.Slack.ClientSecret),
 		redirectURI:            strings.TrimSpace(cfg.Slack.RedirectURI),

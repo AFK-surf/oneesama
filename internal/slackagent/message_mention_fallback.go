@@ -6,7 +6,7 @@ import (
 )
 
 func (s *Service) messageMentionFallbackEvent(ctx context.Context, event SlackEventPayload) (SlackEventPayload, bool) {
-	if isBotMentionFallbackMessageForBotIDs(event, s.botMentionUserIDs) {
+	if isBotMentionFallbackMessage(event, s.botUserID) {
 		return event, true
 	}
 	if !isThreadMentionFallbackCandidate(event) {
@@ -14,7 +14,7 @@ func (s *Service) messageMentionFallbackEvent(ctx context.Context, event SlackEv
 	}
 
 	messages, source, ok, fetchErr := s.fetchSlackMentionThreadMessages(ctx, event)
-	mention, found := latestThreadBotMentionMessageForBotIDs(event, messages, s.botMentionUserIDs)
+	mention, found := latestThreadBotMentionMessage(event, messages, s.botUserID)
 	if !found {
 		s.logger.Warn(
 			"slack thread mention fallback skipped",
@@ -35,17 +35,13 @@ func (s *Service) messageMentionFallbackEvent(ctx context.Context, event SlackEv
 }
 
 func isBotMentionFallbackMessage(event SlackEventPayload, botUserID string) bool {
-	return isBotMentionFallbackMessageForBotIDs(event, []string{botUserID})
-}
-
-func isBotMentionFallbackMessageForBotIDs(event SlackEventPayload, botUserIDs []string) bool {
 	if event.BotID != "" || event.Subtype != "" {
 		return false
 	}
 	if event.Type != "message" || strings.TrimSpace(event.ChannelType) == "im" {
 		return false
 	}
-	return slackTextMentionsAnyUser(event.Text, botUserIDs)
+	return slackTextMentionsUser(event.Text, botUserID)
 }
 
 func isThreadMentionFallbackCandidate(event SlackEventPayload) bool {
@@ -59,10 +55,6 @@ func isThreadMentionFallbackCandidate(event SlackEventPayload) bool {
 }
 
 func latestThreadBotMentionMessage(event SlackEventPayload, messages []SlackMessage, botUserID string) (SlackMessage, bool) {
-	return latestThreadBotMentionMessageForBotIDs(event, messages, []string{botUserID})
-}
-
-func latestThreadBotMentionMessageForBotIDs(event SlackEventPayload, messages []SlackMessage, botUserIDs []string) (SlackMessage, bool) {
 	latestReplyTS := latestThreadReplyTS(event)
 	latestUserTS := ""
 	for index := len(messages) - 1; index >= 0; index-- {
@@ -78,7 +70,7 @@ func latestThreadBotMentionMessageForBotIDs(event SlackEventPayload, messages []
 		if latestUserTS == "" {
 			latestUserTS = messageTS
 		}
-		if !slackTextMentionsAnyUser(text, botUserIDs) {
+		if !slackTextMentionsUser(text, botUserID) {
 			continue
 		}
 		if latestReplyTS != "" {

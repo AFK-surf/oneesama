@@ -168,7 +168,7 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 			message.ChannelType = firstNonEmpty(message.ChannelType, channel.Type)
 			message.TS = firstNonEmpty(message.TS, message.EventTS)
 			message.EventTS = firstNonEmpty(message.EventTS, message.TS)
-			if scannerMessageMentionsAnyBot(message, s.botMentionUserIDs) {
+			if scannerMessageMentionsBot(message, s.botUserID) {
 				reconciled, skipped, err := s.reconcileScannerMention(ctx, workspaceID, channel, message)
 				if err != nil {
 					mentionReconcileError = err.Error()
@@ -183,7 +183,7 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 				}
 				continue
 			}
-			if shouldIgnoreScannerInboundMessageForBotIDs(message, s.botMentionUserIDs) {
+			if shouldIgnoreScannerInboundMessage(message, s.botUserID) {
 				continue
 			}
 			if previousCursor != "" && !slackTSGreater(message.TS, previousCursor) {
@@ -230,12 +230,9 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 }
 
 func scannerMessageMentionsBot(message SlackInboundMessage, botUserID string) bool {
-	return scannerMessageMentionsAnyBot(message, []string{botUserID})
-}
-
-func scannerMessageMentionsAnyBot(message SlackInboundMessage, botUserIDs []string) bool {
 	message = normalizeSlackInboundMessage(message)
-	if len(botUserIDs) == 0 || strings.TrimSpace(message.ChannelID) == "" || strings.TrimSpace(message.UserID) == "" {
+	botUserID = strings.TrimSpace(botUserID)
+	if botUserID == "" || strings.TrimSpace(message.ChannelID) == "" || strings.TrimSpace(message.UserID) == "" {
 		return false
 	}
 	if strings.TrimSpace(message.BotID) != "" {
@@ -245,7 +242,7 @@ func scannerMessageMentionsAnyBot(message SlackInboundMessage, botUserIDs []stri
 	if subtype != "" && subtype != "file_share" {
 		return false
 	}
-	return slackTextMentionsAnyUser(message.Text, botUserIDs)
+	return slackTextMentionsUser(message.Text, botUserID)
 }
 
 func (s *Service) reconcileScannerMention(ctx context.Context, workspaceID string, channel SlackScannerChannel, message SlackInboundMessage) (reconciled bool, skipped bool, err error) {

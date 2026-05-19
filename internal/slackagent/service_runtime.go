@@ -23,7 +23,6 @@ type SlackStatus struct {
 	BotTokenConfigured      bool                       `json:"bot_token_configured"`
 	AppTokenConfigured      bool                       `json:"app_token_configured"`
 	BotUserID               string                     `json:"bot_user_id,omitempty"`
-	BotMentionUserIDs       []string                   `json:"bot_mention_user_ids,omitempty"`
 	PosterMode              string                     `json:"poster_mode"`
 	CanvasProvider          string                     `json:"canvas_provider"`
 	ScheduleManagerReady    bool                       `json:"schedule_manager_ready"`
@@ -115,7 +114,6 @@ func (s *Service) Status() StatusResponse {
 			BotTokenConfigured:      s.botToken != "",
 			AppTokenConfigured:      s.appToken != "",
 			BotUserID:               s.botUserID,
-			BotMentionUserIDs:       append([]string(nil), s.botMentionUserIDs...),
 			PosterMode:              s.posterMode(),
 			CanvasProvider:          s.canvasConfig.Provider,
 			ScheduleManagerReady:    s.scheduleManager != nil,

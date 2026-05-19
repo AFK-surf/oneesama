@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
@@ -75,61 +74,6 @@ func TestHandleEventsMessageMentionFallbackUsesThreadMeetURLJoinCard(t *testing.
 	}
 	if !strings.Contains(calls[0].Text, "Join Google Meet") {
 		t.Fatalf("posted text = %q, want join setup card", calls[0].Text)
-	}
-}
-
-func TestHandleEventsMessageMentionFallbackAcceptsLegacyBridgeAlias(t *testing.T) {
-	runner := &fakeRunner{job: agentrunner.Job{
-		ID:       "job_legacy_alias",
-		Provider: "codex",
-		Status:   agentrunner.StatusRunning,
-	}}
-	router := newTestRouter(t, Config{
-		Slack: appconfig.SlackConfig{
-			SigningSecret:     "secret",
-			BotUserID:         "UBOT",
-			BotMentionUserIDs: []string{"ULEGACY"},
-		},
-		Runner: runner,
-	})
-
-	body := `{
-		"type":"event_callback",
-		"event_id":"EvLegacyBridgeMention",
-		"team_id":"T123",
-		"event":{
-			"type":"message",
-			"channel_type":"channel",
-			"user":"U123",
-			"text":"<@ULEGACY> 我们讨论过这个嘛？",
-			"channel":"C123",
-			"ts":"1779165686.034869",
-			"thread_ts":"1779165686.034869"
-		}
-	}`
-	timestamp, signature := signedSlackJSONBody("secret", body)
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Slack-Request-Timestamp", timestamp)
-	request.Header.Set("X-Slack-Signature", signature)
-	router.ServeHTTP(response, request)
-
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
-	}
-	var payload SlackEventResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !payload.OK || !payload.Handled || payload.Mode != "message_mention" {
-		t.Fatalf("payload = %#v, want handled message_mention for legacy alias", payload)
-	}
-	if runner.startCount != 1 {
-		t.Fatalf("runner start count = %d, want 1", runner.startCount)
-	}
-	if strings.Contains(runner.startInput.Task, "<@ULEGACY>") || !strings.Contains(runner.startInput.Task, "讨论过") {
-		t.Fatalf("runner task = %q, want legacy alias stripped", runner.startInput.Task)
 	}
 }
 

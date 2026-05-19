@@ -957,7 +957,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	threadContexts := s.fetchSlackTriageThreadContexts(ctx, channelID, messages)
 	var ignoredBotReplyCount int
 	if options.IgnoreExistingBotReply {
-		threadContexts, ignoredBotReplyCount = filterSlackTriageThreadContextBotReplies(threadContexts, s.botMentionUserIDs)
+		threadContexts, ignoredBotReplyCount = filterSlackTriageThreadContextBotReplies(threadContexts, []string{s.botUserID})
 	}
 	channelContexts := s.fetchSlackTriageChannelContexts(ctx, channelID, messages, digest, threadContexts)
 	threadContexts, summaryMetadata := s.maybeSummarizeOversizedSlackTriageThreadContexts(ctx, channelID, threadTS, messages, digest, threadContexts)
@@ -1362,7 +1362,7 @@ func (s *Service) slackTriageThreadHasNewerBlockingActivity(ctx context.Context,
 		if !slackTSGreater(firstNonEmpty(message.TS, message.EventTS), snapshotTS) {
 			continue
 		}
-		if isAuthoredByBot(message, s.botMentionUserIDs) {
+		if isAuthoredByBot(message, []string{s.botUserID}) {
 			if ignoreBotReply {
 				continue
 			}

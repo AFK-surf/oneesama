@@ -243,53 +243,6 @@ func TestScannerSweepReconcilesMissedAppMention(t *testing.T) {
 	}
 }
 
-func TestScannerSweepReconcilesLegacyBridgeMentionAlias(t *testing.T) {
-	runner := &fakeRunner{job: agentrunner.Job{
-		ID:       "job_scanner_legacy_mention",
-		Provider: "codex",
-		Status:   agentrunner.StatusRunning,
-	}}
-	service := NewService(Config{
-		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
-		Slack: appconfig.SlackConfig{
-			BotUserID:         "UBOT",
-			BotMentionUserIDs: []string{"ULEGACY"},
-			EventBuffer: appconfig.SlackEventBufferConfig{
-				Enabled:  true,
-				MaxBatch: 10,
-				Debounce: time.Minute,
-			},
-		},
-		Runner: runner,
-	})
-
-	result := service.SweepSlackScanner(context.Background(), SlackScannerSweepRequest{
-		WorkspaceID: "T123",
-		Flush:       boolPtr(true),
-		Channels: []SlackScannerChannel{{
-			ID:   "C123",
-			Name: "bridge-app",
-			Type: "channel",
-			Messages: []SlackInboundMessage{{
-				UserID: "U123",
-				Text:   "<@ULEGACY> 我们讨论过这个嘛？",
-				TS:     "1779165686.034869",
-			}},
-		}},
-	})
-
-	if !result.OK || len(result.Sweeps) != 1 {
-		t.Fatalf("result = %#v, want one successful sweep", result)
-	}
-	sweep := result.Sweeps[0]
-	if sweep.Buffered != 0 || sweep.MentionReconciled != 1 || runner.startCount != 1 {
-		t.Fatalf("sweep = %#v startCount=%d, want legacy alias mention reconciled", sweep, runner.startCount)
-	}
-	if strings.Contains(runner.startInput.Task, "<@ULEGACY>") || !strings.Contains(runner.startInput.Task, "讨论过") {
-		t.Fatalf("runner task = %q, want legacy alias stripped", runner.startInput.Task)
-	}
-}
-
 func TestScannerSweepSkipsMentionAlreadyHandledBeforeRestart(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{

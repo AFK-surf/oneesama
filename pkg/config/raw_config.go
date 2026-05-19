@@ -30,21 +30,20 @@ type rawLoggingConfig struct {
 }
 
 type rawSlackConfig struct {
-	SigningSecret     string                    `json:"signing_secret"`
-	BotToken          string                    `json:"bot_token"`
-	AppToken          string                    `json:"app_token"`
-	BotUserID         string                    `json:"bot_user_id"`
-	BotMentionUserIDs []string                  `json:"bot_mention_user_ids"`
-	ClientID          string                    `json:"client_id"`
-	ClientSecret      string                    `json:"client_secret"`
-	RedirectURI       string                    `json:"redirect_uri"`
-	WorkspaceDir      string                    `json:"workspace_dir"`
-	InternalAuthKey   string                    `json:"internal_auth_key"`
-	PublicBaseURL     string                    `json:"public_base_url"`
-	EventBuffer       rawSlackEventBufferConfig `json:"event_buffer"`
-	Triage            rawSlackTriageConfig      `json:"triage"`
-	Memory            rawSlackMemoryConfig      `json:"memory"`
-	MeetingScanner    rawSlackMeetingScanner    `json:"meeting_scanner"`
+	SigningSecret   string                    `json:"signing_secret"`
+	BotToken        string                    `json:"bot_token"`
+	AppToken        string                    `json:"app_token"`
+	BotUserID       string                    `json:"bot_user_id"`
+	ClientID        string                    `json:"client_id"`
+	ClientSecret    string                    `json:"client_secret"`
+	RedirectURI     string                    `json:"redirect_uri"`
+	WorkspaceDir    string                    `json:"workspace_dir"`
+	InternalAuthKey string                    `json:"internal_auth_key"`
+	PublicBaseURL   string                    `json:"public_base_url"`
+	EventBuffer     rawSlackEventBufferConfig `json:"event_buffer"`
+	Triage          rawSlackTriageConfig      `json:"triage"`
+	Memory          rawSlackMemoryConfig      `json:"memory"`
+	MeetingScanner  rawSlackMeetingScanner    `json:"meeting_scanner"`
 }
 
 type rawSlackEventBufferConfig struct {
@@ -183,17 +182,16 @@ func (r rawConfig) toConfig(path string) Config {
 			AllowedOrigins: sliceOrDefault(r.MeetingAgent.AllowedOrigins, []string{"*"}),
 		},
 		Slack: SlackConfig{
-			SigningSecret:     strings.TrimSpace(r.Slack.SigningSecret),
-			BotToken:          strings.TrimSpace(r.Slack.BotToken),
-			AppToken:          strings.TrimSpace(r.Slack.AppToken),
-			BotUserID:         strings.TrimSpace(r.Slack.BotUserID),
-			BotMentionUserIDs: sliceOrDefault(r.Slack.BotMentionUserIDs, nil),
-			ClientID:          strings.TrimSpace(r.Slack.ClientID),
-			ClientSecret:      strings.TrimSpace(r.Slack.ClientSecret),
-			RedirectURI:       strings.TrimSpace(r.Slack.RedirectURI),
-			WorkspaceDir:      stringOrDefault(r.Slack.WorkspaceDir, defaultSlackWorkspaceDir),
-			InternalAuthKey:   strings.TrimSpace(r.Slack.InternalAuthKey),
-			PublicBaseURL:     strings.TrimSpace(r.Slack.PublicBaseURL),
+			SigningSecret:   strings.TrimSpace(r.Slack.SigningSecret),
+			BotToken:        strings.TrimSpace(r.Slack.BotToken),
+			AppToken:        strings.TrimSpace(r.Slack.AppToken),
+			BotUserID:       strings.TrimSpace(r.Slack.BotUserID),
+			ClientID:        strings.TrimSpace(r.Slack.ClientID),
+			ClientSecret:    strings.TrimSpace(r.Slack.ClientSecret),
+			RedirectURI:     strings.TrimSpace(r.Slack.RedirectURI),
+			WorkspaceDir:    stringOrDefault(r.Slack.WorkspaceDir, defaultSlackWorkspaceDir),
+			InternalAuthKey: strings.TrimSpace(r.Slack.InternalAuthKey),
+			PublicBaseURL:   strings.TrimSpace(r.Slack.PublicBaseURL),
 			EventBuffer: SlackEventBufferConfig{
 				Enabled:  r.Slack.EventBuffer.Enabled,
 				Triage:   r.Slack.EventBuffer.Triage,
