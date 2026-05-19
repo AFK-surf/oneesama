@@ -144,7 +144,7 @@ func TestSlackWorkerToolRequestRejectsUnsafeSlackPost(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool bridge request to parse")
 	}
-	evidence := NewService(Config{}).executeSlackWorkerToolBridgeRequest(context.Background(), request)
+	evidence := NewService(Config{}).executeSlackWorkerToolBridgeRequest(context.Background(), request, nil)
 	if len(evidence) != 1 || evidence[0].OK || !strings.Contains(evidence[0].Error, "not available") {
 		t.Fatalf("evidence = %#v, want rejected unsafe Slack post", evidence)
 	}

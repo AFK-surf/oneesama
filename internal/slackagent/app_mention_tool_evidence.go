@@ -25,6 +25,7 @@ func (s *Service) collectAppMentionToolEvidence(ctx context.Context, mention *Sl
 	}
 	query := appMentionFreshSearchQuery(mention)
 	if !shouldSearchFreshAppMentionEvidence(mention, related, query) {
+		s.recordAppMentionMultimodalMemory(ctx, mention, out, "app_mention_context")
 		return out
 	}
 	args := map[string]any{"query": query}
@@ -45,11 +46,15 @@ func (s *Service) collectAppMentionToolEvidence(ctx context.Context, mention *Sl
 	if !response.OK {
 		evidence.Error = firstNonEmpty(response.Error, response.Text, "tool_failed")
 		evidence.Summary = slackToolEvidenceSummary(response)
-		return append(out, evidence)
+		out = append(out, evidence)
+		s.recordAppMentionMultimodalMemory(ctx, mention, out, "app_mention_context")
+		return out
 	}
 	evidence.Summary = slackToolEvidenceSummary(response)
 	evidence.Text = response.Text
-	return append(out, evidence)
+	out = append(out, evidence)
+	s.recordAppMentionMultimodalMemory(ctx, mention, out, "app_mention_context")
+	return out
 }
 
 func shouldSearchFreshAppMentionEvidence(mention *SlackAppMentionContext, related SlackRelatedMemorySearchResult, query string) bool {

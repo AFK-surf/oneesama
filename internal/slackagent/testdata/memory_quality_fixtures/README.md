@@ -24,7 +24,7 @@ Each `case_NNN_<slug>.json`:
     "notes": "..."
   },
   "scenario": {
-    "type": "durable_write_replay" | "semantic_recall" | "sync_turn_extraction" | "entity_graph_resolution" | "provider_hook_wiring",
+    "type": "durable_write_replay" | "semantic_recall" | "sync_turn_extraction" | "entity_graph_resolution" | "multimodal_ingestion" | "provider_hook_wiring",
     "memory_write": {
       "path": "memory/team/example.md",
       "content": "fact body",
@@ -34,6 +34,12 @@ Each `case_NNN_<slug>.json`:
     "search": {
       "query": "example query",
       "limit": 5
+    },
+    "app_mention": {
+      "channel_id": "C123",
+      "thread_ts": "1779166071.849179",
+      "mention_text": "please review these media assets",
+      "files": []
     },
     "provider_seed_records": [
       {
@@ -76,6 +82,10 @@ Each `case_NNN_<slug>.json`:
   enables the local entity-graph provider, and asserts
   `SearchRelatedMemory` returns relationship evidence with explicit
   entity/source anchors.
+- `multimodal_ingestion`: builds a real app-mention context with Slack
+  files, asserts Oneesama writes a reviewable multimodal Memory
+  candidate, then verifies `SearchRelatedMemory` can recall that
+  metadata/evidence without claiming binary/video/PDF content was read.
 - `provider_hook_wiring`: trigger lifecycle / pre-compress /
   delegation events through service code paths (when wired through
   manager). Currently `Search`, `OnMemoryWrite`, and `SyncTurn` are

@@ -783,6 +783,45 @@ Audit rule:
 
 Reference audit: `notes/cueboard-function-audit/entity-graph-memory-parity-audit-2026-05-19.md`.
 
+## Multimodal evidence is Memory, but content boundaries must survive (worked example, task #233)
+
+File/image/video/PDF requests exposed a different Memory trap:
+attachment evidence can be first-class for the current answer, then
+evaporate before the next related question. If the worker saw
+`bridge_cold_open_montage_v15.mp4` today but Memory cannot recall it
+tomorrow, multimodal context is prompt garnish, not durable Memory.
+
+Cueboard's old Slack Agent D set the content boundary correctly:
+
+- `slack.fetchImage` could fetch images by `file_id`;
+- non-image files returned "Content cannot be viewed";
+- defaults told the worker to fetch Slack images only when relevant.
+
+Task #233 ports that boundary into Memory:
+
+- `slack_file_context` app-mention evidence writes a reviewable
+  `memory/multimodal/candidates/...` file;
+- worker-requested reader evidence (for example `slack.fetchImage`
+  or canvas fetch) is also eligible for the same candidate path;
+- `multimodal_memory` provider searches those candidates through
+  `SearchRelatedMemory`;
+- inline payloads such as `base64` and `data:image/...` are redacted
+  before persistence;
+- case_006 asserts video/PDF metadata is searchable while the
+  "not decoded" boundary remains visible.
+
+Audit rule:
+
+- Treat reader/tool output as Memory source material when it affects
+  a user-visible answer.
+- Never promote binary/media content into Memory as if it had been
+  understood unless a reader produced an explicit summary.
+- Multimodal Memory fixtures must assert both positive recall
+  anchors (file/title/project) and negative boundary anchors
+  ("video/binary contents are not decoded").
+
+Reference audit: `notes/cueboard-function-audit/multimodal-memory-ingestion-parity-audit-2026-05-19.md`.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.

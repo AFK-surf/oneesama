@@ -97,7 +97,7 @@ The local OpenClaw Twitter bot memory directory is effectively static/empty for 
 | Semantic / vector recall | Hermes plugins can provide vector/semantic recall. | Added in task #229 as an opt-in local semantic provider plus hybrid related-memory merge. | Ported as local prototype; replaceable by richer providers later. |
 | Turn sync / auto extraction | Hermes providers can `sync_turn`; mem0/supermemory can ingest turns. | Added in task #230: manager `SyncTurn` routing, Slack worker turn mirroring, and conservative review-candidate extraction provider. | Ported conservatively; no silent high-confidence fact promotion. |
 | Entity graph / trust / user model | Hindsight/Honcho/Holographic-style capabilities. | Task #231 adds a local relationship-evidence provider; trust scoring and user-model work remain future. | Ported first graph slice; continue trust/user-model work later. |
-| Multimodal Memory ingestion | Supermemory-style multimodal layer. | Only file metadata and delegated evidence boundaries exist. | task #233. |
+| Multimodal Memory ingestion | Supermemory-style multimodal layer. | Added in task #233: reviewable multimodal Memory candidates and a local `multimodal_memory` search provider. | Ported first metadata/reader-evidence slice; true video/PDF readers remain future. |
 
 ## Task Split
 
@@ -114,4 +114,4 @@ Created follow-up tasks:
 
 Cueboard self-growth is no longer a schema-only stub; it has a signal store, cluster followups, lesson artifacts, startup resync, and a heartbeat ticker.
 
-The real remaining gap is not "Cueboard parity" but **Hermes-grade Memory architecture** beyond the first local prototypes: richer semantic/vector retrieval, graph/entity modeling, trust/user modeling, and multimodal evidence ingestion. Tasks #228-#230 start that foundation without binding Oneesama to one vendor/plugin too early.
+The real remaining gap is not "Cueboard parity" but **Hermes-grade Memory architecture** beyond the first local prototypes: richer semantic/vector retrieval, graph trust/user modeling, and true multimodal readers. Tasks #228-#233 start that foundation without binding Oneesama to one vendor/plugin too early.

@@ -1,0 +1,57 @@
+{
+  "case_id": "case_006_multimodal_ingestion",
+  "source": {
+    "occurred_at": "2026-05-19T15:58:00+08:00",
+    "notes": "Anchor fixture for #233 multimodal Memory ingestion. A media/file-heavy app mention must create searchable multimodal Memory evidence without claiming video/PDF contents were decoded."
+  },
+  "scenario": {
+    "type": "multimodal_ingestion",
+    "app_mention": {
+      "channel_id": "CVIDEO",
+      "thread_ts": "1779166071.849179",
+      "user_id": "UASK",
+      "user_name": "peng",
+      "mention_text": "你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+      "raw_mention_text": "<@UBOT> 你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+      "prompt": "Thread context:\n你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+      "files": [
+        {
+          "id": "FVID",
+          "name": "bridge_cold_open_montage_v15.mp4",
+          "filetype": "mp4",
+          "mimetype": "video/mp4",
+          "size": 123,
+          "permalink": "https://slack.example/FVID"
+        },
+        {
+          "id": "FPDF",
+          "name": "bridge_assets_brief.pdf",
+          "filetype": "pdf",
+          "mimetype": "application/pdf",
+          "size": 456,
+          "permalink": "https://slack.example/FPDF"
+        }
+      ]
+    },
+    "search": {
+      "query": "bridge_cold_open_montage 素材库",
+      "limit": 5
+    }
+  },
+  "expected_provider_events": {
+    "search_query_contains": "bridge_cold_open_montage",
+    "search_records_returned_min": 1
+  },
+  "expected_search_result_anchors": [
+    "multimodal_memory",
+    "memory_provider:multimodal_memory",
+    "bridge_cold_open_montage_v15.mp4",
+    "bridge_assets_brief.pdf",
+    "video/binary contents are not decoded"
+  ],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "x-oneesama-internal-key"
+  ]
+}

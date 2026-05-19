@@ -35,6 +35,7 @@ type memoryQualityFixtureScenario struct {
 	MemoryWrite         *memoryQualityFixtureMemoryWrite `json:"memory_write,omitempty"`
 	TurnInput           *memoryQualityFixtureTurnInput   `json:"turn_input,omitempty"`
 	Search              *memoryQualityFixtureSearch      `json:"search,omitempty"`
+	AppMention          *memoryQualityFixtureAppMention  `json:"app_mention,omitempty"`
 	ProviderSeedRecords []memoryQualityFixtureSeedRecord `json:"provider_seed_records,omitempty"`
 }
 
@@ -54,6 +55,17 @@ type memoryQualityFixtureTurnInput struct {
 type memoryQualityFixtureSearch struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit"`
+}
+
+type memoryQualityFixtureAppMention struct {
+	ChannelID      string            `json:"channel_id"`
+	ThreadTS       string            `json:"thread_ts"`
+	UserID         string            `json:"user_id"`
+	UserName       string            `json:"user_name"`
+	MentionText    string            `json:"mention_text"`
+	RawMentionText string            `json:"raw_mention_text"`
+	Prompt         string            `json:"prompt"`
+	Files          []SlackThreadFile `json:"files"`
 }
 
 type memoryQualityFixtureSeedRecord struct {
@@ -164,6 +176,8 @@ func runMemoryQualityFixture(t *testing.T, fixture memoryQualityFixture) {
 		runMemorySyncTurnExtraction(t, fixture, service, provider)
 	case "entity_graph_resolution":
 		runMemoryEntityGraphResolution(t, fixture)
+	case "multimodal_ingestion":
+		runMemoryMultimodalIngestion(t, fixture)
 	default:
 		t.Fatalf("[%s] unknown scenario.type %q", fixture.CaseID, fixture.Scenario.Type)
 	}
@@ -211,6 +225,56 @@ func runMemoryEntityGraphResolution(t *testing.T, fixture memoryQualityFixture) 
 	for _, anchor := range fixture.ExpectedSearchResultAnchors {
 		if !strings.Contains(joined, anchor) {
 			t.Fatalf("[%s] entity graph result missing anchor %q; full blob: %q", fixture.CaseID, anchor, joined)
+		}
+	}
+}
+
+func runMemoryMultimodalIngestion(t *testing.T, fixture memoryQualityFixture) {
+	t.Helper()
+	if fixture.Scenario.AppMention == nil {
+		t.Fatalf("[%s] multimodal_ingestion scenario missing app_mention", fixture.CaseID)
+	}
+	if fixture.Scenario.Search == nil {
+		t.Fatalf("[%s] multimodal_ingestion scenario missing search", fixture.CaseID)
+	}
+	workspaceDir := t.TempDir()
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Memory:       appconfig.SlackMemoryConfig{Enabled: true},
+		},
+	})
+	input := fixture.Scenario.AppMention
+	rich := &SlackAppMentionContext{
+		ChannelID:      input.ChannelID,
+		ThreadTS:       input.ThreadTS,
+		UserID:         input.UserID,
+		MentionText:    input.MentionText,
+		RawMentionText: input.RawMentionText,
+		Prompt:         input.Prompt,
+		Files:          append([]SlackThreadFile(nil), input.Files...),
+	}
+	_ = service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
+		ChannelID:         input.ChannelID,
+		ThreadTS:          input.ThreadTS,
+		UserID:            input.UserID,
+		UserName:          input.UserName,
+		RichThreadContext: rich,
+	}, parsedAvatarCommand{Action: "work"}, nil)
+
+	limit := fixture.Scenario.Search.Limit
+	if limit <= 0 {
+		limit = relatedMemoryDefaultLimit
+	}
+	result := service.SearchRelatedMemory(fixture.Scenario.Search.Query, SlackRelatedMemorySearchOptions{Limit: limit})
+	expected := fixture.ExpectedProviderEvents
+	if expected.SearchRecordsReturnedMin > 0 && len(result.Results) < expected.SearchRecordsReturnedMin {
+		t.Fatalf("[%s] multimodal SearchRelatedMemory returned %d records, want >= %d; result: %#v", fixture.CaseID, len(result.Results), expected.SearchRecordsReturnedMin, result)
+	}
+	joined := strings.Join(searchResultAnchorBlobs(result), "\n---\n")
+	for _, anchor := range fixture.ExpectedSearchResultAnchors {
+		if !strings.Contains(joined, anchor) {
+			t.Fatalf("[%s] multimodal result missing anchor %q; full blob: %q", fixture.CaseID, anchor, joined)
 		}
 	}
 }

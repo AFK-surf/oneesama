@@ -106,21 +106,24 @@ or an external embedding backend.
   returns relationship evidence with positive and negative links.
   Landed as `entity_graph_resolution` in case_005.
 - #233 (multimodal ingestion): new scenario type
-  `multimodal_ingest` — pass a file / image evidence, assert the
-  provider receives it as an indexable record. Layer: provider's
-  ingestion hook (TBD by #233 design).
+  `multimodal_ingestion` — pass a media-heavy app mention through
+  the real app-mention context builder, assert a reviewable
+  multimodal Memory candidate is written, then verify
+  `SearchRelatedMemory` recalls the evidence through
+  `memory_provider:multimodal_memory`.
 
 ## Status
 
-- Scaffold + 5 fixtures shipped; case_003 was flipped from pending
+- Scaffold + 6 fixtures shipped; case_003 was flipped from pending
   to active by task #229, case_004 was flipped from pending to
-  active by task #230, and case_005 was flipped from pending to
-  active by task #231.
+  active by task #230, case_005 was flipped from pending to active
+  by task #231, and case_006 landed active with task #233.
 - C232-A `durable_write_replay`: green.
 - C232-B `provider_search_merge`: green.
 - C232-C `semantic_recall`: green.
 - C232-D `sync_turn_extraction`: green.
 - C232-E `entity_graph_resolution`: green.
+- C232-F `multimodal_ingestion`: green.
 - `go test ./internal/slackagent -count=1`: green.
 
 ## Open follow-ups

@@ -287,6 +287,8 @@ func relatedMemoryKindForPath(relPath string) string {
 		return "team_meeting"
 	case strings.HasPrefix(relPath, "memory/lessons/candidates/"):
 		return "lesson_candidate"
+	case strings.HasPrefix(relPath, "memory/multimodal/"):
+		return "multimodal_memory"
 	case strings.HasPrefix(relPath, "memory/feedback/"):
 		return "feedback"
 	default:

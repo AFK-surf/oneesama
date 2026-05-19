@@ -229,7 +229,11 @@ func NewService(cfg Config) *Service {
 	}
 	memoryProviders := append([]SlackMemoryProvider(nil), cfg.MemoryProviders...)
 	if cfg.Slack.Memory.Enabled {
-		memoryProviders = append([]SlackMemoryProvider{newTurnExtractionMemoryProvider(cfg.Slack.Memory), newEntityGraphMemoryProvider(cfg.Slack.Memory)}, memoryProviders...)
+		memoryProviders = append([]SlackMemoryProvider{
+			newTurnExtractionMemoryProvider(cfg.Slack.Memory),
+			newEntityGraphMemoryProvider(cfg.Slack.Memory),
+			newMultimodalMemoryProvider(cfg.Slack.Memory),
+		}, memoryProviders...)
 	}
 	if cfg.Slack.Memory.SemanticEnabled {
 		memoryProviders = append([]SlackMemoryProvider{newSemanticMemoryProvider(cfg.Slack.Memory)}, memoryProviders...)

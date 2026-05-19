@@ -38,7 +38,7 @@ func (s *Service) handleSlackWorkerToolRequest(ctx context.Context, job agentrun
 		s.postSlackWorkerToolBridgeFailure(ctx, job, "tool_loop_limit_reached")
 		return true
 	}
-	evidence := s.executeSlackWorkerToolBridgeRequest(ctx, request)
+	evidence := s.executeSlackWorkerToolBridgeRequest(ctx, request, job.Context)
 	nextContext := slackWorkerToolContinuationContext(job.Context, evidence)
 	nextTask := slackWorkerToolContinuationTask(job, request)
 	_, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
@@ -85,7 +85,7 @@ func parseSlackWorkerToolBridgeRequest(text string) (slackWorkerToolBridgeReques
 	return request, true
 }
 
-func (s *Service) executeSlackWorkerToolBridgeRequest(ctx context.Context, request slackWorkerToolBridgeRequest) []SlackAppMentionToolEvidence {
+func (s *Service) executeSlackWorkerToolBridgeRequest(ctx context.Context, request slackWorkerToolBridgeRequest, workerContext map[string]any) []SlackAppMentionToolEvidence {
 	out := make([]SlackAppMentionToolEvidence, 0, len(request.Calls))
 	for _, call := range request.Calls {
 		call.Tool = firstNonEmpty(call.Tool, call.Name)
@@ -117,6 +117,7 @@ func (s *Service) executeSlackWorkerToolBridgeRequest(ctx context.Context, reque
 		evidence.Text = response.Text
 		out = append(out, evidence)
 	}
+	s.recordAppMentionMultimodalMemory(ctx, slackAppMentionFromContextMap(workerContext), out, "worker_tool_bridge")
 	return out
 }
 
