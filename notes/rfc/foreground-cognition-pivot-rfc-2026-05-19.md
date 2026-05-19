@@ -162,6 +162,29 @@ sequenceDiagram
   - does not run before Pi on automatic foreground triage.
   - is the normal fallback for "Pi knows this needs stronger work", not a competing foreground brain.
 
+### Policy Layering
+
+The Pi runtime should not bake every workspace's engagement taste into
+the universal persona contract. Split foreground behavior into layers:
+
+1. **Universal persona capability boundary**: Pi must not bluff, must
+   delegate when it lacks context/tooling/confidence, must stay silent
+   for already-handled/off-topic/unsafe cases, and must cite evidence
+   for factual replies.
+2. **Workspace-specific engagement policy**: this Oneesama/Bridge
+   workspace values lightweight comments on AI agents, coding tools,
+   creative tooling, Memory, and Bridge/Cue-like collaboration
+   products, even in casual channels. That is our product-development
+   context, not a rule every deployment should inherit.
+3. **Channel/thread local state**: the channel brain and thread ledger
+   can still suppress duplicates, already-handled threads, or channels
+   where the local policy says "do not engage."
+
+This separation is important because some proactive behaviors are
+valuable for our own product team but inappropriate for other
+workspaces. The implementation should model them as deployment /
+workspace policy inputs, not as hard-coded universal Pi instincts.
+
 ## Target Pi Request Shape
 
 Foreground triage request should contain context and evidence, not a runner decision:
