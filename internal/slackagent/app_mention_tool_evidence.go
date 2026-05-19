@@ -16,6 +16,9 @@ func (s *Service) collectAppMentionToolEvidence(ctx context.Context, mention *Sl
 	if evidence, ok := s.collectAppMentionMemoryWriteEvidence(ctx, mention); ok {
 		out = append(out, evidence)
 	}
+	if evidence, ok := collectAppMentionMediaEvidence(mention); ok {
+		out = append(out, evidence)
+	}
 	query := appMentionFreshSearchQuery(mention)
 	if !shouldSearchFreshAppMentionEvidence(mention, related, query) {
 		return out

@@ -193,6 +193,78 @@ func TestAppMentionContextIncludesFirstClassFreshSearchEvidence(t *testing.T) {
 	}
 }
 
+func TestAppMentionMediaRequestAddsFileContextEvidence(t *testing.T) {
+	service := NewService(Config{})
+	rich := &SlackAppMentionContext{
+		ChannelID:      "CVIDEO",
+		ThreadTS:       "1779166071.849179",
+		UserID:         "UASK",
+		MentionText:    "你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+		RawMentionText: "<@UBOT> 你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+		Transcript: strings.Join([]string{
+			"[1779166071.849179] <@UASK>: <@UBOT> 你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+			"  [file: bridge_cold_open_montage_v15.mp4 type=mp4 size=123 <https://slack.example/FVID>]",
+			"  [image: poster.png file_id=FIMG type=image/png size=10 <https://slack.example/FIMG>]",
+		}, "\n"),
+		Prompt: "Thread context:\n你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+		Files: []SlackThreadFile{
+			{ID: "FVID", Name: "bridge_cold_open_montage_v15.mp4", Filetype: "mp4", Mimetype: "video/mp4", Size: 123, Permalink: "https://slack.example/FVID"},
+			{ID: "FIMG", Name: "poster.png", Filetype: "png", Mimetype: "image/png", Size: 10, Permalink: "https://slack.example/FIMG"},
+		},
+	}
+	context := service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
+		ChannelName:       "bridge-social-media",
+		UserName:          "peng",
+		RichThreadContext: rich,
+	}, parsedAvatarCommand{Action: "work"}, nil)
+
+	evidence, ok := context["slackToolEvidence"].(string)
+	if !ok || !strings.Contains(evidence, "slack_file_context (ok)") || !strings.Contains(evidence, "1 video(s)") || !strings.Contains(evidence, "bridge_cold_open_montage_v15.mp4") {
+		t.Fatalf("slackToolEvidence = %q, want media file-context evidence", evidence)
+	}
+	if !strings.Contains(evidence, "Do not claim to have watched videos") || !strings.Contains(evidence, "video/binary contents are not decoded") {
+		t.Fatalf("slackToolEvidence = %q, want explicit media content boundary", evidence)
+	}
+	if len(rich.ToolEvidence) != 1 || rich.ToolEvidence[0].Tool != "slack_file_context" || !rich.ToolEvidence[0].OK {
+		t.Fatalf("rich.ToolEvidence = %#v, want successful slack_file_context evidence", rich.ToolEvidence)
+	}
+	prompt, ok := context["slackAssistantPrompt"].(string)
+	if !ok || !strings.Contains(prompt, "First-class tool evidence:") || !strings.Contains(prompt, "video/binary contents are not decoded") {
+		t.Fatalf("slackAssistantPrompt = %q, want file-context evidence in worker prompt", prompt)
+	}
+}
+
+func TestAppMentionFileMetadataDoesNotAddMediaEvidenceWithoutMediaIntent(t *testing.T) {
+	service := NewService(Config{})
+	rich := &SlackAppMentionContext{
+		ChannelID:      "CVIDEO",
+		ThreadTS:       "1779166071.849179",
+		UserID:         "UASK",
+		MentionText:    "谢谢，先这样",
+		RawMentionText: "<@UBOT> 谢谢，先这样",
+		Transcript: strings.Join([]string{
+			"[1779166071.849179] <@UASK>: <@UBOT> 谢谢，先这样",
+			"  [file: bridge_cold_open_montage_v15.mp4 type=mp4 size=123 <https://slack.example/FVID>]",
+		}, "\n"),
+		Prompt: "Thread context:\n谢谢，先这样",
+		Files: []SlackThreadFile{
+			{ID: "FVID", Name: "bridge_cold_open_montage_v15.mp4", Filetype: "mp4", Mimetype: "video/mp4", Size: 123, Permalink: "https://slack.example/FVID"},
+		},
+	}
+	context := service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
+		ChannelName:       "bridge-social-media",
+		UserName:          "peng",
+		RichThreadContext: rich,
+	}, parsedAvatarCommand{Action: "work"}, nil)
+
+	if evidence, ok := context["slackToolEvidence"].(string); ok && strings.Contains(evidence, "slack_file_context") {
+		t.Fatalf("slackToolEvidence = %q, want no file-context evidence without media request intent", evidence)
+	}
+	if len(rich.ToolEvidence) != 0 {
+		t.Fatalf("rich.ToolEvidence = %#v, want no media evidence without media request intent", rich.ToolEvidence)
+	}
+}
+
 func TestAppMentionExplicitRememberWritesDurableMemory(t *testing.T) {
 	workspaceDir := t.TempDir()
 	service := NewService(Config{
