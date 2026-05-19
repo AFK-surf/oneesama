@@ -309,6 +309,29 @@ func TestMeetingWebhookFailedResultPostsFailureNotice(t *testing.T) {
 	}
 }
 
+func TestMeetingWebhookFailedResultScrubsInternalFailureDetails(t *testing.T) {
+	poster := &recordingPoster{}
+	router := newMeetingWebhookTestRouter(t, poster, &recordingAssistant{}, nil)
+	body := `{"event":"meeting.result","meeting_id":"89","status":"failed","error":"curl http://127.0.0.1:8780/slack/tools/call failed to connect; x-oneesama-internal-key leaked","slack_ref":{"channel_id":"C123","thread_ts":"123.456"}}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	calls := poster.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("poster calls = %#v, want one", calls)
+	}
+	text := calls[0].Text
+	if !strings.Contains(text, "kept this visible for retry") {
+		t.Fatalf("poster text = %q, want safe retry message", text)
+	}
+	for _, forbidden := range []string{"127.0.0.1", "localhost", "/slack/tools/call", "x-oneesama-internal-key", "curl"} {
+		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) {
+			t.Fatalf("poster text = %q, leaked %q", text, forbidden)
+		}
+	}
+}
+
 func newMeetingWebhookTestRouter(t *testing.T, poster PosterService, assistant AssistantService, canvas CanvasPublisherService) http.Handler {
 	t.Helper()
 	return newTestRouter(t, Config{

@@ -362,7 +362,17 @@ func failClosedSlackWorkerVisibleText(text string) (string, bool) {
 	if trimmed == "" {
 		return "", false
 	}
-	lower := strings.ToLower(trimmed)
+	if slackVisibleTextContainsInternalLeak(trimmed) {
+		return slackWorkerInternalToolFailureText, true
+	}
+	return trimmed, false
+}
+
+func slackVisibleTextContainsInternalLeak(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
 	for _, marker := range []string{
 		"127.0.0.1:8780",
 		"localhost:8780",
@@ -371,18 +381,15 @@ func failClosedSlackWorkerVisibleText(text string) (string, bool) {
 		"local slack tool gateway",
 	} {
 		if strings.Contains(lower, marker) {
-			return slackWorkerInternalToolFailureText, true
+			return true
 		}
 	}
-	if (strings.Contains(lower, "127.0.0.1") || strings.Contains(lower, "localhost")) &&
+	return (strings.Contains(lower, "127.0.0.1") || strings.Contains(lower, "localhost")) &&
 		strings.Contains(lower, "curl") &&
 		(strings.Contains(lower, "connection refused") ||
 			strings.Contains(lower, "failed to connect") ||
 			strings.Contains(lower, "could not connect") ||
-			strings.Contains(lower, "exit status 7")) {
-		return slackWorkerInternalToolFailureText, true
-	}
-	return trimmed, false
+			strings.Contains(lower, "exit status 7"))
 }
 
 func assistantStatusTextForJob(job agentrunner.Job) string {

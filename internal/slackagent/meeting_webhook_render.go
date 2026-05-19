@@ -98,7 +98,15 @@ func buildMeetingJoinedPost(payload NormalizedMeetingWebhookPayload) (string, []
 }
 
 func buildMeetingFailurePost(payload NormalizedMeetingWebhookPayload) string {
-	return fmt.Sprintf(":x: Meeting failed: %s", firstNonEmpty(payload.Error, "unknown error"))
+	return fmt.Sprintf(":x: Meeting failed: %s", safeMeetingFailureError(payload.Error))
+}
+
+func safeMeetingFailureError(text string) string {
+	trimmed := strings.TrimSpace(firstNonEmpty(text, "unknown error"))
+	if slackVisibleTextContainsInternalLeak(trimmed) {
+		return "meeting result was unavailable; I kept this visible for retry instead of exposing internal tool details"
+	}
+	return trimmed
 }
 
 func buildMeetingResultPost(payload NormalizedMeetingWebhookPayload) string {
