@@ -265,6 +265,47 @@ func TestAppMentionFileMetadataDoesNotAddMediaEvidenceWithoutMediaIntent(t *test
 	}
 }
 
+func TestAppMentionOperationalPRAddsWorkflowEvidence(t *testing.T) {
+	service := NewService(Config{})
+	rich := &SlackAppMentionContext{
+		ChannelID:      "CWORK",
+		ThreadTS:       "1779079538.775449",
+		UserID:         "UASK",
+		MentionText:    "https://github.com/AFK-surf/cueboard/pull/1917 <@U0ALY77RMJL> <@U0AMN6TKVJ8> 来 review，没问题就 approve 然后推进到合并",
+		RawMentionText: "<@UBOT> https://github.com/AFK-surf/cueboard/pull/1917 <@U0ALY77RMJL> <@U0AMN6TKVJ8> 来 review，没问题就 approve 然后推进到合并",
+		Transcript:     "[1779079538.775449] <@UASK>: <@UBOT> https://github.com/AFK-surf/cueboard/pull/1917 <@U0ALY77RMJL> <@U0AMN6TKVJ8> 来 review，没问题就 approve 然后推进到合并",
+		Prompt:         "Thread context:\nhttps://github.com/AFK-surf/cueboard/pull/1917 <@U0ALY77RMJL> <@U0AMN6TKVJ8> 来 review，没问题就 approve 然后推进到合并",
+	}
+	context := service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
+		ChannelName:       "bridge-dev",
+		UserName:          "peng",
+		RichThreadContext: rich,
+	}, parsedAvatarCommand{Action: "work"}, nil)
+
+	evidence, ok := context["slackToolEvidence"].(string)
+	if !ok || !strings.Contains(evidence, "slack_workflow_context (ok)") || !strings.Contains(evidence, "operational_github_work") || !strings.Contains(evidence, "review_or_delivery_request") {
+		t.Fatalf("slackToolEvidence = %q, want workflow evidence for operational PR review request", evidence)
+	}
+	for _, want := range []string{
+		"not a general link/article share",
+		"identify the requested owner/action/status",
+		"Do not summarize the link as reading material",
+		"https://github.com/AFK-surf/cueboard/pull/1917",
+		"<@U0ALY77RMJL>",
+	} {
+		if !strings.Contains(evidence, want) {
+			t.Fatalf("slackToolEvidence = %q, missing workflow boundary %q", evidence, want)
+		}
+	}
+	if len(rich.ToolEvidence) != 1 || rich.ToolEvidence[0].Tool != "slack_workflow_context" || !rich.ToolEvidence[0].OK {
+		t.Fatalf("rich.ToolEvidence = %#v, want successful slack_workflow_context evidence", rich.ToolEvidence)
+	}
+	prompt, ok := context["slackAssistantPrompt"].(string)
+	if !ok || !strings.Contains(prompt, "First-class tool evidence:") || !strings.Contains(prompt, "Do not summarize the link as reading material") {
+		t.Fatalf("slackAssistantPrompt = %q, want workflow evidence in worker prompt", prompt)
+	}
+}
+
 func TestAppMentionExplicitRememberWritesDurableMemory(t *testing.T) {
 	workspaceDir := t.TempDir()
 	service := NewService(Config{
