@@ -194,6 +194,115 @@ func TestHandleScannerSweepIgnoresCurrentBotMentions(t *testing.T) {
 	}
 }
 
+func TestScannerSweepReconcilesMissedAppMention(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_scanner_mention",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotUserID: "UBOT",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+		},
+		Runner: runner,
+	})
+
+	result := service.SweepSlackScanner(context.Background(), SlackScannerSweepRequest{
+		WorkspaceID: "T123",
+		Flush:       boolPtr(true),
+		Channels: []SlackScannerChannel{{
+			ID:   "C123",
+			Name: "xp-test",
+			Type: "channel",
+			Messages: []SlackInboundMessage{{
+				UserID: "U123",
+				Text:   "<@UBOT> 给一版 what's new，写 canvas 里",
+				TS:     "1779158086.310079",
+			}},
+		}},
+	})
+
+	if !result.OK || len(result.Sweeps) != 1 {
+		t.Fatalf("result = %#v, want one successful sweep", result)
+	}
+	sweep := result.Sweeps[0]
+	if sweep.Buffered != 0 || sweep.MentionReconciled != 1 || sweep.MentionSkipped != 0 {
+		t.Fatalf("sweep = %#v, want mention reconciled without triage buffer", sweep)
+	}
+	if runner.startCount != 1 {
+		t.Fatalf("runner start count = %d, want 1", runner.startCount)
+	}
+	if !strings.Contains(runner.startInput.Task, "what's new") || strings.Contains(runner.startInput.Task, "<@UBOT>") {
+		t.Fatalf("runner task = %q, want stripped app mention text", runner.startInput.Task)
+	}
+}
+
+func TestScannerSweepSkipsMentionAlreadyHandledBeforeRestart(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Persistence: appconfig.PersistenceConfig{
+			Provider: "json-file",
+			DataDir:  dir,
+		},
+		Slack: appconfig.SlackConfig{
+			BotUserID: "UBOT",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+		},
+	}
+	firstRunner := &fakeRunner{job: agentrunner.Job{ID: "job_socket_mention", Provider: "codex", Status: agentrunner.StatusRunning}}
+	first := NewService(cfg)
+	first.runner = firstRunner
+	first.handleEventAvatarCommand(context.Background(), SlackEventEnvelope{
+		Type:    "event_callback",
+		EventID: "EvSocketMention",
+		TeamID:  "T123",
+		Event: SlackEventPayload{
+			Type:    "app_mention",
+			User:    "U123",
+			Text:    "<@UBOT> summarize this",
+			Channel: "C123",
+			TS:      "1779158086.310079",
+		},
+	}, "app_mention")
+	if firstRunner.startCount != 1 {
+		t.Fatalf("first runner start count = %d, want socket event to start once", firstRunner.startCount)
+	}
+
+	secondRunner := &fakeRunner{job: agentrunner.Job{ID: "job_scanner_duplicate", Provider: "codex", Status: agentrunner.StatusRunning}}
+	second := NewService(cfg)
+	second.runner = secondRunner
+	result := second.SweepSlackScanner(context.Background(), SlackScannerSweepRequest{
+		WorkspaceID: "T123",
+		Flush:       boolPtr(true),
+		Channels: []SlackScannerChannel{{
+			ID:   "C123",
+			Type: "channel",
+			Messages: []SlackInboundMessage{{
+				UserID: "U123",
+				Text:   "<@UBOT> summarize this",
+				TS:     "1779158086.310079",
+			}},
+		}},
+	})
+	if !result.OK || len(result.Sweeps) != 1 {
+		t.Fatalf("result = %#v, want one successful sweep", result)
+	}
+	sweep := result.Sweeps[0]
+	if sweep.MentionReconciled != 0 || sweep.MentionSkipped != 1 || secondRunner.startCount != 0 {
+		t.Fatalf("sweep = %#v startCount=%d, want persisted handled mention skipped", sweep, secondRunner.startCount)
+	}
+}
+
 func TestSlackHistoryScannerBootstrapsCursorWithoutFloodingHistory(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {

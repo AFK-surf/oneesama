@@ -151,6 +151,35 @@ func (s *slackContextStore) Remember(ctx context.Context, input AvatarCommandInp
 	return &record, nil
 }
 
+func (s *slackContextStore) HasMentionReaction(ctx context.Context, channelID, threadTS, reactionTS string) (bool, error) {
+	if s == nil || s.collection == nil {
+		return false, nil
+	}
+	channelID = strings.TrimSpace(channelID)
+	threadTS = strings.TrimSpace(threadTS)
+	reactionTS = strings.TrimSpace(reactionTS)
+	if channelID == "" || threadTS == "" || reactionTS == "" {
+		return false, nil
+	}
+	records, err := s.collection.List(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list slack contexts: %w", err)
+	}
+	for _, record := range records {
+		if strings.TrimSpace(record.ChannelID) != channelID || strings.TrimSpace(record.ThreadTS) != threadTS {
+			continue
+		}
+		command := strings.TrimSpace(stringFromAny(record.RawPublic["command"]))
+		if command != "app_mention" && command != "message_mention" {
+			continue
+		}
+		if strings.TrimSpace(stringFromAny(record.RawPublic["reaction_ts"])) == reactionTS {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func slackContextID(input AvatarCommandInput) string {
 	return strings.Join([]string{
 		firstNonEmpty(input.TeamID, "workspace"),

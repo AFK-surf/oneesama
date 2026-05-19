@@ -104,15 +104,18 @@ type SlackScannerSweepResult struct {
 }
 
 type SlackScannerChannelResult struct {
-	ChannelID      string                   `json:"channelId"`
-	OK             bool                     `json:"ok"`
-	Source         string                   `json:"source,omitempty"`
-	Error          string                   `json:"error,omitempty"`
-	PreviousCursor string                   `json:"previousCursor,omitempty"`
-	NextCursor     string                   `json:"nextCursor,omitempty"`
-	Scanned        int                      `json:"scanned"`
-	Buffered       int                      `json:"buffered"`
-	Flushed        *SlackInboundFlushResult `json:"flushed,omitempty"`
+	ChannelID           string                   `json:"channelId"`
+	OK                  bool                     `json:"ok"`
+	Source              string                   `json:"source,omitempty"`
+	Error               string                   `json:"error,omitempty"`
+	PreviousCursor      string                   `json:"previousCursor,omitempty"`
+	NextCursor          string                   `json:"nextCursor,omitempty"`
+	Scanned             int                      `json:"scanned"`
+	Buffered            int                      `json:"buffered"`
+	MentionReconciled   int                      `json:"mentionReconciled,omitempty"`
+	MentionSkipped      int                      `json:"mentionSkipped,omitempty"`
+	MentionReconcileErr string                   `json:"mentionReconcileError,omitempty"`
+	Flushed             *SlackInboundFlushResult `json:"flushed,omitempty"`
 }
 
 type SlackScannerReconcileResult struct {

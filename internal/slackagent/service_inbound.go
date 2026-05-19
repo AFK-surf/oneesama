@@ -156,6 +156,9 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 	flush := request.Flush == nil || *request.Flush
 	for _, channel := range channels {
 		buffered := 0
+		mentionReconciled := 0
+		mentionSkipped := 0
+		mentionReconcileError := ""
 		previousCursor := s.inbound.Cursor(channel.ID)
 		nextCursor := previousCursor
 		for _, message := range channel.Messages {
@@ -165,6 +168,21 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 			message.ChannelType = firstNonEmpty(message.ChannelType, channel.Type)
 			message.TS = firstNonEmpty(message.TS, message.EventTS)
 			message.EventTS = firstNonEmpty(message.EventTS, message.TS)
+			if scannerMessageMentionsBot(message, s.botUserID) {
+				reconciled, skipped, err := s.reconcileScannerMention(ctx, workspaceID, channel, message)
+				if err != nil {
+					mentionReconcileError = err.Error()
+					s.logger.Warn("slack scanner mention reconciliation failed", "channel", channel.ID, "ts", message.TS, "error", err)
+				} else if reconciled {
+					mentionReconciled++
+				} else if skipped {
+					mentionSkipped++
+				}
+				if slackTSGreater(message.TS, nextCursor) {
+					nextCursor = message.TS
+				}
+				continue
+			}
 			if shouldIgnoreScannerInboundMessage(message, s.botUserID) {
 				continue
 			}
@@ -197,12 +215,75 @@ func (s *Service) SweepSlackScanner(ctx context.Context, request SlackScannerSwe
 			}
 		}
 		results = append(results, SlackScannerChannelResult{ChannelID: channel.ID, OK: true, Source: "fixture", PreviousCursor: previousCursor, NextCursor: nextCursor, Scanned: len(channel.Messages), Buffered: buffered, Flushed: flushed})
+		if mentionReconciled > 0 || mentionSkipped > 0 || strings.TrimSpace(mentionReconcileError) != "" {
+			result := &results[len(results)-1]
+			result.MentionReconciled = mentionReconciled
+			result.MentionSkipped = mentionSkipped
+			result.MentionReconcileErr = mentionReconcileError
+		}
 	}
 	ok := true
 	for _, result := range results {
 		ok = ok && result.OK
 	}
 	return SlackScannerSweepResult{OK: ok, WorkspaceID: workspaceID, Sweeps: results, Inbound: s.InboundStatus()}
+}
+
+func scannerMessageMentionsBot(message SlackInboundMessage, botUserID string) bool {
+	message = normalizeSlackInboundMessage(message)
+	botUserID = strings.TrimSpace(botUserID)
+	if botUserID == "" || strings.TrimSpace(message.ChannelID) == "" || strings.TrimSpace(message.UserID) == "" {
+		return false
+	}
+	if strings.TrimSpace(message.BotID) != "" {
+		return false
+	}
+	subtype := strings.TrimSpace(message.Subtype)
+	if subtype != "" && subtype != "file_share" {
+		return false
+	}
+	return slackTextMentionsUser(message.Text, botUserID)
+}
+
+func (s *Service) reconcileScannerMention(ctx context.Context, workspaceID string, channel SlackScannerChannel, message SlackInboundMessage) (reconciled bool, skipped bool, err error) {
+	if s == nil {
+		return false, false, nil
+	}
+	message = normalizeSlackInboundMessage(message)
+	threadTS := firstNonEmpty(message.ThreadTS, message.TS, message.EventTS)
+	reactionTS := firstNonEmpty(message.TS, message.EventTS)
+	if s.slackContext != nil {
+		alreadyHandled, err := s.slackContext.HasMentionReaction(ctx, message.ChannelID, threadTS, reactionTS)
+		if err != nil {
+			return false, false, err
+		}
+		if alreadyHandled {
+			return false, true, nil
+		}
+	}
+	envelope := SlackEventEnvelope{
+		Type:    "event_callback",
+		EventID: strings.Join([]string{"scanner_mention", firstNonEmpty(workspaceID, "workspace"), message.ChannelID, reactionTS}, ":"),
+		TeamID:  firstNonEmpty(workspaceID, message.TeamID, "workspace"),
+		Event: SlackEventPayload{
+			Type:        "app_mention",
+			Channel:     message.ChannelID,
+			ChannelType: firstNonEmpty(message.ChannelType, channel.Type),
+			User:        message.UserID,
+			Text:        message.Text,
+			TS:          reactionTS,
+			EventTS:     firstNonEmpty(message.EventTS, reactionTS),
+			ThreadTS:    message.ThreadTS,
+		},
+	}
+	response := s.handleEventAvatarCommand(ctx, envelope, "app_mention")
+	if response.Ignored {
+		return false, true, nil
+	}
+	if response.Handled && response.OK {
+		return true, false, nil
+	}
+	return false, true, nil
 }
 
 func normalizeScannerContextMessages(workspaceID string, channel SlackScannerChannel, messages []SlackInboundMessage) []SlackInboundMessage {

@@ -18,6 +18,7 @@ import (
 type fakeRunner struct {
 	job           agentrunner.Job
 	startInput    agentrunner.StartInput
+	startCount    int
 	cancelCalled  bool
 	cancelContext context.Context
 }
@@ -26,6 +27,7 @@ func (r *fakeRunner) Provider() string { return r.job.Provider }
 func (r *fakeRunner) DryRun() bool     { return false }
 func (r *fakeRunner) StartTask(_ context.Context, input agentrunner.StartInput) (agentrunner.Job, error) {
 	r.startInput = input
+	r.startCount++
 	job := r.job
 	job.Task = input.Task
 	job.Context = input.Context
