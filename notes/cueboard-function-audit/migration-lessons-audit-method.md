@@ -878,16 +878,19 @@ checks and entry-shape canaries missed:
 
 Two failure modes combined:
 
-- Pi foreground `stay_silent` replaced Codex's already-filtered
-  direct reply actions, so useful one-fact replies disappeared.
+- Pi foreground `stay_silent` dropped already-filtered runner
+  candidate replies, so useful one-fact replies disappeared.
 - The scanner prompt did not explicitly include casual-but-factual
   current-events questions as synthesis-eligible, even though old
   Slack Agent D answered these lightly after search.
 
 Task #237 fixes the first production contract slice:
 
-- if Pi foreground succeeds with `stay_silent`, Oneesama may execute
-  Codex direct-reply actions that already passed safety filters;
+- already-filtered runner direct-reply actions are injected into the
+  Pi persona request as `triage_candidate_actions`;
+- Go must not execute those candidate replies directly after Pi
+  returns `stay_silent`; Pi remains the only owner of foreground
+  visible replies;
 - if the user addressed another bot identity, those actions have
   already been filtered to empty, so new Oneesama still does not
   hijack old Bridge traffic;
@@ -908,6 +911,9 @@ Audit rule:
   away.
 - Old bot identity traffic is a benchmark for quality, not traffic to
   intercept, unless the product explicitly retires that identity.
+- Never fix silence by bypassing the foreground persona. Preserve
+  candidate evidence for Pi, then tune Pi/persona behavior if the
+  candidate should become visible.
 
 Reference audit: `notes/cueboard-function-audit/triage-log-delta-sweep-2026-05-19.md`.
 

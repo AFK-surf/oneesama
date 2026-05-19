@@ -25,9 +25,9 @@ Window: `2026-05-18T16:00:00Z` through `2026-05-19T09:00:00Z`.
 
 ## Root Cause Classes
 
-### Persona Silence Suppressed Vetted Codex Replies
+### Persona Silence Suppressed Vetted Candidate Replies
 
-After Pi foreground cutover, Codex could still produce a filtered `post_thread_reply`, but foreground execution replaced Codex actions with Pi persona actions. If Pi returned `stay_silent`, the already-filtered Codex direct reply was dropped.
+After Pi foreground cutover, the old runner could still produce a filtered `post_thread_reply` candidate, but foreground execution correctly made Pi the only visible-reply owner. If Pi returned `stay_silent`, the already-filtered candidate was dropped.
 
 This explains the class where old Agent D answered with one verified fact while new Oneesama stayed silent even though the runner had enough evidence to propose a safe reply.
 
@@ -41,15 +41,15 @@ When the user explicitly mentions the old Bridge bot identity, new Oneesama must
 
 ## Fixes Added
 
-- Preserve already-filtered Codex direct replies as a fallback only when Pi foreground succeeds with `stay_silent`.
-- Keep the old-Bridge mention guard: if a user addressed another bot, filtered Codex actions are empty and no fallback reply is posted.
-- Add candidate action detail to the persona request so Pi sees the specific vetted action it is deciding to approve or override.
+- Keep Pi as the only visible-reply owner: filtered runner replies are passed into the persona request as `triage_candidate_actions`, not posted directly by Go.
+- Keep the old-Bridge mention guard: if a user addressed another bot, filtered candidate actions are empty and Pi has no candidate to adopt.
+- Add candidate action detail to the persona request so Pi sees the specific vetted action it is deciding to approve, rewrite, or reject.
 - Update the scanner prompt to treat fresh factual/current-events questions as lightweight synthesis candidates after tool verification.
 
 ## Regression Coverage
 
-- `TestSlackTriageLivePersonaStaySilentUsesFilteredCodexReplyFallback`
-- `TestSlackTriageLivePersonaStaySilentDoesNotFallbackForOldBridgeMention`
+- `TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleReply`
+- `TestSlackTriageLivePersonaStaySilentDoesNotPostOldBridgeMentionCandidate`
 - `TestBuildSlackTriagePersonaRequestIncludesDecisionAndMemory`
 - `TestBuildSlackTriagePromptUsesCueboardTwoPassPolicy`
 
