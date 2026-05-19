@@ -34,11 +34,14 @@ func slackExternalLinksFromContext(value any) []SlackExternalLinkContext {
 	}
 }
 
-func slackTriageSharedLinkSynthesisAction(channelID string, threadTS string, messages []SlackInboundMessage, contexts []SlackExternalLinkContext) (SlackTriageDecisionAction, bool) {
+func slackTriageSharedLinkSynthesisAction(channelID string, threadTS string, messages []SlackInboundMessage, contexts []SlackExternalLinkContext, workspacePolicy string) (SlackTriageDecisionAction, bool) {
 	if len(contexts) == 0 || !slackMessagesHaveFetchableExternalLinks(messages) {
 		return SlackTriageDecisionAction{}, false
 	}
 	messageText := joinSlackMessageTexts(messages)
+	if !workspacePolicyEnablesSharedLinkSynthesis(workspacePolicy) && !slackMessageExplicitlyRequestsLinkSynthesis(messageText) {
+		return SlackTriageDecisionAction{}, false
+	}
 	context, ok := firstSynthesisEligibleExternalLink(contexts)
 	if !ok {
 		return SlackTriageDecisionAction{}, false
@@ -58,9 +61,63 @@ func slackTriageSharedLinkSynthesisAction(channelID string, threadTS string, mes
 		ChannelID:            channelID,
 		ThreadTS:             thread,
 		Confidence:           0.66,
-		Reason:               "A substantive shared article/PDF link is a weak invitation; a lightweight synthesis prevents the link from going cold.",
+		Reason:               "A substantive shared link is synthesis-eligible under the workspace policy or explicit thread request.",
 		RequiresConfirmation: false,
 	}, true
+}
+
+func workspacePolicyEnablesSharedLinkSynthesis(policy string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(policy))
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"source-backed",
+		"link",
+		"article",
+		"pdf",
+		"synthesis",
+		"product-adjacent",
+		"链接",
+		"文章",
+		"评价",
+		"点评",
+		"读后感",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func slackMessageExplicitlyRequestsLinkSynthesis(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	if !strings.Contains(normalized, "http://") && !strings.Contains(normalized, "https://") {
+		return false
+	}
+	for _, marker := range []string{
+		"what do you think",
+		"thoughts",
+		"summarize",
+		"summary",
+		"review",
+		"看",
+		"看看",
+		"评价",
+		"点评",
+		"总结",
+		"读一下",
+		"怎么看",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext) (SlackExternalLinkContext, bool) {

@@ -1007,6 +1007,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 		ExternalLinks:          externalLinks,
 		ThreadContexts:         threadContexts,
 		IgnoreExistingBotReply: options.IgnoreExistingBotReply,
+		WorkspacePolicy:        s.triageWorkspacePolicy,
 	})
 	contextMap := map[string]any{
 		"source":        "slack-triage",
@@ -1044,6 +1045,8 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 			"text":        formatTriageContexts(previous),
 		},
 		"externalLinks":             externalLinks,
+		"workspaceTriagePolicy":     s.triageWorkspacePolicy,
+		"workspace_triage_policy":   s.triageWorkspacePolicy,
 		"threadContexts":            threadContexts,
 		"channelContexts":           channelContexts,
 		"triageAudit":               auditMetadata,
@@ -1138,7 +1141,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	ok := job.Status == agentrunner.StatusCompleted
 	actions := append([]SlackTriageDecisionAction(nil), decision.Actions...)
 	if ok && !decision.ParseOK && len(actions) == 0 {
-		if action, ok := slackTriageSharedLinkSynthesisAction(channelID, threadTS, messages, slackExternalLinksFromContext(job.Context["externalLinks"])); ok {
+		if action, ok := slackTriageSharedLinkSynthesisAction(channelID, threadTS, messages, slackExternalLinksFromContext(job.Context["externalLinks"]), stringFromContext(job.Context, "workspaceTriagePolicy", "workspace_triage_policy")); ok {
 			actions = append(actions, action)
 			decision.Summary = firstNonEmpty(decision.Summary, "Shared link is synthesis-eligible; posting a lightweight initial opinion.")
 		}

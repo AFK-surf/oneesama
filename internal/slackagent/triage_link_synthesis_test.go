@@ -1,6 +1,31 @@
 package slackagent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestSharedLinkSynthesisRequiresWorkspacePolicyOrExplicitAsk(t *testing.T) {
+	t.Parallel()
+
+	contexts := []SlackExternalLinkContext{{
+		URL:     "https://antirez.com/news/166",
+		Title:   "Alternatives for the EDIT tool of LLM agents",
+		Excerpt: strings.Repeat("This article explains an LLM agent edit strategy with source-backed tradeoffs. ", 5),
+		Source:  "jina_reader",
+	}}
+	coldShare := []SlackInboundMessage{{Text: "<https://antirez.com/news/166>", TS: "123.456"}}
+	if _, ok := slackTriageSharedLinkSynthesisAction("C1", "123.456", coldShare, contexts, ""); ok {
+		t.Fatal("cold shared link without workspace policy should not trigger deterministic synthesis")
+	}
+	if _, ok := slackTriageSharedLinkSynthesisAction("C1", "123.456", coldShare, contexts, "Reply to source-backed product-adjacent articles in this workspace."); !ok {
+		t.Fatal("workspace policy should enable deterministic source-backed link synthesis")
+	}
+	explicitAsk := []SlackInboundMessage{{Text: "看看这个 <https://antirez.com/news/166>", TS: "123.456"}}
+	if _, ok := slackTriageSharedLinkSynthesisAction("C1", "123.456", explicitAsk, contexts, ""); !ok {
+		t.Fatal("explicit link-synthesis ask should trigger without workspace policy")
+	}
+}
 
 func TestSharedLinkSynthesisRejectsLowSignalSocialStatus(t *testing.T) {
 	t.Parallel()

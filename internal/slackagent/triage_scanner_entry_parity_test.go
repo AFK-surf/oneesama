@@ -169,7 +169,7 @@ func TestSlackTriageRelatedMemoryUsesFreshQuestionOverDigestContext(t *testing.T
 		Timestamp: "2026-05-19T08:29:27Z",
 		Status:    "ok",
 		Channels:  []string{"C09KVPBMLJ3"},
-		Summary:   "Nicole 问没付费用户是否 reset quota，属于产品/技术问题，超出 office helper 范围，无动作。",
+		Summary:   "Nicole 问没付费用户是否 reset quota，属于产品/技术问题，超出默认 triage lane，无动作。",
 		Digest:    "没付费的用户 reset quota 了吗",
 		Metadata: map[string]any{
 			"suppressed_reason":  "no_actions",

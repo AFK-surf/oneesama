@@ -123,13 +123,13 @@ func TestCueboardParityTriagePromptPolicyRails(t *testing.T) {
 		"do not do the debugging yourself",
 		"Meet links are a strong action signal",
 		"join_meeting",
-		"Product-risk threads are not ordinary chatter",
+		"Workspace policy is deployment-specific",
 		"People talking to each other is not an auto-SKIP",
 		"Do not let follow-ups evaporate",
 		"Know your lane: technical implementation is not your job",
 		"Match the language of the thread you act on",
-		"shared article, PDF, technical post, RFC, or long-form thread",
-		"Shared article/PDF links are synthesis-eligible",
+		"Shared articles/PDFs/technical posts/RFCs are reply-eligible",
+		"Shared article/PDF links are not universally synthesis-eligible",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("triage prompt missing %q:\n%s", want, prompt)

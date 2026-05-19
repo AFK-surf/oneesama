@@ -82,6 +82,9 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 		cueboardTriageSystemPrompt,
 		"Channel: " + input.ChannelID,
 	}
+	if workspacePolicy := strings.TrimSpace(input.WorkspacePolicy); workspacePolicy != "" {
+		sections = append(sections, "Workspace triage policy:\n"+workspacePolicy)
+	}
 	if len(contextBlocks) > 0 {
 		sections = append(sections, "Context:\n"+strings.Join(contextBlocks, "\n\n"))
 	}
@@ -130,6 +133,7 @@ type SlackTriagePromptInput struct {
 	// Dev-only acceptance rerun override. Normal live triage should still avoid
 	// duplicate bot replies.
 	IgnoreExistingBotReply bool
+	WorkspacePolicy        string
 }
 
 type SlackTriageMemoryEntry struct {

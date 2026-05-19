@@ -31,15 +31,16 @@ func TestBuildSlackTriagePromptUsesCueboardTwoPassPolicy(t *testing.T) {
 		"ACT — explicit ask",
 		"MAYBE — low-stakes thread",
 		"fresh factual / current-events question",
+		"workspace-policy-eligible link",
 		"SKIP — routine discussion",
 		"## Pass 2: investigate with tools",
 		`slack_api(method="conversations.replies")`,
 		`use suggest_action(action_type="join_meeting") immediately`,
 		"For meaningful external links, read first",
-		"shared article, PDF, technical post, RFC, or long-form thread",
-		"one lightweight synthesis / initial opinion",
-		"Shared article/PDF links are synthesis-eligible",
-		"Do not skip a factual question only because it is casual",
+		"Shared articles/PDFs/technical posts/RFCs are reply-eligible",
+		"workspace policy says source-backed synthesis is useful",
+		"Shared article/PDF links are not universally synthesis-eligible",
+		"Do not skip factual casual questions",
 		"slack.postThreadReply for verified facts",
 		"followup_memory when a concrete follow-up should not evaporate",
 		"Know your lane: technical implementation is not your job",
@@ -58,6 +59,25 @@ func TestBuildSlackTriagePromptUsesCueboardTwoPassPolicy(t *testing.T) {
 	} {
 		if strings.Contains(prompt, unwanted) {
 			t.Fatalf("triage prompt still contains invented/paraphrased policy %q:\n%s", unwanted, prompt)
+		}
+	}
+}
+
+func TestBuildSlackTriagePromptIncludesWorkspacePolicy(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
+		ChannelID:       "C123",
+		Digest:          "<https://antirez.com/news/166>",
+		WorkspacePolicy: "Reply to source-backed product-adjacent articles in this workspace.",
+	})
+	for _, want := range []string{
+		"Workspace triage policy:",
+		"Reply to source-backed product-adjacent articles in this workspace.",
+		"workspace policy says source-backed synthesis is useful",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("triage prompt missing workspace policy %q:\n%s", want, prompt)
 		}
 	}
 }
