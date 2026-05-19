@@ -103,6 +103,52 @@ func TestAppMentionContextIncludesRelatedMemoryEvidence(t *testing.T) {
 	}
 }
 
+func TestAppMentionExternalLinkContextDrivesConceptualRelatedMemory(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/2026-03-30.md", strings.Join([]string{
+		"# 2026-03-30",
+		"",
+		"## Multi-agent architecture (PR #1223, still draft)",
+		"Peng and codex-3720 discussed the botarena IM agent picker design.",
+		"The direction was a runtime/VM-isolated multi-agent system rather than hand-written prompt templates.",
+	}, "\n"))
+
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+	context := service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
+		ChannelName: "bridge-app",
+		UserName:    "kagami",
+		RichThreadContext: &SlackAppMentionContext{
+			MentionText: "<https://github.com/msitarzewski/agency-agents> 我们讨论过这个嘛",
+			Transcript:  "[1779165766.771209] <@U1>: <https://github.com/msitarzewski/agency-agents> <@UBOT> 我们讨论过这个嘛",
+			Prompt:      "Thread context:\n<https://github.com/msitarzewski/agency-agents> 我们讨论过这个嘛",
+			ExternalLinks: []SlackExternalLinkContext{{
+				URL:   "https://github.com/msitarzewski/agency-agents",
+				Title: "GitHub - msitarzewski/agency-agents: A complete AI agency at your fingertips",
+				Excerpt: strings.Join([]string{
+					"A complete AI agency at your fingertips.",
+					"Each agent is a specialized expert with personality, processes, workflows, and deliverables.",
+					"The project packages frontend wizards, Reddit community operators, and other AI agents into a team.",
+				}, " "),
+				Source: "jina_reader",
+			}},
+		},
+	}, parsedAvatarCommand{Action: "work"}, nil)
+
+	related, ok := context["relatedMemory"].(SlackRelatedMemorySearchResult)
+	if !ok {
+		t.Fatalf("relatedMemory = %#v, want search result", context["relatedMemory"])
+	}
+	if !strings.Contains(related.Query, "external link context:") {
+		t.Fatalf("relatedMemory query = %q, want supplemental external link query", related.Query)
+	}
+	evidence, ok := context["relatedMemoryEvidence"].(string)
+	if !ok || !strings.Contains(evidence, "memory/2026-03-30.md") || !strings.Contains(evidence, "PR #1223") || !strings.Contains(evidence, "agent picker") {
+		t.Fatalf("relatedMemoryEvidence = %q, want conceptual memory from link context", evidence)
+	}
+}
+
 func TestAppMentionContextIncludesFirstClassFreshSearchEvidence(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" || !strings.Contains(r.URL.Query().Get("q"), "Zyphra Labs") {
