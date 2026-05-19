@@ -145,8 +145,8 @@ func (s *Service) JoinStatus(ctx context.Context, sessionID string) (JoinStatusR
 			if refreshed := s.sessionFromRuntimeStatus(ctx, *active, status); refreshed != nil {
 				active = refreshed
 			}
-		} else if runnerSessionMissing(err) {
-			if stale := s.markJoinSessionStale(ctx, *active, err); stale != nil {
+		} else if runnerSessionUnavailable(err) {
+			if stale := s.finalizeStaleJoin(ctx, *active, err); stale != nil {
 				active = stale
 			}
 		} else {
@@ -252,7 +252,7 @@ func (s *Service) markJoinSessionStale(ctx context.Context, session SessionRecor
 	if len(metadata) == 0 {
 		metadata = map[string]any{}
 	}
-	metadata["stale_reason"] = "meet_runner_session_missing"
+	metadata["stale_reason"] = runnerUnavailableReason(cause)
 	if cause != nil {
 		metadata["runtime_status_error"] = cause.Error()
 	}
@@ -282,6 +282,33 @@ func runnerSessionMissing(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "meet-runner session") && strings.Contains(msg, "not found")
+}
+
+func runnerSessionUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if runnerSessionMissing(err) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"file already closed",
+		"broken pipe",
+		"use of closed network connection",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runnerUnavailableReason(err error) string {
+	if runnerSessionMissing(err) {
+		return "meet_runner_session_missing"
+	}
+	return "meet_runner_session_unavailable"
 }
 
 func runtimeMeetPageStatus(active any) string {

@@ -37,6 +37,10 @@ func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 		status, err := s.meetRunner.StatusSession(ctx, meetrunner.StatusSessionInput{SessionID: sessionID})
 		if err != nil {
 			s.logger.Warn("join monitor status failed", "session_id", sessionID, "error", err)
+			if runnerSessionUnavailable(err) {
+				_ = s.finalizeStaleJoin(ctx, *session, err)
+				return
+			}
 			continue
 		}
 		state := runtimeJoinState(status.Active)

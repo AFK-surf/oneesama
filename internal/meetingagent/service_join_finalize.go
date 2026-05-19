@@ -14,6 +14,8 @@ import (
 	"github.com/AFK-surf/oneesama/internal/postmeeting"
 )
 
+const staleJoinFailureMessage = "meet-runner session became unavailable before the meeting result was finalized"
+
 func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord, stop meetrunner.StopSessionResult, fixtureCaptions []postmeeting.TranscriptSegmentInput) (*postmeeting.PostProcessResult, string) {
 	slackChannel, slackThread := joinSlackRef(session)
 	captions := captionsFromStopRuntime(stop.Runtime)
@@ -84,6 +86,30 @@ func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord
 		})
 	}
 	return &result, ""
+}
+
+func (s *Service) finalizeStaleJoin(ctx context.Context, session SessionRecord, cause error) *SessionRecord {
+	updated := s.markJoinSessionStale(ctx, session, cause)
+	if updated == nil {
+		updated = &session
+	}
+	slackChannel, slackThread := joinSlackRef(*updated)
+	if slackChannel == "" || slackThread == "" {
+		return updated
+	}
+	meeting := syntheticMeetdMeeting(*updated, slackChannel, slackThread)
+	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", staleJoinFailureMessage, ""); err == nil && persisted != nil {
+		meeting = *persisted
+	} else if err != nil {
+		s.logger.Warn("persist stale join meeting failed", "session_id", session.ID, "error", err)
+	}
+	s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
+		MeetingID:     meetingIDString(meeting.ID),
+		Status:        "failed",
+		Error:         staleJoinFailureMessage,
+		ForceDelivery: true,
+	})
+	return updated
 }
 
 func audioPathFromStopRuntime(ctx context.Context, runtime any) string {

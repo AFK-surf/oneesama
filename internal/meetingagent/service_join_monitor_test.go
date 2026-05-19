@@ -110,6 +110,59 @@ func TestJoinMonitorStopsSoloMeetingAfterTimeout(t *testing.T) {
 	}
 }
 
+func TestJoinMonitorFinalizesStaleSessionWhenRunnerPipeCloses(t *testing.T) {
+	oldInterval := joinMonitorIntervalOverrideNanos.Swap(int64(time.Millisecond))
+	t.Cleanup(func() {
+		joinMonitorIntervalOverrideNanos.Store(oldInterval)
+	})
+
+	webhooks := make(chan MeetdWebhookPayload, 4)
+	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
+	runner := &fakeClosedPipeStatusMeetRunner{}
+	_ = newJoinTestRouterWithWebhookAndRunner(t, webhookURL, "secret", runner)
+
+	service := runner.service
+	if service == nil {
+		t.Fatal("expected test service to be wired")
+	}
+	session, err := service.UpsertSession(context.Background(), SessionUpsertInput{
+		ID:         "session_pipe_closed_monitor",
+		MeetingURL: "https://meet.google.com/abc-defg-hij",
+		Status:     "joined",
+		Title:      "Pipe Closed",
+		Metadata: map[string]any{
+			"slack_channel_id": "C123",
+			"slack_thread_ts":  "123.456",
+		},
+	})
+	if err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		service.monitorJoinSession(context.Background(), session.ID)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitor did not exit after stale runner pipe")
+	}
+	result := waitMeetdWebhook(t, webhooks, "meeting.result")
+	if result.Status != "failed" || result.Error != staleJoinFailureMessage || !result.ForceDelivery {
+		t.Fatalf("result = %+v, want forced stale failure", result)
+	}
+	stale, err := service.GetSession(context.Background(), session.ID)
+	if err != nil || stale == nil {
+		t.Fatalf("get stale session: session=%+v err=%v", stale, err)
+	}
+	if stale.Status != "stale" || stringFromMap(stale.Metadata, "stale_reason") != "meet_runner_session_unavailable" {
+		t.Fatalf("stale session = %+v, want stale unavailable", stale)
+	}
+}
+
 type soloMeetRunner struct {
 	fakeEmptyCaptionMeetRunner
 	service *Service

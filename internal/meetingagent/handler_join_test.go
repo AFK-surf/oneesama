@@ -110,6 +110,19 @@ func (fakeMissingStatusMeetRunner) StatusSession(context.Context, meetrunner.Sta
 	return meetrunner.StatusSessionResult{}, errors.New("meet-runner session session_join_stale not found")
 }
 
+type fakeClosedPipeStatusMeetRunner struct {
+	fakeMeetRunner
+	service *Service
+}
+
+func (fakeClosedPipeStatusMeetRunner) StatusSession(context.Context, meetrunner.StatusSessionInput) (meetrunner.StatusSessionResult, error) {
+	return meetrunner.StatusSessionResult{}, errors.New("write meet-runner join.session.status request: write |1: file already closed")
+}
+
+func (r *fakeClosedPipeStatusMeetRunner) setService(service *Service) {
+	r.service = service
+}
+
 type fakeMeetRunnerWithRuntime struct {
 	fakeMeetRunner
 	runtime map[string]any
@@ -268,6 +281,44 @@ func TestJoinStatusMarksPersistedSessionStaleWhenRunnerSessionMissing(t *testing
 	}
 	if !strings.Contains(body, `"stale_reason":"meet_runner_session_missing"`) {
 		t.Fatalf("body = %s, want stale reason metadata", body)
+	}
+}
+
+func TestJoinStatusFinalizesStaleSessionWhenRunnerPipeCloses(t *testing.T) {
+	t.Parallel()
+
+	webhooks := make(chan MeetdWebhookPayload, 4)
+	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
+	router := newJoinTestRouterWithWebhookAndRunner(t, webhookURL, "secret", &fakeClosedPipeStatusMeetRunner{})
+	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_pipe_closed","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`))
+	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
+	joinRequest.Header.Set("Content-Type", "application/json")
+	joinResponse := httptest.NewRecorder()
+	router.ServeHTTP(joinResponse, joinRequest)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
+	}
+
+	statusRequest := httptest.NewRequest(http.MethodGet, "/join/status?session_id=session_join_pipe_closed", nil)
+	statusRequest.Header.Set(internalauth.HeaderName, "secret-key")
+	statusResponse := httptest.NewRecorder()
+	router.ServeHTTP(statusResponse, statusRequest)
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	body := statusResponse.Body.String()
+	if !strings.Contains(body, `"status":"stale"`) {
+		t.Fatalf("body = %s, want stale session status", body)
+	}
+	if !strings.Contains(body, `"stale_reason":"meet_runner_session_unavailable"`) {
+		t.Fatalf("body = %s, want unavailable stale reason metadata", body)
+	}
+	result := waitMeetdWebhook(t, webhooks, "meeting.result")
+	if result.Status != "failed" || result.Error != staleJoinFailureMessage || !result.ForceDelivery {
+		t.Fatalf("result = %+v, want forced stale failure", result)
+	}
+	if result.SlackRef == nil || result.SlackRef.ChannelID != "C123" || result.SlackRef.ThreadTS != "123.456" {
+		t.Fatalf("slack ref = %+v, want C123/123.456", result.SlackRef)
 	}
 }
 
