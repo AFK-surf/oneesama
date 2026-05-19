@@ -171,11 +171,13 @@ the universal persona contract. Split foreground behavior into layers:
    delegate when it lacks context/tooling/confidence, must stay silent
    for already-handled/off-topic/unsafe cases, and must cite evidence
    for factual replies.
-2. **Workspace-specific engagement policy**: this Oneesama/Bridge
-   workspace values lightweight comments on AI agents, coding tools,
-   creative tooling, Memory, and Bridge/Cue-like collaboration
-   products, even in casual channels. That is our product-development
-   context, not a rule every deployment should inherit.
+2. **Workspace-specific engagement policy**: each deployment may
+   inject a `workspace_triage_policy` that says which otherwise
+   casual-looking discussions are worth proactive engagement. The
+   Oneesama/Bridge workspace may choose to value lightweight comments
+   on AI agents, coding tools, creative tooling, Memory, and
+   Bridge/Cue-like collaboration products, but that is one workspace
+   policy example, not a universal persona rule.
 3. **Channel/thread local state**: the channel brain and thread ledger
    can still suppress duplicates, already-handled threads, or channels
    where the local policy says "do not engage."
@@ -184,6 +186,10 @@ This separation is important because some proactive behaviors are
 valuable for our own product team but inappropriate for other
 workspaces. The implementation should model them as deployment /
 workspace policy inputs, not as hard-coded universal Pi instincts.
+Concretely, Oneesama Go should pass `slack.triage.workspace_policy`
+as a persona context item with `kind=workspace_triage_policy`; Pi
+should follow it only when it does not conflict with safety,
+no-bluff/no-hedge, no-duplicate, and delegation rules.
 
 ## Target Pi Request Shape
 

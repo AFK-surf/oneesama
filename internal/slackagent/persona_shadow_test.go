@@ -162,6 +162,11 @@ func TestQueueSlackTriagePersonaShadowDoesNotBlockAndRecordsLater(t *testing.T) 
 	ctx := context.Background()
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{
+				WorkspacePolicy: "Source-backed product articles are worth concise comments in this workspace.",
+			},
+		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider:   persona.ProviderFake,
 			Mode:       persona.ModeShadow,
@@ -216,6 +221,9 @@ func TestQueueSlackTriagePersonaShadowDoesNotBlockAndRecordsLater(t *testing.T) 
 	case req := <-runtime.requests:
 		if req.Event.Kind != "slack_triage" || req.Anchor.ChannelID != "C_TRIAGE" {
 			t.Fatalf("persona request = %#v, want triage request for C_TRIAGE", req)
+		}
+		if got := personaContextText(req.Context, "workspace_triage_policy"); !strings.Contains(got, "product articles") {
+			t.Fatalf("workspace policy context = %q, want configured policy", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("persona runtime was not called")
@@ -764,4 +772,40 @@ func TestBuildSlackTriagePersonaRequestIncludesDecisionAndMemory(t *testing.T) {
 	if len(req.Evidence.Citations) != 1 || req.Evidence.Citations[0].SourceRef != "memory/questions/aha.md" {
 		t.Fatalf("citations = %#v, want related memory citation", req.Evidence.Citations)
 	}
+}
+
+func TestBuildSlackTriagePersonaRequestIncludesWorkspacePolicyOnlyWhenConfigured(t *testing.T) {
+	base := BuildSlackTriagePersonaRequest(
+		"C_TRIAGE",
+		"200.000",
+		[]SlackInboundMessage{{Text: "看下这个产品文章"}},
+		SlackTriageDecision{Summary: "No workspace policy configured.", ParseOK: true},
+		nil,
+	)
+	if got := personaContextText(base.Context, "workspace_triage_policy"); got != "" {
+		t.Fatalf("workspace policy context = %q, want absent by default", got)
+	}
+
+	withPolicy := BuildSlackTriagePersonaRequestWithOptions(
+		"C_TRIAGE",
+		"200.000",
+		[]SlackInboundMessage{{Text: "看下这个产品文章"}},
+		SlackTriageDecision{Summary: "Workspace policy configured.", ParseOK: true},
+		nil,
+		SlackTriagePersonaRequestOptions{
+			WorkspaceTriagePolicy: "Reply to source-backed product-adjacent articles in this workspace.",
+		},
+	)
+	if got := personaContextText(withPolicy.Context, "workspace_triage_policy"); !strings.Contains(got, "product-adjacent articles") {
+		t.Fatalf("workspace policy context = %q, want configured policy", got)
+	}
+}
+
+func personaContextText(items []persona.ContextItem, kind string) string {
+	for _, item := range items {
+		if item.Kind == kind {
+			return item.Text
+		}
+	}
+	return ""
 }

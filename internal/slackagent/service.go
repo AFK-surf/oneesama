@@ -102,6 +102,7 @@ type Service struct {
 	personaRuntimeConfig    appconfig.PersonaRuntimeConfig
 	triagePostActions       bool
 	triageHeuristicFallback bool
+	triageWorkspacePolicy   string
 
 	canvasMu        sync.Mutex
 	canvasConfig    CanvasPublisherConfig
@@ -298,6 +299,7 @@ func NewService(cfg Config) *Service {
 		personaRuntimeConfig:    cfg.PersonaRuntime,
 		triagePostActions:       cfg.Slack.Triage.PostActions,
 		triageHeuristicFallback: cfg.Slack.Triage.HeuristicFallback,
+		triageWorkspacePolicy:   strings.TrimSpace(cfg.Slack.Triage.WorkspacePolicy),
 		canvasConfig:            canvasConfig,
 		canvasPublisher:         cfg.CanvasPublisher,
 		seenEvents:              make(map[string]time.Time),

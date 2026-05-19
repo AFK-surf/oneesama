@@ -82,7 +82,7 @@ func TestLoadHonorsConfigPathOverride(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`{
   "slack_agent": {"listen": ":19080"},
   "meeting_agent": {"listen": ":19081"},
-  "slack": {"signing_secret": "cfg-secret", "bot_token": "cfg-token", "app_token": "cfg-app-token", "client_id": "cfg-client-id", "client_secret": "cfg-client-secret", "redirect_uri": "https://oneesama.example.com/slack/oauth", "workspace_dir": "./workspace", "internal_auth_key": "cfg-auth-key", "public_base_url": "https://oneesama.example.com", "event_buffer": {"enabled": true, "triage": true, "max_batch": 3, "debounce": "4s"}, "triage": {"post_actions": false, "heuristic_fallback": false}, "memory": {"enabled": true, "dir": "./memory-seed", "semantic_enabled": true, "semantic_index_path": "./semantic-memory.json"}},
+  "slack": {"signing_secret": "cfg-secret", "bot_token": "cfg-token", "app_token": "cfg-app-token", "client_id": "cfg-client-id", "client_secret": "cfg-client-secret", "redirect_uri": "https://oneesama.example.com/slack/oauth", "workspace_dir": "./workspace", "internal_auth_key": "cfg-auth-key", "public_base_url": "https://oneesama.example.com", "event_buffer": {"enabled": true, "triage": true, "max_batch": 3, "debounce": "4s"}, "triage": {"post_actions": false, "heuristic_fallback": false, "workspace_policy": "Reply to source-backed product-adjacent articles in this workspace."}, "memory": {"enabled": true, "dir": "./memory-seed", "semantic_enabled": true, "semantic_index_path": "./semantic-memory.json"}},
   "meetd": {"watch_interval": "2m", "webhook_url": "https://oneesama.example.com/meeting-webhook", "webhook_secret": "cfg-meetd-secret", "summary_model": "summary-file-model", "calibrate_model": "calibrate-file-model", "asr_provider": "gemini", "asr_model": "asr-file-model", "asr_language": "zh", "gemini_asr_model": "gemini-file-model"},
   "openai": {"api_key": "cfg-openai-key", "base_url": "https://openai.example.com/v1/", "audio_transcriptions_url": "https://openai.example.com/v1/audio/transcriptions-custom", "realtime_model": "gpt-realtime-2-test", "realtime_reasoning_effort": "medium", "realtime_voice": "verse", "realtime_turn_detection": "server_vad", "realtime_session_schema": "legacy", "realtime_agent_runtime": "raw", "realtime_personality_context": "local context", "bot_name": "Onee-sama", "current_user_name": "Peng", "current_user_email": "peng@example.com"},
   "dialog": {"stt_provider": "event", "tts_provider": "command", "tts_voice": "local", "tts_command": "say-json", "tts_http_url": "http://127.0.0.1:9001/tts"},
@@ -186,6 +186,9 @@ func TestLoadHonorsConfigPathOverride(t *testing.T) {
 	if cfg.Slack.Triage.PostActions || cfg.Slack.Triage.HeuristicFallback {
 		t.Fatalf("Slack.Triage = %#v, want file false overrides", cfg.Slack.Triage)
 	}
+	if cfg.Slack.Triage.WorkspacePolicy != "Reply to source-backed product-adjacent articles in this workspace." {
+		t.Fatalf("Slack.Triage.WorkspacePolicy = %q, want file value", cfg.Slack.Triage.WorkspacePolicy)
+	}
 	if !cfg.Slack.Memory.Enabled || cfg.Slack.Memory.Dir != "./memory-seed" {
 		t.Fatalf("Slack.Memory = %#v, want enabled dir", cfg.Slack.Memory)
 	}
@@ -266,6 +269,8 @@ func clearAmbientEnvOverrides(t *testing.T) {
 		"ONEESAMA_SLACK_LISTEN",
 		"ONEESAMA_SLACK_ADDR",
 		"MAB_SLACK_PORT",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY",
+		"MAB_SLACK_TRIAGE_WORKSPACE_POLICY",
 		"SCAN_MAX_BATCH",
 		"SCAN_DEBOUNCE",
 	} {

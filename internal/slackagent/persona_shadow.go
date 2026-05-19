@@ -115,7 +115,9 @@ func (s *Service) queueSlackTriagePersonaShadow(ctx context.Context, runID int64
 	if !s.shadowPersonaRuntimeEnabled() || runID == 0 {
 		return false
 	}
-	request := BuildSlackTriagePersonaRequest(channelID, threadTS, messages, decision, relatedMemory)
+	request := BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{
+		WorkspaceTriagePolicy: s.triageWorkspacePolicy,
+	})
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
@@ -134,6 +136,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 	ignoreBotReply := len(ignoreExistingBotReply) > 0 && ignoreExistingBotReply[0]
 	request := BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{
 		IgnoreExistingBotReply: ignoreBotReply,
+		WorkspaceTriagePolicy:  s.triageWorkspacePolicy,
 	})
 	request.Mode = persona.ModeLive
 	go func() {
@@ -317,6 +320,7 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 
 type SlackTriagePersonaRequestOptions struct {
 	IgnoreExistingBotReply bool
+	WorkspaceTriagePolicy  string
 }
 
 func BuildSlackTriagePersonaRequest(channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) persona.Request {
@@ -338,6 +342,12 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 		contextItems = append(contextItems, persona.ContextItem{
 			Kind: "triage_candidate_actions",
 			Text: candidateActions,
+		})
+	}
+	if workspacePolicy := strings.TrimSpace(options.WorkspaceTriagePolicy); workspacePolicy != "" {
+		contextItems = append(contextItems, persona.ContextItem{
+			Kind: "workspace_triage_policy",
+			Text: workspacePolicy,
 		})
 	}
 	metadata := map[string]any{

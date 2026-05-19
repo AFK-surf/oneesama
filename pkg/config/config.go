@@ -57,6 +57,7 @@ type SlackEventBufferConfig struct {
 type SlackTriageConfig struct {
 	PostActions       bool
 	HeuristicFallback bool
+	WorkspacePolicy   string
 }
 
 type SlackMemoryConfig struct {

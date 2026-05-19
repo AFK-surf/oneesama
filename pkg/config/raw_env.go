@@ -91,6 +91,9 @@ func applySlackTriageEnvOverrides(cfg *Config) {
 	if value, ok := getenvBool("ONEESAMA_SLACK_TRIAGE_HEURISTIC_FALLBACK", "MAB_SLACK_TRIAGE_HEURISTIC_FALLBACK"); ok {
 		cfg.Slack.Triage.HeuristicFallback = value
 	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY", "MAB_SLACK_TRIAGE_WORKSPACE_POLICY")); value != "" {
+		cfg.Slack.Triage.WorkspacePolicy = value
+	}
 }
 
 func applySlackMemoryEnvOverrides(cfg *Config) {
