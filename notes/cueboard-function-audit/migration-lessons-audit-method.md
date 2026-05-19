@@ -482,6 +482,102 @@ Scope distinction from "shape ≠ contract":
 
 This is now a first-class drift class on this page.
 
+## Identity migration ≠ traffic interception (new drift pattern, 2026-05-19 afternoon)
+
+The Bridge validation sweep (`bdd274c` → `a2d00b3` revert, recorded in
+`notes/cueboard-function-audit/post-cutover-bridge-validation-sweep-2026-05-19.md`)
+surfaced a drift class distinct from "shape ≠ contract" and from
+"re-derive vs port":
+
+When migrating from agent A to agent B, the natural intuition is "any
+mention of A is now B's responsibility." That is wrong when A is still
+a live, intentionally addressed identity:
+
+- 343 Bridge-related triage runs in the past week included the old
+  Bridge bot user ID `<@U09SF0MQZ5M>`.
+- The first pass of the sweep proposed adding that ID as a mention
+  alias for the new Oneesama (`<@U0AP5UFU0FR>`).
+- Peng corrected within 6 minutes: those users intentionally
+  addressed old Bridge. The new Oneesama must not intercept.
+- `a2d00b3 Revert "fix(slack): accept legacy bridge mentions"` undid
+  the code and the live env var.
+
+The product semantics:
+
+- Identity migration = retire identity A; B inherits A's role.
+- Traffic interception = B answers messages addressed to A while A
+  is still live.
+- These are not the same. Inheriting A's traffic without retiring A
+  is identity hijacking: the user's intent (address A specifically)
+  is silently overridden.
+
+Audit rule for future migrations:
+
+- Before any alias / mention-routing fix, answer in writing: "is
+  identity A being retired in this migration? If yes, who decided,
+  and when does A's bot user actually go away?"
+- If A is not being retired, traffic to A is not a parity gap.
+- The sweep data showing "A has traffic" is not the failure signal;
+  the failure signal would be "users who intended to address B got
+  routed to A or nowhere."
+
+Symptoms that catch this drift:
+
+- A proposed migration fix routes events addressed to an old
+  identifier into the new system.
+- The old identifier is still a live bot account (not a deprecated
+  string).
+- No retirement plan exists for the old identifier.
+
+Scope distinction:
+
+- shape ≠ contract = surface matched, semantics missed.
+- re-derive vs port = reasoned from scratch instead of reading the
+  old code.
+- runtime traces as memory = audited the wrong universe of
+  artefacts.
+- identity migration ≠ traffic interception = audited a real signal
+  (Bridge mentions exist) but conflated identity ownership with
+  inherited-traffic responsibility.
+
+This is now a first-class drift class on this page.
+
+### Worked example: bdd274c → a2d00b3 revert
+
+What got read:
+
+- `slack.db` 1824 triage runs, 343 Bridge-related, 17 mutating.
+- New Oneesama live state mention IDs.
+
+What got assumed (wrong):
+
+- "Users still address old Bridge; new Oneesama should accept old
+  ID as a mention alias."
+
+What got shipped (reverted):
+
+- New `slack.bot_mention_user_ids` config + env var.
+- Scanner / mention fallback / event command stripping all accepted
+  the alias.
+- Live `ONEESAMA_SLACK_BOT_MENTION_USER_IDS=U09SF0MQZ5M`.
+
+What Peng said:
+
+- Users intentionally addressed old Bridge; do not intervene.
+
+What got recovered:
+
+- Revert within 6 minutes; live env unset; memory recorded; pivot
+  to the actual quality gaps (#219–#223).
+
+Why this is the worked example:
+
+- The audit author had been disciplined about reading old code
+  earlier today, but skipped the "is A being retired?" question and
+  treated "A has traffic" as a parity signal. The audit method now
+  requires that question explicitly before any alias / mention
+  routing fix lands.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.
