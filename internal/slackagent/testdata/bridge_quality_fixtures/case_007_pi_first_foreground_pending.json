@@ -1,0 +1,42 @@
+{
+  "case_id": "case_007_pi_first_foreground_pending",
+  "pending": true,
+  "pending_reason": "awaiting_task_237_pi_first_cutover_implementation",
+  "source": {
+    "old_slack_db_run_id": null,
+    "occurred_at": "2026-05-19T22:44:00+08:00",
+    "channel_id": "CPIFIRST",
+    "mention_text": "<@UBOT> 这条产品评论文章你怎么看？",
+    "notes": "STUB fixture for #237 Pi-first foreground cutover. Pre-built per case_003/004/005/006 handoff pattern: pending=true today, driver flips to active when Phase 1 cutover lands (Pi-first scanner triage; Codex only after Pi delegate_worker). Anchor invariant: in pi_first_live mode, automatic scanner triage of this app_mention does NOT call agent_runner.StartTask before Pi.Decide; audit metadata records foreground_chain=pi_first_live + pre_pi_agent_runner_started=false; if Pi returns delegate_worker, exactly one agent_runner.StartTask runs AFTER Pi decision with correlation linking back to the Pi request."
+  },
+  "input": {
+    "channel_name": "pi-first-canary",
+    "user_name": "peng",
+    "mention_text": "这条产品评论文章你怎么看？",
+    "transcript": "[1779196000.000000] <@UASK>: <@UBOT> 这条产品评论文章你怎么看？",
+    "thread_context_prompt": "Thread context:\n这条产品评论文章你怎么看？",
+    "external_links": [],
+    "linked_slack_threads": [],
+    "files": [],
+    "memory_seed_files": []
+  },
+  "expected_contract_items": [
+    "C237_pi_first_foreground_no_pre_pi_runner"
+  ],
+  "intended_provider_signals": [
+    "Pi.Decide invoked exactly once per event before any agent_runner.StartTask call.",
+    "audit metadata records foreground_chain=pi_first_live + pre_pi_agent_runner_started=false.",
+    "If Pi returns decision=reply, Slack post emitted with Pi's visible_text and ZERO agent_runner.StartTask invocations.",
+    "If Pi returns decision=delegate_worker, exactly one agent_runner.StartTask invocation follows AFTER Pi decision with correlation_id linking back to the Pi request.",
+    "Erroring direct agent_runner.StartTask on the foreground path must not break Pi reply or stay_silent outcomes (Codex-offline canary)."
+  ],
+  "expected_provider_events": {},
+  "expected_search_result_anchors": [],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "exit status 7",
+    "localhost:8780"
+  ]
+}

@@ -18,10 +18,13 @@ type bridgeQualityFixture struct {
 	CaseID                string                       `json:"case_id"`
 	Source                bridgeQualityFixtureSource   `json:"source"`
 	Input                 bridgeQualityFixtureInput    `json:"input"`
+	Pending               bool                         `json:"pending"`
+	PendingReason         string                       `json:"pending_reason"`
 	ExpectedContractItems []string                     `json:"expected_contract_items"`
 	ExpectedEvidence      []string                     `json:"expected_evidence_anchors"`
 	ExpectedTools         []string                     `json:"expected_tools_invoked"`
 	ExpectedDecisionShape bridgeQualityFixtureDecision `json:"expected_decision_shape"`
+	IntendedProviderSignals []string                   `json:"intended_provider_signals"`
 }
 
 type bridgeQualityFixtureSource struct {
@@ -103,6 +106,10 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 	t.Helper()
 	if fixture.CaseID == "" {
 		t.Fatalf("fixture missing case_id")
+	}
+	if fixture.Pending {
+		t.Logf("[%s] fixture marked pending (%s); skipping assertions", fixture.CaseID, fixture.PendingReason)
+		return
 	}
 
 	workspaceDir := t.TempDir()

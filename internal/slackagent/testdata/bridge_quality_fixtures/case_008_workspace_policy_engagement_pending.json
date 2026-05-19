@@ -1,0 +1,42 @@
+{
+  "case_id": "case_008_workspace_policy_engagement_pending",
+  "pending": true,
+  "pending_reason": "awaiting_dual_workspace_policy_fixture_harness",
+  "source": {
+    "old_slack_db_run_id": null,
+    "occurred_at": "2026-05-19T22:44:00+08:00",
+    "channel_id": "CPOLICY",
+    "mention_text": "<@UBOT> https://example.dev/post-about-ai-agents",
+    "notes": "STUB fixture for #238 workspace_triage_policy externalization. Pre-built per case_NNN handoff pattern: pending=true today, driver flips to active when the fixture suite can run two persona Service instances with two different workspace_triage_policy values against the same input. Anchor invariant: same Pi binary + same input + two different workspace policies MUST produce different engagement decisions purely from the policy diff."
+  },
+  "input": {
+    "channel_name": "casual-product-chat",
+    "user_name": "peng",
+    "mention_text": "https://example.dev/post-about-ai-agents 看看这个",
+    "transcript": "[1779197000.000000] <@UASK>: <@UBOT> https://example.dev/post-about-ai-agents 看看这个",
+    "thread_context_prompt": "Thread context:\nhttps://example.dev/post-about-ai-agents 看看这个",
+    "external_links": [],
+    "linked_slack_threads": [],
+    "files": [],
+    "memory_seed_files": []
+  },
+  "expected_contract_items": [
+    "C238_workspace_policy_engagement"
+  ],
+  "intended_provider_signals": [
+    "Two persona Service instances, same Pi binary, same input.",
+    "Workspace A policy: { engage_on_topics: [ai_agent, coding_tools, memory_systems, collaboration_products, bridge_products], casual_channel_default: maybe_engage_with_evidence } -> Pi decision must be 'reply' with source-backed product comment OR 'delegate_worker' to fetch evidence.",
+    "Workspace B policy: { engage_on_topics: [], casual_channel_default: stay_silent } -> Pi decision must be 'stay_silent' with reason citing the workspace policy.",
+    "Decision diff between A and B must be attributable solely to the policy diff (not to Pi prompt edits, not to topic-keyword arrays).",
+    "Active Pi prompt / sidecar code must contain ZERO hardcoded mention of Oneesama / Bridge / specific topic list (independent grep verification per 16fcedf supervisor sweep)."
+  ],
+  "expected_provider_events": {},
+  "expected_search_result_anchors": [],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "exit status 7",
+    "localhost:8780"
+  ]
+}
