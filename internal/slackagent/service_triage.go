@@ -21,8 +21,9 @@ const (
 )
 
 type slackTriageStartOptions struct {
-	Probe         bool
-	ExtraMetadata map[string]any
+	Probe                  bool
+	IgnoreExistingBotReply bool
+	ExtraMetadata          map[string]any
 }
 
 func (s *Service) TriageStatus(ctx context.Context, limit int) (SlackTriageStatus, error) {
@@ -954,6 +955,10 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	threadTS := firstNonEmpty(lastMessageThreadTS(messages), "channel-root")
 	sessionID := fmt.Sprintf("triage:%s:%d", channelID, timeNow().UnixMilli())
 	threadContexts := s.fetchSlackTriageThreadContexts(ctx, channelID, messages)
+	var ignoredBotReplyCount int
+	if options.IgnoreExistingBotReply {
+		threadContexts, ignoredBotReplyCount = filterSlackTriageThreadContextBotReplies(threadContexts, []string{s.botUserID})
+	}
 	channelContexts := s.fetchSlackTriageChannelContexts(ctx, channelID, messages, digest, threadContexts)
 	threadContexts, summaryMetadata := s.maybeSummarizeOversizedSlackTriageThreadContexts(ctx, channelID, threadTS, messages, digest, threadContexts)
 	if len(channelContexts) > 0 {
@@ -965,6 +970,12 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	externalLinks := fetchSlackExternalLinkContexts(ctx, messages)
 	auditMetadata := slackTriageAuditMetadata(digest, messages, threadContexts, channelContexts, externalLinks)
 	auditMetadata = mergeStringAnyMaps(auditMetadata, summaryMetadata)
+	if options.IgnoreExistingBotReply {
+		auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
+			"ignore_existing_bot_reply":        true,
+			"ignored_existing_bot_reply_count": ignoredBotReplyCount,
+		})
+	}
 	auditMetadata = mergeStringAnyMaps(auditMetadata, options.ExtraMetadata)
 	run, err := s.triage.RecordRun(ctx, SlackTriageContext{
 		SessionID: sessionID,
@@ -985,15 +996,16 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(digest, 5), digest)
 	relatedMemory := s.searchSlackTriageRelatedMemory(digest, 5)
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
-		ChannelID:      channelID,
-		Messages:       messages,
-		Digest:         digest,
-		ChannelBrain:   channelBrain,
-		LocalMemory:    localMemory,
-		RelatedMemory:  relatedMemory.Results,
-		PreviousTriage: formatTriageContexts(previous),
-		ExternalLinks:  externalLinks,
-		ThreadContexts: threadContexts,
+		ChannelID:              channelID,
+		Messages:               messages,
+		Digest:                 digest,
+		ChannelBrain:           channelBrain,
+		LocalMemory:            localMemory,
+		RelatedMemory:          relatedMemory.Results,
+		PreviousTriage:         formatTriageContexts(previous),
+		ExternalLinks:          externalLinks,
+		ThreadContexts:         threadContexts,
+		IgnoreExistingBotReply: options.IgnoreExistingBotReply,
 	})
 	contextMap := map[string]any{
 		"source":        "slack-triage",
@@ -1030,12 +1042,14 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 			"count":       len(previous),
 			"text":        formatTriageContexts(previous),
 		},
-		"externalLinks":   externalLinks,
-		"threadContexts":  threadContexts,
-		"channelContexts": channelContexts,
-		"triageAudit":     auditMetadata,
-		"triageProbe":     options.Probe,
-		"expectedOutput":  "JSON triage decision with summary and actions[]",
+		"externalLinks":             externalLinks,
+		"threadContexts":            threadContexts,
+		"channelContexts":           channelContexts,
+		"triageAudit":               auditMetadata,
+		"triageProbe":               options.Probe,
+		"ignoreExistingBotReply":    options.IgnoreExistingBotReply,
+		"ignore_existing_bot_reply": options.IgnoreExistingBotReply,
+		"expectedOutput":            "JSON triage decision with summary and actions[]",
 	}
 	job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
 		Task:             prompt,
@@ -1118,7 +1132,10 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	var directFailures int
 	var directMutations int
 	if !probe && !personaForegroundQueued {
-		directToolCalls, directFailures, directMutations = s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions, messages)
+		directToolCalls, directFailures, directMutations = s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
+			SnapshotMessages:       messages,
+			IgnoreExistingBotReply: boolFromAny(job.Context["ignoreExistingBotReply"], false) || boolFromAny(job.Context["ignore_existing_bot_reply"], false),
+		})
 	}
 	mutationCandidateActions := actions
 	if personaForegroundQueued {
@@ -1207,7 +1224,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	}
 	if personaForegroundQueued && updatedRun != nil {
 		relatedMemory := slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"])
-		s.queueSlackTriagePersonaForeground(context.WithoutCancel(ctx), workspaceID, updatedRun.ID, channelID, threadTS, messages, decision, relatedMemory)
+		s.queueSlackTriagePersonaForeground(context.WithoutCancel(ctx), workspaceID, updatedRun.ID, channelID, threadTS, messages, decision, relatedMemory, boolFromAny(job.Context["ignoreExistingBotReply"], false) || boolFromAny(job.Context["ignore_existing_bot_reply"], false))
 	} else if personaShadowQueued && updatedRun != nil {
 		relatedMemory := slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"])
 		s.queueSlackTriagePersonaShadow(context.WithoutCancel(ctx), updatedRun.ID, channelID, threadTS, messages, decision, relatedMemory)
@@ -1233,14 +1250,26 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	return finalization, nil
 }
 
+type slackTriageDirectActionOptions struct {
+	SnapshotMessages       []SlackInboundMessage
+	IgnoreExistingBotReply bool
+}
+
 func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspaceID string, channelID string, threadTS string, runID int64, actions []SlackTriageDecisionAction, snapshotMessages ...[]SlackInboundMessage) ([]SlackTriageToolCall, int, int) {
-	calls := make([]SlackTriageToolCall, 0)
-	var failures int
-	var mutations int
 	var messages []SlackInboundMessage
 	if len(snapshotMessages) > 0 {
 		messages = snapshotMessages[0]
 	}
+	return s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
+		SnapshotMessages: messages,
+	})
+}
+
+func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context, workspaceID string, channelID string, threadTS string, runID int64, actions []SlackTriageDecisionAction, options slackTriageDirectActionOptions) ([]SlackTriageToolCall, int, int) {
+	calls := make([]SlackTriageToolCall, 0)
+	var failures int
+	var mutations int
+	messages := options.SnapshotMessages
 	for _, action := range actions {
 		if !slackTriageDirectReplyAction(action) {
 			continue
@@ -1248,7 +1277,7 @@ func (s *Service) executeSlackTriageDirectActions(ctx context.Context, workspace
 		effectiveChannel := firstNonEmpty(action.ChannelID, channelID)
 		effectiveThread := firstNonEmpty(action.ThreadTS, threadTS)
 		snapshotTS := slackTriageSnapshotLatestTS(messages, effectiveChannel, effectiveThread)
-		if newer, newerTS, reason := s.slackTriageThreadHasNewerBlockingActivity(ctx, effectiveChannel, effectiveThread, snapshotTS); newer {
+		if newer, newerTS, reason := s.slackTriageThreadHasNewerBlockingActivity(ctx, effectiveChannel, effectiveThread, snapshotTS, options.IgnoreExistingBotReply); newer {
 			calls = append(calls, SlackTriageToolCall{
 				Tool:    "slack_api",
 				Action:  "post_thread_reply",
@@ -1315,7 +1344,7 @@ func slackTriageSnapshotLatestTS(messages []SlackInboundMessage, channelID strin
 	return latest
 }
 
-func (s *Service) slackTriageThreadHasNewerBlockingActivity(ctx context.Context, channelID string, threadTS string, snapshotTS string) (bool, string, string) {
+func (s *Service) slackTriageThreadHasNewerBlockingActivity(ctx context.Context, channelID string, threadTS string, snapshotTS string, ignoreExistingBotReply ...bool) (bool, string, string) {
 	if s == nil || strings.TrimSpace(s.botToken) == "" || strings.TrimSpace(channelID) == "" || strings.TrimSpace(threadTS) == "" || strings.TrimSpace(threadTS) == "channel-root" || strings.TrimSpace(snapshotTS) == "" {
 		return false, "", ""
 	}
@@ -1328,11 +1357,15 @@ func (s *Service) slackTriageThreadHasNewerBlockingActivity(ctx context.Context,
 		s.logger.Warn("slack triage direct reply freshness check returned slack error", "channel", channelID, "thread_ts", threadTS, "error", response.Error)
 		return false, "", ""
 	}
+	ignoreBotReply := len(ignoreExistingBotReply) > 0 && ignoreExistingBotReply[0]
 	for _, message := range slackInboundMessagesFromThreadMessages(channelID, response.Messages) {
 		if !slackTSGreater(firstNonEmpty(message.TS, message.EventTS), snapshotTS) {
 			continue
 		}
 		if isAuthoredByBot(message, []string{s.botUserID}) {
+			if ignoreBotReply {
+				continue
+			}
 			return true, firstNonEmpty(message.TS, message.EventTS), "thread_has_newer_bot_activity"
 		}
 		return true, firstNonEmpty(message.TS, message.EventTS), "thread_has_newer_activity"
@@ -1406,6 +1439,34 @@ func (s *Service) fetchSlackTriageThreadContexts(ctx context.Context, channelID 
 		})
 	}
 	return contexts
+}
+
+func filterSlackTriageThreadContextBotReplies(contexts []SlackTriageThreadContext, botUserIDs []string) ([]SlackTriageThreadContext, int) {
+	if len(contexts) == 0 {
+		return nil, 0
+	}
+	filtered := make([]SlackTriageThreadContext, 0, len(contexts))
+	var removed int
+	for _, context := range contexts {
+		if len(context.Messages) == 0 {
+			filtered = append(filtered, context)
+			continue
+		}
+		messages := make([]SlackInboundMessage, 0, len(context.Messages))
+		for _, message := range context.Messages {
+			message = normalizeSlackInboundMessage(message)
+			if isAuthoredByBot(message, botUserIDs) {
+				removed++
+				continue
+			}
+			messages = append(messages, message)
+		}
+		context.Messages = messages
+		context.MessageCount = len(messages)
+		context.Transcript = renderSlackTriageThreadTranscript(messages)
+		filtered = append(filtered, context)
+	}
+	return filtered, removed
 }
 
 func (s *Service) fetchSlackTriageChannelContexts(ctx context.Context, channelID string, messages []SlackInboundMessage, digest string, threadContexts []SlackTriageThreadContext) []SlackInboundMessage {

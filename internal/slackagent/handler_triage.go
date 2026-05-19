@@ -20,6 +20,12 @@ type triageRunRequest struct {
 	TS        string                `json:"ts"`
 	ThreadTS  string                `json:"thread_ts"`
 	Messages  []SlackInboundMessage `json:"messages"`
+
+	// Dev-only acceptance rerun switch. Normal live triage must continue to
+	// avoid duplicate bot replies; this bypass is for operator-triggered
+	// parity checks where an old bot has already answered the same thread.
+	IgnoreExistingBotReply bool `json:"ignore_existing_bot_reply"`
+	RerunForce             bool `json:"rerun_force"`
 }
 
 func (h *Handler) handleTriageStatus(c *gin.Context) {
@@ -72,7 +78,13 @@ func (h *Handler) handleTriageRun(c *gin.Context) {
 		}}
 	}
 	digest := firstNonEmpty(request.Digest, renderSlackActivityDigest(channelID, messages))
-	triage, err := h.service.StartSlackTriage(c.Request.Context(), channelID, messages, digest)
+	triage, err := h.service.startSlackTriage(c.Request.Context(), channelID, messages, digest, slackTriageStartOptions{
+		IgnoreExistingBotReply: request.IgnoreExistingBotReply || request.RerunForce,
+		ExtraMetadata: map[string]any{
+			"manual_triage_run":         true,
+			"ignore_existing_bot_reply": request.IgnoreExistingBotReply || request.RerunForce,
+		},
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": err.Error()})
 		return

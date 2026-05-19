@@ -62,6 +62,9 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 	if threadContexts := formatSlackTriageThreadContexts(input.ThreadContexts); threadContexts != "" {
 		contextBlocks = append(contextBlocks, "Fetched Slack thread context:\n"+threadContexts)
 	}
+	if input.IgnoreExistingBotReply {
+		contextBlocks = append(contextBlocks, "Dev rerun override:\nThis is an internal acceptance rerun. Ignore bot-authored replies already present in the fetched thread context as a reason to skip or stay silent. Human replies and safety/freshness still apply.")
+	}
 	messageBlock := strings.TrimSpace(input.Digest)
 	if messageBlock == "" {
 		lines := make([]string, 0, len(input.Messages))
@@ -123,6 +126,10 @@ type SlackTriagePromptInput struct {
 	PreviousTriage string
 	ExternalLinks  []SlackExternalLinkContext
 	ThreadContexts []SlackTriageThreadContext
+
+	// Dev-only acceptance rerun override. Normal live triage should still avoid
+	// duplicate bot replies.
+	IgnoreExistingBotReply bool
 }
 
 type SlackTriageMemoryEntry struct {

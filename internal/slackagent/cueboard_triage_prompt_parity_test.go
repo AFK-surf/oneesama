@@ -89,6 +89,33 @@ func TestBuildSlackTriagePromptIncludesRelatedMemoryEvidenceWithCitations(t *tes
 	}
 }
 
+func TestBuildSlackTriagePromptIncludesDevRerunOverride(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
+		ChannelID:              "C123",
+		Digest:                 "验收重跑这个没人接住的链接",
+		IgnoreExistingBotReply: true,
+	})
+	for _, want := range []string{
+		"Dev rerun override",
+		"internal acceptance rerun",
+		"Ignore bot-authored replies",
+		"Human replies and safety/freshness still apply",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing dev rerun override %q:\n%s", want, prompt)
+		}
+	}
+	defaultPrompt := buildSlackTriagePrompt(SlackTriagePromptInput{
+		ChannelID: "C123",
+		Digest:    "正常 triage",
+	})
+	if strings.Contains(defaultPrompt, "Dev rerun override") || strings.Contains(defaultPrompt, "internal acceptance rerun") {
+		t.Fatalf("default prompt unexpectedly contains dev rerun override:\n%s", defaultPrompt)
+	}
+}
+
 func TestCueboardDefaultPromptsCarryLegacyToolFirstRules(t *testing.T) {
 	t.Parallel()
 

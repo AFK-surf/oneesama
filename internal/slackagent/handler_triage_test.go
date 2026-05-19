@@ -64,6 +64,35 @@ func TestHandleTriageRunDoesNotInventFallbackActionCards(t *testing.T) {
 	}
 }
 
+func TestHandleTriageRunAcceptsIgnoreExistingBotReply(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_force_rerun",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	router := newTestRouter(t, Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{Triage: appconfig.SlackTriageConfig{HeuristicFallback: true}},
+		Runner:      runner,
+	})
+
+	body := `{"team_id":"T123","channel_id":"C123","user_id":"U123","text":"看看这个链接","ts":"123.456","thread_ts":"123.456","ignore_existing_bot_reply":true}`
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/triage/run", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if got := boolFromAny(runner.startInput.Context["ignore_existing_bot_reply"], false); !got {
+		t.Fatalf("runner context ignore_existing_bot_reply = %#v, want true", runner.startInput.Context["ignore_existing_bot_reply"])
+	}
+	if !strings.Contains(runner.startInput.Task, "Dev rerun override") || !strings.Contains(runner.startInput.Task, "Ignore bot-authored replies") {
+		t.Fatalf("task missing dev rerun override:\n%s", runner.startInput.Task)
+	}
+}
+
 func TestHandleTriageRunRecordsModelRequestedPendingAction(t *testing.T) {
 	router := newTestRouter(t, Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},

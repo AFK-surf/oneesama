@@ -127,18 +127,24 @@ func (s *Service) queueSlackTriagePersonaShadow(ctx context.Context, runID int64
 	return true
 }
 
-func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspaceID string, runID int64, channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) bool {
+func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspaceID string, runID int64, channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord, ignoreExistingBotReply ...bool) bool {
 	if !s.foregroundPersonaRuntimeEnabled() || runID == 0 {
 		return false
 	}
-	request := BuildSlackTriagePersonaRequest(channelID, threadTS, messages, decision, relatedMemory)
+	ignoreBotReply := len(ignoreExistingBotReply) > 0 && ignoreExistingBotReply[0]
+	request := BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{
+		IgnoreExistingBotReply: ignoreBotReply,
+	})
 	request.Mode = persona.ModeLive
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
 		actions := slackPersonaForegroundActions(channelID, threadTS, result)
-		toolCalls, failures, mutations := s.executeSlackTriageDirectActions(ctx, workspaceID, channelID, threadTS, runID, actions, messages)
+		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
+			SnapshotMessages:       messages,
+			IgnoreExistingBotReply: ignoreBotReply,
+		})
 		if err := s.recordSlackTriagePersonaForegroundResult(ctx, workspaceID, runID, result, actions, toolCalls, failures, mutations); err != nil {
 			s.logger.Warn("persona runtime foreground triage result record failed", "triage_run_id", runID, "error", err)
 		}
@@ -309,13 +315,36 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 	}}
 }
 
+type SlackTriagePersonaRequestOptions struct {
+	IgnoreExistingBotReply bool
+}
+
 func BuildSlackTriagePersonaRequest(channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) persona.Request {
+	return BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{})
+}
+
+func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord, options SlackTriagePersonaRequestOptions) persona.Request {
 	messages = normalizeSlackInboundMessages(messages)
 	text := strings.TrimSpace(joinSlackMessageTexts(messages))
 	if text == "" {
 		text = strings.TrimSpace(decision.Summary)
 	}
 	citations := personaCitationsFromRelatedMemory(relatedMemory)
+	contextItems := []persona.ContextItem{
+		{Kind: "triage_summary", Text: strings.TrimSpace(decision.Summary)},
+		{Kind: "triage_actions", Text: fmt.Sprintf("%d action(s)", len(decision.Actions))},
+	}
+	metadata := map[string]any{
+		"decision_parse_ok": decision.ParseOK,
+		"actions":           len(decision.Actions),
+	}
+	if options.IgnoreExistingBotReply {
+		contextItems = append(contextItems, persona.ContextItem{
+			Kind: "dev_rerun_override",
+			Text: "Internal acceptance rerun: ignore existing bot-authored replies as a reason to stay silent. Human replies still count as blocking freshness.",
+		})
+		metadata["ignore_existing_bot_reply"] = true
+	}
 	return persona.Request{
 		ID:   fmt.Sprintf("triage:%s:%s", strings.TrimSpace(channelID), strings.TrimSpace(threadTS)),
 		Mode: persona.ModeShadow,
@@ -328,10 +357,7 @@ func BuildSlackTriagePersonaRequest(channelID string, threadTS string, messages 
 			ChannelID: strings.TrimSpace(channelID),
 			ThreadTS:  strings.TrimSpace(threadTS),
 		},
-		Context: []persona.ContextItem{
-			{Kind: "triage_summary", Text: strings.TrimSpace(decision.Summary)},
-			{Kind: "triage_actions", Text: fmt.Sprintf("%d action(s)", len(decision.Actions))},
-		},
+		Context: contextItems,
 		Evidence: persona.EvidenceBundle{
 			Summary:   strings.TrimSpace(decision.Summary),
 			Citations: citations,
@@ -347,10 +373,7 @@ func BuildSlackTriagePersonaRequest(channelID string, threadTS string, messages 
 			MaxVisibleChars:    600,
 			AllowedWorkers:     []string{"codex", "claude", "agent_read"},
 		},
-		Metadata: map[string]any{
-			"decision_parse_ok": decision.ParseOK,
-			"actions":           len(decision.Actions),
-		},
+		Metadata: metadata,
 	}
 }
 

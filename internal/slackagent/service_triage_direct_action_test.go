@@ -89,6 +89,83 @@ func TestTriageDirectReplySkipsWhenThreadAlreadyHasBotReply(t *testing.T) {
 	}
 }
 
+func TestTriageDirectReplyForceIgnoresExistingBotReply(t *testing.T) {
+	restore := installSlackRepliesFixture(t, []SlackMessage{
+		{TS: "100.000", User: "U_ASKER", Text: "read this"},
+		{TS: "101.000", User: "U_BOT", BotID: "B123", Subtype: "bot_message", Text: "old bot answer"},
+	})
+	defer restore()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken:  "xoxb-test",
+			BotUserID: "U_BOT",
+		},
+		Poster: poster,
+	})
+
+	calls, failures, mutations := service.executeSlackTriageDirectActionsWithOptions(context.Background(), "W1", "C123", "100.000", 189, []SlackTriageDecisionAction{{
+		Type:                 "post_thread_reply",
+		Title:                "synthesis",
+		Message:              "补一条更具体的判断。",
+		ChannelID:            "C123",
+		ThreadTS:             "100.000",
+		RequiresConfirmation: false,
+	}}, slackTriageDirectActionOptions{
+		SnapshotMessages:       []SlackInboundMessage{{ChannelID: "C123", UserID: "U_ASKER", TS: "100.000", Text: "read this"}},
+		IgnoreExistingBotReply: true,
+	})
+
+	if failures != 0 || mutations != 1 || len(calls) != 1 || !calls[0].Success {
+		t.Fatalf("calls=%#v failures=%d mutations=%d, want forced post", calls, failures, mutations)
+	}
+	if got := len(poster.Calls()); got != 1 {
+		t.Fatalf("poster calls = %d, want forced reply to post", got)
+	}
+}
+
+func TestTriageDirectReplyForceStillBlocksHumanActivity(t *testing.T) {
+	restore := installSlackRepliesFixture(t, []SlackMessage{
+		{TS: "100.000", User: "U_ASKER", Text: "read this"},
+		{TS: "101.000", User: "U_HUMAN", Text: "human already answered"},
+	})
+	defer restore()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken:  "xoxb-test",
+			BotUserID: "U_BOT",
+		},
+		Poster: poster,
+	})
+
+	calls, failures, mutations := service.executeSlackTriageDirectActionsWithOptions(context.Background(), "W1", "C123", "100.000", 190, []SlackTriageDecisionAction{{
+		Type:                 "post_thread_reply",
+		Title:                "synthesis",
+		Message:              "补一条更具体的判断。",
+		ChannelID:            "C123",
+		ThreadTS:             "100.000",
+		RequiresConfirmation: false,
+	}}, slackTriageDirectActionOptions{
+		SnapshotMessages:       []SlackInboundMessage{{ChannelID: "C123", UserID: "U_ASKER", TS: "100.000", Text: "read this"}},
+		IgnoreExistingBotReply: true,
+	})
+
+	if failures != 0 || mutations != 0 || len(calls) != 1 || !calls[0].Success {
+		t.Fatalf("calls=%#v failures=%d mutations=%d, want human freshness skip", calls, failures, mutations)
+	}
+	if calls[0].Result != "thread_has_newer_activity" {
+		t.Fatalf("call result = %q, want thread_has_newer_activity", calls[0].Result)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want human activity to suppress forced reply", got)
+	}
+}
+
 func installSlackRepliesFixture(t *testing.T, messages []SlackMessage) func() {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
