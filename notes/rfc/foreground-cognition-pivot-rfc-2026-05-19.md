@@ -47,6 +47,69 @@ The current chain violates the desired responsibility split:
 - Fixing silence by preserving or passing runner candidates risks keeping the old architecture alive under new names.
 - Audit health can be green while the true ownership boundary is wrong.
 
+## Audit Perspective: How This Drift Formed
+
+This section is the supervisor-side reconstruction of why
+`codex_then_pi` shipped under the "Pi cutover" label, so the next
+migration of a similar shape does not repeat it.
+
+Timeline:
+
+- 2026-05-18 ~18:30 SHA: `adc0182 feat(persona): route live triage
+  replies through persona runtime` shipped. The commit message
+  framed this as "Pi foreground." Implementation:
+  `queueSlackTriagePersonaForeground` took the existing Codex
+  `SlackTriageDecision` and asked Pi to refine/replace its actions.
+  Codex still ran on every triage; Pi review was the new gate, not
+  the new origin.
+- 2026-05-18 ~21:00 SHA: persona shadow audits passed cleanly. The
+  audit dashboards report `pi foreground 16/16 success` because the
+  Pi step succeeded; they do not report whether Codex preceded it.
+- 2026-05-19 11:00–12:21 SHA: Pi cutover follow-up swarm closed the
+  7-point app-mention entry-parity contract (`#215-#224`). None of
+  those contract items asked "does Codex run before Pi?" because the
+  contract was framed at the app-mention entry level, not at the
+  cognitive-ownership level.
+- 2026-05-19 17:28 SHA: driver started cleaning up the worker tool
+  bridge. While cleaning, the drift surfaced: removing
+  Codex-publishes-to-Slack still left
+  Codex-produces-candidate-for-Pi-to-review.
+- 2026-05-19 17:29 SHA: Peng called it: 太乱了. RFC mode triggered.
+
+What audit method failed:
+
+- The `persona_shadow` audit reported on Pi runtime health, not on
+  whether Pi was the foreground decision owner.
+- The `triage_run` schema does not record the chain of decisions per
+  event; `last_triage_job` tracks the Codex job, and persona shadow
+  results are recorded separately. The audit reader has to manually
+  correlate the two to detect double-cognition.
+- The 7-point entry-parity contract for `app_mention` did not list
+  "OldModel must not run on the foreground path." That item was
+  implicit in `adc0182`'s commit message but never written down as a
+  contract item with a fixture.
+
+Why this kept living:
+
+- Live behavior of `codex_then_pi` is observable as "everything
+  green." Pi succeeds, Codex succeeds, Slack reply lands. There is
+  no surface signal that Codex's actions were the seed for Pi's
+  visible reply.
+- The candidate-generator name (`triage_candidate_actions`) reads as
+  evidence, not as cognition. The shape did not name itself as the
+  drift it was.
+
+Audit rule from this incident (already captured in
+`migration-lessons-audit-method.md` "candidate-generator as cognition
+in main path"):
+
+- For any "decision_layer = NewModel" cutover, the audit must
+  include a per-event count of OldModel invocations on the
+  foreground path. The expectation post-cutover is zero unless the
+  decision explicitly delegated.
+- The acceptance fixture errors any direct OldModel call and the
+  foreground reply must still land.
+
 ## Target Architecture
 
 ```mermaid
@@ -211,6 +274,75 @@ When Pi returns `delegate_worker`, Go should create a worker job with:
 - [ ] Worker result path remains bounded and scrubbed.
 - [ ] `delegate_worker` cannot write arbitrary Slack messages except through existing safe worker result surfaces.
 
+## Test Fixture Plan
+
+The existing canary suites are the right home for the durable
+acceptance contract. Each fixture is named here so reviewers see the
+test surface up front, not "tests TBD."
+
+### bridge_quality_fixtures (task #219 suite, supervisor-owned)
+
+New `case_NNN_pi_first_foreground` fixture, contract item
+`C237_pi_first_foreground`:
+
+- input: production-shape app-mention or scanner-triage event with
+  fresh messages + thread context + related memory seeded;
+- runner double: errors on direct `StartTask` if called before Pi
+  decision; allows `StartTask` only after a recorded Pi
+  `delegate_worker` decision;
+- assertions:
+  - Pi `Decide` invoked exactly once per event before any
+    `agent_runner.StartTask` call;
+  - if Pi returns `reply`, Slack post emitted with Pi's `visible_text`
+    and zero `agent_runner.StartTask` invocations;
+  - if Pi returns `delegate_worker`, exactly one `agent_runner.StartTask`
+    invocation follows, with `correlation_id` linking back to the Pi
+    request;
+  - audit row written with `foreground_chain=pi_first_live` and
+    `pre_pi_agent_runner_started=false`.
+
+### memory_quality_fixtures (task #232 suite, supervisor-owned)
+
+Existing fixture set continues to assert provider hooks; one stub
+addition for the Pi-first transition:
+
+- `case_007_pi_first_codex_offline_recall`: registers a real Memory
+  provider, replays a triage event with `runner=nil` injected,
+  asserts Pi returns `reply` with cited evidence. This is the
+  "Codex offline → Pi foreground still works" canary from the
+  acceptance gate.
+
+### Old-vs-new shadow comparison harness
+
+Phase 1 shadow phase produces a daily report comparing decision
+distribution:
+
+- old: Codex decision summary/actions vs Pi-shadow refined decision;
+- new: Pi-first decision vs Codex-then-Pi decision on the same
+  event;
+- gate: Pi-first decision must not regress on the should-port
+  fixture set extracted from real Bridge cases; mismatch rate
+  above threshold is yellow on the dashboard.
+
+### Production case replay harness
+
+`cmd/oneesama-triage-replay` already exists for offline Markdown
+reporting. Extend with a `--foreground-chain` flag so the same tool
+can run the same input through `codex_then_pi` vs `pi_first_shadow`
+and emit a side-by-side report. This is the operational version of
+the comparison harness above; QA / Peng can drive it without a code
+deploy.
+
+### Production canary on live
+
+After Phase 2 cutover:
+
+- a synthetic mention from a dev-only Slack channel runs every 5
+  minutes;
+- expects Pi-first reply within latency SLO;
+- if Pi fails or Codex is invoked before Pi, the canary turns red and
+  pages.
+
 ## Observability
 
 New audit fields proposed:
@@ -245,6 +377,59 @@ Rollback should be explicit and observable:
 - Should app-mention worker tasks also move to Pi-first immediately, or is this RFC only for automatic scanner triage first?
 - What is the acceptable quality threshold in Phase 1 shadow: equal mutation rate, equal user-visible quality, or specific should-port fixture pass rate?
 - Should old Bridge identity retirement be part of this migration, or remain a separate product decision?
+
+### Additional Supervisor Open Questions
+
+- Pi cold-start latency on the foreground critical path is the
+  biggest known production risk of removing `codex_then_pi`. Today's
+  Pi sidecar still has a ~60s cold path on first request after
+  restart. Should Phase 2 keep `codex_then_pi` as automatic fallback
+  if Pi latency exceeds a threshold, or strictly fail-closed with
+  user-visible "I'm warming up, try again" text?
+- For the shadow phase, do we need to record the user-visible reply
+  Codex *would* have posted (the candidate text) so reviewers can
+  spot cases where Pi's wording is materially worse, not just where
+  the decision differs?
+- Provider/Memory fanout latency contributes to Pi request build
+  time. Should the Pi-first request builder enforce a budget (e.g.,
+  cap total Memory provider fanout at 800ms), and what is the
+  fail-closed behavior when budget is exceeded?
+- For `delegate_worker` to actually run Codex in Phase 3, do we
+  preserve the existing Codex prompt template (so Codex sees what it
+  saw before) or rebuild the Codex worker prompt from Pi's worker
+  request to capture Pi's reasoning context? The first preserves
+  Codex behavior; the second is closer to how a human delegates.
+- For app-mention worker tasks (out of scope per question 2 above),
+  is "Pi-first" also the eventual direction, or do app-mentions
+  stay Codex-primary because they're already a user-initiated worker
+  request with no automatic triage?
+
+## Risk Inventory
+
+Audit-side risks to track during rollout:
+
+1. **Hidden-cognition leaks back**: A future change adds a
+   "preprocessor that summarizes context for Pi" implemented via
+   Codex. This is the same drift class as
+   candidate-generator-as-cognition. The architecture gate "no
+   `agent_runner.StartTask` before Pi" must reject it.
+2. **Pi prompt drift**: Pi-first changes the input shape it sees.
+   The Pi sidecar prompt template
+   (`oneesama-persona-shadow-decision.md`) must be updated to match
+   the new input or Pi will produce degraded decisions for reasons
+   unrelated to the architecture.
+3. **Memory provider failure modes**: With Pi-first, Pi depends on
+   Memory provider fanout more directly. A flaky provider can now
+   degrade live reply quality, where previously it only degraded
+   Codex-then-Pi quality (because Codex also had its own context).
+4. **Audit observability lag**: New audit fields must land in the
+   same deploy as the runtime change; otherwise we get the same
+   "healthy but wrong" gap that produced this drift.
+5. **Worker task spec divergence**: If `delegate_worker` worker
+   prompts diverge from what Codex used to receive, Codex worker
+   behavior may regress on tasks that previously worked. Phase 1
+   shadow comparison must include worker outcome quality, not only
+   decision quality.
 
 ## Initial Code Change Plan
 
