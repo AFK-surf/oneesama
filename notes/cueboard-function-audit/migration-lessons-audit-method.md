@@ -414,9 +414,64 @@ What this proves:
 - Delivery must be fail-closed at the user boundary. Even when an
   internal worker leaks a gateway or stack detail, Slack-visible output
   should be user-safe.
+- Prompt text is not a tool bridge. If the old runtime had a native
+  tool registry, a migration is not complete just because the new
+  prompt describes a way to call tools.
+- Delivery must be fail-closed at the user boundary. Even when an
+  internal worker leaks a gateway or stack detail, Slack-visible output
+  should be user-safe.
 - Fresh search parity remains an entry-level behavior, not a wording
   promise. Unknown future entities need either a real worker tool
   bridge or a delegated-reader/persona path that can cite evidence.
+
+## Runtime traces as memory (new drift pattern, promoted 2026-05-19)
+
+The entity attribution audit (`555feac`) surfaced a drift class worth
+naming separately from "shape ≠ contract":
+
+> Old runtime traces are memory. They are not disposable logs when
+> they contain the tool calls and evidence that made a prior answer
+> good.
+
+When a migration thinks of "memory" only as the markdown/structured
+data the old system stored deliberately, it skips the history of
+actions and tool outputs the old system accumulated. For an agent
+whose product behavior is "answer with cited evidence from past
+work", the trace IS the evidence base, not a debug log.
+
+Concrete on 2026-05-19: cueboard's `memory/triage-archive/*.json`
+held the exact `person_memory → search → Isoform/Alma` chain that
+made the old Cumora/yetone answer good. The first import pass
+(`8542aa4`) copied `.md` artefacts and skipped `.json` traces. The
+old agent's "best answer for this kind of question" was unreachable
+to new oneesama until `555feac` imported the trace JSONs as
+queryable markdown.
+
+Symptoms that catch this drift in audit:
+
+- Old runtime has a "trace archive", "tool ledger", "decision log",
+  or "audit/history" directory.
+- New runtime imports the curated memory but not the trace store.
+- A real production case (here: Cumora/yetone) cannot retrieve
+  evidence the old agent could.
+
+Audit rule for future migrations:
+
+- List every persisted-evidence directory the old runtime maintained,
+  not only the ones tagged "memory".
+- For each, decide: port as-is / project into queryable form / drop
+  with justification.
+- If the migration cannot point to a fixture that recovers a real
+  prior answer chain, the trace-as-memory question has not been
+  answered.
+
+Scope distinction from "shape ≠ contract":
+
+- shape ≠ contract = audit checked surface, missed semantics.
+- runtime traces as memory = audit checked the wrong universe of
+  artefacts entirely; the "memory" scope was too narrow.
+
+This is now a first-class drift class on this page.
 
 ## Where this file sits
 
