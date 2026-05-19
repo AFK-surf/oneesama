@@ -241,6 +241,46 @@ func TestSearchRelatedMemoryExtractsRepoSignalsFromPRURLs(t *testing.T) {
 	}
 }
 
+func TestSearchRelatedMemoryIgnoresURLSchemeNoiseForEntityAttribution(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/2026-05-19.md", strings.Join([]string{
+		"# Busy daily note",
+		"",
+		"Generic AI and HTTPS maintenance notes should not beat entity evidence from a URL question.",
+	}, "\n"))
+	writeRelatedMemoryFile(t, workspaceDir, "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-19.md", strings.Join([]string{
+		"# Legacy Slack Agent D triage archive 2026-05-19",
+		"",
+		"Old Agent D answered the Cumora question by checking public search results.",
+		"It found GitHub yetone (@yetone), @Isoform, Alma releases, and no visible Cumora link.",
+	}, "\n"))
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+
+	result := service.SearchRelatedMemory("https://cumora.ai/ 这是 yetone 搞得吗", SlackRelatedMemorySearchOptions{
+		Limit: 5,
+		Now:   time.Date(2026, 5, 19, 12, 0, 0, 0, shanghaiLocation()),
+	})
+
+	if len(result.Results) == 0 {
+		t.Fatalf("results empty, want entity evidence")
+	}
+	top := result.Results[0]
+	if top.Kind != "legacy_triage_archive" {
+		t.Fatalf("top kind = %q, want legacy_triage_archive; top = %#v", top.Kind, top)
+	}
+	if !strings.Contains(top.SourcePath, "triage-archive/2026-05-19.md") {
+		t.Fatalf("top result = %#v, want legacy triage archive entity evidence before generic URL noise; all results = %#v", top, result.Results)
+	}
+	for _, want := range []string{"yetone", "Isoform", "Alma"} {
+		if !strings.Contains(top.Content, want) {
+			t.Fatalf("top evidence missing %q:\n%s", want, top.Content)
+		}
+	}
+}
+
 func writeRelatedMemoryFile(t *testing.T, workspaceDir, relPath, content string) {
 	t.Helper()
 	fullPath := filepath.Join(workspaceDir, filepath.FromSlash(relPath))

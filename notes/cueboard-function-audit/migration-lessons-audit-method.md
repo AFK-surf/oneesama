@@ -355,6 +355,40 @@ the diff bullets, write the decision, name the fixture. Without the
 fixture name an audit item has not been ported. With it, the contract
 is locked.
 
+### Worked example: entity attribution parity
+
+The follow-up audit
+`notes/cueboard-function-audit/entity-attribution-parity-audit-2026-05-19.md`
+applies the same method to Peng's Cumora/yetone production case.
+
+What it found:
+
+1. Old Slack Agent D's `person_memory` surface included `briefing`;
+   new Oneesama had re-derived only `lookup/list/correct`.
+2. Old people-memory search scored the whole profile, including
+   durable context, responsibilities, and recent meetings; new
+   Oneesama only searched name, identity, and operator notes.
+3. The strongest evidence for the Cumora/yetone answer was not in a
+   person profile at all. It lived in old
+   `memory/triage-archive/*.json` raw tool output: `person_memory`
+   returned no `yetone`, then search results connected `yetone` to
+   Isoform/Alma and found no visible Cumora link. The first import
+   skipped this JSON because it only copied Markdown.
+4. New related-memory URL tokenization allowed scheme/TLD noise
+   (`https`, `ai`) to compete with entity evidence.
+
+What this proves:
+
+- Entity attribution is not one subsystem. It crosses person memory,
+  workspace memory import, historical tool-result memory, URL query
+  tokenization, and fresh search tools.
+- "We migrated memory" was too coarse; the parity question is "can
+  the new entry point recover the same evidence old Agent D used for
+  this exact user question?"
+- Old runtime traces are memory. They are not disposable logs when
+  they contain the tool calls and evidence that made a prior answer
+  good.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.

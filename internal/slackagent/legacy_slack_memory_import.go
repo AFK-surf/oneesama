@@ -3,6 +3,7 @@ package slackagent
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -26,19 +27,21 @@ type LegacySlackMemoryImportOptions struct {
 }
 
 type LegacySlackMemoryImportReport struct {
-	DryRun                bool
-	SourceWorkspaceDir    string
-	SourceDBPath          string
-	TargetWorkspaceDir    string
-	WorkspaceFilesScanned int
-	WorkspaceFilesWritten int
-	DatabaseFilesWritten  int
-	ChannelBrainRows      int
-	ThreadLedgerRows      int
-	FeedbackRows          int
-	TriageRunRows         int
-	GeneratedFiles        []string
-	Warnings              []string
+	DryRun                    bool
+	SourceWorkspaceDir        string
+	SourceDBPath              string
+	TargetWorkspaceDir        string
+	WorkspaceFilesScanned     int
+	WorkspaceFilesWritten     int
+	TriageArchiveFilesScanned int
+	TriageArchiveFilesWritten int
+	DatabaseFilesWritten      int
+	ChannelBrainRows          int
+	ThreadLedgerRows          int
+	FeedbackRows              int
+	TriageRunRows             int
+	GeneratedFiles            []string
+	Warnings                  []string
 }
 
 func ImportLegacySlackAgentDMemory(ctx context.Context, opts LegacySlackMemoryImportOptions) (LegacySlackMemoryImportReport, error) {
@@ -78,6 +81,35 @@ func ImportLegacySlackAgentDMemory(ctx context.Context, opts LegacySlackMemoryIm
 			}
 			report.GeneratedFiles = append(report.GeneratedFiles, targetRel)
 			report.WorkspaceFilesWritten++
+		}
+
+		archiveFiles, err := legacySlackWorkspaceTriageArchiveFiles(report.SourceWorkspaceDir)
+		if err != nil {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("read source triage archive: %v", err))
+		}
+		report.TriageArchiveFilesScanned = len(archiveFiles)
+		for _, rel := range archiveFiles {
+			if err := ctx.Err(); err != nil {
+				return report, err
+			}
+			sourcePath := filepath.Join(report.SourceWorkspaceDir, filepath.FromSlash(rel))
+			raw, err := os.ReadFile(sourcePath)
+			if err != nil {
+				report.Warnings = append(report.Warnings, fmt.Sprintf("read %s: %v", rel, err))
+				continue
+			}
+			body, err := legacySlackRenderTriageArchiveJSON(rel, raw)
+			if err != nil {
+				report.Warnings = append(report.Warnings, fmt.Sprintf("render %s: %v", rel, err))
+				continue
+			}
+			targetRel := filepath.ToSlash(filepath.Join(legacySlackAgentDTargetRoot, "workspace", strings.TrimSuffix(filepath.FromSlash(rel), filepath.Ext(rel))+".md"))
+			if err := legacySlackWriteGeneratedFile(report.TargetWorkspaceDir, targetRel, []byte(body), opts.Write); err != nil {
+				report.Warnings = append(report.Warnings, fmt.Sprintf("write %s: %v", targetRel, err))
+				continue
+			}
+			report.GeneratedFiles = append(report.GeneratedFiles, targetRel)
+			report.TriageArchiveFilesWritten++
 		}
 	}
 
@@ -130,6 +162,74 @@ func legacySlackWorkspaceMemoryFiles(workspaceDir string) ([]string, error) {
 	})
 	sort.Strings(files)
 	return files, err
+}
+
+func legacySlackWorkspaceTriageArchiveFiles(workspaceDir string) ([]string, error) {
+	archiveDir := filepath.Join(workspaceDir, filepath.FromSlash("memory/triage-archive"))
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+			continue
+		}
+		files = append(files, filepath.ToSlash(filepath.Join("memory/triage-archive", entry.Name())))
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+type legacySlackTriageArchiveRun struct {
+	SessionID string `json:"session_id"`
+	Timestamp string `json:"timestamp"`
+	Status    string `json:"status"`
+	Summary   string `json:"summary"`
+	Digest    string `json:"digest"`
+	RawOutput string `json:"raw_output"`
+	Actions   any    `json:"actions"`
+	Channels  any    `json:"channels"`
+}
+
+func legacySlackRenderTriageArchiveJSON(rel string, raw []byte) (string, error) {
+	var runs []legacySlackTriageArchiveRun
+	if err := json.Unmarshal(raw, &runs); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Legacy Slack Agent D triage archive %s\n\n", strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel)))
+	b.WriteString("Imported from old Slack Agent D workspace `memory/triage-archive` JSON. This preserves old tool outputs as line-citable memory evidence.\n\n")
+	for index, run := range runs {
+		title := firstNonEmpty(run.SessionID, run.Timestamp, fmt.Sprintf("run-%d", index+1))
+		fmt.Fprintf(&b, "## Triage archive run %s\n\n", title)
+		legacySlackWriteBullet(&b, "Timestamp", run.Timestamp)
+		legacySlackWriteBullet(&b, "Status", run.Status)
+		if channels := legacySlackCompactJSON(run.Channels); channels != "" {
+			legacySlackWriteBullet(&b, "Channels", channels)
+		}
+		if actions := legacySlackCompactJSON(run.Actions); actions != "" {
+			legacySlackWriteBlock(&b, "Actions", legacySlackTruncateRunText(actions, 2400))
+		}
+		legacySlackWriteBlock(&b, "Summary", run.Summary)
+		legacySlackWriteBlock(&b, "Digest", legacySlackTruncateRunText(run.Digest, 3600))
+		legacySlackWriteBlock(&b, "Raw output", legacySlackTruncateRunText(run.RawOutput, 12000))
+	}
+	return b.String(), nil
+}
+
+func legacySlackCompactJSON(value any) string {
+	if value == nil {
+		return ""
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func legacySlackWriteGeneratedFile(workspaceDir string, rel string, body []byte, write bool) error {

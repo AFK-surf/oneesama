@@ -226,6 +226,35 @@ func relatedMemoryMarkdownChunks(content string) []relatedMemoryChunk {
 
 func relatedMemoryKindForPath(relPath string) string {
 	relPath = filepath.ToSlash(strings.TrimSpace(relPath))
+	if inner, ok := strings.CutPrefix(relPath, "memory/legacy/slack-agent-d/workspace/"); ok {
+		switch {
+		case inner == "MEMORY.md":
+			return "legacy_memory_index"
+		case strings.HasPrefix(inner, "memory/triage-archive/"):
+			return "legacy_triage_archive"
+		case strings.HasPrefix(inner, "memory/people/") && strings.HasSuffix(inner, ".md"):
+			return "person_profile"
+		case strings.HasPrefix(inner, "memory/team/decisions/"):
+			return "team_decision"
+		case strings.HasPrefix(inner, "memory/team/actions/"):
+			return "team_action"
+		case strings.HasPrefix(inner, "memory/team/questions/"):
+			return "team_question"
+		case strings.HasPrefix(inner, "memory/team/facts/"):
+			return "team_fact"
+		case strings.HasPrefix(inner, "memory/team/meetings/"):
+			return "team_meeting"
+		case strings.HasPrefix(inner, "memory/lessons/candidates/"):
+			return "lesson_candidate"
+		case strings.HasPrefix(inner, "memory/feedback/"):
+			return "feedback"
+		default:
+			return "legacy_memory_file"
+		}
+	}
+	if strings.HasPrefix(relPath, "memory/legacy/slack-agent-d/db/") {
+		return "legacy_slack_db"
+	}
 	switch {
 	case relPath == "MEMORY.md":
 		return "memory_index"
@@ -284,6 +313,8 @@ func relatedMemoryFamilyBoost(kind string, tokens []string) float64 {
 		return false
 	}
 	switch kind {
+	case "legacy_triage_archive":
+		return 0.14
 	case "person_profile":
 		if hasAny("who", "owner", "review", "reviewer", "找谁", "负责人", "谁", "review") {
 			return 0.25
@@ -394,14 +425,23 @@ func relatedMemoryTokens(query string) []string {
 }
 
 func expandRelatedMemoryTokens(tokens []string) []string {
-	out := append([]string(nil), tokens...)
+	var out []string
 	for _, token := range tokens {
-		out = append(out, asciiWordSubtokens(token)...)
+		urlish := relatedMemoryTokenLooksURLish(token)
+		if !urlish && !relatedMemoryNoiseToken(token, false) {
+			out = append(out, token)
+		}
+		for _, subtoken := range asciiWordSubtokens(token) {
+			if relatedMemoryNoiseToken(subtoken, urlish) {
+				continue
+			}
+			out = append(out, subtoken)
+		}
 		if strings.Contains(token, "github.com/") {
 			parts := strings.Split(token, "/")
 			for index, part := range parts {
 				part = strings.TrimSpace(part)
-				if part == "" || part == "https:" || part == "http:" || part == "github.com" {
+				if part == "" || part == "https:" || part == "http:" || part == "github.com" || relatedMemoryNoiseToken(part, true) {
 					continue
 				}
 				out = append(out, part)
@@ -418,6 +458,31 @@ func expandRelatedMemoryTokens(tokens []string) []string {
 		}
 	}
 	return out
+}
+
+func relatedMemoryTokenLooksURLish(token string) bool {
+	token = strings.TrimSpace(strings.ToLower(token))
+	return strings.Contains(token, "/") || strings.Contains(token, ".") || strings.HasPrefix(token, "http")
+}
+
+func relatedMemoryNoiseToken(token string, urlDerived bool) bool {
+	token = strings.Trim(strings.ToLower(strings.TrimSpace(token)), "/.")
+	if token == "" {
+		return true
+	}
+	switch token {
+	case "http", "https", "www":
+		return true
+	}
+	if !urlDerived {
+		return false
+	}
+	switch token {
+	case "com", "net", "org", "io", "ai", "app", "dev", "co", "cn", "xyz":
+		return true
+	default:
+		return false
+	}
 }
 
 func asciiWordSubtokens(token string) []string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -17,10 +18,29 @@ func findPersonMemoryProfiles(workspaceDir string, query string, limit int) ([]p
 	}
 	queryKey := compactPersonKey(query)
 	var matches []personMemoryProfile
+	type scoredProfile struct {
+		profile personMemoryProfile
+		score   int
+	}
+	var scored []scoredProfile
 	for _, profile := range profiles {
-		if queryKey == "" || strings.Contains(compactPersonKey(profile.Name), queryKey) || profileContainsQuery(profile, queryKey) {
+		if queryKey == "" {
 			matches = append(matches, profile)
+			continue
 		}
+		score := personMemoryProfileScore(profile, queryKey)
+		if score > 0 {
+			scored = append(scored, scoredProfile{profile: profile, score: score})
+		}
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].profile.Name < scored[j].profile.Name
+		}
+		return scored[i].score > scored[j].score
+	})
+	for _, item := range scored {
+		matches = append(matches, item.profile)
 	}
 	if limit > 0 && len(matches) > limit {
 		matches = matches[:limit]
@@ -28,39 +48,99 @@ func findPersonMemoryProfiles(workspaceDir string, query string, limit int) ([]p
 	return matches, nil
 }
 
-func profileContainsQuery(profile personMemoryProfile, queryKey string) bool {
-	for _, value := range append(append([]string{}, profile.IdentityMap...), profile.OperatorNotes...) {
-		if strings.Contains(compactPersonKey(value), queryKey) {
-			return true
+func personMemoryProfileScore(profile personMemoryProfile, queryKey string) int {
+	if queryKey == "" {
+		return 1
+	}
+	nameKey := compactPersonKey(profile.Name)
+	switch {
+	case queryKey == nameKey:
+		return 120
+	case strings.Contains(nameKey, queryKey):
+		return 90
+	}
+	fileKey := compactPersonKey(strings.TrimSuffix(filepath.Base(profile.Source), filepath.Ext(profile.Source)))
+	switch {
+	case queryKey == fileKey:
+		return 115
+	case strings.Contains(fileKey, queryKey):
+		return 88
+	}
+	best := 0
+	for _, value := range profile.IdentityMap {
+		valueKey := compactPersonKey(value)
+		switch {
+		case queryKey == valueKey:
+			best = maxInt(best, 95)
+		case strings.Contains(valueKey, queryKey):
+			best = maxInt(best, 80)
 		}
 	}
-	return false
+	searchKey := compactPersonKey(personMemorySearchText(profile))
+	if strings.Contains(searchKey, queryKey) {
+		best = maxInt(best, 60)
+	}
+	return best
+}
+
+func personMemorySearchText(profile personMemoryProfile) string {
+	parts := []string{profile.Name, profile.Source}
+	parts = append(parts, profile.IdentityMap...)
+	parts = append(parts, profile.DurableContext...)
+	parts = append(parts, profile.CurrentResponsibilities...)
+	parts = append(parts, profile.RecentMeetings...)
+	parts = append(parts, profile.OperatorNotes...)
+	return strings.Join(parts, "\n")
+}
+
+func renderPersonMemoryLookup(profile personMemoryProfile) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Person: %s\n", profile.Name))
+	if profile.Source != "" {
+		sb.WriteString("Source: " + profile.Source + "\n")
+	}
+	appendPersonMemorySection(&sb, "Identity", profile.IdentityMap, 4)
+	appendPersonMemorySection(&sb, "Operator notes", profile.OperatorNotes, 4)
+	appendPersonMemorySection(&sb, "Durable context", profile.DurableContext, 4)
+	appendPersonMemorySection(&sb, "Current responsibilities", profile.CurrentResponsibilities, 5)
+	appendPersonMemorySection(&sb, "Recent meetings", profile.RecentMeetings, 4)
+	return strings.TrimSpace(sb.String())
 }
 
 func renderPersonMemoryBriefing(profile personMemoryProfile) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Briefing for %s\n\n", profile.Name))
-	sb.WriteString(fmt.Sprintf("Person: %s\n\n", profile.Name))
-	appendPlainBullets(&sb, "Who they are:", append(profile.IdentityMap, profile.DurableContext...))
-	appendPlainBullets(&sb, "Likely current focus:", profile.CurrentResponsibilities)
-	appendPlainBullets(&sb, "Recent meetings:", profile.RecentMeetings)
-	appendPlainBullets(&sb, "Operator notes:", profile.OperatorNotes)
+	sb.WriteString(fmt.Sprintf("Briefing for %s\n", profile.Name))
+	appendPersonMemorySection(&sb, "Who they are", profile.IdentityMap, 2)
+	appendPersonMemorySection(&sb, "Operator notes", profile.OperatorNotes, 2)
+	if len(profile.CurrentResponsibilities) > 0 {
+		appendPersonMemorySection(&sb, "Likely current focus", profile.CurrentResponsibilities, 3)
+	} else {
+		appendPersonMemorySection(&sb, "Relevant durable context", profile.DurableContext, 3)
+	}
+	appendPersonMemorySection(&sb, "Recent context", profile.RecentMeetings, 2)
 	if profile.Source != "" {
 		sb.WriteString("Source: " + profile.Source + "\n")
 	}
 	return strings.TrimSpace(sb.String())
 }
 
-func appendPlainBullets(sb *strings.Builder, title string, items []string) {
-	items = compactUniqueStrings(items)
+func appendPersonMemorySection(sb *strings.Builder, title string, items []string, limit int) {
+	items = personMemoryTop(items, limit)
 	if len(items) == 0 {
 		return
 	}
-	sb.WriteString(title + "\n")
+	sb.WriteString(title + ":\n")
 	for _, item := range items {
 		sb.WriteString("- " + item + "\n")
 	}
-	sb.WriteString("\n")
+}
+
+func personMemoryTop(items []string, limit int) []string {
+	items = compactUniqueStrings(items)
+	if limit > 0 && len(items) > limit {
+		return items[:limit]
+	}
+	return items
 }
 
 func recordPersonMemoryCorrection(workspaceDir string, person string, note string, author string) (string, error) {
@@ -115,7 +195,7 @@ func (t *personMemoryTool) Execute(ctx context.Context, args map[string]any) (sl
 	}
 	action := stringFromAny(args["action"])
 	switch action {
-	case "lookup":
+	case "lookup", "briefing":
 		matches, err := findPersonMemoryProfiles(t.workspaceDir, stringFromAny(args["person"]), 1)
 		if err != nil {
 			return slackAPIToolResult{}, err
@@ -123,7 +203,10 @@ func (t *personMemoryTool) Execute(ctx context.Context, args map[string]any) (sl
 		if len(matches) == 0 {
 			return slackAPIToolResult{Success: false, Text: "No matching person memory found."}, nil
 		}
-		return slackAPIToolResult{Success: true, Text: renderPersonMemoryBriefing(matches[0])}, nil
+		if action == "briefing" {
+			return slackAPIToolResult{Success: true, Text: renderPersonMemoryBriefing(matches[0])}, nil
+		}
+		return slackAPIToolResult{Success: true, Text: renderPersonMemoryLookup(matches[0])}, nil
 	case "list":
 		limit := intFromAny(args["limit"])
 		matches, err := findPersonMemoryProfiles(t.workspaceDir, "", limit)

@@ -45,6 +45,16 @@ func TestImportLegacySlackAgentDMemoryWritesPiSearchableEvidence(t *testing.T) {
 	targetWorkspace := t.TempDir()
 	writeLegacyMemoryFixtureFile(t, sourceWorkspace, "MEMORY.md", "# Legacy index\n\nOld Slack Agent D kept the Aha Moment recall habit.")
 	writeLegacyMemoryFixtureFile(t, sourceWorkspace, "memory/2026-03-20.md", "# 2026-03-20\n\nAha Moment: oneesama should recall related topics before replying.")
+	writeLegacyMemoryFixtureFile(t, sourceWorkspace, "memory/triage-archive/2026-05-19.json", `[
+	{
+		"session_id": "legacy-cumora",
+		"timestamp": "2026-05-19T09:30:00Z",
+		"status": "ok",
+		"summary": "Answered whether Cumora is connected to yetone.",
+		"raw_output": "person_memory returned no match for yetone, then exa_search found GitHub yetone (@yetone), @Isoform, Alma releases, and no visible Cumora link.",
+		"digest": "C09L0TAN31T asked whether https://cumora.ai/ is something yetone built."
+	}
+]`)
 	writeLegacyMemoryFixtureFile(t, sourceWorkspace, "docs/ignore.md", "Docs are not workspace memory and should not be imported.")
 	dbPath := writeLegacySlackDBFixture(t)
 
@@ -62,7 +72,10 @@ func TestImportLegacySlackAgentDMemoryWritesPiSearchableEvidence(t *testing.T) {
 		t.Fatalf("DryRun = true, want false")
 	}
 	if report.WorkspaceFilesWritten != 2 {
-		t.Fatalf("WorkspaceFilesWritten = %d, want 2", report.WorkspaceFilesWritten)
+		t.Fatalf("WorkspaceFilesWritten = %d, want 2 markdown files", report.WorkspaceFilesWritten)
+	}
+	if report.TriageArchiveFilesWritten != 1 {
+		t.Fatalf("TriageArchiveFilesWritten = %d, want 1", report.TriageArchiveFilesWritten)
 	}
 	if report.ChannelBrainRows != 1 || report.ThreadLedgerRows != 1 || report.FeedbackRows != 1 || report.TriageRunRows != 1 {
 		t.Fatalf("db counts = %+v, want 1 row from each table", report)
@@ -70,6 +83,7 @@ func TestImportLegacySlackAgentDMemoryWritesPiSearchableEvidence(t *testing.T) {
 	wantFiles := []string{
 		"memory/legacy/slack-agent-d/workspace/MEMORY.md",
 		"memory/legacy/slack-agent-d/workspace/memory/2026-03-20.md",
+		"memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-19.md",
 		"memory/legacy/slack-agent-d/db/channel-brain.md",
 		"memory/legacy/slack-agent-d/db/thread-ledger.md",
 		"memory/legacy/slack-agent-d/db/feedback.md",
@@ -105,6 +119,17 @@ func TestImportLegacySlackAgentDMemoryWritesPiSearchableEvidence(t *testing.T) {
 	dbRecord := firstLegacyRelatedMemory(dbResult.Results)
 	if dbRecord == nil || !strings.Contains(dbRecord.SourcePath, "feedback.md") {
 		t.Fatalf("db results = %#v, want generated feedback evidence", dbResult.Results)
+	}
+
+	cumoraResult := service.SearchRelatedMemory("https://cumora.ai/ 这是 yetone 搞得吗", SlackRelatedMemorySearchOptions{Limit: 8})
+	cumoraRecord := firstLegacyRelatedMemory(cumoraResult.Results)
+	if cumoraRecord == nil || !strings.Contains(cumoraRecord.SourcePath, "triage-archive/2026-05-19.md") {
+		t.Fatalf("cumora results = %#v, want legacy triage archive evidence", cumoraResult.Results)
+	}
+	for _, want := range []string{"yetone", "Isoform", "Alma"} {
+		if !strings.Contains(cumoraRecord.Content, want) {
+			t.Fatalf("cumora evidence missing %q:\n%s", want, cumoraRecord.Content)
+		}
 	}
 }
 

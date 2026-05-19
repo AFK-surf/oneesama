@@ -126,6 +126,14 @@ func TestCueboardParityFindPersonMemoryProfilesMatchesAliasAndFormatsBriefing(t 
 		t.Fatalf("top match = %+v, want Jiachen He", matches)
 	}
 
+	contextMatches, err := findPersonMemoryProfiles(workspaceDir, "investor-facing product narrative", 3)
+	if err != nil {
+		t.Fatalf("findPersonMemoryProfiles by durable context: %v", err)
+	}
+	if len(contextMatches) == 0 || contextMatches[0].Name != "Jiachen He" {
+		t.Fatalf("context top match = %+v, want Jiachen He from durable context", contextMatches)
+	}
+
 	briefing := renderPersonMemoryBriefing(matches[0])
 	for _, want := range []string{
 		"Briefing for Jiachen He",
@@ -178,10 +186,18 @@ func TestCueboardParityPersonMemoryToolLookupListAndCorrect(t *testing.T) {
 		t.Fatalf("lookup Execute: %v", err)
 	}
 	body := lookup.GetTextOutput()
-	for _, want := range []string{"Person: Peng Xiao", "Source: memory/people/peng-xiao.md", "Likely current focus:", "Polish launch checklist"} {
+	for _, want := range []string{"Person: Peng Xiao", "Source: memory/people/peng-xiao.md", "Current responsibilities:", "Polish launch checklist"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lookup missing %q:\n%s", want, body)
 		}
+	}
+
+	briefing, err := tool.Execute(nil, map[string]any{"action": "briefing", "person": "peng"})
+	if err != nil {
+		t.Fatalf("briefing Execute: %v", err)
+	}
+	if got := briefing.GetTextOutput(); !strings.Contains(got, "Briefing for Peng Xiao") || !strings.Contains(got, "Polish launch checklist") {
+		t.Fatalf("unexpected briefing output:\n%s", got)
 	}
 
 	list, err := tool.Execute(nil, map[string]any{"action": "list", "limit": 5})

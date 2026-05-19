@@ -72,6 +72,8 @@ func printReport(w io.Writer, report slackagent.LegacySlackMemoryImportReport) {
 	fmt.Fprintf(w, "- Target workspace: %s\n", strings.TrimSpace(report.TargetWorkspaceDir))
 	fmt.Fprintf(w, "- Workspace files scanned: %d\n", report.WorkspaceFilesScanned)
 	fmt.Fprintf(w, "- Workspace files %s: %d\n", importVerb(report), report.WorkspaceFilesWritten)
+	fmt.Fprintf(w, "- Triage archive files scanned: %d\n", report.TriageArchiveFilesScanned)
+	fmt.Fprintf(w, "- Triage archive files %s: %d\n", importVerb(report), report.TriageArchiveFilesWritten)
 	fmt.Fprintf(w, "- Database files %s: %d\n", importVerb(report), report.DatabaseFilesWritten)
 	fmt.Fprintf(w, "- Channel brain rows: %d\n", report.ChannelBrainRows)
 	fmt.Fprintf(w, "- Thread ledger rows: %d\n", report.ThreadLedgerRows)
