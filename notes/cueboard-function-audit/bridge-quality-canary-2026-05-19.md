@@ -155,6 +155,17 @@ This way the canary suite grows with the entry-parity contract.
   is the existing pin and can be ported into a fixture-driven shape
   in a future scaffold pass). Until then, treat that test as the
   C221 canary anchor.
+- **Scaffold layer extension for C224** (automatic scanner triage
+  entry, commit `a74db59`): the scanner entry runs through
+  `scanSlackHistoryOnce` → `SweepSlackScanner` → `StartSlackTriage`,
+  which requires an httptest Slack API server + a `fakeRunner` /
+  recording-runner. Driver's `triage_scanner_entry_parity_test.go::
+  TestSlackHistoryScannerTriageCarriesMemoryAndPlannerContext`
+  (146 lines) is the existing pin. To canary C224 in this fixture
+  suite, the scaffold would need to accept fixture fields for
+  fake-Slack history responses + previous-triage seed context, and
+  drive the same pipeline. Until then, that test is the C224 canary
+  anchor.
 - Extract 4–6 additional fixture candidates from the 56 mutating
   Bridge runs (anchor each to a contract item that does not yet have
   a real-production fixture).
