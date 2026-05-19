@@ -111,6 +111,9 @@ func shouldPublishWorkerResultAsCanvas(job agentrunner.Job, text string) bool {
 	if len([]rune(trimmed)) > 1800 {
 		return true
 	}
+	if slackWorkerJobRequestsCanvas(job) && (len([]rune(trimmed)) > 20 || looksLikeLongFormMarkdown(trimmed)) {
+		return true
+	}
 	if len(slackAppMentionCanvasFiles(job.Context)) > 0 && (len([]rune(trimmed)) > 700 || looksLikeLongFormMarkdown(trimmed)) {
 		return true
 	}
@@ -168,6 +171,41 @@ func workerResultCanvasNotification(title string, revision bool) string {
 		return "新版 " + title + " 已更新：{{canvas_link}}"
 	}
 	return title + " 已写成 Canvas：{{canvas_link}}"
+}
+
+func slackWorkerJobRequestsCanvas(job agentrunner.Job) bool {
+	var texts []string
+	if task := strings.TrimSpace(job.Task); task != "" {
+		texts = append(texts, task)
+	}
+	texts = append(texts, slackAppMentionRequestTexts(job.Context)...)
+	for _, text := range texts {
+		normalized := strings.ToLower(strings.TrimSpace(text))
+		if strings.Contains(normalized, "canvas") || strings.Contains(normalized, "画布") {
+			return true
+		}
+	}
+	return false
+}
+
+func slackAppMentionRequestTexts(context map[string]any) []string {
+	if len(context) == 0 {
+		return nil
+	}
+	switch typed := context["slackAppMention"].(type) {
+	case *SlackAppMentionContext:
+		if typed == nil {
+			return nil
+		}
+		return []string{typed.MentionText, typed.RawMentionText}
+	case SlackAppMentionContext:
+		return []string{typed.MentionText, typed.RawMentionText}
+	case map[string]any:
+		return []string{stringFromAny(typed["mentionText"]), stringFromAny(typed["rawMentionText"])}
+	case map[string]string:
+		return []string{typed["mentionText"], typed["rawMentionText"]}
+	}
+	return nil
 }
 
 func slackAppMentionCanvasFiles(context map[string]any) []SlackThreadFile {

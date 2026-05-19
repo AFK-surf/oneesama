@@ -45,6 +45,7 @@ type SlackAppMentionContext struct {
 	Files               []SlackThreadFile              `json:"files,omitempty"`
 	ImageParts          []SlackThreadImage             `json:"imageParts,omitempty"`
 	ExternalLinks       []SlackExternalLinkContext     `json:"externalLinks,omitempty"`
+	LinkedSlackThreads  []SlackLinkedThreadContext     `json:"linkedSlackThreads,omitempty"`
 	MeetingContext      string                         `json:"meetingContext,omitempty"`
 	ThreadPermalink     string                         `json:"threadPermalink,omitempty"`
 	FetchOK             bool                           `json:"fetchOk"`
@@ -82,6 +83,17 @@ type SlackThreadImage struct {
 	Permalink string `json:"permalink,omitempty"`
 	ImageURL  string `json:"imageUrl,omitempty"`
 	Source    string `json:"source,omitempty"`
+}
+
+type SlackLinkedThreadContext struct {
+	URL          string            `json:"url,omitempty"`
+	ChannelID    string            `json:"channelId,omitempty"`
+	ThreadTS     string            `json:"threadTs,omitempty"`
+	MessageCount int               `json:"messageCount,omitempty"`
+	Transcript   string            `json:"transcript,omitempty"`
+	CanvasFiles  []SlackThreadFile `json:"canvasFiles,omitempty"`
+	FetchOK      bool              `json:"fetchOk"`
+	FetchError   string            `json:"fetchError,omitempty"`
 }
 
 func buildSlackAppMentionContext(event SlackEventPayload) *SlackAppMentionContext {
