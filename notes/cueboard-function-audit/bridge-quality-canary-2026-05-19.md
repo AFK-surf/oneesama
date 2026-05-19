@@ -132,14 +132,26 @@ This way the canary suite grows with the entry-parity contract.
 
 ## Open follow-ups
 
-- Wire `expected_tools_invoked` assertion (currently parsed but not
-  enforced; needs an Agent runner mock that records `ExecuteSlackTool`
-  invocations).
+- Wire `expected_tools_invoked` assertion (currently parsed and
+  partially enforced for C220/C223 via slackToolEvidence substring;
+  a full assertion needs an Agent runner mock that records
+  `ExecuteSlackTool` invocations directly).
 - Wire `expected_decision_shape.min_chars` / `max_chars` once worker
   results are captured (currently only the `must_not_contain` check
-  runs and only against `relatedMemoryEvidence`; output-boundary check
-  should also scan `slackWorkerResultText` once a worker-result
-  fixture lands).
+  runs and only against `relatedMemoryEvidence` + `slackToolEvidence`;
+  output-boundary check should also scan `slackWorkerResultText` once
+  a worker-result fixture lands).
+- **Scaffold layer extension for C221** (worker interactive tool
+  loop, commit `b3ed69e`): the scaffold currently exercises
+  `buildAgentRunnerContext`, which runs before the worker executes.
+  The `<oneesama_tool_request>` interception happens in
+  `handleAgentRunnerUpdate` on job completion, with a continuation
+  job. To canary C221 the fixture suite needs a mock runner +
+  recording poster (driver's `service_worker_jobs_test.go::
+  TestSlackWorkerToolRequestStartsContinuationWithDispatcherEvidence`
+  is the existing pin and can be ported into a fixture-driven shape
+  in a future scaffold pass). Until then, treat that test as the
+  C221 canary anchor.
 - Extract 4–6 additional fixture candidates from the 56 mutating
   Bridge runs (anchor each to a contract item that does not yet have
   a real-production fixture).
