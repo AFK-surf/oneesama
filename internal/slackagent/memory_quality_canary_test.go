@@ -161,6 +161,14 @@ func runMemoryQualityFixture(t *testing.T, fixture memoryQualityFixture) {
 		runMemorySemanticRecall(t, fixture)
 	case "sync_turn_extraction":
 		runMemorySyncTurnExtraction(t, fixture, service, provider)
+	case "entity_graph_resolution":
+		// Pending fixtures (Scenario.Pending == true) are filtered earlier.
+		// An active fixture lands here once task #231 ships an
+		// entity-graph-aware provider. The assertion body is added then;
+		// today the scenario is documented as pending and this branch
+		// logs to flag any non-pending fixture without supporting
+		// infrastructure.
+		t.Logf("[%s] entity_graph_resolution fixture present but provider/source not yet shipped (#231); ensure entity graph resolution is reachable before flipping pending=false", fixture.CaseID)
 	default:
 		t.Fatalf("[%s] unknown scenario.type %q", fixture.CaseID, fixture.Scenario.Type)
 	}

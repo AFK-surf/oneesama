@@ -1,0 +1,40 @@
+{
+  "case_id": "case_005_entity_graph_resolution_pending",
+  "source": {
+    "occurred_at": "2026-05-19T15:34:00+08:00",
+    "notes": "STUB fixture for #231 entity graph / relationship resolution. Pre-built per case_003/004 handoff pattern: pending=true today, driver flips to active when entity-graph evidence emission lands. Anchor scenario: query about Cumora must return evidence that identifies yetone as the contact, Isoform as yetone's org, and an explicit non-relation between Cumora and Alma product line. This is the entity-graph successor to the Cumora/yetone case_002 of #215 entity_attribution, but at the graph/relationship layer, not flat profile lookup."
+  },
+  "scenario": {
+    "type": "entity_graph_resolution",
+    "pending": true,
+    "pending_reason": "awaiting_task_231_entity_graph_resolution",
+    "search": {
+      "query": "Cumora 的 contact 是谁，跟 Alma 有没有关系？",
+      "limit": 5
+    },
+    "intended_provider_signals": [
+      "Provider Search response must include records with source tagged entity_graph (or equivalent kind/reason indicating entity resolution).",
+      "Search response must surface the 4 anchor entities (Cumora, yetone, Isoform, Alma) so the worker can compose a grounded answer.",
+      "Negative relationship 'Cumora is not in Alma product line' must be preserved in the evidence content; the new system must not silently drop the disambiguation.",
+      "Entity attribution must hold across alias forms: yetone / 大yetone / @yetone slack handle should resolve to the same entity record."
+    ],
+    "intended_anchor_entities": [
+      "Cumora",
+      "yetone",
+      "Isoform",
+      "Alma"
+    ]
+  },
+  "expected_provider_events": {
+    "search_query_contains": "Cumora",
+    "search_records_returned_min": 1
+  },
+  "expected_search_result_anchors": [],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "exit status 7",
+    "localhost:8780"
+  ]
+}
