@@ -163,7 +163,7 @@ func (s *Service) ExecuteSlackTool(ctx context.Context, request SlackToolCallReq
 	case "memory_get":
 		return s.executeMemoryGetTool(args), nil
 	case "memory_write":
-		return s.executeMemoryWriteTool(args), nil
+		return s.executeMemoryWriteTool(ctx, args), nil
 	case "person_memory":
 		result, err := (&personMemoryTool{workspaceDir: s.workspaceDir}).Execute(ctx, args)
 		return slackToolFromTextResult(name, result, err)
@@ -294,7 +294,7 @@ func (s *Service) executeMemoryGetTool(args map[string]any) SlackToolCallRespons
 	return slackToolOK("memory_get", map[string]any{"path": filepath.ToSlash(relPath), "content": string(raw)})
 }
 
-func (s *Service) executeMemoryWriteTool(args map[string]any) SlackToolCallResponse {
+func (s *Service) executeMemoryWriteTool(ctx context.Context, args map[string]any) SlackToolCallResponse {
 	relPath := strings.TrimSpace(firstNonEmpty(stringFromAny(args["path"]), stringFromAny(args["key"])))
 	content := stringFromAny(args["content"])
 	if content == "" {
@@ -330,7 +330,28 @@ func (s *Service) executeMemoryWriteTool(args map[string]any) SlackToolCallRespo
 	if err != nil {
 		return slackToolError("memory_write", "write_failed")
 	}
+	s.notifyMemoryProvidersWrite(ctx, SlackMemoryProviderWriteEvent{
+		Action:  mode,
+		Target:  "workspace",
+		Path:    filepath.ToSlash(relPath),
+		Content: content,
+		Source:  "slack_tool:memory_write",
+		Metadata: map[string]any{
+			"tool": "memory_write",
+			"mode": mode,
+		},
+	})
 	return slackToolOK("memory_write", map[string]any{"path": filepath.ToSlash(relPath), "bytes": len([]byte(content)), "mode": mode})
+}
+
+func (s *Service) notifyMemoryProvidersWrite(ctx context.Context, event SlackMemoryProviderWriteEvent) {
+	if s == nil || s.memoryProviders == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.memoryProviders.OnMemoryWrite(ctx, event)
 }
 
 func (s *Service) memoryWriteRoot() string {

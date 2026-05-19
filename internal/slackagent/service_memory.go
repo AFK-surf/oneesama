@@ -24,7 +24,10 @@ func (s *Service) MemorySummary() SlackMemorySummary {
 			summary.FeedbackEntries = count
 		}
 	}
-	summary.Enabled = summary.Enabled || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0 || summary.FeedbackEntries > 0
+	if s.memoryProviders != nil {
+		summary.Providers = s.memoryProviders.Status()
+	}
+	summary.Enabled = summary.Enabled || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0 || summary.FeedbackEntries > 0 || len(summary.Providers) > 0
 	return summary
 }
 

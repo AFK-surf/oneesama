@@ -65,6 +65,7 @@ func (s *Service) SearchRelatedMemory(query string, options SlackRelatedMemorySe
 	records = append(records, relatedMemoryWorkspaceRecords(s.workspaceDir, tokens, now)...)
 	records = append(records, s.relatedMemoryFeedbackRecords(tokens, limit)...)
 	records = append(records, relatedMemoryTriageProjectionRecords(s.workspaceDir, tokens)...)
+	records = append(records, s.relatedMemoryProviderRecords(context.Background(), query, tokens, limit, now)...)
 	records = dedupeRelatedMemoryRecords(records)
 	sort.SliceStable(records, func(i, j int) bool {
 		if records[i].Score == records[j].Score {
@@ -81,6 +82,18 @@ func (s *Service) SearchRelatedMemory(query string, options SlackRelatedMemorySe
 		result.NoRelevantMemory = true
 	}
 	return result
+}
+
+func (s *Service) relatedMemoryProviderRecords(ctx context.Context, query string, tokens []string, limit int, now time.Time) []SlackRelatedMemoryRecord {
+	if s == nil || s.memoryProviders == nil {
+		return nil
+	}
+	return s.memoryProviders.Search(ctx, SlackMemoryProviderSearchRequest{
+		Query:  query,
+		Tokens: append([]string(nil), tokens...),
+		Limit:  limit,
+		Now:    now,
+	})
 }
 
 func (s *Service) searchSlackTriageRelatedMemory(query string, limit int) SlackRelatedMemorySearchResult {

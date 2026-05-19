@@ -51,6 +51,7 @@ type Config struct {
 	CanvasPublisherConfig  CanvasPublisherConfig
 	ScheduleManager        ScheduleManager
 	Runner                 agentrunner.Runner
+	MemoryProviders        []SlackMemoryProvider
 }
 
 type Service struct {
@@ -89,6 +90,7 @@ type Service struct {
 	mentionQueue            *slackMentionQueue
 	operatorFallback        *SlackOperatorFallback
 	localMemory             *localSlackMemory
+	memoryProviders         *slackMemoryProviderManager
 	followups               *slackHeartbeatStore
 	improvements            *slackImprovementStore
 	feedback                *slackFeedbackStore
@@ -269,7 +271,11 @@ func NewService(cfg Config) *Service {
 			Poster:         poster,
 			DM:             newSlackDMPoster(),
 		},
-		localMemory:             newLocalSlackMemory(cfg.Slack.Memory),
+		localMemory: newLocalSlackMemory(cfg.Slack.Memory),
+		memoryProviders: newSlackMemoryProviderManager(logger, SlackMemoryProviderInit{
+			WorkspaceDir: strings.TrimSpace(cfg.Slack.WorkspaceDir),
+			MemoryDir:    strings.TrimSpace(cfg.Slack.Memory.Dir),
+		}, cfg.MemoryProviders...),
 		followups:               newSlackHeartbeatStore(cfg.Persistence, logger),
 		improvements:            newSlackImprovementStore(cfg.Persistence, logger),
 		feedback:                newSlackFeedbackStore(cfg.Persistence, logger),

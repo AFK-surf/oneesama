@@ -259,7 +259,7 @@ func TestCueboardParityMemoryGetWriteUsesLiveWorkspace(t *testing.T) {
 		},
 	})
 
-	writeResult := service.executeMemoryWriteTool(map[string]any{
+	writeResult := service.executeMemoryWriteTool(context.Background(), map[string]any{
 		"path":    "memory/team/decisions.md",
 		"content": "# Decisions\n\nUse live workspace memory.",
 	})

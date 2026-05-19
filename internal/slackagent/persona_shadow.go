@@ -473,6 +473,20 @@ func (s *Service) persistPersonaForegroundMemoryWrites(ctx context.Context, resu
 			out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", rel, err))
 			continue
 		}
+		s.notifyMemoryProvidersWrite(ctx, SlackMemoryProviderWriteEvent{
+			Action:  "write",
+			Target:  "persona",
+			Path:    filepath.ToSlash(rel),
+			Content: body,
+			Source:  "persona_memory_write",
+			Metadata: map[string]any{
+				"request_id": result.RequestID,
+				"channel_id": result.ChannelID,
+				"thread_ts":  result.ThreadTS,
+				"kind":       record.Kind,
+				"source_ref": record.SourceRef,
+			},
+		})
 		out.Files = append(out.Files, rel)
 	}
 	return out
