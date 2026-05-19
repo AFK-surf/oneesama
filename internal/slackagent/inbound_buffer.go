@@ -446,6 +446,10 @@ func shouldIgnoreInboundMessage(message SlackInboundMessage) bool {
 }
 
 func shouldIgnoreScannerInboundMessage(message SlackInboundMessage, botUserID string) bool {
+	return shouldIgnoreScannerInboundMessageForBotIDs(message, []string{botUserID})
+}
+
+func shouldIgnoreScannerInboundMessageForBotIDs(message SlackInboundMessage, botUserIDs []string) bool {
 	message = normalizeSlackInboundMessage(message)
 	if strings.TrimSpace(message.ChannelID) == "" {
 		return true
@@ -461,7 +465,7 @@ func shouldIgnoreScannerInboundMessage(message SlackInboundMessage, botUserID st
 		return true
 	}
 	text := strings.TrimSpace(message.Text)
-	if botUserID != "" && strings.Contains(text, "<@"+botUserID+">") {
+	if slackTextMentionsAnyUser(text, botUserIDs) {
 		return true
 	}
 	return text == "" && len(message.Files) == 0

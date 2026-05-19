@@ -29,22 +29,23 @@ type LoggingConfig struct {
 }
 
 type SlackConfig struct {
-	SigningSecret   string
-	BotToken        string
-	AppToken        string
-	BotUserID       string
-	ClientID        string
-	ClientSecret    string
-	RedirectURI     string
-	WorkspaceDir    string
-	InternalAuthKey string
-	PublicBaseURL   string
-	PilotUserID     string
-	DebugChannelID  string
-	EventBuffer     SlackEventBufferConfig
-	Triage          SlackTriageConfig
-	Memory          SlackMemoryConfig
-	MeetingScanner  SlackMeetingScannerConfig
+	SigningSecret     string
+	BotToken          string
+	AppToken          string
+	BotUserID         string
+	BotMentionUserIDs []string
+	ClientID          string
+	ClientSecret      string
+	RedirectURI       string
+	WorkspaceDir      string
+	InternalAuthKey   string
+	PublicBaseURL     string
+	PilotUserID       string
+	DebugChannelID    string
+	EventBuffer       SlackEventBufferConfig
+	Triage            SlackTriageConfig
+	Memory            SlackMemoryConfig
+	MeetingScanner    SlackMeetingScannerConfig
 }
 
 type SlackEventBufferConfig struct {

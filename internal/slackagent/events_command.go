@@ -13,7 +13,14 @@ func eventTextToAvatarCommand(event SlackEventPayload) string {
 }
 
 func eventTextToAvatarCommandForBot(event SlackEventPayload, botUserID string) string {
-	text := strings.TrimSpace(stripSlackUserMention(event.Text, botUserID))
+	if strings.TrimSpace(botUserID) == "" {
+		return eventTextToAvatarCommandForBotIDs(event, nil)
+	}
+	return eventTextToAvatarCommandForBotIDs(event, []string{botUserID})
+}
+
+func eventTextToAvatarCommandForBotIDs(event SlackEventPayload, botUserIDs []string) string {
+	text := strings.TrimSpace(stripSlackUserMentions(event.Text, botUserIDs))
 	if text == "" {
 		return ""
 	}
@@ -44,12 +51,26 @@ func stripSlackBotMentions(text string) string {
 }
 
 func stripSlackUserMention(text string, userID string) string {
+	if userID != "" {
+		return stripSlackUserMentions(text, []string{userID})
+	}
+	return stripSlackUserMentions(text, nil)
+}
+
+func stripSlackUserMentions(text string, userIDs []string) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return ""
 	}
-	if userID != "" {
-		return strings.TrimSpace(strings.ReplaceAll(trimmed, "<@"+userID+">", ""))
+	if len(userIDs) > 0 {
+		for _, userID := range userIDs {
+			userID = strings.TrimSpace(userID)
+			if userID == "" {
+				continue
+			}
+			trimmed = strings.ReplaceAll(trimmed, "<@"+userID+">", "")
+		}
+		return strings.TrimSpace(trimmed)
 	}
 	return strings.TrimSpace(slackBotMentionPattern.ReplaceAllString(trimmed, ""))
 }

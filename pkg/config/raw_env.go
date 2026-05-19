@@ -43,6 +43,9 @@ func applySlackEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_BOT_USER_ID", "SLACK_BOT_USER_ID", "MAB_SLACK_BOT_USER_ID")); value != "" {
 		cfg.Slack.BotUserID = value
 	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_BOT_MENTION_USER_IDS", "ONEESAMA_SLACK_MENTION_USER_IDS", "MAB_SLACK_BOT_MENTION_USER_IDS")); value != "" {
+		cfg.Slack.BotMentionUserIDs = parseCSV(value)
+	}
 	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_CLIENT_ID", "SLACK_CLIENT_ID", "MAB_SLACK_CLIENT_ID")); value != "" {
 		cfg.Slack.ClientID = value
 	}

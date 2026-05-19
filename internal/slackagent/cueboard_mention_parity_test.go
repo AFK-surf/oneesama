@@ -27,6 +27,9 @@ func TestCueboardParityMentionTextHelpers(t *testing.T) {
 	if got := eventTextToAvatarCommandForBot(SlackEventPayload{Text: "<@UBOT> ask <@UOTHER> to check"}, "UBOT"); got != "work ask <@UOTHER> to check" {
 		t.Fatalf("command = %q, want other mentions preserved", got)
 	}
+	if got := eventTextToAvatarCommandForBotIDs(SlackEventPayload{Text: "<@ULEGACY> ask <@UOTHER> to check"}, []string{"UBOT", "ULEGACY"}); got != "work ask <@UOTHER> to check" {
+		t.Fatalf("alias command = %q, want legacy bot mention stripped and other mentions preserved", got)
+	}
 }
 
 func TestCueboardParityMentionTranscriptFormatting(t *testing.T) {
