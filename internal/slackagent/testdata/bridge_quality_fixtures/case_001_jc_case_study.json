@@ -1,0 +1,45 @@
+{
+  "case_id": "case_001_jc_case_study",
+  "source": {
+    "old_slack_db_run_id": null,
+    "occurred_at": "2026-05-19T11:00:00+08:00",
+    "channel_id": "xp-test",
+    "mention_text": "<@U0AP5UFU0FR> jc说之前录制了5个Case Study的视频，这个有吗？",
+    "notes": "Anchor case from TestAppMentionContextIncludesRelatedMemoryEvidence (commit 36993d1). Reused here as canary for related-memory evidence injection (C4)."
+  },
+  "input": {
+    "channel_name": "xp-test",
+    "user_name": "vincent",
+    "mention_text": "jc说之前录制了5个Case Study的视频，这个有吗？",
+    "transcript": "[1779155703.395489] <@U1>: jc说之前录制了5个Case Study的视频，这个有吗？",
+    "thread_context_prompt": "Thread context:\njc说之前录制了5个Case Study的视频，这个有吗？",
+    "external_links": [],
+    "linked_slack_threads": [],
+    "files": [],
+    "memory_seed_files": [
+      {
+        "rel_path": "memory/team/meetings/jc-case-study.md",
+        "content": "# Meeting 45\nJc discussed a product launch video with five use case demos.\nIt was a promo video project, not a recorded Case Study video set."
+      }
+    ]
+  },
+  "expected_contract_items": [
+    "C4_related_memory_evidence_injected"
+  ],
+  "expected_evidence_anchors": [
+    "memory/team/meetings/jc-case-study.md",
+    "not a recorded Case Study"
+  ],
+  "expected_tools_invoked": [],
+  "expected_decision_shape": {
+    "min_chars": 0,
+    "max_chars": 0,
+    "must_not_contain": [
+      "127.0.0.1",
+      "/slack/tools/call",
+      "curl",
+      "exit status 7",
+      "localhost:8780"
+    ]
+  }
+}
