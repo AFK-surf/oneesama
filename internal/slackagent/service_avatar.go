@@ -199,7 +199,13 @@ func (s *Service) buildAgentRunnerContext(input AvatarCommandInput, parsed parse
 			input.ChannelName,
 			input.UserName,
 		}, " ")
-		context["localSlackMemory"] = s.buildLocalSlackMemoryContext(strings.TrimSpace(query), 5)
+		query = strings.TrimSpace(query)
+		context["localSlackMemory"] = s.buildLocalSlackMemoryContext(query, 5)
+		relatedMemory := s.SearchRelatedMemory(query, SlackRelatedMemorySearchOptions{Limit: 5})
+		context["relatedMemory"] = relatedMemory
+		if evidence := formatSlackRelatedMemoryEvidence(relatedMemory.Results, 5); evidence != "" {
+			context["relatedMemoryEvidence"] = evidence
+		}
 	}
 	return context
 }

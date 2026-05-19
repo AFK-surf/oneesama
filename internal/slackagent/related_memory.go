@@ -396,6 +396,7 @@ func relatedMemoryTokens(query string) []string {
 func expandRelatedMemoryTokens(tokens []string) []string {
 	out := append([]string(nil), tokens...)
 	for _, token := range tokens {
+		out = append(out, asciiWordSubtokens(token)...)
 		if strings.Contains(token, "github.com/") {
 			parts := strings.Split(token, "/")
 			for index, part := range parts {
@@ -416,6 +417,26 @@ func expandRelatedMemoryTokens(tokens []string) []string {
 			}
 		}
 	}
+	return out
+}
+
+func asciiWordSubtokens(token string) []string {
+	var out []string
+	var current []rune
+	flush := func() {
+		if len(current) >= 2 {
+			out = append(out, string(current))
+		}
+		current = nil
+	}
+	for _, r := range strings.ToLower(token) {
+		if r <= unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			current = append(current, r)
+			continue
+		}
+		flush()
+	}
+	flush()
 	return out
 }
 

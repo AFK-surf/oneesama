@@ -167,6 +167,29 @@ func TestSearchRelatedMemoryNoRelevantMemory(t *testing.T) {
 	}
 }
 
+func TestSearchRelatedMemorySplitsMixedCJKEnglishTokens(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/team/meetings/jc-case-study.md", strings.Join([]string{
+		"# Meeting 45",
+		"Jc discussed a product launch video with five use case demos.",
+		"It was a promo video project, not a recorded Case Study video set.",
+	}, "\n"))
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+
+	result := service.SearchRelatedMemory("jc说之前录制了5个Case Study的视频，这个有吗？", SlackRelatedMemorySearchOptions{Limit: 5})
+
+	record := firstRelatedMemoryKind(result.Results, "team_meeting")
+	if record == nil {
+		t.Fatalf("results = %#v, want mixed CJK/English token match", result.Results)
+	}
+	if !strings.Contains(record.Content, "recorded Case Study video set") {
+		t.Fatalf("Content = %q, want case study evidence", record.Content)
+	}
+}
+
 func TestSearchRelatedMemoryBoostsRecentDailyNote(t *testing.T) {
 	workspaceDir := t.TempDir()
 	writeRelatedMemoryFile(t, workspaceDir, "memory/2026-05-18.md", "Today discussed related memory recall and Aha Moment answers.")

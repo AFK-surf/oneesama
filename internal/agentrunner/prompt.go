@@ -34,14 +34,17 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 	)
 	sections := []string{
 		cueboardDefaultSystemPromptForAgentRunner(),
-		"## Oneesama delivery adapter\n- do not expose internal worker/job/delegate mechanics to users\n- do not frame normal Slack requests as internal repository work\n- for long-form writing or document revisions, produce clean Markdown; the delivery layer will publish it as a Slack Canvas\n- keep thread replies concise when the long-form content belongs in Canvas",
-		"## Local Slack tool gateway\nWhen native tool calls are not exposed by this runner, use the loopback gateway before answering facts, links, memory, or Slack-thread questions: POST JSON to http://127.0.0.1:8780/slack/tools/call. Examples: {\"tool\":\"exa_contents\",\"args\":{\"url\":\"https://example.com\"}}, {\"tool\":\"exa_search\",\"args\":{\"query\":\"search terms\"}}, {\"tool\":\"memory_search\",\"args\":{\"query\":\"person or project\"}}, {\"tool\":\"slack_api\",\"role\":\"planner\",\"args\":{\"method\":\"conversations.replies\",\"params\":{\"channel\":\"C...\",\"thread_ts\":\"...\"}}}.",
+		"## Oneesama delivery adapter\n- do not expose internal worker/job/delegate mechanics to users\n- do not frame normal Slack requests as internal repository work\n- for workspace-history questions, prefer injected related memory evidence over local repository search and cite the source when using it\n- for long-form writing or document revisions, produce clean Markdown; the delivery layer will publish it as a Slack Canvas\n- keep thread replies concise when the long-form content belongs in Canvas",
+		"## Local Slack tool gateway\nWhen native tool calls are not exposed by this runner, use the loopback gateway before answering facts, links, memory, or Slack-thread questions: POST JSON to http://127.0.0.1:8780/slack/tools/call. Examples: {\"tool\":\"exa_contents\",\"args\":{\"url\":\"https://example.com\"}}, {\"tool\":\"exa_search\",\"args\":{\"query\":\"search terms\"}}, {\"tool\":\"memory_search\",\"args\":{\"query\":\"person or project\"}}, {\"tool\":\"slack_api\",\"role\":\"planner\",\"args\":{\"method\":\"conversations.replies\",\"params\":{\"channel\":\"C...\",\"thread_ts\":\"...\"}}}. If the gateway is unavailable, use the injected Slack thread context and related memory evidence; do not mention localhost, gateway URLs, curl, or internal connection errors to users.",
 		"Mode: " + defaultMode(input.Mode),
 		"Allow code changes: " + yesNo(input.AllowCodeChanges),
 		"Task: " + strings.TrimSpace(input.Task),
 	}
 	if strings.TrimSpace(assistantContext) != "" {
 		sections = append(sections, "Slack thread context:\n"+strings.TrimSpace(assistantContext))
+	}
+	if relatedMemoryEvidence := stringFromContext(input.Context, "relatedMemoryEvidence", "related_memory_evidence"); relatedMemoryEvidence != "" {
+		sections = append(sections, "Related memory evidence (cite these sources when using them; ignore weak or irrelevant hits):\n"+relatedMemoryEvidence)
 	}
 	sections = append(sections, "Context:\n"+contextJSON)
 	return strings.Join(sections, "\n\n")

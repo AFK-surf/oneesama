@@ -68,6 +68,40 @@ func TestAppMentionBuildsRichThreadContextForDelegate(t *testing.T) {
 	}
 }
 
+func TestAppMentionContextIncludesRelatedMemoryEvidence(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/team/meetings/jc-case-study.md", strings.Join([]string{
+		"# Meeting 45",
+		"Jc discussed a product launch video with five use case demos.",
+		"It was a promo video project, not a recorded Case Study video set.",
+	}, "\n"))
+
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+	context := service.buildAgentRunnerContext(AvatarCommandInput{
+		ChannelName: "xp-test",
+		UserName:    "vincent",
+		RichThreadContext: &SlackAppMentionContext{
+			MentionText: "jc说之前录制了5个Case Study的视频，这个有吗？",
+			Transcript:  "[1779155703.395489] <@U1>: jc说之前录制了5个Case Study的视频，这个有吗？",
+			Prompt:      "Thread context:\njc说之前录制了5个Case Study的视频，这个有吗？",
+		},
+	}, parsedAvatarCommand{Action: "work"}, nil)
+
+	related, ok := context["relatedMemory"].(SlackRelatedMemorySearchResult)
+	if !ok {
+		t.Fatalf("relatedMemory = %#v, want search result", context["relatedMemory"])
+	}
+	if len(related.Results) == 0 {
+		t.Fatalf("relatedMemory = %#v, want evidence for mixed CJK/English query", related)
+	}
+	evidence, ok := context["relatedMemoryEvidence"].(string)
+	if !ok || !strings.Contains(evidence, "memory/team/meetings/jc-case-study.md") || !strings.Contains(evidence, "not a recorded Case Study") {
+		t.Fatalf("relatedMemoryEvidence = %q, want cited meeting memory", evidence)
+	}
+}
+
 func TestJobsCommandIncludesMeetingWorkerPoll(t *testing.T) {
 	meetingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
