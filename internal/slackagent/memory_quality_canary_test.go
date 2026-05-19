@@ -62,6 +62,7 @@ type memoryQualityExpectedEvents struct {
 	OnMemoryWriteContentContains string `json:"on_memory_write_content_contains"`
 	SearchQueryContains          string `json:"search_query_contains"`
 	SearchRecordsReturnedMin     int    `json:"search_records_returned_min"`
+	SyncTurnCountMin             int    `json:"sync_turn_count_min"`
 }
 
 // TestMemoryQualityCanaries replays Memory-provider lifecycle events
@@ -151,6 +152,15 @@ func runMemoryQualityFixture(t *testing.T, fixture memoryQualityFixture) {
 		runMemoryProviderSearchMerge(t, fixture, service, provider)
 	case "semantic_recall":
 		runMemorySemanticRecall(t, fixture)
+	case "sync_turn_extraction":
+		// Pending fixtures for this scenario type are filtered above
+		// (Scenario.Pending == true). An active fixture lands here once
+		// task #230 routes SyncTurn through slackMemoryProviderManager and
+		// ships a conservative extraction provider. The assertion body is
+		// added then; today the scenario is documented as pending and
+		// this branch logs to flag any non-pending fixture without
+		// supporting infrastructure.
+		t.Logf("[%s] sync_turn_extraction fixture present but routing not yet shipped (#230); ensure manager routes SyncTurn before flipping pending=false", fixture.CaseID)
 	default:
 		t.Fatalf("[%s] unknown scenario.type %q", fixture.CaseID, fixture.Scenario.Type)
 	}

@@ -1,0 +1,33 @@
+{
+  "case_id": "case_004_sync_turn_extraction_pending",
+  "source": {
+    "occurred_at": "2026-05-19T15:16:00+08:00",
+    "notes": "STUB fixture for #230 auto-extraction. Pre-built per case_003 handoff pattern: pending=true today, driver flips to active when manager routes SyncTurn through slackMemoryProviderManager and a conservative extraction provider ships. Anchor scenario: a user→bot turn containing a fact statement should reach the provider's SyncTurn hook so it can extract a reviewable durable fact candidate (not auto-write to high-confidence memory)."
+  },
+  "scenario": {
+    "type": "sync_turn_extraction",
+    "pending": true,
+    "pending_reason": "awaiting_task_230_sync_turn_routing_and_extraction_provider",
+    "turn_input": {
+      "user_content": "@bot 注意一下，Cumora 那个项目的 contact 是 yetone，他人在 Isoform，跟 Alma 那条产品线没关系。",
+      "assistant_content": "记下来：Cumora 关联人是 yetone，组织 Isoform，与 Alma 无产品线关系。",
+      "session_id": "session_test_004"
+    },
+    "intended_provider_signals": [
+      "Provider SyncTurn must be invoked with the turn payload.",
+      "A conservative extraction provider should emit a reviewable durable fact candidate (not commit it directly).",
+      "The fact candidate should retain entity attribution (yetone / Isoform / Alma / Cumora) for later review."
+    ]
+  },
+  "expected_provider_events": {
+    "sync_turn_count_min": 1
+  },
+  "expected_search_result_anchors": [],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "exit status 7",
+    "localhost:8780"
+  ]
+}
