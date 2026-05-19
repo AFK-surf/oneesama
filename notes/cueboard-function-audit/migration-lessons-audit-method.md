@@ -659,6 +659,41 @@ Audit rule:
 
 Reference audit: `notes/cueboard-function-audit/worker-interactive-tool-loop-parity-audit-2026-05-19.md`.
 
+## Scanner entry parity is its own contract (worked example, task #224)
+
+The app-mention parity sweep did not prove automatic triage parity.
+Cueboard's scanner was a separate entry:
+
+- Slack history/event buffer produced a `=== Slack Activity ===`
+  digest with message refs.
+- A hidden planner session received workspace memory hints, previous
+  triage context, and planner tools.
+- The scanner advanced cursors only after triage completed
+  successfully.
+
+The Go rewrite has the same shape, but this needed an entry-level
+fixture rather than trust by module inspection. Task #224 added a
+scanner-history fixture that starts from a Slack Web API history poll
+and asserts the runner prompt/context includes:
+
+- the scanner digest ref (`ref:m1`);
+- relevant local workspace memory;
+- previous triage context;
+- planner session capabilities with `slack_api`,
+  `followup_memory`, and `person_memory`;
+- exclusion of assistant-only image/audio tools.
+
+Audit rule:
+
+- Do not let an app-mention canary stand in for automatic scanner
+  triage. They are different entries with different freshness,
+  memory, and compensation paths.
+- If an old behavior was scheduled / scanner-driven, the new fixture
+  must start from the scanner or scheduler entry, not from the helper
+  function behind it.
+
+Reference audit: `notes/cueboard-function-audit/triage-scanner-entry-parity-audit-2026-05-19.md`.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.
