@@ -442,11 +442,11 @@ func TestSlackTriageLivePersonaForegroundFailureSuppressesCodexFallback(t *testi
 	}
 }
 
-func TestSlackTriageLivePersonaStaySilentUsesFilteredCodexReplyFallback(t *testing.T) {
+func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleReply(t *testing.T) {
 	ctx := context.Background()
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	runner := &fakeRunner{job: agentrunner.Job{
-		ID:       "job_live_persona_silent_with_codex_reply",
+		ID:       "job_live_persona_candidate_with_pi_reply",
 		Provider: "codex",
 		Status:   agentrunner.StatusCompleted,
 		Result:   `{"summary":"codex found a useful factual reply","actions":[{"type":"post_thread_reply","title":"factual reply","message":"Google 这轮发布更像是在预热 Gemini 2.5 的能力更新。","channelId":"C_TRIAGE","threadTs":"200.000","confidence":0.74,"requiresConfirmation":false}]}`,
@@ -463,11 +463,12 @@ func TestSlackTriageLivePersonaStaySilentUsesFilteredCodexReplyFallback(t *testi
 		Runner: runner,
 	})
 	service.personaRuntime = &capturePersonaRuntime{response: persona.Response{
-		Runtime:    persona.ProviderPi,
-		Decision:   persona.DecisionStaySilent,
-		Reason:     "persona judged the casual thread as low-risk",
-		Confidence: 0.61,
-		ShadowOnly: false,
+		Runtime:     persona.ProviderPi,
+		Decision:    persona.DecisionReply,
+		VisibleText: "我查了下，更像是在预热 Gemini 2.5 的能力更新。",
+		Reason:      "persona used the candidate action as evidence, then owned the visible reply",
+		Confidence:  0.61,
+		ShadowOnly:  false,
 	}}
 	service.personaRuntimeErr = nil
 	service.personaRuntimeConfig.Provider = persona.ProviderPi
@@ -485,26 +486,42 @@ func TestSlackTriageLivePersonaStaySilentUsesFilteredCodexReplyFallback(t *testi
 		t.Fatalf("StartSlackTriage: %v", err)
 	}
 	poster.WaitForCalls(t, 1)
-	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "Gemini") {
-		t.Fatalf("poster calls = %#v, want Codex factual reply fallback", calls)
+	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "我查了下") || strings.Contains(calls[0].Text, "Google 这轮发布") {
+		t.Fatalf("poster calls = %#v, want Pi-owned reply, not raw Codex candidate", calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
 	if updated.Mutations != 1 || updated.Failures != 0 {
 		t.Fatalf("updated mutations/failures = %d/%d, want 1/0", updated.Mutations, updated.Failures)
 	}
-	if len(updated.Actions) != 1 || updated.Actions[0].Brief != "factual reply" {
-		t.Fatalf("actions = %#v, want Codex fallback reply action recorded", updated.Actions)
+	if len(updated.Actions) != 1 || updated.Actions[0].Brief != "Persona reply" {
+		t.Fatalf("actions = %#v, want Pi persona action recorded", updated.Actions)
 	}
 	foreground, ok := mapFromAny(updated.Metadata["persona_foreground"])
-	if !ok || !boolFromAny(foreground["codex_fallback"], false) {
-		t.Fatalf("persona_foreground = %#v, want codex_fallback marker", updated.Metadata["persona_foreground"])
+	if !ok || boolFromAny(foreground["codex_fallback"], false) {
+		t.Fatalf("persona_foreground = %#v, want no Codex-visible fallback marker", updated.Metadata["persona_foreground"])
 	}
-	if !strings.Contains(fmt.Sprint(foreground["codex_fallback_reason"]), "filtered direct reply") {
-		t.Fatalf("persona_foreground = %#v, want fallback reason", foreground)
+	if foreground["decision"] != persona.DecisionReply || !strings.Contains(fmt.Sprint(foreground["visible_text"]), "我查了下") {
+		t.Fatalf("persona_foreground = %#v, want Pi reply metadata", foreground)
+	}
+	runtime := service.personaRuntime.(*capturePersonaRuntime)
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.requests) != 1 {
+		t.Fatalf("persona requests = %#v, want one request", runtime.requests)
+	}
+	var sawCandidate bool
+	for _, item := range runtime.requests[0].Context {
+		if item.Kind == "triage_candidate_actions" && strings.Contains(item.Text, "Google 这轮发布") {
+			sawCandidate = true
+			break
+		}
+	}
+	if !sawCandidate {
+		t.Fatalf("persona request context = %#v, want filtered candidate action evidence", runtime.requests[0].Context)
 	}
 }
 
-func TestSlackTriageLivePersonaStaySilentDoesNotFallbackForOldBridgeMention(t *testing.T) {
+func TestSlackTriageLivePersonaStaySilentDoesNotPostOldBridgeMentionCandidate(t *testing.T) {
 	ctx := context.Background()
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	runner := &fakeRunner{job: agentrunner.Job{
@@ -557,7 +574,7 @@ func TestSlackTriageLivePersonaStaySilentDoesNotFallbackForOldBridgeMention(t *t
 		t.Fatalf("persona_foreground = %#v, want metadata object", updated.Metadata["persona_foreground"])
 	}
 	if boolFromAny(foreground["codex_fallback"], false) {
-		t.Fatalf("persona_foreground = %#v, want no Codex fallback marker", foreground)
+		t.Fatalf("persona_foreground = %#v, want no Codex visible fallback marker", foreground)
 	}
 	if intFromAny(updated.Metadata["codex_suggested_actions"]) != 0 {
 		t.Fatalf("metadata = %#v, want Codex action filtered before persona fallback", updated.Metadata)

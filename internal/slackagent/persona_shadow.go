@@ -26,8 +26,6 @@ type SlackPersonaShadowResult struct {
 	WorkerRequests []string `json:"worker_requests,omitempty"`
 	MemoryWrites   []string `json:"memory_writes,omitempty"`
 	memoryRecords  []persona.MemoryWrite
-	CodexFallback  bool     `json:"codex_fallback,omitempty"`
-	FallbackReason string   `json:"codex_fallback_reason,omitempty"`
 	ShadowOnly     bool     `json:"shadow_only"`
 	Success        bool     `json:"success"`
 	Error          string   `json:"error,omitempty"`
@@ -143,13 +141,6 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
 		actions := slackPersonaForegroundActions(channelID, threadTS, result)
-		if len(actions) == 0 {
-			if fallback := slackPersonaCodexFallbackActions(channelID, threadTS, result, decision.Actions); len(fallback) > 0 {
-				actions = fallback
-				result.CodexFallback = true
-				result.FallbackReason = "persona stayed silent after Codex produced a filtered direct reply"
-			}
-		}
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
@@ -322,24 +313,6 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 		Reason:     strings.TrimSpace(result.Reason),
 		Confidence: result.Confidence,
 	}}
-}
-
-func slackPersonaCodexFallbackActions(channelID string, threadTS string, result SlackPersonaShadowResult, candidates []SlackTriageDecisionAction) []SlackTriageDecisionAction {
-	if !result.Success || result.ShadowOnly || result.Decision != persona.DecisionStaySilent || len(candidates) == 0 {
-		return nil
-	}
-	out := make([]SlackTriageDecisionAction, 0, len(candidates))
-	for _, action := range candidates {
-		if !slackTriageDirectReplyAction(action) || strings.TrimSpace(action.Message) == "" {
-			continue
-		}
-		action.Title = firstNonEmpty(strings.TrimSpace(action.Title), "Codex vetted reply")
-		action.ChannelID = firstNonEmpty(strings.TrimSpace(action.ChannelID), strings.TrimSpace(channelID))
-		action.ThreadTS = firstNonEmpty(strings.TrimSpace(action.ThreadTS), strings.TrimSpace(threadTS))
-		action.Reason = firstNonEmpty(strings.TrimSpace(action.Reason), "Codex produced a filtered direct reply before persona foreground stayed silent.")
-		out = append(out, action)
-	}
-	return out
 }
 
 type SlackTriagePersonaRequestOptions struct {
