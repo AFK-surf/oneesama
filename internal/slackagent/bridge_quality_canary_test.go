@@ -141,6 +141,21 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 					t.Fatalf("[%s] relatedMemoryEvidence missing anchor %q; evidence: %q", fixture.CaseID, anchor, evidence)
 				}
 			}
+		case "C220_media_file_evidence":
+			evidence, ok := runnerContext["slackToolEvidence"].(string)
+			if !ok || strings.TrimSpace(evidence) == "" {
+				t.Fatalf("[%s] expected slackToolEvidence (C220) to be set; got %#v", fixture.CaseID, runnerContext["slackToolEvidence"])
+			}
+			for _, anchor := range fixture.ExpectedEvidence {
+				if !strings.Contains(evidence, anchor) {
+					t.Fatalf("[%s] slackToolEvidence missing anchor %q; evidence: %q", fixture.CaseID, anchor, evidence)
+				}
+			}
+			for _, tool := range fixture.ExpectedTools {
+				if !strings.Contains(evidence, tool) {
+					t.Fatalf("[%s] slackToolEvidence missing tool %q; evidence: %q", fixture.CaseID, tool, evidence)
+				}
+			}
 		default:
 			t.Logf("[%s] contract item %q not asserted by this scaffold yet; future fixtures should extend runBridgeQualityFixture", fixture.CaseID, item)
 		}
@@ -150,9 +165,12 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 		if banned == "" {
 			continue
 		}
-		evidence, _ := runnerContext["relatedMemoryEvidence"].(string)
-		if strings.Contains(strings.ToLower(evidence), strings.ToLower(banned)) {
-			t.Fatalf("[%s] relatedMemoryEvidence leaks banned token %q: %q", fixture.CaseID, banned, evidence)
+		lower := strings.ToLower(banned)
+		if related, _ := runnerContext["relatedMemoryEvidence"].(string); strings.Contains(strings.ToLower(related), lower) {
+			t.Fatalf("[%s] relatedMemoryEvidence leaks banned token %q: %q", fixture.CaseID, banned, related)
+		}
+		if tools, _ := runnerContext["slackToolEvidence"].(string); strings.Contains(strings.ToLower(tools), lower) {
+			t.Fatalf("[%s] slackToolEvidence leaks banned token %q: %q", fixture.CaseID, banned, tools)
 		}
 	}
 }

@@ -1,0 +1,62 @@
+{
+  "case_id": "case_002_bridge_video_assets",
+  "source": {
+    "old_slack_db_run_id": null,
+    "occurred_at": "2026-05-19T13:38:20+08:00",
+    "channel_id": "CVIDEO",
+    "mention_text": "<@UBOT> 你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+    "notes": "Anchor case from TestAppMentionMediaRequestAddsFileContextEvidence (commit 7e28614, task #220). The Bridge production case it represents is 'inspect channel video assets and organize them' — see post-cutover-bridge-validation-sweep-2026-05-19.md C09SSC9Q5HS:1779166071.849179."
+  },
+  "input": {
+    "channel_name": "bridge-social-media",
+    "user_name": "peng",
+    "mention_text": "你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+    "transcript": "[1779166071.849179] <@UASK>: <@UBOT> 你看一下这个 channel 里哪些视频可以当作素材库整理起来用\n  [file: bridge_cold_open_montage_v15.mp4 type=mp4 size=123 <https://slack.example/FVID>]\n  [image: poster.png file_id=FIMG type=image/png size=10 <https://slack.example/FIMG>]",
+    "thread_context_prompt": "Thread context:\n你看一下这个 channel 里哪些视频可以当作素材库整理起来用",
+    "external_links": [],
+    "linked_slack_threads": [],
+    "files": [
+      {
+        "id": "FVID",
+        "name": "bridge_cold_open_montage_v15.mp4",
+        "filetype": "mp4",
+        "mimetype": "video/mp4",
+        "size": 123,
+        "permalink": "https://slack.example/FVID"
+      },
+      {
+        "id": "FIMG",
+        "name": "poster.png",
+        "filetype": "png",
+        "mimetype": "image/png",
+        "size": 10,
+        "permalink": "https://slack.example/FIMG"
+      }
+    ],
+    "memory_seed_files": []
+  },
+  "expected_contract_items": [
+    "C220_media_file_evidence"
+  ],
+  "expected_evidence_anchors": [
+    "slack_file_context (ok)",
+    "1 video(s)",
+    "bridge_cold_open_montage_v15.mp4",
+    "Do not claim to have watched videos",
+    "video/binary contents are not decoded"
+  ],
+  "expected_tools_invoked": [
+    "slack_file_context"
+  ],
+  "expected_decision_shape": {
+    "min_chars": 0,
+    "max_chars": 0,
+    "must_not_contain": [
+      "127.0.0.1",
+      "/slack/tools/call",
+      "curl",
+      "exit status 7",
+      "localhost:8780"
+    ]
+  }
+}
