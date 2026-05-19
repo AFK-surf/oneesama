@@ -307,6 +307,54 @@ This is now the v1 audit author's resolution: I did not enforce
 gap. Future migration audits I write will start from the cueboard
 source path for that entry-point.
 
+### Worked example: `240d9e2 fix(slack): restore direct canvas tool parity`
+
+Driver's `240d9e2` (2026-05-19 11:27 SHA) is the first commit applying
+the read-old-first rule end to end. It is the worked example future
+migrations should imitate.
+
+What driver did:
+
+1. Read cueboard `slack_api_tool_canvas.go` and `slack_api_tool.go`.
+2. Wrote `notes/cueboard-function-audit/canvas-parity-audit-2026-05-19.md`,
+   five behaviors each with `Old does (file:line) / New does (file:line) /
+   Diff / Decision / Fixtures`.
+3. Caught two real drifts that the previous re-derived implementation
+   (`b2114ff`) had missed:
+   - `slack_api(create_canvas)` / `slack_api(edit_canvas)` had been
+     `registered_unavailable` in the new code; old Agent D listed both
+     in `assistantAllowedSlackActions` as first-class. The
+     `registered_unavailable` status was a re-derived guardrail (assume
+     destructive Canvas writes need human confirmation), not a port of
+     old behavior.
+   - `workerResultCanvasInput` was always creating a new Canvas even
+     when `CanvasFiles` already contained one. The notification text
+     said "已更新" while the input lacked any `CanvasID` — a
+     user-visible-text ↔ actual-behavior decoupling that "read new code
+     only" review would not surface.
+4. Shipped fixes for both drifts + 22 new tests, kept sanitize-retry,
+   logged remaining nits in "Open Follow-Ups".
+
+What this proves about the audit method:
+
+- The audit doc itself caught drift in the same commit window. The
+  doc is not write-only.
+- The "Decision" column does honest work: behavior 1 keeps the new
+  stricter read path with an explicit justification; behavior 2/3
+  ports the old direct tool; behavior 5 keeps the new publisher.
+  Not every old behavior gets ported; the audit captures WHICH and
+  WHY.
+- Fixture names are cited per behavior. A future audit can grep for
+  the fixture to know exactly what the contract is.
+- The doc lives next to the canonical migration docs in
+  `notes/cueboard-function-audit/`, not in a side folder.
+
+The shape future migration items should imitate: cite the cueboard
+file:line for the old behavior, cite the new oneesama file:line, write
+the diff bullets, write the decision, name the fixture. Without the
+fixture name an audit item has not been ported. With it, the contract
+is locked.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.
