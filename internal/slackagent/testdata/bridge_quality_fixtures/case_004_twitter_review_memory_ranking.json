@@ -1,0 +1,50 @@
+{
+  "case_id": "case_004_twitter_review_memory_ranking",
+  "source": {
+    "old_slack_db_run_id": 13289,
+    "occurred_at": "2026-05-17T12:59:51+08:00",
+    "channel_id": "C0B3BFQ3KQX",
+    "mention_text": "Twitter reply review workflow",
+    "notes": "Old Slack Agent D run 13289 used memory_get + memory_search(\"Twitter reply review workflow\") before deciding that the Twitter reply review card was waiting for human approval and should not be bot-acted. This pins task #222: old runtime traces containing memory tool calls must outrank generic recent notes."
+  },
+  "input": {
+    "channel_name": "onee-sama-twitter",
+    "user_name": "peng",
+    "mention_text": "Twitter reply review workflow",
+    "transcript": "[1778993634.351379] <@U0AP5UFU0FR>: Twitter reply review for @kanupriyaa15",
+    "thread_context_prompt": "Thread context:\nTwitter reply review for @kanupriyaa15",
+    "external_links": [],
+    "linked_slack_threads": [],
+    "files": [],
+    "memory_seed_files": [
+      {
+        "rel_path": "memory/2026-05-19.md",
+        "content": "# Daily queue note\n\nTwitter reply review workflow exists as a routine scheduled queue.\nGeneric queue notes should not outrank an old Agent D trace that captured the actual decision."
+      },
+      {
+        "rel_path": "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-17.md",
+        "content": "# Legacy Slack Agent D triage archive 2026-05-17\n\n## Triage archive run 49eeb085-e5e1-43a3-b458-d935df43a5d6\n\nSummary:\n> Assistant turn 1 Tool calls: - memory_get {\"path\":\"memory/2026-05-17.md\"} - slack_api {\"method\":\"conversations.replies\",\"params\":{\"channel\":\"C0B3BFQ3KQX\",\"ts\":\"1778993634.351379\"}} Assistant turn 2 Tool calls: - memory_search {\"query\":\"Twitter reply review workflow\"}\n> This is a Twitter reply review card waiting for human approval — approving brand communications needs a human in the loop.\n\nRaw output:\n> Assistant turn 2\n> Tool calls:\n> - memory_search {\"query\":\"Twitter reply review workflow\"}\n>\n> Assistant turn 3\n> Text:\n> This is a Twitter reply review card waiting for human approval — not something I should act on.\n> The draft reply looks reasonable, but approving brand communications needs a human in the loop."
+      }
+    ]
+  },
+  "expected_contract_items": [
+    "C222_memory_recall_ranking_parity"
+  ],
+  "expected_evidence_anchors": [
+    "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-17.md",
+    "Twitter reply review card waiting for human approval",
+    "memory_search"
+  ],
+  "expected_tools_invoked": [],
+  "expected_decision_shape": {
+    "min_chars": 0,
+    "max_chars": 0,
+    "must_not_contain": [
+      "127.0.0.1",
+      "/slack/tools/call",
+      "curl",
+      "exit status 7",
+      "localhost:8780"
+    ]
+  }
+}

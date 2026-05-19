@@ -482,6 +482,48 @@ Scope distinction from "shape ≠ contract":
 
 This is now a first-class drift class on this page.
 
+### Worked example: task #222 memory ranking parity
+
+Task #222 showed the second half of the same drift class. Importing
+old runtime traces is necessary but not sufficient: ranking has to
+treat a matching old trace as decision evidence, not as a generic
+Markdown note.
+
+Production anchor:
+
+- old Slack Agent D `slack.db` run `13289`;
+- archived run `49eeb085-e5e1-43a3-b458-d935df43a5d6` in
+  `memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-17.md`;
+- old trace called `memory_get {"path":"memory/2026-05-17.md"}` and
+  `memory_search {"query":"Twitter reply review workflow"}`;
+- old decision: the Twitter reply review card was waiting for human
+  approval, so the bot should not act on it.
+
+Pre-fix Oneesama could import both a generic recent daily note and the
+old trace, but sorted the recent note first:
+
+- daily note: lexical `1.00` + recency `0.18`;
+- legacy trace: lexical `1.00` + legacy family `0.14`.
+
+That was a product-quality regression: the old trace contained the
+actual tool path and decision, while the recent note only proved the
+topic existed.
+
+Fix:
+
+- `relatedMemoryLegacyToolTraceBoost` gives a narrow boost only to
+  legacy triage archive chunks that have a meaningful lexical match,
+  contain `Tool calls:`, and include `memory_search`, `memory_get`,
+  or `person_memory`.
+- `TestSearchRelatedMemoryRanksLegacyToolTraceAboveGenericRecentNote`
+  is the direct red/green regression.
+- `case_004_twitter_review_memory_ranking.json` adds C222 to the
+  Bridge quality canary suite and requires the legacy archive citation
+  to be the first related-memory evidence line.
+
+Reference audit:
+`notes/cueboard-function-audit/memory-ranking-parity-audit-2026-05-19.md`.
+
 ## Identity migration ≠ traffic interception (new drift pattern, 2026-05-19 afternoon)
 
 The Bridge validation sweep (`bdd274c` → `a2d00b3` revert, recorded in

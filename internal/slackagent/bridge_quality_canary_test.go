@@ -15,13 +15,13 @@ import (
 // testdata/bridge_quality_fixtures/*.json. Schema is documented in
 // testdata/bridge_quality_fixtures/README.md.
 type bridgeQualityFixture struct {
-	CaseID                 string                          `json:"case_id"`
-	Source                 bridgeQualityFixtureSource      `json:"source"`
-	Input                  bridgeQualityFixtureInput       `json:"input"`
-	ExpectedContractItems  []string                        `json:"expected_contract_items"`
-	ExpectedEvidence       []string                        `json:"expected_evidence_anchors"`
-	ExpectedTools          []string                        `json:"expected_tools_invoked"`
-	ExpectedDecisionShape  bridgeQualityFixtureDecision    `json:"expected_decision_shape"`
+	CaseID                string                       `json:"case_id"`
+	Source                bridgeQualityFixtureSource   `json:"source"`
+	Input                 bridgeQualityFixtureInput    `json:"input"`
+	ExpectedContractItems []string                     `json:"expected_contract_items"`
+	ExpectedEvidence      []string                     `json:"expected_evidence_anchors"`
+	ExpectedTools         []string                     `json:"expected_tools_invoked"`
+	ExpectedDecisionShape bridgeQualityFixtureDecision `json:"expected_decision_shape"`
 }
 
 type bridgeQualityFixtureSource struct {
@@ -141,6 +141,20 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 					t.Fatalf("[%s] relatedMemoryEvidence missing anchor %q; evidence: %q", fixture.CaseID, anchor, evidence)
 				}
 			}
+		case "C222_memory_recall_ranking_parity":
+			evidence, ok := runnerContext["relatedMemoryEvidence"].(string)
+			if !ok || strings.TrimSpace(evidence) == "" {
+				t.Fatalf("[%s] expected relatedMemoryEvidence (C222) to be set; got %#v", fixture.CaseID, runnerContext["relatedMemoryEvidence"])
+			}
+			firstLine := firstNonEmptyLine(evidence)
+			if len(fixture.ExpectedEvidence) > 0 && !strings.Contains(firstLine, fixture.ExpectedEvidence[0]) {
+				t.Fatalf("[%s] top related-memory evidence = %q, want anchor %q first; full evidence: %q", fixture.CaseID, firstLine, fixture.ExpectedEvidence[0], evidence)
+			}
+			for _, anchor := range fixture.ExpectedEvidence {
+				if !strings.Contains(evidence, anchor) {
+					t.Fatalf("[%s] relatedMemoryEvidence missing anchor %q; evidence: %q", fixture.CaseID, anchor, evidence)
+				}
+			}
 		case "C220_media_file_evidence", "C223_workflow_intent_recognition":
 			evidence, ok := runnerContext["slackToolEvidence"].(string)
 			if !ok || strings.TrimSpace(evidence) == "" {
@@ -173,4 +187,14 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 			t.Fatalf("[%s] slackToolEvidence leaks banned token %q: %q", fixture.CaseID, banned, tools)
 		}
 	}
+}
+
+func firstNonEmptyLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }

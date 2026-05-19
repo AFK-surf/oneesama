@@ -296,6 +296,10 @@ func relatedMemoryScoreWithBoosts(base float64, kind, relPath, content string, t
 		score += boost
 		reasons = append(reasons, "recent_memory")
 	}
+	if boost := relatedMemoryLegacyToolTraceBoost(base, kind, content); boost > 0 {
+		score += boost
+		reasons = append(reasons, "legacy_tool_trace_boost")
+	}
 	return score, reasons
 }
 
@@ -347,6 +351,22 @@ func relatedMemoryProjectBoost(content string, tokens []string) float64 {
 			if value != "" && strings.Contains(lower, value) {
 				return 0.12
 			}
+		}
+	}
+	return 0
+}
+
+func relatedMemoryLegacyToolTraceBoost(base float64, kind, content string) float64 {
+	if kind != "legacy_triage_archive" || base < 0.35 {
+		return 0
+	}
+	lower := strings.ToLower(content)
+	if !strings.Contains(lower, "tool calls:") {
+		return 0
+	}
+	for _, marker := range []string{"memory_search", "memory_get", "person_memory"} {
+		if strings.Contains(lower, marker) {
+			return 0.22
 		}
 	}
 	return 0

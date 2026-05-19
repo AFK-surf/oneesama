@@ -281,6 +281,57 @@ func TestSearchRelatedMemoryIgnoresURLSchemeNoiseForEntityAttribution(t *testing
 	}
 }
 
+func TestSearchRelatedMemoryRanksLegacyToolTraceAboveGenericRecentNote(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/2026-05-19.md", strings.Join([]string{
+		"# Daily queue note",
+		"",
+		"Twitter reply review workflow exists as a routine scheduled queue.",
+		"Generic queue notes should not outrank an old Agent D trace that captured the actual decision.",
+	}, "\n"))
+	writeRelatedMemoryFile(t, workspaceDir, "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-17.md", strings.Join([]string{
+		"# Legacy Slack Agent D triage archive 2026-05-17",
+		"",
+		"## Triage archive run 49eeb085-e5e1-43a3-b458-d935df43a5d6",
+		"",
+		"Summary:",
+		"> Assistant turn 1 Tool calls: - memory_get {\"path\":\"memory/2026-05-17.md\"} - slack_api {\"method\":\"conversations.replies\",\"params\":{\"channel\":\"C0B3BFQ3KQX\",\"ts\":\"1778993634.351379\"}} Assistant turn 2 Tool calls: - memory_search {\"query\":\"Twitter reply review workflow\"}",
+		"",
+		"Raw output:",
+		"> Assistant turn 2",
+		"> Tool calls:",
+		"> - memory_search {\"query\":\"Twitter reply review workflow\"}",
+		">",
+		"> Assistant turn 3",
+		"> Text:",
+		"> This is a Twitter reply review card waiting for human approval — not something I should act on.",
+		"> The draft reply looks reasonable, but approving brand communications needs a human in the loop.",
+	}, "\n"))
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+
+	result := service.SearchRelatedMemory("Twitter reply review workflow", SlackRelatedMemorySearchOptions{
+		Limit: 5,
+		Now:   time.Date(2026, 5, 19, 14, 0, 0, 0, shanghaiLocation()),
+	})
+
+	if len(result.Results) < 2 {
+		t.Fatalf("results = %#v, want both generic note and legacy trace", result.Results)
+	}
+	top := result.Results[0]
+	if top.Kind != "legacy_triage_archive" {
+		t.Fatalf("top kind = %q, want legacy_triage_archive above generic recent note; all results = %#v", top.Kind, result.Results)
+	}
+	if !strings.Contains(top.Content, "waiting for human approval") {
+		t.Fatalf("top evidence = %q, want old Agent D decision trace", top.Content)
+	}
+	if !relatedMemoryReasonsContain(top.Reasons, "legacy_tool_trace_boost") {
+		t.Fatalf("Reasons = %#v, want legacy tool trace boost", top.Reasons)
+	}
+}
+
 func writeRelatedMemoryFile(t *testing.T, workspaceDir, relPath, content string) {
 	t.Helper()
 	fullPath := filepath.Join(workspaceDir, filepath.FromSlash(relPath))

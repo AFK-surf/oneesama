@@ -76,6 +76,11 @@ the proof that the new system can recover the same evidence chain.
 `expected_decision_shape` constrains the worker's visible output. The
 `must_not_contain` list pins the fail-closed rule (`C7`) on every case.
 
+For `C222_memory_recall_ranking_parity`, the first
+`expected_evidence_anchors` entry is also the required top
+`relatedMemoryEvidence` citation. This pins ranking, not only
+presence.
+
 ## Adding a new fixture
 
 When a new task in #219–#223 ships, drop the production-anchor case in

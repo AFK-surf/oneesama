@@ -67,9 +67,12 @@ What is NOT in this ship:
      Cumora/yetone live import — `555feac`).
    - C218 (link-conceptual memory): ≥ 1 fixture. **Pending** (anchor:
      driver's `9fa69eb` agency-agents case).
-   - C220 (media/file/video): ≥ 1 fixture. **Pending #220 ship**.
-   - C222 (memory ranking parity): ≥ 1 fixture. **Pending #222 ship**.
-   - C223 (workflow / product-context): ≥ 1 fixture. **Pending #223 ship**.
+   - C220 (media/file/video): ≥ 1 fixture. **Shipped**:
+     `case_002_bridge_video_assets.json`.
+   - C222 (memory ranking parity): ≥ 1 fixture. **Shipped**:
+     `case_004_twitter_review_memory_ranking.json`.
+   - C223 (workflow / product-context): ≥ 1 fixture. **Shipped**:
+     `case_003_pr_review_workflow.json`.
 4. **Source data discoverability**: `slack.db` schema is documented
    in this audit doc; future fixtures can pull `triage_run` rows
    directly by `run_id` and cite them in `source.old_slack_db_run_id`.
