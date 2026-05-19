@@ -226,9 +226,51 @@ func TestSlackAPIToolUploadFileRejectsOutsideWorkspaceAbsolutePath(t *testing.T)
 	}
 }
 
+func TestSlackAPIToolUploadFileRejectsNestedTempWorkspaceEscape(t *testing.T) {
+	baseDir := t.TempDir()
+	workspaceDir := filepath.Join(baseDir, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	tempDir, err := os.MkdirTemp("/tmp", "oneesama-outside-workspace-*")
+	if err != nil {
+		t.Fatalf("create outside temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tempDir) })
+	outside := filepath.Join(tempDir, "outside.txt")
+	if err := os.WriteFile(outside, []byte("nope"), 0o644); err != nil {
+		t.Fatalf("write outside temp file: %v", err)
+	}
+
+	apiBase, transport, _ := newSlackUploadStubServer(t)
+	rec := &recordingTransport{server: transport}
+	tool := &slackAPITool{
+		role:          slackAPIRoleAssistant,
+		apiURL:        apiBase,
+		token:         "xoxb-test",
+		workspaceDir:  workspaceDir,
+		httpTransport: rec,
+	}
+
+	result := tool.actionUploadFile(context.Background(), map[string]any{
+		"path":    outside,
+		"channel": "C123",
+	})
+	if result.Success {
+		t.Fatalf("expected nested temp workspace escape rejection, got success: %q", result.Text)
+	}
+	if !strings.Contains(result.Text, "Slack-triggered file uploads must stay within the Slack agent workspace") {
+		t.Fatalf("expected workspace-boundary error, got %q", result.Text)
+	}
+	if len(rec.requests) != 0 {
+		t.Fatalf("expected zero HTTP calls for rejected path, got %d (%+v)", len(rec.requests), rec.requests)
+	}
+}
+
 // TestSlackAPIToolUploadFileStagesTmpPathThroughWorkspaceStagingDir checks that
-// uploads from /tmp are auto-staged into the workspace staging dir and the
-// uploaded bytes still match the original temp artifact.
+// trusted upload artifacts from /tmp are auto-staged into the workspace staging
+// dir and the uploaded bytes still match the original temp artifact.
 func TestSlackAPIToolUploadFileStagesTmpPathThroughWorkspaceStagingDir(t *testing.T) {
 	workspaceDir := filepath.Join(t.TempDir(), "workspace")
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {

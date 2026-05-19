@@ -132,12 +132,52 @@ func (r slackWorkspaceFileResolver) stageTempUploadPath(path string) (string, bo
 }
 
 func isAutoStagingTempPath(path string) bool {
-	for _, root := range []string{"/tmp", "/var/tmp"} {
-		if pathWithinRoot(root, path) {
+	if !isTrustedTempUploadArtifact(filepath.Base(path)) {
+		return false
+	}
+	for _, root := range []string{os.TempDir(), "/tmp", "/var/tmp"} {
+		if pathDirectChildOfRoot(root, path) {
 			return true
 		}
 	}
 	return false
+}
+
+func isTrustedTempUploadArtifact(name string) bool {
+	for _, prefix := range []string{"oneesama-upload-", "cueboard-upload-"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathDirectChildOfRoot(root, path string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false
+	}
+	cleanRoot, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return false
+	}
+	if realRoot, err := filepath.EvalSymlinks(cleanRoot); err == nil {
+		cleanRoot = realRoot
+	}
+
+	cleanPath, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	if realPath, err := filepath.EvalSymlinks(cleanPath); err == nil {
+		cleanPath = realPath
+	}
+
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil || rel == "." || rel == ".." {
+		return false
+	}
+	return !strings.Contains(rel, string(filepath.Separator))
 }
 
 func pathWithinRoot(root, path string) bool {
