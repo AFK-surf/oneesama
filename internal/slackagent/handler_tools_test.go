@@ -158,6 +158,16 @@ func TestHandleSlackToolCallMemorySearchGetAndWrite(t *testing.T) {
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), "Tool surface parity note") {
 		t.Fatalf("get = %d %s, want written note", get.Code, get.Body.String())
 	}
+
+	appendWrite := postInternalJSON(t, router, "/slack/tools/call", `{"tool":"memory_write","args":{"path":"memory/notes/tool-surface.md","content":"Second note.","mode":"append"}}`)
+	if appendWrite.Code != http.StatusOK || !strings.Contains(appendWrite.Body.String(), `"mode":"append"`) {
+		t.Fatalf("append write = %d %s, want append mode ok", appendWrite.Code, appendWrite.Body.String())
+	}
+
+	getAppended := postInternalJSON(t, router, "/slack/tools/call", `{"tool":"memory_get","args":{"path":"memory/notes/tool-surface.md"}}`)
+	if getAppended.Code != http.StatusOK || !strings.Contains(getAppended.Body.String(), "Tool surface parity note.") || !strings.Contains(getAppended.Body.String(), "Second note.") {
+		t.Fatalf("get appended = %d %s, want both notes", getAppended.Code, getAppended.Body.String())
+	}
 }
 
 func TestHandleSlackToolCallSlackAPIConversationsReplies(t *testing.T) {

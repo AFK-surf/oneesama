@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -188,6 +190,47 @@ func TestAppMentionContextIncludesFirstClassFreshSearchEvidence(t *testing.T) {
 	prompt, ok := context["slackAssistantPrompt"].(string)
 	if !ok || !strings.Contains(prompt, "First-class tool evidence:") || !strings.Contains(prompt, "Zyphra Labs builds audio") {
 		t.Fatalf("slackAssistantPrompt = %q, want first-class tool evidence", prompt)
+	}
+}
+
+func TestAppMentionExplicitRememberWritesDurableMemory(t *testing.T) {
+	workspaceDir := t.TempDir()
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+	rich := &SlackAppMentionContext{
+		ChannelID:       "C123",
+		ThreadTS:        "1779160000.123456",
+		UserID:          "UASK",
+		MentionText:     "这个 Discord 永久邀请链接帮我记一下: https://discord.gg/bridge",
+		RawMentionText:  "<@UBOT> 这个 Discord 永久邀请链接帮我记一下: https://discord.gg/bridge",
+		Transcript:      "[1779160000.123456] <@UASK>: <@UBOT> 这个 Discord 永久邀请链接帮我记一下: https://discord.gg/bridge",
+		Prompt:          "Thread context:\n这个 Discord 永久邀请链接帮我记一下: https://discord.gg/bridge",
+		ThreadPermalink: "https://cue-3kl2780.slack.com/archives/C123/p1779160000123456",
+	}
+	context := service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
+		ChannelName:       "bridge-app",
+		UserName:          "peng",
+		RichThreadContext: rich,
+	}, parsedAvatarCommand{Action: "work"}, nil)
+
+	evidence, ok := context["slackToolEvidence"].(string)
+	if !ok || !strings.Contains(evidence, "memory_write (ok)") || !strings.Contains(evidence, "slack-app-mentions/c123-1779160000-123456.md") {
+		t.Fatalf("slackToolEvidence = %q, want successful memory_write evidence", evidence)
+	}
+	if len(rich.ToolEvidence) != 1 || rich.ToolEvidence[0].Tool != "memory_write" || !rich.ToolEvidence[0].OK {
+		t.Fatalf("rich.ToolEvidence = %#v, want successful memory_write evidence", rich.ToolEvidence)
+	}
+	path := filepath.Join(workspaceDir, "memory/team/facts/slack-app-mentions/c123-1779160000-123456.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read memory write %s: %v", path, err)
+	}
+	body := string(raw)
+	for _, want := range []string{"# Slack explicit memory", "Discord 永久邀请链接", "https://discord.gg/bridge", "Thread permalink"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("memory body missing %q:\n%s", want, body)
+		}
 	}
 }
 

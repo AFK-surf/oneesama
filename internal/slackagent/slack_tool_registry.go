@@ -314,10 +314,23 @@ func (s *Service) executeMemoryWriteTool(args map[string]any) SlackToolCallRespo
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return slackToolError("memory_write", "mkdir_failed")
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	mode := strings.ToLower(strings.TrimSpace(stringFromAny(args["mode"])))
+	if mode == "" {
+		mode = "write"
+	}
+	var err error
+	switch mode {
+	case "write":
+		err = os.WriteFile(path, []byte(content), 0o644)
+	case "append":
+		err = appendMemoryWriteFile(path, content)
+	default:
+		return slackToolError("memory_write", "invalid_mode")
+	}
+	if err != nil {
 		return slackToolError("memory_write", "write_failed")
 	}
-	return slackToolOK("memory_write", map[string]any{"path": filepath.ToSlash(relPath), "bytes": len([]byte(content))})
+	return slackToolOK("memory_write", map[string]any{"path": filepath.ToSlash(relPath), "bytes": len([]byte(content)), "mode": mode})
 }
 
 func (s *Service) memoryWriteRoot() string {
@@ -331,6 +344,25 @@ func (s *Service) memoryWriteRoot() string {
 		return s.localMemory.workspaceDir
 	}
 	return ""
+}
+
+func appendMemoryWriteFile(path string, content string) error {
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	var b strings.Builder
+	if len(existing) > 0 {
+		b.Write(existing)
+		if !strings.HasSuffix(string(existing), "\n") {
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString(content)
+	if !strings.HasSuffix(content, "\n") {
+		b.WriteString("\n")
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 func (s *Service) executeFollowupMemoryTool(ctx context.Context, args map[string]any) (SlackToolCallResponse, error) {
