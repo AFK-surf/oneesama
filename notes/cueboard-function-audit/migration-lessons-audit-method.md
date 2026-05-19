@@ -917,6 +917,125 @@ Audit rule:
 
 Reference audit: `notes/cueboard-function-audit/triage-log-delta-sweep-2026-05-19.md`.
 
+## Candidate-generator as cognition in main path (new drift pattern, task #237 cleanup)
+
+After Pi foreground cutover (`adc0182` 2026-05-18 18:30 SHA), the
+`StartSlackTriage` path still unconditionally calls
+`s.runner.StartTask` (Codex agent runner) to produce a
+`SlackTriageDecision` with `actions[]`. Persona shadow / foreground
+then runs AFTER Codex, taking Codex's decision as input and
+"refining" it. This looks like Pi-foreground but is in fact:
+
+```
+Slack event → Codex (candidate decision) → Pi (review/replace) → execute
+```
+
+not the intended:
+
+```
+Slack event → Pi (decide) → if delegate_worker: Codex (worker) → execute
+```
+
+The drift was caught at 17:28 SHA when driver started cleaning the
+worker tool bridge: removing direct Codex-publishes-to-Slack was
+correct, but keeping "Codex produces reply candidate for Pi to look
+at" was the same drift in a quieter form.
+
+The product semantics:
+
+- Foreground decision owner = whoever makes the "reply / stay_silent /
+  delegate_worker" call. If Codex runs at all before that decision is
+  made, the decision owner is still partly Codex.
+- "Candidate for Pi to review" is identical in shape to "Codex runs
+  the foreground." The handoff disguise does not change which model
+  shaped the visible reply space.
+- Migration is complete only when the foreground entry point can be
+  cold-started with Codex offline and the only observable difference
+  is that `delegate_worker` decisions fall back / fail.
+
+Audit rule for future migrations:
+
+- Before any "decision_layer = NewModel" cutover ships, instrument the
+  foreground path with a count of OldModel invocations per decision.
+  Expectation post-cutover is zero OldModel invocations on the
+  foreground path unless `decision = delegate_worker`.
+- Acceptance fixture: simulate a Slack event end-to-end with an
+  injection that errors any direct OldModel call; the test must still
+  succeed (Pi decides + Slack reply lands) because OldModel was not
+  on the foreground path.
+- Code-side anchor: every call site of `s.runner.StartTask` should
+  document in a comment which layer it serves (foreground decision,
+  delegated worker, scanner compaction, etc.). Drift returns the
+  moment a new caller adds another foreground-flavored invocation.
+
+Symptoms that catch this drift:
+
+- New decision-owner code takes an `OldModelDecision` parameter "for
+  reference."
+- Persona shadow / foreground takes Codex's `SlackTriageDecision`
+  as input and "refines" it — this is the canonical shape.
+- Audit shows healthy Pi foreground stats AND simultaneous Codex
+  runner stats with the same time signature — both ran for the same
+  event.
+- Live `MAB_AGENT_RUNNER=disabled` (or equivalent) breaks foreground
+  replies even when Pi is healthy.
+
+Scope distinction:
+
+- shape ≠ contract = surface matched, semantics missed.
+- re-derive vs port = reasoned from scratch instead of reading old
+  code.
+- identity migration ≠ traffic interception = audited a real signal
+  (old identity has traffic) but conflated it with inherited-traffic
+  responsibility.
+- candidate-generator as cognition in main path = decommissioned the
+  visible output of the old model but kept its cognition silently
+  shaping the new model's input space.
+
+This is now a first-class drift class on this page.
+
+### Worked example: foreground triage path cleanup (task #237)
+
+What got read:
+
+- `internal/slackagent/service_triage.go:1055` — `StartSlackTriage`
+  unconditionally calls `s.runner.StartTask`.
+- `internal/slackagent/persona_shadow.go:130` —
+  `queueSlackTriagePersonaForeground` takes `decision
+  SlackTriageDecision` as a parameter, runs Pi AFTER Codex's
+  decision.
+
+What got assumed (wrong) earlier today:
+
+- Driver's first Pi cutover commit removed Codex-publishes-to-Slack
+  but kept Codex-produces-decision-for-Pi-to-review. That is the same
+  drift in a quieter form.
+
+What Peng said at 17:29 SHA:
+
+- "你们应该需要清理一下实现，太乱了现在."
+- Pi handles most triage directly; Codex only runs on explicit
+  `delegate_worker`; the foreground path must not have Codex baked
+  in.
+
+What the cleanup looks like (driver in flight as of this doc):
+
+- `StartSlackTriage` must reach Pi first.
+- Pi's response with `decision = reply` executes its own actions
+  via `slackPersonaForegroundActions` directly.
+- Only when Pi returns `decision = delegate_worker` does the service
+  start a Codex job, scoped to the requested worker task.
+- Codex never runs as part of "produce a candidate for Pi to look
+  at."
+
+Why this is the worked example:
+
+- The previous Pi cutover audit (`#200` / `#205` / `adc0182`) called
+  the path "Pi foreground" while Pi was actually downstream of Codex
+  per event. The audit had no fixture that errored if Codex ran on
+  the foreground path. Adding that fixture is the durable fix; the
+  cleanup ship is the immediate fix.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.
