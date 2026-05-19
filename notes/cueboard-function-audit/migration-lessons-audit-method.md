@@ -866,6 +866,51 @@ Audit rule:
 
 Reference audit: `notes/cueboard-function-audit/triage-memory-question-parity-audit-2026-05-19.md`.
 
+## Mutation-rate parity catches healthy-but-timid migrations (worked example, task #237)
+
+The old-vs-new triage sweep showed a product regression that health
+checks and entry-shape canaries missed:
+
+- old Slack Agent D had 8 mutation runs in today's window;
+- new Oneesama had 2 mutation runs, both live-positive probes;
+- the system was green, but automatic triage had become materially
+  more timid.
+
+Two failure modes combined:
+
+- Pi foreground `stay_silent` replaced Codex's already-filtered
+  direct reply actions, so useful one-fact replies disappeared.
+- The scanner prompt did not explicitly include casual-but-factual
+  current-events questions as synthesis-eligible, even though old
+  Slack Agent D answered these lightly after search.
+
+Task #237 fixes the first production contract slice:
+
+- if Pi foreground succeeds with `stay_silent`, Oneesama may execute
+  Codex direct-reply actions that already passed safety filters;
+- if the user addressed another bot identity, those actions have
+  already been filtered to empty, so new Oneesama still does not
+  hijack old Bridge traffic;
+- persona requests now include the concrete candidate action text,
+  so Pi can approve or override the actual vetted action instead of
+  re-inferring intent from a count;
+- the scanner prompt explicitly treats fresh factual/current-events
+  questions as lightweight synthesis candidates after tool
+  verification.
+
+Audit rule:
+
+- Compare old and new mutation rates by entry point, not only final
+  health status. A migration can be "all green" while no longer
+  speaking when the old agent did.
+- Every old mutating run should be classified as: should-port,
+  product-decision-not-to-port, or out-of-scope. Do not average them
+  away.
+- Old bot identity traffic is a benchmark for quality, not traffic to
+  intercept, unless the product explicitly retires that identity.
+
+Reference audit: `notes/cueboard-function-audit/triage-log-delta-sweep-2026-05-19.md`.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.

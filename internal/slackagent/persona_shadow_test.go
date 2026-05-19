@@ -442,6 +442,128 @@ func TestSlackTriageLivePersonaForegroundFailureSuppressesCodexFallback(t *testi
 	}
 }
 
+func TestSlackTriageLivePersonaStaySilentUsesFilteredCodexReplyFallback(t *testing.T) {
+	ctx := context.Background()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_live_persona_silent_with_codex_reply",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"codex found a useful factual reply","actions":[{"type":"post_thread_reply","title":"factual reply","message":"Google 这轮发布更像是在预热 Gemini 2.5 的能力更新。","channelId":"C_TRIAGE","threadTs":"200.000","confidence":0.74,"requiresConfirmation":false}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{BotUserID: "U_ONEE"},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = &capturePersonaRuntime{response: persona.Response{
+		Runtime:    persona.ProviderPi,
+		Decision:   persona.DecisionStaySilent,
+		Reason:     "persona judged the casual thread as low-risk",
+		Confidence: 0.61,
+		ShadowOnly: false,
+	}}
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "Google 这次到底要发什么模型？",
+		TS:             "200.000",
+	}}, "#meeting-avatar: Google 这次到底要发什么模型？")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	poster.WaitForCalls(t, 1)
+	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "Gemini") {
+		t.Fatalf("poster calls = %#v, want Codex factual reply fallback", calls)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
+	if updated.Mutations != 1 || updated.Failures != 0 {
+		t.Fatalf("updated mutations/failures = %d/%d, want 1/0", updated.Mutations, updated.Failures)
+	}
+	if len(updated.Actions) != 1 || updated.Actions[0].Brief != "factual reply" {
+		t.Fatalf("actions = %#v, want Codex fallback reply action recorded", updated.Actions)
+	}
+	foreground, ok := mapFromAny(updated.Metadata["persona_foreground"])
+	if !ok || !boolFromAny(foreground["codex_fallback"], false) {
+		t.Fatalf("persona_foreground = %#v, want codex_fallback marker", updated.Metadata["persona_foreground"])
+	}
+	if !strings.Contains(fmt.Sprint(foreground["codex_fallback_reason"]), "filtered direct reply") {
+		t.Fatalf("persona_foreground = %#v, want fallback reason", foreground)
+	}
+}
+
+func TestSlackTriageLivePersonaStaySilentDoesNotFallbackForOldBridgeMention(t *testing.T) {
+	ctx := context.Background()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_live_persona_old_bridge_mention",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"codex suggested answering old Bridge mention","actions":[{"type":"post_thread_reply","title":"old bridge reply","message":"我来补一个回答。","channelId":"C_TRIAGE","threadTs":"200.000","confidence":0.8,"requiresConfirmation":false}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{BotUserID: "U_ONEE"},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = &capturePersonaRuntime{response: persona.Response{
+		Runtime:    persona.ProviderPi,
+		Decision:   persona.DecisionStaySilent,
+		Reason:     "the user addressed another bot identity",
+		ShadowOnly: false,
+	}}
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "<@U09SF0MQZ5M> 我们讨论过这个 repo 嘛？",
+		TS:             "200.000",
+	}}, "#meeting-avatar: <@U09SF0MQZ5M> 我们讨论过这个 repo 嘛？")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want no fallback when user addressed old Bridge", got)
+	}
+	if updated.Mutations != 0 || len(updated.Actions) != 0 {
+		t.Fatalf("updated mutations/actions = %d/%#v, want no action", updated.Mutations, updated.Actions)
+	}
+	foreground, ok := mapFromAny(updated.Metadata["persona_foreground"])
+	if !ok {
+		t.Fatalf("persona_foreground = %#v, want metadata object", updated.Metadata["persona_foreground"])
+	}
+	if boolFromAny(foreground["codex_fallback"], false) {
+		t.Fatalf("persona_foreground = %#v, want no Codex fallback marker", foreground)
+	}
+	if intFromAny(updated.Metadata["codex_suggested_actions"]) != 0 {
+		t.Fatalf("metadata = %#v, want Codex action filtered before persona fallback", updated.Metadata)
+	}
+}
+
 func TestSlackTriageLivePersonaEmptyReplyRecordsRetryFollowup(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 5, 19, 1, 50, 0, 0, time.UTC)
@@ -611,6 +733,16 @@ func TestBuildSlackTriagePersonaRequestIncludesDecisionAndMemory(t *testing.T) {
 	}
 	if req.Metadata["actions"] != 1 || req.Metadata["decision_parse_ok"] != true {
 		t.Fatalf("metadata = %#v, want action count + parse flag", req.Metadata)
+	}
+	var sawCandidateAction bool
+	for _, item := range req.Context {
+		if item.Kind == "triage_candidate_actions" && strings.Contains(item.Text, "我来补一个轻量意见") {
+			sawCandidateAction = true
+			break
+		}
+	}
+	if !sawCandidateAction {
+		t.Fatalf("context = %#v, want candidate action detail for persona foreground", req.Context)
 	}
 	if len(req.Evidence.Citations) != 1 || req.Evidence.Citations[0].SourceRef != "memory/questions/aha.md" {
 		t.Fatalf("citations = %#v, want related memory citation", req.Evidence.Citations)

@@ -26,6 +26,8 @@ type SlackPersonaShadowResult struct {
 	WorkerRequests []string `json:"worker_requests,omitempty"`
 	MemoryWrites   []string `json:"memory_writes,omitempty"`
 	memoryRecords  []persona.MemoryWrite
+	CodexFallback  bool     `json:"codex_fallback,omitempty"`
+	FallbackReason string   `json:"codex_fallback_reason,omitempty"`
 	ShadowOnly     bool     `json:"shadow_only"`
 	Success        bool     `json:"success"`
 	Error          string   `json:"error,omitempty"`
@@ -141,6 +143,13 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
 		actions := slackPersonaForegroundActions(channelID, threadTS, result)
+		if len(actions) == 0 {
+			if fallback := slackPersonaCodexFallbackActions(channelID, threadTS, result, decision.Actions); len(fallback) > 0 {
+				actions = fallback
+				result.CodexFallback = true
+				result.FallbackReason = "persona stayed silent after Codex produced a filtered direct reply"
+			}
+		}
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
@@ -315,6 +324,24 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 	}}
 }
 
+func slackPersonaCodexFallbackActions(channelID string, threadTS string, result SlackPersonaShadowResult, candidates []SlackTriageDecisionAction) []SlackTriageDecisionAction {
+	if !result.Success || result.ShadowOnly || result.Decision != persona.DecisionStaySilent || len(candidates) == 0 {
+		return nil
+	}
+	out := make([]SlackTriageDecisionAction, 0, len(candidates))
+	for _, action := range candidates {
+		if !slackTriageDirectReplyAction(action) || strings.TrimSpace(action.Message) == "" {
+			continue
+		}
+		action.Title = firstNonEmpty(strings.TrimSpace(action.Title), "Codex vetted reply")
+		action.ChannelID = firstNonEmpty(strings.TrimSpace(action.ChannelID), strings.TrimSpace(channelID))
+		action.ThreadTS = firstNonEmpty(strings.TrimSpace(action.ThreadTS), strings.TrimSpace(threadTS))
+		action.Reason = firstNonEmpty(strings.TrimSpace(action.Reason), "Codex produced a filtered direct reply before persona foreground stayed silent.")
+		out = append(out, action)
+	}
+	return out
+}
+
 type SlackTriagePersonaRequestOptions struct {
 	IgnoreExistingBotReply bool
 }
@@ -333,6 +360,12 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 	contextItems := []persona.ContextItem{
 		{Kind: "triage_summary", Text: strings.TrimSpace(decision.Summary)},
 		{Kind: "triage_actions", Text: fmt.Sprintf("%d action(s)", len(decision.Actions))},
+	}
+	if candidateActions := formatSlackTriagePersonaCandidateActions(decision.Actions); candidateActions != "" {
+		contextItems = append(contextItems, persona.ContextItem{
+			Kind: "triage_candidate_actions",
+			Text: candidateActions,
+		})
 	}
 	metadata := map[string]any{
 		"decision_parse_ok": decision.ParseOK,
@@ -375,6 +408,39 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 		},
 		Metadata: metadata,
 	}
+}
+
+func formatSlackTriagePersonaCandidateActions(actions []SlackTriageDecisionAction) string {
+	if len(actions) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for index, action := range actions {
+		if index >= 5 {
+			fmt.Fprintf(&b, "\n- ... %d more action(s) omitted", len(actions)-index)
+			break
+		}
+		fmt.Fprintf(&b, "- type=%s", firstNonEmpty(strings.TrimSpace(action.Type), "unknown"))
+		if title := strings.TrimSpace(action.Title); title != "" {
+			fmt.Fprintf(&b, " title=%q", truncateSlackContextText(title, 80))
+		}
+		if slackTriageDirectReplyAction(action) {
+			b.WriteString(" direct_reply=true")
+		}
+		if action.RequiresConfirmation {
+			b.WriteString(" requires_confirmation=true")
+		}
+		if message := strings.TrimSpace(action.Message); message != "" {
+			fmt.Fprintf(&b, "\n  message: %s", truncateSlackContextText(message, 280))
+		}
+		if reason := strings.TrimSpace(action.Reason); reason != "" {
+			fmt.Fprintf(&b, "\n  reason: %s", truncateSlackContextText(reason, 180))
+		}
+		if index != len(actions)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func slackRelatedMemoryRecordsFromAny(value any) []SlackRelatedMemoryRecord {
