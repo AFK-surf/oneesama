@@ -1036,6 +1036,138 @@ Why this is the worked example:
   the foreground path. Adding that fixture is the durable fix; the
   cleanup ship is the immediate fix.
 
+## Workspace preference as universal model behavior (new drift pattern, 2026-05-19 evening)
+
+Today's incident (`92b8ddb` then driver's #238 sweep that became
+`ad070ec` / `4ab81a6` / `9359251`) surfaced a drift class distinct
+from the previous five on this page. The pattern is:
+
+**A team's product preference is encoded as the model's universal
+behavior.**
+
+Concrete shape on 2026-05-19:
+
+- Peng observed Pi declining to comment on antirez's AI-agent
+  article in `C09L0TAN31T:1779192707778889`. Pi's scope was too
+  narrow for the Bridge team's needs.
+- First fix (`92b8ddb fix(persona): treat product-adjacent articles
+  as in scope`) widened Pi's universal scope to include AI-agent /
+  coding tools / Memory / Bridge-like products.
+- Second fix (`76c1165 docs(persona): scope product article policy
+  to workspace`) scoped the prompt to "Oneesama/Bridge workspace"
+  but kept the topic list hardcoded inside the Pi prompt.
+- Peng corrected: "应该这个作为每个 workspace 自定义的 triage 行为."
+- Third fix (`ad070ec` / `4ab81a6` / `9359251` / supervisor sweep
+  audit `16fcedf`) externalized the policy: Pi prompt now reads
+  `workspace_triage_policy` from request context; Go side injects
+  per-workspace policy; same Pi binary deployed to two workspaces
+  can produce different engagement decisions purely from policy
+  diff.
+
+Why this is its own drift class:
+
+- shape ≠ contract = surface matched, semantics missed.
+- re-derive vs port = reasoned from scratch instead of reading old
+  code.
+- runtime traces as memory = audited the wrong universe of
+  artefacts.
+- identity migration ≠ traffic interception = audited a real signal
+  (old identity has traffic) but conflated identity ownership with
+  inherited-traffic responsibility.
+- candidate-generator as cognition in main path = OldModel hidden
+  in new decision path.
+- **workspace preference as universal model behavior** (this class):
+  one deployment's product policy encoded into the universal model
+  layer.
+
+Symptoms that catch this drift:
+
+- The same fix request would not be appropriate for a different
+  workspace deployment (sales team, support team, research lab).
+- The fix touches universal prompt content or model code rather
+  than per-deployment configuration.
+- After the fix ships, the model behaves Bridge-flavored for any
+  new deployment.
+- The Pi prompt contains the literal name of a specific workspace
+  or product line.
+
+Audit rule for future migrations:
+
+- Before any prompt or runtime edit that widens "what counts as in
+  scope" or "what topics matter," answer in writing: "would this
+  change be appropriate for a sales team Slack? a customer support
+  Slack? a research lab Slack?" If the answer is "not all," the
+  edit belongs in workspace configuration, not universal model
+  prompt.
+- Acceptance fixture: deploy the same Pi binary with two different
+  workspace policies; the same input must produce different
+  engagement decisions purely from the policy diff. Anchor:
+  `case_NNN_workspace_policy_engagement` (proposed in
+  `bridge_quality_fixtures` once Phase 2 of the Pi-first RFC ships
+  and the policy is reachable at the fixture layer).
+
+Scope distinction from previous classes:
+
+- candidate-generator = OldModel still running in main path under
+  new name.
+- workspace preference = one deployment's product policy encoded
+  in the universal model layer.
+
+Scope distinction from Class 2 routing keywords (#199 polish queue):
+
+- Class 2 routing keyword = "what input shape needs which evidence
+  emitter," universal to all deployments, externalized to templates
+  for code-hygiene reasons.
+- Workspace preference = "what topics this workspace cares about,"
+  per-deployment, externalized to workspace config for product
+  reasons.
+- Both end up as configurable, but the configuration scope and
+  authoring audience differ.
+
+This is now the 6th first-class drift class on this page.
+
+### Worked example: 92b8ddb → 9359251 policy externalization
+
+What got read:
+
+- Pi sidecar prompt (pre-fix): hardcoded list of "in-scope" topics
+  in the Pi universal prompt body.
+- Go cueboard triage prompts, legacy TS prompt, shared-link
+  deterministic fallback: hardcoded "office helper / cold-link
+  weak-invitation" preferences in universal templates.
+
+What got shipped wrong twice:
+
+1. `92b8ddb`: widened Pi's universal scope. The widening was correct
+   for Bridge; the location was wrong (universal prompt vs workspace
+   config).
+2. `76c1165`: scoped the prompt to "Oneesama/Bridge workspace" via
+   a comment. Still hardcoded inside the universal Pi prompt.
+
+What Peng said:
+
+- "应该这个作为每个 workspace 自定义的 triage 行为."
+
+What the third pass did:
+
+- Pi prompt: replaced the topic list with `{{workspace_triage_policy}}`
+  placeholder; prompt no longer mentions any workspace name.
+- Go side: introduced `WorkspaceTriagePolicy` config + plumbing
+  through `persona.Request.workspace_policy`.
+- Live deployment: `ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY` env var
+  carries the Bridge workspace's policy; the policy lives outside
+  Pi sidecar code.
+- Independent supervisor sweep (`16fcedf`) verified 0 hardcoded
+  workspace name strings remain in active runtime.
+
+Why this is the worked example:
+
+- The first two fixes look reasonable in isolation but bake
+  Bridge-specific product preferences into the universal model
+  layer. The third pass is the right shape: workspace operators
+  define their engagement policy; Pi consumes it via request
+  context; the universal prompt is workspace-agnostic.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.
