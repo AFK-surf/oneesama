@@ -33,6 +33,7 @@ type memoryQualityFixtureScenario struct {
 	Pending             bool                             `json:"pending"`
 	PendingReason       string                           `json:"pending_reason"`
 	MemoryWrite         *memoryQualityFixtureMemoryWrite `json:"memory_write,omitempty"`
+	TurnInput           *memoryQualityFixtureTurnInput   `json:"turn_input,omitempty"`
 	Search              *memoryQualityFixtureSearch      `json:"search,omitempty"`
 	ProviderSeedRecords []memoryQualityFixtureSeedRecord `json:"provider_seed_records,omitempty"`
 }
@@ -42,6 +43,12 @@ type memoryQualityFixtureMemoryWrite struct {
 	Content   string `json:"content"`
 	Mode      string `json:"mode"`
 	SessionID string `json:"session_id"`
+}
+
+type memoryQualityFixtureTurnInput struct {
+	UserContent      string `json:"user_content"`
+	AssistantContent string `json:"assistant_content"`
+	SessionID        string `json:"session_id"`
 }
 
 type memoryQualityFixtureSearch struct {
@@ -153,14 +160,7 @@ func runMemoryQualityFixture(t *testing.T, fixture memoryQualityFixture) {
 	case "semantic_recall":
 		runMemorySemanticRecall(t, fixture)
 	case "sync_turn_extraction":
-		// Pending fixtures for this scenario type are filtered above
-		// (Scenario.Pending == true). An active fixture lands here once
-		// task #230 routes SyncTurn through slackMemoryProviderManager and
-		// ships a conservative extraction provider. The assertion body is
-		// added then; today the scenario is documented as pending and
-		// this branch logs to flag any non-pending fixture without
-		// supporting infrastructure.
-		t.Logf("[%s] sync_turn_extraction fixture present but routing not yet shipped (#230); ensure manager routes SyncTurn before flipping pending=false", fixture.CaseID)
+		runMemorySyncTurnExtraction(t, fixture, service, provider)
 	default:
 		t.Fatalf("[%s] unknown scenario.type %q", fixture.CaseID, fixture.Scenario.Type)
 	}
@@ -317,6 +317,33 @@ func runMemorySemanticRecall(t *testing.T, fixture memoryQualityFixture) {
 		if !strings.Contains(joined, anchor) {
 			t.Fatalf("[%s] semantic SearchRelatedMemory result missing anchor %q; full blob: %q", fixture.CaseID, anchor, joined)
 		}
+	}
+}
+
+func runMemorySyncTurnExtraction(t *testing.T, fixture memoryQualityFixture, service *Service, provider *simpleRecordingMemoryProvider) {
+	t.Helper()
+	turnInput := fixture.Scenario.TurnInput
+	if turnInput == nil {
+		t.Fatalf("[%s] sync_turn_extraction scenario missing turn_input", fixture.CaseID)
+	}
+	service.syncMemoryProvidersTurn(context.Background(), SlackMemoryProviderTurn{
+		SessionID:        turnInput.SessionID,
+		UserContent:      turnInput.UserContent,
+		AssistantContent: turnInput.AssistantContent,
+		Metadata: map[string]any{
+			"fixture_case": fixture.CaseID,
+		},
+	})
+	expected := fixture.ExpectedProviderEvents
+	if expected.SyncTurnCountMin > 0 && len(provider.turns) < expected.SyncTurnCountMin {
+		t.Fatalf("[%s] provider SyncTurn count = %d, want >= %d", fixture.CaseID, len(provider.turns), expected.SyncTurnCountMin)
+	}
+	if len(provider.turns) == 0 {
+		t.Fatalf("[%s] provider did not receive SyncTurn", fixture.CaseID)
+	}
+	last := provider.turns[len(provider.turns)-1]
+	if last.SessionID != turnInput.SessionID || last.UserContent != turnInput.UserContent || last.AssistantContent != turnInput.AssistantContent {
+		t.Fatalf("[%s] provider turn = %#v, want fixture turn input", fixture.CaseID, last)
 	}
 }
 

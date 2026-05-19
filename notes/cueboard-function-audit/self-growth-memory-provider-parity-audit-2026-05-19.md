@@ -93,9 +93,9 @@ The local OpenClaw Twitter bot memory directory is effectively static/empty for 
 | Visible "I recorded this as self-improvement" interim reply | Cueboard posted this when a new cluster was created. | Not ported. | Deliberate divergence for now; the current product feedback strongly favors fewer low-value bot replies. Revisit only with a quality canary. |
 | Built-in file Memory | Hermes has always-on file memory; Cueboard had workspace memory. | Oneesama has workspace Markdown memory, legacy Slack Agent D imports, and SQLite typed collections. | Keep. |
 | Memory write mirroring | Hermes calls `on_memory_write` for external providers. | Added in task #228: memory writes now notify registered providers. | Ported. |
-| Pluggable provider contract | Hermes has a MemoryProvider manager and plugin lifecycle. | Added in task #228 as Go-side provider contract + manager. | Ported as foundation, no concrete external provider yet. |
-| Semantic / vector recall | Hermes plugins can provide vector/semantic recall. | Not implemented. | task #229. |
-| Turn sync / auto extraction | Hermes providers can `sync_turn`; mem0/supermemory can ingest turns. | Contract exists after task #228; no live auto-extraction provider yet. | task #230. |
+| Pluggable provider contract | Hermes has a MemoryProvider manager and plugin lifecycle. | Added in task #228 as Go-side provider contract + manager. | Ported as foundation. |
+| Semantic / vector recall | Hermes plugins can provide vector/semantic recall. | Added in task #229 as an opt-in local semantic provider plus hybrid related-memory merge. | Ported as local prototype; replaceable by richer providers later. |
+| Turn sync / auto extraction | Hermes providers can `sync_turn`; mem0/supermemory can ingest turns. | Added in task #230: manager `SyncTurn` routing, Slack worker turn mirroring, and conservative review-candidate extraction provider. | Ported conservatively; no silent high-confidence fact promotion. |
 | Entity graph / trust / user model | Hindsight/Honcho/Holographic-style capabilities. | Not implemented beyond flat person profiles and lexical ranking. | task #231 and follow-up trust/user-model work. |
 | Multimodal Memory ingestion | Supermemory-style multimodal layer. | Only file metadata and delegated evidence boundaries exist. | task #233. |
 
@@ -114,4 +114,4 @@ Created follow-up tasks:
 
 Cueboard self-growth is no longer a schema-only stub; it has a signal store, cluster followups, lesson artifacts, startup resync, and a heartbeat ticker.
 
-The real remaining gap is not "Cueboard parity" but **Hermes-grade Memory architecture**: semantic/vector retrieval, provider lifecycle hooks, turn ingestion, backend mirroring, graph/entity modeling, and multimodal evidence ingestion. Task #228 starts that foundation without binding Oneesama to one vendor/plugin too early.
+The real remaining gap is not "Cueboard parity" but **Hermes-grade Memory architecture** beyond the first local prototypes: richer semantic/vector retrieval, graph/entity modeling, trust/user modeling, and multimodal evidence ingestion. Tasks #228-#230 start that foundation without binding Oneesama to one vendor/plugin too early.

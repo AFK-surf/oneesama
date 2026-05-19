@@ -44,13 +44,11 @@ What lands here:
 
 What is NOT in this ship:
 
-- Assertions for `SyncTurn`, `OnPreCompress`, `OnDelegation` hooks.
-  These exist on the `SlackMemoryProvider` interface (commit
-  `a4e874e`) but are not yet routed through
-  `slackMemoryProviderManager` — only `Search` and `OnMemoryWrite`
-  are. When the manager routes them, runMemoryQualityFixture grows
-  scenario branches; today the contract for them is
-  interface-only and the canary doc records that explicitly.
+- Assertions for `OnPreCompress` and `OnDelegation` hooks. These
+  exist on the `SlackMemoryProvider` interface (commit `a4e874e`)
+  but are not yet routed through `slackMemoryProviderManager`.
+  `Search`, `OnMemoryWrite`, and `SyncTurn` are now routed and
+  covered by fixture cases.
 - Multi-provider conflict scenarios (two providers, dedup, score
   blending). Future #230 / #231 may surface these; until then a
   single-provider canary is the right baseline.
@@ -58,10 +56,10 @@ What is NOT in this ship:
 ## Provider double
 
 `memory_provider_test.go` ships the canonical test double
-`simpleRecordingMemoryProvider` (Search + OnMemoryWrite +
+`simpleRecordingMemoryProvider` (Search + OnMemoryWrite + SyncTurn +
 Initialize + Available + Name). This canary suite reuses that double
 directly; no parallel double is defined here. Future scenarios that
-need turn/compress/delegation hook recording will extend
+need compress/delegation hook recording will extend
 `simpleRecordingMemoryProvider` rather than create a new type.
 
 ## Methodology anchor
@@ -101,8 +99,8 @@ or an external embedding backend.
   provider implementation.
 - #230 (auto-extraction): new scenario type `sync_turn_extraction` —
   drive a turn through the service, assert provider's `SyncTurn`
-  hook fired (requires the manager to route `SyncTurn`, which is
-  the gating sub-task).
+  hook fired, and pin the conservative extraction-provider entry
+  point.
 - #231 (entity graph): new scenario type `entity_resolution` — seed
   multiple person records with aliases, assert resolver merges
   them. Likely overlaps with `people_memory` parity tests, but the
@@ -114,20 +112,22 @@ or an external embedding backend.
 
 ## Status
 
-- Scaffold + 3 fixtures shipped; case_003 was flipped from pending
-  to active by task #229.
+- Scaffold + 4 fixtures shipped; case_003 was flipped from pending
+  to active by task #229, and case_004 was flipped from pending to
+  active by task #230.
 - C232-A `durable_write_replay`: green.
 - C232-B `provider_search_merge`: green.
 - C232-C `semantic_recall`: green.
+- C232-D `sync_turn_extraction`: green.
 - `go test ./internal/slackagent -count=1`: green.
 
 ## Open follow-ups
 
-- Land the `SyncTurn` / `OnPreCompress` / `OnDelegation` routing
-  through `slackMemoryProviderManager`. Driver's
+- Land the `OnPreCompress` / `OnDelegation` routing through
+  `slackMemoryProviderManager`. Driver's
   `self-growth-memory-provider-parity-audit-2026-05-19.md` notes
-  this as the next manager-side step; canary fixtures will follow
-  once those hooks are reachable.
+  these as the remaining manager-side steps; canary fixtures will
+  follow once those hooks are reachable.
 - Add multi-provider scenarios (two providers, score-blending,
   conflict resolution) once #229 + a second provider impl exist.
 - Wire `must_not_contain` to also scan `Search` responses, not only

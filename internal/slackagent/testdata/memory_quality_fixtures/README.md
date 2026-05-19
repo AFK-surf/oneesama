@@ -24,7 +24,7 @@ Each `case_NNN_<slug>.json`:
     "notes": "..."
   },
   "scenario": {
-    "type": "durable_write_replay" | "semantic_recall" | "provider_hook_wiring",
+    "type": "durable_write_replay" | "semantic_recall" | "sync_turn_extraction" | "provider_hook_wiring",
     "memory_write": {
       "path": "memory/team/example.md",
       "content": "fact body",
@@ -68,12 +68,16 @@ Each `case_NNN_<slug>.json`:
 - `semantic_recall`: writes a fixture-local semantic-memory index,
   enables the local semantic provider, and asserts `SearchRelatedMemory`
   returns the expected provider-backed anchors.
+- `sync_turn_extraction`: routes a user/assistant turn through the
+  service Memory manager and asserts the provider receives `SyncTurn`.
+  This pins the #230 auto-extraction entry point without committing
+  review candidates directly into stable Memory.
 - `provider_hook_wiring`: trigger lifecycle / pre-compress /
   delegation events through service code paths (when wired through
-  manager). Currently only `OnMemoryWrite` and `Search` are routed
-  through the manager (`a4e874e`); `SyncTurn` / `OnPreCompress` /
-  `OnDelegation` are interface-only and remain manager-side
-  follow-ups documented in this suite.
+  manager). Currently `Search`, `OnMemoryWrite`, and `SyncTurn` are
+  routed through the manager; `OnPreCompress` / `OnDelegation` are
+  interface-only and remain manager-side follow-ups documented in
+  this suite.
 
 ## Provider double
 
@@ -81,7 +85,7 @@ Each `case_NNN_<slug>.json`:
 `simpleRecordingMemoryProvider` from `memory_provider_test.go`, which:
 
 - Records every hook invocation (search requests, write events,
-  turns, compressions, delegations).
+  turns).
 - Returns seed records on `Search`, configurable per fixture.
 
 This is the canonical doubleable provider for any future Memory test

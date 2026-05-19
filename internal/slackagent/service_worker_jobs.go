@@ -80,6 +80,7 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 	if shouldPublishWorkerResultAsCanvas(job, text) {
 		manifest, err := s.PublishCanvas(ctx, workerResultCanvasInput(job, ref, text, dedupKey))
 		if err == nil && manifest.OK {
+			s.syncSlackWorkerMemoryTurn(ctx, job, ref, text, "canvas")
 			return
 		}
 		if err != nil {
@@ -101,6 +102,39 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 		return
 	}
 	s.recordSlackOutboundLedger(ctx, "workspace", postInput, result, "worker_result: "+firstTextLine(text))
+	s.syncSlackWorkerMemoryTurn(ctx, job, ref, text, "thread_reply")
+}
+
+func (s *Service) syncSlackWorkerMemoryTurn(ctx context.Context, job agentrunner.Job, ref AssistantThreadRef, assistantText string, delivery string) {
+	if job.Status != agentrunner.StatusCompleted {
+		return
+	}
+	userContent := slackWorkerTurnUserContent(job)
+	if strings.TrimSpace(userContent) == "" && strings.TrimSpace(assistantText) == "" {
+		return
+	}
+	s.syncMemoryProvidersTurn(ctx, SlackMemoryProviderTurn{
+		SessionID:        firstNonEmpty(stringFromContext(job.Context, "sessionId", "session_id"), job.ID),
+		UserContent:      userContent,
+		AssistantContent: assistantText,
+		Metadata: map[string]any{
+			"source":     "slack_worker_result",
+			"job_id":     strings.TrimSpace(job.ID),
+			"channel_id": strings.TrimSpace(ref.ChannelID),
+			"thread_ts":  strings.TrimSpace(ref.ThreadTS),
+			"delivery":   strings.TrimSpace(delivery),
+		},
+	})
+}
+
+func slackWorkerTurnUserContent(job agentrunner.Job) string {
+	texts := slackAppMentionRequestTexts(job.Context)
+	for _, text := range texts {
+		if trimmed := strings.TrimSpace(text); trimmed != "" {
+			return trimmed
+		}
+	}
+	return strings.TrimSpace(job.Task)
 }
 
 func shouldPublishWorkerResultAsCanvas(job agentrunner.Job, text string) bool {

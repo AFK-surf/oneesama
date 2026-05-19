@@ -694,6 +694,57 @@ Audit rule:
 
 Reference audit: `notes/cueboard-function-audit/triage-scanner-entry-parity-audit-2026-05-19.md`.
 
+## Turn sync must start as reviewable Memory, not silent truth (worked example, task #230)
+
+Hermes Memory providers treat user/assistant turns as a first-class
+Memory event:
+
+- `mem0.sync_turn` sends the turn to the backend for server-side fact
+  extraction.
+- `supermemory.sync_turn` captures cleaned user/assistant turns as
+  conversation-turn Memory.
+- `byterover.sync_turn` curates substantive turns in the background.
+
+Cueboard's old Slack Agent D did not expose the same generic provider
+hook, but it did have a self-growth loop:
+
+- detect self-growth / feedback signals from user text + transcript;
+- cluster those signals;
+- write lesson candidates and self-growth Memory blocks only when
+  the cluster is eligible.
+
+The porting trap is to hear "auto-extraction" and immediately write
+new stable Memory facts. That would create a new quality failure:
+assistant phrasing and unverified inference would become durable
+truth.
+
+Task #230 makes the safer contract:
+
+- `slackMemoryProviderManager.SyncTurn` routes non-empty turns to
+  initialized providers;
+- Slack worker result turns call `SyncTurn` after successful Slack
+  or Canvas delivery;
+- the default `turn_extractor` provider writes **reviewable**
+  candidate Markdown under `memory/extractions/candidates/...`;
+- the candidate file carries source turn, assistant turn, metadata,
+  redaction count, and review guidance;
+- it does not auto-promote facts into stable people/project/team
+  Memory.
+
+Audit rule:
+
+- A turn-ingestion provider may persist source material immediately,
+  but high-confidence Memory promotion needs either explicit
+  `memory_write`, a trusted backend with visible provenance, or a
+  review/quality gate.
+- Auto-extraction should be fixture-pinned at two layers: hook
+  routing (`SyncTurn` fired) and candidate safety (`review_candidate`
+  written, not stable Memory silently mutated).
+- The moment marker/intent lists decide what counts as a Memory turn,
+  they join the Class 2 routing keyword externalization queue.
+
+Reference audit: `notes/cueboard-function-audit/memory-auto-extraction-parity-audit-2026-05-19.md`.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.

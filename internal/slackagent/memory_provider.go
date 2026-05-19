@@ -212,6 +212,26 @@ func (m *slackMemoryProviderManager) OnMemoryWrite(ctx context.Context, event Sl
 	}
 }
 
+func (m *slackMemoryProviderManager) SyncTurn(ctx context.Context, turn SlackMemoryProviderTurn) {
+	if m == nil {
+		return
+	}
+	if strings.TrimSpace(turn.UserContent) == "" && strings.TrimSpace(turn.AssistantContent) == "" {
+		return
+	}
+	m.mu.Lock()
+	providers := append([]slackMemoryProviderState(nil), m.provider...)
+	m.mu.Unlock()
+	for _, state := range providers {
+		if !state.available || !state.initialized || state.provider == nil {
+			continue
+		}
+		if err := state.provider.SyncTurn(ctx, turn); err != nil {
+			m.recordError(state.name, err)
+		}
+	}
+}
+
 func (m *slackMemoryProviderManager) Status() []SlackMemoryProviderStatus {
 	if m == nil {
 		return nil

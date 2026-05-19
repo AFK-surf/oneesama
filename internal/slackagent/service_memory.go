@@ -40,6 +40,21 @@ func memorySummaryHasAvailableProvider(providers []SlackMemoryProviderStatus) bo
 	return false
 }
 
+func (s *Service) syncMemoryProvidersTurn(ctx context.Context, turn SlackMemoryProviderTurn) {
+	if s == nil || s.memoryProviders == nil {
+		return
+	}
+	turn.UserContent = truncateSlackContextText(strings.TrimSpace(turn.UserContent), 4000)
+	turn.AssistantContent = truncateSlackContextText(strings.TrimSpace(turn.AssistantContent), 4000)
+	if turn.UserContent == "" && turn.AssistantContent == "" {
+		return
+	}
+	if turn.Metadata == nil {
+		turn.Metadata = map[string]any{}
+	}
+	s.memoryProviders.SyncTurn(ctx, turn)
+}
+
 func (s *Service) SearchLocalMemory(query string, limit int) []SlackMemoryResult {
 	if s == nil {
 		return nil

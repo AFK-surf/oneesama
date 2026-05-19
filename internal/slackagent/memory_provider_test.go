@@ -16,6 +16,7 @@ type simpleRecordingMemoryProvider struct {
 	init       SlackMemoryProviderInit
 	searches   []SlackMemoryProviderSearchRequest
 	writes     []SlackMemoryProviderWriteEvent
+	turns      []SlackMemoryProviderTurn
 	searchHits []SlackRelatedMemoryRecord
 }
 
@@ -40,6 +41,11 @@ func (p *simpleRecordingMemoryProvider) Search(_ context.Context, request SlackM
 
 func (p *simpleRecordingMemoryProvider) OnMemoryWrite(_ context.Context, event SlackMemoryProviderWriteEvent) error {
 	p.writes = append(p.writes, event)
+	return nil
+}
+
+func (p *simpleRecordingMemoryProvider) SyncTurn(_ context.Context, turn SlackMemoryProviderTurn) error {
+	p.turns = append(p.turns, turn)
 	return nil
 }
 
@@ -108,6 +114,33 @@ func TestMemoryWriteMirrorsToProvider(t *testing.T) {
 	got := provider.writes[0]
 	if got.Action != "write" || got.Target != "workspace" || got.Path != "memory/notes/provider-mirror.md" || !strings.Contains(got.Content, "Provider mirror note") {
 		t.Fatalf("mirrored write = %#v, want workspace write event", got)
+	}
+}
+
+func TestMemoryProviderManagerSyncTurn(t *testing.T) {
+	t.Parallel()
+
+	provider := &simpleRecordingMemoryProvider{name: "turn_fake", available: true}
+	service := NewService(Config{
+		Slack:           appconfig.SlackConfig{WorkspaceDir: t.TempDir()},
+		MemoryProviders: []SlackMemoryProvider{provider},
+	})
+
+	service.syncMemoryProvidersTurn(context.Background(), SlackMemoryProviderTurn{
+		SessionID:        "session_turn",
+		UserContent:      "What should Bridge remember about Cumora?",
+		AssistantContent: "Cumora relates to yetone and Isoform follow-up context.",
+		Metadata: map[string]any{
+			"source": "unit_test",
+		},
+	})
+
+	if len(provider.turns) != 1 {
+		t.Fatalf("provider turns = %#v, want one SyncTurn", provider.turns)
+	}
+	got := provider.turns[0]
+	if got.SessionID != "session_turn" || !strings.Contains(got.UserContent, "Cumora") || !strings.Contains(got.AssistantContent, "Isoform") || got.Metadata["source"] != "unit_test" {
+		t.Fatalf("turn = %#v, want mirrored turn content and metadata", got)
 	}
 }
 
