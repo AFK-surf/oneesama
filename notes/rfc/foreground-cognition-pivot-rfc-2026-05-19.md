@@ -225,6 +225,12 @@ Pi should choose `stay_silent` instead of `reply` when the thread is already han
 
 Hard rule: **no ambiguous foreground answers**. If Pi cannot produce a grounded answer, it must delegate or stay silent with a concrete reason; it must not post a hedged answer just to be active.
 
+Hedge language is a delegation smell, not a safe foreground style. A Pi `reply`
+whose main disposition is "可能 / 也许 / 大概 / 或许 / seems / maybe /
+might / probably" should usually have been `delegate_worker` instead, unless
+the uncertainty itself is the grounded answer and the message clearly says what
+evidence supports that uncertainty.
+
 ## Delegated Worker Spec
 
 When Pi returns `delegate_worker`, Go should create a worker job with:
@@ -289,6 +295,8 @@ When Pi returns `delegate_worker`, Go should create a worker job with:
 - [ ] Pi-first decisions must match or improve the current chain on should-port cases.
 - [ ] For insufficient-context cases, Pi must choose `delegate_worker` or `stay_silent`, not a vague `reply`.
 - [ ] For complex but answerable user asks, Pi must delegate to Codex/agent_runner instead of producing a low-confidence foreground guess.
+- [ ] Pi `reply` output must not use hedge markers as the primary content disposition; hedged uncertainty should trigger `delegate_worker` unless it is explicitly source-backed.
+- [ ] Add fixture `pi_low_confidence_must_delegate`: an ambiguous but answerable request should produce `delegate_worker`, not a hedged visible answer.
 - [ ] Old Bridge identity mentions remain product-not-port unless Peng explicitly retires old Bridge.
 - [ ] Fresh factual/current-events questions with enough evidence can produce a short Pi reply.
 - [ ] Meeting/quota/person/project Memory cases cite Memory/provider evidence.
