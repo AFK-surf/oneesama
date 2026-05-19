@@ -94,7 +94,7 @@ func (s *Service) runWorkCommand(ctx context.Context, input AvatarCommandInput, 
 		Task:             parsed.Task,
 		Mode:             parsed.RequestedMode,
 		AllowCodeChanges: parsed.AllowCodeChanges,
-		Context:          s.buildAgentRunnerContext(input, parsed, slackContext),
+		Context:          s.buildAgentRunnerContext(ctx, input, parsed, slackContext),
 	}, agentrunner.SessionKindSlack)
 	job, err := s.runner.StartTask(ctx, startInput)
 	if err != nil {
@@ -153,7 +153,7 @@ func (s *Service) runJobsCommand(ctx context.Context, input AvatarCommandInput, 
 	}
 }
 
-func (s *Service) buildAgentRunnerContext(input AvatarCommandInput, parsed parsedAvatarCommand, slackContext *SlackContextRecord) map[string]any {
+func (s *Service) buildAgentRunnerContext(ctx context.Context, input AvatarCommandInput, parsed parsedAvatarCommand, slackContext *SlackContextRecord) map[string]any {
 	context := map[string]any{
 		"slack": map[string]any{
 			"workspaceId": input.TeamID,
@@ -205,6 +205,16 @@ func (s *Service) buildAgentRunnerContext(input AvatarCommandInput, parsed parse
 		context["relatedMemory"] = relatedMemory
 		if evidence := formatSlackRelatedMemoryEvidence(relatedMemory.Results, 5); evidence != "" {
 			context["relatedMemoryEvidence"] = evidence
+		}
+		toolEvidence := s.collectAppMentionToolEvidence(ctx, input.RichThreadContext, relatedMemory)
+		if len(toolEvidence) > 0 {
+			input.RichThreadContext.ToolEvidence = toolEvidence
+			context["slackToolEvidence"] = formatSlackAppMentionToolEvidence(toolEvidence)
+			if formatted := strings.TrimSpace(formatSlackAppMentionToolEvidence(toolEvidence)); formatted != "" {
+				input.RichThreadContext.Prompt = appendSlackAppMentionToolEvidencePromptContext(input.RichThreadContext.Prompt, toolEvidence)
+				context["slackAssistantPrompt"] = input.RichThreadContext.Prompt
+			}
+			context["slackAppMention"] = input.RichThreadContext
 		}
 	}
 	return context

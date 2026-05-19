@@ -3,6 +3,7 @@ package slackagent
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,11 +47,21 @@ type SlackAppMentionContext struct {
 	ImageParts          []SlackThreadImage             `json:"imageParts,omitempty"`
 	ExternalLinks       []SlackExternalLinkContext     `json:"externalLinks,omitempty"`
 	LinkedSlackThreads  []SlackLinkedThreadContext     `json:"linkedSlackThreads,omitempty"`
+	ToolEvidence        []SlackAppMentionToolEvidence  `json:"toolEvidence,omitempty"`
 	MeetingContext      string                         `json:"meetingContext,omitempty"`
 	ThreadPermalink     string                         `json:"threadPermalink,omitempty"`
 	FetchOK             bool                           `json:"fetchOk"`
 	FetchError          string                         `json:"fetchError,omitempty"`
 	FetchedAt           string                         `json:"fetchedAt"`
+}
+
+type SlackAppMentionToolEvidence struct {
+	Tool    string         `json:"tool"`
+	Args    map[string]any `json:"args,omitempty"`
+	OK      bool           `json:"ok"`
+	Error   string         `json:"error,omitempty"`
+	Summary string         `json:"summary,omitempty"`
+	Text    string         `json:"text,omitempty"`
 }
 
 type SlackAssistantThreadParentInfo struct {
@@ -307,8 +318,71 @@ func buildSlackAssistantThreadMessage(input *SlackAppMentionContext) string {
 	if len(input.ExternalLinks) > 0 {
 		lines = append(lines, "", "---", "Fetched external link context:", formatSlackExternalLinkContexts(input.ExternalLinks))
 	}
+	if len(input.ToolEvidence) > 0 {
+		lines = append(lines, "", "---", "First-class tool evidence:", formatSlackAppMentionToolEvidence(input.ToolEvidence))
+	}
 	lines = append(lines, "", "---", fmt.Sprintf("User <@%s> says:", firstNonEmpty(input.UserID, "unknown")), strings.TrimSpace(input.MentionText))
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func appendSlackAppMentionToolEvidencePromptContext(prompt string, evidence []SlackAppMentionToolEvidence) string {
+	section := strings.TrimSpace(formatSlackAppMentionToolEvidence(evidence))
+	if section == "" {
+		return prompt
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "First-class tool evidence:\n" + section
+	}
+	return prompt + "\n\n---\nFirst-class tool evidence:\n" + section
+}
+
+func formatSlackAppMentionToolEvidence(evidence []SlackAppMentionToolEvidence) string {
+	var lines []string
+	for index, item := range evidence {
+		tool := strings.TrimSpace(item.Tool)
+		if tool == "" {
+			continue
+		}
+		status := "ok"
+		if !item.OK {
+			status = "error"
+		}
+		lines = append(lines, fmt.Sprintf("%d. %s (%s)", index+1, tool, status))
+		if len(item.Args) > 0 {
+			lines = append(lines, "   args: "+formatSlackToolEvidenceArgs(item.Args))
+		}
+		if item.Error != "" {
+			lines = append(lines, "   error: "+truncateSlackContextText(item.Error, 300))
+		}
+		if item.Summary != "" {
+			lines = append(lines, "   summary: "+truncateSlackContextText(item.Summary, 1200))
+		} else if item.Text != "" {
+			lines = append(lines, "   text: "+truncateSlackContextText(item.Text, 1200))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatSlackToolEvidenceArgs(args map[string]any) string {
+	parts := make([]string, 0, len(args))
+	for _, key := range sortedMapKeys(args) {
+		value := strings.TrimSpace(stringFromAny(args[key]))
+		if value == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%q", key, truncateSlackContextText(value, 180)))
+	}
+	return strings.Join(parts, " ")
+}
+
+func sortedMapKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 type slackThreadMedia struct {

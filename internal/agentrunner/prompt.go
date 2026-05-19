@@ -46,6 +46,9 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 	if relatedMemoryEvidence := stringFromContext(input.Context, "relatedMemoryEvidence", "related_memory_evidence"); relatedMemoryEvidence != "" {
 		sections = append(sections, "Related memory evidence (cite these sources when using them; ignore weak or irrelevant hits):\n"+relatedMemoryEvidence)
 	}
+	if slackToolEvidence := stringFromContext(input.Context, "slackToolEvidence", "slack_tool_evidence"); slackToolEvidence != "" {
+		sections = append(sections, "Slack tool evidence (first-class dispatcher results; cite or summarize only if relevant):\n"+slackToolEvidence)
+	}
 	sections = append(sections, "Context:\n"+contextJSON)
 	return strings.Join(sections, "\n\n")
 }

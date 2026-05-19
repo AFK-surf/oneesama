@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -79,7 +80,7 @@ func TestAppMentionContextIncludesRelatedMemoryEvidence(t *testing.T) {
 	service := NewService(Config{
 		Slack: appconfig.SlackConfig{WorkspaceDir: workspaceDir},
 	})
-	context := service.buildAgentRunnerContext(AvatarCommandInput{
+	context := service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
 		ChannelName: "xp-test",
 		UserName:    "vincent",
 		RichThreadContext: &SlackAppMentionContext{
@@ -99,6 +100,48 @@ func TestAppMentionContextIncludesRelatedMemoryEvidence(t *testing.T) {
 	evidence, ok := context["relatedMemoryEvidence"].(string)
 	if !ok || !strings.Contains(evidence, "memory/team/meetings/jc-case-study.md") || !strings.Contains(evidence, "not a recorded Case Study") {
 		t.Fatalf("relatedMemoryEvidence = %q, want cited meeting memory", evidence)
+	}
+}
+
+func TestAppMentionContextIncludesFirstClassFreshSearchEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search" || !strings.Contains(r.URL.Query().Get("q"), "Zyphra Labs") {
+			t.Fatalf("url = %s, want first-class exa_search query for Zyphra Labs", r.URL.String())
+		}
+		_, _ = w.Write([]byte("Title: Search results\n\nZyphra Labs builds audio and voice AI models."))
+	}))
+	defer server.Close()
+	oldClient := slackExternalSearchHTTPClient
+	oldSearchURL := slackExternalSearchURL
+	slackExternalSearchHTTPClient = server.Client()
+	slackExternalSearchURL = func(query string) string { return server.URL + "/search?q=" + url.QueryEscape(query) }
+	t.Cleanup(func() {
+		slackExternalSearchHTTPClient = oldClient
+		slackExternalSearchURL = oldSearchURL
+	})
+
+	service := NewService(Config{})
+	rich := &SlackAppMentionContext{
+		MentionText: "Zyphra Labs 是什么？",
+		Transcript:  "[1779155703.395489] <@U1>: Zyphra Labs 是什么？",
+		Prompt:      "Thread context:\nZyphra Labs 是什么？",
+	}
+	context := service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
+		ChannelName:       "xp-test",
+		UserName:          "vincent",
+		RichThreadContext: rich,
+	}, parsedAvatarCommand{Action: "work"}, nil)
+
+	evidence, ok := context["slackToolEvidence"].(string)
+	if !ok || !strings.Contains(evidence, "exa_search") || !strings.Contains(evidence, "Zyphra Labs builds audio") {
+		t.Fatalf("slackToolEvidence = %q, want first-class exa_search evidence", evidence)
+	}
+	if len(rich.ToolEvidence) != 1 || rich.ToolEvidence[0].Tool != "exa_search" || !rich.ToolEvidence[0].OK {
+		t.Fatalf("rich.ToolEvidence = %#v, want successful exa_search evidence", rich.ToolEvidence)
+	}
+	prompt, ok := context["slackAssistantPrompt"].(string)
+	if !ok || !strings.Contains(prompt, "First-class tool evidence:") || !strings.Contains(prompt, "Zyphra Labs builds audio") {
+		t.Fatalf("slackAssistantPrompt = %q, want first-class tool evidence", prompt)
 	}
 }
 

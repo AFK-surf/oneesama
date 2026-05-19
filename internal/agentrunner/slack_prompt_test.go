@@ -77,6 +77,25 @@ func TestBuildPromptDoesNotTellSlackWorkerToCurlLocalGateway(t *testing.T) {
 	}
 }
 
+func TestBuildPromptSurfacesFirstClassSlackToolEvidence(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task: "介绍 Zyphra Labs",
+		Context: map[string]any{
+			"source":            "slack-agent",
+			"slackToolEvidence": "1. exa_search (ok)\n   summary: Zyphra Labs builds audio and voice AI models.",
+		},
+	}, SessionKindSlack))
+
+	for _, want := range []string{
+		"Slack tool evidence (first-class dispatcher results",
+		"Zyphra Labs builds audio and voice AI models.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing tool evidence %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildPromptSurfacesRelatedMemoryEvidence(t *testing.T) {
 	prompt := buildPrompt(WithSessionCapabilities(StartInput{
 		Task: "jc说之前录制了5个Case Study的视频，这个有吗？",

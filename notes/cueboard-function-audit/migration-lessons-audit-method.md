@@ -414,15 +414,24 @@ What this proves:
 - Delivery must be fail-closed at the user boundary. Even when an
   internal worker leaks a gateway or stack detail, Slack-visible output
   should be user-safe.
-- Prompt text is not a tool bridge. If the old runtime had a native
-  tool registry, a migration is not complete just because the new
-  prompt describes a way to call tools.
-- Delivery must be fail-closed at the user boundary. Even when an
-  internal worker leaks a gateway or stack detail, Slack-visible output
-  should be user-safe.
 - Fresh search parity remains an entry-level behavior, not a wording
   promise. Unknown future entities need either a real worker tool
   bridge or a delegated-reader/persona path that can cite evidence.
+
+The next audit
+`notes/cueboard-function-audit/worker-tool-bridge-parity-audit-2026-05-19.md`
+closed the immediate entry-level gap by adding first-class Go-side
+tool evidence dispatch for app-mention fresh entity questions:
+
+- Old Agent D had a native tool registry. New Oneesama cannot count
+  prompt text as parity, so app-mention now dispatches `exa_search`
+  via `Service.ExecuteSlackTool` before starting the Codex worker when
+  related memory has no hit.
+- The worker sees `slackToolEvidence` as injected evidence and still
+  cannot reach localhost/internal gateways.
+- This is not a full interactive CLI tool loop. It is a bounded port
+  of the production behavior that failed: unknown entity questions
+  need fresh cited evidence or a safe refusal.
 
 ## Runtime traces as memory (new drift pattern, promoted 2026-05-19)
 

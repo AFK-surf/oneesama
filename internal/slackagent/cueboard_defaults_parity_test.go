@@ -3,6 +3,7 @@
 package slackagent
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,7 +73,7 @@ func TestCueboardParityBuildAgentRunnerContextCarriesLocalMemoryBehindAdapter(t 
 		Slack: appconfig.SlackConfig{Memory: appconfig.SlackMemoryConfig{Enabled: true, Dir: root}},
 	})
 
-	context := service.buildAgentRunnerContext(AvatarCommandInput{
+	context := service.buildAgentRunnerContext(context.Background(), AvatarCommandInput{
 		TeamID:      "W1",
 		ChannelID:   "C1",
 		ChannelName: "launch",
