@@ -141,10 +141,10 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 					t.Fatalf("[%s] relatedMemoryEvidence missing anchor %q; evidence: %q", fixture.CaseID, anchor, evidence)
 				}
 			}
-		case "C220_media_file_evidence":
+		case "C220_media_file_evidence", "C223_workflow_intent_recognition":
 			evidence, ok := runnerContext["slackToolEvidence"].(string)
 			if !ok || strings.TrimSpace(evidence) == "" {
-				t.Fatalf("[%s] expected slackToolEvidence (C220) to be set; got %#v", fixture.CaseID, runnerContext["slackToolEvidence"])
+				t.Fatalf("[%s] expected slackToolEvidence (%s) to be set; got %#v", fixture.CaseID, item, runnerContext["slackToolEvidence"])
 			}
 			for _, anchor := range fixture.ExpectedEvidence {
 				if !strings.Contains(evidence, anchor) {

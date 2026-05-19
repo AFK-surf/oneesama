@@ -1,0 +1,48 @@
+{
+  "case_id": "case_003_pr_review_workflow",
+  "source": {
+    "old_slack_db_run_id": null,
+    "occurred_at": "2026-05-19T13:47:26+08:00",
+    "channel_id": "CWORK",
+    "mention_text": "<@UBOT> https://github.com/AFK-surf/cueboard/pull/1917 <@U0ALY77RMJL> <@U0AMN6TKVJ8> 来 review，没问题就 approve 然后推进到合并",
+    "notes": "Anchor case from TestAppMentionOperationalPRAddsWorkflowEvidence (commit 7a9f141, task #223). Real production case: operational PR review request that previously got summarized as a generic article link by new Oneesama."
+  },
+  "input": {
+    "channel_name": "bridge-dev",
+    "user_name": "peng",
+    "mention_text": "https://github.com/AFK-surf/cueboard/pull/1917 <@U0ALY77RMJL> <@U0AMN6TKVJ8> 来 review，没问题就 approve 然后推进到合并",
+    "transcript": "[1779079538.775449] <@UASK>: <@UBOT> https://github.com/AFK-surf/cueboard/pull/1917 <@U0ALY77RMJL> <@U0AMN6TKVJ8> 来 review，没问题就 approve 然后推进到合并",
+    "thread_context_prompt": "Thread context:\nhttps://github.com/AFK-surf/cueboard/pull/1917 <@U0ALY77RMJL> <@U0AMN6TKVJ8> 来 review，没问题就 approve 然后推进到合并",
+    "external_links": [],
+    "linked_slack_threads": [],
+    "files": [],
+    "memory_seed_files": []
+  },
+  "expected_contract_items": [
+    "C223_workflow_intent_recognition"
+  ],
+  "expected_evidence_anchors": [
+    "slack_workflow_context (ok)",
+    "operational_github_work",
+    "review_or_delivery_request",
+    "not a general link/article share",
+    "identify the requested owner/action/status",
+    "Do not summarize the link as reading material",
+    "https://github.com/AFK-surf/cueboard/pull/1917",
+    "<@U0ALY77RMJL>"
+  ],
+  "expected_tools_invoked": [
+    "slack_workflow_context"
+  ],
+  "expected_decision_shape": {
+    "min_chars": 0,
+    "max_chars": 0,
+    "must_not_contain": [
+      "127.0.0.1",
+      "/slack/tools/call",
+      "curl",
+      "exit status 7",
+      "localhost:8780"
+    ]
+  }
+}
