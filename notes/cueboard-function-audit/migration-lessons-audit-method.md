@@ -578,6 +578,45 @@ Why this is the worked example:
   requires that question explicitly before any alias / mention
   routing fix lands.
 
+## Prompt-only tool surface ≠ tool integration (worked example, task #221)
+
+Cueboard's Slack Agent D gave app-mention assistants a native tool loop:
+
+- `Bridge.RegisterSlackTools` attached Slack proxy/helper/credentialed
+  tools into an `agent.ToolRegistry`.
+- app mentions ran through `SendMessageAndWait(..., b.newMentionHooks(...))`.
+- session/agent hooks forwarded tool starts/results/status back into
+  the same assistant run.
+
+The Go rewrite initially copied the prompt shape ("available tools",
+"call X first") into a command-provider worker where those tools were
+not actually callable. That produced two failure modes:
+
+- the model believed a tool existed, then failed via localhost/curl;
+- later fixes removed the unsafe curl path, but left no way for a
+  worker to ask for one more piece of first-class evidence mid-answer.
+
+The task #221 fix is the current bounded contract:
+
+- the prompt describes a real `<oneesama_tool_request>` protocol, not
+  old native tool names as if they were directly callable;
+- `handleSlackWorkerToolRequest` intercepts the request before Slack
+  delivery, executes allowed tools through `Service.ExecuteSlackTool`,
+  injects `slackToolEvidence`, and starts a continuation job;
+- direct Slack posting/upload/delete/edit/reaction requests from the
+  app-mention worker bridge fail closed.
+
+Audit rule:
+
+- A prompt may mention a tool only if the current runtime has a
+  reachable execution path for that tool in that entry point.
+- If the runtime is a command-provider without native function calls,
+  add an explicit bridge protocol or do not list the tool as available.
+- "The old prompt says call slack_api" is not parity evidence unless
+  the new entry point can prove an equivalent call reaches a dispatcher.
+
+Reference audit: `notes/cueboard-function-audit/worker-interactive-tool-loop-parity-audit-2026-05-19.md`.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.

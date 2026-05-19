@@ -34,6 +34,9 @@ func (s *Service) handleAgentRunnerUpdate(ctx context.Context, job agentrunner.J
 	if !isTerminalJobStatus(job.Status) || !s.claimFinalizedWorkerJob(job.ID) {
 		return
 	}
+	if s.handleSlackWorkerToolRequest(ctx, job) {
+		return
+	}
 	s.reportWorkerJobToMeetingAgent(ctx, job)
 	s.postSlackWorkerResult(ctx, job)
 	if ref, ok := slackRefForWorkerJob(job); ok {

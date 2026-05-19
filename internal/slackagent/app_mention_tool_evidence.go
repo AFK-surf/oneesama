@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"unicode"
 )
@@ -126,6 +127,11 @@ func slackToolEvidenceSummary(response SlackToolCallResponse) string {
 			if value := stringFromAny(resultMap[key]); value != "" {
 				return truncateSlackContextText(value, appMentionFreshSearchSummaryLimit)
 			}
+		}
+	}
+	if response.Result != nil {
+		if raw, err := json.Marshal(response.Result); err == nil && len(raw) > 0 && string(raw) != "null" {
+			return truncateSlackContextText(string(raw), appMentionFreshSearchSummaryLimit)
 		}
 	}
 	if response.Error != "" {

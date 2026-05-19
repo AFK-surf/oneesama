@@ -15,16 +15,25 @@ func TestSlackAssistantPromptUsesCueboardToolFirstDefaults(t *testing.T) {
 	}, SessionKindSlack))
 
 	for _, want := range []string{
-		"## Tool-first defaults",
-		"heartbeat or runtime questions → call runtime_status first",
-		`a Google Meet URL appears in the current thread → use suggest_action(action_type="join_meeting")`,
-		`requested screenshots or local files → use slack_api(method="slack.uploadFile", params={...})`,
-		"NEVER say \"I don't have access\"",
+		"## Dispatcher tool bridge",
+		"<oneesama_tool_request>",
+		"Supported dispatcher tools",
+		"Do not request chat.postMessage",
+		"Do not say \"I don't have access\"",
 		"Match the tone and formality level of the conversation.",
 		"Reply in the SAME language as the user's message.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("slack assistant prompt missing cueboard default %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"call runtime_status first",
+		"slack.uploadFile",
+		"linear_api directly",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("slack assistant prompt contains prompt-only tool assumption %q:\n%s", forbidden, prompt)
 		}
 	}
 	if strings.Contains(prompt, "oneesama Go rewrite") {

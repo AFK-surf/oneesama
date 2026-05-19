@@ -70,6 +70,7 @@ func TestBuildPromptDoesNotTellSlackWorkerToCurlLocalGateway(t *testing.T) {
 	for _, want := range []string{
 		"Do not attempt to reach localhost",
 		"cannot safely verify",
+		"<oneesama_tool_request>",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing fail-closed guidance %q:\n%s", want, prompt)
