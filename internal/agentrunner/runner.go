@@ -122,6 +122,37 @@ func (m *Manager) ListJobs(ctx context.Context) ([]Job, error) {
 	return m.store.List(ctx)
 }
 
+func (m *Manager) RecoverOrphanedRunning(ctx context.Context, reason string) ([]Job, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "agent runner job orphaned after service restart"
+	}
+	jobs, err := m.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	recovered := make([]Job, 0)
+	for _, job := range jobs {
+		if job.Status != StatusRunning {
+			continue
+		}
+		if m.hasCanceler(job.ID) {
+			continue
+		}
+		updated, updateErr := m.store.Update(ctx, job.ID, func(target *Job) {
+			target.Status = StatusTimeout
+			target.Error = reason
+			target.Debug = strings.TrimSpace(firstNonEmpty(target.Debug, "recovered orphaned running job"))
+		})
+		if updateErr != nil {
+			return recovered, updateErr
+		}
+		recovered = append(recovered, updated)
+		m.notifyJobUpdate(ctx, updated)
+	}
+	return recovered, nil
+}
+
 func (m *Manager) finishJob(ctx context.Context, id string, input StartInput) {
 	defer m.clearCanceler(id)
 
@@ -180,6 +211,13 @@ func (m *Manager) clearCanceler(id string) {
 	delete(m.cancelers, id)
 }
 
+func (m *Manager) hasCanceler(id string) bool {
+	m.cancelMu.Lock()
+	defer m.cancelMu.Unlock()
+	_, ok := m.cancelers[id]
+	return ok
+}
+
 func newProvider(cfg appconfig.AgentRunnerConfig) (runnerProvider, error) {
 	switch normalizeProvider(cfg.Provider) {
 	case "", "dry-run":
@@ -216,6 +254,15 @@ func failedResult(result RunResult, err error) RunResult {
 		result.Error = err.Error()
 	}
 	return result
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func cloneMap(source map[string]any) map[string]any {

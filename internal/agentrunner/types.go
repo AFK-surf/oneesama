@@ -48,6 +48,10 @@ type Runner interface {
 	ListJobs(ctx context.Context) ([]Job, error)
 }
 
+type OrphanedRunningRecoverer interface {
+	RecoverOrphanedRunning(ctx context.Context, reason string) ([]Job, error)
+}
+
 type Config struct {
 	Logger        *slog.Logger
 	Persistence   appconfig.PersistenceConfig

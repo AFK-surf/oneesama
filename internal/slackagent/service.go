@@ -303,5 +303,24 @@ func NewService(cfg Config) *Service {
 			service.logger.Warn("slack workspace bootstrap failed", "workspace_dir", service.workspaceDir, "error", result.Error)
 		}
 	}
+	service.recoverOrphanedAgentRunnerJobs(context.Background())
 	return service
+}
+
+func (s *Service) recoverOrphanedAgentRunnerJobs(ctx context.Context) {
+	if s == nil || s.runner == nil {
+		return
+	}
+	recoverer, ok := s.runner.(agentrunner.OrphanedRunningRecoverer)
+	if !ok {
+		return
+	}
+	recovered, err := recoverer.RecoverOrphanedRunning(ctx, "agent runner job orphaned after service restart")
+	if err != nil {
+		s.logger.Warn("agent runner orphan recovery failed", "error", err)
+		return
+	}
+	if len(recovered) > 0 {
+		s.logger.Warn("agent runner orphaned running jobs recovered", "count", len(recovered))
+	}
 }

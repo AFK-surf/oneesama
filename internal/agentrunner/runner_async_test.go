@@ -209,6 +209,56 @@ func TestRunnerTimesOutLongJobsWithSQLiteStore(t *testing.T) {
 	waitForRunnerJobCleanup(t, runner, job.ID)
 }
 
+func TestRecoverOrphanedRunningJobsMarksTimeoutAndNotifies(t *testing.T) {
+	t.Parallel()
+
+	store, err := openStore(appconfig.PersistenceConfig{Provider: "memory"})
+	if err != nil {
+		t.Fatalf("openStore() error = %v", err)
+	}
+	orphan, err := store.Create(context.Background(), "codex", StartInput{Task: "orphaned triage"}, RunResult{Status: StatusRunning})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	updateCh := make(chan Job, 1)
+	runner, err := New(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		AgentRunner: appconfig.AgentRunnerConfig{Provider: "codex", JobTimeout: time.Minute},
+		provider:    dryRunProvider{},
+		store:       store,
+		OnJobUpdate: func(_ context.Context, job Job) {
+			updateCh <- job
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recoverer, ok := runner.(OrphanedRunningRecoverer)
+	if !ok {
+		t.Fatalf("runner does not implement orphan recovery")
+	}
+
+	recovered, err := recoverer.RecoverOrphanedRunning(context.Background(), "agent runner job orphaned after service restart")
+	if err != nil {
+		t.Fatalf("RecoverOrphanedRunning() error = %v", err)
+	}
+	if len(recovered) != 1 || recovered[0].ID != orphan.ID {
+		t.Fatalf("recovered = %#v, want orphan job", recovered)
+	}
+	if recovered[0].Status != StatusTimeout || recovered[0].Error != "agent runner job orphaned after service restart" {
+		t.Fatalf("recovered job = %#v, want timeout with restart reason", recovered[0])
+	}
+
+	select {
+	case update := <-updateCh:
+		if update.ID != orphan.ID || update.Status != StatusTimeout {
+			t.Fatalf("update = %#v, want recovered timeout job", update)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for recovery update callback")
+	}
+}
+
 func waitForJobTerminal(t *testing.T, runner Runner, jobID string) Job {
 	t.Helper()
 
