@@ -147,6 +147,7 @@ sequenceDiagram
   - what visible Slack text says;
   - when to delegate;
   - when to propose durable memory writes.
+  - when it is not capable enough to answer confidently.
 
 - **Oneesama Go** owns orchestration and safety:
   - Slack event ingestion and dedupe;
@@ -159,6 +160,7 @@ sequenceDiagram
   - only starts when Pi returns `delegate_worker` or when a human explicitly invokes `/work` / app-mention worker behavior;
   - handles longer code/research/tool-loop tasks;
   - does not run before Pi on automatic foreground triage.
+  - is the normal fallback for "Pi knows this needs stronger work", not a competing foreground brain.
 
 ## Target Pi Request Shape
 
@@ -197,9 +199,31 @@ The request should not contain:
 ## Decision Semantics
 
 - `stay_silent`: no visible Slack post. Go records outcome and may create delayed/followup candidates if the route is configured to do so.
-- `reply`: Go posts `visible_text` after freshness/dedup/safety checks.
-- `delegate_worker`: Go starts Codex/agent_runner using Pi's `worker_requests` and the same fetched context/Memory evidence.
+- `reply`: Go posts `visible_text` after freshness/dedup/safety checks. Pi should use this only when it has enough cited context/evidence to be concrete.
+- `delegate_worker`: Go starts Codex/agent_runner using Pi's `worker_requests` and the same fetched context/Memory evidence. Pi should use this when it detects its own capability, context, tool, or confidence limit.
 - `memory_write`: Go persists reviewable memory and mirrors to configured Memory providers.
+
+## Pi Capability Boundary
+
+Pi is allowed to handle most Slack triage directly, including moderately complex tasks, but it must not bluff.
+
+Pi should choose `reply` only when the answer can be:
+
+- grounded in supplied Slack context, Memory/provider evidence, or fetched link/thread/file evidence;
+- phrased as a concrete answer or concrete next step;
+- short enough for the foreground Slack surface;
+- safe to post without additional tool execution.
+
+Pi should choose `delegate_worker` when:
+
+- it needs code/repo inspection, a long research pass, browser/tool work, file/video/PDF content reading, or multi-step synthesis;
+- the request is important but the supplied evidence is insufficient;
+- it would otherwise answer with "maybe / possibly / I guess" style uncertainty;
+- it needs a stronger model/tool loop to avoid a vague or misleading visible answer.
+
+Pi should choose `stay_silent` instead of `reply` when the thread is already handled, addressed to another bot, low-signal, or unsafe to answer. If the user explicitly asked Oneesama and the missing information is actionable, `delegate_worker` is preferred over a vague reply.
+
+Hard rule: **no ambiguous foreground answers**. If Pi cannot produce a grounded answer, it must delegate or stay silent with a concrete reason; it must not post a hedged answer just to be active.
 
 ## Delegated Worker Spec
 
@@ -263,6 +287,8 @@ When Pi returns `delegate_worker`, Go should create a worker job with:
 
 - [ ] Replay today's old Slack Agent D mutation cases and classify each as should-port / product-not-port / out-of-scope.
 - [ ] Pi-first decisions must match or improve the current chain on should-port cases.
+- [ ] For insufficient-context cases, Pi must choose `delegate_worker` or `stay_silent`, not a vague `reply`.
+- [ ] For complex but answerable user asks, Pi must delegate to Codex/agent_runner instead of producing a low-confidence foreground guess.
 - [ ] Old Bridge identity mentions remain product-not-port unless Peng explicitly retires old Bridge.
 - [ ] Fresh factual/current-events questions with enough evidence can produce a short Pi reply.
 - [ ] Meeting/quota/person/project Memory cases cite Memory/provider evidence.
@@ -353,12 +379,15 @@ New audit fields proposed:
 - `pi_first_worker_requests`
 - `pre_pi_agent_runner_started`: boolean; must be false in Pi-first live
 - `delegate_worker_jobs_started`: count
+- `pi_confidence_bucket`: high / medium / low / insufficient
+- `pi_insufficiency_reason`: missing_context / missing_tool / needs_worker / already_handled / unsafe
 - `persona_unavailable_policy`: fail_closed / rollback_flag / shadow_only
 
 Dashboard/audit flags:
 
 - red: `pre_pi_agent_runner_started=true` while `foreground_chain=pi_first_live`
 - red: Pi foreground failures above threshold
+- red: Pi returns `reply` with low confidence and no citations/evidence on a case marked `needs_worker`
 - yellow: no live positive samples
 - yellow: Pi-first/Codex-current decision mismatch over threshold during shadow phase
 
@@ -376,6 +405,7 @@ Rollback should be explicit and observable:
 - If Pi sidecar is unavailable in Pi-first live mode, should Oneesama fail closed, or temporarily roll back to the old Codex triage path by flag?
 - Should app-mention worker tasks also move to Pi-first immediately, or is this RFC only for automatic scanner triage first?
 - What is the acceptable quality threshold in Phase 1 shadow: equal mutation rate, equal user-visible quality, or specific should-port fixture pass rate?
+- What confidence/evidence threshold should force `delegate_worker` instead of `reply`?
 - Should old Bridge identity retirement be part of this migration, or remain a separate product decision?
 
 ### Additional Supervisor Open Questions
@@ -452,5 +482,6 @@ No implementation until this RFC is reviewed. Expected files when approved:
 - `templates/prompts/oneesama-persona-shadow-decision.md`
   - remove candidate-action language after code path no longer emits it;
   - strengthen Pi-first triage rules.
+  - add the no-bluff rule: insufficient context should become `delegate_worker` or `stay_silent`, never a vague visible answer.
 - `notes/cueboard-function-audit/migration-lessons-audit-method.md`
   - keep candidate-generator-as-cognition as a first-class drift class.
