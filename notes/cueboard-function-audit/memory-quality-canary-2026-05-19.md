@@ -102,9 +102,9 @@ or an external embedding backend.
   hook fired, and pin the conservative extraction-provider entry
   point.
 - #231 (entity graph): new scenario type `entity_resolution` — seed
-  multiple person records with aliases, assert resolver merges
-  them. Likely overlaps with `people_memory` parity tests, but the
-  fixture-driven shape stays consistent.
+  multiple relationship records with aliases, assert the provider
+  returns relationship evidence with positive and negative links.
+  Landed as `entity_graph_resolution` in case_005.
 - #233 (multimodal ingestion): new scenario type
   `multimodal_ingest` — pass a file / image evidence, assert the
   provider receives it as an indexable record. Layer: provider's
@@ -112,13 +112,15 @@ or an external embedding backend.
 
 ## Status
 
-- Scaffold + 4 fixtures shipped; case_003 was flipped from pending
-  to active by task #229, and case_004 was flipped from pending to
-  active by task #230.
+- Scaffold + 5 fixtures shipped; case_003 was flipped from pending
+  to active by task #229, case_004 was flipped from pending to
+  active by task #230, and case_005 was flipped from pending to
+  active by task #231.
 - C232-A `durable_write_replay`: green.
 - C232-B `provider_search_merge`: green.
 - C232-C `semantic_recall`: green.
 - C232-D `sync_turn_extraction`: green.
+- C232-E `entity_graph_resolution`: green.
 - `go test ./internal/slackagent -count=1`: green.
 
 ## Open follow-ups

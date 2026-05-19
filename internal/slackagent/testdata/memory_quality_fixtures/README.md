@@ -24,7 +24,7 @@ Each `case_NNN_<slug>.json`:
     "notes": "..."
   },
   "scenario": {
-    "type": "durable_write_replay" | "semantic_recall" | "sync_turn_extraction" | "provider_hook_wiring",
+    "type": "durable_write_replay" | "semantic_recall" | "sync_turn_extraction" | "entity_graph_resolution" | "provider_hook_wiring",
     "memory_write": {
       "path": "memory/team/example.md",
       "content": "fact body",
@@ -72,6 +72,10 @@ Each `case_NNN_<slug>.json`:
   service Memory manager and asserts the provider receives `SyncTurn`.
   This pins the #230 auto-extraction entry point without committing
   review candidates directly into stable Memory.
+- `entity_graph_resolution`: writes fixture-local relationship facts,
+  enables the local entity-graph provider, and asserts
+  `SearchRelatedMemory` returns relationship evidence with explicit
+  entity/source anchors.
 - `provider_hook_wiring`: trigger lifecycle / pre-compress /
   delegation events through service code paths (when wired through
   manager). Currently `Search`, `OnMemoryWrite`, and `SyncTurn` are

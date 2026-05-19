@@ -1,17 +1,23 @@
 {
-  "case_id": "case_005_entity_graph_resolution_pending",
+  "case_id": "case_005_entity_graph_resolution",
   "source": {
     "occurred_at": "2026-05-19T15:34:00+08:00",
-    "notes": "STUB fixture for #231 entity graph / relationship resolution. Pre-built per case_003/004 handoff pattern: pending=true today, driver flips to active when entity-graph evidence emission lands. Anchor scenario: query about Cumora must return evidence that identifies yetone as the contact, Isoform as yetone's org, and an explicit non-relation between Cumora and Alma product line. This is the entity-graph successor to the Cumora/yetone case_002 of #215 entity_attribution, but at the graph/relationship layer, not flat profile lookup."
+    "notes": "Anchor fixture for #231 entity graph / relationship resolution. Query about Cumora must return evidence that identifies yetone as the contact, Isoform as yetone's org, and an explicit non-relation between Cumora and Alma product line. This is the entity-graph successor to the Cumora/yetone case_002 of #215 entity_attribution, but at the graph/relationship layer, not flat profile lookup."
   },
   "scenario": {
     "type": "entity_graph_resolution",
-    "pending": true,
-    "pending_reason": "awaiting_task_231_entity_graph_resolution",
     "search": {
       "query": "Cumora 的 contact 是谁，跟 Alma 有没有关系？",
       "limit": 5
     },
+    "provider_seed_records": [
+      {
+        "path": "memory/team/facts/cumora-entity-graph.md",
+        "kind": "team_fact",
+        "score": 0.9,
+        "content": "Cumora contact is yetone.\nyetone aliases: 大yetone, @yetone.\nyetone organization is Isoform.\nCumora is not related to Alma product line."
+      }
+    ],
     "intended_provider_signals": [
       "Provider Search response must include records with source tagged entity_graph (or equivalent kind/reason indicating entity resolution).",
       "Search response must surface the 4 anchor entities (Cumora, yetone, Isoform, Alma) so the worker can compose a grounded answer.",
@@ -29,7 +35,13 @@
     "search_query_contains": "Cumora",
     "search_records_returned_min": 1
   },
-  "expected_search_result_anchors": [],
+  "expected_search_result_anchors": [
+    "entity_graph",
+    "memory_provider:entity_graph",
+    "Cumora contact is yetone",
+    "yetone organization is Isoform",
+    "Cumora is not related to Alma"
+  ],
   "must_not_contain": [
     "127.0.0.1",
     "/slack/tools/call",

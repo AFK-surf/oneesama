@@ -78,10 +78,11 @@ type memoryQualityExpectedEvents struct {
 // testdata/memory_quality_fixtures/ per the schema in that README.
 //
 // The provider double is simpleRecordingMemoryProvider from
-// memory_provider_test.go (Search + OnMemoryWrite + Initialize). Hooks
-// driver has not yet routed through slackMemoryProviderManager
-// (SyncTurn / OnPreCompress / OnDelegation) are not asserted by these
-// fixtures; they will be added when the manager routes them.
+// memory_provider_test.go (Search + OnMemoryWrite + SyncTurn +
+// Initialize). Hooks driver has not yet routed through
+// slackMemoryProviderManager (OnPreCompress / OnDelegation) are not
+// asserted by these fixtures; they will be added when the manager
+// routes them.
 func TestMemoryQualityCanaries(t *testing.T) {
 	fixtureDir := filepath.Join("testdata", "memory_quality_fixtures")
 	entries, err := os.ReadDir(fixtureDir)
@@ -162,13 +163,7 @@ func runMemoryQualityFixture(t *testing.T, fixture memoryQualityFixture) {
 	case "sync_turn_extraction":
 		runMemorySyncTurnExtraction(t, fixture, service, provider)
 	case "entity_graph_resolution":
-		// Pending fixtures (Scenario.Pending == true) are filtered earlier.
-		// An active fixture lands here once task #231 ships an
-		// entity-graph-aware provider. The assertion body is added then;
-		// today the scenario is documented as pending and this branch
-		// logs to flag any non-pending fixture without supporting
-		// infrastructure.
-		t.Logf("[%s] entity_graph_resolution fixture present but provider/source not yet shipped (#231); ensure entity graph resolution is reachable before flipping pending=false", fixture.CaseID)
+		runMemoryEntityGraphResolution(t, fixture)
 	default:
 		t.Fatalf("[%s] unknown scenario.type %q", fixture.CaseID, fixture.Scenario.Type)
 	}
@@ -182,6 +177,40 @@ func runMemoryQualityFixture(t *testing.T, fixture memoryQualityFixture) {
 			if strings.Contains(strings.ToLower(event.Content), lower) {
 				t.Fatalf("[%s] provider write event content leaks banned token %q: %q", fixture.CaseID, banned, event.Content)
 			}
+		}
+	}
+}
+
+func runMemoryEntityGraphResolution(t *testing.T, fixture memoryQualityFixture) {
+	t.Helper()
+	search := fixture.Scenario.Search
+	if search == nil {
+		t.Fatalf("[%s] entity_graph_resolution scenario missing search", fixture.CaseID)
+	}
+	workspaceDir := t.TempDir()
+	for _, seed := range fixture.Scenario.ProviderSeedRecords {
+		writeRelatedMemoryFile(t, workspaceDir, seed.Path, seed.Content)
+	}
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Memory:       appconfig.SlackMemoryConfig{Enabled: true},
+		},
+	})
+	limit := search.Limit
+	if limit <= 0 {
+		limit = relatedMemoryDefaultLimit
+	}
+	result := service.SearchRelatedMemory(search.Query, SlackRelatedMemorySearchOptions{Limit: limit})
+	expected := fixture.ExpectedProviderEvents
+	if expected.SearchRecordsReturnedMin > 0 && len(result.Results) < expected.SearchRecordsReturnedMin {
+		t.Fatalf("[%s] entity graph SearchRelatedMemory returned %d records, want >= %d; result: %#v", fixture.CaseID, len(result.Results), expected.SearchRecordsReturnedMin, result)
+	}
+	blobs := searchResultAnchorBlobs(result)
+	joined := strings.Join(blobs, "\n---\n")
+	for _, anchor := range fixture.ExpectedSearchResultAnchors {
+		if !strings.Contains(joined, anchor) {
+			t.Fatalf("[%s] entity graph result missing anchor %q; full blob: %q", fixture.CaseID, anchor, joined)
 		}
 	}
 }

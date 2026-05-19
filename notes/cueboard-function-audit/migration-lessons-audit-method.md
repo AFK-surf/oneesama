@@ -745,6 +745,44 @@ Audit rule:
 
 Reference audit: `notes/cueboard-function-audit/memory-auto-extraction-parity-audit-2026-05-19.md`.
 
+## Entity graph parity starts with negative relationships too (worked example, task #231)
+
+The Cumora / yetone / Isoform / Alma case exposed a subtle Memory
+quality requirement: entity recall is not just "find all names in the
+same paragraph." The **negative** relationship matters too. If the
+system remembers yetone and Alma but drops "Cumora is not related to
+Alma," it can synthesize the wrong attribution with high confidence.
+
+The reference implementations show two tiers:
+
+- Cueboard projected identity notes and team memory into flat
+  `memory/people/*.md` profiles and exposed them through
+  `person_memory`.
+- Hermes Hindsight / Holographic models entities, fact/entity links,
+  structural retrieval, and trust.
+
+Task #231 ports the first local graph slice:
+
+- `entity_graph` is a Memory provider that scans workspace Memory
+  and emits relationship evidence through `SearchRelatedMemory`;
+- it expands bounded multi-hop context (Cumora -> yetone -> Isoform);
+- it preserves `not_related_to` as an explicit predicate;
+- case_005 asserts positive relationships and the negative Alma
+  disambiguation.
+
+Audit rule:
+
+- Entity Memory fixtures must include both positive and negative
+  relationship anchors when production quality depends on
+  disambiguation.
+- A graph provider may start as a source-cited local relationship
+  emitter; do not overbuild a graph database before the contract
+  fixture demands trust, contradiction, or merge UI.
+- If a query asks "A 与 B 有没有关系", the canary should prove both
+  "yes" and "no" answers can be sourced.
+
+Reference audit: `notes/cueboard-function-audit/entity-graph-memory-parity-audit-2026-05-19.md`.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.
