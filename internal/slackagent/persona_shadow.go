@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/persona"
 )
 
@@ -26,6 +27,7 @@ type SlackPersonaShadowResult struct {
 	WorkerRequests []string `json:"worker_requests,omitempty"`
 	MemoryWrites   []string `json:"memory_writes,omitempty"`
 	memoryRecords  []persona.MemoryWrite
+	workerRecords  []persona.WorkerRequest
 	ShadowOnly     bool     `json:"shadow_only"`
 	Success        bool     `json:"success"`
 	Error          string   `json:"error,omitempty"`
@@ -148,6 +150,37 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
 		})
+		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result)
+		if len(delegation.ToolCalls) > 0 {
+			toolCalls = append(toolCalls, delegation.ToolCalls...)
+		}
+		failures = maxInt(failures, delegation.Failures)
+		if err := s.recordSlackTriagePersonaForegroundResult(ctx, workspaceID, runID, result, actions, toolCalls, failures, mutations); err != nil {
+			s.logger.Warn("persona runtime foreground triage result record failed", "triage_run_id", runID, "error", err)
+		}
+	}()
+	return true
+}
+
+func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, workspaceID string, runID int64, channelID string, threadTS string, messages []SlackInboundMessage, request persona.Request, ignoreExistingBotReply bool) bool {
+	if !s.foregroundPersonaRuntimeEnabled() || runID == 0 {
+		return false
+	}
+	request.Mode = persona.ModeLive
+	go func() {
+		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
+		defer cancel()
+		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
+		actions := slackPersonaForegroundActions(channelID, threadTS, result)
+		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
+			SnapshotMessages:       messages,
+			IgnoreExistingBotReply: ignoreExistingBotReply,
+		})
+		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result)
+		if len(delegation.ToolCalls) > 0 {
+			toolCalls = append(toolCalls, delegation.ToolCalls...)
+		}
+		failures = maxInt(failures, delegation.Failures)
 		if err := s.recordSlackTriagePersonaForegroundResult(ctx, workspaceID, runID, result, actions, toolCalls, failures, mutations); err != nil {
 			s.logger.Warn("persona runtime foreground triage result record failed", "triage_run_id", runID, "error", err)
 		}
@@ -160,6 +193,100 @@ func (s *Service) personaRuntimeShadowTimeout() time.Duration {
 		return s.personaRuntimeConfig.Timeout
 	}
 	return 90 * time.Second
+}
+
+type personaDelegatedWorkerStartResult struct {
+	JobIDs    []string
+	Errors    []string
+	ToolCalls []SlackTriageToolCall
+	Failures  int
+}
+
+func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspaceID string, runID int64, result SlackPersonaShadowResult) personaDelegatedWorkerStartResult {
+	out := personaDelegatedWorkerStartResult{}
+	if s == nil || strings.TrimSpace(result.Decision) != persona.DecisionDelegateWorker || len(result.workerRecords) == 0 {
+		return out
+	}
+	if s.runner == nil {
+		errText := "agent runner is not ready: " + runnerErrorText(s.runnerErr)
+		out.Errors = append(out.Errors, errText)
+		out.Failures = 1
+		out.ToolCalls = append(out.ToolCalls, SlackTriageToolCall{
+			Tool:    "agent_runner",
+			Action:  "delegate_worker",
+			Success: false,
+			Brief:   "Persona delegate_worker could not start Codex worker",
+			Result:  errText,
+		})
+		return out
+	}
+	for index, request := range result.workerRecords {
+		if index >= 3 {
+			out.Errors = append(out.Errors, "delegate_worker_limit_exceeded")
+			break
+		}
+		prompt := strings.TrimSpace(request.Prompt)
+		if prompt == "" {
+			prompt = "Handle the delegated Slack task from Pi foreground triage."
+		}
+		workerID := firstNonEmpty(strings.TrimSpace(request.ID), fmt.Sprintf("%s:worker:%d", result.RequestID, index+1))
+		contextMap := mergeStringAnyMaps(request.Context, map[string]any{
+			"source":        "persona_delegate_worker",
+			"sessionId":     firstNonEmpty(strings.TrimSpace(result.RequestID), fmt.Sprintf("triage:%d", runID)),
+			"session_id":    firstNonEmpty(strings.TrimSpace(result.RequestID), fmt.Sprintf("triage:%d", runID)),
+			"workspaceId":   workspaceID,
+			"workspace_id":  workspaceID,
+			"triageRunId":   runID,
+			"triage_run_id": runID,
+			"slack": map[string]any{
+				"workspaceId": workspaceID,
+				"channelId":   strings.TrimSpace(result.ChannelID),
+				"channel_id":  strings.TrimSpace(result.ChannelID),
+				"threadTs":    strings.TrimSpace(result.ThreadTS),
+				"thread_ts":   strings.TrimSpace(result.ThreadTS),
+			},
+			"persona": map[string]any{
+				"request_id": result.RequestID,
+				"decision":   result.Decision,
+				"reason":     result.Reason,
+				"confidence": result.Confidence,
+				"worker_id":  workerID,
+			},
+		})
+		job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
+			Task:             prompt,
+			Context:          contextMap,
+			Mode:             "analysis",
+			AllowCodeChanges: false,
+		}, agentrunner.SessionKindSlack))
+		if err != nil {
+			errText := err.Error()
+			out.Errors = append(out.Errors, errText)
+			out.Failures = 1
+			out.ToolCalls = append(out.ToolCalls, SlackTriageToolCall{
+				Tool:    "agent_runner",
+				Action:  "delegate_worker",
+				Args:    marshalTriageArgs("persona", workerID, false),
+				Success: false,
+				Brief:   "Persona delegate_worker start failed",
+				Result:  errText,
+			})
+			continue
+		}
+		out.JobIDs = append(out.JobIDs, job.ID)
+		out.ToolCalls = append(out.ToolCalls, SlackTriageToolCall{
+			Tool:    "agent_runner",
+			Action:  "delegate_worker",
+			Args:    marshalTriageArgs(job.Provider, job.ID, true),
+			Success: true,
+			Brief:   "Persona delegated worker started",
+			Result:  prompt,
+		})
+	}
+	if len(out.Errors) > 0 && len(out.JobIDs) == 0 {
+		out.Failures = 1
+	}
+	return out
 }
 
 func (s *Service) recordSlackTriagePersonaShadowResult(ctx context.Context, runID int64, result SlackPersonaShadowResult) error {
@@ -208,6 +335,8 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	patch.Mutations = maxInt(current.Mutations, mutations)
 	patch.Failures = maxInt(current.Failures, failures)
 	memoryWritePersistence := s.persistPersonaForegroundMemoryWrites(ctx, result)
+	delegateWorkerJobsStarted := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker")
+	delegateWorkerFailures := countMatchingFailedTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker")
 	if !result.Success {
 		patch.Status = "failed"
 		patch.Error = firstNonEmpty(result.Error, "persona_runtime_failed")
@@ -215,31 +344,37 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	} else if failures > 0 {
 		patch.Status = "failed"
 		patch.Error = firstNonEmpty(result.Error, "persona_foreground_post_failed")
+	} else {
+		patch.Status = "ok"
+		patch.Summary = firstNonEmpty(result.VisibleText, result.Reason, patch.Summary)
 	}
 	patch.Metadata = mergeStringAnyMaps(current.Metadata, map[string]any{
 		"persona_foreground":              result,
 		"persona_foreground_queued":       false,
 		"persona_foreground_done_at":      nowRFC3339(),
+		"pi_first_decision":               strings.TrimSpace(result.Decision),
 		"persona_foreground_action_count": len(actions),
+		"delegate_worker_jobs_started":    delegateWorkerJobsStarted,
+		"delegate_worker_failures":        delegateWorkerFailures,
 		"persona_memory_write_files":      memoryWritePersistence.Files,
 		"persona_memory_write_errors":     memoryWritePersistence.Errors,
 		"persona_memory_write_redactions": memoryWritePersistence.Redactions,
 	})
-	updated, err := s.triage.UpdateRun(ctx, patch)
-	if err != nil {
-		return err
-	}
-	if updated != nil {
-		persistTriageContext(s.workspaceDir, *updated)
-	}
-	if personaEmptyFinal && updated != nil {
-		s.maybeRecordTriageEmptyFinalFollowup(ctx, workspaceID, result.ChannelID, result.ThreadTS, updated, nil, map[string]any{
+	if personaEmptyFinal {
+		s.maybeRecordTriageEmptyFinalFollowup(ctx, workspaceID, result.ChannelID, result.ThreadTS, &patch, nil, map[string]any{
 			"failure_source":     "persona_foreground",
 			"persona_runtime":    strings.TrimSpace(result.Runtime),
 			"persona_request_id": strings.TrimSpace(result.RequestID),
 			"persona_decision":   strings.TrimSpace(result.Decision),
 			"error":              truncateSlackContextText(result.Error, 400),
 		})
+	}
+	updated, err := s.triage.UpdateRun(ctx, patch)
+	if err != nil {
+		return err
+	}
+	if updated != nil {
+		persistTriageContext(s.workspaceDir, *updated)
 	}
 	if result.ChannelID != "" && result.ThreadTS != "" {
 		summary := firstNonEmpty(result.VisibleText, result.Reason, patch.Summary)
@@ -303,6 +438,26 @@ func replacePersonaRuntimeToolCall(calls []SlackTriageToolCall, action string, c
 	return append(out, call)
 }
 
+func countMatchingSuccessfulTriageToolCalls(calls []SlackTriageToolCall, tool string, action string) int {
+	count := 0
+	for _, call := range calls {
+		if call.Tool == tool && call.Action == action && call.Success {
+			count++
+		}
+	}
+	return count
+}
+
+func countMatchingFailedTriageToolCalls(calls []SlackTriageToolCall, tool string, action string) int {
+	count := 0
+	for _, call := range calls {
+		if call.Tool == tool && call.Action == action && !call.Success {
+			count++
+		}
+	}
+	return count
+}
+
 func slackPersonaForegroundActions(channelID string, threadTS string, result SlackPersonaShadowResult) []SlackTriageDecisionAction {
 	if !result.Success || result.ShadowOnly || result.Decision != persona.DecisionReply || strings.TrimSpace(result.VisibleText) == "" {
 		return nil
@@ -321,6 +476,12 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 type SlackTriagePersonaRequestOptions struct {
 	IgnoreExistingBotReply bool
 	WorkspaceTriagePolicy  string
+	PiFirst                bool
+	Digest                 string
+	ExternalLinks          []SlackExternalLinkContext
+	ThreadContexts         []SlackTriageThreadContext
+	ChannelContexts        []SlackInboundMessage
+	PreviousTriage         string
 }
 
 func BuildSlackTriagePersonaRequest(channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) persona.Request {
@@ -331,18 +492,40 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 	messages = normalizeSlackInboundMessages(messages)
 	text := strings.TrimSpace(joinSlackMessageTexts(messages))
 	if text == "" {
-		text = strings.TrimSpace(decision.Summary)
+		text = strings.TrimSpace(firstNonEmpty(options.Digest, decision.Summary))
 	}
 	citations := personaCitationsFromRelatedMemory(relatedMemory)
-	contextItems := []persona.ContextItem{
-		{Kind: "triage_summary", Text: strings.TrimSpace(decision.Summary)},
-		{Kind: "triage_actions", Text: fmt.Sprintf("%d action(s)", len(decision.Actions))},
-	}
-	if candidateActions := formatSlackTriagePersonaCandidateActions(decision.Actions); candidateActions != "" {
-		contextItems = append(contextItems, persona.ContextItem{
-			Kind: "triage_candidate_actions",
-			Text: candidateActions,
-		})
+	contextItems := make([]persona.ContextItem, 0, 8)
+	if options.PiFirst {
+		if digest := strings.TrimSpace(options.Digest); digest != "" {
+			contextItems = append(contextItems, persona.ContextItem{Kind: "triage_digest", Text: truncateSlackContextText(digest, 4000)})
+		}
+		if threadContext := formatSlackTriageThreadContexts(options.ThreadContexts); strings.TrimSpace(threadContext) != "" {
+			contextItems = append(contextItems, persona.ContextItem{Kind: "slack_thread_context", Text: truncateSlackContextText(threadContext, 6000)})
+		}
+		if len(options.ChannelContexts) > 0 {
+			contextItems = append(contextItems, persona.ContextItem{
+				Kind: "slack_channel_context",
+				Text: truncateSlackContextText(renderSlackTriageThreadTranscript(options.ChannelContexts), 4000),
+			})
+		}
+		if external := formatSlackExternalLinkContexts(options.ExternalLinks); strings.TrimSpace(external) != "" {
+			contextItems = append(contextItems, persona.ContextItem{Kind: "external_link_context", Text: truncateSlackContextText(external, 4000)})
+		}
+		if previous := strings.TrimSpace(options.PreviousTriage); previous != "" {
+			contextItems = append(contextItems, persona.ContextItem{Kind: "previous_triage_context", Text: truncateSlackContextText(previous, 3000)})
+		}
+	} else {
+		contextItems = append(contextItems,
+			persona.ContextItem{Kind: "triage_summary", Text: strings.TrimSpace(decision.Summary)},
+			persona.ContextItem{Kind: "triage_actions", Text: fmt.Sprintf("%d action(s)", len(decision.Actions))},
+		)
+		if candidateActions := formatSlackTriagePersonaCandidateActions(decision.Actions); candidateActions != "" {
+			contextItems = append(contextItems, persona.ContextItem{
+				Kind: "triage_candidate_actions",
+				Text: candidateActions,
+			})
+		}
 	}
 	if workspacePolicy := strings.TrimSpace(options.WorkspaceTriagePolicy); workspacePolicy != "" {
 		contextItems = append(contextItems, persona.ContextItem{
@@ -353,6 +536,7 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 	metadata := map[string]any{
 		"decision_parse_ok": decision.ParseOK,
 		"actions":           len(decision.Actions),
+		"foreground_chain":  mapBool(options.PiFirst, slackTriageForegroundChainPiFirstLive, slackTriageForegroundChainCodexThenPi),
 	}
 	if options.IgnoreExistingBotReply {
 		contextItems = append(contextItems, persona.ContextItem{
@@ -375,7 +559,7 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 		},
 		Context: contextItems,
 		Evidence: persona.EvidenceBundle{
-			Summary:   strings.TrimSpace(decision.Summary),
+			Summary:   strings.TrimSpace(firstNonEmpty(decision.Summary, options.Digest)),
 			Citations: citations,
 		},
 		Memory: persona.MemoryContext{
@@ -483,6 +667,7 @@ func callPersonaShadow(ctx context.Context, runtime persona.Runtime, source stri
 	result.Confidence = resp.Confidence
 	result.WorkerRequests = personaWorkerRequestSummaries(resp.WorkerRequests)
 	result.MemoryWrites = personaMemoryWriteSummaries(resp.MemoryWrites)
+	result.workerRecords = append([]persona.WorkerRequest(nil), resp.WorkerRequests...)
 	result.memoryRecords = append([]persona.MemoryWrite(nil), resp.MemoryWrites...)
 	result.ShadowOnly = resp.ShadowOnly
 	result.Reason = resp.Reason

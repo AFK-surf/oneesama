@@ -589,6 +589,171 @@ func TestSlackTriageLivePersonaStaySilentDoesNotPostOldBridgeMentionCandidate(t 
 	}
 }
 
+func TestSlackTriagePiFirstLiveSkipsPrePiRunnerAndPostsPersonaReply(t *testing.T) {
+	ctx := context.Background()
+	workspaceDir := t.TempDir()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_should_not_start_before_pi",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"codex should not run","actions":[{"type":"post_thread_reply","message":"wrong"}]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Triage: appconfig.SlackTriageConfig{
+				ForegroundChain: "pi_first_live",
+				WorkspacePolicy: "In this workspace, reply to source-backed product-adjacent articles when evidence is available.",
+			},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:     persona.ProviderPi,
+		Decision:    persona.DecisionReply,
+		VisibleText: "Pi-first 直接评价：这篇文章和我们的产品判断很接近。",
+		Reason:      "workspace policy says to engage product-adjacent evidence-backed links",
+		Confidence:  0.86,
+		ShadowOnly:  false,
+	}}
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "<@U_ONEE> 这条产品评论文章你怎么看？",
+		TS:             "220.000",
+	}}, "#meeting-avatar: <@U_ONEE> 这条产品评论文章你怎么看？")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if started.Job != nil || started.Finalization != nil {
+		t.Fatalf("started = %#v, want no pre-Pi agent_runner job/finalization", started)
+	}
+	if runner.startCount != 0 {
+		t.Fatalf("runner.startCount = %d, want no pre-Pi StartTask", runner.startCount)
+	}
+	poster.WaitForCalls(t, 1)
+	if runner.startCount != 0 {
+		t.Fatalf("runner.startCount after Pi reply = %d, want no StartTask", runner.startCount)
+	}
+	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "Pi-first 直接评价") {
+		t.Fatalf("poster calls = %#v, want Pi-first visible reply", calls)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if updated.Metadata["foreground_chain"] != slackTriageForegroundChainPiFirstLive {
+		t.Fatalf("metadata = %#v, want foreground_chain=pi_first_live", updated.Metadata)
+	}
+	if boolFromAny(updated.Metadata["pre_pi_agent_runner_started"], true) {
+		t.Fatalf("metadata = %#v, want pre_pi_agent_runner_started=false", updated.Metadata)
+	}
+	if updated.Metadata["pi_first_decision"] != persona.DecisionReply {
+		t.Fatalf("metadata = %#v, want pi_first_decision=reply", updated.Metadata)
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.requests) != 1 || runtime.requests[0].Mode != persona.ModeLive {
+		t.Fatalf("persona requests = %#v, want one live request", runtime.requests)
+	}
+	var sawPolicy, sawDigest, sawCandidate bool
+	for _, item := range runtime.requests[0].Context {
+		switch item.Kind {
+		case "workspace_triage_policy":
+			sawPolicy = strings.Contains(item.Text, "product-adjacent")
+		case "triage_digest":
+			sawDigest = strings.Contains(item.Text, "产品评论文章")
+		case "triage_candidate_actions":
+			sawCandidate = true
+		}
+	}
+	if !sawPolicy || !sawDigest || sawCandidate {
+		t.Fatalf("persona context = %#v, want policy+digest and no Codex candidate actions", runtime.requests[0].Context)
+	}
+}
+
+func TestSlackTriagePiFirstLiveDelegatesWorkerAfterPiDecision(t *testing.T) {
+	ctx := context.Background()
+	workspaceDir := t.TempDir()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:  persona.ProviderPi,
+		Decision: persona.DecisionDelegateWorker,
+		Reason:   "needs repository/tool inspection before answering",
+		WorkerRequests: []persona.WorkerRequest{{
+			ID:     "inspect-repo",
+			Kind:   "codex",
+			Prompt: "Inspect the linked repository and summarize whether it overlaps with our product.",
+		}},
+		Confidence: 0.41,
+		ShadowOnly: false,
+	}}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_delegate_after_pi",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Triage:       appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "<@U_ONEE> 这个 repo 和我们的产品方向重合吗？",
+		TS:             "221.000",
+	}}, "#meeting-avatar: <@U_ONEE> 这个 repo 和我们的产品方向重合吗？")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if runner.startCount != 1 {
+		t.Fatalf("runner.startCount = %d, want exactly one post-Pi delegate worker", runner.startCount)
+	}
+	if updated.Metadata["pi_first_decision"] != persona.DecisionDelegateWorker || intFromAny(updated.Metadata["delegate_worker_jobs_started"]) != 1 {
+		t.Fatalf("metadata = %#v, want delegate decision + one worker job", updated.Metadata)
+	}
+	slack, ok := mapFromAny(runner.startInput.Context["slack"])
+	if !ok || stringFromAny(slack["channel_id"]) != "C_TRIAGE" || stringFromAny(slack["thread_ts"]) != "221.000" {
+		t.Fatalf("runner slack context = %#v, want channel/thread context", runner.startInput.Context["slack"])
+	}
+	if runner.startInput.Context["session_kind"] != agentrunner.SessionKindSlack {
+		t.Fatalf("runner context session_kind = %#v, want slack_case", runner.startInput.Context["session_kind"])
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want worker to answer asynchronously later", got)
+	}
+}
+
 func TestSlackTriageLivePersonaEmptyReplyRecordsRetryFollowup(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 5, 19, 1, 50, 0, 0, time.UTC)

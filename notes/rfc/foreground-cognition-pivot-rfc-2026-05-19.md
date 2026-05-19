@@ -1,7 +1,7 @@
 # RFC: Pi-First Foreground Cognition For Slack Triage
 
 Date: 2026-05-19
-Status: Draft
+Status: Phase 1 implemented behind `slack.triage.foreground_chain`
 Owners: @劲霸仁波切, @喵喵
 
 ## Context
@@ -10,7 +10,35 @@ Peng pointed out that the post-cutover implementation is still confusing: we say
 
 That means the live chain is not truly Pi-first. It is currently closer to "Codex proposes, Pi reviews/refines". The intended architecture is "Pi decides, Codex is delegated only when Pi asks for a worker".
 
-This RFC freezes implementation work until the architecture, rollout, and acceptance gates are explicit.
+This RFC was originally written as a pause point. Peng later directed
+the team to implement directly, so Phase 1 now treats this document as
+the executable contract and audit checklist rather than a blocker.
+
+## Proposed Decisions For Review
+
+These are the recommended decisions for the first implementation
+slice. They are written explicitly so review can approve/change them
+before code moves.
+
+1. **Scope the first cut to automatic scanner triage.**
+   App-mention worker tasks and explicit user-initiated worker flows
+   stay on their current paths until scanner triage proves Pi-first.
+2. **Pi unavailable means fail closed or explicit operator rollback.**
+   Do not silently fall back to Codex visible replies in `pi_first_live`.
+   Rollback is allowed only by flipping the foreground-chain flag and
+   leaving an audit trail.
+3. **No silent fallback in live.**
+   Peng directed direct implementation rather than a timed shadow gate.
+   In `pi_first_live`, Pi is the first foreground cognition step; if Pi
+   is unavailable, the event fails closed until an operator explicitly
+   rolls back the flag.
+4. **Low confidence must delegate.**
+   If Pi lacks context, tools, or certainty on an answerable request, it
+   returns `delegate_worker` instead of a hedged visible reply.
+5. **Workspace engagement taste stays configurable.**
+   Topic preference such as "comment on product-adjacent AI-agent
+   articles" is supplied through `workspace_triage_policy`, not the
+   universal Pi prompt or hardcoded Go triage policy.
 
 ## Current Implementation
 
@@ -309,6 +337,71 @@ When Pi returns `delegate_worker`, Go should create a worker job with:
 - [ ] Keep `agent_runner` for explicit `/work`, app-mention worker tasks, and Pi `delegate_worker`.
 - [ ] Update migration lessons and delete misleading fallback/candidate tests.
 
+## Step-by-Step Task Split
+
+This is the executable breakdown implied by the migration plan. Each
+step should be a separate task/commit boundary unless a later review
+intentionally combines them.
+
+### Step 1 — Review-Ready RFC And Decisions
+
+- [x] Document current `codex_then_pi` chain with file references.
+- [x] Document target Pi-first chain and no-hedge/delegate rule.
+- [x] Document workspace-policy layering so workspace taste does not
+  leak into universal Pi behavior.
+- [x] Add proposed decisions for Peng review.
+- [x] Peng overrode the pause and directed direct implementation; @喵喵
+  is supervising through active fixture/audit commits.
+
+### Step 2 — Instrument Foreground Chain
+
+- [x] Add config enum `slack.triage.foreground_chain`.
+- [x] Default it to the current `codex_then_pi`.
+- [x] Record `foreground_chain`, `pre_pi_agent_runner_started`,
+  `pi_first_decision`, and `delegate_worker_jobs_started` in triage
+  audit metadata.
+- [x] Add tests proving `pi_first_live` reports no pre-Pi runner.
+- [ ] Deploy and verify live audit shows the active chain honestly.
+
+### Step 3 — Build Pi-First Request Builder
+
+- [x] Add a Pi-first request builder that takes Slack context, Memory,
+  link/thread/file evidence, and workspace policy, but no
+  `SlackTriageDecision`.
+- [x] Run it in live when `foreground_chain=pi_first_live`.
+- [x] Store Pi-first decision, latency, citations, worker
+  requests, and no-hedge/delegate markers.
+- [ ] Extend `cmd/oneesama-triage-replay` with `--foreground-chain` for
+  offline side-by-side reports.
+
+### Step 4 — Quality Gate On Real Cases
+
+- [ ] Replay the should-port old Slack Agent D mutation set.
+- [ ] Replay the Memory-backed scanner cases that previously regressed.
+- [ ] Add `pi_low_confidence_must_delegate`.
+- [ ] Add `workspace_policy_engagement` with two workspace policies and
+  the same input producing different engagement decisions.
+- [ ] Produce a shadow report: current chain vs Pi-first decision,
+  mutation rate, missed-reply cases, latency, and user-visible richness.
+
+### Step 5 — Pi-First Live Behind Flag
+
+- [x] Enable `pi_first_live` behind an explicit config/env flag.
+- [x] In `pi_first_live`, do not call `agent_runner.StartTask` before Pi.
+- [x] Implement `delegate_worker` job creation from Pi response.
+- [x] Keep explicit rollback to `codex_then_pi` for one deploy window,
+  but never silently fallback per event.
+- [ ] Verify live audit has `pre_pi_agent_runner_started=false`.
+
+### Step 6 — Remove Old Candidate Generator Path
+
+- [x] Remove `triage_candidate_actions` from the Pi-first foreground Pi request.
+- [ ] Remove `SlackTriageDecision` from
+  `queueSlackTriagePersonaForeground`.
+- [ ] Keep `SlackTriageDecision` only where explicitly needed for
+  replay/legacy current-chain comparison until the rollback window ends.
+- [ ] Update migration lessons with the final worked example.
+
 ## Acceptance Gates
 
 ### Architecture Gates
@@ -363,6 +456,22 @@ New `case_NNN_pi_first_foreground` fixture, contract item
     request;
   - audit row written with `foreground_chain=pi_first_live` and
     `pre_pi_agent_runner_started=false`.
+
+New `case_NNN_workspace_policy_engagement` fixture, contract item
+`C238_workspace_policy_externalization`:
+
+- input: same source-backed product-adjacent article link in a casual
+  channel, with no explicit question;
+- policy A: workspace policy permits lightweight source-backed
+  comments on AI-agent/coding-tool articles;
+- policy B: workspace policy does not permit proactive article
+  commentary;
+- assertions:
+  - the same Pi binary and same Go runtime make different engagement
+    decisions only because `workspace_triage_policy` differs;
+  - neither Pi prompt nor Go triage prompt contains workspace-specific
+    product names;
+  - audit row records the policy version/hash used for the decision.
 
 ### memory_quality_fixtures (task #232 suite, supervisor-owned)
 
@@ -444,6 +553,25 @@ Rollback should be explicit and observable:
 - What is the acceptable quality threshold in Phase 1 shadow: equal mutation rate, equal user-visible quality, or specific should-port fixture pass rate?
 - What confidence/evidence threshold should force `delegate_worker` instead of `reply`?
 - Should old Bridge identity retirement be part of this migration, or remain a separate product decision?
+
+## Recommended Answers To Open Questions
+
+Driver recommendation for the first implementation round:
+
+- Pi unavailable: **fail closed per event, rollback only by explicit
+  operator flag**. Silent Codex visible fallback would recreate the
+  architecture drift.
+- App-mention worker tasks: **do not include in this first round**.
+  Start with automatic scanner triage because that is where the hidden
+  candidate generator currently lives.
+- Shadow quality threshold: **100% pass on should-port fixtures, no
+  red safety/audit flags, and an explicit review of any lower mutation
+  rate**. Equal mutation count alone is not sufficient.
+- Delegate threshold: **missing evidence/tooling/context or a hedged
+  answer shape must delegate** if the request is answerable and in
+  scope; otherwise stay silent.
+- Old Bridge identity: **separate product decision**. Do not use this
+  RFC to intercept users explicitly talking to the old Bridge bot.
 
 ### Additional Supervisor Open Questions
 

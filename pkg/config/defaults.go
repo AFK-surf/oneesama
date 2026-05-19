@@ -19,6 +19,7 @@ const (
 	defaultSlackEventDebounce           = 5 * time.Minute
 	defaultSlackTriagePostActions       = true
 	defaultSlackTriageHeuristicFallback = true
+	defaultSlackTriageForegroundChain   = "codex_then_pi"
 	defaultSlackMeetingScannerInterval  = time.Minute
 	defaultGoogleCalendarID             = "primary"
 	defaultGoogleCalendarAPIBaseURL     = "https://www.googleapis.com/calendar/v3"

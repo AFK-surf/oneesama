@@ -1,7 +1,7 @@
 {
   "case_id": "case_007_pi_first_foreground_pending",
-  "pending": true,
-  "pending_reason": "awaiting_task_237_pi_first_cutover_implementation",
+  "pending": false,
+  "pending_reason": "",
   "source": {
     "old_slack_db_run_id": null,
     "occurred_at": "2026-05-19T22:44:00+08:00",

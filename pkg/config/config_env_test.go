@@ -15,6 +15,7 @@ func TestLoadHonorsSlackEventBufferEnvOverrides(t *testing.T) {
 	t.Setenv("ONEESAMA_SLACK_TRIAGE_POST_ACTIONS", "false")
 	t.Setenv("ONEESAMA_SLACK_TRIAGE_HEURISTIC_FALLBACK", "false")
 	t.Setenv("ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY", "Reply to source-backed product-adjacent articles in this workspace.")
+	t.Setenv("ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN", "pi_first_live")
 	t.Setenv("ONEESAMA_SLACK_MEMORY_ENABLED", "true")
 	t.Setenv("ONEESAMA_SLACK_MEMORY_DIR", "/tmp/oneesama-slack-memory")
 	t.Setenv("ONEESAMA_SLACK_MEMORY_SEMANTIC_ENABLED", "true")
@@ -32,6 +33,9 @@ func TestLoadHonorsSlackEventBufferEnvOverrides(t *testing.T) {
 	}
 	if cfg.Slack.Triage.WorkspacePolicy != "Reply to source-backed product-adjacent articles in this workspace." {
 		t.Fatalf("Slack.Triage.WorkspacePolicy = %q, want env value", cfg.Slack.Triage.WorkspacePolicy)
+	}
+	if cfg.Slack.Triage.ForegroundChain != "pi_first_live" {
+		t.Fatalf("Slack.Triage.ForegroundChain = %q, want env value", cfg.Slack.Triage.ForegroundChain)
 	}
 	if !cfg.Slack.Memory.Enabled || cfg.Slack.Memory.Dir != "/tmp/oneesama-slack-memory" {
 		t.Fatalf("Slack.Memory = %#v, want env overrides", cfg.Slack.Memory)

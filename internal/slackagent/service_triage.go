@@ -18,7 +18,30 @@ const (
 	slackTriageLowContextCharThreshold = 200
 	slackTriageAuditDefaultWindow      = 6 * time.Hour
 	slackTriageAuditStaleSampleAfter   = 2 * time.Hour
+
+	slackTriageForegroundChainCodexThenPi = "codex_then_pi"
+	slackTriageForegroundChainPiFirstLive = "pi_first_live"
 )
+
+func normalizeSlackTriageForegroundChain(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case slackTriageForegroundChainPiFirstLive:
+		return slackTriageForegroundChainPiFirstLive
+	default:
+		return slackTriageForegroundChainCodexThenPi
+	}
+}
+
+func (s *Service) slackTriageForegroundChain() string {
+	if s == nil {
+		return slackTriageForegroundChainCodexThenPi
+	}
+	return normalizeSlackTriageForegroundChain(s.triageForegroundChain)
+}
+
+func (s *Service) piFirstForegroundLiveEnabled(probe bool) bool {
+	return !probe && s.foregroundPersonaRuntimeEnabled() && s.slackTriageForegroundChain() == slackTriageForegroundChainPiFirstLive
+}
 
 type slackTriageStartOptions struct {
 	Probe                  bool
@@ -947,7 +970,13 @@ func (s *Service) StartSlackTriageProbe(ctx context.Context) (SlackTriageStartRe
 }
 
 func (s *Service) startSlackTriage(ctx context.Context, channelID string, messages []SlackInboundMessage, digest string, options slackTriageStartOptions) (SlackTriageStartResult, error) {
-	if s.runner == nil {
+	foregroundChain := s.slackTriageForegroundChain()
+	configuredPiFirstLive := !options.Probe && foregroundChain == slackTriageForegroundChainPiFirstLive
+	if configuredPiFirstLive && !s.foregroundPersonaRuntimeEnabled() {
+		return SlackTriageStartResult{}, fmt.Errorf("persona foreground runtime is not ready for pi_first_live")
+	}
+	piFirstLive := configuredPiFirstLive
+	if !piFirstLive && s.runner == nil {
 		return SlackTriageStartResult{}, fmt.Errorf("agent runner is not ready: %s", runnerErrorText(s.runnerErr))
 	}
 	messages = normalizeSlackInboundMessages(messages)
@@ -976,6 +1005,12 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 			"ignored_existing_bot_reply_count": ignoredBotReplyCount,
 		})
 	}
+	auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
+		"foreground_chain":             foregroundChain,
+		"pre_pi_agent_runner_started":  !piFirstLive,
+		"persona_foreground_pi_first":  piFirstLive,
+		"delegate_worker_jobs_started": 0,
+	})
 	auditMetadata = mergeStringAnyMaps(auditMetadata, options.ExtraMetadata)
 	run, err := s.triage.RecordRun(ctx, SlackTriageContext{
 		SessionID: sessionID,
@@ -996,6 +1031,36 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest)
 	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(memoryQuery, 5), memoryQuery)
 	relatedMemory := s.searchSlackTriageRelatedMemory(memoryQuery, 5)
+	if piFirstLive {
+		request := BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, SlackTriageDecision{}, relatedMemory.Results, SlackTriagePersonaRequestOptions{
+			PiFirst:                true,
+			Digest:                 digest,
+			ExternalLinks:          externalLinks,
+			ThreadContexts:         threadContexts,
+			ChannelContexts:        channelContexts,
+			PreviousTriage:         formatTriageContexts(previous),
+			IgnoreExistingBotReply: options.IgnoreExistingBotReply,
+			WorkspaceTriagePolicy:  s.triageWorkspacePolicy,
+		})
+		runPatch := *run
+		runPatch.Summary = fmt.Sprintf("Pi-first foreground triage pending for %d Slack message(s) in %s", len(messages), channelID)
+		runPatch.Metadata = mergeStringAnyMaps(run.Metadata, map[string]any{
+			"persona_foreground_queued": true,
+			"expectedOutput":            "Pi persona decision with optional delegate_worker",
+		})
+		updatedRun, err := s.triage.UpdateRun(ctx, runPatch)
+		if err != nil {
+			return SlackTriageStartResult{Run: run}, err
+		}
+		if updatedRun != nil {
+			persistTriageContext(s.workspaceDir, *updatedRun)
+			run = updatedRun
+		}
+		if !s.queueSlackTriagePersonaForegroundRequest(context.WithoutCancel(ctx), workspaceID, run.ID, channelID, threadTS, messages, request, options.IgnoreExistingBotReply) {
+			return SlackTriageStartResult{Run: run}, fmt.Errorf("persona foreground runtime is not ready")
+		}
+		return SlackTriageStartResult{Run: run}, nil
+	}
 	prompt := buildSlackTriagePrompt(SlackTriagePromptInput{
 		ChannelID:              channelID,
 		Messages:               messages,
@@ -1044,16 +1109,20 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 			"count":       len(previous),
 			"text":        formatTriageContexts(previous),
 		},
-		"externalLinks":             externalLinks,
-		"workspaceTriagePolicy":     s.triageWorkspacePolicy,
-		"workspace_triage_policy":   s.triageWorkspacePolicy,
-		"threadContexts":            threadContexts,
-		"channelContexts":           channelContexts,
-		"triageAudit":               auditMetadata,
-		"triageProbe":               options.Probe,
-		"ignoreExistingBotReply":    options.IgnoreExistingBotReply,
-		"ignore_existing_bot_reply": options.IgnoreExistingBotReply,
-		"expectedOutput":            "JSON triage decision with summary and actions[]",
+		"externalLinks":               externalLinks,
+		"workspaceTriagePolicy":       s.triageWorkspacePolicy,
+		"workspace_triage_policy":     s.triageWorkspacePolicy,
+		"threadContexts":              threadContexts,
+		"channelContexts":             channelContexts,
+		"triageAudit":                 auditMetadata,
+		"foregroundChain":             foregroundChain,
+		"foreground_chain":            foregroundChain,
+		"prePiAgentRunnerStarted":     true,
+		"pre_pi_agent_runner_started": true,
+		"triageProbe":                 options.Probe,
+		"ignoreExistingBotReply":      options.IgnoreExistingBotReply,
+		"ignore_existing_bot_reply":   options.IgnoreExistingBotReply,
+		"expectedOutput":              "JSON triage decision with summary and actions[]",
 	}
 	job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
 		Task:             prompt,

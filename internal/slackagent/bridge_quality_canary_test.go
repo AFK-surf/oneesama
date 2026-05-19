@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
+	"github.com/AFK-surf/oneesama/internal/persona"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
@@ -15,16 +18,16 @@ import (
 // testdata/bridge_quality_fixtures/*.json. Schema is documented in
 // testdata/bridge_quality_fixtures/README.md.
 type bridgeQualityFixture struct {
-	CaseID                string                       `json:"case_id"`
-	Source                bridgeQualityFixtureSource   `json:"source"`
-	Input                 bridgeQualityFixtureInput    `json:"input"`
-	Pending               bool                         `json:"pending"`
-	PendingReason         string                       `json:"pending_reason"`
-	ExpectedContractItems []string                     `json:"expected_contract_items"`
-	ExpectedEvidence      []string                     `json:"expected_evidence_anchors"`
-	ExpectedTools         []string                     `json:"expected_tools_invoked"`
-	ExpectedDecisionShape bridgeQualityFixtureDecision `json:"expected_decision_shape"`
-	IntendedProviderSignals []string                   `json:"intended_provider_signals"`
+	CaseID                  string                       `json:"case_id"`
+	Source                  bridgeQualityFixtureSource   `json:"source"`
+	Input                   bridgeQualityFixtureInput    `json:"input"`
+	Pending                 bool                         `json:"pending"`
+	PendingReason           string                       `json:"pending_reason"`
+	ExpectedContractItems   []string                     `json:"expected_contract_items"`
+	ExpectedEvidence        []string                     `json:"expected_evidence_anchors"`
+	ExpectedTools           []string                     `json:"expected_tools_invoked"`
+	ExpectedDecisionShape   bridgeQualityFixtureDecision `json:"expected_decision_shape"`
+	IntendedProviderSignals []string                     `json:"intended_provider_signals"`
 }
 
 type bridgeQualityFixtureSource struct {
@@ -177,6 +180,8 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 					t.Fatalf("[%s] slackToolEvidence missing tool %q; evidence: %q", fixture.CaseID, tool, evidence)
 				}
 			}
+		case "C237_pi_first_foreground_no_pre_pi_runner":
+			assertBridgeQualityPiFirstForeground(t, fixture)
 		default:
 			t.Logf("[%s] contract item %q not asserted by this scaffold yet; future fixtures should extend runBridgeQualityFixture", fixture.CaseID, item)
 		}
@@ -193,6 +198,73 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 		if tools, _ := runnerContext["slackToolEvidence"].(string); strings.Contains(strings.ToLower(tools), lower) {
 			t.Fatalf("[%s] slackToolEvidence leaks banned token %q: %q", fixture.CaseID, banned, tools)
 		}
+	}
+}
+
+func assertBridgeQualityPiFirstForeground(t *testing.T, fixture bridgeQualityFixture) {
+	t.Helper()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_unexpected_pre_pi",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"Codex should not run first","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: t.TempDir(),
+			Triage:       appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:     persona.ProviderPi,
+		Decision:    persona.DecisionReply,
+		VisibleText: "Pi-first canary reply.",
+		Reason:      "Pi owns the foreground decision",
+		Confidence:  0.9,
+		ShadowOnly:  false,
+	}}
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	channelID := firstNonEmpty(fixture.Source.ChannelID, "CPIFIRST")
+	threadTS := "1779196000.000000"
+	started, err := service.StartSlackTriage(context.Background(), channelID, []SlackInboundMessage{{
+		TeamID:         "TBRIDGE",
+		ChannelIDSnake: channelID,
+		UserIDSnake:    "UASK",
+		Text:           fixture.Input.MentionText,
+		TS:             threadTS,
+	}}, fixture.Input.Transcript)
+	if err != nil {
+		t.Fatalf("[%s] StartSlackTriage: %v", fixture.CaseID, err)
+	}
+	if started.Job != nil || runner.startCount != 0 {
+		t.Fatalf("[%s] started=%#v runner.startCount=%d, want no pre-Pi agent_runner", fixture.CaseID, started, runner.startCount)
+	}
+	poster.WaitForCalls(t, 1)
+	if runner.startCount != 0 {
+		t.Fatalf("[%s] runner.startCount after Pi reply = %d, want 0", fixture.CaseID, runner.startCount)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if updated.Metadata["foreground_chain"] != slackTriageForegroundChainPiFirstLive || boolFromAny(updated.Metadata["pre_pi_agent_runner_started"], true) {
+		t.Fatalf("[%s] metadata = %#v, want pi_first_live + no pre-Pi runner", fixture.CaseID, updated.Metadata)
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.requests) != 1 {
+		t.Fatalf("[%s] persona requests = %#v, want one Pi request", fixture.CaseID, runtime.requests)
 	}
 }
 

@@ -94,6 +94,9 @@ func applySlackTriageEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY", "MAB_SLACK_TRIAGE_WORKSPACE_POLICY")); value != "" {
 		cfg.Slack.Triage.WorkspacePolicy = value
 	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN", "MAB_SLACK_TRIAGE_FOREGROUND_CHAIN")); value != "" {
+		cfg.Slack.Triage.ForegroundChain = value
+	}
 }
 
 func applySlackMemoryEnvOverrides(cfg *Config) {

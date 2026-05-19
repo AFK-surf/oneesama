@@ -57,6 +57,7 @@ type rawSlackTriageConfig struct {
 	PostActions       *bool  `json:"post_actions"`
 	HeuristicFallback *bool  `json:"heuristic_fallback"`
 	WorkspacePolicy   string `json:"workspace_policy"`
+	ForegroundChain   string `json:"foreground_chain"`
 }
 
 type rawSlackMemoryConfig struct {
@@ -205,6 +206,7 @@ func (r rawConfig) toConfig(path string) Config {
 				PostActions:       boolPtrOrDefault(r.Slack.Triage.PostActions, defaultSlackTriagePostActions),
 				HeuristicFallback: boolPtrOrDefault(r.Slack.Triage.HeuristicFallback, defaultSlackTriageHeuristicFallback),
 				WorkspacePolicy:   strings.TrimSpace(r.Slack.Triage.WorkspacePolicy),
+				ForegroundChain:   stringOrDefault(r.Slack.Triage.ForegroundChain, defaultSlackTriageForegroundChain),
 			},
 			Memory: SlackMemoryConfig{
 				Enabled:           r.Slack.Memory.Enabled,
