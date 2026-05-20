@@ -977,7 +977,6 @@ func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing
 
 func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T) {
 	ctx := context.Background()
-	workspaceDir := t.TempDir()
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	runtime := &capturePersonaRuntime{response: persona.Response{
 		Runtime:  persona.ProviderPi,
@@ -999,8 +998,7 @@ func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
-			WorkspaceDir: workspaceDir,
-			Triage:       appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+			Triage: appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
 		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,

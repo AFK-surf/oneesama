@@ -131,6 +131,51 @@ first_env_name_with_value() {
   return 1
 }
 
+check_env_alias_conflict() {
+  local label="$1"
+  shift
+  local first_name="" first_value="" seen=0
+  local name value
+  for name in "$@"; do
+    value="${!name:-}"
+    [[ -z "$value" ]] && continue
+    if [[ "$seen" -eq 0 ]]; then
+      first_name="$name"
+      first_value="$value"
+    elif [[ "$value" != "$first_value" ]]; then
+      die "$label has conflicting env aliases: $first_name and $name differ; remove the stale value or make aliases identical"
+    fi
+    seen=$((seen + 1))
+  done
+  if [[ "$seen" -gt 1 ]]; then
+    log "ok: $label aliases agree across $seen env vars"
+  fi
+}
+
+check_live_env_conflicts() {
+  if [[ "$subcommand" == "slack-agent" ]]; then
+    check_env_alias_conflict "Slack bot token" ONEESAMA_SLACK_BOT_TOKEN SLACK_BOT_TOKEN MAB_SLACK_BOT_TOKEN
+    check_env_alias_conflict "Slack app token" ONEESAMA_SLACK_APP_TOKEN SLACK_APP_TOKEN MAB_SLACK_APP_TOKEN
+    check_env_alias_conflict "Slack bot user ID" ONEESAMA_SLACK_BOT_USER_ID SLACK_BOT_USER_ID MAB_SLACK_BOT_USER_ID
+    check_env_alias_conflict "Slack workspace dir" ONEESAMA_SLACK_WORKSPACE_DIR MAB_SLACK_WORKSPACE_DIR
+    check_env_alias_conflict "triage foreground chain" ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN MAB_SLACK_TRIAGE_FOREGROUND_CHAIN
+    check_env_alias_conflict "workspace triage policy" ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY MAB_SLACK_TRIAGE_WORKSPACE_POLICY
+    check_env_alias_conflict "persona runtime provider" ONEESAMA_PERSONA_RUNTIME MAB_PERSONA_RUNTIME
+    check_env_alias_conflict "persona runtime mode" ONEESAMA_PERSONA_RUNTIME_MODE MAB_PERSONA_RUNTIME_MODE
+    check_env_alias_conflict "persona runtime base URL" ONEESAMA_PERSONA_RUNTIME_BASE_URL MAB_PERSONA_RUNTIME_BASE_URL
+    check_env_alias_conflict "persona runtime shadow-only" ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY MAB_PERSONA_RUNTIME_SHADOW_ONLY
+  fi
+  check_env_alias_conflict "agent runner provider" ONEESAMA_AGENT_RUNNER MAB_AGENT_RUNNER
+  check_env_alias_conflict "agent runner dry-run" ONEESAMA_DRY_RUN_AGENT MAB_DRY_RUN_AGENT MAB_DRY_RUN_CODEX
+  check_env_alias_conflict "Codex model" ONEESAMA_CODEX_MODEL MAB_CODEX_MODEL
+  check_env_alias_conflict "Codex model provider" ONEESAMA_CODEX_MODEL_PROVIDER MAB_CODEX_MODEL_PROVIDER
+  check_env_alias_conflict "Codex base URL" ONEESAMA_CODEX_BASE_URL MAB_CODEX_BASE_URL
+  check_env_alias_conflict "Codex env key" ONEESAMA_CODEX_ENV_KEY MAB_CODEX_ENV_KEY
+  check_env_alias_conflict "Codex wire API" ONEESAMA_CODEX_WIRE_API MAB_CODEX_WIRE_API
+  check_env_alias_conflict "state provider" ONEESAMA_STATE_PROVIDER ONEESAMA_PERSISTENCE_PROVIDER MAB_STATE_PROVIDER
+  check_env_alias_conflict "state SQLite path" ONEESAMA_STATE_SQLITE_PATH ONEESAMA_PERSISTENCE_SQLITE_PATH MAB_STATE_SQLITE_PATH
+}
+
 normalize_bool() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
@@ -266,6 +311,7 @@ for env_file in "${env_files[@]}"; do
   source_exported "$env_file"
 done
 
+check_live_env_conflicts
 preflight_env
 
 case "$mode" in

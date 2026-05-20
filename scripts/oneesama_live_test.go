@@ -101,6 +101,116 @@ func TestOneesamaLivePreflightFailsMissingProviderToken(t *testing.T) {
 	}
 }
 
+func TestOneesamaLivePreflightFailsConflictingWorkspacePolicyAliases(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	firstEnv := filepath.Join(dir, "live-env.sh")
+	secondEnv := filepath.Join(dir, "workspace-policy.sh")
+	writeFile(t, firstEnv, strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='reply to workspace product links'",
+		"",
+	}, "\n"))
+	writeFile(t, secondEnv, strings.Join([]string{
+		"MAB_SLACK_TRIAGE_WORKSPACE_POLICY='legacy office-helper policy'",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", firstEnv, "--env", secondEnv, "--preflight-only", "slack-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "workspace triage policy has conflicting env aliases") ||
+		!strings.Contains(output, "ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY and MAB_SLACK_TRIAGE_WORKSPACE_POLICY differ") {
+		t.Fatalf("output = %s, want workspace policy conflict", output)
+	}
+	if strings.Contains(output, "legacy office-helper policy") || strings.Contains(output, "reply to workspace product links") {
+		t.Fatalf("output = %s, should not print policy values", output)
+	}
+}
+
+func TestOneesamaLivePreflightAllowsIdenticalAliasValues(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"ONEESAMA_SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"MAB_SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"MAB_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "slack-agent")
+	if err != nil {
+		t.Fatalf("oneesama-live preflight failed: %v\n%s", err, output)
+	}
+	for _, want := range []string{
+		"Slack bot token aliases agree across 2 env vars",
+		"Slack app token aliases agree across 2 env vars",
+		"triage foreground chain aliases agree across 2 env vars",
+		"preflight passed",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output = %s, want %q", output, want)
+		}
+	}
+}
+
+func TestOneesamaLivePreflightFailsConflictingPersonaRuntimeAliases(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"MAB_PERSONA_RUNTIME=legacy",
+		"ONEESAMA_PI_API_KEY=test-key",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "slack-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "persona runtime provider has conflicting env aliases") ||
+		!strings.Contains(output, "ONEESAMA_PERSONA_RUNTIME and MAB_PERSONA_RUNTIME differ") {
+		t.Fatalf("output = %s, want persona runtime conflict", output)
+	}
+}
+
+func TestOneesamaLivePreflightFailsConflictingStateProviderAliases(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_STATE_PROVIDER=json-file",
+		"MAB_STATE_PROVIDER=sqlite",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "meeting-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "state provider has conflicting env aliases") ||
+		!strings.Contains(output, "ONEESAMA_STATE_PROVIDER and MAB_STATE_PROVIDER differ") {
+		t.Fatalf("output = %s, want state provider conflict", output)
+	}
+}
+
 func TestOneesamaLivePreflightRequiresOneesamaPiKey(t *testing.T) {
 	t.Parallel()
 
