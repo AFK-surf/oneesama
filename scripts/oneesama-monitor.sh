@@ -4,7 +4,7 @@ set -euo pipefail
 slack_url="${ONEESAMA_MONITOR_SLACK_URL:-http://127.0.0.1:8780}"
 meeting_url="${ONEESAMA_MONITOR_MEETING_URL:-http://127.0.0.1:8781}"
 persona_url="${ONEESAMA_MONITOR_PERSONA_URL:-http://127.0.0.1:8799}"
-audit_window="${ONEESAMA_MONITOR_AUDIT_WINDOW:-6h}"
+audit_window="${ONEESAMA_MONITOR_AUDIT_WINDOW:-3h}"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || {
