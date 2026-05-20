@@ -4,10 +4,16 @@ This directory is the long-running function-level parity audit between Cueboard 
 
 The goal is not to port everything blindly. The goal is to enumerate Cueboard module by module, file by file, function by function, then mark each function as covered, intentionally excluded, or missing with evidence.
 
+> Looking for the polish-era curated indexes (canary fixtures, drift classes,
+> memory ownership matrix, OpenClaw/Hermes roadmap)? Start at
+> `notes/README.md` or `notes/code-polish/README.md`. This directory remains
+> the underlying audit evidence; the polish-era hubs are the scannable
+> navigation surface. Task #278.
+
 ## Canonical Roots
 
 - Cueboard source: `/Users/pengx17/Documents/cueboard/agent-framework/deploy/docker/data/slack-agent/runtime/repos/cueboard-main/agent-framework`
-- Oneesama source: `/Users/pengx17/.slock/agents/34e14f86-d6a4-48e0-aa7b-9b98507eb9de/worktrees/oneesama-go-rewrite`
+- Oneesama source: `/Users/pengx17/Documents/GitHub/oneesama` (post-2026-05-19 repo-path migration; old slock worktree path retired)
 
 ## Inventory Tool
 
