@@ -1,3 +1,17 @@
+// Command cueboard-function-inventory walks one or more Go source roots and
+// emits a Markdown function/method inventory with a per-row "Suggested
+// status" column so an audit author can mark each function ported / ported
+// (verified) / port pending / out of scope.
+//
+// Why this exists:
+//   - The cueboard → oneesama migration relied on per-function port
+//     reviews. This binary keeps the audit checklist mechanically generated
+//     so we cannot silently drop a function from the review surface.
+//   - Use `--root label=/path` (repeatable) to scope; `--out path` to write
+//     to disk. `--include-tests` to widen scope to *_test.go files.
+//
+// Reference: notes/cueboard-function-audit/ uses inventories produced by
+// this command as the per-area starting tables.
 package main
 
 import (

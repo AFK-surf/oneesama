@@ -1,3 +1,20 @@
+// Command oneesama-legacy-slack-memory-import imports old Slack Agent D
+// workspace memory + sqlite triage runs into Oneesama's live workspace
+// under `memory/legacy/slack-agent-d/` as line-citable Markdown.
+//
+// Why this exists:
+//   - During the slack-agent-d → oneesama migration we needed to preserve
+//     historical triage / channel-brain / feedback / lessons so the new
+//     Memory provider could cite them via `legacy_triage_archive`,
+//     `legacy_memory_file`, etc. (see relatedMemoryKindForPath).
+//   - Default mode is dry-run; pass `--write` to actually create files.
+//   - `--max-triage-runs` bounds how many sqlite triage_run rows get
+//     rendered (default 200) to keep workspace size manageable.
+//
+// Reference: notes/cueboard-function-audit/ runs against the imported
+// memory; the suppression filter for actionless legacy policy traces
+// (relatedMemorySuppressesImportedPolicyTrace) is what keeps the imported
+// content from polluting current Workspace policy.
 package main
 
 import (

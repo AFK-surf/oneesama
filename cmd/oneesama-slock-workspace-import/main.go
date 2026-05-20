@@ -1,3 +1,20 @@
+// Command oneesama-slock-workspace-import imports per-agent Slock D
+// workspace knowledge (MEMORY.md, notes/, handoffs/, daily notes) from
+// `~/.slock/agents/<id>/` into Oneesama's live workspace under
+// `memory/legacy/slock-d/` as line-citable Markdown.
+//
+// Why this exists:
+//   - Slock D agents accumulate per-agent knowledge that the Oneesama
+//     Memory provider should be able to cite without losing the source
+//     attribution. This binary imports that knowledge into the canonical
+//     legacy/ subtree and lets relatedMemoryKindForPath classify it.
+//   - Default mode is dry-run; pass `--write` to actually create files.
+//   - `--max-file-bytes` caps how much per-file content is imported
+//     before truncation (default 1 MiB).
+//
+// Distinct from oneesama-legacy-slack-memory-import: that one imports the
+// old slack-agent-d service workspace + sqlite triage runs; this one
+// imports the broader Slock agent workspaces (memory + notes + handoffs).
 package main
 
 import (

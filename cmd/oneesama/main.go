@@ -1,3 +1,17 @@
+// Command oneesama is the unified entry point for the slack-agent and
+// meeting-agent HTTP services. The first positional argument selects the
+// service (currently "slack-agent" or "meeting-agent"); ONEESAMA_* env vars
+// and pkg/config control everything else.
+//
+// Why this exists:
+//   - A single binary keeps deployment (`scripts/oneesama-live.sh`) simple
+//     and ensures both services link the same revisions of internal packages.
+//   - The shared httpserver / config / observability scaffolding is
+//     identical, so we collapsed the per-service mains into one.
+//
+// See docs/architecture.md for the runtime layout and the corresponding
+// internal/{slackagent,meetingagent} packages for the service-specific
+// boot logic, health, and status endpoints.
 package main
 
 import (
