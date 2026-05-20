@@ -5,6 +5,11 @@ slack_url="${ONEESAMA_MONITOR_SLACK_URL:-http://127.0.0.1:8780}"
 meeting_url="${ONEESAMA_MONITOR_MEETING_URL:-http://127.0.0.1:8781}"
 audit_window="${ONEESAMA_MONITOR_AUDIT_WINDOW:-3h}"
 
+# When ONEESAMA_STATUS_OUTPUT_DIR is set, a structured summary is written to
+# "<dir>/monitor-result.json" so the unified status report wrapper can merge
+# this script's findings with sibling scripts. Task #295.
+status_output_dir="${ONEESAMA_STATUS_OUTPUT_DIR:-}"
+
 need() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "oneesama-monitor: missing required command: $1" >&2
@@ -58,12 +63,48 @@ persona_quality_summary="$(
   ' <"${tmpdir}/triage-audit.json"
 )"
 red_flags="$(jq -r '.audit.flags[]? | select(.level == "red") | "\(.code): \(.message)"' <"${tmpdir}/triage-audit.json")"
+
+write_status_summary() {
+  local status="$1"
+  if [[ -z "$status_output_dir" ]]; then
+    return 0
+  fi
+  mkdir -p "$status_output_dir"
+  jq -n \
+    --arg script "oneesama-monitor" \
+    --arg status "$status" \
+    --arg window "$audit_window" \
+    --arg slack_url "$slack_url" \
+    --arg meeting_url "$meeting_url" \
+    --arg persona_provider "$persona_provider" \
+    --arg persona_mode "$persona_mode" \
+    --arg red_flags "$red_flags" \
+    --arg persona_summary "$persona_quality_summary" \
+    --rawfile triage_audit "${tmpdir}/triage-audit.json" \
+    '{
+      script: $script,
+      status: $status,
+      window: $window,
+      checks: {
+        slack_url: $slack_url,
+        meeting_url: $meeting_url,
+        persona_provider: $persona_provider,
+        persona_mode: $persona_mode
+      },
+      red_flags: ($red_flags | split("\n") | map(select(. != ""))),
+      persona_foreground_context: ($persona_summary | split("\n") | map(select(. != ""))),
+      triage_audit: ($triage_audit | fromjson)
+    }' >"${status_output_dir}/monitor-result.json"
+}
+
 if [[ -n "$red_flags" ]]; then
   echo "oneesama-monitor: red triage audit flags:" >&2
   echo "$red_flags" >&2
   echo "oneesama-monitor: persona foreground context:" >&2
   echo "$persona_quality_summary" >&2
+  write_status_summary "red"
   exit 1
 fi
 
+write_status_summary "ok"
 echo "oneesama-monitor: ok"

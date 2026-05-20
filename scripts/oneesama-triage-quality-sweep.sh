@@ -5,6 +5,11 @@ slack_url="${ONEESAMA_MONITOR_SLACK_URL:-http://127.0.0.1:8780}"
 audit_window="${ONEESAMA_TRIAGE_QUALITY_WINDOW:-${ONEESAMA_MONITOR_AUDIT_WINDOW:-3h}}"
 status_limit="${ONEESAMA_TRIAGE_QUALITY_LIMIT:-200}"
 
+# When ONEESAMA_STATUS_OUTPUT_DIR is set, a structured summary is written to
+# "<dir>/triage-quality-result.json" so the unified status report wrapper can
+# merge this script's findings with sibling scripts. Task #295.
+status_output_dir="${ONEESAMA_STATUS_OUTPUT_DIR:-}"
+
 need() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "oneesama-triage-quality-sweep: missing required command: $1" >&2
@@ -91,6 +96,16 @@ if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction
   ' <"${tmpdir}/quality.json" >&2
 fi
 
+write_status_summary() {
+  local status="$1"
+  if [[ -z "$status_output_dir" ]]; then
+    return 0
+  fi
+  mkdir -p "$status_output_dir"
+  jq --arg script "oneesama-triage-quality-sweep" --arg status "$status" \
+    '. + {script: $script, status: $status}' <"${tmpdir}/quality.json" >"${status_output_dir}/triage-quality-result.json"
+}
+
 if jq -e '((.red.failures | length) + (.red.invalidPersonaJSON | length) + (.red.placeholderSummaries | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
   echo "oneesama-triage-quality-sweep: red quality samples:" >&2
   jq -r '
@@ -99,7 +114,9 @@ if jq -e '((.red.failures | length) + (.red.invalidPersonaJSON | length) + (.red
     | select(.value | length > 0)
     | "## \(.key)\n" + (.value | map("- \(.at) \(.channels | join(",")) id=\(.id) summary=\(.summary)") | join("\n"))
   ' <"${tmpdir}/quality.json" >&2
+  write_status_summary "red"
   exit 1
 fi
 
+write_status_summary "ok"
 echo "oneesama-triage-quality-sweep: ok"
