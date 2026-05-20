@@ -35,7 +35,14 @@ const (
 // would but actually did nothing" runs for human review without classifying
 // them as red — many such runs are model self-narration of historical
 // behaviour, but a recurring spike is a signal the action wiring is broken.
-// Task #285 follow-up (driver 6h audit 2026-05-21 review proposal).
+//
+// Markers are intentionally compound phrases. Bare single-word ZH markers
+// like `回复` / `需要` / `应该` were too wide: they false-positive on
+// historical / negated phrases such as `已被 ... 回复` / `没有需要回复`
+// (driver false-positive report 2026-05-21 on the initial cut).
+//
+// Task #285 follow-up (driver 6h audit 2026-05-21 review proposal +
+// false-positive tightening).
 var triageQualityIntentActionMismatchMarkers = []string{
 	// English action verbs the persona uses in summary narration.
 	"delegate",
@@ -48,26 +55,69 @@ var triageQualityIntentActionMismatchMarkers = []string{
 	"should post",
 	"plan to",
 	"going to",
-	// Chinese counterparts. Triage summaries are written by the persona in
-	// either language; the bucket misses the Chinese path if these are
-	// omitted (driver review comment 2026-05-21).
-	"应该",
-	"需要",
-	"建议",
-	"委托",
-	"回复",
-	"反应",
-	"打算",
+	// Chinese compound phrases. Avoid bare single-word markers so historical
+	// / negated narration (`已被 X 回复` / `没有需要回复`) does not trip the
+	// bucket; the negation guard below catches the remaining edge cases.
+	"应该回复",
+	"应该委托",
+	"应该反应",
+	"应该跟进",
+	"需要回复",
+	"需要委托",
+	"需要跟进",
+	"建议回复",
+	"建议委托",
+	"打算回复",
+	"打算委托",
+	"会回复",
+	"会委托",
+	"要回复",
+	"要委托",
+	"应当回复",
+	"应当委托",
+}
+
+// triageQualityIntentActionMismatchNegations are substrings that, when
+// present anywhere in the summary, suppress the mismatch bucket entirely.
+// They flag "the run is describing historical / already-handled / negated
+// state" rather than asserting an unrealised intent.
+//
+// Example trip the original cut: `没有明确问题或需要回复...无需介入`
+// substring-matched `需要回复` even though the surrounding `没有 ... 或` /
+// `无需` negates it. Rather than try to track negation scope statically,
+// treat the whole summary as descriptive when any of these negation /
+// historical markers appear.
+var triageQualityIntentActionMismatchNegations = []string{
+	"无需",
+	"不需",
+	"无须",
+	"无须",
+	"没有",
+	"已被",
+	"已由",
+	"已经",
+	"已回复",
+	"已反应",
+	"不再",
+	"不必",
 }
 
 // triageQualityIntentActionMismatchMatch returns the first marker that
 // triggered the bucket so callers can record it in the review sample for
-// operator clarity. Returns empty string when no marker is present.
+// operator clarity. Returns empty string when no marker is present, the
+// summary is empty, or any negation / historical marker appears anywhere in
+// the summary.
 func triageQualityIntentActionMismatchMatch(summary string) string {
-	lower := strings.ToLower(strings.TrimSpace(summary))
-	if lower == "" {
+	s := strings.TrimSpace(summary)
+	if s == "" {
 		return ""
 	}
+	for _, neg := range triageQualityIntentActionMismatchNegations {
+		if strings.Contains(s, neg) {
+			return ""
+		}
+	}
+	lower := strings.ToLower(s)
 	for _, marker := range triageQualityIntentActionMismatchMarkers {
 		needle := strings.ToLower(marker)
 		if strings.Contains(lower, needle) {

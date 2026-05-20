@@ -42,7 +42,11 @@ low_confidence_ceiling="$(jq -r '.audit.qualityThresholds.lowConfidenceCeiling /
 # audit.qualityThresholds.intentActionMismatchSummaryMarkers; servers older
 # than the #285 follow-up will not have it, so we fall back to a compact
 # in-script list mirroring the same EN+ZH set.
-intent_action_markers="$(jq -c '.audit.qualityThresholds.intentActionMismatchSummaryMarkers // ["delegate","will reply","will react","will post","should reply","should react","should delegate","should post","plan to","going to","应该","需要","建议","委托","回复","反应","打算"]' <"${tmpdir}/audit.json")"
+intent_action_markers="$(jq -c '.audit.qualityThresholds.intentActionMismatchSummaryMarkers // ["delegate","will reply","will react","will post","should reply","should react","should delegate","should post","plan to","going to","应该回复","应该委托","应该反应","应该跟进","需要回复","需要委托","需要跟进","建议回复","建议委托","打算回复","打算委托","会回复","会委托","要回复","要委托","应当回复","应当委托"]' <"${tmpdir}/audit.json")"
+# Same negation/historical markers triageQualityIntentActionMismatchMatch
+# uses in Go; presence of any anywhere in the summary suppresses the bucket
+# so "已被 X 回复" / "没有需要回复" do not false-positive trip a match.
+intent_action_negations='["无需","不需","无须","没有","已被","已由","已经","已回复","已反应","不再","不必"]'
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
@@ -108,9 +112,15 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
                 is_no_action(.)
                 and ((($markers // []) | length) > 0)
                 and (
-                  ($markers // []) as $needles
-                  | (.summary // "" | ascii_downcase) as $haystack
-                  | any($needles[]; (. | ascii_downcase) as $needle | $haystack | test($needle; "i"))
+                  (.summary // "") as $raw
+                  | ($raw | ascii_downcase) as $haystack
+                  # negation guard: any historical / negated marker in the
+                  # summary suppresses the whole match.
+                  | (any(($negations // [])[]; . as $neg | $raw | contains($neg)) | not)
+                  and (
+                    ($markers // []) as $needles
+                    | any($needles[]; (. | ascii_downcase) as $needle | $haystack | test($needle; "i"))
+                  )
                 )
               )
               | brief(.)
@@ -118,7 +128,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       }
     }
-' --arg window "$audit_window" --argjson markers "$intent_action_markers" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
