@@ -101,6 +101,48 @@ func TestOneesamaLivePreflightFailsMissingProviderToken(t *testing.T) {
 	}
 }
 
+func TestOneesamaLivePreflightRequiresOneesamaPiKey(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "slack-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "Oneesama Pi API key is required") {
+		t.Fatalf("output = %s, want missing Oneesama Pi API key", output)
+	}
+
+	envWithKey := filepath.Join(dir, "live-env-with-key.sh")
+	writeFile(t, envWithKey, strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PI_API_KEY=test-key",
+		"ONEESAMA_PI_MODEL=test-model",
+		"",
+	}, "\n"))
+	output, err = runLiveScript(t, "--env", envWithKey, "--preflight-only", "slack-agent")
+	if err != nil {
+		t.Fatalf("oneesama-live preflight failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "Oneesama Pi runtime provider selected") || !strings.Contains(output, "Oneesama Pi model = test-model") {
+		t.Fatalf("output = %s, want Oneesama Pi provider/model logs", output)
+	}
+}
+
 func TestOneesamaLivePreflightSkipsSlackTokensForMeetingAgent(t *testing.T) {
 	t.Parallel()
 

@@ -209,6 +209,16 @@ preflight_env() {
     else
       log "warn: ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY not exported"
     fi
+    local persona_provider
+    persona_provider="$(first_env_value ONEESAMA_PERSONA_RUNTIME MAB_PERSONA_RUNTIME || true)"
+    persona_provider="$(normalize_provider "${persona_provider:-legacy}")"
+    if [[ "$persona_provider" == "oneesama-pi" ]]; then
+      require_env_any "Oneesama Pi API key" ONEESAMA_PI_API_KEY PI_API_KEY OPENROUTER_API_KEY
+      log "ok: Oneesama Pi runtime provider selected"
+      if [[ -n "${ONEESAMA_PI_MODEL:-${PI_MODEL_ID:-}}" ]]; then
+        log "ok: Oneesama Pi model = ${ONEESAMA_PI_MODEL:-${PI_MODEL_ID:-}}"
+      fi
+    fi
   fi
 	local required_codex_env
 	required_codex_env="$(codex_required_env_key || true)"
