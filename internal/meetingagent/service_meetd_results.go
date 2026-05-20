@@ -44,11 +44,11 @@ func populateMeetdResultArtifacts(result *MeetdMeetingResult, meeting MeetdMeeti
 	if result == nil || strings.TrimSpace(meeting.ArtifactsDir) == "" {
 		return
 	}
-	transcriptPath := filepath.Join(meeting.ArtifactsDir, "transcript.txt")
+	transcriptPath := filepath.Join(meeting.ArtifactsDir, meetingTranscriptFilename)
 	if fileExists(transcriptPath) {
 		result.Artifacts.TranscriptPath = transcriptPath
 	}
-	for _, name := range []string{"audio.mp3", "audio.wav"} {
+	for _, name := range []string{finalMeetingAudioFilename, rawMeetingAudioFilename} {
 		audioPath := filepath.Join(meeting.ArtifactsDir, name)
 		if fileExists(audioPath) {
 			result.Artifacts.AudioPath = audioPath
@@ -64,7 +64,7 @@ func resolveMeetdArtifactPath(meeting MeetdMeetingRecord, name string) (string, 
 	}
 	switch name {
 	case "transcript":
-		path := filepath.Join(meeting.ArtifactsDir, "transcript.txt")
+		path := filepath.Join(meeting.ArtifactsDir, meetingTranscriptFilename)
 		if _, err := os.Stat(path); err != nil {
 			if !os.IsNotExist(err) {
 				return "", "", "", fmt.Errorf("stat artifact: %w", err)
@@ -77,8 +77,8 @@ func resolveMeetdArtifactPath(meeting MeetdMeetingRecord, name string) (string, 
 			name        string
 			contentType string
 		}{
-			{name: "audio.mp3", contentType: "audio/mpeg"},
-			{name: "audio.wav", contentType: "audio/wav"},
+			{name: finalMeetingAudioFilename, contentType: "audio/mpeg"},
+			{name: rawMeetingAudioFilename, contentType: "audio/wav"},
 		} {
 			path := filepath.Join(meeting.ArtifactsDir, artifact.name)
 			if fileExists(path) {

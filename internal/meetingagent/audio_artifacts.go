@@ -14,7 +14,36 @@ import (
 const (
 	rawMeetingAudioFilename   = "audio.wav"
 	finalMeetingAudioFilename = "audio.mp3"
+	meetingCaptionsFilename   = "captions.json"
+	meetingTranscriptFilename = "transcript.txt"
+
+	// Two legacy artifact root path conventions the redelivery path falls
+	// back to when the manifest / session.Metadata do not point at the
+	// canonical artifact location. Centralised here so adding a new
+	// candidate root only requires one edit, and the regression test pins
+	// both prefixes. Task #274.
+	legacyMeetdArtifactRoot     = "/tmp/meeting-avatar-bot-data/meeting-artifacts"
+	legacyRunnerArtifactRoot    = "runtime/meeting-artifacts"
+	legacyRunnerSessionDirInfix = "runner-"
 )
+
+// meetingArtifactCandidatePaths returns the ordered list of file paths a
+// redelivery path should try for the given session ID and artifact filename
+// (rawMeetingAudioFilename / finalMeetingAudioFilename /
+// meetingCaptionsFilename / meetingTranscriptFilename). The first entry is
+// the canonical meetd artifacts root; the second is the runner-side fallback
+// that pre-dates the meetd cutover. Callers should iterate in order and pick
+// the first that satisfies usableMeetingAudioArtifactPath (for audio) or
+// os.Stat (for captions / transcript). Task #274.
+func meetingArtifactCandidatePaths(sessionID string, filename string) []string {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(filename) == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(legacyMeetdArtifactRoot, sessionID, filename),
+		filepath.Join(legacyRunnerArtifactRoot, legacyRunnerSessionDirInfix+sessionID, filename),
+	}
+}
 
 var transcodeMeetingAudioToMP3 = func(ctx context.Context, inputPath, outputPath string) error {
 	cmd := exec.CommandContext(ctx, "ffmpeg",

@@ -254,11 +254,9 @@ func transcriptSegmentsFromPostMeetingArtifact(path string) []postmeeting.Transc
 }
 
 func joinRedeliveryRawCaptions(session SessionRecord) []postmeeting.TranscriptSegmentInput {
-	for _, path := range []string{
-		stringFromMap(session.Metadata, "captions_path"),
-		filepath.Join("/tmp/meeting-avatar-bot-data/meeting-artifacts", session.ID, "captions.json"),
-		filepath.Join("runtime/meeting-artifacts", "runner-"+session.ID, "captions.json"),
-	} {
+	candidates := append([]string{stringFromMap(session.Metadata, "captions_path")},
+		meetingArtifactCandidatePaths(session.ID, meetingCaptionsFilename)...)
+	for _, path := range candidates {
 		if segments := captionSegmentsFromFile(path); len(segments) > 0 {
 			return segments
 		}
@@ -277,13 +275,10 @@ func joinRedeliveryAudioPath(ctx context.Context, manifest *postmeeting.Artifact
 			}
 		}
 	}
-	for _, path := range []string{
-		stringFromMap(session.Metadata, "audio_path"),
-		filepath.Join("/tmp/meeting-avatar-bot-data/meeting-artifacts", session.ID, "audio.mp3"),
-		filepath.Join("/tmp/meeting-avatar-bot-data/meeting-artifacts", session.ID, "audio.wav"),
-		filepath.Join("runtime/meeting-artifacts", "runner-"+session.ID, "audio.mp3"),
-		filepath.Join("runtime/meeting-artifacts", "runner-"+session.ID, "audio.wav"),
-	} {
+	candidates := []string{stringFromMap(session.Metadata, "audio_path")}
+	candidates = append(candidates, meetingArtifactCandidatePaths(session.ID, finalMeetingAudioFilename)...)
+	candidates = append(candidates, meetingArtifactCandidatePaths(session.ID, rawMeetingAudioFilename)...)
+	for _, path := range candidates {
 		if audio := usableMeetingAudioArtifactPath(ctx, path); audio != "" {
 			return finalizedJoinRedeliveryAudioPath(ctx, audio)
 		}
