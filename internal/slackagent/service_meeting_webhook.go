@@ -22,12 +22,12 @@ var compressSlackMeetingAudioArtifact = func(ctx context.Context, audioPath stri
 	}
 	cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-i", audioPath, "-codec:a", "libmp3lame", "-b:a", "64k", mp3Path)
 	if _, err := cmd.CombinedOutput(); err != nil {
-		return audioPath
+		return ""
 	}
 	if shouldUploadMeetingArtifact(mp3Path) {
 		return mp3Path
 	}
-	return audioPath
+	return ""
 }
 
 func (s *Service) HandleMeetingWebhook(ctx context.Context, payload MeetingWebhookPayload) MeetingWebhookResponse {
@@ -206,21 +206,33 @@ func (s *Service) uploadMeetingArtifactFiles(ctx context.Context, artifacts Meet
 		}
 	}
 	if audio := firstNonEmpty(artifacts.AudioPath, artifacts.AudioPathAlt, artifacts.Audio); shouldUploadMeetingArtifact(audio) {
+		sourceAudio := audio
 		audio = compressSlackMeetingAudioArtifact(ctx, audio)
+		if strings.TrimSpace(audio) == "" {
+			s.logger.Warn("skip meeting audio upload; wav compression unavailable", "path", sourceAudio)
+			return withoutMeetingAudioArtifact(uploaded), nil
+		}
 		if !shouldUploadMeetingAudioArtifact(audio) {
-			s.logger.Warn("skip large meeting audio upload", "path", audio)
-			return uploaded, nil
+			s.logger.Warn("skip meeting audio upload; compressed mp3 required", "path", audio)
+			return withoutMeetingAudioArtifact(uploaded), nil
 		}
 		file, err := s.uploadMeetingArtifactFile(ctx, audio, meetingAudioUploadName(audio), ref)
 		if err != nil {
 			s.logger.Warn("meeting audio upload failed", "path", audio, "error", err)
-			return uploaded, nil
+			return withoutMeetingAudioArtifact(uploaded), nil
 		}
 		uploaded.AudioPath = file.Permalink
 		uploaded.AudioPathAlt = ""
 		uploaded.Audio = ""
 	}
 	return uploaded, nil
+}
+
+func withoutMeetingAudioArtifact(artifacts MeetingWebhookArtifacts) MeetingWebhookArtifacts {
+	artifacts.AudioPath = ""
+	artifacts.AudioPathAlt = ""
+	artifacts.Audio = ""
+	return artifacts
 }
 
 func (s *Service) uploadMeetingArtifactFile(ctx context.Context, path string, title string, _ MeetingSlackRef) (SlackUploadedFile, error) {
@@ -252,8 +264,10 @@ func shouldUploadMeetingAudioArtifact(value string) bool {
 	if !shouldUploadMeetingArtifact(value) {
 		return false
 	}
-	if !strings.EqualFold(filepath.Ext(value), ".wav") {
-		return true
+	// Recording webhooks should never upload raw WAV to Slack. If the
+	// compressor cannot produce a bounded MP3, omit the audio artifact.
+	if strings.EqualFold(filepath.Ext(value), ".wav") {
+		return false
 	}
 	info, err := os.Stat(value)
 	return err == nil && !info.IsDir() && info.Size() <= meetingAudioUploadMaxBytes

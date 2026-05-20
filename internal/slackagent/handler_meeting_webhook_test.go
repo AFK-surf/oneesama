@@ -401,6 +401,84 @@ func TestMeetingWebhookResultCompressesWavAudioBeforeUpload(t *testing.T) {
 	}
 }
 
+func TestMeetingWebhookArtifactUploadNeverFallsBackToRawWav(t *testing.T) {
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.txt")
+	if err := os.WriteFile(transcriptPath, []byte("Peng: real transcript line\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	audioPath := filepath.Join(t.TempDir(), "audio.wav")
+	if err := os.WriteFile(audioPath, []byte("wav"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	originalCompress := compressSlackMeetingAudioArtifact
+	compressSlackMeetingAudioArtifact = func(_ context.Context, path string) string {
+		return path
+	}
+	t.Cleanup(func() { compressSlackMeetingAudioArtifact = originalCompress })
+
+	completedFiles := map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/files.getUploadURLExternal":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse upload url request: %v", err)
+			}
+			filename := r.Form.Get("filename")
+			if filename != "transcript.txt" {
+				t.Fatalf("unexpected upload filename %q; raw wav must not be uploaded", filename)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file_id": "FTRANSCRIPT", "upload_url": "http://" + r.Host + "/upload/FTRANSCRIPT"})
+		case "/upload/FTRANSCRIPT":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse upload: %v", err)
+			}
+			_, _ = w.Write([]byte("ok"))
+		case "/files.completeUploadExternal":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse complete: %v", err)
+			}
+			if strings.Contains(r.Form.Get("files"), "FTRANSCRIPT") {
+				completedFiles["transcript.txt"] = true
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "files": []map[string]any{{"id": "FTRANSCRIPT", "title": "transcript.txt"}}})
+		case "/files.info":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse info: %v", err)
+			}
+			if r.Form.Get("file") != "FTRANSCRIPT" {
+				t.Fatalf("unexpected file info request %#v", r.Form)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file": map[string]any{"permalink": "https://files.slack.com/transcript.txt"}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{BotToken: "xoxb-test"},
+		CanvasPublisherConfig: CanvasPublisherConfig{
+			BotToken:   "xoxb-test",
+			APIBaseURL: server.URL,
+			Client:     server.Client(),
+		},
+	})
+	uploaded, err := service.uploadMeetingArtifactFiles(context.Background(), MeetingWebhookArtifacts{
+		TranscriptPath: transcriptPath,
+		AudioPath:      audioPath,
+	}, MeetingSlackRef{ChannelID: "C123", ThreadTS: "123.456"})
+	if err != nil {
+		t.Fatalf("uploadMeetingArtifactFiles() error = %v", err)
+	}
+	if !completedFiles["transcript.txt"] || uploaded.TranscriptPath != "https://files.slack.com/transcript.txt" {
+		t.Fatalf("uploaded = %+v completed=%#v, want transcript uploaded", uploaded, completedFiles)
+	}
+	if uploaded.AudioPath != "" || uploaded.AudioPathAlt != "" || uploaded.Audio != "" {
+		t.Fatalf("uploaded = %+v, want raw wav audio omitted when mp3 compression is unavailable", uploaded)
+	}
+}
+
 func TestMeetingWebhookRejectsBadSignature(t *testing.T) {
 	router := newMeetingWebhookTestRouter(t, &recordingPoster{}, &recordingAssistant{}, nil)
 	response := httptest.NewRecorder()
