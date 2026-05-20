@@ -715,6 +715,16 @@ func (s *Service) dailyReportStatus() SlackDailyReportStatus {
 	status.LastChannelID = s.dailyReportLastChannel
 	status.LastError = s.dailyReportLastError
 	status.TicksLastWindow = len(s.dailyReportTicks)
+	if status.LastPostedAt == "" && strings.TrimSpace(cfg.ChannelID) != "" && s.dailyReports != nil {
+		if _, _, reportDate, err := slackDailyReportWindow(timeNow().UTC(), cfg.Window, cfg.Timezone, ""); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if record, ok, err := s.dailyReports.Get(ctx, dailyReportRecordID(cfg.ChannelID, reportDate)); err == nil && ok {
+				status.LastPostedAt = strings.TrimSpace(record.PostedAt)
+				status.LastChannelID = strings.TrimSpace(record.ChannelID)
+			}
+		}
+	}
 	return status
 }
 
