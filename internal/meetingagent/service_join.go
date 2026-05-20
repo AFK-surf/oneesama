@@ -188,7 +188,7 @@ func (s *Service) StopJoin(ctx context.Context, input StopJoinRequest) (StopJoin
 	metadata["stop_reason"] = strings.TrimSpace(input.Reason)
 	saved, err := s.UpsertSession(ctx, SessionUpsertInput{
 		ID:         session.ID,
-		Status:     strings.TrimSpace(firstNonEmpty(stop.Session.Status, "stopped")),
+		Status:     strings.TrimSpace(firstNonEmpty(stop.Session.Status, joinSessionStatusString(joinSessionStatusStopped))),
 		EndedAt:    strings.TrimSpace(firstNonEmpty(stop.StoppedAt, time.Now().UTC().Format(time.RFC3339Nano))),
 		Title:      session.Title,
 		MeetingID:  session.MeetingID,
@@ -262,7 +262,7 @@ func (s *Service) markJoinSessionStale(ctx context.Context, session SessionRecor
 		ID:               session.ID,
 		MeetingID:        session.MeetingID,
 		MeetingURL:       session.MeetingURL,
-		Status:           "stale",
+		Status:           joinSessionStatusString(joinSessionStatusStale),
 		Title:            session.Title,
 		ParticipantCount: session.ParticipantCount,
 		StartedAt:        session.StartedAt,
@@ -322,13 +322,13 @@ func runtimeMeetPageStatus(active any) string {
 	}
 	meetPage, _ := fields["meetPage"].(map[string]any)
 	if boolField(meetPage, "cannotJoin") {
-		return "failed"
+		return joinSessionStatusString(joinSessionStatusFailed)
 	}
 	if boolField(meetPage, "waitingForAdmit") {
-		return "waiting"
+		return joinSessionStatusString(joinSessionStatusWaiting)
 	}
 	if boolField(meetPage, "inMeeting") {
-		return "joined"
+		return joinSessionStatusString(joinSessionStatusJoined)
 	}
 	return ""
 }
@@ -363,12 +363,7 @@ func (s *Service) resolveJoinSession(ctx context.Context, sessionID string) (*Se
 }
 
 func isTerminalSessionStatus(status string) bool {
-	switch strings.TrimSpace(status) {
-	case "stopped", "done", "failed", "cancelled", "canceled", "stale":
-		return true
-	default:
-		return false
-	}
+	return isTerminalJoinSessionStatus(status)
 }
 
 func timestampIfStarted(started bool) string {

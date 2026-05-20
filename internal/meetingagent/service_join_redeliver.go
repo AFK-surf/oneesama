@@ -58,12 +58,12 @@ func (s *Service) redeliverJoinSessionRecord(ctx context.Context, session Sessio
 
 	input, err := s.postProcessInputFromJoinSessionRedelivery(ctx, session, meeting)
 	if err != nil {
-		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", err.Error(), ""); updateErr == nil && updated != nil {
+		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusFailed), err.Error(), ""); updateErr == nil && updated != nil {
 			meeting = *updated
 		}
 		_ = s.redeliverJoinSessionResult(ctx, meeting, MeetdMeetingResult{
 			MeetingID:     meetingIDString(meeting.ID),
-			Status:        "failed",
+			Status:        joinSessionStatusString(joinSessionStatusFailed),
 			Error:         err.Error(),
 			ForceDelivery: true,
 		})
@@ -71,18 +71,18 @@ func (s *Service) redeliverJoinSessionRecord(ctx context.Context, session Sessio
 	}
 	result, err := s.PostProcessMeeting(ctx, input)
 	if err != nil {
-		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", err.Error(), ""); updateErr == nil && updated != nil {
+		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusFailed), err.Error(), ""); updateErr == nil && updated != nil {
 			meeting = *updated
 		}
 		_ = s.redeliverJoinSessionResult(ctx, meeting, MeetdMeetingResult{
 			MeetingID:     meetingIDString(meeting.ID),
-			Status:        "failed",
+			Status:        joinSessionStatusString(joinSessionStatusFailed),
 			Error:         err.Error(),
 			ForceDelivery: true,
 		})
 		return err
 	}
-	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "done", "", result.Artifact.Dir); err == nil && updated != nil {
+	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusDone), "", result.Artifact.Dir); err == nil && updated != nil {
 		meeting = *updated
 	}
 	if summary := meetdSummaryFromPostMeeting(result.Summary); summary != nil {
@@ -90,13 +90,13 @@ func (s *Service) redeliverJoinSessionRecord(ctx context.Context, session Sessio
 			s.logger.Warn("persist redelivered join summary failed", "meeting_id", meeting.ID, "session_id", session.ID, "error", err)
 		}
 	}
-	if strings.EqualFold(strings.TrimSpace(session.Status), "stale") {
+	if normalizeJoinSessionStatus(session.Status) == joinSessionStatusStale {
 		s.markRedeliveredJoinSessionDone(ctx, session)
 	}
 
 	return s.redeliverJoinSessionResult(ctx, meeting, MeetdMeetingResult{
 		MeetingID: meetingIDString(meeting.ID),
-		Status:    "done",
+		Status:    joinSessionStatusString(joinSessionStatusDone),
 		Summary:   meetdSummaryFromPostMeeting(result.Summary),
 		Artifacts: MeetdMeetingArtifacts{
 			CaptionsCount:  len(input.Captions),
@@ -117,7 +117,7 @@ func (s *Service) markRedeliveredJoinSessionDone(ctx context.Context, session Se
 		ID:               session.ID,
 		MeetingID:        session.MeetingID,
 		MeetingURL:       session.MeetingURL,
-		Status:           "done",
+		Status:           joinSessionStatusString(joinSessionStatusDone),
 		Title:            session.Title,
 		ParticipantCount: session.ParticipantCount,
 		StartedAt:        session.StartedAt,
@@ -193,12 +193,7 @@ func (s *Service) joinSessionBySyntheticMeetingID(ctx context.Context, meetingID
 }
 
 func joinSessionCanRedeliver(session SessionRecord) bool {
-	switch strings.TrimSpace(strings.ToLower(session.Status)) {
-	case "stopped", "done", "failed", "stale":
-		return true
-	default:
-		return false
-	}
+	return isRedeliverableJoinSessionStatus(session.Status)
 }
 
 func (s *Service) postProcessInputFromJoinSessionRedelivery(ctx context.Context, session SessionRecord, meeting MeetdMeetingRecord) (postmeeting.PostProcessInput, error) {

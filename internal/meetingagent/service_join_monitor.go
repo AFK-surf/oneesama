@@ -65,7 +65,7 @@ func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 				ID:               session.ID,
 				MeetingID:        session.MeetingID,
 				MeetingURL:       session.MeetingURL,
-				Status:           "joined",
+				Status:           joinSessionStatusString(joinSessionStatusJoined),
 				Title:            session.Title,
 				ParticipantCount: state.ParticipantCount,
 				StartedAt:        session.StartedAt,

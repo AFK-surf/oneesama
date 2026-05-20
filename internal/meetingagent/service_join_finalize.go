@@ -31,13 +31,13 @@ func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord
 	}
 	if len(captions) == 0 {
 		warning := "no transcript captured"
-		if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", warning, ""); err == nil && updated != nil {
+		if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusFailed), warning, ""); err == nil && updated != nil {
 			meeting = *updated
 		}
 		if slackChannel != "" && slackThread != "" {
 			s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
 				MeetingID:     meetingIDString(meeting.ID),
-				Status:        "failed",
+				Status:        joinSessionStatusString(joinSessionStatusFailed),
 				Error:         warning,
 				ForceDelivery: true,
 			})
@@ -56,26 +56,26 @@ func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord
 		Source:     "join-stop",
 	})
 	if err != nil {
-		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", err.Error(), ""); updateErr == nil && updated != nil {
+		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusFailed), err.Error(), ""); updateErr == nil && updated != nil {
 			meeting = *updated
 		}
 		if slackChannel != "" && slackThread != "" {
 			s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
 				MeetingID:     meetingIDString(meeting.ID),
-				Status:        "failed",
+				Status:        joinSessionStatusString(joinSessionStatusFailed),
 				Error:         err.Error(),
 				ForceDelivery: true,
 			})
 		}
 		return nil, err.Error()
 	}
-	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "done", "", result.Artifact.Dir); err == nil && updated != nil {
+	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusDone), "", result.Artifact.Dir); err == nil && updated != nil {
 		meeting = *updated
 	}
 	if slackChannel != "" && slackThread != "" {
 		s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
 			MeetingID: meetingIDString(meeting.ID),
-			Status:    "done",
+			Status:    joinSessionStatusString(joinSessionStatusDone),
 			Summary:   meetdSummaryFromPostMeeting(result.Summary),
 			Artifacts: MeetdMeetingArtifacts{
 				CaptionsCount:  len(captions),
@@ -101,14 +101,14 @@ func (s *Service) finalizeStaleJoin(ctx context.Context, session SessionRecord, 
 	if recovered, recoveredSession := s.finalizeStaleJoinFromArtifacts(ctx, *updated, meeting, slackChannel, slackThread); recovered {
 		return recoveredSession
 	}
-	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", staleJoinFailureMessage, ""); err == nil && persisted != nil {
+	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusFailed), staleJoinFailureMessage, ""); err == nil && persisted != nil {
 		meeting = *persisted
 	} else if err != nil {
 		s.logger.Warn("persist stale join meeting failed", "session_id", session.ID, "error", err)
 	}
 	s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
 		MeetingID:     meetingIDString(meeting.ID),
-		Status:        "failed",
+		Status:        joinSessionStatusString(joinSessionStatusFailed),
 		Error:         staleJoinFailureMessage,
 		ForceDelivery: true,
 	})
@@ -132,7 +132,7 @@ func (s *Service) finalizeStaleJoinFromArtifacts(ctx context.Context, session Se
 		s.logger.Warn("post-process stale join artifacts failed", "session_id", session.ID, "error", err)
 		return false, nil
 	}
-	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "done", "", result.Artifact.Dir); err == nil && persisted != nil {
+	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusDone), "", result.Artifact.Dir); err == nil && persisted != nil {
 		meeting = *persisted
 	} else if err != nil {
 		s.logger.Warn("persist recovered stale join meeting failed", "session_id", session.ID, "error", err)
@@ -147,7 +147,7 @@ func (s *Service) finalizeStaleJoinFromArtifacts(ctx context.Context, session Se
 		ID:               session.ID,
 		MeetingID:        session.MeetingID,
 		MeetingURL:       session.MeetingURL,
-		Status:           "done",
+		Status:           joinSessionStatusString(joinSessionStatusDone),
 		Title:            session.Title,
 		ParticipantCount: session.ParticipantCount,
 		StartedAt:        session.StartedAt,
@@ -157,12 +157,12 @@ func (s *Service) finalizeStaleJoinFromArtifacts(ctx context.Context, session Se
 	if err != nil {
 		s.logger.Warn("persist recovered stale join session failed", "session_id", session.ID, "error", err)
 		recoveredSession = session
-		recoveredSession.Status = "done"
+		recoveredSession.Status = joinSessionStatusString(joinSessionStatusDone)
 		recoveredSession.Metadata = metadata
 	}
 	s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
 		MeetingID: meetingIDString(meeting.ID),
-		Status:    "done",
+		Status:    joinSessionStatusString(joinSessionStatusDone),
 		Summary:   meetdSummaryFromPostMeeting(result.Summary),
 		Artifacts: MeetdMeetingArtifacts{
 			CaptionsCount:  len(input.Captions),

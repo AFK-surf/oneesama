@@ -58,7 +58,7 @@ func (s *Service) UpsertSession(ctx context.Context, input SessionUpsertInput) (
 		ID:               strings.TrimSpace(firstNonEmpty(input.ID, input.MeetingID, newSessionID())),
 		MeetingID:        strings.TrimSpace(input.MeetingID),
 		MeetingURL:       strings.TrimSpace(input.MeetingURL),
-		Status:           firstNonEmpty(strings.TrimSpace(input.Status), "queued"),
+		Status:           firstNonEmpty(strings.TrimSpace(input.Status), joinSessionStatusString(joinSessionStatusQueued)),
 		Title:            strings.TrimSpace(input.Title),
 		ParticipantCount: input.ParticipantCount,
 		StartedAt:        strings.TrimSpace(input.StartedAt),

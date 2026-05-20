@@ -192,7 +192,7 @@ func (s *Service) joinMeetdMeeting(ctx context.Context, meeting MeetdMeetingReco
 
 func meetdPrepareLooksJoined(response JoinGoogleMeetResponse) bool {
 	status := strings.TrimSpace(response.Session.Status)
-	return response.Started && (status == "joined" || status == "active")
+	return response.Started && (status == joinSessionStatusString(joinSessionStatusJoined) || status == "active")
 }
 
 func (s *Service) ProcessMeetdMeetingEnd(ctx context.Context, meeting MeetdMeetingRecord, forceDelivery bool) {
