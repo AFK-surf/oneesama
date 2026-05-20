@@ -58,8 +58,14 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if seen.Model != "test-model" || len(seen.Messages) != 2 {
 		t.Fatalf("seen = %#v, want model + system/user messages", seen)
 	}
-	if !strings.Contains(seen.Messages[0].Content, "Oneesama's own Slack foreground Pi agent") || strings.Contains(seen.Messages[0].Content, "[[MSG_BREAK]] as allowed") {
+	systemPrompt := seen.Messages[0].Content
+	if !strings.Contains(systemPrompt, "Oneesama's own Slack foreground Pi agent") {
 		t.Fatalf("system prompt did not establish Oneesama foreground boundary:\n%s", seen.Messages[0].Content)
+	}
+	for _, forbidden := range []string{"[[", "telegram-pi", "Linger"} {
+		if strings.Contains(systemPrompt, forbidden) {
+			t.Fatalf("system prompt contains old/private marker %q:\n%s", forbidden, systemPrompt)
+		}
 	}
 	if !strings.Contains(seen.Messages[1].Content, "产品相邻链接") {
 		t.Fatalf("user request missing persona payload:\n%s", seen.Messages[1].Content)
@@ -160,5 +166,76 @@ func TestOneesamaPIRuntimePreservesActionFields(t *testing.T) {
 	}
 	if len(resp.Citations) != 1 || resp.Citations[0].SourceRef != "memory.md:7" {
 		t.Fatalf("citations = %#v, want preserved citation", resp.Citations)
+	}
+}
+
+func TestNormalizeOneesamaPIResponseRequiresDecisionPayloads(t *testing.T) {
+	runtime := &OneesamaPIRuntime{
+		provider: ProviderOneesamaPi,
+		mode:     ModeLive,
+	}
+	req := Request{
+		Mode: ModeLive,
+		Safety: SafetyConstraints{
+			AllowVisibleReply:  true,
+			AllowWorkerRequest: true,
+			AllowReactions:     true,
+			MaxVisibleChars:    80,
+		},
+	}
+
+	tests := []struct {
+		name         string
+		resp         Response
+		wantDecision string
+		wantEmoji    string
+	}{
+		{
+			name:         "reply requires visible text",
+			resp:         Response{Decision: DecisionReply, VisibleText: "   "},
+			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "react requires emoji",
+			resp:         Response{Decision: DecisionReact, Reactions: []ReactionIntent{{Emoji: "  "}}},
+			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "delegate requires kind and prompt",
+			resp:         Response{Decision: DecisionDelegateWorker, WorkerRequests: []WorkerRequest{{Kind: "codex"}}},
+			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "memory_write requires kind and text",
+			resp:         Response{Decision: DecisionMemoryWrite, MemoryWrites: []MemoryWrite{{Kind: "fact"}}},
+			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "valid react trims colon wrapper",
+			resp:         Response{Decision: DecisionReact, Reactions: []ReactionIntent{{Emoji: ":eyes_bridge:"}}},
+			wantDecision: DecisionReact,
+			wantEmoji:    "eyes_bridge",
+		},
+		{
+			name:         "valid delegate is preserved",
+			resp:         Response{Decision: DecisionDelegateWorker, WorkerRequests: []WorkerRequest{{Kind: "codex", Prompt: "summarize thread"}}},
+			wantDecision: DecisionDelegateWorker,
+		},
+		{
+			name:         "valid memory write is preserved",
+			resp:         Response{Decision: DecisionMemoryWrite, MemoryWrites: []MemoryWrite{{Kind: "fact", Text: "Peng prefers source-backed commentary."}}},
+			wantDecision: DecisionMemoryWrite,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeOneesamaPIResponse(req, tt.resp, runtime)
+			if got.Decision != tt.wantDecision {
+				t.Fatalf("Decision = %q, want %q; response=%#v", got.Decision, tt.wantDecision, got)
+			}
+			if tt.wantEmoji != "" && (len(got.Reactions) != 1 || got.Reactions[0].Emoji != tt.wantEmoji) {
+				t.Fatalf("Reactions = %#v, want trimmed %q", got.Reactions, tt.wantEmoji)
+			}
+		})
 	}
 }
