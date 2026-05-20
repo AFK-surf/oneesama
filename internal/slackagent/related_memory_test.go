@@ -83,6 +83,34 @@ func TestSearchRelatedMemoryBoostsPersonProfileForOwnerQuery(t *testing.T) {
 	}
 }
 
+func TestSearchRelatedMemoryLabelsPersonaMemoryWrites(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/persona/writes/2026-05-20/episode-abcdef123456.md", strings.Join([]string{
+		"# Persona memory write",
+		"",
+		"Peng asked Oneesama to remember that Pi foreground memory must be cited on future link commentary.",
+		"Source: slack:C1:123.456",
+	}, "\n"))
+	writeRelatedMemoryFile(t, workspaceDir, "memory/team/facts/generic.md", "Pi foreground memory can be used for future link commentary.")
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+
+	result := service.SearchRelatedMemory("Pi foreground memory future link commentary", SlackRelatedMemorySearchOptions{Limit: 5})
+
+	record := firstRelatedMemoryKind(result.Results, "persona_memory_write")
+	if record == nil {
+		t.Fatalf("results = %#v, want persona_memory_write evidence", result.Results)
+	}
+	if record.SourcePath != "memory/persona/writes/2026-05-20/episode-abcdef123456.md" {
+		t.Fatalf("SourcePath = %q, want persona memory write path", record.SourcePath)
+	}
+	if !relatedMemoryReasonsContain(record.Reasons, "family_boost:persona_memory_write") {
+		t.Fatalf("Reasons = %#v, want persona memory write family boost", record.Reasons)
+	}
+}
+
 func TestSearchRelatedMemoryIncludesTriageProjection(t *testing.T) {
 	workspaceDir := t.TempDir()
 	projection := []SlackTriageContext{{

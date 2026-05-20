@@ -400,6 +400,13 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 	search := service.SearchRelatedMemory("Pi persona memory-backed replies", SlackRelatedMemorySearchOptions{Limit: 5})
 	if record := firstPersonaRelatedMemory(search.Results); record == nil {
 		t.Fatalf("search results = %#v, want durable persona memory evidence", search.Results)
+	} else {
+		if record.Kind != "persona_memory_write" {
+			t.Fatalf("persona memory kind = %q, want persona_memory_write; record=%#v", record.Kind, *record)
+		}
+		if !relatedMemoryReasonsContain(record.Reasons, "family_boost:persona_memory_write") {
+			t.Fatalf("persona memory reasons = %#v, want persona_memory_write family boost", record.Reasons)
+		}
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()

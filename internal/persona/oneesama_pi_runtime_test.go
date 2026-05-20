@@ -58,8 +58,8 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if seen.Model != "test-model" || len(seen.Messages) != 2 {
 		t.Fatalf("seen = %#v, want model + system/user messages", seen)
 	}
-	if !strings.Contains(seen.Messages[0].Content, "not Linger") || strings.Contains(seen.Messages[0].Content, "[[MSG_BREAK]] as allowed") {
-		t.Fatalf("system prompt did not establish Oneesama/Linger boundary:\n%s", seen.Messages[0].Content)
+	if !strings.Contains(seen.Messages[0].Content, "Oneesama's own Slack foreground Pi agent") || strings.Contains(seen.Messages[0].Content, "[[MSG_BREAK]] as allowed") {
+		t.Fatalf("system prompt did not establish Oneesama foreground boundary:\n%s", seen.Messages[0].Content)
 	}
 	if !strings.Contains(seen.Messages[1].Content, "产品相邻链接") {
 		t.Fatalf("user request missing persona payload:\n%s", seen.Messages[1].Content)

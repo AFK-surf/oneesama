@@ -5,8 +5,9 @@ Date: 2026-05-20
 ## Trigger
 
 Peng asked to re-walk the 2026-05-19 Oneesama migration work and look for
-pollution, especially from old slackd workspace context and the temporary
-Linger/telegram-pi-agent path.
+pollution, especially from old slackd workspace context and temporary
+compatibility-runtime assumptions. Peng later clarified that Oneesama memory
+capability should learn from **OpenClaw + Hermes**, not from any old sidecar.
 
 ## Scope
 
@@ -21,12 +22,12 @@ Linger/telegram-pi-agent path.
 
 | Area | Finding | Decision |
 |---|---|---|
-| Oneesama Pi runtime | `oneesama-pi` is a separate provider from `pi`; live status reports `provider=oneesama-pi`, `mode=live`, `healthy=true`, and no Linger sidecar is required. | Keep. |
-| Linger runtime docs | `docs/persona-runtime.md` still framed `telegram-pi-agent` as directly reusable. That directory is Linger and must be historical reference only. | Patched docs to say concepts may be ported, not live dependency. |
-| Live env | `/tmp/oneesama-live-env-from-proc.sh` still contained stale `ONEESAMA_PERSONA_RUNTIME=pi` and sidecar URL variables. Current workspace policy overrode them, but source-order changes could resurrect Linger. | Removed stale runtime lines from the live env snapshot. |
+| Oneesama Pi runtime | `oneesama-pi` is a separate provider from `pi`; live status reports `provider=oneesama-pi`, `mode=live`, `healthy=true`, and no compatibility sidecar is required. | Keep. |
+| Memory reference docs | `docs/persona-runtime.md` still framed an old local runtime as directly reusable. The target should instead be OpenClaw + Hermes-style Memory capability. | Patched docs to use OpenClaw + Hermes as the memory reference shape. |
+| Live env | `/tmp/oneesama-live-env-from-proc.sh` still contained stale `ONEESAMA_PERSONA_RUNTIME=pi` and sidecar URL variables. Current workspace policy overrode them, but source-order changes could resurrect the old compatibility route. | Removed stale runtime lines from the live env snapshot. |
 | Old slackd workspace import | Old slackd workspace memory is intentionally imported under `runtime/live-workspace/memory/legacy/slack-agent-d/...`. This is correct evidence, not pollution. | Keep as line-citable evidence. |
 | Old slackd actionless policy traces | Old legacy triage archives include many "office helper / watercooler / pure technical / skip" decisions. Those are historical decisions, not Oneesama's current workspace policy. | Suppress actionless legacy policy traces from related-memory/local-memory retrieval unless they contain real tool/memory trace evidence. |
-| Linger marker tokens in memory | One bad 2026-05-20 triage archive entry had `[[MSG_BREAK]]` in `summary` and `visible_text`. Output scrub existed, but Memory retrieval could re-feed the marker to Pi. | Scrub Memory snippets, related-memory records, persona memory items, and citations; repaired the live archive JSON. |
+| Private marker tokens in memory | One bad 2026-05-20 triage archive entry had `[[MSG_BREAK]]` in `summary` and `visible_text`. Output scrub existed, but Memory retrieval could re-feed the marker to Pi. | Scrub Memory snippets, related-memory records, persona memory items, and citations; repaired the live archive JSON. |
 | Workspace policy | Active policy should be deployment config, not hardcoded model behavior. Current code uses `workspace_triage_policy` context and no hardcoded Oneesama-specific default. | Keep; future work should make link-synthesis policy more structured. |
 | Daily legacy comparison | `legacy_db_path` / `legacy_triage_archive_dir` point to old cueboard data only for daily report comparison. They do not enter persona foreground. | Keep; add staleness flag later if legacy data stops updating. |
 
@@ -37,9 +38,13 @@ Linger/telegram-pi-agent path.
 - Related-memory/local-memory retrieval suppresses imported old slackd
   actionless policy traces while preserving old traces that include
   `tool calls:`, `memory_search`, `memory_get`, or `person_memory`.
+- Pi-authored memory files under `memory/persona/writes/...` now have the
+  explicit `persona_memory_write` kind and a small family boost, so self-written
+  memory is visible as self-written memory rather than generic markdown.
 - Added regression tests for marker scrub and actionless policy trace
-  suppression.
-- `docs/persona-runtime.md` now records the Oneesama/Linger boundary and
+  suppression, plus a round-trip assertion that Pi-authored memory is written,
+  searchable, and tagged as `persona_memory_write`.
+- `docs/persona-runtime.md` now records the OpenClaw + Hermes Memory target and
   `oneesama-pi` capability limitations.
 
 ## Verification
@@ -55,3 +60,6 @@ Linger/telegram-pi-agent path.
   structured policy flag or explicit positive/negative policy parser.
 - Add a daily report "legacy comparison stale" flag when old slackd source data
   stops updating.
+- Add Memory quota/rotation, trust/staleness scoring, and episodic consolidation
+  for `memory/persona/writes/...` so the OpenClaw-style write path can grow
+  toward Hermes-style long-term memory.

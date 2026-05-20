@@ -62,20 +62,16 @@ flowchart LR
     WorkerResult --> Persona
 ```
 
-The closest existing local reference for memory-context ideas was historically
-`/Users/pengx17/Documents/telegram-pi-agent/src/runtime/memory.ts`, where that
-runtime builds a `<memory-context>` from semantic memory, working memory,
-today/yesterday episodes, historical memory, world state, and persona state.
-`/Users/pengx17/Documents/telegram-pi-agent/docs/world-model.md` adds the
-entity/event/arc/state model and source-reference discipline.
+The memory capability reference is **OpenClaw + Hermes**:
 
-That directory is Linger's runtime, not Oneesama's foreground runtime. It is a
-source of concepts to port deliberately through the `persona.Request` contract;
-Oneesama live Slack foreground must not directly run or depend on the
-Telegram/Linger sidecar, its marker protocol, or its workspace assumptions.
+- OpenClaw-style workspace memory: structured files, explicit source refs,
+  agent-authored durable writes, and retrieval that can cite where evidence came
+  from.
+- Hermes-style long-term memory: semantic recall, trust/staleness scoring,
+  episodic consolidation, entity relationships, and memory quality canaries.
 
-Oneesama should use that style of context assembly instead of feeding raw Slack
-memory blobs into Codex.
+Oneesama should grow toward that model instead of feeding raw Slack memory blobs
+into Codex or inheriting behavior from any temporary compatibility runtime.
 
 ## Language And Deployment Options
 
@@ -94,15 +90,15 @@ persists, audits, and routes; the persona process owns cognition and memory.
 
 | Option                   | Shape                                                                                                                | Pros                                                                                         | Risks                                                                                           | When To Use                                                                   |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Dedicated Pi-style runtime | Run a Oneesama-owned Pi-style runtime as a local subprocess, HTTP service, or OpenAI-compatible provider; Go calls it through `PersonaRuntime`. | Preserves the persona boundary while avoiding Linger protocol/workspace coupling. | Requires explicit memory/context injection and health/preflight ownership. | Production foreground after behavior fixtures pass. |
+| Dedicated Pi-style runtime | Run a Oneesama-owned Pi-style runtime as a local subprocess, HTTP service, or OpenAI-compatible provider; Go calls it through `PersonaRuntime`. | Preserves the persona boundary while keeping Memory owned by Oneesama. | Requires explicit memory/context injection and health/preflight ownership. | Production foreground after behavior fixtures pass. |
 | Go Pi-style port         | Reimplement the Pi/OpenClaw memory context builder, episode model, and persona decision loop in Go.                  | Single binary/runtime; easier deploy and observability once correct.                         | High migration risk; easy to repeat the "tool surface migrated, behavior did not" failure mode. | Only after JS sidecar behavior fixtures are stable and the contract is known. |
 | Hybrid shadow-first path | Start with JS sidecar in shadow/dry-run, define golden request/response fixtures, then decide whether to port to Go. | Lets us validate behavior before investing in language migration.                            | Requires maintaining the adapter seam during the shadow period.                                 | Recommended path.                                                             |
 
 Decision update after the 2026-05-20 cutover: **Oneesama foreground uses
 `oneesama-pi`, a dedicated OpenAI-compatible runtime behind the persona
-contract.** Do not run the Telegram/Linger sidecar for live Oneesama Slack
-foreground. Concepts from Linger may be ported only by copying the behavior into
-Oneesama-owned request construction, memory providers, tests, and prompts.
+contract.** Memory capability work should target the OpenClaw + Hermes reference
+shape above, implemented through Oneesama-owned request construction, memory
+providers, tests, and prompts.
 
 The code quality implication is important: a future Go implementation is fine
 only if it implements the same persona-runtime contract and passes the same
@@ -196,8 +192,8 @@ ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=1
 ```
 
 `oneesama-pi` is the dedicated Oneesama foreground runtime. It uses an
-OpenAI-compatible chat-completions backend directly and must not reuse the
-Telegram/Linger sidecar protocol. Configure it with:
+OpenAI-compatible chat-completions backend directly; Memory and workspace
+context are injected by Oneesama. Configure it with:
 
 ```bash
 ONEESAMA_PERSONA_RUNTIME=oneesama-pi
@@ -215,9 +211,9 @@ Capability boundary for `oneesama-pi`:
   providers.
 - It does not run tool loops internally; tool needs must become structured
   `WorkerRequest` output for Go to dispatch safely.
-- It must not emit Telegram/Linger marker tokens such as `[[MSG_BREAK]]`,
-  `[[WORLD_BRIEF]]`, or `[[KNOWLEDGE_BRIEF]]`; Slack-visible and memory evidence
-  paths scrub those markers as defense in depth.
+- It must not emit private transport or memory marker tokens such as
+  `[[MSG_BREAK]]`, `[[WORLD_BRIEF]]`, or `[[KNOWLEDGE_BRIEF]]`; Slack-visible
+  and memory evidence paths scrub those markers as defense in depth.
 - It does not currently own speech/TTS output. Meeting or voice surfaces need a
   separate acceptance path before reusing this provider there.
 
@@ -357,9 +353,8 @@ During the post-memory/backfill quality pass, flag the following as drift:
 
 - Should the Pi-style runtime be embedded in-process, called as a local HTTP
   service, or invoked through an agent protocol?
-- Which `telegram-pi-agent` memory/context concepts should be ported into
-  Oneesama-owned providers or shared libraries, without direct live dependency
-  on Linger's sidecar protocol or workspace assumptions?
+- Which OpenClaw/Hermes memory capabilities should move next into Oneesama-owned
+  providers or shared libraries?
 - Where should Oneesama store episode memory and world-state updates so they can
   be shared by Slack and Meet?
 - Which channels/meeting sessions should be the first canary cohort?

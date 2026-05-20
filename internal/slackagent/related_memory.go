@@ -326,6 +326,8 @@ func relatedMemoryKindForPath(relPath string) string {
 		return "memory_index"
 	case regexp.MustCompile(`^memory/\d{4}-\d{2}-\d{2}\.md$`).MatchString(relPath):
 		return "daily_note"
+	case strings.HasPrefix(relPath, "memory/persona/writes/") && strings.HasSuffix(relPath, ".md"):
+		return "persona_memory_write"
 	case strings.HasPrefix(relPath, "memory/people/") && strings.HasSuffix(relPath, ".md"):
 		return "person_profile"
 	case strings.HasPrefix(relPath, "memory/team/decisions/"):
@@ -387,6 +389,8 @@ func relatedMemoryFamilyBoost(kind string, tokens []string) float64 {
 	switch kind {
 	case "legacy_triage_archive":
 		return 0.14
+	case "persona_memory_write":
+		return 0.20
 	case "person_profile":
 		if hasAny("who", "owner", "review", "reviewer", "找谁", "负责人", "谁", "review") {
 			return 0.25
