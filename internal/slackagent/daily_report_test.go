@@ -65,8 +65,21 @@ func TestSlackDailyReportComparesLegacyEmojiUse(t *testing.T) {
 	if !report.Legacy.Available || report.Legacy.Runs != 1 || report.Legacy.ReactionRuns != 1 || report.Legacy.CustomEmojiUses != 1 {
 		t.Fatalf("legacy metrics = %#v, want available reaction + custom emoji", report.Legacy)
 	}
-	if !strings.Contains(report.Text, "Old slackd") || !strings.Contains(report.Text, "custom_emoji") || !strings.Contains(report.Text, ":memo_bridge:") {
-		t.Fatalf("report text = %q, want old-vs-new custom emoji summary", report.Text)
+	for _, want := range []string{
+		"*Oneesama Daily Audit*",
+		"*New Oneesama summary* · reply 1 / like(reaction) 1",
+		"*Old slackd summary* · reply 1 / like(reaction) 1",
+		"*Liked / emoji reactions*",
+		"*Self-iteration notes*",
+		"custom_emoji +0",
+		":memo_bridge:",
+	} {
+		if !strings.Contains(report.Text, want) {
+			t.Fatalf("report text = %q, want %q", report.Text, want)
+		}
+	}
+	if strings.Contains(report.Text, "*Quality buckets*") || strings.Contains(report.Text, "invalid_json=") {
+		t.Fatalf("report text = %q, should keep old daily-audit action buckets instead of invented quality bucket labels", report.Text)
 	}
 }
 

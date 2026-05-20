@@ -105,6 +105,10 @@ type SlackDailyTriageMetrics struct {
 	DelegateWorkerJobs    int            `json:"delegate_worker_jobs,omitempty"`
 	TopEmoji              map[string]int `json:"top_emoji,omitempty"`
 	TopCustomEmoji        map[string]int `json:"top_custom_emoji,omitempty"`
+	ReplySamples          []string       `json:"reply_samples,omitempty"`
+	ReactionSamples       []string       `json:"reaction_samples,omitempty"`
+	SkippedSamples        []string       `json:"skipped_samples,omitempty"`
+	FailedSamples         []string       `json:"failed_samples,omitempty"`
 }
 
 type SlackDailyTriageComparison struct {
@@ -501,6 +505,7 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		metrics.Runs++
 		if slackTriageRunFailed(run) {
 			metrics.FailedRuns++
+			metrics.FailedSamples = appendLimitedString(metrics.FailedSamples, slackDailyReportRunSample(run, firstNonEmpty(run.Error, run.Summary, "failed")), 8)
 		}
 		if run.Mutations > 0 {
 			metrics.MutatingRuns++
@@ -508,6 +513,7 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		metrics.Mutations += run.Mutations
 		if len(run.Actions) == 0 && run.Mutations == 0 {
 			metrics.NoActionRuns++
+			metrics.SkippedSamples = appendLimitedString(metrics.SkippedSamples, slackDailyReportRunSample(run, firstNonEmpty(run.Summary, "no visible action")), 8)
 		}
 		if slackTriageRunParseFallback(run) {
 			metrics.ParseFallbacks++
@@ -545,9 +551,11 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		for _, action := range run.Actions {
 			if slackDailyReportActionIsReply(action.Tool) {
 				replyRun = true
+				metrics.ReplySamples = appendLimitedString(metrics.ReplySamples, slackDailyReportRunSample(run, firstNonEmpty(action.Brief, run.Summary, "posted reply")), 8)
 			}
 			if slackDailyReportActionIsReaction(action.Tool) {
 				reactionRun = true
+				metrics.ReactionSamples = appendLimitedString(metrics.ReactionSamples, slackDailyReportRunSample(run, firstNonEmpty(action.Brief, run.Summary, "added reaction")), 8)
 				for _, emoji := range slackDailyReportExtractEmoji(action.Brief) {
 					metrics.ReactionMutations++
 					metrics.TopEmoji[emoji]++
@@ -572,9 +580,11 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 			}
 			if slackDailyReportActionIsReply(firstNonEmpty(call.Action, call.Tool)) {
 				replyRun = true
+				metrics.ReplySamples = appendLimitedString(metrics.ReplySamples, slackDailyReportRunSample(run, firstNonEmpty(call.Brief, run.Summary, "posted reply")), 8)
 			}
 			if slackDailyReportActionIsReaction(firstNonEmpty(call.Action, call.Tool)) && call.Success {
 				reactionRun = true
+				metrics.ReactionSamples = appendLimitedString(metrics.ReactionSamples, slackDailyReportRunSample(run, firstNonEmpty(call.Brief, call.Result, run.Summary, "added reaction")), 8)
 				emojis := slackDailyReportExtractEmoji(call.Brief)
 				if len(emojis) == 0 {
 					emojis = slackDailyReportExtractEmoji(call.Result)
@@ -656,34 +666,67 @@ func formatSlackDailyReportText(report SlackDailyReport) string {
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, ":bar_chart: *Oneesama daily triage report* — %s\n", report.ReportDate)
-	fmt.Fprintf(&b, "Window: %.0fh, status=%s\n\n", report.WindowHours, status)
-	fmt.Fprintf(&b, "*New Oneesama*: runs=%d reply=%d reaction=%d custom_emoji=%d failed=%d no_action=%d\n",
-		report.New.Runs, report.New.ReplyRuns, report.New.ReactionRuns, report.New.CustomEmojiUses, report.New.FailedRuns, report.New.NoActionRuns)
+	fmt.Fprintf(&b, ":bar_chart: *Oneesama Daily Audit* · %s · last %.0fh\n", report.ReportDate, report.WindowHours)
+	fmt.Fprintf(&b, "*Status* · %s\n\n", status)
+	fmt.Fprintf(&b, "*New Oneesama summary* · reply %d / like(reaction) %d / repost 0 / quote 0 / pending 0 / skipped %d / stale-aged 0 / failed %d / discovered %d\n",
+		report.New.ReplyRuns, report.New.ReactionRuns, report.New.NoActionRuns, report.New.FailedRuns, report.New.Runs)
 	if report.Legacy.Available {
-		fmt.Fprintf(&b, "*Old slackd*: runs=%d reply=%d reaction=%d custom_emoji=%d failed=%d no_action=%d\n",
-			report.Legacy.Runs, report.Legacy.ReplyRuns, report.Legacy.ReactionRuns, report.Legacy.CustomEmojiUses, report.Legacy.FailedRuns, report.Legacy.NoActionRuns)
-		fmt.Fprintf(&b, "*Delta*: reply=%+d reaction=%+d custom_emoji=%+d failed=%+d\n",
+		fmt.Fprintf(&b, "*Old slackd summary* · reply %d / like(reaction) %d / repost 0 / quote 0 / pending 0 / skipped %d / stale-aged 0 / failed %d / discovered %d\n",
+			report.Legacy.ReplyRuns, report.Legacy.ReactionRuns, report.Legacy.NoActionRuns, report.Legacy.FailedRuns, report.Legacy.Runs)
+		fmt.Fprintf(&b, "*Old-vs-new delta* · reply %+d / like(reaction) %+d / custom_emoji %+d / failed %+d\n",
 			report.Comparison.ReplyRunDelta, report.Comparison.ReactionRunDelta, report.Comparison.CustomEmojiUseDelta, report.Comparison.FailureDelta)
 	} else {
 		fmt.Fprintf(&b, "*Old slackd*: unavailable (%s)\n", report.Legacy.Error)
 	}
-	fmt.Fprintf(&b, "\n*Quality buckets*: invalid_json=%d placeholder=%d high_context_no_action=%d link_no_action=%d low_conf_no_action=%d\n",
-		report.New.InvalidPersonaJSON, report.New.PlaceholderSummaries, report.New.HighContextNoAction, report.New.LinkContextNoAction, report.New.LowConfidenceNoAction)
-	fmt.Fprintf(&b, "*Evidence/tools*: memory_lookups=%d external_searches=%d thread_fetches=%d delegate_workers=%d\n",
-		report.New.MemoryLookups, report.New.ExternalSearches, report.New.ThreadFetches, report.New.DelegateWorkerJobs)
-	if len(report.New.TopCustomEmoji) > 0 {
-		fmt.Fprintf(&b, "*Custom emoji used*: %s\n", formatEmojiCounts(report.New.TopCustomEmoji))
-	} else if report.New.ReactionRuns > 0 {
-		b.WriteString("*Custom emoji used*: none (reactions used only standard emoji)\n")
+
+	b.WriteString("\n*Reply category mix:* slack_thread_reply\n")
+	b.WriteString(formatDailyAuditBullets(report.New.ReplySamples))
+	b.WriteString("\n\n*Liked / emoji reactions*\n")
+	b.WriteString(formatDailyAuditBullets(report.New.ReactionSamples))
+	b.WriteString("\n\n*Skipped category mix:* no_visible_action: ")
+	fmt.Fprintf(&b, "%d\n", report.New.NoActionRuns)
+	b.WriteString(formatDailyAuditBullets(report.New.SkippedSamples))
+	b.WriteString("\n\n*Failed*\n")
+	b.WriteString(formatDailyAuditBullets(report.New.FailedSamples))
+	b.WriteString("\n\n*Emoji audit*\n")
+	fmt.Fprintf(&b, "- New Oneesama custom emoji: %s\n", slackDailyReportEmojiSummary(report.New.TopCustomEmoji, report.New.ReactionRuns))
+	if report.Legacy.Available {
+		fmt.Fprintf(&b, "- Old slackd custom emoji: %s\n", slackDailyReportEmojiSummary(report.Legacy.TopCustomEmoji, report.Legacy.ReactionRuns))
 	}
-	if len(report.Flags) > 0 {
-		b.WriteString("\n*Flags*\n")
+	fmt.Fprintf(&b, "- New evidence path: memory %d / external %d / thread %d / delegate %d\n",
+		report.New.MemoryLookups, report.New.ExternalSearches, report.New.ThreadFetches, report.New.DelegateWorkerJobs)
+	b.WriteString("\n*Self-iteration notes*\n")
+	fmt.Fprintf(&b, "- Compare approved replies/reactions/skips in the same action buckets as old daily audit; do not invent a separate quality taxonomy.\n")
+	fmt.Fprintf(&b, "- Treat old slackd silence as one signal, not ground truth; workspace policy and Memory-backed synthesis still decide whether Oneesama should engage.\n")
+	if len(report.Flags) == 0 {
+		b.WriteString("- No red/yellow parity notes in this window.\n")
+	} else {
 		for _, flag := range report.Flags {
 			fmt.Fprintf(&b, "- %s: %s\n", flag.Code, flag.Message)
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func formatDailyAuditBullets(samples []string) string {
+	if len(samples) == 0 {
+		return "- none"
+	}
+	var b strings.Builder
+	for _, sample := range samples {
+		fmt.Fprintf(&b, "- %s\n", sample)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func slackDailyReportEmojiSummary(counts map[string]int, reactionRuns int) string {
+	if len(counts) > 0 {
+		return formatEmojiCounts(counts)
+	}
+	if reactionRuns > 0 {
+		return "none (standard emoji only)"
+	}
+	return "none"
 }
 
 func (s *Service) dailyReportStatus() SlackDailyReportStatus {
@@ -908,6 +951,51 @@ func slackDailyReportExtractEmoji(text string) []string {
 		}
 	}
 	return out
+}
+
+func slackDailyReportRunSample(run SlackTriageContext, detail string) string {
+	var parts []string
+	if channel := slackDailyReportRunChannel(run); channel != "" {
+		parts = append(parts, channel)
+	}
+	if ts := parseTriageTimestamp(run.Timestamp); !ts.IsZero() {
+		parts = append(parts, ts.UTC().Format("01-02 15:04Z"))
+	}
+	detail = truncateSlackContextText(firstLine(firstNonEmpty(detail, compactTriageSummary(run))), 180)
+	if detail != "" {
+		parts = append(parts, detail)
+	}
+	if len(parts) == 0 {
+		return "n/a"
+	}
+	return strings.Join(parts, " · ")
+}
+
+func slackDailyReportRunChannel(run SlackTriageContext) string {
+	for _, action := range run.Actions {
+		if strings.TrimSpace(action.Channel) != "" {
+			return strings.TrimSpace(action.Channel)
+		}
+	}
+	for _, channel := range run.Channels {
+		if strings.TrimSpace(channel) != "" {
+			return strings.TrimSpace(channel)
+		}
+	}
+	return ""
+}
+
+func appendLimitedString(values []string, value string, limit int) []string {
+	value = strings.TrimSpace(value)
+	if value == "" || limit <= 0 || len(values) >= limit {
+		return values
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func slackDailyReportPlaceholderSummary(run SlackTriageContext) bool {

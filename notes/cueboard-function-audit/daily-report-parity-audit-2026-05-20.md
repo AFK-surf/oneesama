@@ -6,12 +6,15 @@ Peng asked for new Oneesama to send a daily report like old cueboard slackd, and
 
 This audit follows the read-old-first migration rule: old behavior is the baseline, new behavior must either port the contract or explicitly justify divergence.
 
+**2026-05-20 correction after Peng review:** the first implementation invented a new "quality buckets" report vocabulary. Peng clarified the goal is to replicate the previous daily-audit reading shape so old/new reply quality can be compared in the same language. The report renderer now uses the old action-bucket form (`reply / like / repost / quote / pending / skipped / stale-aged / failed / discovered`) and keeps quality observations under `Self-iteration notes`, instead of creating a separate taxonomy.
+
 ## Cueboard source
 
 - Old schedule engine: `agent-framework/internal/core/schedule/schedule.go`
 - Old framework schedule dispatch: `agent-framework/internal/framework/framework.go`
 - Old Slack usage/report tool: `agent-framework/internal/bridge/slack/usage_tool.go`
 - Old triage source of truth: `slack.db` tables `triage_run`, `triage_action`, and `triage_tool_call`
+- Old daily-audit shape reference: OpenClaw/Twitter daily audit builder `~/.openclaw/twitter-bot/twitter_reply_bot.py::build_daily_audit`, which reports action buckets and self-iteration notes, and later posts a short Slack summary while keeping details in Canvas.
 
 ## New Oneesama source
 
@@ -75,26 +78,34 @@ Port the old durable source of truth and extend it: new daily report includes `n
 
 - `TestSlackDailyReportComparesLegacyEmojiUse`
 
-## Behavior 3: report includes triage quality buckets
+## Behavior 3: report uses the old daily-audit action buckets
 
 ### Old does
 
 - Old `usage_api` can generate Slack rich reports for usage dashboards and automatically post them for non-assistant roles (`usage_tool.go:74-80`, `usage_tool.go:103-125`, `usage_tool.go:371-430`).
-- Old triage logs preserve enough run/tool/action state to reconstruct quality buckets from persisted history.
+- The prior daily-audit report shape groups outcome by action: `reply`, `like`, `repost`, `quote`, `pending`, `skipped`, `stale-aged`, `failed`, and `discovered`; it also includes `Reply category mix`, `Liked`, `Reposted`, `Quoted`, `Pending review`, `Skipped category mix`, `Failed`, and `Self-iteration notes` (`twitter_reply_bot.py:2844-2897`).
+- Old triage logs preserve enough run/tool/action state to reconstruct equivalent action buckets from persisted history.
 
 ### New does
 
-- `buildSlackDailyTriageMetrics` counts runs, failures, mutations, reply runs, reaction runs, no-action runs, parse fallbacks, placeholder summaries, invalid persona JSON, high-context no-action, link-context no-action, low-confidence no-action, memory lookups, external searches, thread fetches, persona failures, and delegate worker jobs (`internal/slackagent/daily_report.go:493-606`).
+- `buildSlackDailyTriageMetrics` counts runs, failures, mutations, reply runs, reaction runs, no-action runs, parse fallbacks, placeholder summaries, invalid persona JSON, high-context no-action, link-context no-action, low-confidence no-action, memory lookups, external searches, thread fetches, persona failures, and delegate worker jobs (`internal/slackagent/daily_report.go:493-620`).
 - `buildSlackDailyReportFlags` promotes red/yellow quality signals into the report (`internal/slackagent/daily_report.go:625-642`).
-- `formatSlackDailyReportText` renders the daily report into Slack mrkdwn with quality buckets and evidence/tool counts (`internal/slackagent/daily_report.go:645-684`).
+- `formatSlackDailyReportText` renders those metrics in the old daily-audit action-bucket vocabulary:
+  - `New Oneesama summary` / `Old slackd summary`
+  - `reply / like(reaction) / repost / quote / pending / skipped / stale-aged / failed / discovered`
+  - `Reply category mix`, `Liked / emoji reactions`, `Skipped category mix`, `Failed`
+  - `Emoji audit`
+  - `Self-iteration notes`
+  (`internal/slackagent/daily_report.go:645-730`).
 
 ### Diff
 
-- New report is mrkdwn text through the existing poster seam, not Block Kit. This keeps the first live slice simpler while preserving all data in the API response for future Block Kit formatting.
+- New report maps Slack emoji reactions to the old `like` bucket because that is the closest Slack-side lightweight action. `repost` and `quote` stay present as zero-valued buckets to preserve the old daily-audit shape.
+- New report is mrkdwn text through the existing poster seam, not Canvas-first yet. This is a temporary delivery divergence; the wording/measurement vocabulary is now old-format-compatible.
 
 ### Decision
 
-Ship mrkdwn first; keep the structured JSON report so a richer Block Kit renderer can be added without changing collectors.
+Use old daily-audit action buckets now. Do not reintroduce `Quality buckets` / `invalid_json=` style headings in the visible report; those remain internal counters and become notes only when they affect the action-bucket comparison.
 
 ### Fixtures
 
@@ -154,6 +165,6 @@ Use internal API now. A Slack command wrapper can be added later if humans want 
 
 ## Open follow-ups
 
-- Add a Block Kit renderer if the mrkdwn report becomes too dense.
+- Add Canvas-first delivery if #meeting-avatar wants to mirror the later Twitter daily-audit delivery path exactly: short Slack message + reusable Canvas detail.
 - Add channel-level breakdown once daily report consumers want more than workspace-level quality.
 - Add explicit old slackd custom emoji cache snapshot if historical comparison should judge old custom emoji usage against old custom emoji list rather than current workspace list.
