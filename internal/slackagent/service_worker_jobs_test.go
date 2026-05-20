@@ -154,6 +154,46 @@ func TestSlackWorkerToolRequestStartsContinuationWithDispatcherEvidence(t *testi
 	}
 }
 
+func TestSlackWorkerToolBridgeFailureClearsStatusAndWarnsReaction(t *testing.T) {
+	assistant := &recordingAssistant{}
+	reactions := &recordingReactions{}
+	service := NewService(Config{
+		Assistant: assistant,
+		Reactions: reactions,
+	})
+
+	service.handleAgentRunnerUpdate(context.Background(), agentrunner.Job{
+		ID:       "job_tool_request_no_runner",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Mode:     "analysis",
+		Task:     "Need a tool call.",
+		Result: strings.Join([]string{
+			"<oneesama_tool_request>",
+			`{"calls":[{"tool":"memory_search","args":{"query":"Bridge native tool loop","limit":3}}],"reason":"need evidence"}`,
+			"</oneesama_tool_request>",
+		}, "\n"),
+		Context: map[string]any{
+			"source":                      "slack-agent",
+			slackWorkerToolLoopContextKey: slackWorkerToolLoopMax,
+			"slack": map[string]any{
+				"channelId":  "C123",
+				"threadTs":   "177.123",
+				"reactionTs": "177.122",
+			},
+		},
+	})
+
+	calls := assistant.Calls()
+	if len(calls) != 1 || calls[0].Status != "" {
+		t.Fatalf("assistant calls = %#v, want one clear-status call", calls)
+	}
+	assertReactionCalls(t, reactions.Calls(), []reactionCall{
+		{Method: "remove", Channel: "C123", Timestamp: "177.122", Name: slackReactionEyes},
+		{Method: "add", Channel: "C123", Timestamp: "177.122", Name: slackReactionWarn},
+	})
+}
+
 func TestSlackWorkerToolRequestRejectsUnsafeSlackPost(t *testing.T) {
 	request, ok := parseSlackWorkerToolBridgeRequest(strings.Join([]string{
 		"<oneesama_tool_request>",

@@ -198,10 +198,13 @@ func slackWorkerToolLoopCount(context map[string]any) int {
 }
 
 func (s *Service) postSlackWorkerToolBridgeFailure(ctx context.Context, job agentrunner.Job, reason string) {
-	if _, ok := slackRefForWorkerJob(job); !ok {
+	ref, ok := slackRefForWorkerJob(job)
+	if !ok {
 		return
 	}
 	if strings.TrimSpace(reason) != "" {
 		s.logger.Warn("slack worker tool bridge failed", "job_id", job.ID, "reason", reason)
 	}
+	s.scheduleAssistantThreadStatus(ctx, ref, "", true)
+	s.finishMentionReaction(ctx, ref, slackReactionWarn)
 }
