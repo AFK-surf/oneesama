@@ -85,6 +85,14 @@ func (s *Service) redeliverJoinSessionRecord(ctx context.Context, session Sessio
 	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "done", "", result.Artifact.Dir); err == nil && updated != nil {
 		meeting = *updated
 	}
+	if summary := meetdSummaryFromPostMeeting(result.Summary); summary != nil {
+		if err := s.SetMeetdMeetingSummary(ctx, meeting.ID, *summary); err != nil {
+			s.logger.Warn("persist redelivered join summary failed", "meeting_id", meeting.ID, "session_id", session.ID, "error", err)
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(session.Status), "stale") {
+		s.markRedeliveredJoinSessionDone(ctx, session)
+	}
 
 	return s.redeliverJoinSessionResult(ctx, meeting, MeetdMeetingResult{
 		MeetingID: meetingIDString(meeting.ID),
@@ -97,6 +105,27 @@ func (s *Service) redeliverJoinSessionRecord(ctx context.Context, session Sessio
 		},
 		ForceDelivery: true,
 	})
+}
+
+func (s *Service) markRedeliveredJoinSessionDone(ctx context.Context, session SessionRecord) {
+	metadata := cloneMap(session.Metadata)
+	if len(metadata) == 0 {
+		metadata = map[string]any{}
+	}
+	metadata["stale_recovered_from_redelivery"] = true
+	if _, err := s.UpsertSession(ctx, SessionUpsertInput{
+		ID:               session.ID,
+		MeetingID:        session.MeetingID,
+		MeetingURL:       session.MeetingURL,
+		Status:           "done",
+		Title:            session.Title,
+		ParticipantCount: session.ParticipantCount,
+		StartedAt:        session.StartedAt,
+		EndedAt:          firstNonEmpty(session.EndedAt, time.Now().UTC().Format(time.RFC3339Nano)),
+		Metadata:         metadata,
+	}); err != nil {
+		s.logger.Warn("persist redelivered stale join session failed", "session_id", session.ID, "error", err)
+	}
 }
 
 func (s *Service) redeliverJoinSessionResult(ctx context.Context, meeting MeetdMeetingRecord, result MeetdMeetingResult) error {

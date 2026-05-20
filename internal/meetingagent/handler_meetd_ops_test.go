@@ -149,6 +149,10 @@ func TestMeetdRedeliverSyntheticJoinSessionReprocessesDirectJoin(t *testing.T) {
 	if capturedResult.Artifacts.TranscriptPath == "" || capturedResult.Artifacts.CaptionsCount == 0 {
 		t.Fatalf("captured artifacts = %+v, want transcript and caption count", capturedResult.Artifacts)
 	}
+	get := performMeetdRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"result"`) || !strings.Contains(get.Body.String(), "第一版字幕很差") {
+		t.Fatalf("get body = %s, want stored redelivered summary", get.Body.String())
+	}
 }
 
 func TestMeetdRedeliverStaleSyntheticJoinSessionFromCapturedArtifacts(t *testing.T) {
@@ -205,6 +209,17 @@ func TestMeetdRedeliverStaleSyntheticJoinSessionFromCapturedArtifacts(t *testing
 	}
 	if capturedResult.Status != "done" || capturedResult.Summary == nil || capturedResult.Artifacts.CaptionsCount != 1 {
 		t.Fatalf("captured result = %+v, want recovered done summary", capturedResult)
+	}
+	recovered, err := service.GetSession(context.Background(), sessionID)
+	if err != nil || recovered == nil {
+		t.Fatalf("get recovered session: session=%+v err=%v", recovered, err)
+	}
+	if recovered.Status != "done" || !boolField(recovered.Metadata, "stale_recovered_from_redelivery") {
+		t.Fatalf("recovered session = %+v, want done with redelivery recovery metadata", recovered)
+	}
+	get := performMeetdRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"result"`) || !strings.Contains(get.Body.String(), "Stale runner artifacts") {
+		t.Fatalf("get body = %s, want stored redelivered summary", get.Body.String())
 	}
 }
 
