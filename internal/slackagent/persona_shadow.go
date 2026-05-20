@@ -894,7 +894,7 @@ func personaCitationsFromRelatedMemory(records []SlackRelatedMemoryRecord) []per
 			SourceRef: firstNonEmpty(record.SourceRef, record.SourcePath),
 			LineStart: record.StartLine,
 			LineEnd:   record.EndLine,
-			Snippet:   truncateSlackContextText(record.Content, 240),
+			Snippet:   truncateSlackContextText(sanitizeSlackVisibleText(record.Content), 240),
 		})
 	}
 	return out
@@ -905,7 +905,7 @@ func personaMemoryRecordsFromRelatedMemory(records []SlackRelatedMemoryRecord) [
 	for _, record := range records {
 		out = append(out, persona.MemoryRecord{
 			Kind:      record.Kind,
-			Text:      record.Content,
+			Text:      sanitizeSlackVisibleText(record.Content),
 			SourceRef: firstNonEmpty(record.SourceRef, record.SourcePath),
 			Score:     record.Score,
 		})

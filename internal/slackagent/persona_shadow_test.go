@@ -114,6 +114,37 @@ func TestBuildBackfillPersonaRequestCarriesEvidenceAndShadowSafety(t *testing.T)
 	}
 }
 
+func TestPersonaRelatedMemoryInputsScrubSidecarMarkers(t *testing.T) {
+	t.Parallel()
+
+	records := []SlackRelatedMemoryRecord{{
+		Kind:       "legacy_triage_archive",
+		Source:     "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-20.md",
+		SourcePath: "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-20.md",
+		Content:    "alpha[[MSG_BREAK]]beta[[WORLD_BRIEF]]internal only[[/WORLD_BRIEF]]",
+		Score:      0.9,
+	}}
+
+	memory := personaMemoryRecordsFromRelatedMemory(records)
+	if len(memory) != 1 {
+		t.Fatalf("memory records = %#v, want one record", memory)
+	}
+	if strings.Contains(memory[0].Text, "MSG_BREAK") || strings.Contains(memory[0].Text, "WORLD_BRIEF") || strings.Contains(memory[0].Text, "internal only") {
+		t.Fatalf("persona memory leaked sidecar marker content: %q", memory[0].Text)
+	}
+	if !strings.Contains(memory[0].Text, "alpha\n\nbeta") {
+		t.Fatalf("persona memory = %q, want paragraph-preserving sanitized content", memory[0].Text)
+	}
+
+	citations := personaCitationsFromRelatedMemory(records)
+	if len(citations) != 1 {
+		t.Fatalf("citations = %#v, want one citation", citations)
+	}
+	if strings.Contains(citations[0].Snippet, "MSG_BREAK") || strings.Contains(citations[0].Snippet, "internal only") {
+		t.Fatalf("persona citation leaked sidecar marker content: %q", citations[0].Snippet)
+	}
+}
+
 func TestBuildBackfillPersonaRequestDisablesVisibleReplyWhenNotReviewReady(t *testing.T) {
 	req := BuildBackfillPersonaRequest(SlackBackfillCandidate{
 		ChannelID:      "C1",

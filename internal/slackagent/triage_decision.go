@@ -156,7 +156,7 @@ func formatSlackTriageMemory(entries []SlackTriageMemoryEntry) string {
 		if index >= 5 {
 			break
 		}
-		content := truncateSlackContextText(strings.TrimSpace(entry.Content), 500)
+		content := truncateSlackContextText(strings.TrimSpace(sanitizeSlackVisibleText(entry.Content)), 500)
 		if content == "" {
 			continue
 		}
@@ -175,7 +175,7 @@ func formatSlackRelatedMemoryEvidence(records []SlackRelatedMemoryRecord, limit 
 		if index >= limit {
 			break
 		}
-		content := truncateSlackContextText(strings.TrimSpace(record.Content), 420)
+		content := truncateSlackContextText(strings.TrimSpace(sanitizeSlackVisibleText(record.Content)), 420)
 		if content == "" {
 			continue
 		}

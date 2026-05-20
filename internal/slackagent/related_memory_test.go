@@ -332,6 +332,40 @@ func TestSearchRelatedMemoryRanksLegacyToolTraceAboveGenericRecentNote(t *testin
 	}
 }
 
+func TestSearchRelatedMemorySuppressesLegacyActionlessPolicyTrace(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/team/facts/current-policy.md", "Current Oneesama workspace policy treats product context as deployment-specific evidence.")
+	writeRelatedMemoryFile(t, workspaceDir, "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-19.md", strings.Join([]string{
+		"# Legacy Slack Agent D triage archive 2026-05-19",
+		"",
+		"## Triage archive run old-actionless-policy",
+		"",
+		"Actions:",
+		"> []",
+		"",
+		"Summary:",
+		"> product context was skipped because this is watercooler and the office helper should not join pure technical chatter.",
+		"",
+		"Raw output:",
+		"> SKIP — product context in watercooler. No action.",
+	}, "\n"))
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+
+	result := service.SearchRelatedMemory("product context office helper watercooler", SlackRelatedMemorySearchOptions{Limit: 5})
+
+	for _, record := range result.Results {
+		if record.Kind == "legacy_triage_archive" && strings.Contains(record.Content, "office helper") {
+			t.Fatalf("related memory surfaced imported actionless policy trace: %#v", record)
+		}
+	}
+	if firstRelatedMemoryKind(result.Results, "team_fact") == nil {
+		t.Fatalf("results = %#v, want current non-legacy evidence to remain", result.Results)
+	}
+}
+
 func writeRelatedMemoryFile(t *testing.T, workspaceDir, relPath, content string) {
 	t.Helper()
 	fullPath := filepath.Join(workspaceDir, filepath.FromSlash(relPath))

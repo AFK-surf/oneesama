@@ -74,7 +74,11 @@ func workspaceMemoryFileSearchResults(workspaceDir string, keywords []string, li
 		if err != nil {
 			continue
 		}
-		score := scoreMemoryText(string(raw), keywords)
+		content := sanitizeSlackVisibleText(string(raw))
+		if relatedMemorySuppressesImportedPolicyTrace(relatedMemoryKindForPath(relPath), content) {
+			continue
+		}
+		score := scoreMemoryText(content, keywords)
 		if score <= 0 {
 			continue
 		}
@@ -83,7 +87,7 @@ func workspaceMemoryFileSearchResults(workspaceDir string, keywords []string, li
 			Kind:    "workspace_memory_file",
 			Source:  "workspace:" + relPath,
 			Score:   score,
-			Content: memorySnippet(string(raw)),
+			Content: memorySnippet(content),
 		})
 	}
 	sortMemoryResults(results)
@@ -261,7 +265,7 @@ func scoreMemoryText(content string, keywords []string) float64 {
 }
 
 func memorySnippet(text string) string {
-	compact := strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	compact := strings.TrimSpace(strings.ReplaceAll(sanitizeSlackVisibleText(text), "\r\n", "\n"))
 	for strings.Contains(compact, "\n\n\n") {
 		compact = strings.ReplaceAll(compact, "\n\n\n", "\n\n")
 	}

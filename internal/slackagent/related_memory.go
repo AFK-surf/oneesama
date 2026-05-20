@@ -76,12 +76,19 @@ func (s *Service) SearchRelatedMemory(query string, options SlackRelatedMemorySe
 	if len(records) > limit {
 		records = records[:limit]
 	}
+	sanitizeSlackRelatedMemoryRecords(records)
 	result.Results = records
 	if len(records) == 0 {
 		result.Status = "no_relevant_memory"
 		result.NoRelevantMemory = true
 	}
 	return result
+}
+
+func sanitizeSlackRelatedMemoryRecords(records []SlackRelatedMemoryRecord) {
+	for index := range records {
+		records[index].Content = sanitizeSlackVisibleText(records[index].Content)
+	}
 }
 
 func (s *Service) relatedMemoryProviderRecords(ctx context.Context, query string, tokens []string, limit int, now time.Time) []SlackRelatedMemoryRecord {
@@ -121,21 +128,25 @@ func relatedMemoryWorkspaceRecords(workspaceDir string, tokens []string, now tim
 		createdAt, updatedAt := relatedMemoryFileTimestamps(relPath, info)
 		kind := relatedMemoryKindForPath(relPath)
 		for _, chunk := range relatedMemoryMarkdownChunks(string(raw)) {
-			base := relatedMemoryTextScore(chunk.Content, tokens)
+			content := sanitizeSlackVisibleText(chunk.Content)
+			if relatedMemorySuppressesImportedPolicyTrace(kind, content) {
+				continue
+			}
+			base := relatedMemoryTextScore(content, tokens)
 			if base <= 0 {
 				continue
 			}
-			score, reasons := relatedMemoryScoreWithBoosts(base, kind, relPath, chunk.Content, tokens, now)
+			score, reasons := relatedMemoryScoreWithBoosts(base, kind, relPath, content, tokens, now)
 			records = append(records, SlackRelatedMemoryRecord{
 				Kind:       kind,
 				Source:     filepath.ToSlash(relPath),
 				SourcePath: filepath.ToSlash(relPath),
-				Title:      relatedMemoryTitle(chunk.Content),
+				Title:      relatedMemoryTitle(content),
 				StartLine:  chunk.StartLine,
 				EndLine:    chunk.EndLine,
 				CreatedAt:  createdAt,
 				UpdatedAt:  updatedAt,
-				Content:    truncateSlackContextText(strings.TrimSpace(chunk.Content), relatedMemorySnippetLimit),
+				Content:    truncateSlackContextText(strings.TrimSpace(content), relatedMemorySnippetLimit),
 				Score:      score,
 				Reasons:    reasons,
 			})
@@ -431,6 +442,55 @@ func relatedMemoryLegacyToolTraceBoost(base float64, kind, content string) float
 		}
 	}
 	return 0
+}
+
+func relatedMemorySuppressesImportedPolicyTrace(kind, content string) bool {
+	if kind != "legacy_triage_archive" {
+		return false
+	}
+	lower := strings.ToLower(content)
+	for _, marker := range []string{"tool calls:", "memory_search", "memory_get", "person_memory"} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	actionless := false
+	for _, marker := range []string{
+		"actions:\n> []",
+		"\"actions\": []",
+		"\"actions\":[]",
+		"actions: []",
+		"no action",
+		"skip",
+		"无 action",
+		"无动作",
+		"无需介入",
+		"不介入",
+	} {
+		if strings.Contains(lower, marker) {
+			actionless = true
+			break
+		}
+	}
+	if !actionless {
+		return false
+	}
+	for _, marker := range []string{
+		"office helper",
+		"watercooler",
+		"水群",
+		"水聊",
+		"not in my lane",
+		"不属于 office helper",
+		"无需 office helper",
+		"纯技术",
+		"纯粹 casual",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func relatedMemoryRecencyBoost(relPath string, now time.Time) float64 {

@@ -64,6 +64,38 @@ func TestCueboardParityLocalMemorySnippetTruncatesUTF8(t *testing.T) {
 	}
 }
 
+func TestCueboardParityMemorySnippetScrubsPersonaMarkers(t *testing.T) {
+	t.Parallel()
+
+	got := memorySnippet("alpha[[MSG_BREAK]]beta[[WORLD_BRIEF]]internal only[[/WORLD_BRIEF]]")
+	if strings.Contains(got, "MSG_BREAK") || strings.Contains(got, "WORLD_BRIEF") || strings.Contains(got, "internal only") {
+		t.Fatalf("memory snippet leaked persona marker content: %q", got)
+	}
+	if !strings.Contains(got, "alpha\n\nbeta") {
+		t.Fatalf("memory snippet = %q, want paragraph-preserving sanitized content", got)
+	}
+}
+
+func TestCueboardParityRelatedMemoryScrubsPersonaMarkers(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(workspaceDir, "memory", "team", "facts", "markers.md"), "marker recall alpha[[MSG_BREAK]]beta[[WORLD_BRIEF]]internal only[[/WORLD_BRIEF]]")
+	service := NewService(Config{Slack: appconfig.SlackConfig{WorkspaceDir: workspaceDir}})
+
+	result := service.SearchRelatedMemory("marker recall", SlackRelatedMemorySearchOptions{Limit: 5})
+	if len(result.Results) == 0 {
+		t.Fatalf("SearchRelatedMemory returned no results")
+	}
+	joined := result.Results[0].Content
+	if strings.Contains(joined, "MSG_BREAK") || strings.Contains(joined, "WORLD_BRIEF") || strings.Contains(joined, "internal only") {
+		t.Fatalf("related memory leaked persona marker content: %q", joined)
+	}
+	if !strings.Contains(joined, "alpha\n\nbeta") {
+		t.Fatalf("related memory content = %q, want paragraph-preserving sanitized content", joined)
+	}
+}
+
 func TestCueboardParityBuildAgentRunnerContextCarriesLocalMemoryBehindAdapter(t *testing.T) {
 	t.Parallel()
 

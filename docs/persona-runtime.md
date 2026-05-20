@@ -62,12 +62,17 @@ flowchart LR
     WorkerResult --> Persona
 ```
 
-The closest existing local reference is
-`/Users/pengx17/Documents/telegram-pi-agent/src/runtime/memory.ts`, where the
+The closest existing local reference for memory-context ideas was historically
+`/Users/pengx17/Documents/telegram-pi-agent/src/runtime/memory.ts`, where that
 runtime builds a `<memory-context>` from semantic memory, working memory,
 today/yesterday episodes, historical memory, world state, and persona state.
 `/Users/pengx17/Documents/telegram-pi-agent/docs/world-model.md` adds the
 entity/event/arc/state model and source-reference discipline.
+
+That directory is Linger's runtime, not Oneesama's foreground runtime. It is a
+source of concepts to port deliberately through the `persona.Request` contract;
+Oneesama live Slack foreground must not directly run or depend on the
+Telegram/Linger sidecar, its marker protocol, or its workspace assumptions.
 
 Oneesama should use that style of context assembly instead of feeding raw Slack
 memory blobs into Codex.
@@ -89,14 +94,15 @@ persists, audits, and routes; the persona process owns cognition and memory.
 
 | Option                   | Shape                                                                                                                | Pros                                                                                         | Risks                                                                                           | When To Use                                                                   |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| JS/TS Pi sidecar         | Run the existing Pi-style runtime as a local subprocess or HTTP service; Go calls it through `PersonaRuntime`.       | Fastest path to reuse memory-native behavior; avoids reimplementing the lobster brain in Go. | Two runtimes to supervise; persona state and health must be exposed across process boundaries.  | First production-shaped canary and behavior validation.                       |
+| Dedicated Pi-style runtime | Run a Oneesama-owned Pi-style runtime as a local subprocess, HTTP service, or OpenAI-compatible provider; Go calls it through `PersonaRuntime`. | Preserves the persona boundary while avoiding Linger protocol/workspace coupling. | Requires explicit memory/context injection and health/preflight ownership. | Production foreground after behavior fixtures pass. |
 | Go Pi-style port         | Reimplement the Pi/OpenClaw memory context builder, episode model, and persona decision loop in Go.                  | Single binary/runtime; easier deploy and observability once correct.                         | High migration risk; easy to repeat the "tool surface migrated, behavior did not" failure mode. | Only after JS sidecar behavior fixtures are stable and the contract is known. |
 | Hybrid shadow-first path | Start with JS sidecar in shadow/dry-run, define golden request/response fixtures, then decide whether to port to Go. | Lets us validate behavior before investing in language migration.                            | Requires maintaining the adapter seam during the shadow period.                                 | Recommended path.                                                             |
 
-Decision for now: **hybrid shadow-first**. Do not start by searching for or
-building a "Go pi-agent" clone. First lock the persona protocol and behavior
-fixtures, run a JS/Pi-style sidecar behind that protocol, and only then decide
-whether a Go port is worth the cost.
+Decision update after the 2026-05-20 cutover: **Oneesama foreground uses
+`oneesama-pi`, a dedicated OpenAI-compatible runtime behind the persona
+contract.** Do not run the Telegram/Linger sidecar for live Oneesama Slack
+foreground. Concepts from Linger may be ported only by copying the behavior into
+Oneesama-owned request construction, memory providers, tests, and prompts.
 
 The code quality implication is important: a future Go implementation is fine
 only if it implements the same persona-runtime contract and passes the same
@@ -201,6 +207,19 @@ ONEESAMA_PI_BASE_URL=https://openrouter.ai/api/v1
 ONEESAMA_PI_API_KEY=...
 ONEESAMA_PI_MODEL=deepseek/deepseek-v4-pro
 ```
+
+Capability boundary for `oneesama-pi`:
+
+- It is stateless between `Decide` calls; durable memory must be injected by
+  Oneesama through `Request.Memory`, `Request.Context`, citations, and memory
+  providers.
+- It does not run tool loops internally; tool needs must become structured
+  `WorkerRequest` output for Go to dispatch safely.
+- It must not emit Telegram/Linger marker tokens such as `[[MSG_BREAK]]`,
+  `[[WORLD_BRIEF]]`, or `[[KNOWLEDGE_BRIEF]]`; Slack-visible and memory evidence
+  paths scrub those markers as defense in depth.
+- It does not currently own speech/TTS output. Meeting or voice surfaces need a
+  separate acceptance path before reusing this provider there.
 
 The initial scaffold was intentionally not wired into live reply generation; it
 established the runtime boundary and observability surface first. task #206 adds
@@ -338,8 +357,9 @@ During the post-memory/backfill quality pass, flag the following as drift:
 
 - Should the Pi-style runtime be embedded in-process, called as a local HTTP
   service, or invoked through an agent protocol?
-- Which parts of `telegram-pi-agent` memory/context can be reused directly, and
-  which should become a shared library?
+- Which `telegram-pi-agent` memory/context concepts should be ported into
+  Oneesama-owned providers or shared libraries, without direct live dependency
+  on Linger's sidecar protocol or workspace assumptions?
 - Where should Oneesama store episode memory and world-state updates so they can
   be shared by Slack and Meet?
 - Which channels/meeting sessions should be the first canary cohort?
