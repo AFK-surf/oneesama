@@ -391,6 +391,8 @@ func relatedMemoryFamilyBoost(kind string, tokens []string) float64 {
 		return 0.14
 	case "persona_memory_write":
 		return 0.20
+	case "multimodal_memory":
+		return 0.16
 	case "person_profile":
 		if hasAny("who", "owner", "review", "reviewer", "找谁", "负责人", "谁", "review") {
 			return 0.25

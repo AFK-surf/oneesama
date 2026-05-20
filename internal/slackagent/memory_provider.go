@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -186,8 +187,25 @@ func (m *slackMemoryProviderManager) Search(ctx context.Context, request SlackMe
 		providerName := firstNonEmpty(strings.TrimSpace(result.Provider), state.name)
 		for _, record := range result.Records {
 			record = normalizeMemoryProviderRecord(providerName, record)
-			if strings.TrimSpace(record.Content) == "" {
+			content := strings.TrimSpace(record.Content)
+			if content == "" {
 				continue
+			}
+			// Apply the same suppression filter the workspace scanner uses.
+			// Without this, legacy actionless policy traces could re-enter
+			// via a provider that re-emits legacy_triage_archive content.
+			// Anchor: task #272 (Memory provider + evidence ranking cleanup).
+			if relatedMemorySuppressesImportedPolicyTrace(record.Kind, content) {
+				continue
+			}
+			// Apply family boost so provider-emitted records get the same
+			// kind-aware ranking signal as workspace-scanner records. The
+			// workspace scanner's project_boost / recency_boost still apply
+			// only to scanner records since they depend on relPath + file
+			// mtime, neither of which providers reliably supply.
+			if boost := relatedMemoryFamilyBoost(record.Kind, request.Tokens); boost > 0 {
+				record.Score += boost
+				record.Reasons = append(record.Reasons, fmt.Sprintf("family_boost:%s", record.Kind))
 			}
 			records = append(records, record)
 		}

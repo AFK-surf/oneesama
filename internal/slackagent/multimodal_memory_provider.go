@@ -2,10 +2,8 @@ package slackagent
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -44,53 +42,17 @@ func (p *multimodalMemoryProvider) Initialize(_ context.Context, init SlackMemor
 	return nil
 }
 
+// Search intentionally returns no records. The workspace scanner in
+// related_memory.go already walks files under memory/multimodal/ and emits
+// them with kind=multimodal_memory; emitting them here again would double-
+// index the same content under a different Source string, bloating the
+// top-N. The previously-provider-only "+0.16" relevance boost is now applied
+// by relatedMemoryFamilyBoost so scanner records get the same treatment.
+// Anchor: task #272 (Memory provider + evidence ranking cleanup).
 func (p *multimodalMemoryProvider) Search(_ context.Context, request SlackMemoryProviderSearchRequest) (SlackMemoryProviderSearchResult, error) {
-	result := SlackMemoryProviderSearchResult{Provider: multimodalMemoryProviderName, Status: "ok"}
+	result := SlackMemoryProviderSearchResult{Provider: multimodalMemoryProviderName, Status: "no_relevant_memory"}
 	if p == nil || !p.enabled {
 		result.Status = "disabled"
-		return result, nil
-	}
-	query := strings.TrimSpace(request.Query)
-	if query == "" {
-		result.Status = "no_query"
-		return result, nil
-	}
-	var records []SlackRelatedMemoryRecord
-	for _, relPath := range listDirectWorkspaceMemoryFiles(p.workspaceDir) {
-		if !strings.HasPrefix(filepath.ToSlash(relPath), "memory/multimodal/") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(p.workspaceDir, filepath.FromSlash(relPath)))
-		if err != nil {
-			continue
-		}
-		content := string(raw)
-		base := relatedMemoryTextScore(content, request.Tokens)
-		if base <= 0 {
-			continue
-		}
-		records = append(records, SlackRelatedMemoryRecord{
-			Kind:       "multimodal_memory",
-			Source:     "multimodal_memory:" + filepath.ToSlash(relPath),
-			SourcePath: filepath.ToSlash(relPath),
-			Title:      relatedMemoryTitle(content),
-			Content:    truncateSlackContextText(strings.TrimSpace(content), relatedMemorySnippetLimit),
-			Score:      base + 0.16,
-			Reasons:    []string{"multimodal_memory_match"},
-		})
-	}
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].Score == records[j].Score {
-			return records[i].Source < records[j].Source
-		}
-		return records[i].Score > records[j].Score
-	})
-	if request.Limit > 0 && len(records) > request.Limit {
-		records = records[:request.Limit]
-	}
-	result.Records = records
-	if len(records) == 0 {
-		result.Status = "no_relevant_memory"
 	}
 	return result, nil
 }

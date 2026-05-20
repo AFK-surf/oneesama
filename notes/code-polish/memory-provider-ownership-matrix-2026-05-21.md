@@ -80,38 +80,42 @@ final = lexical_base
 | `team_question` | 0.16 | `question / why / how / 问题 / 为什么 / 怎么` |
 | `team_fact` / `team_meeting` | 0.22 | `quota / reset / 配额 / 额度 / 付费 / 免费 / 用户 / 事实 / 站会 / meeting` |
 | `lesson_candidate` | 0.16 | `bug / incident / mistake / regression / 教训 / 复盘 / 错误` |
+| `multimodal_memory` | 0.16 | unconditional (task #272: replaces the multimodal provider's old `+0.16` inline boost) |
 | `legacy_triage_archive` (extra) | +0.22 | base ≥ 0.35 AND content contains `tool calls:` AND any of `memory_search / memory_get / person_memory` |
 | anything else | 0 | — |
 
-Provider records do **not** pass through `relatedMemoryScoreWithBoosts`. They keep whatever score the provider assigns:
+Provider records produced by `slackMemoryProviderManager.Search` now run through the same `relatedMemoryFamilyBoost` table as the workspace scanner (task #272). The remaining provider score differences:
 
-| Provider record kind | Provider score formula |
+| Provider record kind | Score formula |
 |---|---|
-| `semantic_memory` (and explicit kinds in semantic index) | cosine similarity, no boosts |
-| `memory_write` (from semantic provider after `OnMemoryWrite`) | cosine similarity, no boosts |
-| `entity_graph` | `entityGraphScore(queryEntities, selected)`, no family boost |
-| `multimodal_memory` (provider side) | `lexical_base + 0.16` |
+| `semantic_memory` (and explicit kinds in semantic index) | cosine similarity + family boost if kind matches |
+| `memory_write` (from semantic provider after `OnMemoryWrite`) | cosine similarity (no family boost row for this kind today) |
+| `entity_graph` | `entityGraphScore(queryEntities, selected)` (no family boost row for this kind today) |
+| `multimodal_memory` (provider side) | n/a — provider `Search` is a no-op; the workspace scanner is the sole producer |
 
-Project boost / recency boost / legacy-tool-trace boost are **workspace-scanner-only** today. A `persona_memory_write` returned by the workspace scanner can rank meaningfully higher than the same logical content surfaced through a provider, because only the workspace scanner adds the 0.20 family boost.
+Project boost / recency boost / legacy-tool-trace boost remain **workspace-scanner-only** — they depend on `relPath` + file `mtime`, which providers do not reliably supply.
 
-## Ownership overlaps (known, kept for now)
+## Ownership overlaps (current state)
 
-1. **`multimodal_memory` is double-indexed.** Both the workspace scanner and the multimodal provider scan files under `memory/multimodal/`. They emit the same `Kind`, different `Source` (`memory_provider:multimodal_memory:<path>` vs `<path>`), and different scores. Dedup does not collapse them because the keys differ. Net effect: the same file appears twice with different scores; the higher-scored one wins the top slot but the second still consumes a slot in the top-N.
-2. **`persona_memory_write` can also be double-indexed** when the semantic provider has indexed `memory/persona/writes/...` documents (or after a runtime `OnMemoryWrite` event with that path). Scanner emits `persona_memory_write`; semantic emits `semantic_memory` (or `memory_write`). Different kinds → both kept, but only the scanner copy receives the 0.20 family boost.
-3. **`legacy_triage_archive` boost is workspace-scanner-only.** If a future provider re-emits the same content with kind `legacy_triage_archive`, it would also get the family boost — but no provider currently does, and the suppression filter `relatedMemorySuppressesImportedPolicyTrace` only runs on the workspace path. Provider-emitted legacy archive content would bypass the suppression filter today.
+1. ~~**`multimodal_memory` is double-indexed.**~~ ✅ Resolved by task #272: the multimodal provider's `Search` is a no-op; the workspace scanner is the single producer of `multimodal_memory` records. Pinned by `TestMultimodalMemoryNoDoubleIndex`.
+2. **`persona_memory_write` can still be double-indexed** when the semantic provider has indexed `memory/persona/writes/...` documents (or after a runtime `OnMemoryWrite` event with that path). Scanner emits `persona_memory_write`; semantic emits `semantic_memory` (or `memory_write`). Different kinds → both kept; with the task #272 unified boost path, BOTH copies now receive the 0.20 family boost (the persona-write copy from the scanner with kind `persona_memory_write`, and any semantic copy still labelled `persona_memory_write` if the index preserved that kind). Risk reduced; full resolution would require unifying source attribution across scanner + semantic.
+3. ~~**`legacy_triage_archive` suppression is workspace-scanner-only.**~~ ✅ Resolved by task #272: `relatedMemorySuppressesImportedPolicyTrace` now also runs against provider records in `slackMemoryProviderManager.Search`. Provider-emitted legacy archive content no longer bypasses the suppression filter. Pinned by `TestRelatedMemoryProviderRecordsSuppressLegacyActionlessPolicy`.
 
-## Recommendations (for follow-up tasks, not in scope of #284)
+## Recommendations (for follow-up tasks)
 
-- Consider making the multimodal provider's `Search` opt-out of paths already covered by the workspace scanner, or aligning its `Source` with the scanner so dedup collapses the duplicates.
-- Consider running `relatedMemoryScoreWithBoosts` over provider records too, so family/legacy boosts are not workspace-only. The current short-circuit means a semantic provider hit can rank below a scanner hit even when both reference the same evidence.
-- Consider running the actionless-policy-trace suppression filter on provider records as well, so legacy-style content cannot sneak back in through a provider path.
+- Consider unifying source attribution so the same physical file produced by scanner + semantic provider collapses under one dedup key (would resolve the residual `persona_memory_write` duplication noted above).
+- Consider adding a configurable `MemoryDir` override so semantic provider's index path and scanner's walk root can be kept in sync.
 
 ## Regression test
 
 `internal/slackagent/memory_provider_ownership_test.go` pins this matrix:
 
-- Each registered provider's `Name()` and the `Kind` it returns from `Search`.
-- The full family-boost table (kind → boost / condition).
-- The double-index behaviour for `memory/multimodal/` and `memory/persona/writes/` (both records present today; the test should be updated when overlap is removed).
+- Each registered provider's `Name()` and availability flag wiring.
+- The full family-boost table (kind → boost / condition), including the new `multimodal_memory` row.
+- The legacy-tool-trace boost edge conditions.
+- The `relatedMemoryKindForPath` path → kind classification.
+- `TestMultimodalMemoryNoDoubleIndex`: single record for `memory/multimodal/*.md` files, with `family_boost:multimodal_memory` reason tag.
+- `TestRelatedMemoryProviderRecordsReceiveFamilyBoost`: provider-emitted `persona_memory_write` record gets the 0.20 boost via the unified path.
+- `TestRelatedMemoryProviderRecordsSuppressLegacyActionlessPolicy`: actionless legacy policy traces from a provider get suppressed, not just from the scanner.
 
 If the matrix changes, update both this doc and the test together; do not silently re-shape ownership.

@@ -61,11 +61,14 @@ func TestAppMentionMediaEvidenceWritesSearchableMultimodalMemory(t *testing.T) {
 	if record == nil {
 		t.Fatalf("SearchRelatedMemory = %#v, want multimodal_memory evidence", result.Results)
 	}
-	for _, want := range []string{"memory_provider:multimodal_memory", "bridge_cold_open_montage_v15.mp4"} {
-		blob := record.Content + "\n" + strings.Join(record.Reasons, "\n")
-		if !strings.Contains(blob, want) {
-			t.Fatalf("multimodal search record missing %q:\n%#v", want, record)
-		}
+	if !strings.Contains(record.Content, "bridge_cold_open_montage_v15.mp4") {
+		t.Fatalf("multimodal search record missing file reference:\n%#v", record)
+	}
+	// Task #272: multimodal records are now produced by the workspace scanner
+	// (provider Search is a no-op), and pick up the relevance signal via
+	// relatedMemoryFamilyBoost instead of the provider's old "+0.16" inline boost.
+	if !relatedMemoryReasonsContain(record.Reasons, "family_boost:multimodal_memory") {
+		t.Fatalf("multimodal record reasons = %#v, want family_boost:multimodal_memory", record.Reasons)
 	}
 }
 

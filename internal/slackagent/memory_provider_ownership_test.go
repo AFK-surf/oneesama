@@ -1,6 +1,7 @@
 package slackagent
 
 import (
+	"context"
 	"testing"
 
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
@@ -69,7 +70,7 @@ func TestRelatedMemoryFamilyBoostMatrix(t *testing.T) {
 		{"team_meeting_meeting_token", "team_meeting", []string{"meeting"}, 0.22},
 		{"lesson_candidate_regression_token", "lesson_candidate", []string{"regression"}, 0.16},
 		{"lesson_candidate_no_token", "lesson_candidate", []string{"unrelated"}, 0},
-		{"multimodal_memory_no_family_boost", "multimodal_memory", []string{"image"}, 0},
+		{"multimodal_memory_family_boost", "multimodal_memory", []string{"image"}, 0.16},
 		{"semantic_memory_no_family_boost", "semantic_memory", []string{"any"}, 0},
 		{"entity_graph_no_family_boost", "entity_graph", []string{"any"}, 0},
 		{"memory_write_no_family_boost", "memory_write", []string{"any"}, 0},
@@ -151,12 +152,13 @@ func TestRelatedMemoryKindForPathMatrix(t *testing.T) {
 	}
 }
 
-// Pins the known multimodal double-index overlap: the same memory/multimodal/
-// file is currently produced both by the workspace scanner (via SearchRelatedMemory)
-// and by the multimodal provider's Search. This test will start failing when
-// either side stops producing the duplicate, at which point update the
-// ownership matrix doc to reflect the resolved overlap.
-func TestMultimodalMemoryDoubleIndexOverlap(t *testing.T) {
+// Pins the resolution of the prior multimodal double-index overlap (task
+// #272): only the workspace scanner emits records for memory/multimodal/...
+// files now. The multimodal provider's Search is intentionally a no-op so the
+// same file does not get listed twice under different Source strings. The
+// "+0.16" relevance boost that used to live in the provider is now applied
+// via relatedMemoryFamilyBoost and reasons-tagged "family_boost:multimodal_memory".
+func TestMultimodalMemoryNoDoubleIndex(t *testing.T) {
 	workspaceDir := t.TempDir()
 	writeRelatedMemoryFile(t, workspaceDir, "memory/multimodal/2026-05-21/case.md", "Customer share file reference: codex generated screenshot. action item")
 
@@ -171,26 +173,85 @@ func TestMultimodalMemoryDoubleIndexOverlap(t *testing.T) {
 	result := service.SearchRelatedMemory("codex screenshot action item", SlackRelatedMemorySearchOptions{Limit: 8})
 
 	var multimodalHits int
-	var seenWorkspaceSource, seenProviderSource bool
-	for _, record := range result.Results {
-		if record.Kind != "multimodal_memory" {
+	var record *SlackRelatedMemoryRecord
+	for index := range result.Results {
+		if result.Results[index].Kind != "multimodal_memory" {
 			continue
 		}
 		multimodalHits++
-		switch record.Source {
-		case "memory/multimodal/2026-05-21/case.md":
-			seenWorkspaceSource = true
-		case "multimodal_memory:memory/multimodal/2026-05-21/case.md":
-			seenProviderSource = true
-		}
+		record = &result.Results[index]
 	}
-	if multimodalHits < 2 {
-		t.Fatalf("multimodal_memory hits = %d, want >= 2 (pins documented workspace+provider double-index overlap); results = %#v", multimodalHits, result.Results)
+	if multimodalHits != 1 {
+		t.Fatalf("multimodal_memory hits = %d, want exactly 1 (scanner-source only); results = %#v", multimodalHits, result.Results)
 	}
-	if !seenWorkspaceSource || !seenProviderSource {
-		t.Fatalf("expected both workspace-source (%q) and provider-source (%q) records; got workspaceSeen=%v providerSeen=%v; results=%#v",
-			"memory/multimodal/2026-05-21/case.md",
-			"multimodal_memory:memory/multimodal/2026-05-21/case.md",
-			seenWorkspaceSource, seenProviderSource, result.Results)
+	if record.Source != "memory/multimodal/2026-05-21/case.md" {
+		t.Fatalf("multimodal_memory Source = %q, want bare scanner path", record.Source)
 	}
+	if !relatedMemoryReasonsContain(record.Reasons, "family_boost:multimodal_memory") {
+		t.Fatalf("multimodal_memory reasons = %#v, want family_boost:multimodal_memory tag", record.Reasons)
+	}
+}
+
+// Pins that provider-emitted records also receive family boost + suppression,
+// not just workspace-scanner records. Task #272 unified the boost+suppression
+// pipeline so a record's Kind alone determines its ranking treatment, no
+// matter which side produced it.
+func TestRelatedMemoryProviderRecordsReceiveFamilyBoost(t *testing.T) {
+	manager := newSlackMemoryProviderManager(nil, SlackMemoryProviderInit{})
+	manager.Register(context.Background(), &fakeMemoryProvider{
+		name: "fake_persona_writes",
+		records: []SlackRelatedMemoryRecord{{
+			Kind:    "persona_memory_write",
+			Source:  "memory/persona/writes/2026-05-21/episode-test.md",
+			Content: "Peng asked Pi to remember the canary contract.",
+			Score:   0.5,
+			Reasons: []string{"fake_match"},
+		}},
+	})
+	records := manager.Search(context.Background(), SlackMemoryProviderSearchRequest{
+		Query: "Pi canary contract",
+	})
+	if len(records) != 1 {
+		t.Fatalf("records = %#v, want exactly 1 provider record", records)
+	}
+	if got := records[0].Score; got != 0.7 {
+		t.Fatalf("provider record Score = %v, want 0.5 base + 0.20 persona_memory_write boost", got)
+	}
+	if !relatedMemoryReasonsContain(records[0].Reasons, "family_boost:persona_memory_write") {
+		t.Fatalf("provider record reasons = %#v, want family_boost:persona_memory_write", records[0].Reasons)
+	}
+}
+
+// Pins that the legacy actionless-policy-trace suppression filter also runs
+// against provider records, not only workspace-scanner records. Task #272.
+func TestRelatedMemoryProviderRecordsSuppressLegacyActionlessPolicy(t *testing.T) {
+	manager := newSlackMemoryProviderManager(nil, SlackMemoryProviderInit{})
+	manager.Register(context.Background(), &fakeMemoryProvider{
+		name: "fake_legacy_triage",
+		records: []SlackRelatedMemoryRecord{{
+			Kind:    "legacy_triage_archive",
+			Source:  "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-20.md",
+			Content: "Slack thread: 不属于 office helper 范围；纯技术 PR review。actions: []",
+			Score:   0.6,
+		}},
+	})
+	records := manager.Search(context.Background(), SlackMemoryProviderSearchRequest{Query: "office helper"})
+	if len(records) != 0 {
+		t.Fatalf("records = %#v, want 0 (actionless policy trace should be suppressed even on provider path)", records)
+	}
+}
+
+type fakeMemoryProvider struct {
+	SlackMemoryNoopProvider
+	name    string
+	records []SlackRelatedMemoryRecord
+}
+
+func (p *fakeMemoryProvider) Name() string      { return p.name }
+func (p *fakeMemoryProvider) Available() bool   { return true }
+func (p *fakeMemoryProvider) Initialize(context.Context, SlackMemoryProviderInit) error {
+	return nil
+}
+func (p *fakeMemoryProvider) Search(context.Context, SlackMemoryProviderSearchRequest) (SlackMemoryProviderSearchResult, error) {
+	return SlackMemoryProviderSearchResult{Provider: p.name, Records: p.records}, nil
 }

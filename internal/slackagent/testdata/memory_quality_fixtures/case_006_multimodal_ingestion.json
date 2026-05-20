@@ -44,7 +44,7 @@
   },
   "expected_search_result_anchors": [
     "multimodal_memory",
-    "memory_provider:multimodal_memory",
+    "family_boost:multimodal_memory",
     "bridge_cold_open_montage_v15.mp4",
     "bridge_assets_brief.pdf",
     "video/binary contents are not decoded"
