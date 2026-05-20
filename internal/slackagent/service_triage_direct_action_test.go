@@ -166,6 +166,39 @@ func TestTriageDirectReplyForceStillBlocksHumanActivity(t *testing.T) {
 	}
 }
 
+func TestTriageDirectReactionAddsEmojiToLatestSnapshotMessage(t *testing.T) {
+	t.Parallel()
+
+	reactions := &recordingReactions{}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken:  "xoxb-test",
+			BotUserID: "U_BOT",
+		},
+		Reactions: reactions,
+	})
+
+	calls, failures, mutations := service.executeSlackTriageDirectActions(context.Background(), "W1", "C123", "100.000", 191, []SlackTriageDecisionAction{{
+		Type:                 "add_reaction",
+		Title:                "seen",
+		Emoji:                "eyes_bridge",
+		ChannelID:            "C123",
+		ThreadTS:             "100.000",
+		RequiresConfirmation: false,
+	}}, []SlackInboundMessage{
+		{ChannelID: "C123", UserID: "U_ASKER", TS: "100.000", ThreadTS: "100.000", Text: "可以看看这个"},
+		{ChannelID: "C123", UserID: "U_ASKER", TS: "100.123", ThreadTS: "100.000", Text: "补充一条"},
+	})
+
+	if failures != 0 || mutations != 1 || len(calls) != 1 || !calls[0].Success || calls[0].Action != "add_reaction" {
+		t.Fatalf("calls=%#v failures=%d mutations=%d, want successful reaction mutation", calls, failures, mutations)
+	}
+	assertReactionCalls(t, reactions.Calls(), []reactionCall{
+		{Method: "add", Channel: "C123", Timestamp: "100.123", Name: "eyes_bridge"},
+	})
+}
+
 func installSlackRepliesFixture(t *testing.T, messages []SlackMessage) func() {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

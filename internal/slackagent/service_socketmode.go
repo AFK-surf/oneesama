@@ -3,6 +3,7 @@ package slackagent
 import "context"
 
 func (s *Service) Start() error {
+	s.refreshWorkspaceCustomEmojiOnStart(context.Background())
 	s.startSlackHistoryScanner()
 	s.startMeetingApprovalScanner()
 	s.primeHeartbeatStateOnStart(context.Background())

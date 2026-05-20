@@ -50,6 +50,13 @@ func reactionErrorIsIgnored(add bool, err string) bool {
 	return err == "no_reaction"
 }
 
+func slackReactionBodyError(result SlackReactionResult) string {
+	if result.Body == nil {
+		return ""
+	}
+	return strings.TrimSpace(result.Body.Error)
+}
+
 func (s *Service) finishMentionReaction(ctx context.Context, ref AssistantThreadRef, emoji string) {
 	if strings.TrimSpace(ref.ReactionTS) == "" {
 		return

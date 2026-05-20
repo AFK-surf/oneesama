@@ -56,6 +56,8 @@ type SlackTriageDecisionAction struct {
 	Type                 string  `json:"type"`
 	Title                string  `json:"title"`
 	Message              string  `json:"message"`
+	Emoji                string  `json:"emoji,omitempty"`
+	MessageTS            string  `json:"messageTs,omitempty"`
 	ChannelID            string  `json:"channelId,omitempty"`
 	ThreadTS             string  `json:"threadTs,omitempty"`
 	Confidence           float64 `json:"confidence"`

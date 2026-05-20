@@ -16,6 +16,7 @@ const (
 
 	DecisionStaySilent     = "stay_silent"
 	DecisionReply          = "reply"
+	DecisionReact          = "react"
 	DecisionDelegateWorker = "delegate_worker"
 	DecisionMemoryWrite    = "memory_write"
 )
@@ -91,22 +92,32 @@ type SafetyConstraints struct {
 	AllowVisibleReply  bool     `json:"allow_visible_reply"`
 	AllowSpeech        bool     `json:"allow_speech"`
 	AllowWorkerRequest bool     `json:"allow_worker_request"`
+	AllowReactions     bool     `json:"allow_reactions,omitempty"`
 	MaxVisibleChars    int      `json:"max_visible_chars,omitempty"`
 	AllowedWorkers     []string `json:"allowed_workers,omitempty"`
 }
 
 type Response struct {
-	Runtime        string          `json:"runtime,omitempty"`
-	Decision       string          `json:"decision"`
-	VisibleText    string          `json:"visible_text,omitempty"`
-	SpeechIntent   string          `json:"speech_intent,omitempty"`
-	WorkerRequests []WorkerRequest `json:"worker_requests,omitempty"`
-	MemoryWrites   []MemoryWrite   `json:"memory_writes,omitempty"`
-	Confidence     float64         `json:"confidence,omitempty"`
-	Citations      []Citation      `json:"citations,omitempty"`
-	Reason         string          `json:"reason,omitempty"`
-	ShadowOnly     bool            `json:"shadow_only,omitempty"`
-	Metadata       map[string]any  `json:"metadata,omitempty"`
+	Runtime        string           `json:"runtime,omitempty"`
+	Decision       string           `json:"decision"`
+	VisibleText    string           `json:"visible_text,omitempty"`
+	SpeechIntent   string           `json:"speech_intent,omitempty"`
+	Reactions      []ReactionIntent `json:"reactions,omitempty"`
+	WorkerRequests []WorkerRequest  `json:"worker_requests,omitempty"`
+	MemoryWrites   []MemoryWrite    `json:"memory_writes,omitempty"`
+	Confidence     float64          `json:"confidence,omitempty"`
+	Citations      []Citation       `json:"citations,omitempty"`
+	Reason         string           `json:"reason,omitempty"`
+	ShadowOnly     bool             `json:"shadow_only,omitempty"`
+	Metadata       map[string]any   `json:"metadata,omitempty"`
+}
+
+type ReactionIntent struct {
+	Emoji      string  `json:"emoji"`
+	ChannelID  string  `json:"channel_id,omitempty"`
+	MessageTS  string  `json:"message_ts,omitempty"`
+	Reason     string  `json:"reason,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
 }
 
 type WorkerRequest struct {

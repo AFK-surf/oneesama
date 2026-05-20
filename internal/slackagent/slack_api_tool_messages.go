@@ -25,6 +25,7 @@ type slackAPITool struct {
 	httpTransport         http.RoundTripper
 	messageTargets        map[string]slackAPIMessageTarget
 	latestTargetByChannel map[string]slackAPIMessageTarget
+	customEmoji           func() []string
 }
 
 type slackAPIToolResult struct {
@@ -68,7 +69,9 @@ func (t *slackAPITool) Execute(ctx context.Context, args map[string]any) (slackA
 		return t.actionUploadFile(ctx, params), nil
 	case "add_reaction":
 		return t.actionAddReaction(ctx, params)
-	case "delete_message", "edit_message", "list_emoji", "pin", "unpin", "set_topic", "set_purpose", "add_bookmark", "invite":
+	case "list_emoji":
+		return t.actionListEmoji(ctx, params)
+	case "delete_message", "edit_message", "pin", "unpin", "set_topic", "set_purpose", "add_bookmark", "invite":
 		return t.actionGenericSlackForm(ctx, resolvedAction, params)
 	case "fetch_canvas":
 		return t.actionFetchCanvas(ctx, params), nil
@@ -338,6 +341,15 @@ func (t *slackAPITool) actionGenericSlackForm(ctx context.Context, action string
 		return slackAPIToolResult{Success: false, Text: "Failed to call " + method + ": " + firstNonEmpty(stringFromAny(body["error"]), "slack_api_error")}, nil
 	}
 	return slackAPIJSONTextResult(body)
+}
+
+func (t *slackAPITool) actionListEmoji(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
+	if t.customEmoji != nil {
+		if names := t.customEmoji(); len(names) > 0 {
+			return workspaceCustomEmojiJSON(names, "workspace_cache"), nil
+		}
+	}
+	return t.actionGenericSlackForm(ctx, "list_emoji", params)
 }
 
 type slackAPIMessageTarget struct {

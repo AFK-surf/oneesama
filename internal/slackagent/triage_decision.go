@@ -20,6 +20,7 @@ var slackTriageActionTypes = map[string]struct{}{
 	"join_meeting":      {},
 	"create_channel":    {},
 	"post_thread_reply": {},
+	"add_reaction":      {},
 	"none":              {},
 }
 
@@ -85,6 +86,9 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 	if workspacePolicy := strings.TrimSpace(input.WorkspacePolicy); workspacePolicy != "" {
 		sections = append(sections, "Workspace triage policy:\n"+workspacePolicy)
 	}
+	if customEmoji := formatWorkspaceCustomEmojiPrompt(input.CustomEmoji); customEmoji != "" {
+		sections = append(sections, customEmoji)
+	}
 	if len(contextBlocks) > 0 {
 		sections = append(sections, "Context:\n"+strings.Join(contextBlocks, "\n\n"))
 	}
@@ -93,22 +97,25 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 		messageBlock,
 		"",
 		"Runtime output adapter:",
-		"The legacy tools are represented as JSON in this Go runtime. Preserve the cueboard policy above; only translate the action you would have taken into the JSON action list below.",
-		"- slack.postThreadReply maps to type post_thread_reply with requiresConfirmation=false.",
+		"Translate the cueboard action you would take into JSON only.",
+		"- slack.postThreadReply -> post_thread_reply, requiresConfirmation=false.",
+		"- reactions.add maps to type add_reaction, requiresConfirmation=false; use for lightweight emoji ack when text would be noisy.",
 		"- suggest_action(action_type=\"join_meeting\") maps to type join_meeting.",
-		"- suggest_action for create_issue, add_comment, create_event, create_channel, create_task, follow_up, or ask_user maps to the matching type and requiresConfirmation=true.",
-		"- If the cueboard policy says no action, return an empty actions array.",
+		"- Other suggest_action types keep their matching type and require confirmation.",
+		"- If no action, return an empty actions array.",
 		"",
-		"Return only JSON with this shape:",
+		"Return JSON only:",
 		"{",
-		`  "summary": "one concise channel-brain update",`,
+		`  "summary": "concise channel-brain update",`,
 		`  "actions": [`,
 		"    {",
-		`      "type": "post_thread_reply | follow_up | create_task | ask_user | create_issue | add_comment | create_event | join_meeting | create_channel | none",`,
-		`      "title": "short action title",`,
-		`      "message": "reply text for post_thread_reply, or what the user should confirm for a mutation",`,
-		`      "channelId": "Slack channel id, optional",`,
-		`      "threadTs": "Slack thread ts, optional",`,
+		`      "type": "post_thread_reply | add_reaction | follow_up | create_task | ask_user | create_issue | add_comment | create_event | join_meeting | create_channel | none",`,
+		`      "title": "short title",`,
+		`      "message": "reply text, emoji name, or confirmation text",`,
+		`      "emoji": "emoji for add_reaction, optional",`,
+		`      "messageTs": "target Slack message ts for add_reaction, optional",`,
+		`      "channelId": "optional",`,
+		`      "threadTs": "optional",`,
 		`      "confidence": 0.0,`,
 		`      "reason": "why this action is justified",`,
 		`      "requiresConfirmation": false`,
@@ -134,6 +141,7 @@ type SlackTriagePromptInput struct {
 	// duplicate bot replies.
 	IgnoreExistingBotReply bool
 	WorkspacePolicy        string
+	CustomEmoji            []string
 }
 
 type SlackTriageMemoryEntry struct {
@@ -375,6 +383,9 @@ func normalizeSlackTriageActions(values []any, fallback slackTriageFallback) []S
 		if typ == "postthreadreply" {
 			typ = "post_thread_reply"
 		}
+		if typ == "reaction" || typ == "react" || typ == "addreaction" {
+			typ = "add_reaction"
+		}
 		if typ == "delegate" {
 			typ = "create_task"
 		}
@@ -395,6 +406,8 @@ func normalizeSlackTriageActions(values []any, fallback slackTriageFallback) []S
 			ThreadTS:             firstNonEmpty(action.ThreadTS, fallback.ThreadTS),
 			Confidence:           clampFloat(action.Confidence, 0, 1, 0.5),
 			Reason:               strings.TrimSpace(action.Reason),
+			Emoji:                normalizeSlackReactionName(firstNonEmpty(action.Emoji, action.Message)),
+			MessageTS:            strings.TrimSpace(action.MessageTS),
 			RequiresConfirmation: requires,
 		})
 		if len(actions) >= 5 {
@@ -415,6 +428,8 @@ func triageActionFromAny(value any) SlackTriageDecisionAction {
 			Message:              firstNonEmpty(stringFromAny(typed["message"]), stringFromAny(typed["text"]), stringFromAny(typed["description"]), stringFromAny(typed["reason"])),
 			ChannelID:            firstNonEmpty(stringFromAny(typed["channelId"]), stringFromAny(typed["channel_id"]), stringFromAny(typed["channel"])),
 			ThreadTS:             firstNonEmpty(stringFromAny(typed["threadTs"]), stringFromAny(typed["thread_ts"])),
+			MessageTS:            firstNonEmpty(stringFromAny(typed["messageTs"]), stringFromAny(typed["message_ts"]), stringFromAny(typed["timestamp"]), stringFromAny(typed["ts"])),
+			Emoji:                firstNonEmpty(stringFromAny(typed["emoji"]), stringFromAny(typed["name"]), stringFromAny(typed["reaction"])),
 			Confidence:           numberFromAny(typed["confidence"], 0.5),
 			Reason:               firstNonEmpty(stringFromAny(typed["reason"]), stringFromAny(typed["rationale"])),
 			RequiresConfirmation: boolFromAny(typed["requiresConfirmation"], boolFromAny(typed["requires_confirmation"], true)),
@@ -443,10 +458,13 @@ func joinSlackMessageTexts(messages []SlackInboundMessage) string {
 }
 
 func slackTriageActionRequiresConfirmation(actionType string, modelValue bool) bool {
+	if actionType == "post_thread_reply" || actionType == "add_reaction" {
+		return false
+	}
 	if _, ok := slackTriageMutationActionTypes[actionType]; ok {
 		return true
 	}
-	return modelValue && actionType != "post_thread_reply"
+	return modelValue
 }
 
 func filterSlackTriageActionsForMessages(actions []SlackTriageDecisionAction, messages []SlackInboundMessage, botUserID string) []SlackTriageDecisionAction {
@@ -556,7 +574,7 @@ func filterSlackTriageReadConfirmationActions(actions []SlackTriageDecisionActio
 }
 
 func slackTriageReadConfirmationAction(action SlackTriageDecisionAction) bool {
-	if slackTriageDirectReplyAction(action) {
+	if slackTriageDirectReplyAction(action) || slackTriageDirectReactionAction(action) {
 		return false
 	}
 	joined := strings.ToLower(strings.Join([]string{action.Type, action.Title, action.Message, action.Reason}, "\n"))
@@ -705,4 +723,8 @@ func explicitlyRequestsSlackPermalinkHandling(text string) bool {
 
 func slackTriageDirectReplyAction(action SlackTriageDecisionAction) bool {
 	return action.Type == "post_thread_reply" && !action.RequiresConfirmation
+}
+
+func slackTriageDirectReactionAction(action SlackTriageDecisionAction) bool {
+	return action.Type == "add_reaction" && !action.RequiresConfirmation
 }

@@ -1340,6 +1340,95 @@ Recording here so future operators see it; not promoting as a
 first-class drift class because it's a tooling SOP rather than a
 code pattern.
 
+## Drift class 8: tool surface without cognition affordance
+
+Definition:
+
+- The new system contains the raw tool/API operation.
+- The audit marks parity green because the tool can be called.
+- The old system also injected a catalog, policy, or usage surface
+  into the model's decision context.
+- The new system does not inject that affordance, so the capability
+  exists mechanically but is rarely used naturally.
+
+This is distinct from earlier classes:
+
+- **prompt-as-implementation**: the prompt tells the model how to
+  implement a backend operation.
+- **tool surface without cognition affordance**: the backend
+  operation exists, but the model lacks the old decision-time
+  knowledge needed to choose it.
+
+Symptoms:
+
+- Tool inventory says "active", but production behavior almost never
+  uses it.
+- The old system had startup caches, workspace catalogs, prompt
+  sections, policy snippets, or examples that are absent in the new
+  system.
+- Fixing the tool executor alone does not change visible behavior;
+  the fix has to move context into the cognition surface and add an
+  output action path.
+
+Audit rule:
+
+- Tool parity checks must cover three layers:
+  1. backend executor,
+  2. cognition affordance / prompt context,
+  3. visible action path.
+- A migrated tool is not "done" until all three are covered or the
+  missing layers are explicitly declared out of scope.
+
+### Worked example: 2026-05-20 custom emoji reaction triage
+
+What got read:
+
+- Old Cueboard `bridge.go:76-77`: cached `customEmoji []string`.
+- Old Cueboard `bridge.go:668-685`: startup `emoji.list` refresh,
+  alias filtering, and loaded-count log.
+- Old Cueboard `bridge.go:478-482`: custom emoji catalog appended
+  to the assistant system prompt.
+- Old Cueboard `scanner_triage.go:112-116`: same catalog appended to
+  scanner triage prompt.
+- Old Cueboard `slack_api_tool.go` / `slack_api_tool_messages.go`:
+  `add_reaction` and `list_emoji` tool surfaces.
+
+What got shipped wrong before:
+
+- New Oneesama had `add_reaction` and `list_emoji`, but no startup
+  workspace custom emoji cache.
+- Pi / triage prompts did not receive `## Workspace custom emoji`.
+- Persona decisions had no first-class `react` output shape.
+- Direct triage execution could not turn a Pi reaction decision into
+  `reactions.add` without pretending it was a text reply.
+
+What Peng said on 2026-05-20:
+
+- "cueboard slackd还会用到emoji去回应某些发在Slock里面的消息来着，
+  甚至都会使用当前Workspace自己上传的那些。但是我们新的有做吗？"
+- "不需要考虑工作量，做得越好越好。而且现在好像 oneesama 不太会去用
+  这些表情? 这个应该就是 triage 的一种，能来对一些消息做回应"
+- "反思一下，为什么这个能力没迁移到？"
+
+What the fix did:
+
+- Added workspace custom emoji startup refresh/cache/status.
+- Injected the cached custom emoji catalog into triage prompts and
+  Pi persona request context.
+- Added persona `decision=react` and `reactions[]`, gated by
+  `allow_reactions`.
+- Converted persona reaction decisions into direct `add_reaction`
+  triage actions.
+- Made cached custom emoji available through `list_emoji`.
+
+Why this is the worked example:
+
+- The original audit failed because it treated a tool list as a
+  behavior contract.
+- The actual contract was "the model knows the workspace emoji
+  catalog before deciding and can use reaction as a triage response."
+- This is now a first-class audit rule for future tool migrations.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.

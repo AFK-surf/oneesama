@@ -34,6 +34,7 @@ type SlackStatus struct {
 	ScannerCursors          SlackScannerCursorStats    `json:"scanner_cursors"`
 	WorkspaceState          SlackWorkspaceStateStats   `json:"workspace_state"`
 	ThreadCases             SlackThreadCaseStats       `json:"thread_cases"`
+	CustomEmoji             SlackCustomEmojiStatus     `json:"custom_emoji"`
 }
 
 type AgentRunnerStatus struct {
@@ -125,6 +126,7 @@ func (s *Service) Status() StatusResponse {
 			ScannerCursors:          scannerCursorStats,
 			WorkspaceState:          workspaceStats,
 			ThreadCases:             threadCaseStats,
+			CustomEmoji:             s.customEmojiStatus(),
 		},
 		AgentRunner: runnerStatus,
 		Persona:     s.personaStatus(ctx),

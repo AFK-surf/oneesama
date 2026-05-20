@@ -250,6 +250,7 @@ func (s *Service) executeSlackAPITool(ctx context.Context, role string, args map
 		token:        s.botToken,
 		workspaceDir: s.workspaceDir,
 		activeThread: s.isActiveMentionThread,
+		customEmoji:  s.workspaceCustomEmojiSnapshot,
 	}
 	params, _ := args["params"].(map[string]any)
 	if params == nil {

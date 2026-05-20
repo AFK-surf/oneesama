@@ -983,7 +983,7 @@ func slackTriageAuditFixtureOutcome(actions []SlackTriageDecisionAction) (string
 	}
 	mutations := 0
 	for _, action := range actions {
-		if slackTriageDirectReplyAction(action) {
+		if slackTriageDirectReplyAction(action) || slackTriageDirectReactionAction(action) {
 			mutations++
 		}
 	}
@@ -1091,6 +1091,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 			PreviousTriage:         formatTriageContexts(previous),
 			IgnoreExistingBotReply: options.IgnoreExistingBotReply,
 			WorkspaceTriagePolicy:  s.triageWorkspacePolicy,
+			CustomEmoji:            s.workspaceCustomEmojiSnapshot(),
 		})
 		runPatch := *run
 		runPatch.Summary = fmt.Sprintf("Pi-first foreground triage pending for %d Slack message(s) in %s", len(messages), channelID)
@@ -1123,6 +1124,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 		ThreadContexts:         threadContexts,
 		IgnoreExistingBotReply: options.IgnoreExistingBotReply,
 		WorkspacePolicy:        s.triageWorkspacePolicy,
+		CustomEmoji:            s.workspaceCustomEmojiSnapshot(),
 	})
 	contextMap := map[string]any{
 		"source":        "slack-triage",
@@ -1162,6 +1164,8 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 		"externalLinks":               externalLinks,
 		"workspaceTriagePolicy":       s.triageWorkspacePolicy,
 		"workspace_triage_policy":     s.triageWorkspacePolicy,
+		"workspaceCustomEmoji":        s.workspaceCustomEmojiSnapshot(),
+		"workspace_custom_emoji":      s.workspaceCustomEmojiSnapshot(),
 		"threadContexts":              threadContexts,
 		"channelContexts":             channelContexts,
 		"triageAudit":                 auditMetadata,
@@ -1286,7 +1290,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	if personaForegroundQueued {
 		mutationCandidateActions = nil
 	}
-	mutationCandidates := len(mutationCandidateActions) - countSlackTriageDirectReplyActions(mutationCandidateActions) + directMutations
+	mutationCandidates := len(mutationCandidateActions) - countSlackTriageDirectActions(mutationCandidateActions) + directMutations
 	mutations, failures := reconcileTriageCounts(&triageCounters{mutations: mutationCandidates, failures: directFailures}, nil)
 	if probe {
 		mutations = 0
@@ -1416,7 +1420,7 @@ func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context
 	var mutations int
 	messages := options.SnapshotMessages
 	for _, action := range actions {
-		if !slackTriageDirectReplyAction(action) {
+		if !slackTriageDirectReplyAction(action) && !slackTriageDirectReactionAction(action) {
 			continue
 		}
 		effectiveChannel := firstNonEmpty(action.ChannelID, channelID)
@@ -1431,6 +1435,49 @@ func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context
 				Brief:   firstNonEmpty(action.Title, "skipped stale thread reply"),
 				Result:  reason,
 			})
+			continue
+		}
+		if slackTriageDirectReactionAction(action) {
+			emoji := normalizeSlackReactionName(firstNonEmpty(action.Emoji, action.Message, action.Title))
+			reactionTS := firstNonEmpty(strings.TrimSpace(action.MessageTS), snapshotTS, effectiveThread)
+			if emoji == "" || reactionTS == "" || effectiveChannel == "" {
+				failures++
+				calls = append(calls, SlackTriageToolCall{
+					Tool:    "slack_api",
+					Action:  "add_reaction",
+					Args:    marshalTriageArgs("reactions.add", reactionTS, false),
+					Success: false,
+					Brief:   "missing reaction target",
+					Result:  "emoji, channel, and timestamp are required",
+				})
+				continue
+			}
+			var result SlackReactionResult
+			if s == nil || s.reactions == nil {
+				result = SlackReactionResult{Method: "reactions.add", Error: "missing_reaction_client"}
+			} else {
+				result = s.reactions.AddReaction(ctx, SlackReactionInput{
+					Channel:   effectiveChannel,
+					Timestamp: reactionTS,
+					Name:      emoji,
+				})
+			}
+			ok := result.OK || reactionErrorIsIgnored(true, result.Error)
+			call := SlackTriageToolCall{
+				Tool:    "slack_api",
+				Action:  "add_reaction",
+				Args:    marshalTriageArgs("reactions.add", reactionTS, ok),
+				Success: ok,
+				Brief:   ":" + emoji + ":",
+				Result:  firstNonEmpty(result.Error, result.Detail, slackReactionBodyError(result), result.Method),
+			}
+			if !ok {
+				failures++
+			} else if err := s.cognition.RecordOutbound(ctx, workspaceID, effectiveChannel, effectiveThread, "Triage reacted :"+emoji+":"); err != nil {
+				s.logger.Warn("slack thread ledger direct reaction record failed", "error", err)
+			}
+			mutations++
+			calls = append(calls, call)
 			continue
 		}
 		result := s.PostMessage(ctx, PostMessageInput{
@@ -1459,10 +1506,10 @@ func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context
 	return calls, failures, mutations
 }
 
-func countSlackTriageDirectReplyActions(actions []SlackTriageDecisionAction) int {
+func countSlackTriageDirectActions(actions []SlackTriageDecisionAction) int {
 	count := 0
 	for _, action := range actions {
-		if slackTriageDirectReplyAction(action) {
+		if slackTriageDirectReplyAction(action) || slackTriageDirectReactionAction(action) {
 			count++
 		}
 	}

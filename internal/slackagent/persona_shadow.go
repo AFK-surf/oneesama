@@ -15,25 +15,27 @@ import (
 )
 
 type SlackPersonaShadowResult struct {
-	RequestID      string   `json:"request_id"`
-	Source         string   `json:"source"`
-	ChannelID      string   `json:"channel_id,omitempty"`
-	ThreadTS       string   `json:"thread_ts,omitempty"`
-	Classification string   `json:"classification,omitempty"`
-	Runtime        string   `json:"runtime,omitempty"`
-	Decision       string   `json:"decision,omitempty"`
-	VisibleText    string   `json:"visible_text,omitempty"`
-	Confidence     float64  `json:"confidence,omitempty"`
-	WorkerRequests []string `json:"worker_requests,omitempty"`
-	MemoryWrites   []string `json:"memory_writes,omitempty"`
-	memoryRecords  []persona.MemoryWrite
-	workerRecords  []persona.WorkerRequest
-	ShadowOnly     bool     `json:"shadow_only"`
-	Success        bool     `json:"success"`
-	Error          string   `json:"error,omitempty"`
-	Reason         string   `json:"reason,omitempty"`
-	LatencyMS      int64    `json:"latency_ms,omitempty"`
-	Citations      []string `json:"citations,omitempty"`
+	RequestID       string   `json:"request_id"`
+	Source          string   `json:"source"`
+	ChannelID       string   `json:"channel_id,omitempty"`
+	ThreadTS        string   `json:"thread_ts,omitempty"`
+	Classification  string   `json:"classification,omitempty"`
+	Runtime         string   `json:"runtime,omitempty"`
+	Decision        string   `json:"decision,omitempty"`
+	VisibleText     string   `json:"visible_text,omitempty"`
+	Confidence      float64  `json:"confidence,omitempty"`
+	WorkerRequests  []string `json:"worker_requests,omitempty"`
+	MemoryWrites    []string `json:"memory_writes,omitempty"`
+	Reactions       []string `json:"reactions,omitempty"`
+	memoryRecords   []persona.MemoryWrite
+	workerRecords   []persona.WorkerRequest
+	reactionRecords []persona.ReactionIntent
+	ShadowOnly      bool     `json:"shadow_only"`
+	Success         bool     `json:"success"`
+	Error           string   `json:"error,omitempty"`
+	Reason          string   `json:"reason,omitempty"`
+	LatencyMS       int64    `json:"latency_ms,omitempty"`
+	Citations       []string `json:"citations,omitempty"`
 }
 
 func BuildBackfillPersonaRequest(candidate SlackBackfillCandidate) persona.Request {
@@ -119,6 +121,7 @@ func (s *Service) queueSlackTriagePersonaShadow(ctx context.Context, runID int64
 	}
 	request := BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{
 		WorkspaceTriagePolicy: s.triageWorkspacePolicy,
+		CustomEmoji:           s.workspaceCustomEmojiSnapshot(),
 	})
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
@@ -139,6 +142,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 	request := BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{
 		IgnoreExistingBotReply: ignoreBotReply,
 		WorkspaceTriagePolicy:  s.triageWorkspacePolicy,
+		CustomEmoji:            s.workspaceCustomEmojiSnapshot(),
 	})
 	request.Mode = persona.ModeLive
 	go func() {
@@ -398,7 +402,10 @@ func slackPersonaForegroundEmptyFinal(result SlackPersonaShadowResult) bool {
 	if strings.EqualFold(decision, persona.DecisionReply) && visibleText == "" {
 		return true
 	}
-	return decision == "" && visibleText == "" && len(result.WorkerRequests) == 0 && len(result.MemoryWrites) == 0
+	if strings.EqualFold(decision, persona.DecisionReact) && len(result.Reactions) == 0 {
+		return true
+	}
+	return decision == "" && visibleText == "" && len(result.WorkerRequests) == 0 && len(result.MemoryWrites) == 0 && len(result.Reactions) == 0
 }
 
 func slackPersonaShadowToolCall(result SlackPersonaShadowResult) SlackTriageToolCall {
@@ -457,18 +464,41 @@ func countMatchingFailedTriageToolCalls(calls []SlackTriageToolCall, tool string
 }
 
 func slackPersonaForegroundActions(channelID string, threadTS string, result SlackPersonaShadowResult) []SlackTriageDecisionAction {
-	if !result.Success || result.ShadowOnly || result.Decision != persona.DecisionReply || strings.TrimSpace(result.VisibleText) == "" {
+	if !result.Success || result.ShadowOnly {
 		return nil
 	}
-	return []SlackTriageDecisionAction{{
-		Type:       "post_thread_reply",
-		Title:      "Persona reply",
-		Message:    strings.TrimSpace(result.VisibleText),
-		ChannelID:  strings.TrimSpace(channelID),
-		ThreadTS:   strings.TrimSpace(threadTS),
-		Reason:     strings.TrimSpace(result.Reason),
-		Confidence: result.Confidence,
-	}}
+	actions := make([]SlackTriageDecisionAction, 0, 1+len(result.reactionRecords))
+	if result.Decision == persona.DecisionReply && strings.TrimSpace(result.VisibleText) != "" {
+		actions = append(actions, SlackTriageDecisionAction{
+			Type:       "post_thread_reply",
+			Title:      "Persona reply",
+			Message:    strings.TrimSpace(result.VisibleText),
+			ChannelID:  strings.TrimSpace(channelID),
+			ThreadTS:   strings.TrimSpace(threadTS),
+			Reason:     strings.TrimSpace(result.Reason),
+			Confidence: result.Confidence,
+		})
+	}
+	if result.Decision == persona.DecisionReact || len(result.reactionRecords) > 0 {
+		for _, reaction := range result.reactionRecords {
+			emoji := normalizeSlackReactionName(reaction.Emoji)
+			if emoji == "" {
+				continue
+			}
+			actions = append(actions, SlackTriageDecisionAction{
+				Type:       "add_reaction",
+				Title:      "Persona reaction",
+				Message:    emoji,
+				Emoji:      emoji,
+				ChannelID:  firstNonEmpty(strings.TrimSpace(reaction.ChannelID), strings.TrimSpace(channelID)),
+				ThreadTS:   strings.TrimSpace(threadTS),
+				MessageTS:  strings.TrimSpace(reaction.MessageTS),
+				Reason:     strings.TrimSpace(reaction.Reason),
+				Confidence: reaction.Confidence,
+			})
+		}
+	}
+	return actions
 }
 
 type SlackTriagePersonaRequestOptions struct {
@@ -480,6 +510,7 @@ type SlackTriagePersonaRequestOptions struct {
 	ThreadContexts         []SlackTriageThreadContext
 	ChannelContexts        []SlackInboundMessage
 	PreviousTriage         string
+	CustomEmoji            []string
 }
 
 func BuildSlackTriagePersonaRequest(channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) persona.Request {
@@ -531,6 +562,12 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 			Text: workspacePolicy,
 		})
 	}
+	if customEmoji := formatWorkspaceCustomEmojiPrompt(options.CustomEmoji); customEmoji != "" {
+		contextItems = append(contextItems, persona.ContextItem{
+			Kind: "workspace_custom_emoji",
+			Text: customEmoji,
+		})
+	}
 	metadata := map[string]any{
 		"decision_parse_ok": decision.ParseOK,
 		"actions":           len(decision.Actions),
@@ -568,6 +605,7 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 			AllowVisibleReply:  true,
 			AllowSpeech:        false,
 			AllowWorkerRequest: true,
+			AllowReactions:     true,
 			MaxVisibleChars:    600,
 			AllowedWorkers:     []string{"codex", "claude", "agent_read"},
 		},
@@ -665,8 +703,10 @@ func callPersonaShadow(ctx context.Context, runtime persona.Runtime, source stri
 	result.Confidence = resp.Confidence
 	result.WorkerRequests = personaWorkerRequestSummaries(resp.WorkerRequests)
 	result.MemoryWrites = personaMemoryWriteSummaries(resp.MemoryWrites)
+	result.Reactions = personaReactionSummaries(resp.Reactions)
 	result.workerRecords = append([]persona.WorkerRequest(nil), resp.WorkerRequests...)
 	result.memoryRecords = append([]persona.MemoryWrite(nil), resp.MemoryWrites...)
+	result.reactionRecords = append([]persona.ReactionIntent(nil), resp.Reactions...)
 	result.ShadowOnly = resp.ShadowOnly
 	result.Reason = resp.Reason
 	result.Citations = personaCitationRefs(resp.Citations)
@@ -822,6 +862,25 @@ func personaMemoryWriteSummaries(writes []persona.MemoryWrite) []string {
 			text = text + " [" + source + "]"
 		}
 		out = append(out, truncateSlackContextText(text, 220))
+	}
+	return out
+}
+
+func personaReactionSummaries(reactions []persona.ReactionIntent) []string {
+	out := make([]string, 0, len(reactions))
+	for _, reaction := range reactions {
+		emoji := normalizeSlackReactionName(reaction.Emoji)
+		if emoji == "" {
+			continue
+		}
+		text := ":" + emoji + ":"
+		if ts := strings.TrimSpace(reaction.MessageTS); ts != "" {
+			text += " @" + ts
+		}
+		if reason := strings.TrimSpace(reaction.Reason); reason != "" {
+			text += " — " + truncateSlackContextText(reason, 160)
+		}
+		out = append(out, text)
 	}
 	return out
 }
