@@ -151,6 +151,63 @@ func TestMeetdRedeliverSyntheticJoinSessionReprocessesDirectJoin(t *testing.T) {
 	}
 }
 
+func TestMeetdRedeliverStaleSyntheticJoinSessionFromCapturedArtifacts(t *testing.T) {
+	t.Parallel()
+
+	var capturedResult MeetdMeetingResult
+	service, router := newMeetdOpsTestRouter(t, func(_ context.Context, _ MeetdMeetingRecord, result MeetdMeetingResult) error {
+		capturedResult = result
+		return nil
+	})
+	sessionID := "session_stale_redeliver"
+	artifactDir := filepath.Join("/tmp/meeting-avatar-bot-data/meeting-artifacts", sessionID)
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("create artifact dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(artifactDir) })
+	writeFile(t, filepath.Join(artifactDir, "captions.json"), `{"ok":true,"captions":[{"speaker":"Peng Xiao","text":"Stale runner artifacts still need post-meeting delivery.","source":"google-meet-caption-dom"}]}`)
+	if _, err := service.UpsertSession(context.Background(), SessionUpsertInput{
+		ID:         sessionID,
+		MeetingID:  sessionID,
+		MeetingURL: "https://meet.google.com/stale-redeliver",
+		Status:     "stale",
+		Title:      "Stale Redeliver",
+		StartedAt:  time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339Nano),
+		EndedAt:    time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano),
+		Metadata: map[string]any{
+			"slack_channel_id": "C123",
+			"slack_thread_ts":  "111.222",
+			"stale_reason":     "meet_runner_session_unavailable",
+		},
+	}); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	meetingID := syntheticMeetingID(sessionID)
+	if _, err := service.upsertSyntheticMeetdMeeting(context.Background(), syntheticMeetdMeeting(SessionRecord{
+		ID:         sessionID,
+		MeetingID:  sessionID,
+		MeetingURL: "https://meet.google.com/stale-redeliver",
+		Status:     "stale",
+		Title:      "Stale Redeliver",
+		StartedAt:  time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339Nano),
+		EndedAt:    time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano),
+		Metadata: map[string]any{
+			"slack_channel_id": "C123",
+			"slack_thread_ts":  "111.222",
+		},
+	}, "C123", "111.222"), "failed", staleJoinFailureMessage, ""); err != nil {
+		t.Fatalf("seed synthetic meeting: %v", err)
+	}
+
+	response := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"status":"redelivered"}` {
+		t.Fatalf("redeliver stale synthetic meeting = %d %s", response.Code, response.Body.String())
+	}
+	if capturedResult.Status != "done" || capturedResult.Summary == nil || capturedResult.Artifacts.CaptionsCount != 1 {
+		t.Fatalf("captured result = %+v, want recovered done summary", capturedResult)
+	}
+}
+
 func TestFinalizeStoppedJoinRegistersSyntheticMeetdMeeting(t *testing.T) {
 	t.Parallel()
 

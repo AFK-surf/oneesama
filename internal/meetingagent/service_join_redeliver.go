@@ -165,7 +165,7 @@ func (s *Service) joinSessionBySyntheticMeetingID(ctx context.Context, meetingID
 
 func joinSessionCanRedeliver(session SessionRecord) bool {
 	switch strings.TrimSpace(strings.ToLower(session.Status)) {
-	case "stopped", "done", "failed":
+	case "stopped", "done", "failed", "stale":
 		return true
 	default:
 		return false

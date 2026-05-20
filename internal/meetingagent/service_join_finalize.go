@@ -98,6 +98,9 @@ func (s *Service) finalizeStaleJoin(ctx context.Context, session SessionRecord, 
 		return updated
 	}
 	meeting := syntheticMeetdMeeting(*updated, slackChannel, slackThread)
+	if recovered, recoveredSession := s.finalizeStaleJoinFromArtifacts(ctx, *updated, meeting, slackChannel, slackThread); recovered {
+		return recoveredSession
+	}
 	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "failed", staleJoinFailureMessage, ""); err == nil && persisted != nil {
 		meeting = *persisted
 	} else if err != nil {
@@ -110,6 +113,65 @@ func (s *Service) finalizeStaleJoin(ctx context.Context, session SessionRecord, 
 		ForceDelivery: true,
 	})
 	return updated
+}
+
+func (s *Service) finalizeStaleJoinFromArtifacts(ctx context.Context, session SessionRecord, meeting MeetdMeetingRecord, slackChannel string, slackThread string) (bool, *SessionRecord) {
+	input, err := s.postProcessInputFromJoinSessionRedelivery(ctx, session, meeting)
+	if err != nil {
+		return false, nil
+	}
+	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "processing", "", ""); err == nil && persisted != nil {
+		meeting = *persisted
+	} else if err != nil {
+		s.logger.Warn("persist stale join recovery meeting failed", "session_id", session.ID, "error", err)
+		return false, nil
+	}
+	s.NotifyMeetdWebhook(ctx, "meeting.processing", meeting, nil)
+	result, err := s.PostProcessMeeting(ctx, input)
+	if err != nil {
+		s.logger.Warn("post-process stale join artifacts failed", "session_id", session.ID, "error", err)
+		return false, nil
+	}
+	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "done", "", result.Artifact.Dir); err == nil && persisted != nil {
+		meeting = *persisted
+	} else if err != nil {
+		s.logger.Warn("persist recovered stale join meeting failed", "session_id", session.ID, "error", err)
+		return false, nil
+	}
+	metadata := cloneMap(session.Metadata)
+	if len(metadata) == 0 {
+		metadata = map[string]any{}
+	}
+	metadata["stale_recovered_from_artifacts"] = true
+	recoveredSession, err := s.UpsertSession(ctx, SessionUpsertInput{
+		ID:               session.ID,
+		MeetingID:        session.MeetingID,
+		MeetingURL:       session.MeetingURL,
+		Status:           "done",
+		Title:            session.Title,
+		ParticipantCount: session.ParticipantCount,
+		StartedAt:        session.StartedAt,
+		EndedAt:          firstNonEmpty(session.EndedAt, time.Now().UTC().Format(time.RFC3339Nano)),
+		Metadata:         metadata,
+	})
+	if err != nil {
+		s.logger.Warn("persist recovered stale join session failed", "session_id", session.ID, "error", err)
+		recoveredSession = session
+		recoveredSession.Status = "done"
+		recoveredSession.Metadata = metadata
+	}
+	s.NotifyMeetdWebhook(ctx, "meeting.result", meeting, &MeetdMeetingResult{
+		MeetingID: meetingIDString(meeting.ID),
+		Status:    "done",
+		Summary:   meetdSummaryFromPostMeeting(result.Summary),
+		Artifacts: MeetdMeetingArtifacts{
+			CaptionsCount:  len(input.Captions),
+			TranscriptPath: firstNonEmpty(result.Artifact.Files.TranscriptText, result.Artifact.Files.Transcript),
+			AudioPath:      result.Artifact.Files.Audio,
+		},
+		ForceDelivery: true,
+	})
+	return true, &recoveredSession
 }
 
 func audioPathFromStopRuntime(ctx context.Context, runtime any) string {
