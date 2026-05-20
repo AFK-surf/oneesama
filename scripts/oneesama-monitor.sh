@@ -33,10 +33,23 @@ jq -e '.ready == true and .healthy == true and .shadow_only == false' <"${tmpdir
 
 echo "oneesama-monitor: checking triage audit window=${audit_window}"
 curl -fsS "${slack_url}/slack/triage/audit?window=${audit_window}" >"${tmpdir}/triage-audit.json"
+persona_quality_summary="$(
+  jq -r '
+    .audit.personaQuality as $q
+    | [
+        "latest_run=\($q.latestRunId // "none") at \($q.latestAt // "unknown") decision=\($q.latestDecision // "unknown")",
+        "latest_auth_failure=\($q.latestAuthFailureRunId // "none") at \($q.latestAuthFailureAt // "none")",
+        "stale_queued=\($q.foregroundStaleQueuedRuns // 0)"
+      ]
+    | .[]
+  ' <"${tmpdir}/triage-audit.json"
+)"
 red_flags="$(jq -r '.audit.flags[]? | select(.level == "red") | "\(.code): \(.message)"' <"${tmpdir}/triage-audit.json")"
 if [[ -n "$red_flags" ]]; then
   echo "oneesama-monitor: red triage audit flags:" >&2
   echo "$red_flags" >&2
+  echo "oneesama-monitor: persona foreground context:" >&2
+  echo "$persona_quality_summary" >&2
   exit 1
 fi
 
