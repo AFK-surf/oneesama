@@ -141,6 +141,8 @@ func channelBrainTextLooksLikeNoActionRationale(summary string) bool {
 		"无 @",
 		"无@",
 		"无会议链接",
+		"foreground triage pending",
+		"pi-first foreground triage pending",
 	} {
 		if strings.Contains(lower, phrase) || strings.Contains(summary, phrase) {
 			return true
@@ -184,7 +186,55 @@ func sanitizeChannelBrainSummary(summary string) string {
 	for len(filtered) > 0 && strings.TrimSpace(filtered[len(filtered)-1]) == "" {
 		filtered = filtered[:len(filtered)-1]
 	}
-	return strings.TrimSpace(strings.Join(filtered, "\n"))
+	return pruneEmptyChannelBrainSections(filtered)
+}
+
+func pruneEmptyChannelBrainSections(lines []string) string {
+	var pruned []string
+	for index := 0; index < len(lines); index++ {
+		line := lines[index]
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasSuffix(trimmed, ":") {
+			pruned = append(pruned, line)
+			continue
+		}
+		hasContent := false
+		for next := index + 1; next < len(lines); next++ {
+			nextTrimmed := strings.TrimSpace(lines[next])
+			if nextTrimmed == "" {
+				continue
+			}
+			if strings.HasSuffix(nextTrimmed, ":") {
+				break
+			}
+			hasContent = true
+			break
+		}
+		if hasContent {
+			pruned = append(pruned, line)
+		}
+	}
+	for len(pruned) > 0 && strings.TrimSpace(pruned[0]) == "" {
+		pruned = pruned[1:]
+	}
+	for len(pruned) > 0 && strings.TrimSpace(pruned[len(pruned)-1]) == "" {
+		pruned = pruned[:len(pruned)-1]
+	}
+	compact := make([]string, 0, len(pruned))
+	previousBlank := false
+	for _, line := range pruned {
+		if strings.TrimSpace(line) == "" {
+			if previousBlank || len(compact) == 0 {
+				continue
+			}
+			previousBlank = true
+			compact = append(compact, "")
+			continue
+		}
+		previousBlank = false
+		compact = append(compact, line)
+	}
+	return strings.TrimSpace(strings.Join(compact, "\n"))
 }
 
 func extractStructuredChannelBrainNotes(record SlackThreadLedgerRecord, summary string) []channelBrainNote {

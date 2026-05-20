@@ -1143,3 +1143,17 @@ func TestChannelBrainSanitizesStoredNoActionRationaleLines(t *testing.T) {
 		t.Fatalf("summary missing valid content:\n%s", summary)
 	}
 }
+
+func TestChannelBrainSanitizesEmptySectionsAndInternalPending(t *testing.T) {
+	raw := strings.Join([]string{
+		"Shared open loops:",
+		"- [thread 1779205377.367449] updated=2026-05-19T15:51:31Z Pi-first foreground triage pending for 1 Slack message(s) in C09L0TAN31T",
+		"",
+		"Shared facts and conventions:",
+		"- Durov X 帖子链接，非 workspace policy 覆盖。纯链接分享无评论，不触发回复。",
+	}, "\n")
+	summary := sanitizeChannelBrainSummary(raw)
+	if summary != "" {
+		t.Fatalf("expected fully stale channel brain to sanitize empty, got:\n%s", summary)
+	}
+}
