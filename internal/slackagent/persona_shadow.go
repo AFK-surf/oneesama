@@ -119,7 +119,12 @@ func (s *Service) queueSlackTriagePersonaShadow(ctx context.Context, runID int64
 	if !s.shadowPersonaRuntimeEnabled() || runID == 0 {
 		return false
 	}
-	request := BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{
+	request := BuildSlackTriagePersonaShadowRequest(SlackTriagePersonaShadowRequestInput{
+		ChannelID:             channelID,
+		ThreadTS:              threadTS,
+		Messages:              messages,
+		Decision:              decision,
+		RelatedMemory:         relatedMemory,
 		WorkspaceTriagePolicy: s.triageWorkspacePolicy,
 		CustomEmoji:           s.workspaceCustomEmojiSnapshot(),
 	})
@@ -139,12 +144,16 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		return false
 	}
 	ignoreBotReply := len(ignoreExistingBotReply) > 0 && ignoreExistingBotReply[0]
-	request := BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{
+	request := BuildSlackTriagePersonaForegroundRequest(SlackTriagePersonaForegroundRequestInput{
+		ChannelID:              channelID,
+		ThreadTS:               threadTS,
+		Messages:               messages,
+		Decision:               decision,
+		RelatedMemory:          relatedMemory,
 		IgnoreExistingBotReply: ignoreBotReply,
 		WorkspaceTriagePolicy:  s.triageWorkspacePolicy,
 		CustomEmoji:            s.workspaceCustomEmojiSnapshot(),
 	})
-	request.Mode = persona.ModeLive
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
@@ -725,11 +734,128 @@ type SlackTriagePersonaRequestOptions struct {
 	CustomEmoji            []string
 }
 
+type SlackTriagePersonaRequestInput struct {
+	ChannelID     string
+	ThreadTS      string
+	Messages      []SlackInboundMessage
+	Decision      SlackTriageDecision
+	RelatedMemory []SlackRelatedMemoryRecord
+	Options       SlackTriagePersonaRequestOptions
+}
+
+type SlackTriagePersonaShadowRequestInput struct {
+	ChannelID             string
+	ThreadTS              string
+	Messages              []SlackInboundMessage
+	Decision              SlackTriageDecision
+	RelatedMemory         []SlackRelatedMemoryRecord
+	WorkspaceTriagePolicy string
+	CustomEmoji           []string
+}
+
+type SlackTriagePersonaForegroundRequestInput struct {
+	ChannelID              string
+	ThreadTS               string
+	Messages               []SlackInboundMessage
+	Decision               SlackTriageDecision
+	RelatedMemory          []SlackRelatedMemoryRecord
+	IgnoreExistingBotReply bool
+	WorkspaceTriagePolicy  string
+	CustomEmoji            []string
+}
+
+type SlackTriagePiFirstForegroundRequestInput struct {
+	ChannelID              string
+	ThreadTS               string
+	Messages               []SlackInboundMessage
+	RelatedMemory          []SlackRelatedMemoryRecord
+	Digest                 string
+	ExternalLinks          []SlackExternalLinkContext
+	ThreadContexts         []SlackTriageThreadContext
+	ChannelContexts        []SlackInboundMessage
+	PreviousTriage         string
+	IgnoreExistingBotReply bool
+	WorkspaceTriagePolicy  string
+	WorkspacePolicyStatus  SlackWorkspacePolicyStatus
+	CustomEmoji            []string
+}
+
 func BuildSlackTriagePersonaRequest(channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord) persona.Request {
 	return BuildSlackTriagePersonaRequestWithOptions(channelID, threadTS, messages, decision, relatedMemory, SlackTriagePersonaRequestOptions{})
 }
 
 func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string, messages []SlackInboundMessage, decision SlackTriageDecision, relatedMemory []SlackRelatedMemoryRecord, options SlackTriagePersonaRequestOptions) persona.Request {
+	return BuildSlackTriagePersonaRequestFromInput(SlackTriagePersonaRequestInput{
+		ChannelID:     channelID,
+		ThreadTS:      threadTS,
+		Messages:      messages,
+		Decision:      decision,
+		RelatedMemory: relatedMemory,
+		Options:       options,
+	})
+}
+
+func BuildSlackTriagePersonaShadowRequest(input SlackTriagePersonaShadowRequestInput) persona.Request {
+	return BuildSlackTriagePersonaRequestFromInput(SlackTriagePersonaRequestInput{
+		ChannelID:     input.ChannelID,
+		ThreadTS:      input.ThreadTS,
+		Messages:      input.Messages,
+		Decision:      input.Decision,
+		RelatedMemory: input.RelatedMemory,
+		Options: SlackTriagePersonaRequestOptions{
+			WorkspaceTriagePolicy: input.WorkspaceTriagePolicy,
+			CustomEmoji:           input.CustomEmoji,
+		},
+	})
+}
+
+func BuildSlackTriagePersonaForegroundRequest(input SlackTriagePersonaForegroundRequestInput) persona.Request {
+	req := BuildSlackTriagePersonaRequestFromInput(SlackTriagePersonaRequestInput{
+		ChannelID:     input.ChannelID,
+		ThreadTS:      input.ThreadTS,
+		Messages:      input.Messages,
+		Decision:      input.Decision,
+		RelatedMemory: input.RelatedMemory,
+		Options: SlackTriagePersonaRequestOptions{
+			IgnoreExistingBotReply: input.IgnoreExistingBotReply,
+			WorkspaceTriagePolicy:  input.WorkspaceTriagePolicy,
+			CustomEmoji:            input.CustomEmoji,
+		},
+	})
+	req.Mode = persona.ModeLive
+	return req
+}
+
+func BuildSlackTriagePiFirstForegroundRequest(input SlackTriagePiFirstForegroundRequestInput) persona.Request {
+	req := BuildSlackTriagePersonaRequestFromInput(SlackTriagePersonaRequestInput{
+		ChannelID:     input.ChannelID,
+		ThreadTS:      input.ThreadTS,
+		Messages:      input.Messages,
+		RelatedMemory: input.RelatedMemory,
+		Options: SlackTriagePersonaRequestOptions{
+			PiFirst:                true,
+			Digest:                 input.Digest,
+			ExternalLinks:          input.ExternalLinks,
+			ThreadContexts:         input.ThreadContexts,
+			ChannelContexts:        input.ChannelContexts,
+			PreviousTriage:         input.PreviousTriage,
+			IgnoreExistingBotReply: input.IgnoreExistingBotReply,
+			WorkspaceTriagePolicy:  input.WorkspaceTriagePolicy,
+			WorkspacePolicyStatus:  input.WorkspacePolicyStatus,
+			CustomEmoji:            input.CustomEmoji,
+		},
+	})
+	req.Mode = persona.ModeLive
+	return req
+}
+
+func BuildSlackTriagePersonaRequestFromInput(input SlackTriagePersonaRequestInput) persona.Request {
+	channelID := input.ChannelID
+	threadTS := input.ThreadTS
+	messages := input.Messages
+	decision := input.Decision
+	relatedMemory := input.RelatedMemory
+	options := input.Options
 	messages = normalizeSlackInboundMessages(messages)
 	text := strings.TrimSpace(joinSlackMessageTexts(messages))
 	if text == "" {
