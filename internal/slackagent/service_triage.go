@@ -20,12 +20,15 @@ const (
 	slackTriageAuditStaleSampleAfter      = 2 * time.Hour
 	slackTriageForegroundQueuedStaleAfter = 2 * time.Minute
 
+	slackTriageForegroundChainCodexOnly   = "codex_only"
 	slackTriageForegroundChainCodexThenPi = "codex_then_pi"
 	slackTriageForegroundChainPiFirstLive = "pi_first_live"
 )
 
 func normalizeSlackTriageForegroundChain(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case slackTriageForegroundChainCodexOnly:
+		return slackTriageForegroundChainCodexOnly
 	case slackTriageForegroundChainPiFirstLive:
 		return slackTriageForegroundChainPiFirstLive
 	default:
@@ -42,6 +45,10 @@ func (s *Service) slackTriageForegroundChain() string {
 
 func (s *Service) piFirstForegroundLiveEnabled(probe bool) bool {
 	return !probe && s.foregroundPersonaRuntimeEnabled() && s.slackTriageForegroundChain() == slackTriageForegroundChainPiFirstLive
+}
+
+func slackTriageForegroundChainAllowsPersona(value string) bool {
+	return normalizeSlackTriageForegroundChain(value) != slackTriageForegroundChainCodexOnly
 }
 
 type slackTriageStartOptions struct {
@@ -1276,7 +1283,9 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		decision.Actions = nil
 	}
 	probe := boolFromAny(job.Context["triageProbe"], false)
-	personaForegroundQueued := ok && !probe && s.foregroundPersonaRuntimeEnabled()
+	foregroundChain := stringFromContext(job.Context, "foregroundChain", "foreground_chain")
+	personaAllowed := slackTriageForegroundChainAllowsPersona(foregroundChain)
+	personaForegroundQueued := ok && !probe && personaAllowed && s.foregroundPersonaRuntimeEnabled()
 	var directToolCalls []SlackTriageToolCall
 	var directFailures int
 	var directMutations int
@@ -1324,7 +1333,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		extraMetadata["triage_empty_final_needs_retry"] = true
 		extraMetadata["triage_empty_final_job_status"] = string(job.Status)
 	}
-	personaShadowQueued := ok && !probe && !personaForegroundQueued && s.shadowPersonaRuntimeEnabled()
+	personaShadowQueued := ok && !probe && personaAllowed && !personaForegroundQueued && s.shadowPersonaRuntimeEnabled()
 	if personaShadowQueued {
 		extraMetadata["persona_shadow_queued"] = true
 	}

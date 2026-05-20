@@ -403,6 +403,75 @@ func stringSliceFromAny(value any) []string {
 	}
 }
 
+func TestSlackTriageCodexOnlyDoesNotCallPersonaRuntime(t *testing.T) {
+	ctx := context.Background()
+	workspaceDir := t.TempDir()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_codex_only",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"codex-only reply","actions":[{"type":"post_thread_reply","title":"codex reply","message":"codex visible reply","channelId":"C_TRIAGE","threadTs":"200.000"}]}`,
+	}}
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:     persona.ProviderPi,
+		Decision:    persona.DecisionReply,
+		VisibleText: "Pi/Linger should not be called.",
+		Confidence:  0.9,
+		ShadowOnly:  false,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Triage:       appconfig.SlackTriageConfig{ForegroundChain: "codex_only"},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "这个 thread 值得回一下。",
+		TS:             "200.000",
+	}}, "#meeting-avatar: 这个 thread 值得回一下。")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if started.Finalization == nil || started.Finalization.Run == nil {
+		t.Fatalf("started = %#v, want Codex finalization", started)
+	}
+	poster.WaitForCalls(t, 1)
+	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "codex visible reply") {
+		t.Fatalf("poster calls = %#v, want Codex direct reply", calls)
+	}
+	runtime.mu.Lock()
+	requests := len(runtime.requests)
+	runtime.mu.Unlock()
+	if requests != 0 {
+		t.Fatalf("persona runtime requests = %d, want 0 in codex_only foreground chain", requests)
+	}
+	updated := started.Finalization.Run
+	if updated.Metadata["foreground_chain"] != slackTriageForegroundChainCodexOnly {
+		t.Fatalf("metadata = %#v, want foreground_chain=codex_only", updated.Metadata)
+	}
+	if boolFromAny(updated.Metadata["persona_foreground_queued"], false) || boolFromAny(updated.Metadata["persona_shadow_queued"], false) {
+		t.Fatalf("metadata = %#v, want no persona queues", updated.Metadata)
+	}
+}
+
 func TestSlackTriageLivePersonaForegroundFailureSuppressesCodexFallback(t *testing.T) {
 	ctx := context.Background()
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
