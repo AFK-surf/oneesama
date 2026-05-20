@@ -20,6 +20,13 @@ func TestLoadHonorsSlackEventBufferEnvOverrides(t *testing.T) {
 	t.Setenv("ONEESAMA_SLACK_MEMORY_DIR", "/tmp/oneesama-slack-memory")
 	t.Setenv("ONEESAMA_SLACK_MEMORY_SEMANTIC_ENABLED", "true")
 	t.Setenv("ONEESAMA_SLACK_MEMORY_SEMANTIC_INDEX_PATH", "/tmp/oneesama-semantic-memory.json")
+	t.Setenv("ONEESAMA_SLACK_DAILY_REPORT_ENABLED", "true")
+	t.Setenv("ONEESAMA_SLACK_DAILY_REPORT_CHANNEL", "C_REPORT")
+	t.Setenv("ONEESAMA_SLACK_DAILY_REPORT_TIME", "19:30")
+	t.Setenv("ONEESAMA_SLACK_DAILY_REPORT_TIMEZONE", "Asia/Tokyo")
+	t.Setenv("ONEESAMA_SLACK_DAILY_REPORT_WINDOW", "12h")
+	t.Setenv("ONEESAMA_SLACK_DAILY_REPORT_LEGACY_DB_PATH", "/tmp/slackd.sqlite3")
+	t.Setenv("ONEESAMA_SLACK_DAILY_REPORT_LEGACY_TRIAGE_ARCHIVE_DIR", "/tmp/slackd-triage")
 
 	cfg := loadInTempDir(t)
 	if !cfg.Slack.EventBuffer.Enabled || !cfg.Slack.EventBuffer.Triage {
@@ -42,6 +49,12 @@ func TestLoadHonorsSlackEventBufferEnvOverrides(t *testing.T) {
 	}
 	if !cfg.Slack.Memory.SemanticEnabled || cfg.Slack.Memory.SemanticIndexPath != "/tmp/oneesama-semantic-memory.json" {
 		t.Fatalf("Slack.Memory = %#v, want semantic env overrides", cfg.Slack.Memory)
+	}
+	if !cfg.Slack.DailyReport.Enabled || cfg.Slack.DailyReport.ChannelID != "C_REPORT" || cfg.Slack.DailyReport.TimeOfDay != "19:30" || cfg.Slack.DailyReport.Timezone != "Asia/Tokyo" {
+		t.Fatalf("Slack.DailyReport = %#v, want env schedule values", cfg.Slack.DailyReport)
+	}
+	if cfg.Slack.DailyReport.Window != 12*time.Hour || cfg.Slack.DailyReport.LegacySlackDBPath != "/tmp/slackd.sqlite3" || cfg.Slack.DailyReport.LegacyTriageArchiveDir != "/tmp/slackd-triage" {
+		t.Fatalf("Slack.DailyReport = %#v, want env window/source values", cfg.Slack.DailyReport)
 	}
 }
 

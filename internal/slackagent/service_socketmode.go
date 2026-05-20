@@ -8,6 +8,7 @@ func (s *Service) Start() error {
 	s.startMeetingApprovalScanner()
 	s.primeHeartbeatStateOnStart(context.Background())
 	s.startHeartbeatTicker()
+	s.startDailyReportTicker()
 
 	if s == nil || s.appToken == "" {
 		return nil
@@ -34,6 +35,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	s.stopSlackHistoryScanner()
 	s.stopMeetingApprovalScanner()
 	s.stopHeartbeatTicker()
+	s.stopDailyReportTicker()
 	s.socketModeMu.Lock()
 	runner := s.socketMode
 	s.socketModeMu.Unlock()

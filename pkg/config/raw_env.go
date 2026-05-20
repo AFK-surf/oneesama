@@ -69,6 +69,30 @@ func applySlackEnvOverrides(cfg *Config) {
 	}
 }
 
+func applySlackDailyReportEnvOverrides(cfg *Config) {
+	if value, ok := getenvBool("ONEESAMA_SLACK_DAILY_REPORT_ENABLED", "MAB_SLACK_DAILY_REPORT_ENABLED"); ok {
+		cfg.Slack.DailyReport.Enabled = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_DAILY_REPORT_CHANNEL", "ONEESAMA_SLACK_DAILY_REPORT_CHANNEL_ID", "MAB_SLACK_DAILY_REPORT_CHANNEL")); value != "" {
+		cfg.Slack.DailyReport.ChannelID = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_DAILY_REPORT_TIME", "ONEESAMA_SLACK_DAILY_REPORT_TIME_OF_DAY", "MAB_SLACK_DAILY_REPORT_TIME")); value != "" {
+		cfg.Slack.DailyReport.TimeOfDay = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_DAILY_REPORT_TIMEZONE", "MAB_SLACK_DAILY_REPORT_TIMEZONE")); value != "" {
+		cfg.Slack.DailyReport.Timezone = value
+	}
+	if value, ok := getenvDuration("ONEESAMA_SLACK_DAILY_REPORT_WINDOW", "MAB_SLACK_DAILY_REPORT_WINDOW"); ok {
+		cfg.Slack.DailyReport.Window = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_DAILY_REPORT_LEGACY_DB_PATH", "ONEESAMA_LEGACY_SLACK_DB_PATH", "MAB_LEGACY_SLACK_DB_PATH")); value != "" {
+		cfg.Slack.DailyReport.LegacySlackDBPath = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_SLACK_DAILY_REPORT_LEGACY_TRIAGE_ARCHIVE_DIR", "ONEESAMA_LEGACY_TRIAGE_ARCHIVE_DIR", "MAB_LEGACY_TRIAGE_ARCHIVE_DIR")); value != "" {
+		cfg.Slack.DailyReport.LegacyTriageArchiveDir = value
+	}
+}
+
 func applySlackEventBufferEnvOverrides(cfg *Config) {
 	if value, ok := getenvBool("ONEESAMA_SLACK_EVENT_BUFFER", "MAB_SLACK_EVENT_BUFFER"); ok {
 		cfg.Slack.EventBuffer.Enabled = value

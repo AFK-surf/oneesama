@@ -104,6 +104,15 @@ type Service struct {
 	triageHeuristicFallback  bool
 	triageWorkspacePolicy    string
 	triageForegroundChain    string
+	dailyReportConfig        appconfig.SlackDailyReportConfig
+	dailyReports             *slackDailyReportStore
+	dailyReportMu            sync.Mutex
+	dailyReportCancel        context.CancelFunc
+	dailyReportTicks         []time.Time
+	dailyReportLastTickAt    time.Time
+	dailyReportLastPostedAt  time.Time
+	dailyReportLastError     string
+	dailyReportLastChannel   string
 	customEmojiMu            sync.Mutex
 	customEmoji              []string
 	customEmojiLastRefreshAt time.Time
@@ -306,6 +315,8 @@ func NewService(cfg Config) *Service {
 		triageHeuristicFallback: cfg.Slack.Triage.HeuristicFallback,
 		triageWorkspacePolicy:   strings.TrimSpace(cfg.Slack.Triage.WorkspacePolicy),
 		triageForegroundChain:   normalizeSlackTriageForegroundChain(cfg.Slack.Triage.ForegroundChain),
+		dailyReportConfig:       normalizeSlackDailyReportConfig(cfg.Slack.DailyReport),
+		dailyReports:            newSlackDailyReportStore(cfg.Persistence, logger),
 		canvasConfig:            canvasConfig,
 		canvasPublisher:         cfg.CanvasPublisher,
 		seenEvents:              make(map[string]time.Time),

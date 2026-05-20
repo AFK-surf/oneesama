@@ -45,6 +45,7 @@ type SlackConfig struct {
 	Triage          SlackTriageConfig
 	Memory          SlackMemoryConfig
 	MeetingScanner  SlackMeetingScannerConfig
+	DailyReport     SlackDailyReportConfig
 }
 
 type SlackEventBufferConfig struct {
@@ -79,6 +80,16 @@ type SlackMeetingScannerConfig struct {
 	ClientSecret    string
 	APIBaseURL      string
 	TokenURL        string
+}
+
+type SlackDailyReportConfig struct {
+	Enabled                bool
+	ChannelID              string
+	TimeOfDay              string
+	Timezone               string
+	Window                 time.Duration
+	LegacySlackDBPath      string
+	LegacyTriageArchiveDir string
 }
 
 type AgentRunnerConfig struct {

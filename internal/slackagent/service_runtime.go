@@ -30,6 +30,7 @@ type SlackStatus struct {
 	InternalAuthConfigured  bool                       `json:"internal_auth_configured"`
 	SocketMode              SlackSocketModeStatus      `json:"socket_mode"`
 	HeartbeatTicker         SlackHeartbeatTickerStatus `json:"heartbeat_ticker"`
+	DailyReport             SlackDailyReportStatus     `json:"daily_report"`
 	MeetingScanner          SlackMeetingScannerStatus  `json:"meeting_scanner"`
 	ScannerCursors          SlackScannerCursorStats    `json:"scanner_cursors"`
 	WorkspaceState          SlackWorkspaceStateStats   `json:"workspace_state"`
@@ -122,6 +123,7 @@ func (s *Service) Status() StatusResponse {
 			InternalAuthConfigured:  s.internalAuthKey != "",
 			SocketMode:              s.socketModeStatus(),
 			HeartbeatTicker:         s.heartbeatTickerStatus(),
+			DailyReport:             s.dailyReportStatus(),
 			MeetingScanner:          s.meetingScannerStatus(),
 			ScannerCursors:          scannerCursorStats,
 			WorkspaceState:          workspaceStats,

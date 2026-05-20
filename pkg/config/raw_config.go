@@ -44,6 +44,7 @@ type rawSlackConfig struct {
 	Triage          rawSlackTriageConfig      `json:"triage"`
 	Memory          rawSlackMemoryConfig      `json:"memory"`
 	MeetingScanner  rawSlackMeetingScanner    `json:"meeting_scanner"`
+	DailyReport     rawSlackDailyReport       `json:"daily_report"`
 }
 
 type rawSlackEventBufferConfig struct {
@@ -78,6 +79,16 @@ type rawSlackMeetingScanner struct {
 	ClientSecret    string `json:"client_secret"`
 	APIBaseURL      string `json:"api_base_url"`
 	TokenURL        string `json:"token_url"`
+}
+
+type rawSlackDailyReport struct {
+	Enabled                bool   `json:"enabled"`
+	ChannelID              string `json:"channel_id"`
+	TimeOfDay              string `json:"time_of_day"`
+	Timezone               string `json:"timezone"`
+	Window                 string `json:"window"`
+	LegacySlackDBPath      string `json:"legacy_slack_db_path"`
+	LegacyTriageArchiveDir string `json:"legacy_triage_archive_dir"`
 }
 
 type rawAgentRunner struct {
@@ -226,6 +237,15 @@ func (r rawConfig) toConfig(path string) Config {
 				APIBaseURL:      stringOrDefault(r.Slack.MeetingScanner.APIBaseURL, defaultGoogleCalendarAPIBaseURL),
 				TokenURL:        stringOrDefault(r.Slack.MeetingScanner.TokenURL, defaultGoogleOAuthTokenURL),
 			},
+			DailyReport: SlackDailyReportConfig{
+				Enabled:                r.Slack.DailyReport.Enabled,
+				ChannelID:              strings.TrimSpace(r.Slack.DailyReport.ChannelID),
+				TimeOfDay:              stringOrDefault(r.Slack.DailyReport.TimeOfDay, defaultSlackDailyReportTimeOfDay),
+				Timezone:               stringOrDefault(r.Slack.DailyReport.Timezone, defaultSlackDailyReportTimezone),
+				Window:                 durationOrDefault(r.Slack.DailyReport.Window, defaultSlackDailyReportWindow),
+				LegacySlackDBPath:      strings.TrimSpace(r.Slack.DailyReport.LegacySlackDBPath),
+				LegacyTriageArchiveDir: strings.TrimSpace(r.Slack.DailyReport.LegacyTriageArchiveDir),
+			},
 		},
 		AgentRunner: buildAgentRunnerConfig(r.AgentRunner),
 		PersonaRuntime: PersonaRuntimeConfig{
@@ -279,6 +299,7 @@ func applyEnvOverrides(cfg *Config) {
 	applySlackTriageEnvOverrides(cfg)
 	applySlackMemoryEnvOverrides(cfg)
 	applySlackMeetingScannerEnvOverrides(cfg)
+	applySlackDailyReportEnvOverrides(cfg)
 	applyAgentRunnerEnvOverrides(cfg)
 	applyPersonaRuntimeEnvOverrides(cfg)
 	applyMeetdEnvOverrides(cfg)

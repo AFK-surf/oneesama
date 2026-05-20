@@ -21,6 +21,9 @@ const (
 	defaultSlackTriageHeuristicFallback = true
 	defaultSlackTriageForegroundChain   = "codex_then_pi"
 	defaultSlackMeetingScannerInterval  = time.Minute
+	defaultSlackDailyReportTimeOfDay    = "18:00"
+	defaultSlackDailyReportTimezone     = "Asia/Shanghai"
+	defaultSlackDailyReportWindow       = 24 * time.Hour
 	defaultGoogleCalendarID             = "primary"
 	defaultGoogleCalendarAPIBaseURL     = "https://www.googleapis.com/calendar/v3"
 	defaultGoogleOAuthTokenURL          = "https://oauth2.googleapis.com/token"
