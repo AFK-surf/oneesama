@@ -11,6 +11,7 @@ Options:
                         Defaults to ONEESAMA_LIVE_ENV_FILES, or:
                         /private/tmp/oneesama-r24-a-window/live-env.sh
                         /tmp/oneesama-live-env-from-proc.sh
+                        /tmp/oneesama-workspace-triage-policy.sh
   --bin <path>          oneesama binary path. Default: ./oneesama
   --preflight-only      Load env and validate required exported tokens, then exit.
   --check-pid <pid>     Verify the already-started process still has required env.
@@ -86,9 +87,11 @@ if [[ ${#env_files[@]} -eq 0 ]]; then
     # shellcheck disable=SC2206
     env_files=(${ONEESAMA_LIVE_ENV_FILES})
   else
+    default_env_dir="${ONEESAMA_LIVE_DEFAULT_ENV_DIR:-/tmp}"
     env_files=(
-      "/private/tmp/oneesama-r24-a-window/live-env.sh"
-      "/tmp/oneesama-live-env-from-proc.sh"
+      "${default_env_dir}/oneesama-r24-a-window/live-env.sh"
+      "${default_env_dir}/oneesama-live-env-from-proc.sh"
+      "${default_env_dir}/oneesama-workspace-triage-policy.sh"
     )
   fi
 fi
@@ -193,10 +196,20 @@ require_env_name() {
 }
 
 preflight_env() {
-	if [[ "$subcommand" == "slack-agent" ]]; then
-		require_env_any "Slack bot token" ONEESAMA_SLACK_BOT_TOKEN SLACK_BOT_TOKEN MAB_SLACK_BOT_TOKEN
-		require_env_any "Slack app token" ONEESAMA_SLACK_APP_TOKEN SLACK_APP_TOKEN MAB_SLACK_APP_TOKEN
-	fi
+  if [[ "$subcommand" == "slack-agent" ]]; then
+    require_env_any "Slack bot token" ONEESAMA_SLACK_BOT_TOKEN SLACK_BOT_TOKEN MAB_SLACK_BOT_TOKEN
+    require_env_any "Slack app token" ONEESAMA_SLACK_APP_TOKEN SLACK_APP_TOKEN MAB_SLACK_APP_TOKEN
+    if [[ -n "${ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN:-}" ]]; then
+      log "ok: triage foreground chain = ${ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN}"
+    else
+      log "warn: ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN not exported; default config will apply"
+    fi
+    if [[ -n "${ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY:-}" ]]; then
+      log "ok: workspace triage policy exported (length ${#ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY})"
+    else
+      log "warn: ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY not exported"
+    fi
+  fi
 	local required_codex_env
 	required_codex_env="$(codex_required_env_key || true)"
   if [[ -n "$required_codex_env" ]]; then
