@@ -862,6 +862,7 @@ func waitForPersonaForegroundRun(t *testing.T, service *Service, runID int64) Sl
 		}
 		if run != nil {
 			if _, ok := run.Metadata["persona_foreground"]; ok {
+				waitForTriageProjection(t, service, runID)
 				return *run
 			}
 		}
@@ -873,6 +874,23 @@ func waitForPersonaForegroundRun(t *testing.T, service *Service, runID int64) Sl
 	}
 	t.Fatalf("persona foreground result was not recorded; metadata=%#v toolCalls=%#v", run.Metadata, run.ToolCalls)
 	return SlackTriageContext{}
+}
+
+func waitForTriageProjection(t *testing.T, service *Service, runID int64) {
+	t.Helper()
+	if service == nil || strings.TrimSpace(service.workspaceDir) == "" {
+		return
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		for _, context := range loadTriageContextsFromProjection(service.workspaceDir) {
+			if context.ID == runID {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("triage projection for run %d was not persisted before test cleanup", runID)
 }
 
 func TestShadowPersonaBackfillCandidatesRecordsErrorsWithoutDroppingResult(t *testing.T) {

@@ -274,7 +274,7 @@ func joinRedeliveryRawCaptions(session SessionRecord) []postmeeting.TranscriptSe
 func joinRedeliveryAudioPath(ctx context.Context, manifest *postmeeting.ArtifactManifest, session SessionRecord) string {
 	if manifest != nil {
 		if path := usableMeetingAudioArtifactPath(ctx, manifest.Files.Audio); path != "" {
-			return path
+			return finalizedJoinRedeliveryAudioPath(ctx, path)
 		}
 		for _, chunk := range manifest.Files.AudioChunks {
 			if path := usableMeetingAudioArtifactPath(ctx, chunk); path != "" {
@@ -290,8 +290,20 @@ func joinRedeliveryAudioPath(ctx context.Context, manifest *postmeeting.Artifact
 		filepath.Join("runtime/meeting-artifacts", "runner-"+session.ID, "audio.wav"),
 	} {
 		if audio := usableMeetingAudioArtifactPath(ctx, path); audio != "" {
-			return audio
+			return finalizedJoinRedeliveryAudioPath(ctx, audio)
 		}
 	}
 	return ""
+}
+
+func finalizedJoinRedeliveryAudioPath(ctx context.Context, path string) string {
+	if !strings.EqualFold(filepath.Base(path), rawMeetingAudioFilename) {
+		return path
+	}
+	if finalPath := finalizeMeetingAudioArtifact(ctx, filepath.Dir(path), 0); finalPath != "" {
+		if audio := usableMeetingAudioArtifactPath(ctx, finalPath); audio != "" {
+			return audio
+		}
+	}
+	return path
 }

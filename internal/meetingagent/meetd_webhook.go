@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+const (
+	meetdWebhookDefaultTimeout = 15 * time.Second
+	meetdWebhookResultTimeout  = 3 * time.Minute
+)
+
 func (s *Service) SendMeetdWebhook(ctx context.Context, event string, meeting MeetdMeetingRecord, result MeetdMeetingResult) error {
 	payload := buildMeetdWebhookPayload(event, meeting, &result)
 	err := sendMeetdWebhook(ctx, s.meetdWebhookURL, s.meetdWebhookSecret, payload)
@@ -81,7 +86,7 @@ func sendMeetdWebhook(ctx context.Context, webhookURL, secret string, payload Me
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("context cancelled: %w", err)
 		}
-		requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		requestCtx, cancel := context.WithTimeout(ctx, meetdWebhookRequestTimeout(payload))
 		request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, webhookURL, bytes.NewReader(body))
 		if err != nil {
 			cancel()
@@ -111,6 +116,13 @@ func sendMeetdWebhook(ctx context.Context, webhookURL, secret string, payload Me
 		}
 	}
 	return fmt.Errorf("webhook failed after 5 attempts: %w", lastErr)
+}
+
+func meetdWebhookRequestTimeout(payload MeetdWebhookPayload) time.Duration {
+	if payload.Event == "meeting.result" {
+		return meetdWebhookResultTimeout
+	}
+	return meetdWebhookDefaultTimeout
 }
 
 func meetdHMAC(data []byte, secret string) string {

@@ -186,6 +186,14 @@ func TestJoinMonitorRecoversStaleSessionFromCapturedArtifacts(t *testing.T) {
 	originalInspect := inspectMeetingAudioSignal
 	inspectMeetingAudioSignal = func(context.Context, string) (bool, bool) { return true, true }
 	t.Cleanup(func() { inspectMeetingAudioSignal = originalInspect })
+	originalTranscode := transcodeMeetingAudioToMP3
+	transcodeMeetingAudioToMP3 = func(_ context.Context, inputPath, outputPath string) error {
+		if inputPath != filepath.Join(artifactDir, "audio.wav") {
+			t.Fatalf("transcode input = %q, want stale raw audio", inputPath)
+		}
+		return os.WriteFile(outputPath, []byte("mp3"), 0o644)
+	}
+	t.Cleanup(func() { transcodeMeetingAudioToMP3 = originalTranscode })
 
 	webhooks := make(chan MeetdWebhookPayload, 4)
 	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
@@ -237,6 +245,9 @@ func TestJoinMonitorRecoversStaleSessionFromCapturedArtifacts(t *testing.T) {
 	}
 	if result.Artifacts.TranscriptPath == "" || result.Artifacts.AudioPath == "" {
 		t.Fatalf("artifacts = %+v, want transcript and audio paths", result.Artifacts)
+	}
+	if filepath.Base(result.Artifacts.AudioPath) != "audio.mp3" {
+		t.Fatalf("audio artifact = %q, want compressed audio.mp3", result.Artifacts.AudioPath)
 	}
 	recovered, err := service.GetSession(context.Background(), session.ID)
 	if err != nil || recovered == nil {

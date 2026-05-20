@@ -4,10 +4,31 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+const meetingAudioUploadMaxBytes = 64 << 20
+
+var compressSlackMeetingAudioArtifact = func(ctx context.Context, audioPath string) string {
+	if !strings.EqualFold(filepath.Ext(audioPath), ".wav") {
+		return audioPath
+	}
+	mp3Path := strings.TrimSuffix(audioPath, filepath.Ext(audioPath)) + ".mp3"
+	if shouldUploadMeetingArtifact(mp3Path) {
+		return mp3Path
+	}
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-i", audioPath, "-codec:a", "libmp3lame", "-b:a", "64k", mp3Path)
+	if _, err := cmd.CombinedOutput(); err != nil {
+		return audioPath
+	}
+	if shouldUploadMeetingArtifact(mp3Path) {
+		return mp3Path
+	}
+	return audioPath
+}
 
 func (s *Service) HandleMeetingWebhook(ctx context.Context, payload MeetingWebhookPayload) MeetingWebhookResponse {
 	normalized := normalizeMeetingWebhookPayload(payload)
@@ -177,16 +198,23 @@ func (s *Service) uploadMeetingArtifactFiles(ctx context.Context, artifacts Meet
 	if transcript := firstNonEmpty(artifacts.TranscriptPath, artifacts.TranscriptPathAlt, artifacts.Transcript); shouldUploadMeetingArtifact(transcript) {
 		file, err := s.uploadMeetingArtifactFile(ctx, transcript, "transcript.txt", ref)
 		if err != nil {
-			return artifacts, err
+			s.logger.Warn("meeting transcript upload failed", "path", transcript, "error", err)
+		} else {
+			uploaded.TranscriptPath = file.Permalink
+			uploaded.TranscriptPathAlt = ""
+			uploaded.Transcript = ""
 		}
-		uploaded.TranscriptPath = file.Permalink
-		uploaded.TranscriptPathAlt = ""
-		uploaded.Transcript = ""
 	}
 	if audio := firstNonEmpty(artifacts.AudioPath, artifacts.AudioPathAlt, artifacts.Audio); shouldUploadMeetingArtifact(audio) {
+		audio = compressSlackMeetingAudioArtifact(ctx, audio)
+		if !shouldUploadMeetingAudioArtifact(audio) {
+			s.logger.Warn("skip large meeting audio upload", "path", audio)
+			return uploaded, nil
+		}
 		file, err := s.uploadMeetingArtifactFile(ctx, audio, meetingAudioUploadName(audio), ref)
 		if err != nil {
-			return artifacts, err
+			s.logger.Warn("meeting audio upload failed", "path", audio, "error", err)
+			return uploaded, nil
 		}
 		uploaded.AudioPath = file.Permalink
 		uploaded.AudioPathAlt = ""
@@ -217,6 +245,18 @@ func shouldUploadMeetingArtifact(value string) bool {
 	}
 	info, err := os.Stat(value)
 	return err == nil && !info.IsDir()
+}
+
+func shouldUploadMeetingAudioArtifact(value string) bool {
+	value = strings.TrimSpace(value)
+	if !shouldUploadMeetingArtifact(value) {
+		return false
+	}
+	if !strings.EqualFold(filepath.Ext(value), ".wav") {
+		return true
+	}
+	info, err := os.Stat(value)
+	return err == nil && !info.IsDir() && info.Size() <= meetingAudioUploadMaxBytes
 }
 
 func meetingAudioUploadName(path string) string {

@@ -281,6 +281,126 @@ func TestMeetingWebhookResultUploadsTranscriptAndAudioBeforeCanvasPublish(t *tes
 	}
 }
 
+func TestMeetingWebhookResultCompressesWavAudioBeforeUpload(t *testing.T) {
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.txt")
+	if err := os.WriteFile(transcriptPath, []byte("Peng: real transcript line\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	audioPath := filepath.Join(t.TempDir(), "audio.wav")
+	if err := os.WriteFile(audioPath, []byte("wav"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	originalCompress := compressSlackMeetingAudioArtifact
+	compressSlackMeetingAudioArtifact = func(_ context.Context, path string) string {
+		if path != audioPath {
+			t.Fatalf("compress path = %q, want %q", path, audioPath)
+		}
+		mp3Path := strings.TrimSuffix(path, ".wav") + ".mp3"
+		if err := os.WriteFile(mp3Path, []byte("mp3"), 0o644); err != nil {
+			t.Fatalf("write mp3: %v", err)
+		}
+		return mp3Path
+	}
+	t.Cleanup(func() { compressSlackMeetingAudioArtifact = originalCompress })
+
+	var canvasMarkdown string
+	completedFiles := map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/files.getUploadURLExternal":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse upload url request: %v", err)
+			}
+			filename := r.Form.Get("filename")
+			switch filename {
+			case "transcript.txt":
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file_id": "FTRANSCRIPT", "upload_url": "http://" + r.Host + "/upload/FTRANSCRIPT"})
+			case "audio.mp3":
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file_id": "FAUDIO", "upload_url": "http://" + r.Host + "/upload/FAUDIO"})
+			default:
+				t.Fatalf("unexpected upload filename %q", filename)
+			}
+		case "/upload/FTRANSCRIPT", "/upload/FAUDIO":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse upload: %v", err)
+			}
+			_, _ = w.Write([]byte("ok"))
+		case "/files.completeUploadExternal":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse complete: %v", err)
+			}
+			if strings.Contains(r.Form.Get("files"), "FTRANSCRIPT") {
+				completedFiles["transcript.txt"] = true
+			}
+			if strings.Contains(r.Form.Get("files"), "FAUDIO") {
+				completedFiles["audio.mp3"] = true
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "files": []map[string]any{{"id": "FTRANSCRIPT", "title": "transcript.txt"}, {"id": "FAUDIO", "title": "audio.mp3"}}})
+		case "/files.info":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse info: %v", err)
+			}
+			switch r.Form.Get("file") {
+			case "FTRANSCRIPT":
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file": map[string]any{"permalink": "https://files.slack.com/transcript.txt"}})
+			case "FAUDIO":
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "file": map[string]any{"permalink": "https://files.slack.com/audio.mp3"}})
+			default:
+				t.Fatalf("unexpected file info request %#v", r.Form)
+			}
+		case "/canvases.create":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode canvas: %v", err)
+			}
+			content, _ := body["document_content"].(map[string]any)
+			canvasMarkdown, _ = content["markdown"].(string)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "canvas_id": "canvas_uploaded"})
+		case "/auth.test":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "team_id": "T123"})
+		case "/chat.postMessage":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "ts": "111.222"})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	router := newTestRouter(t, Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "json-file", DataDir: t.TempDir()},
+		MeetWebhookSecret: "meet-secret",
+		Slack:             appconfig.SlackConfig{SigningSecret: "slack-secret", BotToken: "xoxb-test"},
+		Poster:            NewPoster(PosterConfig{BotToken: "xoxb-test", Endpoint: server.URL + "/chat.postMessage", Client: server.Client()}),
+		Assistant:         &recordingAssistant{},
+		CanvasPublisherConfig: CanvasPublisherConfig{
+			Provider:   "file",
+			BotToken:   "xoxb-test",
+			APIBaseURL: server.URL,
+			Client:     server.Client(),
+			Poster:     NewPoster(PosterConfig{BotToken: "xoxb-test", Endpoint: server.URL + "/chat.postMessage", Client: server.Client()}),
+		},
+	})
+
+	body := `{"event":"meeting.result","meeting_id":92,"title":"Large Audio","summary":{"title":"Large Audio","duration_minutes":1,"attendees":["Peng"],"key_points":["Summary should still publish."]},"artifacts":{"transcript_path":` + strconv.Quote(transcriptPath) + `,"audio_path":` + strconv.Quote(audioPath) + `},"slack_ref":{"channel_id":"C123","thread_ts":"123.456"},"force_delivery":true}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if !completedFiles["transcript.txt"] {
+		t.Fatalf("completed files = %#v, want transcript upload", completedFiles)
+	}
+	if !completedFiles["audio.mp3"] {
+		t.Fatalf("completed files = %#v, want compressed audio upload", completedFiles)
+	}
+	if !strings.Contains(canvasMarkdown, "![transcript.txt](https://files.slack.com/transcript.txt)") {
+		t.Fatalf("canvas markdown = %s, want transcript attachment", canvasMarkdown)
+	}
+	if !strings.Contains(canvasMarkdown, "![audio.mp3](https://files.slack.com/audio.mp3)") || strings.Contains(canvasMarkdown, "audio.wav") {
+		t.Fatalf("canvas markdown = %s, want compressed audio attachment only", canvasMarkdown)
+	}
+}
+
 func TestMeetingWebhookRejectsBadSignature(t *testing.T) {
 	router := newMeetingWebhookTestRouter(t, &recordingPoster{}, &recordingAssistant{}, nil)
 	response := httptest.NewRecorder()
