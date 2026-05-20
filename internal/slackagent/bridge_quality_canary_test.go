@@ -180,6 +180,8 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 					t.Fatalf("[%s] slackToolEvidence missing tool %q; evidence: %q", fixture.CaseID, tool, evidence)
 				}
 			}
+		case "C241_link_commentary_synthesis":
+			assertBridgeQualityLinkCommentarySynthesis(t, fixture, runnerContext)
 		case "C237_pi_first_foreground_no_pre_pi_runner":
 			assertBridgeQualityPiFirstForeground(t, fixture)
 		default:
@@ -198,6 +200,32 @@ func runBridgeQualityFixture(t *testing.T, fixture bridgeQualityFixture) {
 		if tools, _ := runnerContext["slackToolEvidence"].(string); strings.Contains(strings.ToLower(tools), lower) {
 			t.Fatalf("[%s] slackToolEvidence leaks banned token %q: %q", fixture.CaseID, banned, tools)
 		}
+	}
+}
+
+func assertBridgeQualityLinkCommentarySynthesis(t *testing.T, fixture bridgeQualityFixture, runnerContext map[string]any) {
+	t.Helper()
+	evidence, ok := runnerContext["relatedMemoryEvidence"].(string)
+	if !ok || strings.TrimSpace(evidence) == "" {
+		t.Fatalf("[%s] expected relatedMemoryEvidence for link commentary synthesis; got %#v", fixture.CaseID, runnerContext["relatedMemoryEvidence"])
+	}
+	mention, ok := runnerContext["slackAppMention"].(*SlackAppMentionContext)
+	if !ok || mention == nil || len(mention.ExternalLinks) == 0 {
+		t.Fatalf("[%s] expected slackAppMention external link context; got %#v", fixture.CaseID, runnerContext["slackAppMention"])
+	}
+	linkContext := formatSlackExternalLinkContexts(mention.ExternalLinks)
+	if strings.TrimSpace(linkContext) == "" {
+		t.Fatalf("[%s] expected formatted fetched external link context; links=%#v", fixture.CaseID, mention.ExternalLinks)
+	}
+	for _, anchor := range fixture.ExpectedEvidence {
+		if strings.Contains(evidence, anchor) || strings.Contains(linkContext, anchor) {
+			continue
+		}
+		t.Fatalf("[%s] link commentary synthesis missing anchor %q; related=%q external=%q", fixture.CaseID, anchor, evidence, linkContext)
+	}
+	combined := strings.ToLower(evidence + "\n" + linkContext)
+	if strings.Contains(combined, "headline-only") || strings.Contains(combined, "headline only") {
+		t.Fatalf("[%s] canary fixture should not pass with headline-only evidence: %q", fixture.CaseID, combined)
 	}
 }
 

@@ -1,13 +1,12 @@
 {
-  "case_id": "case_009_link_commentary_synthesis_pending",
-  "pending": true,
-  "pending_reason": "awaiting_task_241_link_commentary_quality_canary",
+  "case_id": "case_009_link_commentary_synthesis",
+  "pending": false,
   "source": {
     "old_slack_db_run_id": null,
     "occurred_at": "2026-05-20T09:50:00+08:00",
     "channel_id": "CLINKCMT",
     "mention_text": "<@UBOT> https://example.dev/post-about-something",
-    "notes": "STUB fixture for #241 link-commentary quality canary. Pre-built per case_007/008 handoff pattern: pending=true today, driver flips to active when #241 ships a canary that requires workspace Memory citation + multi-source synthesis on link commentary replies. Anchor invariant: when Pi decides 'reply' to a shared link in a workspace whose policy engages on the link's topic, the reply MUST cite at least one workspace Memory anchor AND reference a second source beyond the headline; pure headline restatement must fail the canary."
+    "notes": "Active fixture for #241 link-commentary quality canary. Anchor invariant: when Pi or a delegated worker replies to a shared link in a workspace whose policy engages on the link's topic, the reply context MUST carry at least one workspace Memory anchor AND fetched source context beyond the headline; pure headline restatement must fail the canary."
   },
   "input": {
     "channel_name": "casual-product-chat",
@@ -15,7 +14,14 @@
     "mention_text": "https://example.dev/post-about-something 看看这个",
     "transcript": "[1779260000.000000] <@UASK>: <@UBOT> https://example.dev/post-about-something 看看这个",
     "thread_context_prompt": "Thread context:\nhttps://example.dev/post-about-something 看看这个",
-    "external_links": [],
+    "external_links": [
+      {
+        "url": "https://example.dev/post-about-something",
+        "title": "Post about agent workspace memory",
+        "excerpt": "The article argues that link commentary is useful only when the assistant connects the source to local product context, prior team decisions, and adjacent examples instead of repeating the headline.",
+        "source": "fixture_reader"
+      }
+    ],
     "linked_slack_threads": [],
     "files": [],
     "memory_seed_files": [
@@ -27,6 +33,11 @@
   },
   "expected_contract_items": [
     "C241_link_commentary_synthesis"
+  ],
+  "expected_evidence_anchors": [
+    "memory/team/related-product-discussion.md",
+    "Post about agent workspace memory",
+    "prior team decisions"
   ],
   "intended_provider_signals": [
     "When Pi returns decision=reply on a shared link, the reply MUST cite at least one workspace Memory anchor (path + line OR substring evidence).",

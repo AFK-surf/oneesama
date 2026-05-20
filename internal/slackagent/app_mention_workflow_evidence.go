@@ -42,7 +42,6 @@ func appMentionWorkflowText(mention *SlackAppMentionContext) string {
 		stripSlackBotMentions(mention.MentionText),
 		stripSlackBotMentions(mention.RawMentionText),
 		mention.Transcript,
-		formatSlackExternalLinkContexts(mention.ExternalLinks),
 	}, "\n"))
 }
 
