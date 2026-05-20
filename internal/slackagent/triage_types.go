@@ -162,6 +162,7 @@ type SlackTriageAuditReport struct {
 	Flags             []SlackTriageAuditFlag             `json:"flags,omitempty"`
 	RecentRuns        []SlackTriageAuditRunBrief         `json:"recentRuns,omitempty"`
 	QualityThresholds SlackTriageQualityBucketThresholds `json:"qualityThresholds"`
+	ReviewBuckets     SlackTriageReviewBuckets           `json:"reviewBuckets"`
 }
 
 type SlackTriageAuditOutcome struct {
@@ -278,6 +279,30 @@ type SlackTriageFailureSample struct {
 	Status    string   `json:"status,omitempty"`
 	Summary   string   `json:"summary,omitempty"`
 	Error     string   `json:"error,omitempty"`
+}
+
+// SlackTriageIntentActionMismatchSample surfaces runs whose summary text
+// contains an action-intent marker (delegate / reply / react / 应该 / 委托
+// ...) even though actions=0 and mutations=0. The triple
+// (summary, actionsCount, personaDecision) lets the operator distinguish
+// "model said it would but didn't" from "model is narrating history".
+// Driver review request 2026-05-21 (#285 follow-up).
+type SlackTriageIntentActionMismatchSample struct {
+	Timestamp       string   `json:"timestamp,omitempty"`
+	RunID           int64    `json:"runId,omitempty"`
+	Channels        []string `json:"channels,omitempty"`
+	Summary         string   `json:"summary,omitempty"`
+	ActionsCount    int      `json:"actionsCount"`
+	PersonaDecision string   `json:"personaDecision,omitempty"`
+	MarkerMatched   string   `json:"markerMatched,omitempty"`
+}
+
+// SlackTriageReviewBuckets aggregates per-bucket counts + capped sample
+// lists for the triage audit review surface. Buckets count all matching runs
+// in the window; samples are limited and ordered newest-first.
+type SlackTriageReviewBuckets struct {
+	IntentActionMismatchCount   int                                     `json:"intentActionMismatchCount"`
+	IntentActionMismatchSamples []SlackTriageIntentActionMismatchSample `json:"intentActionMismatchSamples,omitempty"`
 }
 
 type SlackTriageAuditRunBrief struct {

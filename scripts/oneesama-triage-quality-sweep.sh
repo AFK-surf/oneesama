@@ -36,6 +36,13 @@ cutoff="${ONEESAMA_TRIAGE_QUALITY_AFTER:-$cutoff}"
 # task #285 and does not yet emit the qualityThresholds block.
 high_context_threshold="$(jq -r '.audit.qualityThresholds.highContextInputChars // 7000' <"${tmpdir}/audit.json")"
 low_confidence_ceiling="$(jq -r '.audit.qualityThresholds.lowConfidenceCeiling // 0.75' <"${tmpdir}/audit.json")"
+# task #285 follow-up: canonical EN+ZH marker list lives in
+# internal/slackagent/triage_quality_buckets.go.
+# triageQualityIntentActionMismatchMarkers. The audit endpoint exposes it via
+# audit.qualityThresholds.intentActionMismatchSummaryMarkers; servers older
+# than the #285 follow-up will not have it, so we fall back to a compact
+# in-script list mirroring the same EN+ZH set.
+intent_action_markers="$(jq -c '.audit.qualityThresholds.intentActionMismatchSummaryMarkers // ["delegate","will reply","will react","will post","should reply","should react","should delegate","should post","plan to","going to","应该","需要","建议","委托","回复","反应","打算"]' <"${tmpdir}/audit.json")"
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
@@ -86,19 +93,41 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
       review: {
         highContextNoAction: ($runs | map(select(is_no_action(.) and input_chars(.) >= $high_context) | brief(.))),
         linkContextNoAction: ($runs | map(select(is_no_action(.) and external_links(.) > 0) | brief(.))),
-        lowConfidenceNoAction: ($runs | map(select(is_no_action(.) and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)) | brief(.)))
+        lowConfidenceNoAction: ($runs | map(select(is_no_action(.) and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)) | brief(.))),
+        # task #285 follow-up: summary asserts action intent (delegate / reply
+        # / react / 应该 / 委托 / etc.) but actions=0 and mutations=0. Detector
+        # mirrors triageQualityIntentActionMismatchMatch; if the audit
+        # endpoint exposes the canonical marker list (audit.qualityThresholds
+        # .intentActionMismatchSummaryMarkers, this list is fed via
+        # --argjson markers) it wins, otherwise the inline fallback covers
+        # pre-#285-follow-up servers.
+        summaryIntentActionMismatch: (
+          $runs
+          | map(
+              select(
+                is_no_action(.)
+                and ((($markers // []) | length) > 0)
+                and (
+                  ($markers // []) as $needles
+                  | (.summary // "" | ascii_downcase) as $haystack
+                  | any($needles[]; (. | ascii_downcase) as $needle | $haystack | test($needle; "i"))
+                )
+              )
+              | brief(.)
+            )
+        )
       }
     }
-' --arg window "$audit_window" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
-  "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length)"
+  "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length)"
 ' <"${tmpdir}/quality.json"
 
-if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
+if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
   echo "oneesama-triage-quality-sweep: review candidates:" >&2
   jq -r '
     .review

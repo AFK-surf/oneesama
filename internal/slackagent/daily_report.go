@@ -96,6 +96,7 @@ type SlackDailyTriageMetrics struct {
 	LinkContextNoAction   int            `json:"link_context_no_action"`
 	LinkReplies           int            `json:"link_replies"`
 	LowConfidenceNoAction int            `json:"low_confidence_no_action"`
+	IntentActionMismatch  int            `json:"intent_action_mismatch"`
 	ToolCalls             int            `json:"tool_calls"`
 	MemoryLookups         int            `json:"memory_lookups"`
 	ExternalSearches      int            `json:"external_searches"`
@@ -537,6 +538,9 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		}
 		if slackDailyReportLowConfidenceNoAction(run) {
 			metrics.LowConfidenceNoAction++
+		}
+		if len(run.Actions) == 0 && run.Mutations == 0 && triageQualityIntentActionMismatchMatch(run.Summary) != "" {
+			metrics.IntentActionMismatch++
 		}
 		if raw, ok := mapFromAny(run.Metadata["persona_foreground"]); ok {
 			metrics.PersonaRuns++

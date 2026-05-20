@@ -92,6 +92,7 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		FailureSamples:    buildSlackTriageFailureSamples(windowRuns, 5),
 		RecentRuns:        buildSlackTriageAuditRunBriefs(windowRuns, 20),
 		QualityThresholds: slackTriageQualityBucketThresholds(),
+		ReviewBuckets:     buildSlackTriageReviewBuckets(windowRuns, 5),
 	}
 	report.Flags = buildSlackTriageAuditFlags(report)
 	return report
@@ -137,6 +138,43 @@ func buildSlackTriageAuditOutcome(runs []SlackTriageContext) SlackTriageAuditOut
 		}
 	}
 	return outcome
+}
+
+func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) SlackTriageReviewBuckets {
+	out := SlackTriageReviewBuckets{}
+	if len(runs) == 0 {
+		return out
+	}
+	ordered := append([]SlackTriageContext(nil), runs...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return parseTriageTimestamp(ordered[i].Timestamp).After(parseTriageTimestamp(ordered[j].Timestamp))
+	})
+	for _, run := range ordered {
+		if len(run.Actions) > 0 || run.Mutations > 0 {
+			continue
+		}
+		marker := triageQualityIntentActionMismatchMatch(run.Summary)
+		if marker == "" {
+			continue
+		}
+		out.IntentActionMismatchCount++
+		if sampleLimit > 0 && len(out.IntentActionMismatchSamples) < sampleLimit {
+			decision := ""
+			if raw, ok := mapFromAny(run.Metadata["persona_foreground"]); ok {
+				decision = strings.TrimSpace(stringFromAny(raw["decision"]))
+			}
+			out.IntentActionMismatchSamples = append(out.IntentActionMismatchSamples, SlackTriageIntentActionMismatchSample{
+				Timestamp:       run.Timestamp,
+				RunID:           run.ID,
+				Channels:        run.Channels,
+				Summary:         slackTriageFailureSampleText(run.Summary),
+				ActionsCount:    len(run.Actions),
+				PersonaDecision: decision,
+				MarkerMatched:   marker,
+			})
+		}
+	}
+	return out
 }
 
 func buildSlackTriageFailureSamples(runs []SlackTriageContext, limit int) []SlackTriageFailureSample {
