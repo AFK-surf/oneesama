@@ -158,7 +158,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		if len(policyToolCalls) > 0 {
 			toolCalls = append(toolCalls, policyToolCalls...)
 		}
-		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result)
+		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result, messages)
 		if len(delegation.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, delegation.ToolCalls...)
 		}
@@ -188,7 +188,7 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		if len(policyToolCalls) > 0 {
 			toolCalls = append(toolCalls, policyToolCalls...)
 		}
-		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result)
+		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result, messages)
 		if len(delegation.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, delegation.ToolCalls...)
 		}
@@ -335,7 +335,7 @@ func slackPersonaSecretaryRoutingText() string {
 	return "这看起来是具体项目代码/环境问题，我先不直接下场查 repo。更适合走项目 owner 处理；我可以帮忙把现象、链接和影响面整理成 brief，或者在你明确授权我查 Oneesama 自身/指定代码时再派 worker。"
 }
 
-func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspaceID string, runID int64, result SlackPersonaShadowResult) personaDelegatedWorkerStartResult {
+func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspaceID string, runID int64, result SlackPersonaShadowResult, messages []SlackInboundMessage) personaDelegatedWorkerStartResult {
 	out := personaDelegatedWorkerStartResult{}
 	if s == nil || strings.TrimSpace(result.Decision) != persona.DecisionDelegateWorker || len(result.workerRecords) == 0 {
 		return out
@@ -385,7 +385,7 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 				"confidence": result.Confidence,
 				"worker_id":  workerID,
 			},
-		})
+		}, personaDelegatedWorkerSlackContext(result.ChannelID, result.ThreadTS, messages))
 		job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
 			Task:             prompt,
 			Context:          contextMap,
@@ -418,6 +418,78 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 	}
 	if len(out.Errors) > 0 && len(out.JobIDs) == 0 {
 		out.Failures = 1
+	}
+	return out
+}
+
+func personaDelegatedWorkerSlackContext(channelID string, threadTS string, messages []SlackInboundMessage) map[string]any {
+	messages = normalizeSlackInboundMessages(messages)
+	if len(messages) == 0 {
+		return nil
+	}
+	slackMessages := make([]SlackMessage, 0, len(messages))
+	latestUserID := ""
+	latestText := ""
+	for _, message := range messages {
+		ts := firstNonEmpty(message.TS, message.EventTS)
+		slackMessages = append(slackMessages, SlackMessage{
+			TS:         ts,
+			EventTS:    firstNonEmpty(message.EventTS, ts),
+			User:       message.UserID,
+			UserID:     message.UserID,
+			BotID:      message.BotID,
+			Subtype:    message.Subtype,
+			Text:       message.Text,
+			Channel:    firstNonEmpty(message.ChannelID, channelID),
+			ThreadTS:   firstNonEmpty(message.ThreadTS, threadTS),
+			ReplyCount: message.ReplyCount,
+			ReplyUsers: append([]string(nil), message.ReplyUsers...),
+			Files:      append([]SlackFile(nil), message.Files...),
+			Reactions:  append([]SlackReaction(nil), message.Reactions...),
+		})
+		if message.UserID != "" {
+			latestUserID = message.UserID
+		}
+		if text := strings.TrimSpace(message.Text); text != "" {
+			latestText = text
+		}
+	}
+	transcriptMessages, omitted := compactSlackThreadTranscriptMessages(slackMessages, true, mentionRecentThreadTail)
+	transcript := formatSlackThreadTranscript(transcriptMessages)
+	transcript = annotateCompactedSlackTranscript(transcript, channelID, threadTS, omitted)
+	media := extractSlackThreadMedia(slackMessages)
+	mentionText := strings.TrimSpace(firstNonEmpty(latestText, joinSlackMessageTexts(messages)))
+	rich := &SlackAppMentionContext{
+		Kind:           "slack_persona_delegate_worker_context",
+		Source:         "persona_delegate_worker",
+		ChannelID:      channelID,
+		ThreadTS:       threadTS,
+		UserID:         latestUserID,
+		MessageCount:   len(messages),
+		Transcript:     transcript,
+		RawMentionText: mentionText,
+		MentionText:    mentionText,
+		ParentInfo:     slackParentInfo(firstSlackMessage(slackMessages)),
+		CanvasFiles:    append([]SlackThreadFile(nil), media.CanvasFiles...),
+		Files:          append([]SlackThreadFile(nil), media.Files...),
+		ImageParts:     append([]SlackThreadImage(nil), media.Images...),
+		FetchOK:        true,
+		FetchedAt:      nowRFC3339(),
+	}
+	prompt := buildSlackAssistantThreadMessage(rich)
+	if len(media.Images) > 0 {
+		prompt += "\n\n---\nImage reading rule:\nThis delegated Slack task includes image attachment file_ids. If the answer depends on image contents, request them with slack_api(method=\"slack.fetchImage\", params={\"file_id\":\"F...\"}) before answering. If image evidence cannot be fetched or remains insufficient, return no visible result instead of guessing."
+	}
+	rich.Prompt = prompt
+	out := map[string]any{
+		"slackAssistantPrompt": prompt,
+		"slackAppMention":      rich,
+	}
+	if len(media.Files) > 0 {
+		out["slack_files"] = append([]SlackThreadFile(nil), media.Files...)
+	}
+	if len(media.Images) > 0 {
+		out["slack_image_files"] = append([]SlackThreadImage(nil), media.Images...)
 	}
 	return out
 }

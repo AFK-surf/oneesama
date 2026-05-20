@@ -868,6 +868,113 @@ func TestSlackTriagePiFirstLiveDelegatesWorkerAfterPiDecision(t *testing.T) {
 	}
 }
 
+func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing.T) {
+	ctx := context.Background()
+	workspaceDir := t.TempDir()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:  persona.ProviderPi,
+		Decision: persona.DecisionDelegateWorker,
+		Reason:   "image contents are required before answering",
+		WorkerRequests: []persona.WorkerRequest{{
+			ID:     "inspect-slack-images",
+			Kind:   "codex",
+			Prompt: "Read the Slack screenshots and explain what permission is missing. If you cannot inspect the images, return no visible result.",
+			Context: map[string]any{
+				"delegation_scope": "secretary_lookup",
+			},
+		}},
+		Confidence: 0.44,
+		ShadowOnly: false,
+	}}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_image_delegate_after_pi",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Triage:       appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "没懂",
+		TS:             "300.000",
+		ThreadTS:       "300.000",
+		Files: []SlackFile{{
+			ID:        "F0B540Q5J5Q",
+			Name:      "IMG_0083.jpg",
+			Filetype:  "jpg",
+			Mimetype:  "image/jpeg",
+			Size:      224000,
+			OriginalW: 2032,
+			OriginalH: 352,
+			Permalink: "https://slack.example/files/F0B540Q5J5Q",
+		}},
+	}, {
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_OTHER",
+		Text:           "look its not letting me i have done everything but it keeps showing as non authorised",
+		TS:             "301.000",
+		ThreadTS:       "300.000",
+		Files: []SlackFile{{
+			ID:        "F0B55RA382V",
+			Name:      "IMG_0082.jpg",
+			Filetype:  "jpg",
+			Mimetype:  "image/jpeg",
+			Size:      412000,
+			OriginalW: 1206,
+			OriginalH: 609,
+			Permalink: "https://slack.example/files/F0B55RA382V",
+		}},
+	}}, "#triage: user is confused by Bridge authorization screenshots")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if runner.startCount != 1 {
+		t.Fatalf("runner.startCount = %d, want one image-inspection delegate worker", runner.startCount)
+	}
+	if updated.Metadata["pi_first_decision"] != persona.DecisionDelegateWorker || intFromAny(updated.Metadata["delegate_worker_jobs_started"]) != 1 {
+		t.Fatalf("metadata = %#v, want delegate decision + one worker job", updated.Metadata)
+	}
+	prompt := stringFromAny(runner.startInput.Context["slackAssistantPrompt"])
+	for _, want := range []string{"slack.fetchImage", "F0B540Q5J5Q", "F0B55RA382V", "IMG_0083.jpg", "[image:"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("slackAssistantPrompt missing %q:\n%s", want, prompt)
+		}
+	}
+	mention, ok := runner.startInput.Context["slackAppMention"].(*SlackAppMentionContext)
+	if !ok || mention == nil {
+		t.Fatalf("slackAppMention = %#v, want rich context pointer", runner.startInput.Context["slackAppMention"])
+	}
+	if len(mention.ImageParts) != 2 || mention.ImageParts[0].ID != "F0B540Q5J5Q" || mention.ImageParts[1].ID != "F0B55RA382V" {
+		t.Fatalf("image parts = %#v, want both Slack image file ids", mention.ImageParts)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want worker to answer after reading images", got)
+	}
+}
+
 func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T) {
 	ctx := context.Background()
 	workspaceDir := t.TempDir()
