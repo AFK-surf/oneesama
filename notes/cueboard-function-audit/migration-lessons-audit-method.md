@@ -1168,6 +1168,178 @@ Why this is the worked example:
   define their engagement policy; Pi consumes it via request
   context; the universal prompt is workspace-agnostic.
 
+## Compensator without downstream-activity check (new drift pattern, 2026-05-20 morning)
+
+Today's batch incident (`2183678` + `c8caa90` + `8bbadb8` + `4198996`
+fixes for #240 / #241 / #242 / #243) surfaced a drift class distinct
+from the previous six on this page. The pattern is:
+
+**A compensator path posts based on stale state without checking
+downstream assistant activity that would have resolved the original
+need.**
+
+Three concrete shapes shipped on 2026-05-20:
+
+- **#242**: heartbeat followup mechanism added a template `:heartbeat:`
+  comment to an already-handled Slack thread. Root cause: heartbeat
+  surface scanned its own pending followups but never checked the
+  workspace ledger to see if the original prompt had already
+  produced a Bridge / Oneesama reply.
+- **#243**: scanner reconciliation re-processed a successful Meet
+  join as a "missed app_mention" 2 minutes after the join card had
+  already posted. Root cause: `f9629fe` scanner reconciliation only
+  checked `HasMentionReaction`, not "any assistant activity after
+  the mention." Meet join flow uses a different reaction shape, so
+  the reconciler thought the mention was still unhandled. (This is
+  the production case of the edge-case flag in the 5/19 `f9629fe`
+  audit at 10:56 SHA.)
+- **#240**: channel brain summary cached "policy says no-action /
+  pure link / not in scope" as a long-term fact. Heartbeat followup
+  + future triage runs both consumed that cache. The cache was
+  state from a now-superseded policy decision, but nothing
+  invalidated it when the policy changed at 23:55.
+
+Driver's named pattern from the post-incident retro (`task #240/#242/#243`
+in_review):
+
+> 任何 heartbeat/scanner/backfill 这类"补偿路径"要先查后续 assistant
+> activity，不能只凭旧 pending 状态往 Slack 里补东西
+
+The product semantics:
+
+- A compensator path exists because the primary path can miss
+  events (Socket disconnect, restart, race conditions).
+- Compensator-correct: when about to post, check that the original
+  need still exists (no downstream activity has resolved it).
+- Compensator-drifted: post because the original pending state says
+  to, even though downstream activity already handled the need.
+
+Why this is its own drift class:
+
+- shape ≠ contract = surface matched, semantics missed.
+- re-derive vs port = reasoned from scratch instead of reading old
+  code.
+- runtime traces as memory = audited the wrong universe of
+  artefacts.
+- identity migration ≠ traffic interception = inherited old
+  identity's traffic without owning it.
+- candidate-generator as cognition in main path = OldModel hidden
+  in new decision path.
+- workspace preference as universal model behavior = one deployment's
+  product policy encoded into the universal model layer.
+- **compensator without downstream-activity check** (this class):
+  a fallback path acts on its own pending state without verifying
+  the need is still open.
+
+Symptoms that catch this drift:
+
+- Slack thread receives a duplicate / late / generic comment N
+  seconds or minutes after the original interaction was already
+  handled by another path.
+- The compensator's check is anchored on its own pending ledger
+  (heartbeat_followup status, scanner cursor, backfill candidate)
+  rather than on workspace ledger (assistant activity in the
+  thread).
+- The fix consists of "check downstream activity before posting,"
+  not "remove the compensator." The compensator is still useful;
+  it just needs a downstream guard.
+- A state cache stores policy-derived facts (no-action reasons,
+  scope decisions) as if they were long-term truths.
+
+Audit rule for future migrations:
+
+- Every compensator path in `service_*.go` (heartbeat,
+  scanner reconciliation, backfill replay, retry/followup) must
+  have a written-down "downstream-activity guard" before any
+  Slack-visible post.
+- Every state cache that records policy-derived facts (channel
+  brain, summary cache, candidate ledger) must invalidate or
+  sanitize entries when the upstream policy changes.
+- Acceptance fixture: simulate a successful primary path completion
+  for an event, then trigger the compensator path on the same
+  event; assert no duplicate or late post emits.
+
+Scope distinction from earlier drift classes:
+
+- candidate-generator = OldModel runs in main path producing a
+  decision.
+- workspace preference = one workspace's policy encoded in
+  universal model layer.
+- compensator without downstream-activity check = a fallback path
+  acts on its own pending state without verifying downstream.
+
+This is now a first-class drift class on this page.
+
+### Worked example: 2026-05-20 morning batch (#240 / #241 / #242 / #243)
+
+What got read:
+
+- `f9629fe` scanner reconciliation: only `HasMentionReaction` check;
+  no general "post-mention assistant activity" check.
+- `service_heartbeat_*.go`: pending heartbeat followups; no
+  cross-ledger workspace-activity check.
+- Channel-brain summary cache: persisted no-action reasons as
+  long-term facts.
+- `bridge_quality_canary` link-commentary canary: passed if Pi
+  returned `reply` to a shared link regardless of synthesis depth.
+
+What got shipped wrong before (pre-fix state):
+
+- Compensator paths posted based on their own pending state, with
+  no downstream check.
+- Channel brain accumulated stale policy reasons that survived
+  policy changes.
+- Canary did not require workspace Memory + multi-source synthesis,
+  so headline-restatement replies passed.
+
+What Peng / driver said on 2026-05-20:
+
+- 09:49 SHA Peng dropped `C09L0TAN31T/1779238855102199`: "这是什么
+  东西，好像不对."
+- 10:07 SHA Peng dropped `C0AQ0C0KVMH/1779242470100329`: "不对劲."
+- 10:19 SHA driver retro: 任何 heartbeat/scanner/backfill 这类
+  "补偿路径" 要先查后续 assistant activity.
+
+What the fix did:
+
+- `2183678`: heartbeat followup checks workspace ledger before
+  posting; successful triage auto-closes same-thread
+  timeout/empty-final followups.
+- `c8caa90`: scanner reconciliation checks assistant activity after
+  the mention, not just `HasMentionReaction`.
+- `8bbadb8`: channel brain filters and clears no-action / policy
+  reasons; they no longer survive policy changes as long-term
+  facts.
+- `4198996`: link-commentary canary requires workspace Memory anchor
+  + second-source synthesis; headline-only fails. case_009
+  flipped from pending to active.
+
+Why this is the worked example:
+
+- All four fixes share the same drift shape: post / cache /
+  validate based on local pending state without checking downstream.
+- The fixes individually look surgical but collectively name the
+  drift class. Each compensator now has a downstream-activity
+  guard; each policy-derived cache has an invalidation path; each
+  canary has a synthesis requirement.
+
+### Deploy SOP gap discovered same morning (operational, not a drift class)
+
+At 10:05 SHA, driver realized the live wrapper was running a stale
+`./oneesama` binary from 23:00 the previous night. The wrapper
+`scripts/oneesama-live.sh` did not auto-rebuild before restart, so
+shipped fixes that passed `go test` were not actually running
+in production until the binary was rebuilt manually.
+
+This is an operational drift, not a code drift class. The fix
+belongs in the deploy runbook: every live restart must either
+`go build -o ./oneesama ./cmd/oneesama` first, or the wrapper must
+fail loudly if the binary mtime predates the latest commit.
+
+Recording here so future operators see it; not promoting as a
+first-class drift class because it's a tooling SOP rather than a
+code pattern.
+
 ## Where this file sits
 
 `migration-lessons.md` is the canonical gates + Definition of Done.
