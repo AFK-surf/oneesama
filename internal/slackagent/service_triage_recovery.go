@@ -23,10 +23,13 @@ func (s *Service) recoverOrphanedPersonaForegroundTriage(ctx context.Context) {
 	}
 	var recovered int
 	for _, run := range runs {
-		if !s.recoverOneOrphanedPersonaForegroundTriage(ctx, run) {
+		if s.recoverOneOrphanedPersonaForegroundTriage(ctx, run) {
+			recovered++
 			continue
 		}
-		recovered++
+		if s.recoverOnePersonaForegroundTimeoutFailure(ctx, run) {
+			recovered++
+		}
 	}
 	if recovered > 0 {
 		s.logger.Warn("persona foreground orphaned triage recovered", "count", recovered)
@@ -91,9 +94,53 @@ func (s *Service) recoverOneOrphanedPersonaForegroundTriage(ctx context.Context,
 	return true
 }
 
+func (s *Service) recoverOnePersonaForegroundTimeoutFailure(ctx context.Context, run SlackTriageContext) bool {
+	if slackTriageRunHasRetryScheduled(run) {
+		return false
+	}
+	raw, ok := mapFromAny(run.Metadata["persona_foreground"])
+	if !ok {
+		return false
+	}
+	result := SlackPersonaShadowResult{
+		RequestID:  strings.TrimSpace(stringFromAny(raw["request_id"])),
+		Source:     strings.TrimSpace(stringFromAny(raw["source"])),
+		ChannelID:  firstNonEmpty(strings.TrimSpace(stringFromAny(raw["channel_id"])), slackTriageRunChannelID(run)),
+		ThreadTS:   firstNonEmpty(strings.TrimSpace(stringFromAny(raw["thread_ts"])), slackTriageRunThreadTS(run)),
+		Decision:   strings.TrimSpace(stringFromAny(raw["decision"])),
+		Success:    boolFromAny(raw["success"], false),
+		ShadowOnly: boolFromAny(raw["shadow_only"], false),
+		Error:      firstNonEmpty(strings.TrimSpace(stringFromAny(raw["error"])), run.Error),
+		Reason:     strings.TrimSpace(stringFromAny(raw["reason"])),
+	}
+	if result.Success || !strings.EqualFold(strings.TrimSpace(run.Status), "failed") || !slackPersonaForegroundTimedOut(result) {
+		return false
+	}
+	patch := run
+	patch.Metadata = mergeStringAnyMaps(run.Metadata, map[string]any{
+		"triage_timeout_needs_retry":             true,
+		"persona_foreground_timeout_needs_retry": true,
+	})
+	updated, err := s.triage.UpdateRun(ctx, patch)
+	if err != nil {
+		s.logger.Warn("persona foreground timeout recovery update failed", "triage_run_id", run.ID, "error", err)
+		return false
+	}
+	if updated != nil {
+		persistTriageContext(s.workspaceDir, *updated)
+		s.maybeRecordPersonaForegroundTimeoutFollowup(ctx, firstNonEmpty(stringFromAny(run.Metadata["workspace_id"]), stringFromAny(run.Metadata["workspaceId"]), "workspace"), result.ChannelID, result.ThreadTS, updated, result)
+	}
+	return true
+}
+
 func slackTriageRunChannelID(run SlackTriageContext) string {
 	if value := strings.TrimSpace(firstNonEmpty(stringFromAny(run.Metadata["channel_id"]), stringFromAny(run.Metadata["channelId"]))); value != "" {
 		return value
+	}
+	if raw, ok := mapFromAny(run.Metadata["persona_foreground"]); ok {
+		if value := strings.TrimSpace(firstNonEmpty(stringFromAny(raw["channel_id"]), stringFromAny(raw["channelId"]))); value != "" {
+			return value
+		}
 	}
 	if len(run.Channels) > 0 {
 		return strings.TrimSpace(run.Channels[0])
@@ -104,6 +151,11 @@ func slackTriageRunChannelID(run SlackTriageContext) string {
 func slackTriageRunThreadTS(run SlackTriageContext) string {
 	if value := strings.TrimSpace(firstNonEmpty(stringFromAny(run.Metadata["thread_ts"]), stringFromAny(run.Metadata["threadTs"]))); value != "" {
 		return value
+	}
+	if raw, ok := mapFromAny(run.Metadata["persona_foreground"]); ok {
+		if value := strings.TrimSpace(firstNonEmpty(stringFromAny(raw["thread_ts"]), stringFromAny(raw["threadTs"]))); value != "" {
+			return value
+		}
 	}
 	matches := slackDigestMessageTSPattern.FindStringSubmatch(run.Digest)
 	if len(matches) == 2 {

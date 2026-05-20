@@ -137,3 +137,60 @@ func TestRecordPersonaForegroundTimeoutMarksRetryScheduled(t *testing.T) {
 		t.Fatalf("flags = %#v, want retry-scheduled yellow flag", report.Flags)
 	}
 }
+
+func TestRecoverPersonaForegroundTimeoutFailureMarksRetryScheduled(t *testing.T) {
+	previousClock := timeNow
+	now := time.Date(2026, 5, 21, 1, 8, 0, 0, time.UTC)
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}})
+	recorded, err := service.triage.RecordRun(context.Background(), SlackTriageContext{
+		ID:        789,
+		SessionID: "triage:C789:1779289224943",
+		Timestamp: now.Add(-time.Hour).Format(time.RFC3339Nano),
+		Status:    "failed",
+		Channels:  []string{"C789"},
+		Summary:   "Pi-first foreground triage pending for 3 Slack message(s) in C789",
+		Error:     `call persona runtime: Post "http://127.0.0.1:8799/persona/decide": context deadline exceeded`,
+		Metadata: map[string]any{
+			"workspace_id": "T789",
+			"persona_foreground": map[string]any{
+				"request_id":  "triage:C789:1779289224943",
+				"source":      "triage",
+				"channel_id":  "C789",
+				"thread_ts":   "1779289191.004699",
+				"success":     false,
+				"shadow_only": true,
+				"error":       `call persona runtime: Post "http://127.0.0.1:8799/persona/decide": context deadline exceeded`,
+				"latency_ms":  90001,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+	if recorded == nil {
+		t.Fatal("RecordRun returned nil")
+	}
+	if !service.recoverOnePersonaForegroundTimeoutFailure(context.Background(), *recorded) {
+		t.Fatal("recoverOnePersonaForegroundTimeoutFailure returned false")
+	}
+	updated, err := service.triage.GetRun(context.Background(), recorded.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if updated == nil || !boolFromAny(updated.Metadata["triage_timeout_needs_retry"], false) || !boolFromAny(updated.Metadata["persona_foreground_timeout_needs_retry"], false) {
+		t.Fatalf("updated = %#v, want timeout retry markers", updated)
+	}
+	followups, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups: %v", err)
+	}
+	if len(followups) != 1 || followups[0].Kind != slackTriageTimeoutFollowupKind || followups[0].ChannelID != "C789" || followups[0].ThreadTS != "1779289191.004699" {
+		t.Fatalf("followups = %#v, want one persona timeout retry followup", followups)
+	}
+	if service.recoverOnePersonaForegroundTimeoutFailure(context.Background(), *updated) {
+		t.Fatal("second recovery should be idempotent")
+	}
+}
