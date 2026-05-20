@@ -945,6 +945,78 @@ func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T
 	}
 }
 
+func TestPersonaDelegatedWorkerAllowedBySecretaryPolicyFixtures(t *testing.T) {
+	// Ground-truth fixtures from runtime/live-state/agent_runner_jobs.json audit.
+	// 3 historical in-scope app_mention worker prompts must NOT be blocked by the
+	// heuristic when Pi omits the delegation_scope field; 1 out-of-scope case
+	// (the #279 staging perf incident) must be blocked.
+	cases := []struct {
+		name    string
+		request persona.WorkerRequest
+		want    bool
+	}{
+		{
+			name: "in_scope/linear_memo",
+			request: persona.WorkerRequest{
+				Kind:   "codex",
+				Prompt: "记一个 linear 吧，省得忘了",
+			},
+			want: true,
+		},
+		{
+			name: "in_scope/github_link_discussion_recall",
+			request: persona.WorkerRequest{
+				Kind:   "codex",
+				Prompt: "https://github.com/msitarzewski/agency-agents 我们讨论过这个嘛",
+			},
+			want: true,
+		},
+		{
+			name: "in_scope/case_study_video_lookup",
+			request: persona.WorkerRequest{
+				Kind:   "codex",
+				Prompt: "jc说之前录制了5个Case Study的视频，这个有吗？",
+			},
+			want: true,
+		},
+		{
+			name: "out_of_scope/staging_perf_investigation_279",
+			request: persona.WorkerRequest{
+				Kind:   "codex",
+				Prompt: "User reports staging loading conversations is very slow (~30s). Investigate staging environment: check recent deployments, database query performance, API latency for conversation loading.",
+			},
+			want: false,
+		},
+		{
+			name: "in_scope/explicit_oneesama_code_scope_overrides_markers",
+			request: persona.WorkerRequest{
+				Kind:   "codex",
+				Prompt: "Investigate oneesama meeting-agent recording latency regression in our own code.",
+				Context: map[string]any{
+					"delegation_scope": "oneesama_code",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "in_scope/oneesama_self_reference_overrides_heuristic",
+			request: persona.WorkerRequest{
+				Kind:   "codex",
+				Prompt: "Investigate slack-agent triage policy regression after the latest deploy.",
+			},
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, reason := personaDelegatedWorkerAllowedBySecretaryPolicy(tc.request)
+			if got != tc.want {
+				t.Fatalf("personaDelegatedWorkerAllowedBySecretaryPolicy = (%v, %q), want allowed=%v", got, reason, tc.want)
+			}
+		})
+	}
+}
+
 func TestSlackTriageLivePersonaEmptyReplyRecordsRetryFollowup(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 5, 19, 1, 50, 0, 0, time.UTC)
