@@ -74,7 +74,7 @@ func validatePersonaRuntime(cfg PersonaRuntimeConfig) error {
 	var errs error
 	provider := normalizePersonaRuntimeProvider(cfg.Provider)
 	switch provider {
-	case "legacy", "fake", "http", "pi":
+	case "legacy", "fake", "http", "pi", "oneesama-pi":
 	default:
 		errs = errors.Join(errs, fmt.Errorf("persona_runtime.provider is unsupported: %q", cfg.Provider))
 	}

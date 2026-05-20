@@ -31,6 +31,7 @@ func init() {
 	})
 	mustRegisterRuntimeFactory(ProviderHTTP, newHTTPRuntimeFromConfig)
 	mustRegisterRuntimeFactory(ProviderPi, newHTTPRuntimeFromConfig)
+	mustRegisterRuntimeFactory(ProviderOneesamaPi, newOneesamaPIRuntimeFromConfig)
 }
 
 func RegisterRuntimeFactory(provider string, factory RuntimeFactory) error {

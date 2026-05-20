@@ -182,11 +182,24 @@ Implemented scaffold in task #201:
 Config flags:
 
 ```bash
-ONEESAMA_PERSONA_RUNTIME=legacy   # legacy | fake | http | pi
+ONEESAMA_PERSONA_RUNTIME=legacy   # legacy | fake | http | pi | oneesama-pi
 ONEESAMA_PERSONA_RUNTIME_MODE=shadow
 ONEESAMA_PERSONA_RUNTIME_BASE_URL=http://127.0.0.1:8799
 ONEESAMA_PERSONA_RUNTIME_TIMEOUT=90s
 ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=1
+```
+
+`oneesama-pi` is the dedicated Oneesama foreground runtime. It uses an
+OpenAI-compatible chat-completions backend directly and must not reuse the
+Telegram/Linger sidecar protocol. Configure it with:
+
+```bash
+ONEESAMA_PERSONA_RUNTIME=oneesama-pi
+ONEESAMA_PERSONA_RUNTIME_MODE=live
+ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=0
+ONEESAMA_PI_BASE_URL=https://openrouter.ai/api/v1
+ONEESAMA_PI_API_KEY=...
+ONEESAMA_PI_MODEL=deepseek/deepseek-v4-pro
 ```
 
 The initial scaffold was intentionally not wired into live reply generation; it

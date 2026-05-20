@@ -10,6 +10,9 @@ const (
 	ProviderFake   = "fake"
 	ProviderHTTP   = "http"
 	ProviderPi     = "pi"
+	// ProviderOneesamaPi is the dedicated Oneesama foreground cognition runtime.
+	// ProviderPi remains the generic sidecar/http compatibility provider.
+	ProviderOneesamaPi = "oneesama-pi"
 
 	ModeShadow = "shadow"
 	ModeLive   = "live"

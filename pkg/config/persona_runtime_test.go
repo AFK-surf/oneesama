@@ -82,6 +82,17 @@ func TestValidatePersonaRuntimeRequiresBaseURLForPi(t *testing.T) {
 	}
 }
 
+func TestValidatePersonaRuntimeAllowsOneesamaPiWithoutSidecarURL(t *testing.T) {
+	cfg := minimalValidConfigForPersonaTest()
+	cfg.PersonaRuntime.Provider = "oneesama-pi"
+	cfg.PersonaRuntime.Mode = "live"
+	cfg.PersonaRuntime.BaseURL = ""
+	cfg.PersonaRuntime.ShadowOnly = false
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("Validate() error = %v, want oneesama-pi to avoid sidecar base_url requirement", err)
+	}
+}
+
 func minimalValidConfigForPersonaTest() Config {
 	return Config{
 		SlackAgent:     ServiceConfig{Listen: ":8780"},
