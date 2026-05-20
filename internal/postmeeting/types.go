@@ -73,6 +73,7 @@ type PostProcessInput struct {
 	Participants      []string                 `json:"participants,omitempty"`
 	AudioPath         string                   `json:"audio_path,omitempty"`
 	AudioChunks       []string                 `json:"audio_chunks,omitempty"`
+	SkipASR           bool                     `json:"skip_asr,omitempty"`
 	RootDir           string                   `json:"root_dir,omitempty"`
 	Source            string                   `json:"source,omitempty"`
 	Summary           *Summary                 `json:"summary,omitempty"`

@@ -187,6 +187,9 @@ func (p *Pipeline) transcribeAudio(ctx context.Context, input PostProcessInput, 
 	if p.asr == nil {
 		return ASRTranscript{}, nil
 	}
+	if input.SkipASR {
+		return ASRTranscript{}, nil
+	}
 	chunks := discoverASRAudioChunks(input, artifactDir)
 	if firstNonEmpty(input.AudioPath) == "" && len(chunks) == 0 {
 		return ASRTranscript{}, nil

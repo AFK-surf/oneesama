@@ -208,6 +208,39 @@ func TestPipelineTranscribesAudioChunksAndRecordsManifest(t *testing.T) {
 	}
 }
 
+func TestPipelineSkipASRPreservesAudioManifest(t *testing.T) {
+	t.Parallel()
+
+	audioPath := filepath.Join(t.TempDir(), "audio.wav")
+	if err := os.WriteFile(audioPath, []byte("fake audio"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	asr := &fakeASRProvider{err: errors.New("asr should not be called")}
+	pipeline := NewPipeline(t.TempDir(), WithASRProvider(asr))
+	result, err := pipeline.PostProcess(context.Background(), PostProcessInput{
+		ArtifactID: "captions-only-recovery",
+		Title:      "Captions-only recovery",
+		AudioPath:  audioPath,
+		SkipASR:    true,
+		Captions: []TranscriptSegmentInput{{
+			Speaker: "Peng",
+			Text:    "Captured captions should be enough for stale recovery.",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("PostProcess() error = %v", err)
+	}
+	if asr.request.AudioPath != "" {
+		t.Fatalf("ASR request = %+v, want no ASR call", asr.request)
+	}
+	if result.Artifact.Files.Audio != audioPath {
+		t.Fatalf("manifest audio = %q, want %q", result.Artifact.Files.Audio, audioPath)
+	}
+	if result.Transcript.Provider != "caption" {
+		t.Fatalf("transcript provider = %q, want caption", result.Transcript.Provider)
+	}
+}
+
 func TestPipelineUsesConfiguredASRCalibrationAndLLMSummary(t *testing.T) {
 	t.Parallel()
 
