@@ -56,6 +56,7 @@ func encodeSafeBlocks(raw any) (string, int, error) {
 	if len(normalized) == 0 {
 		return "", 0, nil
 	}
+	normalized = sanitizeSlackVisibleBlockMaps(normalized)
 	for index, block := range normalized {
 		if err := validateSafeBlock(block, index); err != nil {
 			return "", 0, err

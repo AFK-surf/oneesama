@@ -699,7 +699,7 @@ func callPersonaShadow(ctx context.Context, runtime persona.Runtime, source stri
 	result.Success = true
 	result.Runtime = resp.Runtime
 	result.Decision = resp.Decision
-	result.VisibleText = resp.VisibleText
+	result.VisibleText = sanitizeSlackVisibleText(resp.VisibleText)
 	result.Confidence = resp.Confidence
 	result.WorkerRequests = personaWorkerRequestSummaries(resp.WorkerRequests)
 	result.MemoryWrites = personaMemoryWriteSummaries(resp.MemoryWrites)
@@ -708,7 +708,7 @@ func callPersonaShadow(ctx context.Context, runtime persona.Runtime, source stri
 	result.memoryRecords = append([]persona.MemoryWrite(nil), resp.MemoryWrites...)
 	result.reactionRecords = append([]persona.ReactionIntent(nil), resp.Reactions...)
 	result.ShadowOnly = resp.ShadowOnly
-	result.Reason = resp.Reason
+	result.Reason = sanitizeSlackVisibleText(resp.Reason)
 	result.Citations = personaCitationRefs(resp.Citations)
 	return result
 }

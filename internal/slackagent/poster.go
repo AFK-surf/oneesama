@@ -108,6 +108,7 @@ func NewPoster(config PosterConfig) *Poster {
 }
 
 func (p *Poster) PostMessage(ctx context.Context, input PostMessageInput) PostMessageResult {
+	input = sanitizeSlackPostMessageInput(input)
 	channel := strings.TrimSpace(input.Channel)
 	text := strings.TrimSpace(input.Text)
 	if channel == "" {
