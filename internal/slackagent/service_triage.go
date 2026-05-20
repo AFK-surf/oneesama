@@ -107,8 +107,10 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 		digest = enriched
 	}
 	externalLinks := fetchSlackExternalLinkContexts(ctx, messages)
+	workspacePolicyStatus := s.slackWorkspacePolicyStatus()
 	auditMetadata := slackTriageAuditMetadata(digest, messages, threadContexts, channelContexts, externalLinks)
 	auditMetadata = mergeStringAnyMaps(auditMetadata, summaryMetadata)
+	auditMetadata = mergeStringAnyMaps(auditMetadata, slackWorkspacePolicyMetadataMap(workspacePolicyStatus))
 	if options.IgnoreExistingBotReply {
 		auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
 			"ignore_existing_bot_reply":        true,
@@ -155,6 +157,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 			PreviousTriage:         formatTriageContexts(previous),
 			IgnoreExistingBotReply: options.IgnoreExistingBotReply,
 			WorkspaceTriagePolicy:  s.triageWorkspacePolicy,
+			WorkspacePolicyStatus:  workspacePolicyStatus,
 			CustomEmoji:            s.workspaceCustomEmojiSnapshot(),
 		})
 		runPatch := *run
@@ -188,6 +191,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 		ThreadContexts:         threadContexts,
 		IgnoreExistingBotReply: options.IgnoreExistingBotReply,
 		WorkspacePolicy:        s.triageWorkspacePolicy,
+		WorkspacePolicyStatus:  workspacePolicyStatus,
 		CustomEmoji:            s.workspaceCustomEmojiSnapshot(),
 	})
 	contextMap := map[string]any{
@@ -228,19 +232,33 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 		"externalLinks":               externalLinks,
 		"workspaceTriagePolicy":       s.triageWorkspacePolicy,
 		"workspace_triage_policy":     s.triageWorkspacePolicy,
-		"workspaceCustomEmoji":        s.workspaceCustomEmojiSnapshot(),
-		"workspace_custom_emoji":      s.workspaceCustomEmojiSnapshot(),
-		"threadContexts":              threadContexts,
-		"channelContexts":             channelContexts,
-		"triageAudit":                 auditMetadata,
-		"foregroundChain":             foregroundChain,
-		"foreground_chain":            foregroundChain,
-		"prePiAgentRunnerStarted":     true,
-		"pre_pi_agent_runner_started": true,
-		"triageProbe":                 options.Probe,
-		"ignoreExistingBotReply":      options.IgnoreExistingBotReply,
-		"ignore_existing_bot_reply":   options.IgnoreExistingBotReply,
-		"expectedOutput":              "JSON triage decision with summary and actions[]",
+		"workspaceTriagePolicyStatus": workspacePolicyStatus,
+		"workspace_triage_policy_status": map[string]any{
+			"configured":   workspacePolicyStatus.Configured,
+			"source":       workspacePolicyStatus.Source,
+			"version":      workspacePolicyStatus.Version,
+			"hash":         workspacePolicyStatus.Hash,
+			"length_chars": workspacePolicyStatus.LengthChars,
+		},
+		"workspaceTriagePolicySource":     workspacePolicyStatus.Source,
+		"workspace_triage_policy_source":  workspacePolicyStatus.Source,
+		"workspaceTriagePolicyVersion":    workspacePolicyStatus.Version,
+		"workspace_triage_policy_version": workspacePolicyStatus.Version,
+		"workspaceTriagePolicyHash":       workspacePolicyStatus.Hash,
+		"workspace_triage_policy_hash":    workspacePolicyStatus.Hash,
+		"workspaceCustomEmoji":            s.workspaceCustomEmojiSnapshot(),
+		"workspace_custom_emoji":          s.workspaceCustomEmojiSnapshot(),
+		"threadContexts":                  threadContexts,
+		"channelContexts":                 channelContexts,
+		"triageAudit":                     auditMetadata,
+		"foregroundChain":                 foregroundChain,
+		"foreground_chain":                foregroundChain,
+		"prePiAgentRunnerStarted":         true,
+		"pre_pi_agent_runner_started":     true,
+		"triageProbe":                     options.Probe,
+		"ignoreExistingBotReply":          options.IgnoreExistingBotReply,
+		"ignore_existing_bot_reply":       options.IgnoreExistingBotReply,
+		"expectedOutput":                  "JSON triage decision with summary and actions[]",
 	}
 	job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
 		Task:             prompt,

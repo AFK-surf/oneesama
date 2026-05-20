@@ -33,6 +33,7 @@ func (s *Service) TriageStatus(ctx context.Context, limit int) (SlackTriageStatu
 		Enabled:           s.InboundStatus().EventBuffer.TriageEnabled,
 		PostActions:       s.triagePostActions,
 		HeuristicFallback: s.triageHeuristicFallback,
+		WorkspacePolicy:   s.slackWorkspacePolicyStatus(),
 		LastTriageJobID:   s.InboundStatus().EventBuffer.LastTriageJobID,
 		AuditFreshness:    buildSlackTriageFreshness(runs),
 		AuditFixtures:     buildSlackTriageAuditFixtures(),

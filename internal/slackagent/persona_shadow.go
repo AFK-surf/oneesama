@@ -715,6 +715,7 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 type SlackTriagePersonaRequestOptions struct {
 	IgnoreExistingBotReply bool
 	WorkspaceTriagePolicy  string
+	WorkspacePolicyStatus  SlackWorkspacePolicyStatus
 	PiFirst                bool
 	Digest                 string
 	ExternalLinks          []SlackExternalLinkContext
@@ -768,10 +769,17 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 		}
 	}
 	if workspacePolicy := strings.TrimSpace(options.WorkspaceTriagePolicy); workspacePolicy != "" {
+		status := normalizeSlackWorkspacePolicyStatus(workspacePolicy, options.WorkspacePolicyStatus)
 		contextItems = append(contextItems, persona.ContextItem{
 			Kind: "workspace_triage_policy",
 			Text: workspacePolicy,
 		})
+		if metadata := slackWorkspacePolicyMetadataText(status); metadata != "" {
+			contextItems = append(contextItems, persona.ContextItem{
+				Kind: "workspace_triage_policy_metadata",
+				Text: metadata,
+			})
+		}
 	}
 	if customEmoji := formatWorkspaceCustomEmojiPrompt(options.CustomEmoji); customEmoji != "" {
 		contextItems = append(contextItems, persona.ContextItem{

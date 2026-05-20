@@ -84,7 +84,11 @@ func buildSlackTriagePrompt(input SlackTriagePromptInput) string {
 		"Channel: " + input.ChannelID,
 	}
 	if workspacePolicy := strings.TrimSpace(input.WorkspacePolicy); workspacePolicy != "" {
+		status := normalizeSlackWorkspacePolicyStatus(workspacePolicy, input.WorkspacePolicyStatus)
 		sections = append(sections, "Workspace triage policy:\n"+workspacePolicy)
+		if metadata := slackWorkspacePolicyMetadataText(status); metadata != "" {
+			sections = append(sections, "Workspace triage policy metadata:\n"+metadata)
+		}
 	}
 	if customEmoji := formatWorkspaceCustomEmojiPrompt(input.CustomEmoji); customEmoji != "" {
 		sections = append(sections, customEmoji)
@@ -141,6 +145,7 @@ type SlackTriagePromptInput struct {
 	// duplicate bot replies.
 	IgnoreExistingBotReply bool
 	WorkspacePolicy        string
+	WorkspacePolicyStatus  SlackWorkspacePolicyStatus
 	CustomEmoji            []string
 }
 

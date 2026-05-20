@@ -287,6 +287,71 @@ func TestTriageStatusDefaultKeepsAuditWindowBeyondTenRuns(t *testing.T) {
 	}
 }
 
+func TestStartSlackTriageAnnotatesWorkspacePolicyBoundary(t *testing.T) {
+	policy := "Reply to source-backed product-adjacent articles in this workspace."
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_policy_boundary",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{WorkspacePolicy: policy},
+		},
+		Runner: runner,
+	})
+	result, err := service.StartSlackTriage(context.Background(), "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "看看这个产品文章",
+		TS:        "123.456",
+	}}, "")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	want := buildSlackWorkspacePolicyStatus(policy)
+	if runner.startCount != 1 {
+		t.Fatalf("runner start count = %d, want 1", runner.startCount)
+	}
+	if got := runner.startInput.Context["workspaceTriagePolicySource"]; got != want.Source {
+		t.Fatalf("workspaceTriagePolicySource = %#v, want %q", got, want.Source)
+	}
+	if got := runner.startInput.Context["workspaceTriagePolicyVersion"]; got != want.Version {
+		t.Fatalf("workspaceTriagePolicyVersion = %#v, want %q", got, want.Version)
+	}
+	if got := runner.startInput.Context["workspaceTriagePolicyHash"]; got != want.Hash {
+		t.Fatalf("workspaceTriagePolicyHash = %#v, want %q", got, want.Hash)
+	}
+	if !strings.Contains(runner.startInput.Task, "Workspace triage policy metadata:") || !strings.Contains(runner.startInput.Task, want.Version) {
+		t.Fatalf("task missing workspace policy metadata:\n%s", runner.startInput.Task)
+	}
+	if result.Run == nil {
+		t.Fatalf("run missing")
+	}
+	if got := stringFromContext(result.Run.Metadata, "workspace_policy_source"); got != want.Source {
+		t.Fatalf("run workspace_policy_source = %q, want %q", got, want.Source)
+	}
+	if got := stringFromContext(result.Run.Metadata, "workspace_policy_version"); got != want.Version {
+		t.Fatalf("run workspace_policy_version = %q, want %q", got, want.Version)
+	}
+	if got := stringFromContext(result.Run.Metadata, "workspace_policy_hash"); got != want.Hash {
+		t.Fatalf("run workspace_policy_hash = %q, want %q", got, want.Hash)
+	}
+	status, err := service.TriageStatus(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TriageStatus: %v", err)
+	}
+	if status.WorkspacePolicy != want {
+		t.Fatalf("triage workspace policy = %#v, want %#v", status.WorkspacePolicy, want)
+	}
+	serviceStatus := service.Status()
+	if serviceStatus.Slack.WorkspacePolicy != want {
+		t.Fatalf("status workspace policy = %#v, want %#v", serviceStatus.Slack.WorkspacePolicy, want)
+	}
+}
+
 func TestTriageStatusReportsSampleFreshness(t *testing.T) {
 	previousClock := timeNow
 	now := time.Date(2026, 5, 16, 5, 46, 28, 0, time.UTC)

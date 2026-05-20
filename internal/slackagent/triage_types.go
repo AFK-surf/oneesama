@@ -98,15 +98,24 @@ type SlackTriagePendingResult struct {
 }
 
 type SlackTriageStatus struct {
-	Enabled           bool                      `json:"enabled"`
-	PostActions       bool                      `json:"postActions"`
-	HeuristicFallback bool                      `json:"heuristicFallback"`
-	LastTriageJobID   string                    `json:"lastTriageJobId,omitempty"`
-	AuditFreshness    *SlackTriageFreshness     `json:"auditFreshness,omitempty"`
-	AuditFixtures     []SlackTriageAuditFixture `json:"auditFixtures,omitempty"`
-	Runs              []SlackTriageContext      `json:"runs,omitempty"`
-	PendingActions    []SlackPendingAction      `json:"pendingActions,omitempty"`
-	ChannelBrains     []SlackChannelBrain       `json:"channelBrains,omitempty"`
+	Enabled           bool                       `json:"enabled"`
+	PostActions       bool                       `json:"postActions"`
+	HeuristicFallback bool                       `json:"heuristicFallback"`
+	WorkspacePolicy   SlackWorkspacePolicyStatus `json:"workspacePolicy"`
+	LastTriageJobID   string                     `json:"lastTriageJobId,omitempty"`
+	AuditFreshness    *SlackTriageFreshness      `json:"auditFreshness,omitempty"`
+	AuditFixtures     []SlackTriageAuditFixture  `json:"auditFixtures,omitempty"`
+	Runs              []SlackTriageContext       `json:"runs,omitempty"`
+	PendingActions    []SlackPendingAction       `json:"pendingActions,omitempty"`
+	ChannelBrains     []SlackChannelBrain        `json:"channelBrains,omitempty"`
+}
+
+type SlackWorkspacePolicyStatus struct {
+	Configured  bool   `json:"configured"`
+	Source      string `json:"source"`
+	Version     string `json:"version,omitempty"`
+	Hash        string `json:"hash,omitempty"`
+	LengthChars int    `json:"lengthChars,omitempty"`
 }
 
 type SlackTriageFreshness struct {

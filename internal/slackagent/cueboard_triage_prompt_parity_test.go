@@ -74,6 +74,9 @@ func TestBuildSlackTriagePromptIncludesWorkspacePolicy(t *testing.T) {
 	for _, want := range []string{
 		"Workspace triage policy:",
 		"Reply to source-backed product-adjacent articles in this workspace.",
+		"Workspace triage policy metadata:",
+		"source=config.slack.triage.workspace_policy",
+		"version=sha256:",
 		"workspace policy says source-backed synthesis is useful",
 	} {
 		if !strings.Contains(prompt, want) {

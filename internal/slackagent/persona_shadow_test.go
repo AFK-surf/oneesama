@@ -1338,6 +1338,9 @@ func TestBuildSlackTriagePersonaRequestIncludesWorkspacePolicyOnlyWhenConfigured
 	if got := personaContextText(base.Context, "workspace_triage_policy"); got != "" {
 		t.Fatalf("workspace policy context = %q, want absent by default", got)
 	}
+	if got := personaContextText(base.Context, "workspace_triage_policy_metadata"); got != "" {
+		t.Fatalf("workspace policy metadata context = %q, want absent by default", got)
+	}
 
 	withPolicy := BuildSlackTriagePersonaRequestWithOptions(
 		"C_TRIAGE",
@@ -1351,6 +1354,17 @@ func TestBuildSlackTriagePersonaRequestIncludesWorkspacePolicyOnlyWhenConfigured
 	)
 	if got := personaContextText(withPolicy.Context, "workspace_triage_policy"); !strings.Contains(got, "product-adjacent articles") {
 		t.Fatalf("workspace policy context = %q, want configured policy", got)
+	}
+	metadata := personaContextText(withPolicy.Context, "workspace_triage_policy_metadata")
+	for _, want := range []string{
+		"source=config.slack.triage.workspace_policy",
+		"version=sha256:",
+		"hash=",
+		"length_chars=",
+	} {
+		if !strings.Contains(metadata, want) {
+			t.Fatalf("workspace policy metadata = %q, want %q", metadata, want)
+		}
 	}
 }
 
