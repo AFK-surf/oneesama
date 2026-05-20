@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 	_ "modernc.org/sqlite"
@@ -137,6 +138,20 @@ func TestNextSlackDailyReportRunUsesConfiguredTimezone(t *testing.T) {
 	want := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Fatalf("next = %s, want %s", next, want)
+	}
+}
+
+func TestSlackDailyReportRunSampleTruncatesUTF8Safely(t *testing.T) {
+	run := SlackTriageContext{
+		Timestamp: time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		Channels:  []string{"C09L0TAN31T"},
+	}
+	sample := slackDailyReportRunSample(run, strings.Repeat("中文", 120))
+	if !utf8.ValidString(sample) {
+		t.Fatalf("sample = %q, want valid UTF-8", sample)
+	}
+	if !strings.HasSuffix(sample, "...") {
+		t.Fatalf("sample = %q, want truncated marker", sample)
 	}
 }
 

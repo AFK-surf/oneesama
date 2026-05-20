@@ -961,7 +961,7 @@ func slackDailyReportRunSample(run SlackTriageContext, detail string) string {
 	if ts := parseTriageTimestamp(run.Timestamp); !ts.IsZero() {
 		parts = append(parts, ts.UTC().Format("01-02 15:04Z"))
 	}
-	detail = truncateSlackContextText(firstLine(firstNonEmpty(detail, compactTriageSummary(run))), 180)
+	detail = truncateSlackContextTextRunes(firstLine(firstNonEmpty(detail, compactTriageSummary(run))), 180)
 	if detail != "" {
 		parts = append(parts, detail)
 	}
@@ -996,6 +996,18 @@ func appendLimitedString(values []string, value string, limit int) []string {
 		}
 	}
 	return append(values, value)
+}
+
+func truncateSlackContextTextRunes(value string, maxLength int) string {
+	value = strings.TrimSpace(value)
+	if maxLength <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxLength {
+		return value
+	}
+	return string(runes[:maxLength]) + "..."
 }
 
 func slackDailyReportPlaceholderSummary(run SlackTriageContext) bool {
