@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/persona"
 )
 
@@ -39,14 +40,15 @@ type SlackStatus struct {
 }
 
 type AgentRunnerStatus struct {
-	Provider      string `json:"provider"`
-	Ready         bool   `json:"ready"`
-	DryRun        bool   `json:"dry_run"`
-	Model         string `json:"model,omitempty"`
-	ModelProvider string `json:"model_provider,omitempty"`
-	BaseURL       string `json:"base_url,omitempty"`
-	Jobs          int    `json:"jobs"`
-	Error         string `json:"error,omitempty"`
+	Provider      string         `json:"provider"`
+	Ready         bool           `json:"ready"`
+	DryRun        bool           `json:"dry_run"`
+	Model         string         `json:"model,omitempty"`
+	ModelProvider string         `json:"model_provider,omitempty"`
+	BaseURL       string         `json:"base_url,omitempty"`
+	Jobs          int            `json:"jobs"`
+	FailureCodes  map[string]int `json:"failure_codes,omitempty"`
+	Error         string         `json:"error,omitempty"`
 }
 
 type PersonaStatus struct {
@@ -218,6 +220,7 @@ func (s *Service) agentRunnerStatus(ctx context.Context) AgentRunnerStatus {
 			return status
 		}
 		status.Jobs = len(jobs)
+		status.FailureCodes = agentRunnerFailureCodeCounts(jobs)
 		return status
 	}
 	if s.runnerErr != nil {
@@ -227,6 +230,21 @@ func (s *Service) agentRunnerStatus(ctx context.Context) AgentRunnerStatus {
 		status.Provider = "dry-run"
 	}
 	return status
+}
+
+func agentRunnerFailureCodeCounts(jobs []agentrunner.Job) map[string]int {
+	counts := make(map[string]int)
+	for _, job := range jobs {
+		code := strings.TrimSpace(string(job.FailureCode))
+		if code == "" {
+			continue
+		}
+		counts[code]++
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	return counts
 }
 
 func (s *Service) personaStatus(ctx context.Context) PersonaStatus {

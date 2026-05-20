@@ -41,6 +41,7 @@ func (s *Store) Create(ctx context.Context, provider string, input StartInput, r
 		ID:               newJobID(),
 		Provider:         strings.TrimSpace(provider),
 		Status:           result.Status,
+		FailureCode:      normalizeFailureCode(result.FailureCode, result.Status, result.Error),
 		Mode:             defaultMode(input.Mode),
 		Task:             strings.TrimSpace(input.Task),
 		Context:          cloneMap(input.Context),

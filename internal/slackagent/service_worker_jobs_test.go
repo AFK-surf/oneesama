@@ -86,9 +86,10 @@ func TestSlackWorkerResultTextKeepsNormalWorkerAnswer(t *testing.T) {
 
 func TestSlackWorkerResultTextFailClosesOnJobTimeout(t *testing.T) {
 	job := agentrunner.Job{
-		Status: agentrunner.StatusTimeout,
-		Error:  "job timed out",
-		Result: "partial: started inspecting staging deploy logs...",
+		Status:      agentrunner.StatusTimeout,
+		FailureCode: agentrunner.FailureTimeout,
+		Error:       "job timed out",
+		Result:      "partial: started inspecting staging deploy logs...",
 	}
 
 	got := slackWorkerResultText(job)
@@ -99,6 +100,41 @@ func TestSlackWorkerResultTextFailClosesOnJobTimeout(t *testing.T) {
 	}
 	if !strings.Contains(got, "超时") || !strings.Contains(got, "重试") {
 		t.Fatalf("slackWorkerResultText() = %q, want user-safe timeout wording", got)
+	}
+}
+
+func TestSlackWorkerResultTextMapsTypedFailures(t *testing.T) {
+	cases := []struct {
+		name         string
+		job          agentrunner.Job
+		wantContains string
+		blocked      []string
+	}{
+		{
+			name:         "provider auth",
+			job:          agentrunner.Job{Status: agentrunner.StatusFailed, FailureCode: agentrunner.FailureProviderAuth, Error: "401 unauthorized"},
+			wantContains: "凭证",
+			blocked:      []string{"401", "unauthorized"},
+		},
+		{
+			name:         "canceled",
+			job:          agentrunner.Job{Status: agentrunner.StatusFailed, FailureCode: agentrunner.FailureCanceled, Error: "job canceled"},
+			wantContains: "取消",
+			blocked:      []string{"job canceled"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := slackWorkerResultText(tc.job)
+			if !strings.Contains(got, tc.wantContains) {
+				t.Fatalf("slackWorkerResultText() = %q, want %q", got, tc.wantContains)
+			}
+			for _, forbidden := range tc.blocked {
+				if strings.Contains(strings.ToLower(got), strings.ToLower(forbidden)) {
+					t.Fatalf("slackWorkerResultText() leaked %q in %q", forbidden, got)
+				}
+			}
+		})
 	}
 }
 

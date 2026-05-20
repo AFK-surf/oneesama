@@ -17,10 +17,23 @@ const (
 	StatusTimeout   JobStatus = "timeout"
 )
 
+type FailureCode string
+
+const (
+	FailureNone         FailureCode = ""
+	FailureTimeout      FailureCode = "timeout"
+	FailureCanceled     FailureCode = "canceled"
+	FailureProviderAuth FailureCode = "provider_auth"
+	FailureProcessError FailureCode = "process_error"
+	FailureUnsafeTool   FailureCode = "unsafe_tool"
+	FailureUnknown      FailureCode = "unknown"
+)
+
 type Job struct {
 	ID               string         `json:"id"`
 	Provider         string         `json:"provider"`
 	Status           JobStatus      `json:"status"`
+	FailureCode      FailureCode    `json:"failure_code,omitempty"`
 	Mode             string         `json:"mode"`
 	Task             string         `json:"task"`
 	Context          map[string]any `json:"context,omitempty"`
@@ -65,10 +78,11 @@ type Config struct {
 type JobCallback func(ctx context.Context, job Job)
 
 type RunResult struct {
-	Status JobStatus
-	Result string
-	Error  string
-	Debug  string
+	Status      JobStatus
+	FailureCode FailureCode
+	Result      string
+	Error       string
+	Debug       string
 }
 
 type runnerProvider interface {

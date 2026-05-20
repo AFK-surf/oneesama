@@ -47,10 +47,11 @@ func (p commandProvider) Run(ctx context.Context, input StartInput) (RunResult, 
 
 	if err := runCommand(ctx, command); err != nil {
 		return RunResult{
-			Status: classifyContextStatus(ctx),
-			Result: strings.TrimSpace(stdout.String()),
-			Error:  commandErrorText(ctx, stderr.String(), err),
-			Debug:  strings.TrimSpace(stderr.String()),
+			Status:      classifyContextStatus(ctx),
+			FailureCode: classifyCommandFailureCode(ctx),
+			Result:      strings.TrimSpace(stdout.String()),
+			Error:       commandErrorText(ctx, stderr.String(), err),
+			Debug:       strings.TrimSpace(stderr.String()),
 		}, fmt.Errorf("%s command failed: %w", p.provider, err)
 	}
 
@@ -90,6 +91,17 @@ func classifyContextStatus(ctx context.Context) JobStatus {
 		return StatusFailed
 	default:
 		return StatusFailed
+	}
+}
+
+func classifyCommandFailureCode(ctx context.Context) FailureCode {
+	switch ctx.Err() {
+	case context.DeadlineExceeded:
+		return FailureTimeout
+	case context.Canceled:
+		return FailureCanceled
+	default:
+		return FailureProcessError
 	}
 }
 

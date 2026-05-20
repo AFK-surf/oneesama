@@ -141,6 +141,7 @@ func (m *Manager) RecoverOrphanedRunning(ctx context.Context, reason string) ([]
 		}
 		updated, updateErr := m.store.Update(ctx, job.ID, func(target *Job) {
 			target.Status = StatusTimeout
+			target.FailureCode = FailureTimeout
 			target.Error = reason
 			target.Debug = strings.TrimSpace(firstNonEmpty(target.Debug, "recovered orphaned running job"))
 		})
@@ -164,6 +165,7 @@ func (m *Manager) finishJob(ctx context.Context, id string, input StartInput) {
 	updateCtx := context.WithoutCancel(ctx)
 	updated, updateErr := m.store.Update(updateCtx, id, func(job *Job) {
 		job.Status = result.Status
+		job.FailureCode = normalizeFailureCode(result.FailureCode, result.Status, result.Error)
 		job.Result = strings.TrimSpace(result.Result)
 		job.Error = strings.TrimSpace(result.Error)
 		job.Debug = strings.TrimSpace(result.Debug)
@@ -250,10 +252,31 @@ func failedResult(result RunResult, err error) RunResult {
 	if result.Status == "" || result.Status == StatusCompleted {
 		result.Status = StatusFailed
 	}
+	result.FailureCode = normalizeFailureCode(result.FailureCode, result.Status, result.Error)
 	if strings.TrimSpace(result.Error) == "" {
 		result.Error = err.Error()
 	}
 	return result
+}
+
+func normalizeFailureCode(code FailureCode, status JobStatus, text string) FailureCode {
+	if code != "" {
+		return code
+	}
+	if status == StatusCompleted || status == StatusRunning || status == StatusQueued || status == "" {
+		return FailureNone
+	}
+	lower := strings.ToLower(strings.TrimSpace(text))
+	switch {
+	case status == StatusTimeout || strings.Contains(lower, "timed out") || strings.Contains(lower, "timeout"):
+		return FailureTimeout
+	case strings.Contains(lower, "canceled") || strings.Contains(lower, "cancelled"):
+		return FailureCanceled
+	case strings.Contains(lower, "unauthorized") || strings.Contains(lower, "401") || strings.Contains(lower, "invalid api key") || strings.Contains(lower, "authentication"):
+		return FailureProviderAuth
+	default:
+		return FailureProcessError
+	}
 }
 
 func firstNonEmpty(values ...string) string {

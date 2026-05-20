@@ -77,6 +77,9 @@ func TestRunnerCancelRequestsStop(t *testing.T) {
 	if finalJob.Error != "job canceled" {
 		t.Fatalf("final error = %q, want job canceled", finalJob.Error)
 	}
+	if finalJob.FailureCode != FailureCanceled {
+		t.Fatalf("final failure_code = %q, want %q", finalJob.FailureCode, FailureCanceled)
+	}
 }
 
 func TestRunnerCallbacksReportProgressAndTerminalUpdate(t *testing.T) {
@@ -160,6 +163,9 @@ func TestRunnerTimesOutLongJobs(t *testing.T) {
 	if finalJob.Error != "job timed out" {
 		t.Fatalf("final error = %q, want job timed out", finalJob.Error)
 	}
+	if finalJob.FailureCode != FailureTimeout {
+		t.Fatalf("final failure_code = %q, want %q", finalJob.FailureCode, FailureTimeout)
+	}
 }
 
 func TestRunnerTimesOutLongJobsWithSQLiteStore(t *testing.T) {
@@ -206,6 +212,9 @@ func TestRunnerTimesOutLongJobsWithSQLiteStore(t *testing.T) {
 	if finalJob.Error != "job timed out" {
 		t.Fatalf("final error = %q, want job timed out", finalJob.Error)
 	}
+	if finalJob.FailureCode != FailureTimeout {
+		t.Fatalf("final failure_code = %q, want %q", finalJob.FailureCode, FailureTimeout)
+	}
 	waitForRunnerJobCleanup(t, runner, job.ID)
 }
 
@@ -247,6 +256,9 @@ func TestRecoverOrphanedRunningJobsMarksTimeoutAndNotifies(t *testing.T) {
 	}
 	if recovered[0].Status != StatusTimeout || recovered[0].Error != "agent runner job orphaned after service restart" {
 		t.Fatalf("recovered job = %#v, want timeout with restart reason", recovered[0])
+	}
+	if recovered[0].FailureCode != FailureTimeout {
+		t.Fatalf("recovered failure_code = %q, want %q", recovered[0].FailureCode, FailureTimeout)
 	}
 
 	select {

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/httpserver"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 	"github.com/gin-gonic/gin"
@@ -56,6 +57,34 @@ func TestHandleStatus(t *testing.T) {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Fatalf("body = %s, want %s", response.Body.String(), want)
 		}
+	}
+}
+
+func TestHandleStatusReportsAgentRunnerFailureCodes(t *testing.T) {
+	router := newTestRouter(t, Config{
+		Runner: &fakeRunner{
+			job: agentrunner.Job{
+				ID:          "job_timeout",
+				Provider:    "codex",
+				Status:      agentrunner.StatusTimeout,
+				FailureCode: agentrunner.FailureTimeout,
+			},
+		},
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/slack/status", nil)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body StatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if got := body.AgentRunner.FailureCodes[string(agentrunner.FailureTimeout)]; got != 1 {
+		t.Fatalf("failure_codes = %#v, want timeout=1", body.AgentRunner.FailureCodes)
 	}
 }
 
