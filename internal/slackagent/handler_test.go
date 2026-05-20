@@ -47,8 +47,16 @@ func TestHandleStatus(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"service":"slack-agent"`) {
 		t.Fatalf("body = %s, want slack-agent status", response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"provider":"sqlite"`) {
-		t.Fatalf("body = %s, want sqlite persistence", response.Body.String())
+	var body StatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if body.Persistence != (PersistenceStatus{
+		Provider:   "sqlite",
+		DataDir:    "./runtime/state",
+		SQLitePath: "./runtime/state/oneesama.sqlite",
+	}) {
+		t.Fatalf("persistence = %#v, want sqlite status", body.Persistence)
 	}
 	if !strings.Contains(response.Body.String(), `"socket_mode":{"configured":true`) {
 		t.Fatalf("body = %s, want socket mode status", response.Body.String())

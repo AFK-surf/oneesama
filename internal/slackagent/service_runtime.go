@@ -13,10 +13,16 @@ type StatusResponse struct {
 	OK          bool              `json:"ok"`
 	Service     string            `json:"service"`
 	Mode        string            `json:"mode"`
-	Persistence map[string]string `json:"persistence"`
+	Persistence PersistenceStatus `json:"persistence"`
 	Slack       SlackStatus       `json:"slack"`
 	AgentRunner AgentRunnerStatus `json:"agent_runner"`
 	Persona     PersonaStatus     `json:"persona_runtime"`
+}
+
+type PersistenceStatus struct {
+	Provider   string `json:"provider"`
+	DataDir    string `json:"data_dir"`
+	SQLitePath string `json:"sqlite_path"`
 }
 
 type SlackStatus struct {
@@ -106,14 +112,10 @@ func (s *Service) Status() StatusResponse {
 		threadCaseStats = s.threadCases.Stats(ctx)
 	}
 	return StatusResponse{
-		OK:      true,
-		Service: "slack-agent",
-		Mode:    "go-rewrite-r8",
-		Persistence: map[string]string{
-			"provider":    s.persistence.Provider,
-			"data_dir":    s.persistence.DataDir,
-			"sqlite_path": s.persistence.SQLitePath,
-		},
+		OK:          true,
+		Service:     "slack-agent",
+		Mode:        "go-rewrite-r8",
+		Persistence: s.persistenceStatus(),
 		Slack: SlackStatus{
 			SigningSecretConfigured: s.signingSecret != "",
 			BotTokenConfigured:      s.botToken != "",
@@ -136,6 +138,14 @@ func (s *Service) Status() StatusResponse {
 		},
 		AgentRunner: runnerStatus,
 		Persona:     s.personaStatus(ctx),
+	}
+}
+
+func (s *Service) persistenceStatus() PersistenceStatus {
+	return PersistenceStatus{
+		Provider:   s.persistence.Provider,
+		DataDir:    s.persistence.DataDir,
+		SQLitePath: s.persistence.SQLitePath,
 	}
 }
 
