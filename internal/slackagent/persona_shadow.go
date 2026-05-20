@@ -482,7 +482,7 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		patch.Status = "ok"
 		patch.Summary = firstNonEmpty(result.VisibleText, result.Reason, patch.Summary)
 	}
-	patch.Metadata = mergeStringAnyMaps(current.Metadata, map[string]any{
+	metadata := map[string]any{
 		"persona_foreground":              result,
 		"persona_foreground_queued":       false,
 		"persona_foreground_done_at":      nowRFC3339(),
@@ -494,7 +494,12 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		"persona_memory_write_files":      memoryWritePersistence.Files,
 		"persona_memory_write_errors":     memoryWritePersistence.Errors,
 		"persona_memory_write_redactions": memoryWritePersistence.Redactions,
-	})
+	}
+	if !result.Success && slackPersonaForegroundTimedOut(result) {
+		metadata["triage_timeout_needs_retry"] = true
+		metadata["persona_foreground_timeout_needs_retry"] = true
+	}
+	patch.Metadata = mergeStringAnyMaps(current.Metadata, metadata)
 	if personaEmptyFinal {
 		s.maybeRecordTriageEmptyFinalFollowup(ctx, workspaceID, result.ChannelID, result.ThreadTS, &patch, nil, map[string]any{
 			"failure_source":     "persona_foreground",
@@ -510,6 +515,9 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	}
 	if updated != nil {
 		persistTriageContext(s.workspaceDir, *updated)
+		if !result.Success && slackPersonaForegroundTimedOut(result) {
+			s.maybeRecordPersonaForegroundTimeoutFollowup(ctx, workspaceID, result.ChannelID, result.ThreadTS, updated, result)
+		}
 	}
 	if result.ChannelID != "" && result.ThreadTS != "" {
 		summary := firstNonEmpty(result.VisibleText, result.Reason, patch.Summary)

@@ -340,6 +340,7 @@ func NewService(cfg Config) *Service {
 		}
 	}
 	service.recoverOrphanedAgentRunnerJobs(context.Background())
+	service.recoverOrphanedPersonaForegroundTriage(context.Background())
 	return service
 }
 

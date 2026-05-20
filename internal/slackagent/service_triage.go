@@ -117,6 +117,10 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	}
 	auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
 		"foreground_chain":             foregroundChain,
+		"workspace_id":                 workspaceID,
+		"channel_id":                   channelID,
+		"thread_ts":                    threadTS,
+		"session_id":                   sessionID,
 		"pre_pi_agent_runner_started":  !piFirstLive,
 		"persona_foreground_pi_first":  piFirstLive,
 		"delegate_worker_jobs_started": 0,

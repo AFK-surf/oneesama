@@ -418,8 +418,11 @@ func buildSlackTriagePersonaQuality(runs []SlackTriageContext) SlackTriagePerson
 			quality.Successes++
 		} else {
 			quality.Failures++
+			if slackTriageRunHasRetryScheduled(run) {
+				quality.RetryScheduledFailures++
+			}
 		}
-		if boolFromAny(raw["shadow_only"], false) {
+		if success && boolFromAny(raw["shadow_only"], false) {
 			quality.ShadowOnlyResponses++
 		}
 		quality.WorkerRequests += lenStringSliceFromAny(raw["worker_requests"])
@@ -540,7 +543,12 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_runtime_not_live", Message: "Foreground persona runtime is enabled but status does not report live non-shadow mode."})
 		}
 		if report.PersonaQuality.Failures > 0 {
-			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_failures", Message: fmt.Sprintf("%d persona foreground triage run(s) failed in the audit window.", report.PersonaQuality.Failures)})
+			unhandled := report.PersonaQuality.Failures - report.PersonaQuality.RetryScheduledFailures
+			if unhandled > 0 {
+				flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_failures", Message: fmt.Sprintf("%d persona foreground triage run(s) failed in the audit window.", unhandled)})
+			} else {
+				flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "persona_foreground_failures_retry_scheduled", Message: fmt.Sprintf("%d persona foreground triage failure(s) already have retry follow-up scheduled.", report.PersonaQuality.RetryScheduledFailures)})
+			}
 		}
 		if report.PersonaQuality.AuthFailures > 0 {
 			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_auth_failures", Message: fmt.Sprintf("%d persona foreground triage run(s) failed with provider authentication errors.", report.PersonaQuality.AuthFailures)})
@@ -576,7 +584,8 @@ func slackTriageRunFailed(run SlackTriageContext) bool {
 
 func slackTriageRunHasRetryScheduled(run SlackTriageContext) bool {
 	return boolFromAny(run.Metadata["triage_timeout_needs_retry"], false) ||
-		boolFromAny(run.Metadata["triage_empty_final_needs_retry"], false)
+		boolFromAny(run.Metadata["triage_empty_final_needs_retry"], false) ||
+		boolFromAny(run.Metadata["persona_foreground_orphan_needs_retry"], false)
 }
 
 func slackTriageFailureSampleText(value string) string {

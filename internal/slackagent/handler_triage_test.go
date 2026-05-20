@@ -1022,9 +1022,22 @@ func TestTriageAuditSummarizesPersonaForegroundQuality(t *testing.T) {
 				},
 			},
 		},
+		{
+			ID:        13,
+			Timestamp: now.Add(-4 * time.Minute).Format(time.RFC3339Nano),
+			Status:    "ok",
+			Summary:   "persona shadow-only response in live mode",
+			Metadata: map[string]any{
+				"persona_foreground": map[string]any{
+					"success":     true,
+					"decision":    persona.DecisionStaySilent,
+					"shadow_only": true,
+				},
+			},
+		},
 	}, 6*time.Hour)
 	quality := report.PersonaQuality
-	if quality.ForegroundRuns != 2 || quality.ForegroundQueuedRuns != 1 || quality.Successes != 1 || quality.Replies != 1 || quality.Failures != 1 || quality.ShadowOnlyResponses != 1 || quality.WorkerRequests != 1 || quality.MemoryWriteIntents != 1 {
+	if quality.ForegroundRuns != 3 || quality.ForegroundQueuedRuns != 1 || quality.Successes != 2 || quality.Replies != 1 || quality.Failures != 1 || quality.ShadowOnlyResponses != 1 || quality.WorkerRequests != 1 || quality.MemoryWriteIntents != 1 {
 		t.Fatalf("persona quality = %#v, want queued/success/reply/failure summary", quality)
 	}
 	if quality.ForegroundStaleQueuedRuns != 1 || quality.OldestQueuedRunID != 10 || quality.OldestQueuedAgeSeconds < int64((2*time.Minute).Seconds()) {
