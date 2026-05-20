@@ -220,7 +220,7 @@ func (s *Service) postProcessInputFromJoinSessionRedelivery(ctx context.Context,
 		MeetURL:    session.MeetingURL,
 		Captions:   captions,
 		AudioPath:  audioPath,
-		SkipASR:    strings.EqualFold(strings.TrimSpace(session.Status), "stale"),
+		SkipASR:    true,
 		Source:     "join-redeliver",
 	}, nil
 }

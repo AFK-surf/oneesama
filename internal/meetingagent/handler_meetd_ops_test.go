@@ -155,6 +155,44 @@ func TestMeetdRedeliverSyntheticJoinSessionReprocessesDirectJoin(t *testing.T) {
 	}
 }
 
+func TestPostProcessInputFromJoinRedeliverySkipsASRForDoneSessions(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newMeetdOpsTestRouter(t, nil)
+	sessionID := "session_done_redeliver_skip_asr"
+	if _, err := service.PostProcessMeeting(context.Background(), postmeeting.PostProcessInput{
+		ArtifactID: "join-" + sessionID,
+		MeetingID:  meetingIDString(syntheticMeetingID(sessionID)),
+		SessionID:  sessionID,
+		Title:      "Done Redeliver",
+		MeetURL:    "https://meet.google.com/done-redeliver",
+		Captions: []postmeeting.TranscriptSegmentInput{{
+			Speaker: "Peng Xiao",
+			Text:    "已经有字幕的 redelivery 不应该重新跑 ASR。",
+			Source:  "google_meet_caption",
+		}},
+		Source: "join-stop",
+	}); err != nil {
+		t.Fatalf("seed postprocess artifact: %v", err)
+	}
+	session := SessionRecord{
+		ID:         sessionID,
+		MeetingID:  sessionID,
+		MeetingURL: "https://meet.google.com/done-redeliver",
+		Status:     "done",
+		Title:      "Done Redeliver",
+	}
+	meeting := syntheticMeetdMeeting(session, "C123", "111.222")
+
+	input, err := service.postProcessInputFromJoinSessionRedelivery(context.Background(), session, meeting)
+	if err != nil {
+		t.Fatalf("postProcessInputFromJoinSessionRedelivery() error = %v", err)
+	}
+	if !input.SkipASR {
+		t.Fatalf("SkipASR = false, want true for join redelivery with captured captions")
+	}
+}
+
 func TestMeetdRedeliverStaleSyntheticJoinSessionFromCapturedArtifacts(t *testing.T) {
 	t.Parallel()
 

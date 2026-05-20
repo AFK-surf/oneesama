@@ -591,7 +591,11 @@ func TestSlackTriageLivePersonaStaySilentDoesNotPostOldBridgeMentionCandidate(t 
 
 func TestSlackTriagePiFirstLiveSkipsPrePiRunnerAndPostsPersonaReply(t *testing.T) {
 	ctx := context.Background()
-	workspaceDir := t.TempDir()
+	workspaceDir, err := os.MkdirTemp("", "oneesama-pi-first-live-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(workspaceDir) }()
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	runner := &fakeRunner{job: agentrunner.Job{
 		ID:       "job_should_not_start_before_pi",
