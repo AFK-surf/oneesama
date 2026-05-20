@@ -529,7 +529,7 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		if externalLinks > 0 {
 			metrics.LinkContextRuns++
 		}
-		if inputChars >= 7000 && len(run.Actions) == 0 && run.Mutations == 0 {
+		if inputChars >= triageQualityHighContextInputCharsThreshold && len(run.Actions) == 0 && run.Mutations == 0 {
 			metrics.HighContextNoAction++
 		}
 		if externalLinks > 0 && len(run.Actions) == 0 && run.Mutations == 0 {
@@ -1046,7 +1046,7 @@ func slackDailyReportLowConfidenceNoAction(run SlackTriageContext) bool {
 	if !ok {
 		return false
 	}
-	return float64FromAny(raw["confidence"]) > 0 && float64FromAny(raw["confidence"]) < 0.75
+	return float64FromAny(raw["confidence"]) > 0 && float64FromAny(raw["confidence"]) < triageQualityLowConfidenceCeiling
 }
 
 func float64FromAny(value any) float64 {

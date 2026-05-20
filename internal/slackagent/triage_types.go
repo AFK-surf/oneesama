@@ -142,25 +142,26 @@ type SlackTriageAuditFixture struct {
 }
 
 type SlackTriageAuditReport struct {
-	GeneratedAt    string                      `json:"generatedAt"`
-	WindowSeconds  int64                       `json:"windowSeconds"`
-	Cutoff         string                      `json:"cutoff"`
-	RunCount       int                         `json:"runCount"`
-	Freshness      SlackTriageFreshness        `json:"freshness"`
-	Outcome        SlackTriageAuditOutcome     `json:"outcome"`
-	RealOutcome    SlackTriageAuditOutcome     `json:"realOutcome"`
-	ProbeOutcome   SlackTriageAuditOutcome     `json:"probeOutcome"`
-	InputContext   SlackTriageInputContext     `json:"inputContext"`
-	ContextFetch   SlackTriageContextFetch     `json:"contextFetch"`
-	SkipReasons    map[string]int              `json:"skipReasons,omitempty"`
-	ProcessHealth  SlackTriageProcessHealth    `json:"processHealth"`
-	PersonaRuntime SlackTriagePersonaRuntime   `json:"personaRuntime"`
-	PersonaQuality SlackTriagePersonaQuality   `json:"personaQuality"`
-	Canary         SlackTriageCanarySummary    `json:"canary"`
-	LiveProbe      SlackTriageLiveProbeSummary `json:"liveProbe"`
-	FailureSamples []SlackTriageFailureSample  `json:"failureSamples,omitempty"`
-	Flags          []SlackTriageAuditFlag      `json:"flags,omitempty"`
-	RecentRuns     []SlackTriageAuditRunBrief  `json:"recentRuns,omitempty"`
+	GeneratedAt       string                             `json:"generatedAt"`
+	WindowSeconds     int64                              `json:"windowSeconds"`
+	Cutoff            string                             `json:"cutoff"`
+	RunCount          int                                `json:"runCount"`
+	Freshness         SlackTriageFreshness               `json:"freshness"`
+	Outcome           SlackTriageAuditOutcome            `json:"outcome"`
+	RealOutcome       SlackTriageAuditOutcome            `json:"realOutcome"`
+	ProbeOutcome      SlackTriageAuditOutcome            `json:"probeOutcome"`
+	InputContext      SlackTriageInputContext            `json:"inputContext"`
+	ContextFetch      SlackTriageContextFetch            `json:"contextFetch"`
+	SkipReasons       map[string]int                     `json:"skipReasons,omitempty"`
+	ProcessHealth     SlackTriageProcessHealth           `json:"processHealth"`
+	PersonaRuntime    SlackTriagePersonaRuntime          `json:"personaRuntime"`
+	PersonaQuality    SlackTriagePersonaQuality          `json:"personaQuality"`
+	Canary            SlackTriageCanarySummary           `json:"canary"`
+	LiveProbe         SlackTriageLiveProbeSummary        `json:"liveProbe"`
+	FailureSamples    []SlackTriageFailureSample         `json:"failureSamples,omitempty"`
+	Flags             []SlackTriageAuditFlag             `json:"flags,omitempty"`
+	RecentRuns        []SlackTriageAuditRunBrief         `json:"recentRuns,omitempty"`
+	QualityThresholds SlackTriageQualityBucketThresholds `json:"qualityThresholds"`
 }
 
 type SlackTriageAuditOutcome struct {

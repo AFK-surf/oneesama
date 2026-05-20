@@ -29,7 +29,15 @@ curl -fsS "${slack_url}/slack/triage/status?limit=${status_limit}" >"${tmpdir}/s
 cutoff="$(jq -r '.audit.cutoff' <"${tmpdir}/audit.json")"
 cutoff="${ONEESAMA_TRIAGE_QUALITY_AFTER:-$cutoff}"
 
-jq --arg cutoff "$cutoff" '
+# Read the per-run quality bucket thresholds from the live audit response so
+# this script and internal/slackagent/triage_quality_buckets.go stay in sync.
+# Defaults match triageQualityHighContextInputCharsThreshold = 7000 and
+# triageQualityLowConfidenceCeiling = 0.75 in case the server is older than
+# task #285 and does not yet emit the qualityThresholds block.
+high_context_threshold="$(jq -r '.audit.qualityThresholds.highContextInputChars // 7000' <"${tmpdir}/audit.json")"
+low_confidence_ceiling="$(jq -r '.audit.qualityThresholds.lowConfidenceCeiling // 0.75' <"${tmpdir}/audit.json")"
+
+jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
     [.triage.runs[]? | select((.timestamp // "") >= $cutoff)];
   def meta($run; $key):
@@ -60,6 +68,10 @@ jq --arg cutoff "$cutoff" '
   | {
       window: $ARGS.named.window,
       cutoff: $cutoff,
+      thresholds: {
+        highContextInputChars: $high_context,
+        lowConfidenceCeiling: $low_confidence
+      },
       totals: {
         runs: ($runs | length),
         failed: ($runs | map(select(.status != "ok")) | length),
@@ -72,9 +84,9 @@ jq --arg cutoff "$cutoff" '
         placeholderSummaries: ($runs | map(select((.summary // "") | test("short reason for the shadow decision|placeholder|TODO"; "i")) | brief(.)))
       },
       review: {
-        highContextNoAction: ($runs | map(select(is_no_action(.) and input_chars(.) >= 7000) | brief(.))),
+        highContextNoAction: ($runs | map(select(is_no_action(.) and input_chars(.) >= $high_context) | brief(.))),
         linkContextNoAction: ($runs | map(select(is_no_action(.) and external_links(.) > 0) | brief(.))),
-        lowConfidenceNoAction: ($runs | map(select(is_no_action(.) and ((meta(.; "persona_foreground").confidence // 1) < 0.75)) | brief(.)))
+        lowConfidenceNoAction: ($runs | map(select(is_no_action(.) and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)) | brief(.)))
       }
     }
 ' --arg window "$audit_window" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
