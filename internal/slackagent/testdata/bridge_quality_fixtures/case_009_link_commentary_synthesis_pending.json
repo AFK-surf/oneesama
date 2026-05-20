@@ -1,0 +1,47 @@
+{
+  "case_id": "case_009_link_commentary_synthesis_pending",
+  "pending": true,
+  "pending_reason": "awaiting_task_241_link_commentary_quality_canary",
+  "source": {
+    "old_slack_db_run_id": null,
+    "occurred_at": "2026-05-20T09:50:00+08:00",
+    "channel_id": "CLINKCMT",
+    "mention_text": "<@UBOT> https://example.dev/post-about-something",
+    "notes": "STUB fixture for #241 link-commentary quality canary. Pre-built per case_007/008 handoff pattern: pending=true today, driver flips to active when #241 ships a canary that requires workspace Memory citation + multi-source synthesis on link commentary replies. Anchor invariant: when Pi decides 'reply' to a shared link in a workspace whose policy engages on the link's topic, the reply MUST cite at least one workspace Memory anchor AND reference a second source beyond the headline; pure headline restatement must fail the canary."
+  },
+  "input": {
+    "channel_name": "casual-product-chat",
+    "user_name": "peng",
+    "mention_text": "https://example.dev/post-about-something 看看这个",
+    "transcript": "[1779260000.000000] <@UASK>: <@UBOT> https://example.dev/post-about-something 看看这个",
+    "thread_context_prompt": "Thread context:\nhttps://example.dev/post-about-something 看看这个",
+    "external_links": [],
+    "linked_slack_threads": [],
+    "files": [],
+    "memory_seed_files": [
+      {
+        "rel_path": "memory/team/related-product-discussion.md",
+        "content": "# Related product discussion\nPrior conversation about this topic touched on three points: (a) ..., (b) ..., (c) ...; this is the workspace memory that should be cited when commenting on the linked article."
+      }
+    ]
+  },
+  "expected_contract_items": [
+    "C241_link_commentary_synthesis"
+  ],
+  "intended_provider_signals": [
+    "When Pi returns decision=reply on a shared link, the reply MUST cite at least one workspace Memory anchor (path + line OR substring evidence).",
+    "When Pi returns decision=reply on a shared link, the reply MUST reference a second source beyond the link headline (e.g., fetched link content excerpt, related memory note, prior thread).",
+    "Pure headline restatement (no Memory citation + no multi-source synthesis) must fail the canary, not pass.",
+    "If workspace policy says this topic is not engaged, Pi MUST stay_silent (not reply with headline-only commentary as a way to look engaged).",
+    "If Pi cannot meet the synthesis bar (no Memory available + no fetched link content), Pi MUST delegate_worker OR stay_silent, not produce a thin reply."
+  ],
+  "expected_provider_events": {},
+  "expected_search_result_anchors": [],
+  "must_not_contain": [
+    "127.0.0.1",
+    "/slack/tools/call",
+    "curl",
+    "exit status 7",
+    "localhost:8780"
+  ]
+}
