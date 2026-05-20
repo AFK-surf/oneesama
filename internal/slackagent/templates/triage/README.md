@@ -29,3 +29,6 @@ lists used for routing/classification, not user-visible replies. Blank lines
 and `#` comments are ignored. Keep them workspace-specific and conservative:
 they decide whether a candidate needs more context or should be treated as
 owner-directed operational work.
+
+Markers are trimmed by default. Wrap a marker in double quotes when leading or
+trailing spaces are meaningful for a word-boundary match, for example `" pr "`.

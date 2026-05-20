@@ -149,7 +149,12 @@ func parseTriageKeywordList(raw string) []string {
 			continue
 		}
 		marker = strings.TrimSpace(strings.TrimPrefix(marker, "-"))
-		marker = strings.ToLower(strings.TrimSpace(marker))
+		if strings.HasPrefix(marker, `"`) && strings.HasSuffix(marker, `"`) && len(marker) >= 2 {
+			marker = strings.TrimPrefix(strings.TrimSuffix(marker, `"`), `"`)
+		} else {
+			marker = strings.TrimSpace(marker)
+		}
+		marker = strings.ToLower(marker)
 		if marker == "" {
 			continue
 		}

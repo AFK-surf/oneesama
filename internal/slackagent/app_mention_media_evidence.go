@@ -36,15 +36,19 @@ func appMentionRequestsMediaInspection(mention *SlackAppMentionContext) bool {
 	if text == "" {
 		return false
 	}
-	for _, marker := range []string{
-		"视频", "素材", "素材库", "文件", "图片", "截图", "看一下", "看看", "整理", "筛一下", "哪些", "可用", "放到", "thread", "canvas",
-		"video", "videos", "media", "asset", "assets", "file", "files", "image", "images", "screenshot", "screenshots", "organize", "review",
-	} {
+	for _, marker := range appMentionMediaRequestKeywords() {
 		if strings.Contains(text, marker) {
 			return true
 		}
 	}
 	return false
+}
+
+func appMentionMediaRequestKeywords() []string {
+	return loadTriageKeywordListTemplate("app_mention_media_request_keywords", []string{
+		"视频", "素材", "素材库", "文件", "图片", "截图", "看一下", "看看", "整理", "筛一下", "哪些", "可用", "放到", "thread", "canvas",
+		"video", "videos", "media", "asset", "assets", "file", "files", "image", "images", "screenshot", "screenshots", "organize", "review",
+	})
 }
 
 func renderAppMentionMediaEvidenceSummary(files []SlackThreadFile) string {

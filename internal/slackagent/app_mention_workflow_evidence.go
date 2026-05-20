@@ -78,15 +78,40 @@ func appMentionWorkflowSignals(text string, urls []string) []string {
 	if backfillMessageLooksLikeOperationalGitHubWork(text, urls) {
 		signals = append(signals, "operational_github_work")
 	}
-	if containsAnyWorkflowMarker(normalized, []string{"review", "approve", "merge", "deploy", "ci", "build", "test", "pull request", "cherry-pick", "cherry pick", "preprod", "来 review", "没问题就 approve", "合并", "发版", "上线", "测一下", "看一下 pr", "看看 pr"}) &&
-		(containsAnyWorkflowMarker(normalized, []string{"github", "/pull/", "/issues/", " pr ", "pull request", "issue", "linear", "cue-"}) || len(urls) > 0) {
+	if containsAnyWorkflowMarker(normalized, appMentionWorkflowReviewKeywords()) &&
+		(containsAnyWorkflowMarker(normalized, appMentionWorkflowReviewTargetKeywords()) || len(urls) > 0) {
 		signals = append(signals, "review_or_delivery_request")
 	}
-	if containsAnyWorkflowMarker(normalized, []string{"task #", "任务", "开个 task", "建个 task", "linear", "cue-"}) &&
-		containsAnyWorkflowMarker(normalized, []string{"推进", "跟进", "review", "approve", "done", "close", "resolve", "处理", "确认"}) {
+	if containsAnyWorkflowMarker(normalized, appMentionWorkflowTaskKeywords()) &&
+		containsAnyWorkflowMarker(normalized, appMentionWorkflowTaskActionKeywords()) {
 		signals = append(signals, "task_workflow_request")
 	}
 	return compactUniqueStrings(signals)
+}
+
+func appMentionWorkflowReviewKeywords() []string {
+	return loadTriageKeywordListTemplate("app_mention_workflow_review_keywords", []string{
+		"review", "approve", "merge", "deploy", "ci", "build", "test", "pull request", "cherry-pick", "cherry pick", "preprod",
+		"来 review", "没问题就 approve", "合并", "发版", "上线", "测一下", "看一下 pr", "看看 pr",
+	})
+}
+
+func appMentionWorkflowReviewTargetKeywords() []string {
+	return loadTriageKeywordListTemplate("app_mention_workflow_review_target_keywords", []string{
+		"github", "/pull/", "/issues/", " pr ", "pull request", "issue", "linear", "cue-",
+	})
+}
+
+func appMentionWorkflowTaskKeywords() []string {
+	return loadTriageKeywordListTemplate("app_mention_workflow_task_keywords", []string{
+		"task #", "任务", "开个 task", "建个 task", "linear", "cue-",
+	})
+}
+
+func appMentionWorkflowTaskActionKeywords() []string {
+	return loadTriageKeywordListTemplate("app_mention_workflow_task_action_keywords", []string{
+		"推进", "跟进", "review", "approve", "done", "close", "resolve", "处理", "确认",
+	})
 }
 
 func containsAnyWorkflowMarker(text string, markers []string) bool {

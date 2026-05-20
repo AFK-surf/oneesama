@@ -71,10 +71,7 @@ func shouldSearchFreshAppMentionEvidence(mention *SlackAppMentionContext, relate
 	if text == "" {
 		text = strings.ToLower(strings.TrimSpace(mention.Transcript))
 	}
-	for _, marker := range []string{
-		"是什么", "是谁", "什么是", "查一下", "搜一下", "搜索", "了解一下", "怎么看",
-		"what is", "who is", "search", "look up", "tell me about",
-	} {
+	for _, marker := range appMentionFreshSearchKeywords() {
 		if strings.Contains(text, marker) {
 			return true
 		}
@@ -83,6 +80,13 @@ func shouldSearchFreshAppMentionEvidence(mention *SlackAppMentionContext, relate
 		return true
 	}
 	return false
+}
+
+func appMentionFreshSearchKeywords() []string {
+	return loadTriageKeywordListTemplate("app_mention_fresh_search_keywords", []string{
+		"是什么", "是谁", "什么是", "查一下", "搜一下", "搜索", "了解一下", "怎么看",
+		"what is", "who is", "search", "look up", "tell me about",
+	})
 }
 
 func appMentionFreshSearchQuery(mention *SlackAppMentionContext) string {
