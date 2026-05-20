@@ -738,22 +738,22 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 	contextItems := make([]persona.ContextItem, 0, 8)
 	if options.PiFirst {
 		if digest := strings.TrimSpace(options.Digest); digest != "" {
-			contextItems = append(contextItems, persona.ContextItem{Kind: "triage_digest", Text: truncateSlackContextText(digest, 4000)})
+			contextItems = append(contextItems, persona.ContextItem{Kind: "triage_digest", Text: truncateSlackContextText(digest, slackTriageDigestBudgetChars)})
 		}
 		if threadContext := formatSlackTriageThreadContexts(options.ThreadContexts); strings.TrimSpace(threadContext) != "" {
-			contextItems = append(contextItems, persona.ContextItem{Kind: "slack_thread_context", Text: truncateSlackContextText(threadContext, 6000)})
+			contextItems = append(contextItems, persona.ContextItem{Kind: "slack_thread_context", Text: truncateSlackContextText(threadContext, slackThreadContextBudgetChars)})
 		}
 		if len(options.ChannelContexts) > 0 {
 			contextItems = append(contextItems, persona.ContextItem{
 				Kind: "slack_channel_context",
-				Text: truncateSlackContextText(renderSlackTriageThreadTranscript(options.ChannelContexts), 4000),
+				Text: truncateSlackContextText(renderSlackTriageThreadTranscript(options.ChannelContexts), slackChannelContextBudgetChars),
 			})
 		}
 		if external := formatSlackExternalLinkContexts(options.ExternalLinks); strings.TrimSpace(external) != "" {
-			contextItems = append(contextItems, persona.ContextItem{Kind: "external_link_context", Text: truncateSlackContextText(external, 4000)})
+			contextItems = append(contextItems, persona.ContextItem{Kind: "external_link_context", Text: truncateSlackContextText(external, slackExternalLinkContextBudgetChars)})
 		}
 		if previous := strings.TrimSpace(options.PreviousTriage); previous != "" {
-			contextItems = append(contextItems, persona.ContextItem{Kind: "previous_triage_context", Text: truncateSlackContextText(previous, 3000)})
+			contextItems = append(contextItems, persona.ContextItem{Kind: "previous_triage_context", Text: truncateSlackContextText(previous, slackPreviousTriageContextBudgetChars)})
 		}
 	} else {
 		contextItems = append(contextItems,

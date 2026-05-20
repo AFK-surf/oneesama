@@ -107,7 +107,7 @@ func (s *slackContextStore) Remember(ctx context.Context, input AvatarCommandInp
 		LastUserID:      input.UserID,
 		LastUserName:    input.UserName,
 		LastAction:      recent.Action,
-		LastCommandText: truncateSlackContextText(recent.Text, 4000),
+		LastCommandText: truncateSlackContextText(recent.Text, slackContextLastCommandBudgetChars),
 		LastSessionID:   recent.SessionID,
 		LastMeetURL:     recent.MeetURL,
 		LastTask:        recent.Task,

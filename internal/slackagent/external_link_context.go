@@ -92,7 +92,7 @@ func fetchSlackExternalLinkContext(ctx context.Context, rawURL string) SlackExte
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		result.Error = fmt.Sprintf("reader returned HTTP %d", response.StatusCode)
-		result.Excerpt = truncateSlackContextText(normalizeExternalLinkText(string(body)), 500)
+		result.Excerpt = truncateSlackContextText(normalizeExternalLinkText(string(body)), slackExternalLinkExcerptBudgetChars)
 		return result
 	}
 	result.Title, result.Excerpt = summarizeExternalLinkReaderText(string(body))
@@ -131,7 +131,7 @@ func summarizeExternalLinkReaderText(raw string) (string, string) {
 		text = strings.TrimSpace(content)
 	}
 	text = stripExternalLinkBoilerplate(text)
-	return truncateSlackContextText(title, 240), truncateSlackContextText(text, 1200)
+	return truncateSlackContextText(title, slackExternalLinkTitleBudgetChars), truncateSlackContextText(text, slackExternalLinkTextBudgetChars)
 }
 
 func normalizeExternalLinkText(raw string) string {

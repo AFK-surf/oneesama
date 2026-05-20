@@ -44,8 +44,8 @@ func (s *Service) syncMemoryProvidersTurn(ctx context.Context, turn SlackMemoryP
 	if s == nil || s.memoryProviders == nil {
 		return
 	}
-	turn.UserContent = truncateSlackContextText(strings.TrimSpace(turn.UserContent), 4000)
-	turn.AssistantContent = truncateSlackContextText(strings.TrimSpace(turn.AssistantContent), 4000)
+	turn.UserContent = truncateSlackContextText(strings.TrimSpace(turn.UserContent), slackMemoryProviderTurnBudgetChars)
+	turn.AssistantContent = truncateSlackContextText(strings.TrimSpace(turn.AssistantContent), slackMemoryProviderTurnBudgetChars)
 	if turn.UserContent == "" && turn.AssistantContent == "" {
 		return
 	}
