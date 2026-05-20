@@ -149,11 +149,15 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
+		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
 		actions := slackPersonaForegroundActions(channelID, threadTS, result)
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
 		})
+		if len(policyToolCalls) > 0 {
+			toolCalls = append(toolCalls, policyToolCalls...)
+		}
 		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result)
 		if len(delegation.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, delegation.ToolCalls...)
@@ -175,11 +179,15 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
+		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
 		actions := slackPersonaForegroundActions(channelID, threadTS, result)
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreExistingBotReply,
 		})
+		if len(policyToolCalls) > 0 {
+			toolCalls = append(toolCalls, policyToolCalls...)
+		}
 		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result)
 		if len(delegation.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, delegation.ToolCalls...)
@@ -204,6 +212,127 @@ type personaDelegatedWorkerStartResult struct {
 	Errors    []string
 	ToolCalls []SlackTriageToolCall
 	Failures  int
+}
+
+func (s *Service) applyPersonaSecretaryDelegationPolicy(result SlackPersonaShadowResult) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionDelegateWorker || len(result.workerRecords) == 0 {
+		return result, nil
+	}
+	allowed := make([]persona.WorkerRequest, 0, len(result.workerRecords))
+	toolCalls := make([]SlackTriageToolCall, 0)
+	for _, request := range result.workerRecords {
+		ok, reason := personaDelegatedWorkerAllowedBySecretaryPolicy(request)
+		if ok {
+			allowed = append(allowed, request)
+			continue
+		}
+		toolCalls = append(toolCalls, SlackTriageToolCall{
+			Tool:    "agent_runner",
+			Action:  "delegate_worker_blocked_scope",
+			Args:    marshalTriageArgs(firstNonEmpty(strings.TrimSpace(request.Kind), "worker"), strings.TrimSpace(request.ID), false),
+			Success: true,
+			Brief:   "Persona delegate_worker blocked by secretary routing policy",
+			Result:  reason,
+		})
+	}
+	if len(toolCalls) == 0 {
+		return result, nil
+	}
+	result.workerRecords = allowed
+	result.WorkerRequests = personaWorkerRequestSummaries(allowed)
+	if len(allowed) == 0 && strings.TrimSpace(result.VisibleText) == "" {
+		result.Decision = persona.DecisionReply
+		result.VisibleText = slackPersonaSecretaryRoutingText()
+		result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "delegate_worker blocked by secretary routing policy"))
+		if result.Confidence < 0.7 {
+			result.Confidence = 0.7
+		}
+	}
+	return result, toolCalls
+}
+
+func personaDelegatedWorkerAllowedBySecretaryPolicy(request persona.WorkerRequest) (bool, string) {
+	scope := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		stringFromAny(request.Context["delegation_scope"]),
+		stringFromAny(request.Context["scope"]),
+		stringFromAny(request.Context["worker_scope"]),
+	)))
+	switch scope {
+	case "oneesama_system", "oneesama_code", "secretary_lookup", "workspace_memory", "explicit_human_authorized_code":
+		return true, ""
+	case "external_project_code", "project_code", "project_debugging", "secretary_route":
+		return false, fmt.Sprintf("delegation_scope %q is outside Oneesama secretary worker scope", scope)
+	}
+
+	text := strings.TrimSpace(strings.Join([]string{
+		request.Kind,
+		request.Prompt,
+		personaWorkerRequestContextText(request.Context),
+	}, "\n"))
+	if personaDelegatedWorkerLooksLikeProjectDebugging(text) && !personaDelegatedWorkerMentionsOneesamaSystem(text) && !personaDelegatedWorkerExplicitlyAuthorized(text) {
+		return false, "external project debugging should be secretary-routed instead of delegated to Codex"
+	}
+	return true, ""
+}
+
+func personaWorkerRequestContextText(contextMap map[string]any) string {
+	if len(contextMap) == 0 {
+		return ""
+	}
+	payload, err := json.Marshal(contextMap)
+	if err != nil {
+		return fmt.Sprint(contextMap)
+	}
+	return string(payload)
+}
+
+func personaDelegatedWorkerLooksLikeProjectDebugging(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	markers := []string{
+		"staging", "production", "deploy", "deployment", "infra", "infrastructure",
+		"database", "api latency", "latency", "performance", "perf", "slow", "timeout",
+		"build failure", "test failure", "regression", "incident", "debug", "fix bug", "bug",
+		"repository", "repo", "codebase", "source code", "recent deployments",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func personaDelegatedWorkerMentionsOneesamaSystem(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	markers := []string{
+		"oneesama", "onee sama", "onee-sama", "slack agent", "slack-agent", "meeting agent",
+		"meeting-agent", "meet-runner", "agentrunner", "persona foreground", "pi foreground",
+		"workspace triage", "triage policy", "daily report", "custom emoji", "memory provider",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func personaDelegatedWorkerExplicitlyAuthorized(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.Contains(lower, "explicit_human_authorized_code") ||
+		strings.Contains(lower, "explicitly human-authorized") ||
+		strings.Contains(lower, "human explicitly asked") ||
+		strings.Contains(lower, "peng explicitly asked")
+}
+
+func slackPersonaSecretaryRoutingText() string {
+	return "这看起来是具体项目代码/环境问题，我先不直接下场查 repo。更适合走项目 owner 处理；我可以帮忙把现象、链接和影响面整理成 brief，或者在你明确授权我查 Oneesama 自身/指定代码时再派 worker。"
 }
 
 func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspaceID string, runID int64, result SlackPersonaShadowResult) personaDelegatedWorkerStartResult {
@@ -341,6 +470,7 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	memoryWritePersistence := s.persistPersonaForegroundMemoryWrites(ctx, result)
 	delegateWorkerJobsStarted := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker")
 	delegateWorkerFailures := countMatchingFailedTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker")
+	delegateWorkerScopeBlocks := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker_blocked_scope")
 	if !result.Success {
 		patch.Status = "failed"
 		patch.Error = firstNonEmpty(result.Error, "persona_runtime_failed")
@@ -360,6 +490,7 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		"persona_foreground_action_count": len(actions),
 		"delegate_worker_jobs_started":    delegateWorkerJobsStarted,
 		"delegate_worker_failures":        delegateWorkerFailures,
+		"delegate_worker_scope_blocks":    delegateWorkerScopeBlocks,
 		"persona_memory_write_files":      memoryWritePersistence.Files,
 		"persona_memory_write_errors":     memoryWritePersistence.Errors,
 		"persona_memory_write_redactions": memoryWritePersistence.Redactions,
@@ -568,10 +699,15 @@ func BuildSlackTriagePersonaRequestWithOptions(channelID string, threadTS string
 			Text: customEmoji,
 		})
 	}
+	contextItems = append(contextItems, persona.ContextItem{
+		Kind: "delegation_scope_policy",
+		Text: "Oneesama is a workspace secretary, not the default code investigator for every project. delegate_worker is allowed for bounded secretary work (workspace Memory lookup/synthesis, file/thread retrieval, Canvas/memo preparation), Oneesama's own runtime/code, or explicit human-authorized code work. For external staging/prod/deploy/infra/database/API latency/CI/performance/debug/code investigations, reply with routing/owner handoff or stay_silent instead of delegating.",
+	})
 	metadata := map[string]any{
-		"decision_parse_ok": decision.ParseOK,
-		"actions":           len(decision.Actions),
-		"foreground_chain":  mapBool(options.PiFirst, slackTriageForegroundChainPiFirstLive, slackTriageForegroundChainCodexThenPi),
+		"decision_parse_ok":       decision.ParseOK,
+		"actions":                 len(decision.Actions),
+		"foreground_chain":        mapBool(options.PiFirst, slackTriageForegroundChainPiFirstLive, slackTriageForegroundChainCodexThenPi),
+		"delegation_scope_policy": "secretary_routing",
 	}
 	if options.IgnoreExistingBotReply {
 		contextItems = append(contextItems, persona.ContextItem{

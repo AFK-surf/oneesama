@@ -807,6 +807,9 @@ func TestSlackTriagePiFirstLiveDelegatesWorkerAfterPiDecision(t *testing.T) {
 			ID:     "inspect-repo",
 			Kind:   "codex",
 			Prompt: "Inspect the linked repository and summarize whether it overlaps with our product.",
+			Context: map[string]any{
+				"delegation_scope": "secretary_lookup",
+			},
 		}},
 		Confidence: 0.41,
 		ShadowOnly: false,
@@ -862,6 +865,83 @@ func TestSlackTriagePiFirstLiveDelegatesWorkerAfterPiDecision(t *testing.T) {
 	}
 	if got := len(poster.Calls()); got != 0 {
 		t.Fatalf("poster calls = %d, want worker to answer asynchronously later", got)
+	}
+}
+
+func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T) {
+	ctx := context.Background()
+	workspaceDir := t.TempDir()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:  persona.ProviderPi,
+		Decision: persona.DecisionDelegateWorker,
+		Reason:   "needs staging investigation",
+		WorkerRequests: []persona.WorkerRequest{{
+			ID:     "investigate-staging",
+			Kind:   "codex",
+			Prompt: "Investigate staging environment: check recent deployments, database query performance, and API latency for conversation loading.",
+		}},
+		Confidence: 0.38,
+		ShadowOnly: false,
+	}}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_should_not_start",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Triage:       appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_PENG",
+		Text:           "staging conversations loading is very slow, about 30s",
+		TS:             "222.000",
+	}}, "#meeting-avatar: staging conversations loading is very slow, about 30s")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	poster.WaitForCalls(t, 1)
+	if runner.startCount != 0 {
+		t.Fatalf("runner.startCount = %d, want no project-code worker", runner.startCount)
+	}
+	calls := poster.Calls()
+	if len(calls) != 1 || !strings.Contains(calls[0].Text, "项目 owner") || !strings.Contains(calls[0].Text, "不直接下场查 repo") {
+		t.Fatalf("poster calls = %#v, want secretary routing reply", calls)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if updated.Metadata["pi_first_decision"] != persona.DecisionReply {
+		t.Fatalf("metadata = %#v, want downgraded reply decision", updated.Metadata)
+	}
+	if intFromAny(updated.Metadata["delegate_worker_jobs_started"]) != 0 || intFromAny(updated.Metadata["delegate_worker_scope_blocks"]) != 1 {
+		t.Fatalf("metadata = %#v, want no worker jobs and one scope block", updated.Metadata)
+	}
+	var sawBlock bool
+	for _, call := range updated.ToolCalls {
+		if call.Tool == "agent_runner" && call.Action == "delegate_worker_blocked_scope" && call.Success {
+			sawBlock = true
+		}
+	}
+	if !sawBlock {
+		t.Fatalf("tool calls = %#v, want delegate_worker_blocked_scope", updated.ToolCalls)
 	}
 }
 
