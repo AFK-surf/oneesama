@@ -226,6 +226,17 @@ func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context
 				})
 				continue
 			}
+			if s.slackTriageShouldSkipUnknownWorkspaceCustomEmoji(emoji) {
+				calls = append(calls, SlackTriageToolCall{
+					Tool:    "slack_api",
+					Action:  "add_reaction",
+					Args:    marshalTriageArgs("reactions.add", reactionTS, true),
+					Success: true,
+					Brief:   "skipped unknown workspace custom emoji :" + emoji + ":",
+					Result:  "unknown_workspace_custom_emoji",
+				})
+				continue
+			}
 			var result SlackReactionResult
 			if s == nil || s.reactions == nil {
 				result = SlackReactionResult{Method: "reactions.add", Error: "missing_reaction_client"}
@@ -278,6 +289,45 @@ func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context
 		calls = append(calls, call)
 	}
 	return calls, failures, mutations
+}
+
+func (s *Service) slackTriageShouldSkipUnknownWorkspaceCustomEmoji(emoji string) bool {
+	emoji = normalizeSlackReactionName(emoji)
+	if s == nil || emoji == "" {
+		return false
+	}
+	customEmoji := normalizeWorkspaceCustomEmojiNames(s.workspaceCustomEmojiSnapshot())
+	if len(customEmoji) == 0 || stringSliceContains(customEmoji, emoji) {
+		return false
+	}
+	return slackReactionLooksLikeWorkspaceCustomEmoji(emoji, customEmoji)
+}
+
+func slackReactionLooksLikeWorkspaceCustomEmoji(emoji string, customEmoji []string) bool {
+	emoji = strings.ToLower(normalizeSlackReactionName(emoji))
+	if emoji == "" {
+		return false
+	}
+	if strings.Contains(emoji, "_bridge") || strings.HasPrefix(emoji, "bridge_") {
+		return true
+	}
+	for _, custom := range customEmoji {
+		custom = strings.ToLower(normalizeSlackReactionName(custom))
+		if custom == "" {
+			continue
+		}
+		for _, suffix := range []string{"_bridge", "_oneesama", "_slock", "_cueboard"} {
+			if strings.HasSuffix(custom, suffix) && strings.HasSuffix(emoji, suffix) {
+				return true
+			}
+		}
+		for _, prefix := range []string{"oneesama_", "slock_", "cueboard_"} {
+			if strings.HasPrefix(custom, prefix) && strings.HasPrefix(emoji, prefix) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func countSlackTriageDirectActions(actions []SlackTriageDecisionAction) int {
