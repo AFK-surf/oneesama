@@ -32,7 +32,10 @@ persona_provider="$(jq -r '.persona_runtime.provider // ""' <"${tmpdir}/slack-st
 persona_mode="$(jq -r '.persona_runtime.mode // ""' <"${tmpdir}/slack-status.json")"
 persona_shadow_only="$(jq -r '.persona_runtime.shadow_only // false' <"${tmpdir}/slack-status.json")"
 persona_base_url="$(jq -r '.persona_runtime.base_url // ""' <"${tmpdir}/slack-status.json")"
-if [[ "${persona_provider}" == "legacy" || "${persona_mode}" == "shadow" || "${persona_shadow_only}" == "true" ]]; then
+if [[ "${persona_provider}" == "oneesama-pi" ]]; then
+  echo "oneesama-monitor: checking Oneesama Pi runtime via slack status"
+  jq -e '.persona_runtime.ready == true and .persona_runtime.healthy == true and .persona_runtime.shadow_only == false' <"${tmpdir}/slack-status.json" >/dev/null
+elif [[ "${persona_provider}" == "legacy" || "${persona_mode}" == "shadow" || "${persona_shadow_only}" == "true" ]]; then
   echo "oneesama-monitor: persona foreground disabled provider=${persona_provider:-unknown} mode=${persona_mode:-unknown}; skipping sidecar check"
 else
   persona_url="${ONEESAMA_MONITOR_PERSONA_URL:-${persona_base_url:-http://127.0.0.1:8799}}"
