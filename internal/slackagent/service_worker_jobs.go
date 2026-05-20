@@ -344,9 +344,12 @@ func slackRefForWorkerJob(job agentrunner.Job) (AssistantThreadRef, bool) {
 
 func slackWorkerResultText(job agentrunner.Job) string {
 	var text string
-	if job.Status == agentrunner.StatusCompleted {
+	switch job.Status {
+	case agentrunner.StatusCompleted:
 		text = firstNonEmpty(strings.TrimSpace(job.Result), "我这边处理完了。")
-	} else {
+	case agentrunner.StatusTimeout:
+		return slackWorkerJobTimeoutText
+	default:
 		text = "我这边处理失败了：" + firstNonEmpty(strings.TrimSpace(job.Error), strings.TrimSpace(job.Result), "unknown error")
 	}
 	if safe, replaced := failClosedSlackWorkerVisibleText(text); replaced {
@@ -356,6 +359,8 @@ func slackWorkerResultText(job agentrunner.Job) string {
 }
 
 const slackWorkerInternalToolFailureText = "我这次没能安全拿到需要的工具结果，先不强答。可以再 @ 我让我重试，或者等工具桥接恢复后再处理。"
+
+const slackWorkerJobTimeoutText = "这个调查任务超时了，我先记下来不强答。可以再 @ 我让我重试，或者把问题再缩小一点（比如指明具体接口/时间段）再交给我。"
 
 func failClosedSlackWorkerVisibleText(text string) (string, bool) {
 	trimmed := strings.TrimSpace(text)

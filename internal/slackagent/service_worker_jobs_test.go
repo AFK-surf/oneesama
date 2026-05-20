@@ -84,6 +84,24 @@ func TestSlackWorkerResultTextKeepsNormalWorkerAnswer(t *testing.T) {
 	}
 }
 
+func TestSlackWorkerResultTextFailClosesOnJobTimeout(t *testing.T) {
+	job := agentrunner.Job{
+		Status: agentrunner.StatusTimeout,
+		Error:  "job timed out",
+		Result: "partial: started inspecting staging deploy logs...",
+	}
+
+	got := slackWorkerResultText(job)
+	for _, forbidden := range []string{"job timed out", "partial", "staging deploy logs"} {
+		if strings.Contains(strings.ToLower(got), strings.ToLower(forbidden)) {
+			t.Fatalf("slackWorkerResultText() leaked %q in timeout reply %q", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "超时") || !strings.Contains(got, "重试") {
+		t.Fatalf("slackWorkerResultText() = %q, want user-safe timeout wording", got)
+	}
+}
+
 func TestSlackWorkerToolRequestStartsContinuationWithDispatcherEvidence(t *testing.T) {
 	workspaceDir := t.TempDir()
 	writeRelatedMemoryFile(t, workspaceDir, "memory/team/bridge-tools.md", strings.Join([]string{
