@@ -301,6 +301,7 @@ func (s *Service) RunDailyReport(ctx context.Context, request SlackDailyReportRu
 	})
 	response.Post = &post
 	if !post.OK {
+		s.recordDailyReportPost(timeNow().UTC(), channelID, fmt.Errorf("post daily report: %s", firstNonEmpty(post.Error, post.Detail, "slack_post_failed")))
 		return response, fmt.Errorf("post daily report: %s", firstNonEmpty(post.Error, post.Detail, "slack_post_failed"))
 	}
 	record := SlackDailyReportRecord{
@@ -316,6 +317,7 @@ func (s *Service) RunDailyReport(ctx context.Context, request SlackDailyReportRu
 	if err := s.dailyReports.Set(ctx, record); err != nil {
 		return response, err
 	}
+	s.recordDailyReportPost(timeNow().UTC(), channelID, nil)
 	response.Record = &record
 	return response, nil
 }
@@ -742,6 +744,24 @@ func (s *Service) recordDailyReportTick(now time.Time, channel string, err error
 		}
 	}
 	s.dailyReportTicks = kept
+}
+
+func (s *Service) recordDailyReportPost(now time.Time, channel string, err error) {
+	if s == nil {
+		return
+	}
+	if now.IsZero() {
+		now = timeNow().UTC()
+	}
+	s.dailyReportMu.Lock()
+	defer s.dailyReportMu.Unlock()
+	s.dailyReportLastChannel = strings.TrimSpace(channel)
+	if err != nil {
+		s.dailyReportLastError = err.Error()
+		return
+	}
+	s.dailyReportLastError = ""
+	s.dailyReportLastPostedAt = now.UTC()
 }
 
 func nextSlackDailyReportRun(now time.Time, cfg appconfig.SlackDailyReportConfig) (time.Time, error) {
