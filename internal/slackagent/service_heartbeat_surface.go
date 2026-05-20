@@ -384,10 +384,6 @@ func (s *Service) heartbeatThreadHasNewerActivity(ctx context.Context, followup 
 	if s == nil || s.cognition == nil || followup == nil {
 		return false
 	}
-	ledger, err := s.cognition.GetThreadLedger(ctx, "workspace", followup.ChannelID, followup.ThreadTS)
-	if err != nil || ledger == nil {
-		return false
-	}
 	reference := parseHeartbeatTime(followup.UpdatedAt)
 	if reference == nil {
 		reference = parseHeartbeatTime(followup.CreatedAt)
@@ -399,6 +395,13 @@ func (s *Service) heartbeatThreadHasNewerActivity(ctx context.Context, followup 
 		return false
 	}
 	cutoff := reference.UTC().Add(2 * time.Minute)
+	if s.cognition.ThreadHasActivityAfter(ctx, followup.ChannelID, followup.ThreadTS, cutoff) {
+		return true
+	}
+	ledger, err := s.cognition.GetThreadLedger(ctx, "workspace", followup.ChannelID, followup.ThreadTS)
+	if err != nil || ledger == nil {
+		return false
+	}
 	if lastUser := parseHeartbeatTime(ledger.LastUserMessageAt); lastUser != nil && lastUser.After(cutoff) {
 		return true
 	}

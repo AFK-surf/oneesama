@@ -59,8 +59,8 @@ func TestHandleTriageRunDoesNotInventFallbackActionCards(t *testing.T) {
 	if status.Code != http.StatusOK {
 		t.Fatalf("status route = %d, want 200: %s", status.Code, status.Body.String())
 	}
-	if strings.Contains(status.Body.String(), `"pendingActions"`) || !strings.Contains(status.Body.String(), `"channelBrains"`) {
-		t.Fatalf("status body = %s, want no pending actions and channel brain", status.Body.String())
+	if strings.Contains(status.Body.String(), `"pendingActions"`) {
+		t.Fatalf("status body = %s, want no invented pending actions", status.Body.String())
 	}
 }
 
@@ -1096,5 +1096,50 @@ func TestChannelBrainBuildsFactsAndOpenLoops(t *testing.T) {
 	}
 	if !strings.Contains(summary, "Shared facts and conventions:") || !strings.Contains(summary, "use Codex for runner") {
 		t.Fatalf("summary = %q, want facts", summary)
+	}
+}
+
+func TestChannelBrainSkipsNoActionPolicyRationales(t *testing.T) {
+	summary := buildChannelBrainSummary([]SlackThreadLedgerRecord{
+		{
+			ThreadTS:         "111.222",
+			Status:           "active",
+			LastActionType:   "triage",
+			LastActionStatus: "no_action",
+			Summary:          "Railway GCP 账户被封锁的云平台运维公告，非 workspace policy 覆盖的 AI agent/coding tool/lab 话题。纯链接分享无评论，不触发回复。",
+			UpdatedAt:        "2026-05-20T01:00:00Z",
+		},
+		{
+			ThreadTS:         "333.444",
+			Status:           "active",
+			LastActionType:   "triage",
+			LastActionStatus: "confirmed",
+			Summary:          "Decision: product-adjacent link replies should cite workspace memory.",
+			UpdatedAt:        "2026-05-20T01:01:00Z",
+		},
+	})
+	if strings.Contains(summary, "Railway") || strings.Contains(summary, "不触发回复") || strings.Contains(summary, "纯链接") {
+		t.Fatalf("summary retained no-action rationale:\n%s", summary)
+	}
+	if !strings.Contains(summary, "product-adjacent link replies") {
+		t.Fatalf("summary missing durable decision:\n%s", summary)
+	}
+}
+
+func TestChannelBrainSanitizesStoredNoActionRationaleLines(t *testing.T) {
+	raw := strings.Join([]string{
+		"Shared facts and conventions:",
+		"- Railway GCP 账户被封锁的云平台运维公告，非 workspace policy 覆盖。纯链接分享无评论，不触发回复。",
+		"- Decision: product-adjacent link replies should cite workspace memory.",
+		"",
+		"Shared open loops:",
+		"- Durov link 非 workspace policy，纯链接分享无评论，不触发回复。",
+	}, "\n")
+	summary := sanitizeChannelBrainSummary(raw)
+	if strings.Contains(summary, "Railway") || strings.Contains(summary, "Durov") || strings.Contains(summary, "不触发回复") {
+		t.Fatalf("summary retained stale no-action rationale:\n%s", summary)
+	}
+	if !strings.Contains(summary, "product-adjacent link replies") {
+		t.Fatalf("summary missing valid content:\n%s", summary)
 	}
 }

@@ -179,10 +179,14 @@ func (s *slackCognitionStore) UpsertChannelBrainSummary(ctx context.Context, wor
 		return nil, nil
 	}
 	summary = strings.TrimSpace(summary)
+	summary = sanitizeChannelBrainSummary(summary)
 	id := channelBrainID(workspaceID, channelID)
 	previous, ok, err := s.brains.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("load channel brain: %w", err)
+	}
+	if !ok && summary == "" {
+		return nil, nil
 	}
 	now := nowRFC3339()
 	record := previous
@@ -209,6 +213,7 @@ func (s *slackCognitionStore) GetChannelBrain(ctx context.Context, workspaceID s
 	if err != nil || !ok {
 		return nil, err
 	}
+	record.Summary = sanitizeChannelBrainSummary(record.Summary)
 	return &record, nil
 }
 
@@ -219,6 +224,9 @@ func (s *slackCognitionStore) ListChannelBrains(ctx context.Context, limit int) 
 	brains, err := s.brains.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list channel brains: %w", err)
+	}
+	for index := range brains {
+		brains[index].Summary = sanitizeChannelBrainSummary(brains[index].Summary)
 	}
 	sort.SliceStable(brains, func(i, j int) bool { return brains[i].UpdatedAt > brains[j].UpdatedAt })
 	if limit > 0 && len(brains) > limit {
@@ -233,17 +241,40 @@ func (s *slackCognitionStore) RebuildChannelBrainSummary(ctx context.Context, wo
 		return err
 	}
 	summary := buildChannelBrainSummary(records)
-	if summary == "" {
-		return nil
-	}
 	brain, err := s.UpsertChannelBrainSummary(ctx, workspaceID, channelID, summary)
-	if err != nil || brain == nil || len(records) == 0 {
+	if err != nil || brain == nil || len(records) == 0 || summary == "" {
 		return err
 	}
 	brain.LastThreadTS = records[0].ThreadTS
 	brain.LastSessionID = records[0].AssistantSessionID
 	brain.UpdatedAt = firstNonEmpty(brain.UpdatedAt, nowRFC3339())
 	return s.brains.Set(ctx, brain.ID, *brain)
+}
+
+func (s *slackCognitionStore) ThreadHasActivityAfter(ctx context.Context, channelID string, threadTS string, cutoff time.Time) bool {
+	if s == nil || s.ledgers == nil || channelID == "" || threadTS == "" || cutoff.IsZero() {
+		return false
+	}
+	records, err := s.ledgers.List(ctx)
+	if err != nil {
+		return false
+	}
+	for _, record := range records {
+		if record.ChannelID != channelID || record.ThreadTS != threadTS {
+			continue
+		}
+		if threadLedgerTimeAfter(record.LastUserMessageAt, cutoff) ||
+			threadLedgerTimeAfter(record.LastAssistantMessageAt, cutoff) ||
+			threadLedgerTimeAfter(record.UpdatedAt, cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
+func threadLedgerTimeAfter(value string, cutoff time.Time) bool {
+	parsed := parseOptionalTime(value)
+	return parsed != nil && parsed.After(cutoff.UTC())
 }
 
 func (s *slackCognitionStore) ListRecentThreadLedgers(ctx context.Context, workspaceID string, channelID string, limit int) ([]SlackThreadLedgerRecord, error) {

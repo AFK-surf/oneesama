@@ -144,6 +144,23 @@ func (s *Service) maybeRecordTriageEmptyFinalFollowup(ctx context.Context, works
 	}
 }
 
+func (s *Service) resolveTriageRetryFollowups(ctx context.Context, channelID string, threadTS string, resolution string) {
+	if s == nil || s.followups == nil {
+		return
+	}
+	channelID = strings.TrimSpace(channelID)
+	threadTS = strings.TrimSpace(threadTS)
+	if channelID == "" || threadTS == "" || threadTS == "channel-root" {
+		return
+	}
+	for _, kind := range []string{slackTriageTimeoutFollowupKind, slackTriageEmptyFinalFollowupKind} {
+		sourceRef := fmt.Sprintf("%s:%s:%s", kind, channelID, threadTS)
+		if _, err := s.followups.ResolveFollowupBySourceRef(ctx, sourceRef, "done", resolution); err != nil {
+			s.logger.Warn("slack triage retry followup resolve failed", "source_ref", sourceRef, "error", err)
+		}
+	}
+}
+
 func slackTriageJobEmptyFinal(job agentrunner.Job) bool {
 	text := strings.ToLower(strings.Join([]string{job.Error, job.Result, job.Debug}, "\n"))
 	return strings.Contains(text, "empty final response with no mutations")

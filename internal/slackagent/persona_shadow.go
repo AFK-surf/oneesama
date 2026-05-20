@@ -382,10 +382,8 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		if err := s.cognition.RecordTriageSummary(ctx, workspaceID, result.ChannelID, result.ThreadTS, patch.SessionID, summary, outcome); err != nil {
 			s.logger.Warn("slack thread ledger persona foreground summary record failed", "error", err)
 		}
-		if result.Success && summary != "" {
-			if _, err := s.cognition.UpsertChannelBrainSummary(ctx, workspaceID, result.ChannelID, summary); err != nil {
-				s.logger.Warn("slack channel brain persona foreground summary update failed", "error", err)
-			}
+		if result.Success {
+			s.resolveTriageRetryFollowups(ctx, result.ChannelID, result.ThreadTS, "superseded_by_successful_persona_foreground")
 		}
 	}
 	return nil

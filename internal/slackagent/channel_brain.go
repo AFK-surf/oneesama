@@ -93,6 +93,9 @@ func extractChannelBrainNotes(record SlackThreadLedgerRecord) []channelBrainNote
 	if strings.EqualFold(record.Status, "awaiting_confirmation") || strings.EqualFold(record.LastActionStatus, "pending") {
 		return nil
 	}
+	if channelBrainLooksLikeNoActionRationale(record, rawSummary) {
+		return nil
+	}
 	if notes := extractStructuredChannelBrainNotes(record, rawSummary); len(notes) > 0 {
 		return notes
 	}
@@ -109,6 +112,79 @@ func extractChannelBrainNotes(record SlackThreadLedgerRecord) []channelBrainNote
 		Text:      truncateSlackContextText(summary, channelBrainNoteMaxLen),
 		UpdatedAt: latestThreadLedgerActivityTime(record),
 	}}
+}
+
+func channelBrainLooksLikeNoActionRationale(record SlackThreadLedgerRecord, summary string) bool {
+	actionStatus := strings.ToLower(strings.TrimSpace(record.LastActionStatus))
+	if actionStatus != "no_action" && actionStatus != "observed" {
+		return false
+	}
+	return channelBrainTextLooksLikeNoActionRationale(summary)
+}
+
+func channelBrainTextLooksLikeNoActionRationale(summary string) bool {
+	lower := strings.ToLower(normalizeChannelBrainSummary(summary))
+	for _, phrase := range []string{
+		"no action",
+		"stay_silent",
+		"pure link",
+		"outside workspace policy",
+		"not covered by workspace policy",
+		"非 workspace policy",
+		"不触发回复",
+		"不需要回复",
+		"无需回复",
+		"暂不回复",
+		"纯链接",
+		"无评论",
+		"无协调需求",
+		"无 @",
+		"无@",
+		"无会议链接",
+	} {
+		if strings.Contains(lower, phrase) || strings.Contains(summary, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeChannelBrainSummary(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return ""
+	}
+	lines := strings.Split(summary, "\n")
+	filtered := make([]string, 0, len(lines))
+	contentLines := 0
+	previousBlank := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		text := strings.TrimSpace(strings.TrimLeft(trimmed, "-*• \t"))
+		if text != "" && channelBrainTextLooksLikeNoActionRationale(text) {
+			continue
+		}
+		if text != "" && !strings.HasSuffix(text, ":") {
+			contentLines++
+		}
+		if trimmed == "" {
+			if previousBlank || len(filtered) == 0 {
+				continue
+			}
+			previousBlank = true
+			filtered = append(filtered, "")
+			continue
+		}
+		previousBlank = false
+		filtered = append(filtered, line)
+	}
+	if contentLines == 0 {
+		return ""
+	}
+	for len(filtered) > 0 && strings.TrimSpace(filtered[len(filtered)-1]) == "" {
+		filtered = filtered[:len(filtered)-1]
+	}
+	return strings.TrimSpace(strings.Join(filtered, "\n"))
 }
 
 func extractStructuredChannelBrainNotes(record SlackThreadLedgerRecord, summary string) []channelBrainNote {

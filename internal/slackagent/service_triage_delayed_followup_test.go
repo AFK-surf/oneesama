@@ -131,6 +131,56 @@ func TestSlackTriageDoesNotRecordDelayedNoReplyForLowSignalChatter(t *testing.T)
 	}
 }
 
+func TestSuccessfulTriageResolvesObsoleteRetryFollowups(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_retry_resolved",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"这条已经有人回复并闭环，无需继续补看。","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{Triage: appconfig.SlackTriageConfig{HeuristicFallback: true}},
+		Runner:      runner,
+	})
+	ctx := context.Background()
+	record, err := service.followups.CreateFollowup(ctx, SlackHeartbeatFollowup{
+		Kind:       slackTriageTimeoutFollowupKind,
+		Title:      "补看这条长讨论",
+		Summary:    "这条讨论上下文很长，上一轮没有完整判断；如果线程没有继续推进，我会补一次轻量判断。",
+		SourceKind: heartbeatSourceKindThread,
+		ChannelID:  "C123",
+		ThreadTS:   "1779090000.000001",
+		SourceRef:  "triage_timeout_retry:C123:1779090000.000001",
+		Status:     "open",
+		Priority:   heartbeatFollowupPriorityNormal,
+	})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+
+	started, err := service.StartSlackTriage(ctx, "C123", []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "这个问题已经回过了",
+		TS:        "1779090000.000001",
+	}}, "#meeting-avatar: 这个问题已经回过了")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	if started.Finalization == nil || started.Finalization.Run == nil {
+		t.Fatalf("started = %#v, want finalized triage run", started)
+	}
+	updated, err := service.followups.GetFollowup(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("GetFollowup: %v", err)
+	}
+	if updated == nil || updated.Status != "done" || updated.Metadata["resolution"] != "superseded_by_successful_triage" {
+		t.Fatalf("updated = %#v, want obsolete retry resolved", updated)
+	}
+}
+
 func TestSlackTriageRecordsTimeoutRetryFollowupForTimedOutJob(t *testing.T) {
 	now := time.Date(2026, 5, 18, 16, 0, 0, 0, time.UTC)
 	previousClock := timeNow

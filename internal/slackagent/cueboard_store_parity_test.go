@@ -279,6 +279,24 @@ func TestCueboardParityStoreThreadLedgerAndChannelBrainLifecycle(t *testing.T) {
 	}
 }
 
+func TestCueboardParityChannelBrainClearsStaleNoActionRationale(t *testing.T) {
+	ctx := context.Background()
+	store := newSlackCognitionStore(appconfig.PersistenceConfig{Provider: "memory"}, cueboardParityDiscardLogger())
+	if _, err := store.UpsertChannelBrainSummary(ctx, "W1", "C1", "Shared facts and conventions:\n- stale pure-link policy rationale"); err != nil {
+		t.Fatalf("seed channel brain: %v", err)
+	}
+	if err := store.RecordTriageSummary(ctx, "W1", "C1", "123.456", "triage:1", "纯链接分享无评论，不触发回复。", "no_action"); err != nil {
+		t.Fatalf("RecordTriageSummary: %v", err)
+	}
+	brain, err := store.GetChannelBrain(ctx, "W1", "C1")
+	if err != nil {
+		t.Fatalf("GetChannelBrain: %v", err)
+	}
+	if brain == nil || strings.TrimSpace(brain.Summary) != "" {
+		t.Fatalf("brain summary = %#v, want stale no-action rationale cleared", brain)
+	}
+}
+
 func TestCueboardParityStoreChannelBrainSummaryExtractsFactsAndOpenLoops(t *testing.T) {
 	lastUserAt := time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
 	lastAssistantAt := time.Date(2026, 3, 19, 9, 3, 0, 0, time.UTC).Format(time.RFC3339Nano)

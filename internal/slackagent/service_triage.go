@@ -1329,9 +1329,9 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		if err := s.cognition.RecordTriageSummary(ctx, workspaceID, channelID, threadTS, runPatch.SessionID, decision.Summary, slackTriageLedgerOutcome(ok, mutations, failures)); err != nil {
 			s.logger.Warn("slack thread ledger triage summary record failed", "error", err)
 		}
-		if _, err := s.cognition.UpsertChannelBrainSummary(ctx, workspaceID, channelID, decision.Summary); err != nil {
-			s.logger.Warn("slack channel brain summary update failed", "error", err)
-		}
+	}
+	if ok && !probe {
+		s.resolveTriageRetryFollowups(ctx, channelID, threadTS, "superseded_by_successful_triage")
 	}
 	if ok && !probe && !personaForegroundQueued && len(actions) == 0 {
 		s.maybeRecordDelayedNoReplyFollowup(ctx, workspaceID, channelID, threadTS, updatedRun, decision, messages)
