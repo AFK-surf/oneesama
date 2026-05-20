@@ -272,6 +272,25 @@ func (s *slackCognitionStore) ThreadHasActivityAfter(ctx context.Context, channe
 	return false
 }
 
+func (s *slackCognitionStore) ThreadHasAssistantActivityAfter(ctx context.Context, channelID string, threadTS string, cutoff time.Time) bool {
+	if s == nil || s.ledgers == nil || channelID == "" || threadTS == "" || cutoff.IsZero() {
+		return false
+	}
+	records, err := s.ledgers.List(ctx)
+	if err != nil {
+		return false
+	}
+	for _, record := range records {
+		if record.ChannelID != channelID || record.ThreadTS != threadTS {
+			continue
+		}
+		if threadLedgerTimeAfter(record.LastAssistantMessageAt, cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
 func threadLedgerTimeAfter(value string, cutoff time.Time) bool {
 	parsed := parseOptionalTime(value)
 	return parsed != nil && parsed.After(cutoff.UTC())

@@ -303,6 +303,50 @@ func TestScannerSweepSkipsMentionAlreadyHandledBeforeRestart(t *testing.T) {
 	}
 }
 
+func TestScannerSweepSkipsMentionWhenAssistantAlreadyAnsweredThread(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_scanner_duplicate_join",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotUserID: "UBOT",
+			EventBuffer: appconfig.SlackEventBufferConfig{
+				Enabled:  true,
+				MaxBatch: 10,
+				Debounce: time.Minute,
+			},
+		},
+		Runner: runner,
+	})
+	if err := service.cognition.RecordOutbound(context.Background(), "T123", "C123", "100.000", "Joined: Google Meet"); err != nil {
+		t.Fatalf("record outbound: %v", err)
+	}
+
+	result := service.SweepSlackScanner(context.Background(), SlackScannerSweepRequest{
+		WorkspaceID: "T123",
+		Flush:       boolPtr(true),
+		Channels: []SlackScannerChannel{{
+			ID:   "C123",
+			Type: "channel",
+			Messages: []SlackInboundMessage{{
+				UserID: "U123",
+				Text:   "<@UBOT> https://meet.google.com/abc-defg-hij",
+				TS:     "100.000",
+			}},
+		}},
+	})
+	if !result.OK || len(result.Sweeps) != 1 {
+		t.Fatalf("result = %#v, want one successful sweep", result)
+	}
+	sweep := result.Sweeps[0]
+	if sweep.MentionReconciled != 0 || sweep.MentionSkipped != 1 || runner.startCount != 0 {
+		t.Fatalf("sweep = %#v startCount=%d, want scanner mention skipped after assistant activity", sweep, runner.startCount)
+	}
+}
+
 func TestSlackHistoryScannerBootstrapsCursorWithoutFloodingHistory(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {

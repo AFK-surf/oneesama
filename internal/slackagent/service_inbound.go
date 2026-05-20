@@ -261,6 +261,12 @@ func (s *Service) reconcileScannerMention(ctx context.Context, workspaceID strin
 			return false, true, nil
 		}
 	}
+	if s.cognition != nil {
+		reactionTime := parseSlackTime(reactionTS)
+		if !reactionTime.IsZero() && s.cognition.ThreadHasAssistantActivityAfter(ctx, message.ChannelID, threadTS, reactionTime) {
+			return false, true, nil
+		}
+	}
 	envelope := SlackEventEnvelope{
 		Type:    "event_callback",
 		EventID: strings.Join([]string{"scanner_mention", firstNonEmpty(workspaceID, "workspace"), message.ChannelID, reactionTS}, ":"),
