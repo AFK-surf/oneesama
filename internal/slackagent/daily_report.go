@@ -961,7 +961,7 @@ func slackDailyReportRunSample(run SlackTriageContext, detail string) string {
 	if ts := parseTriageTimestamp(run.Timestamp); !ts.IsZero() {
 		parts = append(parts, ts.UTC().Format("01-02 15:04Z"))
 	}
-	detail = truncateSlackContextTextRunes(firstLine(firstNonEmpty(detail, compactTriageSummary(run))), 180)
+	detail = truncateSlackContextTextRunes(slackDailyReportVisibleDetail(firstLine(firstNonEmpty(detail, compactTriageSummary(run)))), 180)
 	if detail != "" {
 		parts = append(parts, detail)
 	}
@@ -969,6 +969,24 @@ func slackDailyReportRunSample(run SlackTriageContext, detail string) string {
 		return "n/a"
 	}
 	return strings.Join(parts, " · ")
+}
+
+func slackDailyReportVisibleDetail(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		"http://127.0.0.1:8799/persona/decide", "persona runtime request",
+		"http://localhost:8799/persona/decide", "persona runtime request",
+		"https://127.0.0.1:8799/persona/decide", "persona runtime request",
+		"https://localhost:8799/persona/decide", "persona runtime request",
+		"127.0.0.1:8799", "persona runtime",
+		"localhost:8799", "persona runtime",
+		"127.0.0.1", "local runtime",
+		"localhost", "local runtime",
+	)
+	return replacer.Replace(detail)
 }
 
 func slackDailyReportRunChannel(run SlackTriageContext) string {

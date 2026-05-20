@@ -155,6 +155,22 @@ func TestSlackDailyReportRunSampleTruncatesUTF8Safely(t *testing.T) {
 	}
 }
 
+func TestSlackDailyReportRunSampleScrubsInternalRuntimeDetails(t *testing.T) {
+	run := SlackTriageContext{
+		Timestamp: time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		Channels:  []string{"C09L0TAN31T"},
+	}
+	sample := slackDailyReportRunSample(run, "Post \"http://127.0.0.1:8799/persona/decide\": context deadline exceeded")
+	for _, blocked := range []string{"127.0.0.1", "localhost", "persona/decide"} {
+		if strings.Contains(sample, blocked) {
+			t.Fatalf("sample = %q, should scrub %q", sample, blocked)
+		}
+	}
+	if !strings.Contains(sample, "persona runtime request") {
+		t.Fatalf("sample = %q, want user-safe runtime wording", sample)
+	}
+}
+
 func writeLegacySlackdDailyReportDB(t *testing.T, occurredAt time.Time) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "slackd.sqlite3")
