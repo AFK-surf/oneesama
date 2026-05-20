@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	slackTriageStatusDefaultLimit      = 100
-	slackTriageLowContextCharThreshold = 200
-	slackTriageAuditDefaultWindow      = 6 * time.Hour
-	slackTriageAuditStaleSampleAfter   = 2 * time.Hour
+	slackTriageStatusDefaultLimit         = 100
+	slackTriageLowContextCharThreshold    = 200
+	slackTriageAuditDefaultWindow         = 6 * time.Hour
+	slackTriageAuditStaleSampleAfter      = 2 * time.Hour
+	slackTriageForegroundQueuedStaleAfter = 2 * time.Minute
 
 	slackTriageForegroundChainCodexThenPi = "codex_then_pi"
 	slackTriageForegroundChainPiFirstLive = "pi_first_live"
@@ -424,11 +425,27 @@ func buildSlackTriageLiveProbeSummary(runs []SlackTriageContext) SlackTriageLive
 func buildSlackTriagePersonaQuality(runs []SlackTriageContext) SlackTriagePersonaQuality {
 	var quality SlackTriagePersonaQuality
 	var latest time.Time
+	var latestAuthFailure time.Time
+	var oldestQueued time.Time
+	now := timeNow().UTC()
 	for _, run := range runs {
+		timestamp := parseTriageTimestamp(run.Timestamp).UTC()
+		raw, ok := mapFromAny(run.Metadata["persona_foreground"])
 		if boolFromAny(run.Metadata["persona_foreground_queued"], false) {
 			quality.ForegroundQueuedRuns++
+			if !ok && !timestamp.IsZero() {
+				age := now.Sub(timestamp)
+				if age > slackTriageForegroundQueuedStaleAfter {
+					quality.ForegroundStaleQueuedRuns++
+					if oldestQueued.IsZero() || timestamp.Before(oldestQueued) {
+						oldestQueued = timestamp
+						quality.OldestQueuedRunID = run.ID
+						quality.OldestQueuedAt = run.Timestamp
+						quality.OldestQueuedAgeSeconds = int64(age.Seconds())
+					}
+				}
+			}
 		}
-		raw, ok := mapFromAny(run.Metadata["persona_foreground"])
 		if !ok {
 			continue
 		}
@@ -448,7 +465,16 @@ func buildSlackTriagePersonaQuality(runs []SlackTriageContext) SlackTriagePerson
 		if strings.EqualFold(decision, persona.DecisionReply) || stringFromAny(raw["visible_text"]) != "" {
 			quality.Replies++
 		}
-		timestamp := parseTriageTimestamp(run.Timestamp)
+		errorText := firstNonEmpty(stringFromAny(raw["error"]), run.Error, stringFromAny(raw["reason"]), run.Summary)
+		if personaForegroundAuthFailureText(errorText) {
+			quality.AuthFailures++
+			if !timestamp.IsZero() && (latestAuthFailure.IsZero() || timestamp.After(latestAuthFailure)) {
+				latestAuthFailure = timestamp
+				quality.LatestAuthFailureRunID = run.ID
+				quality.LatestAuthFailureAt = run.Timestamp
+				quality.LatestAuthFailureError = slackTriageFailureSampleText(errorText)
+			}
+		}
 		if !timestamp.IsZero() && (latest.IsZero() || timestamp.After(latest)) {
 			latest = timestamp
 			quality.LatestRunID = run.ID
@@ -459,6 +485,24 @@ func buildSlackTriagePersonaQuality(runs []SlackTriageContext) SlackTriagePerson
 		}
 	}
 	return quality
+}
+
+func personaForegroundAuthFailureText(value string) bool {
+	text := strings.ToLower(strings.TrimSpace(value))
+	if text == "" {
+		return false
+	}
+	if strings.Contains(text, "authentication fails") ||
+		strings.Contains(text, "authentication failed") ||
+		strings.Contains(text, "unauthorized") ||
+		strings.Contains(text, "invalid api key") ||
+		strings.Contains(text, "invalid key") ||
+		strings.Contains(text, "401 unauthorized") ||
+		strings.Contains(text, "status code: 401") ||
+		strings.Contains(text, "http 401") {
+		return true
+	}
+	return strings.Contains(text, "api key") && (strings.Contains(text, "401") || strings.Contains(text, "invalid") || strings.Contains(text, "auth"))
 }
 
 func lenStringSliceFromAny(value any) int {
@@ -534,6 +578,12 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 		}
 		if report.PersonaQuality.Failures > 0 {
 			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_failures", Message: fmt.Sprintf("%d persona foreground triage run(s) failed in the audit window.", report.PersonaQuality.Failures)})
+		}
+		if report.PersonaQuality.AuthFailures > 0 {
+			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_auth_failures", Message: fmt.Sprintf("%d persona foreground triage run(s) failed with provider authentication errors.", report.PersonaQuality.AuthFailures)})
+		}
+		if report.PersonaQuality.ForegroundStaleQueuedRuns > 0 {
+			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_stuck_queued", Message: fmt.Sprintf("%d persona foreground triage run(s) stayed queued for more than %s.", report.PersonaQuality.ForegroundStaleQueuedRuns, slackTriageForegroundQueuedStaleAfter)})
 		}
 		if report.PersonaQuality.ShadowOnlyResponses > 0 {
 			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "persona_foreground_shadow_only", Message: "Persona foreground returned shadow-only responses while live mode was enabled."})

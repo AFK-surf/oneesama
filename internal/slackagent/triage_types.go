@@ -212,19 +212,27 @@ type SlackTriagePersonaRuntime struct {
 }
 
 type SlackTriagePersonaQuality struct {
-	ForegroundRuns       int    `json:"foregroundRuns"`
-	ForegroundQueuedRuns int    `json:"foregroundQueuedRuns"`
-	Successes            int    `json:"successes"`
-	Replies              int    `json:"replies"`
-	Failures             int    `json:"failures"`
-	ShadowOnlyResponses  int    `json:"shadowOnlyResponses"`
-	WorkerRequests       int    `json:"workerRequests"`
-	MemoryWriteIntents   int    `json:"memoryWriteIntents"`
-	LatestRunID          int64  `json:"latestRunId,omitempty"`
-	LatestAt             string `json:"latestAt,omitempty"`
-	LatestDecision       string `json:"latestDecision,omitempty"`
-	LatestError          string `json:"latestError,omitempty"`
-	LatestLatencyMS      int64  `json:"latestLatencyMs,omitempty"`
+	ForegroundRuns            int    `json:"foregroundRuns"`
+	ForegroundQueuedRuns      int    `json:"foregroundQueuedRuns"`
+	ForegroundStaleQueuedRuns int    `json:"foregroundStaleQueuedRuns,omitempty"`
+	Successes                 int    `json:"successes"`
+	Replies                   int    `json:"replies"`
+	Failures                  int    `json:"failures"`
+	AuthFailures              int    `json:"authFailures,omitempty"`
+	ShadowOnlyResponses       int    `json:"shadowOnlyResponses"`
+	WorkerRequests            int    `json:"workerRequests"`
+	MemoryWriteIntents        int    `json:"memoryWriteIntents"`
+	OldestQueuedRunID         int64  `json:"oldestQueuedRunId,omitempty"`
+	OldestQueuedAt            string `json:"oldestQueuedAt,omitempty"`
+	OldestQueuedAgeSeconds    int64  `json:"oldestQueuedAgeSeconds,omitempty"`
+	LatestRunID               int64  `json:"latestRunId,omitempty"`
+	LatestAt                  string `json:"latestAt,omitempty"`
+	LatestDecision            string `json:"latestDecision,omitempty"`
+	LatestError               string `json:"latestError,omitempty"`
+	LatestLatencyMS           int64  `json:"latestLatencyMs,omitempty"`
+	LatestAuthFailureRunID    int64  `json:"latestAuthFailureRunId,omitempty"`
+	LatestAuthFailureAt       string `json:"latestAuthFailureAt,omitempty"`
+	LatestAuthFailureError    string `json:"latestAuthFailureError,omitempty"`
 }
 
 type SlackTriageCanarySummary struct {

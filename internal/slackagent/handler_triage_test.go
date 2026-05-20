@@ -1011,12 +1011,12 @@ func TestTriageAuditSummarizesPersonaForegroundQuality(t *testing.T) {
 			Timestamp: now.Add(-time.Minute).Format(time.RFC3339Nano),
 			Status:    "failed",
 			Summary:   "persona failed",
-			Error:     "persona foreground failed",
+			Error:     "persona foreground failed: status code: 401 Authentication Fails",
 			Metadata: map[string]any{
 				"persona_foreground": map[string]any{
 					"success":     false,
 					"decision":    persona.DecisionStaySilent,
-					"error":       "timeout",
+					"error":       "status code: 401 Authentication Fails",
 					"shadow_only": true,
 					"latency_ms":  int64(90000),
 				},
@@ -1027,13 +1027,22 @@ func TestTriageAuditSummarizesPersonaForegroundQuality(t *testing.T) {
 	if quality.ForegroundRuns != 2 || quality.ForegroundQueuedRuns != 1 || quality.Successes != 1 || quality.Replies != 1 || quality.Failures != 1 || quality.ShadowOnlyResponses != 1 || quality.WorkerRequests != 1 || quality.MemoryWriteIntents != 1 {
 		t.Fatalf("persona quality = %#v, want queued/success/reply/failure summary", quality)
 	}
-	if quality.LatestRunID != 12 || quality.LatestDecision != persona.DecisionStaySilent || quality.LatestError != "timeout" || quality.LatestLatencyMS != 90000 {
+	if quality.ForegroundStaleQueuedRuns != 1 || quality.OldestQueuedRunID != 10 || quality.OldestQueuedAgeSeconds < int64((2*time.Minute).Seconds()) {
+		t.Fatalf("persona quality queued = %#v, want stale queued run details", quality)
+	}
+	if quality.AuthFailures != 1 || quality.LatestAuthFailureRunID != 12 || !strings.Contains(quality.LatestAuthFailureError, "401") {
+		t.Fatalf("persona quality auth = %#v, want latest auth failure details", quality)
+	}
+	if quality.LatestRunID != 12 || quality.LatestDecision != persona.DecisionStaySilent || quality.LatestError != "status code: 401 Authentication Fails" || quality.LatestLatencyMS != 90000 {
 		t.Fatalf("persona quality latest = %#v, want latest failed run details", quality)
 	}
 
 	report.PersonaRuntime = SlackTriagePersonaRuntime{ForegroundEnabled: true, Provider: persona.ProviderPi, Mode: persona.ModeLive, Ready: true, Healthy: true}
 	report.Flags = buildSlackTriageAuditFlags(report)
-	if !hasAuditFlagLevel(report.Flags, "persona_foreground_failures", "red") || !hasAuditFlagLevel(report.Flags, "persona_foreground_shadow_only", "red") {
+	if !hasAuditFlagLevel(report.Flags, "persona_foreground_failures", "red") ||
+		!hasAuditFlagLevel(report.Flags, "persona_foreground_auth_failures", "red") ||
+		!hasAuditFlagLevel(report.Flags, "persona_foreground_stuck_queued", "red") ||
+		!hasAuditFlagLevel(report.Flags, "persona_foreground_shadow_only", "red") {
 		t.Fatalf("flags = %#v, want persona foreground quality red flags", report.Flags)
 	}
 }
