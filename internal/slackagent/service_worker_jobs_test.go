@@ -59,20 +59,13 @@ func TestWorkerResultCanvasInputReusesExistingCanvasFile(t *testing.T) {
 	}
 }
 
-func TestSlackWorkerResultTextFailClosesInternalGatewayLeak(t *testing.T) {
+func TestSlackWorkerResultTextSilentOnInternalGatewayLeak(t *testing.T) {
 	job := agentrunner.Job{
 		Status: agentrunner.StatusCompleted,
 		Result: "我试着 curl http://127.0.0.1:8780/slack/tools/call，但是 connection refused，所以拿不到资料。",
 	}
-
-	got := slackWorkerResultText(job)
-	for _, forbidden := range []string{"127.0.0.1", "/slack/tools/call", "curl", "connection refused"} {
-		if strings.Contains(strings.ToLower(got), forbidden) {
-			t.Fatalf("slackWorkerResultText() leaked %q in %q", forbidden, got)
-		}
-	}
-	if !strings.Contains(got, "工具") || !strings.Contains(got, "不强答") {
-		t.Fatalf("slackWorkerResultText() = %q, want user-safe fail-closed wording", got)
+	if got := slackWorkerResultText(job); got != "" {
+		t.Fatalf("slackWorkerResultText() = %q, want empty string (silent) when result leaks internal gateway", got)
 	}
 }
 
@@ -84,55 +77,27 @@ func TestSlackWorkerResultTextKeepsNormalWorkerAnswer(t *testing.T) {
 	}
 }
 
-func TestSlackWorkerResultTextFailClosesOnJobTimeout(t *testing.T) {
-	job := agentrunner.Job{
-		Status:      agentrunner.StatusTimeout,
-		FailureCode: agentrunner.FailureTimeout,
-		Error:       "job timed out",
-		Result:      "partial: started inspecting staging deploy logs...",
-	}
-
-	got := slackWorkerResultText(job)
-	for _, forbidden := range []string{"job timed out", "partial", "staging deploy logs"} {
-		if strings.Contains(strings.ToLower(got), strings.ToLower(forbidden)) {
-			t.Fatalf("slackWorkerResultText() leaked %q in timeout reply %q", forbidden, got)
-		}
-	}
-	if !strings.Contains(got, "超时") || !strings.Contains(got, "重试") {
-		t.Fatalf("slackWorkerResultText() = %q, want user-safe timeout wording", got)
-	}
-}
-
-func TestSlackWorkerResultTextMapsTypedFailures(t *testing.T) {
+func TestSlackWorkerResultTextSilentOnNonCompletedStates(t *testing.T) {
+	// Every non-completed state must yield empty text so postSlackWorkerResult
+	// skips the Slack post entirely. Status is conveyed via the mention
+	// reaction, not via hardcoded user-facing template strings. Anchor: #299
+	// retrospective on "我处理完了" fallback that was claiming completion of
+	// nothing — silence is the correct state for failure / timeout / canceled.
 	cases := []struct {
-		name         string
-		job          agentrunner.Job
-		wantContains string
-		blocked      []string
+		name string
+		job  agentrunner.Job
 	}{
-		{
-			name:         "provider auth",
-			job:          agentrunner.Job{Status: agentrunner.StatusFailed, FailureCode: agentrunner.FailureProviderAuth, Error: "401 unauthorized"},
-			wantContains: "凭证",
-			blocked:      []string{"401", "unauthorized"},
-		},
-		{
-			name:         "canceled",
-			job:          agentrunner.Job{Status: agentrunner.StatusFailed, FailureCode: agentrunner.FailureCanceled, Error: "job canceled"},
-			wantContains: "取消",
-			blocked:      []string{"job canceled"},
-		},
+		{"empty_completed", agentrunner.Job{Status: agentrunner.StatusCompleted, Result: "   "}},
+		{"timeout_via_status", agentrunner.Job{Status: agentrunner.StatusTimeout, Error: "job timed out", Result: "partial: started inspecting staging deploy logs..."}},
+		{"timeout_via_failure_code", agentrunner.Job{Status: agentrunner.StatusFailed, FailureCode: agentrunner.FailureTimeout, Error: "job timed out"}},
+		{"provider_auth_failure", agentrunner.Job{Status: agentrunner.StatusFailed, FailureCode: agentrunner.FailureProviderAuth, Error: "401 unauthorized"}},
+		{"canceled_failure", agentrunner.Job{Status: agentrunner.StatusFailed, FailureCode: agentrunner.FailureCanceled, Error: "job canceled"}},
+		{"generic_failed", agentrunner.Job{Status: agentrunner.StatusFailed, Error: "boom"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := slackWorkerResultText(tc.job)
-			if !strings.Contains(got, tc.wantContains) {
-				t.Fatalf("slackWorkerResultText() = %q, want %q", got, tc.wantContains)
-			}
-			for _, forbidden := range tc.blocked {
-				if strings.Contains(strings.ToLower(got), strings.ToLower(forbidden)) {
-					t.Fatalf("slackWorkerResultText() leaked %q in %q", forbidden, got)
-				}
+			if got := slackWorkerResultText(tc.job); got != "" {
+				t.Fatalf("slackWorkerResultText() = %q, want empty (silent) for %s", got, tc.name)
 			}
 		})
 	}

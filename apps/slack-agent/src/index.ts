@@ -985,10 +985,10 @@ function slackRefForWorkerJob(job: SlackJobLike = {}) {
 }
 
 function slackWorkerResultText(job: SlackJobLike = {}) {
-  if (job.status === "completed") {
-    return String(job.result || "").trim() || "我这边处理完了。";
+  if (job.status !== "completed") {
+    return "";
   }
-  return `我这边处理失败了：${String(job.error || job.result || "unknown error").trim()}`;
+  return String(job.result || "").trim();
 }
 
 async function postSlackWorkerResult(job: SlackJobLike = {}) {

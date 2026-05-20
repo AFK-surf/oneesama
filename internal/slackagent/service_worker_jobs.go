@@ -342,45 +342,24 @@ func slackRefForWorkerJob(job agentrunner.Job) (AssistantThreadRef, bool) {
 	return ref, true
 }
 
+// slackWorkerResultText returns the model's actual completed result for posting
+// to Slack. Every non-completed state (failed / timeout / auth / canceled), any
+// completed-with-empty-result, and any completed-result containing an internal
+// gateway leak returns the empty string so that postSlackWorkerResult silently
+// skips the post. Status is conveyed via the mention reaction, not via
+// hardcoded user-facing template strings.
 func slackWorkerResultText(job agentrunner.Job) string {
-	var text string
-	switch job.Status {
-	case agentrunner.StatusCompleted:
-		text = firstNonEmpty(strings.TrimSpace(job.Result), "我这边处理完了。")
-	case agentrunner.StatusTimeout:
-		return slackWorkerJobTimeoutText
-	default:
-		switch job.FailureCode {
-		case agentrunner.FailureTimeout:
-			return slackWorkerJobTimeoutText
-		case agentrunner.FailureProviderAuth:
-			return slackWorkerProviderAuthFailureText
-		case agentrunner.FailureCanceled:
-			return slackWorkerCanceledFailureText
-		}
-		text = "我这边处理失败了：" + firstNonEmpty(strings.TrimSpace(job.Error), strings.TrimSpace(job.Result), "unknown error")
+	if job.Status != agentrunner.StatusCompleted {
+		return ""
 	}
-	if safe, replaced := failClosedSlackWorkerVisibleText(text); replaced {
-		return safe
+	text := strings.TrimSpace(job.Result)
+	if text == "" {
+		return ""
+	}
+	if slackVisibleTextContainsInternalLeak(text) {
+		return ""
 	}
 	return text
-}
-
-const slackWorkerInternalToolFailureText = "我这次没能安全拿到需要的工具结果，先不强答。可以再 @ 我让我重试，或者等工具桥接恢复后再处理。"
-
-const slackWorkerJobTimeoutText = "这个调查任务超时了，我先记下来不强答。可以再 @ 我让我重试，或者把问题再缩小一点（比如指明具体接口/时间段）再交给我。"
-const slackWorkerProviderAuthFailureText = "这次后台调查没能安全连上模型/工具凭证，先不强答。凭证恢复后可以再 @ 我重试。"
-const slackWorkerCanceledFailureText = "这次后台调查已经被取消了，我不会继续发半截结论。"
-
-func failClosedSlackWorkerVisibleText(text string) (string, bool) {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return "", false
-	}
-	if slackVisibleTextContainsInternalLeak(trimmed) {
-		return slackWorkerInternalToolFailureText, true
-	}
-	return trimmed, false
 }
 
 func slackVisibleTextContainsInternalLeak(text string) bool {
