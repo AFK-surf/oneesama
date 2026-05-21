@@ -69,12 +69,12 @@ func (s *Service) surfaceOneFollowup(ctx context.Context, followup SlackHeartbea
 	}
 	if plan.DeliveredSurface == "" {
 		surface, err := s.followups.RecordSurface(ctx, heartbeatSurfaceFromPlan(followup, plan, heartbeatSurfaceStatusBlocked, plan.BlockReason, ""))
-		if err == nil && heartbeatFollowupClosesAfterSurface(followup) && plan.BlockReason == "thread_has_newer_activity" {
+		if err == nil && heartbeatFollowupClosesAfterBlockedSurface(followup, plan.BlockReason) {
 			followup.Status = "done"
 			if followup.Metadata == nil {
 				followup.Metadata = map[string]any{}
 			}
-			followup.Metadata["resolution"] = "thread_has_newer_activity"
+			followup.Metadata["resolution"] = plan.BlockReason
 			_, _ = s.followups.UpdateFollowup(ctx, followup)
 		}
 		return surface, err
@@ -183,6 +183,25 @@ func heartbeatFollowupClosesAfterSurface(followup SlackHeartbeatFollowup) bool {
 	return boolFromAny(followup.Metadata["one_shot"], false)
 }
 
+func heartbeatFollowupClosesAfterBlockedSurface(followup SlackHeartbeatFollowup, blockReason string) bool {
+	if heartbeatFollowupIsInternalTriageRetry(&followup) && blockReason == "internal_triage_retry_not_user_visible" {
+		return true
+	}
+	return heartbeatFollowupClosesAfterSurface(followup) && blockReason == "thread_has_newer_activity"
+}
+
+func heartbeatFollowupIsInternalTriageRetry(followup *SlackHeartbeatFollowup) bool {
+	if followup == nil {
+		return false
+	}
+	switch strings.TrimSpace(followup.Kind) {
+	case slackTriageTimeoutFollowupKind, slackTriageEmptyFinalFollowupKind:
+		return true
+	}
+	classification := strings.TrimSpace(stringFromAny(followup.Metadata["classification"]))
+	return classification == "triage_timeout_needs_retry" || classification == "triage_empty_final_needs_retry"
+}
+
 type heartbeatDeliveryPlan struct {
 	RequestedSurface string
 	DeliveredSurface string
@@ -233,6 +252,10 @@ func (s *Service) planHeartbeatDelivery(ctx context.Context, requested string, f
 	}
 	if plan.DeliveredSurface == heartbeatSurfaceDM && plan.ChannelID == "" {
 		heartbeatBlockOrFallbackToDM(&plan, "missing_channel_target", false)
+	}
+	if heartbeatFollowupIsInternalTriageRetry(followup) && plan.DeliveredSurface != "" {
+		heartbeatBlockOrFallbackToDM(&plan, "internal_triage_retry_not_user_visible", false)
+		return plan, nil
 	}
 
 	if followup == nil || plan.DeliveredSurface == heartbeatSurfaceDM || plan.DeliveredSurface == "" {

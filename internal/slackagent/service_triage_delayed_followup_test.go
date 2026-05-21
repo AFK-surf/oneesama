@@ -350,6 +350,59 @@ func TestSlackTriageRecordsEmptyFinalRetryFollowupForEmptyCompletedJob(t *testin
 	}
 }
 
+func TestTriageRetryFollowupDoesNotSurfaceInternalLog(t *testing.T) {
+	now := time.Date(2026, 5, 21, 11, 54, 0, 0, time.UTC)
+	previousClock := timeNow
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	for _, tc := range []struct {
+		name string
+		kind string
+	}{
+		{name: "empty final", kind: slackTriageEmptyFinalFollowupKind},
+		{name: "timeout", kind: slackTriageTimeoutFollowupKind},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			poster := &recordingPoster{}
+			service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
+			record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{
+				Kind:        tc.kind,
+				Title:       "Retry incomplete triage",
+				Summary:     "The last triage pass returned no usable final response. If the thread stays unanswered, re-check it instead of dropping it.",
+				SourceKind:  heartbeatSourceKindThread,
+				ChannelID:   "C123",
+				ThreadTS:    "123.456",
+				SourceRef:   tc.kind + ":C123:123.456",
+				Priority:    heartbeatFollowupPriorityNormal,
+				NextCheckAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+				Metadata:    map[string]any{"one_shot": true, "classification": "triage_empty_final_needs_retry"},
+			})
+			if err != nil {
+				t.Fatalf("CreateFollowup: %v", err)
+			}
+
+			response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+			if err != nil {
+				t.Fatalf("SurfaceSlackFollowups: %v", err)
+			}
+			if len(response.Posted) != 0 || len(poster.Calls()) != 0 {
+				t.Fatalf("response=%#v calls=%#v, retry diagnostics must stay audit-only", response, poster.Calls())
+			}
+			if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "internal_triage_retry_not_user_visible" {
+				t.Fatalf("response = %#v, want internal_triage_retry_not_user_visible skip", response)
+			}
+			updated, err := service.followups.GetFollowup(context.Background(), record.ID)
+			if err != nil {
+				t.Fatalf("GetFollowup: %v", err)
+			}
+			if updated == nil || updated.Status != "done" || updated.Metadata["resolution"] != "internal_triage_retry_not_user_visible" {
+				t.Fatalf("updated = %#v, want closed audit-only retry followup", updated)
+			}
+		})
+	}
+}
+
 func TestTriageTimeoutRetryFollowupUsesTemplateOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "triage_timeout_title.zh.tmpl"), []byte("自定义 timeout 标题：{{.ThreadTS}}\n"), 0o644); err != nil {
