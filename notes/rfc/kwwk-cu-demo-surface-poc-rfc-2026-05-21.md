@@ -133,15 +133,17 @@ Thin interface between Oneesama and the KWWK / Computer Use implementation.
 Interface variants:
 
 - fake in-memory implementation for tests;
-- Codex/browser-use worker adapter for the first real POC path;
+- direct `agent-browser` CLI adapter for deterministic realtime demo steps;
+- Codex/browser-use worker adapter for planning/summarization-heavy tasks;
 - deferred stdio JSON-RPC bridge to a Swift/KWWK helper;
 - future library binding if KWWK becomes importable as a package.
 
 Key decision:
 
-- use the existing Codex worker runtime as the first real adapter so the POC does
-  not reimplement desktop-minion's KWWK host-control stack; keep the KWWK
-  interface boundary so a Swift/helper adapter can replace it later.
+- use the direct `agent-browser` CLI as the first fast realtime adapter for
+  open/capture/scroll/highlight/click/type smokes. Keep the Codex/browser-use
+  worker adapter as a slower planning/summarization path, and keep the KWWK
+  interface boundary so a Swift/helper adapter can replace either path later.
 
 ### `DemoController`
 
@@ -193,7 +195,8 @@ Realtime-facing tool and context bridge.
 
 Responsibilities:
 
-- expose `start_demo_surface` / `cancel_demo_surface` intent tools;
+- expose `start_demo_surface` / `control_demo_surface` / `cancel_demo_surface`
+  intent tools;
 - push compact observations back into realtime context;
 - keep speech responsive while demo work runs asynchronously;
 - convert stop/cancel utterances into session cancellation.
@@ -291,22 +294,23 @@ Independent harness:
 
 ## Realtime Demo Tool
 
-Add a realtime-facing tool later, separate from the generic worker tools:
+Expose bounded realtime-facing tools, separate from generic worker tools:
 
 ```json
-{
-  "name": "start_demo_surface",
-  "description": "Open a bot-owned demo browser and share it into the meeting.",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "task_brief": { "type": "string" },
-      "url": { "type": "string" },
-      "mode": { "type": "string", "enum": ["show", "observe", "scroll"] }
-    },
-    "required": ["task_brief"]
+[
+  {
+    "name": "start_demo_surface",
+    "description": "Open a bot-owned demo browser and share it into the meeting."
+  },
+  {
+    "name": "control_demo_surface",
+    "description": "Change the active shared demo content via open/capture/scroll/highlight/click/type."
+  },
+  {
+    "name": "cancel_demo_surface",
+    "description": "Stop the active shared demo surface."
   }
-}
+]
 ```
 
 The realtime model should not receive raw `computer_use_step` in phase 1. It
@@ -342,17 +346,18 @@ should ask for demo-surface intents; the host decides which CU actions are safe.
 Done when: tests can prove Oneesama can represent a demo session independently
 from existing `screen_share.*` code.
 
-### Phase 1: Codex Browser-Use Demo Adapter
+### Phase 1: Agent-Browser Demo Adapter
 
-- [ ] Implement a Codex/browser-use adapter behind the existing `KWWKClient`
+- [ ] Implement an `agent-browser` adapter behind the existing `KWWKClient`
       boundary.
-- [ ] Support `open_url`, `capture_frame`, `scroll`, and `stop` through bounded
-      demo actions.
+- [ ] Support `open_url`, `capture`, `scroll`, `highlight`, `click`, and `type`
+      through bounded demo actions.
 - [ ] Persist frames to `runtime/demo-surfaces/<session>/frames/`.
 - [ ] Add a dry-run smoke that uses a local fixture page.
 
-Done when: a local command can trigger a Codex browser-use worker, receive a
-structured observation, and stop without touching a user's active browser.
+Done when: a local command can trigger the direct browser adapter, receive a
+structured observation, change the same shared browser content, and stop without
+touching a user's active browser.
 
 ### Phase 2: Demo Surface Presentation Glue
 
@@ -371,7 +376,8 @@ surface without running full realtime.
 
 - [ ] Add `DemoObservationBus` and compact observation state.
 - [ ] Feed latest observations into realtime context without blocking speech.
-- [ ] Add a realtime tool contract for `start_demo_surface` and `stop_demo_surface`.
+- [ ] Add a realtime tool contract for `start_demo_surface`,
+      `control_demo_surface`, and `cancel_demo_surface`.
 - [ ] Add tests that realtime receives a new observation after the adapter emits
       one.
 
@@ -380,8 +386,9 @@ instead of a tool log.
 
 ### Phase 4: Adapter Hardening / KWWK Swap
 
-- [ ] Keep `adapter=fake` for deterministic tests and `adapter=codex` for POC
-      live verification.
+- [ ] Keep `adapter=fake` for deterministic tests, `adapter=agent_browser` for
+      fast POC live verification, and `adapter=codex` for higher-level planning
+      or summarization demos.
 - [ ] Decide later whether to call KWWK as a library, subprocess, or HTTP
       service once that stack is explicitly in scope.
 - [ ] Add a thin adapter that maps KWWK observation output into
@@ -391,7 +398,7 @@ instead of a tool log.
 - [ ] Add failure taxonomy: permission denied, browser launch failed, URL
       blocked, observation failed, share failed.
 
-Done when: KWWK-backed observation can replace the Codex/browser-use adapter
+Done when: KWWK-backed observation can replace the agent-browser/Codex adapters
 without changing meeting/realtime call sites.
 
 ### Phase 5: Mainline Integration Gate
@@ -427,12 +434,14 @@ its own fake/local harness and should not require full meeting E2E to develop.
 - **304-A Demo workspace lifecycle**: bot-owned browser sandbox start/stop,
   profile/runtime cleanup, stale cleanup tests.
 - **304-B KWWK client adapter decision + interface**: define `KWWKClient`,
-  fake implementation, and pick Codex/browser-use as the first real adapter
-  while keeping stdio JSON-RPC / library binding deferred.
+  fake implementation, and pick `agent-browser` as the first fast realtime
+  adapter while keeping Codex/browser-use, stdio JSON-RPC, and library binding
+  as swappable variants.
 - **304-C Demo controller**: `DemoIntent` -> `DemoObservation` loop using fake
   `KWWKClient`; cover open/observe/scroll/stop/failures.
-- **304-D Realtime demo bridge**: `start_demo_surface` / `cancel_demo_surface`
-  tool contract plus async observation push into realtime context.
+- **304-D Realtime demo bridge**: `start_demo_surface` /
+  `control_demo_surface` / `cancel_demo_surface` tool contract plus async
+  observation push into realtime context.
 - **304-E Demo surface presenter**: connect fixture/demo surface into existing
   `screen_share.*` / stage path without full meeting dependency.
 - **304-F Observation feedback renderer**: convert observations into clean

@@ -8,17 +8,17 @@ import (
 	"time"
 )
 
-func TestDefaultDemoKWWKAdapterDecisionPrefersCodex(t *testing.T) {
+func TestDefaultDemoKWWKAdapterDecisionPrefersAgentBrowser(t *testing.T) {
 	decision := DefaultDemoKWWKAdapterDecision()
 
-	if decision.Preferred != DemoKWWKAdapterCodex {
-		t.Fatalf("Preferred = %q, want codex", decision.Preferred)
+	if decision.Preferred != DemoKWWKAdapterAgentBrowser {
+		t.Fatalf("Preferred = %q, want agent_browser", decision.Preferred)
 	}
-	if !reflect.DeepEqual(decision.Deferred, []DemoKWWKAdapterKind{DemoKWWKAdapterStdioJSONRPC, DemoKWWKAdapterLibrary}) {
-		t.Fatalf("Deferred = %#v, want stdio/library deferred", decision.Deferred)
+	if !reflect.DeepEqual(decision.Deferred, []DemoKWWKAdapterKind{DemoKWWKAdapterCodex, DemoKWWKAdapterStdioJSONRPC, DemoKWWKAdapterLibrary}) {
+		t.Fatalf("Deferred = %#v, want codex/stdio/library deferred", decision.Deferred)
 	}
 	if len(decision.Rationale) < 3 {
-		t.Fatalf("Rationale = %#v, want codex/fake/deferred-adapter rationale", decision.Rationale)
+		t.Fatalf("Rationale = %#v, want agent-browser/fake/deferred-adapter rationale", decision.Rationale)
 	}
 }
 

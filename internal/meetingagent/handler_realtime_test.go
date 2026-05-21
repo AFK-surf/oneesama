@@ -314,12 +314,17 @@ func TestRealtimeDemoSurfaceToolsUseBridge(t *testing.T) {
 		Summary:    "Demo page opened for the meeting.",
 		Confidence: 0.9,
 	})
+	kwwk.QueueResult(DemoKWWKActionResult{
+		Summary:    "Demo page changed in the already shared browser window.",
+		Confidence: 0.95,
+	})
 	bridge := &RealtimeDemoBridge{
 		Lifecycle: lifecycle,
 		Controller: DemoController{
 			Client: kwwk,
 			Safety: DemoSafetyPolicy{
 				URLAllowlistPatterns: []string{"https://example.test/"},
+				AllowActiveControl:   true,
 			},
 		},
 		Presenter:    DemoSurfacePresenter{Share: &fakeDemoSurfaceShareClient{}},
@@ -337,6 +342,17 @@ func TestRealtimeDemoSurfaceToolsUseBridge(t *testing.T) {
 	decodeRealtimeBody(t, start.Body.String(), &startBody)
 	if startBody["ok"] != true || startBody["session_id"] != "demo_tool" || !strings.Contains(stringFromAny(startBody["observation_context"]), "Demo page opened") {
 		t.Fatalf("start body = %#v, want demo observation", startBody)
+	}
+
+	control := httptest.NewRecorder()
+	router.ServeHTTP(control, realtimeRequest(http.MethodPost, "/tools/control_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","action":"click","text":"Start snake"}`))
+	if control.Code != http.StatusOK {
+		t.Fatalf("control status = %d: %s", control.Code, control.Body.String())
+	}
+	var controlBody map[string]any
+	decodeRealtimeBody(t, control.Body.String(), &controlBody)
+	if controlBody["ok"] != true || stringFromAny(controlBody["status"]) != realtimeDemoBridgeStatusUpdated || !strings.Contains(stringFromAny(controlBody["observation_context"]), "already shared browser window") {
+		t.Fatalf("control body = %#v, want updated demo observation", controlBody)
 	}
 
 	cancel := httptest.NewRecorder()
@@ -397,7 +413,7 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	}
 	var configBody map[string]any
 	decodeRealtimeBody(t, configResponse.Body.String(), &configBody)
-	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_surface", "cancel_demo_surface") {
+	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_surface", "control_demo_surface", "cancel_demo_surface") {
 		t.Fatalf("tools = %#v, want demo surface tools when flag enabled", configBody["tools"])
 	}
 	demoSurface := configBody["demoSurface"].(map[string]any)

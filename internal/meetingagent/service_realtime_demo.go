@@ -19,6 +19,13 @@ func (s *Service) CancelRealtimeDemoSurface(ctx context.Context, input RealtimeD
 	return s.demoBridge.Cancel(ctx, input)
 }
 
+func (s *Service) ControlRealtimeDemoSurface(ctx context.Context, input RealtimeDemoSurfaceControlRequest) (RealtimeDemoBridgeResult, error) {
+	if s.demoBridge == nil {
+		return RealtimeDemoBridgeResult{OK: false, Status: realtimeDemoBridgeStatusFailed, Error: errRealtimeDemoBridgeUnavailable.Error()}, errRealtimeDemoBridgeUnavailable
+	}
+	return s.demoBridge.Control(ctx, input)
+}
+
 func realtimeDemoBridgeHTTPStatus(err error) int {
 	if err == nil {
 		return 200
@@ -26,7 +33,8 @@ func realtimeDemoBridgeHTTPStatus(err error) int {
 	if errors.Is(err, errRealtimeDemoBridgeUnavailable) ||
 		errors.Is(err, errRealtimeDemoBridgeMissingLifecycle) ||
 		errors.Is(err, errRealtimeDemoBridgeMissingPresenter) ||
-		errors.Is(err, errRealtimeDemoBridgeMissingController) {
+		errors.Is(err, errRealtimeDemoBridgeMissingController) ||
+		errors.Is(err, errRealtimeDemoBridgeNoActiveSession) {
 		return 503
 	}
 	if errors.Is(err, errRealtimeDemoBridgeActionBlocked) {

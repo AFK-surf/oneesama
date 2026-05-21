@@ -292,6 +292,7 @@
     "github_search",
     "fetch_url",
     "start_demo_surface",
+    "control_demo_surface",
     "cancel_demo_surface",
     "memory_write",
     "memory_read",

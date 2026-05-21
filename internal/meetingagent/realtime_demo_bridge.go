@@ -10,6 +10,7 @@ import (
 
 const (
 	realtimeDemoBridgeStatusStarted = "started"
+	realtimeDemoBridgeStatusUpdated = "updated"
 	realtimeDemoBridgeStatusStopped = "stopped"
 	realtimeDemoBridgeStatusFailed  = "failed"
 )
@@ -20,6 +21,7 @@ var (
 	errRealtimeDemoBridgeMissingPresenter  = errors.New("realtime_demo_bridge_presenter_required")
 	errRealtimeDemoBridgeMissingController = errors.New("realtime_demo_bridge_controller_required")
 	errRealtimeDemoBridgeActionBlocked     = errors.New("realtime_demo_bridge_action_blocked")
+	errRealtimeDemoBridgeNoActiveSession   = errors.New("realtime_demo_bridge_no_active_demo_session")
 )
 
 type DemoWorkspaceLifecycleClient interface {
@@ -69,6 +71,19 @@ type RealtimeDemoSurfaceCancelRequest struct {
 	MeetingSessionID string `json:"session_id,omitempty"`
 	DemoSessionID    string `json:"demo_session_id,omitempty"`
 	Reason           string `json:"reason,omitempty"`
+}
+
+type RealtimeDemoSurfaceControlRequest struct {
+	MeetingSessionID string         `json:"session_id,omitempty"`
+	DemoSessionID    string         `json:"demo_session_id,omitempty"`
+	Action           DemoActionKind `json:"action,omitempty"`
+	Kind             DemoActionKind `json:"kind,omitempty"`
+	URL              string         `json:"url,omitempty"`
+	Instruction      string         `json:"instruction,omitempty"`
+	Direction        string         `json:"direction,omitempty"`
+	Amount           int            `json:"amount,omitempty"`
+	Text             string         `json:"text,omitempty"`
+	Sequence         int            `json:"sequence,omitempty"`
 }
 
 type RealtimeDemoBridgeResult struct {
@@ -244,6 +259,81 @@ func (b *RealtimeDemoBridge) Cancel(ctx context.Context, req RealtimeDemoSurface
 	}, nil
 }
 
+func (b *RealtimeDemoBridge) Control(ctx context.Context, req RealtimeDemoSurfaceControlRequest) (RealtimeDemoBridgeResult, error) {
+	if b == nil {
+		return RealtimeDemoBridgeResult{OK: false, Status: realtimeDemoBridgeStatusFailed, Error: errRealtimeDemoBridgeUnavailable.Error()}, errRealtimeDemoBridgeUnavailable
+	}
+	if b.Lifecycle == nil {
+		return RealtimeDemoBridgeResult{OK: false, Status: realtimeDemoBridgeStatusFailed, Error: errRealtimeDemoBridgeMissingLifecycle.Error()}, errRealtimeDemoBridgeMissingLifecycle
+	}
+	if b.Controller == nil {
+		return RealtimeDemoBridgeResult{OK: false, Status: realtimeDemoBridgeStatusFailed, Error: errRealtimeDemoBridgeMissingController.Error()}, errRealtimeDemoBridgeMissingController
+	}
+	workspace, ok := b.Lifecycle.ActiveSession()
+	if !ok {
+		return RealtimeDemoBridgeResult{OK: false, Status: realtimeDemoBridgeStatusFailed, Error: errRealtimeDemoBridgeNoActiveSession.Error()}, errRealtimeDemoBridgeNoActiveSession
+	}
+	if requestedID := strings.TrimSpace(req.DemoSessionID); requestedID != "" && requestedID != workspace.ID {
+		return RealtimeDemoBridgeResult{OK: false, Status: realtimeDemoBridgeStatusFailed, SessionID: workspace.ID, Error: errRealtimeDemoBridgeNoActiveSession.Error()}, errRealtimeDemoBridgeNoActiveSession
+	}
+	action := req.actionKind()
+	sequence := req.Sequence
+	if sequence <= 0 {
+		sequence = len(b.observationBus().Recent(workspace.ID, defaultDemoObservationContextLimit)) + 1
+	}
+	token := b.cancelForSession(workspace.ID)
+	controllerResult, err := b.Controller.RunIntent(ctx, DemoIntent{
+		Session:     DemoKWWKSessionFromWorkspace(workspace),
+		Kind:        action,
+		URL:         strings.TrimSpace(req.URL),
+		Instruction: strings.TrimSpace(req.Instruction),
+		Direction:   strings.TrimSpace(req.Direction),
+		Amount:      req.Amount,
+		Text:        strings.TrimSpace(req.Text),
+		Sequence:    sequence,
+		Cancel:      token,
+	})
+	obs := controllerResult.Observation
+	if strings.TrimSpace(obs.SessionID) == "" {
+		obs.SessionID = workspace.ID
+	}
+	if obs.CreatedAt.IsZero() {
+		obs.CreatedAt = b.timestamp()
+	}
+	b.publishObservation(obs)
+	feedback := b.renderer().Render(obs)
+	result := demoSessionResultFromController(controllerResult, err)
+	reason := firstNonEmpty(controllerResult.Verdict.Reason, feedback.AuditDetail)
+	if err != nil {
+		reason = firstNonEmpty(reason, err.Error())
+	}
+	b.recordAction(workspace.ID, action, req.URL, result, reason, []string{obs.FramePath})
+	out := RealtimeDemoBridgeResult{
+		OK:                 err == nil && controllerResult.Verdict.Decision != DemoActionDecisionBlock,
+		Status:             realtimeDemoBridgeStatusUpdated,
+		SessionID:          workspace.ID,
+		MeetingSessionID:   strings.TrimSpace(req.MeetingSessionID),
+		Workspace:          &workspace,
+		Observation:        &obs,
+		FeedbackKind:       feedback.Kind,
+		FeedbackText:       feedback.Spoken,
+		ShouldSpeak:        feedback.ShouldSpeak,
+		ObservationContext: b.observationContext(workspace.ID),
+		Audit:              b.entries(workspace.ID),
+	}
+	if controllerResult.Verdict.Decision == DemoActionDecisionBlock {
+		out.Status = realtimeDemoBridgeStatusFailed
+		out.Error = errRealtimeDemoBridgeActionBlocked.Error()
+		return out, errRealtimeDemoBridgeActionBlocked
+	}
+	if err != nil {
+		out.Status = realtimeDemoBridgeStatusFailed
+		out.Error = err.Error()
+		return out, err
+	}
+	return out, nil
+}
+
 func (b *RealtimeDemoBridge) runObservation(ctx context.Context, workspace DemoWorkspaceSession, req RealtimeDemoSurfaceStartRequest, token *DemoCancelToken) (DemoObservation, DemoFeedback, error) {
 	if b.Controller == nil {
 		obs := DemoObservation{
@@ -405,6 +495,16 @@ func (b *RealtimeDemoBridge) setCancel(sessionID string, token *DemoCancelToken)
 	b.cancels[sessionID] = token
 }
 
+func (b *RealtimeDemoBridge) cancelForSession(sessionID string) *DemoCancelToken {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.cancels[sessionID]
+}
+
 func (b *RealtimeDemoBridge) popCancel(sessionID string) *DemoCancelToken {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -415,4 +515,17 @@ func (b *RealtimeDemoBridge) popCancel(sessionID string) *DemoCancelToken {
 	token := b.cancels[sessionID]
 	delete(b.cancels, sessionID)
 	return token
+}
+
+func (req RealtimeDemoSurfaceControlRequest) actionKind() DemoActionKind {
+	if req.Action != "" {
+		return req.Action
+	}
+	if req.Kind != "" {
+		return req.Kind
+	}
+	if strings.TrimSpace(req.URL) != "" {
+		return DemoActionOpenURL
+	}
+	return DemoActionCapture
 }

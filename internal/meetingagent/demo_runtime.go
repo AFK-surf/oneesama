@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	demoSurfaceAdapterFake  = "fake"
-	demoSurfaceAdapterCodex = "codex"
+	demoSurfaceAdapterFake         = "fake"
+	demoSurfaceAdapterCodex        = "codex"
+	demoSurfaceAdapterAgentBrowser = "agent_browser"
 )
 
 func (s *Service) newRealtimeDemoBridgeFromConfig() *RealtimeDemoBridge {
@@ -28,6 +29,8 @@ func (s *Service) newRealtimeDemoBridgeFromConfig() *RealtimeDemoBridge {
 			return nil
 		}
 		client = NewDemoCodexBrowserClient(s.runner)
+	case demoSurfaceAdapterAgentBrowser:
+		client = NewDemoAgentBrowserClient()
 	default:
 		s.logger.Warn("demo surface adapter disabled because adapter is unsupported", "adapter", cfg.Adapter)
 		return nil
@@ -95,5 +98,12 @@ func normalizeDemoSurfaceConfig(cfg appconfig.DemoSurfaceConfig) appconfig.DemoS
 }
 
 func normalizeDemoSurfaceAdapter(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.NewReplacer("-", "_", " ", "_").Replace(normalized)
+	switch normalized {
+	case "agentbrowser", "browser", "browser_use":
+		return demoSurfaceAdapterAgentBrowser
+	default:
+		return normalized
+	}
 }

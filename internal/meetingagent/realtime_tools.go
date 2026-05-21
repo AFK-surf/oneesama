@@ -34,7 +34,7 @@ func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
 	out := make([]realtimeToolSchema, 0, len(definitions))
 	for _, definition := range definitions {
 		switch definition.Name {
-		case "start_demo_surface", "cancel_demo_surface":
+		case "start_demo_surface", "control_demo_surface", "cancel_demo_surface":
 			continue
 		default:
 			out = append(out, definition)
@@ -89,6 +89,16 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"subtitle":        stringSchema("Visible subtitle for the shared demo surface."),
 			"session_id":      stringSchema("Current meeting session id when known."),
 			"demo_session_id": stringSchema("Optional stable demo session id for audit/reuse."),
+		})),
+		realtimeTool("control_demo_surface", "Continue controlling the active bot-owned demo surface. Use after start_demo_surface to change the shared content, observe/capture the page, scroll, highlight, click approved UI, or type approved text without restarting the meeting share.", objectSchema([]string{"action"}, map[string]realtimeJSONSchema{
+			"action":          enumStringSchema("capture", "open_url", "capture", "scroll", "highlight", "click", "type"),
+			"url":             stringSchema("HTTP(S) URL to open in the active demo browser when action is open_url."),
+			"instruction":     stringSchema("Short internal instruction for this step. Do not include secrets."),
+			"direction":       enumStringSchema("down", "down", "up", "left", "right"),
+			"amount":          integerSchema("Scroll amount in pixels when action is scroll.", float64(500)),
+			"text":            stringSchema("Visible text/ref to highlight or click, or text to type when action is type."),
+			"session_id":      stringSchema("Current meeting session id when known."),
+			"demo_session_id": stringSchema("Active demo session id. Omit to use the active demo surface."),
 		})),
 		realtimeTool("cancel_demo_surface", "Cancel and stop the active bot-owned Computer Use demo surface.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"session_id":      stringSchema("Current meeting session id when known."),

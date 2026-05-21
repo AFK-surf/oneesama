@@ -192,6 +192,46 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
+    name: "control_demo_surface",
+    description:
+      "Continue controlling the active bot-owned demo surface. Use after start_demo_surface to change the shared content, observe/capture the page, scroll, highlight, click approved UI, or type approved text without restarting the meeting share.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["open_url", "capture", "scroll", "highlight", "click", "type"],
+          default: "capture",
+        },
+        url: {
+          type: "string",
+          description: "HTTP(S) URL to open in the active demo browser when action is open_url.",
+        },
+        instruction: {
+          type: "string",
+          description: "Short internal instruction for this step. Do not include secrets.",
+        },
+        direction: { type: "string", enum: ["down", "up", "left", "right"], default: "down" },
+        amount: {
+          type: "integer",
+          description: "Scroll amount in pixels when action is scroll.",
+          default: 500,
+        },
+        text: {
+          type: "string",
+          description: "Visible text/ref to highlight or click, or text to type when action is type.",
+        },
+        session_id: { type: "string", description: "Current meeting session id when known." },
+        demo_session_id: {
+          type: "string",
+          description: "Active demo session id. Omit to use the active demo surface.",
+        },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    type: "function",
     name: "cancel_demo_surface",
     description: "Cancel and stop the active bot-owned Computer Use demo surface.",
     parameters: {

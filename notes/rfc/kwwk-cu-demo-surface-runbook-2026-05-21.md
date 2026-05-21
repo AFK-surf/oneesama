@@ -1,4 +1,4 @@
-# KWWK / Codex CU Demo Surface — Operator Runbook (POC)
+# KWWK / Browser CU Demo Surface — Operator Runbook (POC)
 
 Date: 2026-05-21
 Owner: @喵喵 (task #312)
@@ -16,9 +16,11 @@ mainline meeting runtime.
 
 ## What this does NOT cover
 
-- Deferred KWWK adapter install / KWWK runtime topology — the first real POC
-  adapter is `adapter=codex`, which delegates bounded browser-use work to the
-  existing agent runner.
+- Deferred KWWK adapter install / KWWK runtime topology — the fastest live POC
+  adapter is `adapter=agent_browser`, which drives the `agent-browser` CLI
+  directly for deterministic open/capture/scroll/click smokes. The
+  `adapter=codex` worker path remains available for higher-level planning or
+  summarization, but it is too slow for every realtime demo step.
 - Realtime tool registration — see task #308 thread.
 - Production rollout — POC stays host-run, no Docker; see RFC
   Non-Goals section.
@@ -28,7 +30,7 @@ mainline meeting runtime.
 | Module | Code | Owner task |
 |---|---|---|
 | Workspace lifecycle (browser sandbox) | `internal/meetingagent/demo_workspace_lifecycle.go` | #305 |
-| KWWK/CU client contract + fake/codex adapters | `internal/meetingagent/demo_kwwk_client.go`, `internal/meetingagent/demo_codex_browser_client.go` | #306/#316 |
+| KWWK/CU client contract + fake/browser/codex adapters | `internal/meetingagent/demo_kwwk_client.go`, `internal/meetingagent/demo_agent_browser_client.go`, `internal/meetingagent/demo_codex_browser_client.go` | #306/#316/#318 |
 | Controller (intent → observation loop) | `internal/meetingagent/demo_controller.go` (in flight) | #307 |
 | Observation feedback renderer | `internal/meetingagent/demo_observation_feedback.go` | #310 |
 | Allowlist + safety policy | `internal/meetingagent/demo_safety_policy.go` | #311 |
@@ -155,9 +157,9 @@ runtime flag (RFC Phase 5), the following must all hold:
       grep recipe still matches after the change.
 - [ ] `DemoWorkspaceLifecycle.CleanupStale` runs at startup so orphaned
       profiles from a crashed POC do not pile up.
-- [ ] The realtime bridge (#308) only exposes `start_demo_surface` /
-      `cancel_demo_surface`; raw `computer_use_step` stays off until
-      the click/type approval gate lands.
+- [ ] The realtime bridge (#308/#318) exposes only bounded demo-surface intents:
+      `start_demo_surface`, `control_demo_surface`, and `cancel_demo_surface`;
+      raw `computer_use_step` stays off until the click/type approval gate lands.
 - [ ] The integration flag defaults OFF and the runbook documents how
       a single operator can verify it locally without exercising the
       whole production stack.

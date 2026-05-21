@@ -126,6 +126,79 @@ func TestRealtimeDemoBridgeCancelStopsPresentationAndWorkspace(t *testing.T) {
 	}
 }
 
+func TestRealtimeDemoBridgeControlUpdatesActiveSharedSurface(t *testing.T) {
+	now := time.Date(2026, 5, 21, 18, 55, 0, 0, time.UTC)
+	process := &fakeDemoWorkspaceProcess{pid: 5158}
+	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: process})
+	lifecycle.now = func() time.Time { return now }
+	share := &fakeDemoSurfaceShareClient{}
+	client := NewFakeDemoKWWKClient()
+	client.QueueResult(DemoKWWKActionResult{
+		Summary:    "Oneesama Snake POC is visible with score: 0.",
+		Confidence: 0.92,
+	})
+	client.QueueResult(DemoKWWKActionResult{
+		Summary:    "The same shared demo browser now shows score: 1.",
+		Confidence: 0.97,
+	})
+	store := NewDemoSessionStore().WithClock(func() time.Time { return now })
+	bridge := &RealtimeDemoBridge{
+		Lifecycle: lifecycle,
+		Presenter: DemoSurfacePresenter{Share: share},
+		Controller: DemoController{
+			Client: client,
+			Safety: DemoSafetyPolicy{
+				URLAllowlistPatterns: []string{"https://example.test/"},
+				AllowActiveControl:   true,
+			},
+			Now: func() time.Time { return now },
+		},
+		Store:        store,
+		Observations: NewDemoObservationBus(),
+	}
+
+	start, err := bridge.Start(context.Background(), RealtimeDemoSurfaceStartRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_change_surface",
+		URL:              "https://example.test/snake",
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if start.Presentation == nil || start.Presentation.Source != "screen_share_app" {
+		t.Fatalf("presentation = %#v, want shared app/window", start.Presentation)
+	}
+	control, err := bridge.Control(context.Background(), RealtimeDemoSurfaceControlRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_change_surface",
+		Action:           DemoActionClick,
+		Text:             "Start snake",
+	})
+	if err != nil {
+		t.Fatalf("Control() error = %v", err)
+	}
+	if !control.OK || control.Status != realtimeDemoBridgeStatusUpdated || control.Observation == nil {
+		t.Fatalf("control = %#v, want updated observation", control)
+	}
+	if control.Observation.Kind != demoObservationKindStep || !strings.Contains(control.Observation.Summary, "score: 1") {
+		t.Fatalf("control observation = %#v, want post-click shared content", control.Observation)
+	}
+	if len(share.startCalls) != 1 || len(share.appCalls) != 1 || len(share.presentCalls) != 0 {
+		t.Fatalf("share calls start=%d app=%d present=%d, want one initial shared window reused for control", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
+	}
+	requests := client.Requests()
+	if len(requests) != 2 || requests[0].Kind != DemoActionOpenURL || requests[1].Kind != DemoActionClick || requests[1].Text != "Start snake" {
+		t.Fatalf("client requests = %#v, want open then click", requests)
+	}
+	if !strings.Contains(control.ObservationContext, "score: 0") || !strings.Contains(control.ObservationContext, "score: 1") {
+		t.Fatalf("observation context = %q, want before and after content", control.ObservationContext)
+	}
+	entries, ok := store.Entries("demo_change_surface")
+	if !ok || len(entries) != 3 || entries[2].ActionClass != DemoActionClick || entries[2].Result != DemoSessionResultAllowed {
+		t.Fatalf("audit entries = %#v ok=%v, want trigger + open + click", entries, ok)
+	}
+}
+
 func TestRealtimeDemoBridgeStartPresentationFailureStopsWorkspace(t *testing.T) {
 	now := time.Date(2026, 5, 21, 16, 55, 0, 0, time.UTC)
 	process := &fakeDemoWorkspaceProcess{pid: 5154}

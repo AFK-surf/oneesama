@@ -18,6 +18,7 @@ type DemoKWWKAdapterKind string
 const (
 	DemoKWWKAdapterFake         DemoKWWKAdapterKind = "fake"
 	DemoKWWKAdapterCodex        DemoKWWKAdapterKind = "codex"
+	DemoKWWKAdapterAgentBrowser DemoKWWKAdapterKind = "agent_browser"
 	DemoKWWKAdapterStdioJSONRPC DemoKWWKAdapterKind = "stdio_json_rpc"
 	DemoKWWKAdapterLibrary      DemoKWWKAdapterKind = "library"
 )
@@ -30,13 +31,14 @@ type DemoKWWKAdapterDecision struct {
 
 func DefaultDemoKWWKAdapterDecision() DemoKWWKAdapterDecision {
 	return DemoKWWKAdapterDecision{
-		Preferred: DemoKWWKAdapterCodex,
-		Deferred:  []DemoKWWKAdapterKind{DemoKWWKAdapterStdioJSONRPC, DemoKWWKAdapterLibrary},
+		Preferred: DemoKWWKAdapterAgentBrowser,
+		Deferred:  []DemoKWWKAdapterKind{DemoKWWKAdapterCodex, DemoKWWKAdapterStdioJSONRPC, DemoKWWKAdapterLibrary},
 		Rationale: []string{
-			"codex_browser_use_reuses_existing_worker_runtime_without_reimplementing_desktop_minion_kwwk",
+			"agent_browser_adapter_provides_fast_deterministic_open_snapshot_click_smokes_for_realtime_demo_surfaces",
+			"codex_browser_use_remains_available_for_planning_or_summarization_but_is_too_slow_for_every_demo_step",
 			"host_run_poc_needs_a_process_boundary_around_browser_control_permissions",
 			"fake_adapter_unblocks_controller_tests_without_meet_or_realtime",
-			"stdio_or_library_kwwk_binding_can_replace_codex_without_changing_demo_controller",
+			"stdio_or_library_kwwk_binding_can_replace_agent_browser_without_changing_demo_controller",
 		},
 	}
 }
