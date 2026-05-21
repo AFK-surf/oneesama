@@ -50,6 +50,7 @@ type StartInput struct {
 	Context          map[string]any
 	Mode             string
 	AllowCodeChanges bool
+	Sandbox          string
 }
 
 type Runner interface {

@@ -56,3 +56,16 @@ func TestBuildCodexArgsDefaultsOpenRouterProviderFromBaseURL(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCodexArgsHonorsInputSandboxOverrideWithoutCodeChanges(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(appconfig.CodexRunnerConfig{
+		Sandbox: "read-only",
+	}, StartInput{AllowCodeChanges: false, Sandbox: "danger-full-access"})
+	joined := strings.Join(args, "\n")
+
+	if !strings.Contains(joined, "-s\ndanger-full-access") {
+		t.Fatalf("args = %s, want input sandbox override", joined)
+	}
+}

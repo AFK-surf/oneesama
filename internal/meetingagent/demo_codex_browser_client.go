@@ -15,6 +15,7 @@ const (
 	demoCodexBrowserObservationSource = "codex_browser_use"
 	defaultDemoCodexPollInterval      = 250 * time.Millisecond
 	defaultDemoCodexTimeout           = 120 * time.Second
+	defaultDemoCodexSandbox           = "danger-full-access"
 )
 
 var (
@@ -27,6 +28,7 @@ type DemoCodexBrowserClient struct {
 	Runner       agentrunner.Runner
 	PollInterval time.Duration
 	Timeout      time.Duration
+	Sandbox      string
 	Now          func() time.Time
 }
 
@@ -47,6 +49,7 @@ func (c *DemoCodexBrowserClient) DoDemoAction(ctx context.Context, req DemoKWWKA
 		Context:          demoCodexBrowserContext(req),
 		Mode:             "analysis",
 		AllowCodeChanges: false,
+		Sandbox:          firstNonEmpty(c.Sandbox, defaultDemoCodexSandbox),
 	}, agentrunner.SessionKindDemoSurface)
 	job, err := c.Runner.StartTask(ctx, input)
 	if err != nil {
@@ -185,7 +188,7 @@ func demoKWWKResultFromCodexJob(req DemoKWWKActionRequest, job agentrunner.Job, 
 		summary = "I could not verify the demo surface yet."
 	}
 	confidence := 0.6
-	if ok && payload.Confidence > 0 {
+	if ok {
 		confidence = payload.Confidence
 	} else if !ok {
 		confidence = 0.2

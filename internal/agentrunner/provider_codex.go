@@ -19,7 +19,10 @@ func newCodexProvider(cfg appconfig.AgentRunnerConfig) runnerProvider {
 }
 
 func buildCodexArgs(cfg appconfig.CodexRunnerConfig, input StartInput) []string {
-	sandbox := strings.TrimSpace(cfg.Sandbox)
+	sandbox := strings.TrimSpace(input.Sandbox)
+	if sandbox == "" {
+		sandbox = strings.TrimSpace(cfg.Sandbox)
+	}
 	if sandbox == "" {
 		if input.AllowCodeChanges {
 			sandbox = "workspace-write"

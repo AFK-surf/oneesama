@@ -241,6 +241,7 @@ func normalizeStartInput(input StartInput) StartInput {
 		Context:          cloneMap(input.Context),
 		Mode:             defaultMode(input.Mode),
 		AllowCodeChanges: input.AllowCodeChanges,
+		Sandbox:          strings.TrimSpace(input.Sandbox),
 	}
 }
 

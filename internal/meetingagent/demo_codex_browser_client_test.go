@@ -108,6 +108,9 @@ func TestDemoCodexBrowserClientStartsWorkerAndParsesStructuredObservation(t *tes
 		runner.startInput.Context["adapter"] != string(DemoKWWKAdapterCodex) {
 		t.Fatalf("context = %#v, want demo surface codex context", runner.startInput.Context)
 	}
+	if runner.startInput.Sandbox != defaultDemoCodexSandbox {
+		t.Fatalf("sandbox = %q, want demo-surface host-run sandbox", runner.startInput.Sandbox)
+	}
 	capabilities, ok := runner.startInput.Context["session_capabilities"].(agentrunner.SessionCapabilities)
 	if !ok {
 		t.Fatalf("session_capabilities = %#v, want agentrunner.SessionCapabilities", runner.startInput.Context["session_capabilities"])
@@ -180,6 +183,30 @@ func TestDemoCodexBrowserClientProtectsReservedMetadataAndUnstructuredFallback(t
 		}
 		if result.Summary != "I could not verify the demo surface yet." || result.Confidence >= defaultDemoFeedbackConfidenceFloor {
 			t.Fatalf("result = %#v, want user-safe low-confidence fallback", result)
+		}
+	})
+
+	t.Run("structured zero confidence stays below speak floor", func(t *testing.T) {
+		runner := &fakeDemoCodexRunner{
+			startJob: agentrunner.Job{
+				ID:       "job_zero_confidence",
+				Provider: "codex",
+				Status:   agentrunner.StatusCompleted,
+				Result:   `{"summary":"Cannot verify the requested page yet.","confidence":0,"kind":"surface_failed"}`,
+			},
+		}
+		client := NewDemoCodexBrowserClient(runner)
+
+		result, err := client.DoDemoAction(context.Background(), DemoKWWKActionRequest{
+			Session: DemoKWWKSessionRef{SessionID: "demo_zero_confidence"},
+			Kind:    DemoActionOpenURL,
+			URL:     "https://example.test/demo",
+		})
+		if err != nil {
+			t.Fatalf("DoDemoAction() error = %v", err)
+		}
+		if result.Confidence != 0 {
+			t.Fatalf("confidence = %f, want structured zero preserved", result.Confidence)
 		}
 	})
 }
