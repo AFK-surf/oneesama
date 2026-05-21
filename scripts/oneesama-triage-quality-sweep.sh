@@ -47,6 +47,13 @@ intent_action_markers="$(jq -c '.audit.qualityThresholds.intentActionMismatchSum
 # uses in Go; presence of any anywhere in the summary suppresses the bucket
 # so "已被 X 回复" / "没有需要回复" do not false-positive trip a match.
 intent_action_negations='["无需","不需","无须","没有","已被","已由","已经","已回复","已反应","不再","不必"]'
+# Task #285 follow-up #3: handled-by-other markers demote no-action runs from
+# review (operator-attention needed) to info (record-keeping only). Canonical
+# list lives in internal/slackagent/triage_quality_buckets.go via
+# triageQualityHandledByOtherMarkers; the audit endpoint exposes it via
+# audit.qualityThresholds.handledByOtherSummaryMarkers. Inline fallback for
+# pre-follow-up servers mirrors the same EN+ZH compound set.
+handled_by_other_markers="$(jq -c '.audit.qualityThresholds.handledByOtherSummaryMarkers // ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already handled","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","being actively handled","was already handled","is being handled","is already being handled","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]' <"${tmpdir}/audit.json")"
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
@@ -94,10 +101,63 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         invalidPersonaJSON: ($runs | map(select(((.summary // "") + " " + (.error // "")) | test("not valid persona JSON|invalid persona JSON"; "i")) | brief(.))),
         placeholderSummaries: ($runs | map(select((.summary // "") | test("short reason for the shadow decision|placeholder|TODO"; "i")) | brief(.)))
       },
+      info: {
+        handledByOtherNoAction: (
+          $runs
+          | map(
+              select(
+                is_no_action(.)
+                and ((($handled // []) | length) > 0)
+                and (
+                  (.summary // "" | ascii_downcase) as $haystack
+                  | ($handled // []) as $needles
+                  | any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle))
+                )
+              )
+              | brief(.)
+            )
+        )
+      },
       review: {
-        highContextNoAction: ($runs | map(select(is_no_action(.) and input_chars(.) >= $high_context) | brief(.))),
-        linkContextNoAction: ($runs | map(select(is_no_action(.) and external_links(.) > 0) | brief(.))),
-        lowConfidenceNoAction: ($runs | map(select(is_no_action(.) and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)) | brief(.))),
+        # task #285 follow-up #3: review buckets exclude runs where the
+        # summary already names another agent / teammate as the handler;
+        # those are info-tier (not operator-attention).
+        highContextNoAction: (
+          $runs | map(
+            select(
+              is_no_action(.)
+              and input_chars(.) >= $high_context
+              and (
+                ((($handled // []) | length) == 0)
+                or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
+              )
+            ) | brief(.)
+          )
+        ),
+        linkContextNoAction: (
+          $runs | map(
+            select(
+              is_no_action(.)
+              and external_links(.) > 0
+              and (
+                ((($handled // []) | length) == 0)
+                or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
+              )
+            ) | brief(.)
+          )
+        ),
+        lowConfidenceNoAction: (
+          $runs | map(
+            select(
+              is_no_action(.)
+              and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)
+              and (
+                ((($handled // []) | length) == 0)
+                or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
+              )
+            ) | brief(.)
+          )
+        ),
         # task #285 follow-up: summary asserts action intent (delegate / reply
         # / react / 应该 / 委托 / etc.) but actions=0 and mutations=0. Detector
         # mirrors triageQualityIntentActionMismatchMatch; if the audit
@@ -117,6 +177,12 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
                   # negation guard: any historical / negated marker in the
                   # summary suppresses the whole match.
                   | (any(($negations // [])[]; . as $neg | $raw | contains($neg)) | not)
+                  # also skip runs already classified as handled-by-other
+                  # info-tier; they belong in info, not review.
+                  and (
+                    ((($handled // []) | length) == 0)
+                    or ((($handled // []) as $hand | any($hand[]; (. | ascii_downcase) as $needle | $haystack | contains($needle))) | not)
+                  )
                   and (
                     ($markers // []) as $needles
                     | any($needles[]; (. | ascii_downcase) as $needle | $haystack | test($needle; "i"))
@@ -128,13 +194,14 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       }
     }
-' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
-  "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length)"
+  "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length)",
+  "info: handled_by_other_no_action=\(.info.handledByOtherNoAction | length)"
 ' <"${tmpdir}/quality.json"
 
 if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then

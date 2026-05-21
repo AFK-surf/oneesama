@@ -93,6 +93,7 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		RecentRuns:        buildSlackTriageAuditRunBriefs(windowRuns, 20),
 		QualityThresholds: slackTriageQualityBucketThresholds(),
 		ReviewBuckets:     buildSlackTriageReviewBuckets(windowRuns, 5),
+		InfoBuckets:       buildSlackTriageInfoBuckets(windowRuns, 5),
 	}
 	report.Flags = buildSlackTriageAuditFlags(report)
 	return report
@@ -153,6 +154,11 @@ func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) S
 		if len(run.Actions) > 0 || run.Mutations > 0 {
 			continue
 		}
+		// Skip handled-by-other runs from intent-action mismatch sampling too;
+		// they belong in the info tier, not the review tier. Task #285 follow-up #3.
+		if triageQualityRunIsHandledByOther(run.Summary) != "" {
+			continue
+		}
 		marker := triageQualityIntentActionMismatchMatch(run.Summary)
 		if marker == "" {
 			continue
@@ -171,6 +177,43 @@ func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) S
 				ActionsCount:    len(run.Actions),
 				PersonaDecision: decision,
 				MarkerMatched:   marker,
+			})
+		}
+	}
+	return out
+}
+
+// buildSlackTriageInfoBuckets collects no-action runs whose summary indicates
+// "another agent / teammate already handled this thread". These runs land in
+// the info tier so operator review queues stay focused on real
+// "something might be wrong" candidates. Counts run independently of the
+// review-tier buckets; samples are limited and ordered newest-first. Task
+// #285 follow-up #3 (driver 6h audit 2026-05-21 proposal #2).
+func buildSlackTriageInfoBuckets(runs []SlackTriageContext, sampleLimit int) SlackTriageInfoBuckets {
+	out := SlackTriageInfoBuckets{}
+	if len(runs) == 0 {
+		return out
+	}
+	ordered := append([]SlackTriageContext(nil), runs...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return parseTriageTimestamp(ordered[i].Timestamp).After(parseTriageTimestamp(ordered[j].Timestamp))
+	})
+	for _, run := range ordered {
+		if len(run.Actions) > 0 || run.Mutations > 0 {
+			continue
+		}
+		marker := triageQualityRunIsHandledByOther(run.Summary)
+		if marker == "" {
+			continue
+		}
+		out.HandledByOtherNoActionCount++
+		if sampleLimit > 0 && len(out.HandledByOtherNoActionSamples) < sampleLimit {
+			out.HandledByOtherNoActionSamples = append(out.HandledByOtherNoActionSamples, SlackTriageHandledByOtherSample{
+				Timestamp:     run.Timestamp,
+				RunID:         run.ID,
+				Channels:      run.Channels,
+				Summary:       slackTriageFailureSampleText(run.Summary),
+				MarkerMatched: marker,
 			})
 		}
 	}

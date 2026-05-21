@@ -126,6 +126,80 @@ func triageQualityIntentActionMismatchMatch(summary string) string {
 	return ""
 }
 
+// triageQualityHandledByOtherMarkers indicate the no-action run's summary is
+// describing "another agent / teammate already handled this thread", which is
+// the correct dispose for many high-context / link-context no-action runs.
+// Hitting any marker demotes the run from the review tier (operator-attention
+// needed) to the info tier (record-keeping only) — operators stop having to
+// triage through "all 5 review candidates were handled elsewhere" sweeps.
+//
+// Markers are compound phrases for the same reason intent-action markers are:
+// bare `已被` / `已经` / `already` etc. would false-positive on a wide range
+// of historical / passive narration that has nothing to do with "another
+// agent handled the thread". The 5 dispose samples driver pulled from the
+// 6h sweep at 11:52 SHA are pinned as positive regression cases in
+// triage_quality_buckets_test.go. Task #285 follow-up #3 (driver 6h audit
+// 2026-05-21 review proposal #2: handled-by-other → info bucket).
+var triageQualityHandledByOtherMarkers = []string{
+	// English compound phrases observed in 6h live samples.
+	"already answered",
+	"already responded",
+	"already replied",
+	"already acknowledged",
+	"already addressed",
+	"already implemented",
+	"already handled",
+	"already started reviewing",
+	"already joined",
+	"already executed",
+	"already merged",
+	"already resolved",
+	"already confirmed",
+	"actively handled",
+	"being actively handled",
+	"was already handled",
+	"is being handled",
+	"is already being handled",
+	// Chinese compound phrases. Same compound discipline as the
+	// intent-action markers — avoid bare `已被` / `已经`.
+	"已被回复",
+	"已被处理",
+	"已被解决",
+	"已被直接回复",
+	"已被直接处理",
+	"已由 codex",
+	"已由 claude",
+	"已经回复",
+	"已经处理",
+	"已经解决",
+	"已经确认",
+	"已经接手",
+	"正在处理",
+	"正在跟进",
+	"正在被处理",
+	"问题已被",
+	"已在 msg_ts",
+	"已在线程",
+}
+
+// triageQualityRunIsHandledByOther returns the first matching marker (for
+// audit / sample tagging) when the summary indicates another agent or
+// teammate already handled the thread.
+func triageQualityRunIsHandledByOther(summary string) string {
+	s := strings.TrimSpace(summary)
+	if s == "" {
+		return ""
+	}
+	lower := strings.ToLower(s)
+	for _, marker := range triageQualityHandledByOtherMarkers {
+		needle := strings.ToLower(marker)
+		if strings.Contains(lower, needle) {
+			return marker
+		}
+	}
+	return ""
+}
+
 // SlackTriageQualityBucketThresholds is the snapshot exposed via the triage
 // audit endpoint so external tooling (sweep script, monitor, future
 // dashboards) can read the live thresholds instead of hard-coding them.
@@ -133,13 +207,16 @@ type SlackTriageQualityBucketThresholds struct {
 	HighContextInputChars              int      `json:"highContextInputChars"`
 	LowConfidenceCeiling               float64  `json:"lowConfidenceCeiling"`
 	IntentActionMismatchSummaryMarkers []string `json:"intentActionMismatchSummaryMarkers"`
+	HandledByOtherSummaryMarkers       []string `json:"handledByOtherSummaryMarkers"`
 }
 
 func slackTriageQualityBucketThresholds() SlackTriageQualityBucketThresholds {
-	markers := append([]string(nil), triageQualityIntentActionMismatchMarkers...)
+	intentMarkers := append([]string(nil), triageQualityIntentActionMismatchMarkers...)
+	handledMarkers := append([]string(nil), triageQualityHandledByOtherMarkers...)
 	return SlackTriageQualityBucketThresholds{
 		HighContextInputChars:              triageQualityHighContextInputCharsThreshold,
 		LowConfidenceCeiling:               triageQualityLowConfidenceCeiling,
-		IntentActionMismatchSummaryMarkers: markers,
+		IntentActionMismatchSummaryMarkers: intentMarkers,
+		HandledByOtherSummaryMarkers:       handledMarkers,
 	}
 }

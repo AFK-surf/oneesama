@@ -95,8 +95,9 @@ type SlackDailyTriageMetrics struct {
 	LinkContextRuns       int            `json:"link_context_runs"`
 	LinkContextNoAction   int            `json:"link_context_no_action"`
 	LinkReplies           int            `json:"link_replies"`
-	LowConfidenceNoAction int            `json:"low_confidence_no_action"`
-	IntentActionMismatch  int            `json:"intent_action_mismatch"`
+	LowConfidenceNoAction  int            `json:"low_confidence_no_action"`
+	IntentActionMismatch   int            `json:"intent_action_mismatch"`
+	HandledByOtherNoAction int            `json:"handled_by_other_no_action"`
 	ToolCalls             int            `json:"tool_calls"`
 	MemoryLookups         int            `json:"memory_lookups"`
 	ExternalSearches      int            `json:"external_searches"`
@@ -530,17 +531,28 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		if externalLinks > 0 {
 			metrics.LinkContextRuns++
 		}
-		if inputChars >= triageQualityHighContextInputCharsThreshold && len(run.Actions) == 0 && run.Mutations == 0 {
-			metrics.HighContextNoAction++
+		// Task #285 follow-up #3: when the no-action summary describes another
+		// agent already handling the thread, count it under the info-tier
+		// HandledByOtherNoAction bucket and skip the review-tier high-context
+		// / link-context / low-confidence / intent-mismatch buckets so review
+		// queues stay focused on real "something might be wrong" candidates.
+		handledByOther := len(run.Actions) == 0 && run.Mutations == 0 && triageQualityRunIsHandledByOther(run.Summary) != ""
+		if handledByOther {
+			metrics.HandledByOtherNoAction++
 		}
-		if externalLinks > 0 && len(run.Actions) == 0 && run.Mutations == 0 {
-			metrics.LinkContextNoAction++
-		}
-		if slackDailyReportLowConfidenceNoAction(run) {
-			metrics.LowConfidenceNoAction++
-		}
-		if len(run.Actions) == 0 && run.Mutations == 0 && triageQualityIntentActionMismatchMatch(run.Summary) != "" {
-			metrics.IntentActionMismatch++
+		if !handledByOther {
+			if inputChars >= triageQualityHighContextInputCharsThreshold && len(run.Actions) == 0 && run.Mutations == 0 {
+				metrics.HighContextNoAction++
+			}
+			if externalLinks > 0 && len(run.Actions) == 0 && run.Mutations == 0 {
+				metrics.LinkContextNoAction++
+			}
+			if slackDailyReportLowConfidenceNoAction(run) {
+				metrics.LowConfidenceNoAction++
+			}
+			if len(run.Actions) == 0 && run.Mutations == 0 && triageQualityIntentActionMismatchMatch(run.Summary) != "" {
+				metrics.IntentActionMismatch++
+			}
 		}
 		if raw, ok := mapFromAny(run.Metadata["persona_foreground"]); ok {
 			metrics.PersonaRuns++

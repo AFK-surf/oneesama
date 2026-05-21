@@ -163,6 +163,7 @@ type SlackTriageAuditReport struct {
 	RecentRuns        []SlackTriageAuditRunBrief         `json:"recentRuns,omitempty"`
 	QualityThresholds SlackTriageQualityBucketThresholds `json:"qualityThresholds"`
 	ReviewBuckets     SlackTriageReviewBuckets           `json:"reviewBuckets"`
+	InfoBuckets       SlackTriageInfoBuckets             `json:"infoBuckets"`
 }
 
 type SlackTriageAuditOutcome struct {
@@ -303,6 +304,28 @@ type SlackTriageIntentActionMismatchSample struct {
 type SlackTriageReviewBuckets struct {
 	IntentActionMismatchCount   int                                     `json:"intentActionMismatchCount"`
 	IntentActionMismatchSamples []SlackTriageIntentActionMismatchSample `json:"intentActionMismatchSamples,omitempty"`
+}
+
+// SlackTriageHandledByOtherSample records a no-action run whose summary
+// describes another agent / teammate already handling the thread. These runs
+// land in the info tier (not review) so operators stop having to triage
+// through correct dispose runs. Task #285 follow-up #3.
+type SlackTriageHandledByOtherSample struct {
+	Timestamp     string   `json:"timestamp,omitempty"`
+	RunID         int64    `json:"runId,omitempty"`
+	Channels      []string `json:"channels,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+	MarkerMatched string   `json:"markerMatched,omitempty"`
+}
+
+// SlackTriageInfoBuckets aggregates "info tier" (record-keeping only, NOT
+// operator-attention-needed) bucket counts + samples. Operators should be
+// able to glance at info bucket counts to confirm "system is correctly
+// staying silent because work was done elsewhere", without these counts
+// landing in review queues. Task #285 follow-up #3.
+type SlackTriageInfoBuckets struct {
+	HandledByOtherNoActionCount   int                               `json:"handledByOtherNoActionCount"`
+	HandledByOtherNoActionSamples []SlackTriageHandledByOtherSample `json:"handledByOtherNoActionSamples,omitempty"`
 }
 
 type SlackTriageAuditRunBrief struct {
