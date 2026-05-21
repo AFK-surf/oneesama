@@ -3,6 +3,9 @@ package slackagent
 import (
 	"encoding/json"
 	"strings"
+	"time"
+
+	"github.com/AFK-surf/oneesama/internal/persona"
 )
 
 // Thresholds shared between the daily report's per-run quality bucketing
@@ -29,7 +32,142 @@ const (
 	// persona is hedging; the bucket exists to surface "Pi was unsure and
 	// silently dropped" runs for human review.
 	triageQualityLowConfidenceCeiling = 0.75
+
+	// triageQualityDynamicContextFreshnessSkew flags dynamic envelopes whose
+	// freshness timestamp is too far away from the triage run timestamp.
+	// Dynamic envelopes are built with the request, so a few seconds is
+	// normal; minutes of skew means stale or replayed context.
+	triageQualityDynamicContextFreshnessSkew = 5 * time.Minute
 )
+
+var triageQualityRequiredDynamicContextKinds = []string{"current_time"}
+
+type triageQualityDynamicContextIssue struct {
+	MissingKinds    []string
+	IncompleteKinds []string
+	StaleKinds      []string
+	Details         []string
+}
+
+type triageQualityDynamicContextEnvelope struct {
+	Kind         string
+	Source       string
+	Version      string
+	Freshness    string
+	CachePolicy  string
+	ContentChars int
+}
+
+func triageQualityRunDynamicContextIssue(run SlackTriageContext) (triageQualityDynamicContextIssue, bool) {
+	if !boolFromAny(run.Metadata["persona_dynamic_context_expected"], false) {
+		return triageQualityDynamicContextIssue{}, false
+	}
+	required := triageQualityRequiredDynamicContextKindsForRun(run)
+	envelopes := triageQualityDynamicContextEnvelopesFromAny(run.Metadata["persona_dynamic_context"])
+	byKind := make(map[string]triageQualityDynamicContextEnvelope, len(envelopes))
+	for _, env := range envelopes {
+		if env.Kind != "" {
+			byKind[env.Kind] = env
+		}
+	}
+	out := triageQualityDynamicContextIssue{}
+	runTime := parseTriageTimestamp(run.Timestamp)
+	for _, kind := range required {
+		env, ok := byKind[kind]
+		if !ok {
+			out.MissingKinds = append(out.MissingKinds, kind)
+			out.Details = append(out.Details, kind+":missing")
+			continue
+		}
+		if incompleteReason := triageQualityDynamicContextIncompleteReason(env); incompleteReason != "" {
+			out.IncompleteKinds = append(out.IncompleteKinds, kind)
+			out.Details = append(out.Details, kind+":"+incompleteReason)
+		}
+		if staleReason := triageQualityDynamicContextStaleReason(env, runTime); staleReason != "" {
+			out.StaleKinds = append(out.StaleKinds, kind)
+			out.Details = append(out.Details, kind+":"+staleReason)
+		}
+	}
+	return out, len(out.MissingKinds)+len(out.IncompleteKinds)+len(out.StaleKinds) > 0
+}
+
+func triageQualityRequiredDynamicContextKindsForRun(run SlackTriageContext) []string {
+	required := append([]string(nil), triageQualityRequiredDynamicContextKinds...)
+	if boolFromAny(run.Metadata["workspace_policy_configured"], false) || stringFromAny(run.Metadata["workspace_triage_policy"]) != "" {
+		required = append(required, "workspace_triage_policy")
+	}
+	if lenStringSliceFromAny(run.Metadata["workspace_custom_emoji"]) > 0 {
+		required = append(required, "workspace_custom_emoji")
+	}
+	return required
+}
+
+func triageQualityDynamicContextIncompleteReason(env triageQualityDynamicContextEnvelope) string {
+	switch {
+	case strings.TrimSpace(env.Source) == "":
+		return "missing_source"
+	case strings.TrimSpace(env.Version) == "":
+		return "missing_version"
+	case strings.TrimSpace(env.Freshness) == "":
+		return "missing_freshness"
+	case strings.TrimSpace(env.CachePolicy) != persona.DynamicContextCachePolicyNotStablePrefix:
+		return "wrong_cache_policy"
+	default:
+		return ""
+	}
+}
+
+func triageQualityDynamicContextStaleReason(env triageQualityDynamicContextEnvelope, runTime time.Time) string {
+	if runTime.IsZero() {
+		return ""
+	}
+	freshness := parseTriageTimestamp(env.Freshness)
+	if freshness.IsZero() {
+		return "invalid_freshness"
+	}
+	delta := freshness.Sub(runTime)
+	if delta < 0 {
+		delta = -delta
+	}
+	if delta > triageQualityDynamicContextFreshnessSkew {
+		return "freshness_skew"
+	}
+	return ""
+}
+
+func triageQualityDynamicContextEnvelopesFromAny(value any) []triageQualityDynamicContextEnvelope {
+	switch typed := value.(type) {
+	case []triageQualityDynamicContextEnvelope:
+		return append([]triageQualityDynamicContextEnvelope(nil), typed...)
+	case []map[string]any:
+		out := make([]triageQualityDynamicContextEnvelope, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, triageQualityDynamicContextEnvelopeFromMap(item))
+		}
+		return out
+	case []any:
+		out := make([]triageQualityDynamicContextEnvelope, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := mapFromAny(item); ok {
+				out = append(out, triageQualityDynamicContextEnvelopeFromMap(mapped))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func triageQualityDynamicContextEnvelopeFromMap(item map[string]any) triageQualityDynamicContextEnvelope {
+	return triageQualityDynamicContextEnvelope{
+		Kind:         stringFromAny(item["kind"]),
+		Source:       stringFromAny(item["source"]),
+		Version:      stringFromAny(item["version"]),
+		Freshness:    stringFromAny(item["freshness"]),
+		CachePolicy:  stringFromAny(item["cache_policy"]),
+		ContentChars: intFromAny(item["content_chars"]),
+	}
+}
 
 // triageQualityIntentActionMismatchMarkers are case-insensitive substrings
 // indicating the run's `summary` text claims an intent to act
@@ -393,6 +531,7 @@ func triageQualityRunIsHandledByOther(summary string) string {
 type SlackTriageQualityBucketThresholds struct {
 	HighContextInputChars              int      `json:"highContextInputChars"`
 	LowConfidenceCeiling               float64  `json:"lowConfidenceCeiling"`
+	DynamicContextFreshnessSkewSeconds int64    `json:"dynamicContextFreshnessSkewSeconds"`
 	IntentActionMismatchSummaryMarkers []string `json:"intentActionMismatchSummaryMarkers"`
 	HandledByOtherSummaryMarkers       []string `json:"handledByOtherSummaryMarkers"`
 }
@@ -403,6 +542,7 @@ func slackTriageQualityBucketThresholds() SlackTriageQualityBucketThresholds {
 	return SlackTriageQualityBucketThresholds{
 		HighContextInputChars:              triageQualityHighContextInputCharsThreshold,
 		LowConfidenceCeiling:               triageQualityLowConfidenceCeiling,
+		DynamicContextFreshnessSkewSeconds: int64(triageQualityDynamicContextFreshnessSkew.Seconds()),
 		IntentActionMismatchSummaryMarkers: intentMarkers,
 		HandledByOtherSummaryMarkers:       handledMarkers,
 	}

@@ -317,6 +317,22 @@ type SlackTriageDelegateNoVisibleActionSample struct {
 	DeliveryStatus string   `json:"deliveryStatus,omitempty"`
 }
 
+// SlackTriageDynamicContextIssueSample surfaces Pi foreground runs whose
+// dynamic_context audit snapshot is missing, incomplete, or stale relative to
+// the run timestamp. This bucket is gated by
+// metadata.persona_dynamic_context_expected so legacy pre-envelope runs do not
+// create review noise. Task #324.
+type SlackTriageDynamicContextIssueSample struct {
+	Timestamp       string   `json:"timestamp,omitempty"`
+	RunID           int64    `json:"runId,omitempty"`
+	Channels        []string `json:"channels,omitempty"`
+	Summary         string   `json:"summary,omitempty"`
+	MissingKinds    []string `json:"missingKinds,omitempty"`
+	IncompleteKinds []string `json:"incompleteKinds,omitempty"`
+	StaleKinds      []string `json:"staleKinds,omitempty"`
+	Details         []string `json:"details,omitempty"`
+}
+
 // SlackTriageReviewBuckets aggregates per-bucket counts + capped sample
 // lists for the triage audit review surface. Buckets count all matching runs
 // in the window; samples are limited and ordered newest-first.
@@ -326,6 +342,8 @@ type SlackTriageDelegateNoVisibleActionSample struct {
 // because the failure mode + the evidence the operator needs are
 // different. See `buildSlackTriageReviewBuckets` for the dispatch order.
 type SlackTriageReviewBuckets struct {
+	DynamicContextIssueCount       int                                        `json:"dynamicContextIssueCount"`
+	DynamicContextIssueSamples     []SlackTriageDynamicContextIssueSample     `json:"dynamicContextIssueSamples,omitempty"`
 	DelegateNoVisibleActionCount   int                                        `json:"delegateNoVisibleActionCount"`
 	DelegateNoVisibleActionSamples []SlackTriageDelegateNoVisibleActionSample `json:"delegateNoVisibleActionSamples,omitempty"`
 	IntentActionMismatchCount      int                                        `json:"intentActionMismatchCount"`

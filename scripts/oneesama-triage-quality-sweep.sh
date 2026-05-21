@@ -36,6 +36,7 @@ cutoff="${ONEESAMA_TRIAGE_QUALITY_AFTER:-$cutoff}"
 # task #285 and does not yet emit the qualityThresholds block.
 high_context_threshold="$(jq -r '.audit.qualityThresholds.highContextInputChars // 7000' <"${tmpdir}/audit.json")"
 low_confidence_ceiling="$(jq -r '.audit.qualityThresholds.lowConfidenceCeiling // 0.75' <"${tmpdir}/audit.json")"
+dynamic_context_freshness_skew="$(jq -r '.audit.qualityThresholds.dynamicContextFreshnessSkewSeconds // 300' <"${tmpdir}/audit.json")"
 # task #285 follow-up: canonical EN+ZH marker list lives in
 # internal/slackagent/triage_quality_buckets.go.
 # triageQualityIntentActionMismatchMarkers. The audit endpoint exposes it via
@@ -68,6 +69,44 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
     (($run.actions // []) | length);
   def is_no_action($run):
     (($run.mutations // 0) == 0 and actions_count($run) == 0);
+  def epoch($value):
+    (($value // "") | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601? // 0);
+  def absnum:
+    if . < 0 then -. else . end;
+  def dynamic_required_kinds($run):
+    ["current_time"]
+    + (if (($run.metadata.workspace_policy_configured // false) or (($run.metadata.workspace_triage_policy // "") != "")) then ["workspace_triage_policy"] else [] end)
+    + (if ((($run.metadata.workspace_custom_emoji // []) | length) > 0) then ["workspace_custom_emoji"] else [] end);
+  def dynamic_envelope($run; $kind):
+    [($run.metadata.persona_dynamic_context // [])[]? | select((.kind // "") == $kind)] | first // null;
+  def dynamic_context_issue($run):
+    (($run.metadata.persona_dynamic_context_expected // false) == true)
+    and (
+      (dynamic_required_kinds($run) as $required | any($required[]; dynamic_envelope($run; .) == null))
+      or (
+        dynamic_required_kinds($run) as $required
+        | any($required[]; (dynamic_envelope($run; .)) as $env
+            | $env != null
+            and (
+              (($env.source // "") == "")
+              or (($env.version // "") == "")
+              or (($env.freshness // "") == "")
+              or (($env.cache_policy // "") != "dynamic_not_stable_prefix")
+            )
+          )
+      )
+      or (
+        (epoch($run.timestamp)) as $run_epoch
+        | dynamic_required_kinds($run) as $required
+        | any($required[]; (dynamic_envelope($run; .)) as $env
+            | $env != null
+            and (
+              (epoch($env.freshness) == 0)
+              or (((epoch($env.freshness) - $run_epoch) | absnum) > $dynamic_skew)
+            )
+          )
+      )
+    );
   def retry_scheduled_failure($run):
     (($run.metadata.triage_timeout_needs_retry // false)
       or ($run.metadata.triage_empty_final_needs_retry // false)
@@ -170,6 +209,10 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       },
       review: {
+        dynamicContextIssue: (
+          $runs
+          | map(select(is_no_action(.) and dynamic_context_issue(.)) | brief(.))
+        ),
         # task #285 follow-up #3: review buckets exclude runs where the
         # summary already names another agent / teammate as the handler;
         # those are info-tier (not operator-attention).
@@ -195,6 +238,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           $runs | map(
             select(
               is_no_action(.)
+              and (dynamic_context_issue(.) | not)
               and input_chars(.) >= $high_context
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (
@@ -208,6 +252,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           $runs | map(
             select(
               is_no_action(.)
+              and (dynamic_context_issue(.) | not)
               and external_links(.) > 0
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (
@@ -221,6 +266,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           $runs | map(
             select(
               is_no_action(.)
+              and (dynamic_context_issue(.) | not)
               and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (
@@ -242,6 +288,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           | map(
               select(
                 is_no_action(.)
+                and (dynamic_context_issue(.) | not)
                 # bucket precedence: a real delegate_worker call belongs
                 # in delegateNoVisibleAction, not narrative mismatch.
                 and (is_delegate_no_visible_action(.) | not)
@@ -270,17 +317,17 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       }
     }
-' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson dynamic_skew "$dynamic_context_freshness_skew" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
-  "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length) delegate_no_visible_action=\(.review.delegateNoVisibleAction | length)",
+  "review: dynamic_context_issue=\(.review.dynamicContextIssue | length) high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length) delegate_no_visible_action=\(.review.delegateNoVisibleAction | length)",
   "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length) delegate_started_pending_worker_audit=\(.info.delegateStartedPendingWorkerAudit | length)"
 ' <"${tmpdir}/quality.json"
 
-if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length) + (.review.delegateNoVisibleAction | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
+if jq -e '((.review.dynamicContextIssue | length) + (.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length) + (.review.delegateNoVisibleAction | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
   echo "oneesama-triage-quality-sweep: review candidates:" >&2
   jq -r '
     .review

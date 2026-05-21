@@ -96,6 +96,7 @@ type SlackDailyTriageMetrics struct {
 	LinkContextNoAction     int            `json:"link_context_no_action"`
 	LinkReplies             int            `json:"link_replies"`
 	LowConfidenceNoAction   int            `json:"low_confidence_no_action"`
+	DynamicContextIssues    int            `json:"dynamic_context_issues"`
 	IntentActionMismatch    int            `json:"intent_action_mismatch"`
 	DelegateNoVisibleAction int            `json:"delegate_no_visible_action"`
 	HandledByOtherNoAction  int            `json:"handled_by_other_no_action"`
@@ -538,14 +539,21 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		// / link-context / low-confidence / intent-mismatch buckets so review
 		// queues stay focused on real "something might be wrong" candidates.
 		handledByOther := len(run.Actions) == 0 && run.Mutations == 0 && triageQualityRunIsHandledByOther(run.Summary) != ""
+		dynamicContextIssue := len(run.Actions) == 0 && run.Mutations == 0
+		if _, ok := triageQualityRunDynamicContextIssue(run); !ok {
+			dynamicContextIssue = false
+		}
 		delegateStartedPending := false
 		if evidence, ok := triageQualityRunDelegateNoVisibleAction(run); ok && !triageQualityDelegateNeedsOperatorReview(evidence) {
 			delegateStartedPending = true
 		}
+		if dynamicContextIssue {
+			metrics.DynamicContextIssues++
+		}
 		if handledByOther {
 			metrics.HandledByOtherNoAction++
 		}
-		if !handledByOther && !delegateStartedPending {
+		if !dynamicContextIssue && !handledByOther && !delegateStartedPending {
 			if inputChars >= triageQualityHighContextInputCharsThreshold && len(run.Actions) == 0 && run.Mutations == 0 {
 				metrics.HighContextNoAction++
 			}
@@ -679,6 +687,9 @@ func buildSlackDailyReportFlags(report SlackDailyReport) []SlackDailyReportFlag 
 	if report.New.LinkContextNoAction > 0 {
 		flags = append(flags, SlackDailyReportFlag{Level: "yellow", Code: "link_context_no_action", Message: "Some fetched-link triage samples stayed silent; review whether workspace commentary should have fired."})
 	}
+	if report.New.DynamicContextIssues > 0 {
+		flags = append(flags, SlackDailyReportFlag{Level: "yellow", Code: "dynamic_context_issue", Message: "Some persona runs had missing, incomplete, or stale dynamic context envelopes."})
+	}
 	return flags
 }
 
@@ -723,6 +734,8 @@ func formatSlackDailyReportText(report SlackDailyReport) string {
 	}
 	fmt.Fprintf(&b, "- New evidence path: memory %d / external %d / thread %d / delegate %d\n",
 		report.New.MemoryLookups, report.New.ExternalSearches, report.New.ThreadFetches, report.New.DelegateWorkerJobs)
+	fmt.Fprintf(&b, "- Harness drift: dynamic_context_issue %d / delegate_no_visible_action %d / handled_by_other_no_action %d\n",
+		report.New.DynamicContextIssues, report.New.DelegateNoVisibleAction, report.New.HandledByOtherNoAction)
 	b.WriteString("\n*Self-iteration notes*\n")
 	fmt.Fprintf(&b, "- Compare approved replies/reactions/skips in the same action buckets as old daily audit; do not invent a separate quality taxonomy.\n")
 	fmt.Fprintf(&b, "- Treat old slackd silence as one signal, not ground truth; workspace policy and Memory-backed synthesis still decide whether Oneesama should engage.\n")

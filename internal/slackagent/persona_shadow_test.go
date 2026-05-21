@@ -363,6 +363,12 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 	if updated.Mutations != 1 || updated.Failures != 0 {
 		t.Fatalf("updated mutations/failures = %d/%d, want 1/0; run=%#v", updated.Mutations, updated.Failures, updated)
 	}
+	if updated.Metadata["persona_dynamic_context_expected"] != true {
+		t.Fatalf("metadata = %#v, want persona_dynamic_context_expected", updated.Metadata)
+	}
+	if intFromAny(updated.Metadata["persona_dynamic_context_count"]) == 0 {
+		t.Fatalf("metadata = %#v, want persona_dynamic_context_count > 0", updated.Metadata)
+	}
 	if len(updated.Actions) != 1 || !strings.Contains(updated.Actions[0].Brief, "Persona reply") {
 		t.Fatalf("actions = %#v, want one persona action", updated.Actions)
 	}

@@ -1,6 +1,112 @@
 package slackagent
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/AFK-surf/oneesama/internal/persona"
+)
+
+func TestTriageQualityRunDynamicContextIssue(t *testing.T) {
+	mkRun := func(envelopes []map[string]any, extra map[string]any) SlackTriageContext {
+		md := map[string]any{
+			"persona_dynamic_context_expected": true,
+			"persona_dynamic_context":          envelopes,
+		}
+		for key, value := range extra {
+			md[key] = value
+		}
+		return SlackTriageContext{
+			ID:        101,
+			Timestamp: "2026-05-21T10:00:00Z",
+			Summary:   "Pi foreground completed.",
+			Metadata:  md,
+		}
+	}
+	env := func(kind string, freshness string) map[string]any {
+		return map[string]any{
+			"kind":          kind,
+			"source":        "test_source",
+			"version":       "sha256:abc123",
+			"freshness":     freshness,
+			"cache_policy":  persona.DynamicContextCachePolicyNotStablePrefix,
+			"content_chars": 12,
+		}
+	}
+	cases := []struct {
+		name           string
+		run            SlackTriageContext
+		wantOK         bool
+		wantMissing    string
+		wantIncomplete string
+		wantStale      string
+	}{
+		{
+			name: "legacy_without_expected_marker_is_ignored",
+			run: SlackTriageContext{
+				Timestamp: "2026-05-21T10:00:00Z",
+				Metadata:  map[string]any{},
+			},
+			wantOK: false,
+		},
+		{
+			name:   "valid_required_context_does_not_match",
+			run:    mkRun([]map[string]any{env("current_time", "2026-05-21T10:00:01Z")}, nil),
+			wantOK: false,
+		},
+		{
+			name:        "missing_workspace_policy_when_configured",
+			run:         mkRun([]map[string]any{env("current_time", "2026-05-21T10:00:01Z")}, map[string]any{"workspace_policy_configured": true}),
+			wantOK:      true,
+			wantMissing: "workspace_triage_policy",
+		},
+		{
+			name:           "wrong_cache_policy_is_incomplete",
+			run:            mkRun([]map[string]any{{"kind": "current_time", "source": "runtime", "version": "runtime_clock", "freshness": "2026-05-21T10:00:01Z", "cache_policy": "stable_prefix"}}, nil),
+			wantOK:         true,
+			wantIncomplete: "current_time",
+		},
+		{
+			name:      "old_freshness_is_stale",
+			run:       mkRun([]map[string]any{env("current_time", "2026-05-21T09:40:00Z")}, nil),
+			wantOK:    true,
+			wantStale: "current_time",
+		},
+		{
+			name: "custom_emoji_required_when_snapshot_present",
+			run: mkRun([]map[string]any{env("current_time", "2026-05-21T10:00:01Z")}, map[string]any{
+				"workspace_custom_emoji": []any{"eyes_bridge"},
+			}),
+			wantOK:      true,
+			wantMissing: "workspace_custom_emoji",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issue, ok := triageQualityRunDynamicContextIssue(tc.run)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (issue=%#v)", ok, tc.wantOK, issue)
+			}
+			if tc.wantMissing != "" && !containsTriageQualityString(issue.MissingKinds, tc.wantMissing) {
+				t.Fatalf("MissingKinds = %#v, want %q", issue.MissingKinds, tc.wantMissing)
+			}
+			if tc.wantIncomplete != "" && !containsTriageQualityString(issue.IncompleteKinds, tc.wantIncomplete) {
+				t.Fatalf("IncompleteKinds = %#v, want %q", issue.IncompleteKinds, tc.wantIncomplete)
+			}
+			if tc.wantStale != "" && !containsTriageQualityString(issue.StaleKinds, tc.wantStale) {
+				t.Fatalf("StaleKinds = %#v, want %q", issue.StaleKinds, tc.wantStale)
+			}
+		})
+	}
+}
+
+func containsTriageQualityString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
 
 // TestTriageQualityRunDelegateNoVisibleActionMatch pins the bucket conditions
 // for `delegate_no_visible_action` review samples. Driver 2h sweep
@@ -164,6 +270,16 @@ func TestTriageQualityRunDelegateNoVisibleActionMatch(t *testing.T) {
 // no longer review-tier; if the worker did not start / has no visible job id,
 // it remains in delegate_no_visible_action for operator review.
 func TestBuildSlackTriageReviewBucketsBucketPrecedence(t *testing.T) {
+	dynamicIssueRun := SlackTriageContext{
+		ID:        4,
+		Timestamp: "2026-05-21T07:03:00Z",
+		Channels:  []string{"C_D"},
+		Summary:   "I should delegate this to codex and reply later",
+		Metadata: map[string]any{
+			"persona_dynamic_context_expected": true,
+			"persona_dynamic_context":          []any{},
+		},
+	}
 	delegateStartedRun := SlackTriageContext{
 		ID:        1,
 		Timestamp: "2026-05-21T07:00:00Z",
@@ -199,7 +315,13 @@ func TestBuildSlackTriageReviewBucketsBucketPrecedence(t *testing.T) {
 		Summary:   "Should delegate to codex but did nothing",
 		Metadata:  map[string]any{},
 	}
-	buckets := buildSlackTriageReviewBuckets([]SlackTriageContext{delegateStartedRun, delegateNotStartedRun, pureMismatchRun}, 8)
+	buckets := buildSlackTriageReviewBuckets([]SlackTriageContext{delegateStartedRun, delegateNotStartedRun, pureMismatchRun, dynamicIssueRun}, 8)
+	if buckets.DynamicContextIssueCount != 1 {
+		t.Fatalf("DynamicContextIssueCount = %d, want 1", buckets.DynamicContextIssueCount)
+	}
+	if len(buckets.DynamicContextIssueSamples) != 1 || buckets.DynamicContextIssueSamples[0].RunID != 4 {
+		t.Fatalf("DynamicContextIssueSamples = %#v, want one row for run 4", buckets.DynamicContextIssueSamples)
+	}
 	if buckets.DelegateNoVisibleActionCount != 1 {
 		t.Fatalf("DelegateNoVisibleActionCount = %d, want 1", buckets.DelegateNoVisibleActionCount)
 	}
@@ -237,6 +359,9 @@ func TestSlackTriageQualityBucketThresholdsMatrix(t *testing.T) {
 	}
 	if got.LowConfidenceCeiling != triageQualityLowConfidenceCeiling {
 		t.Fatalf("LowConfidenceCeiling = %v, want triageQualityLowConfidenceCeiling (%v)", got.LowConfidenceCeiling, triageQualityLowConfidenceCeiling)
+	}
+	if got.DynamicContextFreshnessSkewSeconds != int64(triageQualityDynamicContextFreshnessSkew.Seconds()) {
+		t.Fatalf("DynamicContextFreshnessSkewSeconds = %d, want %d", got.DynamicContextFreshnessSkewSeconds, int64(triageQualityDynamicContextFreshnessSkew.Seconds()))
 	}
 	if len(got.IntentActionMismatchSummaryMarkers) == 0 {
 		t.Fatalf("IntentActionMismatchSummaryMarkers must not be empty")

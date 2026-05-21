@@ -154,6 +154,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		WorkspaceTriagePolicy:  s.triageWorkspacePolicy,
 		CustomEmoji:            s.workspaceCustomEmojiSnapshot(),
 	})
+	s.recordSlackTriagePersonaDynamicContextAudit(ctx, runID, request.DynamicContext)
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
@@ -184,6 +185,7 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		return false
 	}
 	request.Mode = persona.ModeLive
+	s.recordSlackTriagePersonaDynamicContextAudit(ctx, runID, request.DynamicContext)
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
@@ -634,6 +636,26 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	return nil
 }
 
+func (s *Service) recordSlackTriagePersonaDynamicContextAudit(ctx context.Context, runID int64, envelopes []persona.DynamicContextEnvelope) {
+	if s == nil || s.triage == nil || runID == 0 {
+		return
+	}
+	current, err := s.triage.GetRun(ctx, runID)
+	if err != nil || current == nil {
+		return
+	}
+	patch := *current
+	patch.Metadata = mergeStringAnyMaps(current.Metadata, slackPersonaDynamicContextAuditMetadata(envelopes))
+	updated, err := s.triage.UpdateRun(ctx, patch)
+	if err != nil {
+		s.logger.Warn("persona dynamic context audit metadata record failed", "triage_run_id", runID, "error", err)
+		return
+	}
+	if updated != nil {
+		persistTriageContext(s.workspaceDir, *updated)
+	}
+}
+
 func slackPersonaForegroundEmptyFinal(result SlackPersonaShadowResult) bool {
 	if !result.Success || result.ShadowOnly {
 		return false
@@ -1042,6 +1064,38 @@ func slackCustomEmojiDynamicContextPayload(names []string) (string, map[string]a
 func shortSHA256Hex(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])[:12]
+}
+
+func slackPersonaDynamicContextAuditMetadata(envelopes []persona.DynamicContextEnvelope) map[string]any {
+	out := map[string]any{
+		"persona_dynamic_context_expected": true,
+		"persona_dynamic_context_count":    len(envelopes),
+	}
+	if len(envelopes) == 0 {
+		out["persona_dynamic_context"] = []map[string]any{}
+		out["persona_dynamic_context_kinds"] = []string{}
+		return out
+	}
+	items := make([]map[string]any, 0, len(envelopes))
+	kinds := make([]string, 0, len(envelopes))
+	for _, env := range envelopes {
+		kind := strings.TrimSpace(env.Kind)
+		if kind == "" {
+			continue
+		}
+		kinds = append(kinds, kind)
+		items = append(items, map[string]any{
+			"kind":          kind,
+			"source":        strings.TrimSpace(env.Source),
+			"version":       strings.TrimSpace(env.Version),
+			"freshness":     strings.TrimSpace(env.Freshness),
+			"cache_policy":  strings.TrimSpace(env.CachePolicy),
+			"content_chars": len([]rune(strings.TrimSpace(env.Content))),
+		})
+	}
+	out["persona_dynamic_context"] = items
+	out["persona_dynamic_context_kinds"] = kinds
+	return out
 }
 
 func formatSlackTriagePersonaCandidateActions(actions []SlackTriageDecisionAction) string {

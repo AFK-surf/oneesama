@@ -154,6 +154,22 @@ func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) S
 		if len(run.Actions) > 0 || run.Mutations > 0 {
 			continue
 		}
+		if issue, ok := triageQualityRunDynamicContextIssue(run); ok {
+			out.DynamicContextIssueCount++
+			if sampleLimit > 0 && len(out.DynamicContextIssueSamples) < sampleLimit {
+				out.DynamicContextIssueSamples = append(out.DynamicContextIssueSamples, SlackTriageDynamicContextIssueSample{
+					Timestamp:       run.Timestamp,
+					RunID:           run.ID,
+					Channels:        run.Channels,
+					Summary:         slackTriageFailureSampleText(run.Summary),
+					MissingKinds:    issue.MissingKinds,
+					IncompleteKinds: issue.IncompleteKinds,
+					StaleKinds:      issue.StaleKinds,
+					Details:         issue.Details,
+				})
+			}
+			continue
+		}
 		// Skip handled-by-other runs from review-tier sampling; they belong
 		// in the info tier, not the review tier. Task #285 follow-up #3.
 		if triageQualityRunIsHandledByOther(run.Summary) != "" {
