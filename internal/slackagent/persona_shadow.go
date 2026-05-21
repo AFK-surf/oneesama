@@ -190,12 +190,16 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
+		result, dispositionToolCalls := applyPersonaSecretaryLookupDisposition(result, request)
 		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
 		actions := slackPersonaForegroundActions(channelID, threadTS, result)
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreExistingBotReply,
 		})
+		if len(dispositionToolCalls) > 0 {
+			toolCalls = append(toolCalls, dispositionToolCalls...)
+		}
 		if len(policyToolCalls) > 0 {
 			toolCalls = append(toolCalls, policyToolCalls...)
 		}
@@ -249,9 +253,23 @@ func (s *Service) applyPersonaSecretaryDelegationPolicy(result SlackPersonaShado
 	if len(toolCalls) == 0 {
 		return result, nil
 	}
+	blockedShouldStaySilent := len(allowed) == 0 && personaDelegateBlockShouldStaySilent(result)
 	result.workerRecords = allowed
 	result.WorkerRequests = personaWorkerRequestSummaries(allowed)
 	if len(allowed) == 0 && strings.TrimSpace(result.VisibleText) == "" {
+		if blockedShouldStaySilent {
+			result.Decision = persona.DecisionStaySilent
+			result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "delegate_worker blocked; no safe visible reply"))
+			toolCalls = append(toolCalls, SlackTriageToolCall{
+				Tool:    "agent_runner",
+				Action:  "delegate_worker_blocked_silent",
+				Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+				Success: true,
+				Brief:   "Persona delegate_worker block downgraded to silence",
+				Result:  "blocked secretary lookup produced no safe visible reply",
+			})
+			return result, toolCalls
+		}
 		result.Decision = persona.DecisionReply
 		result.VisibleText = slackPersonaSecretaryRoutingText()
 		result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "delegate_worker blocked by secretary routing policy"))
@@ -260,6 +278,134 @@ func (s *Service) applyPersonaSecretaryDelegationPolicy(result SlackPersonaShado
 		}
 	}
 	return result, toolCalls
+}
+
+func applyPersonaSecretaryLookupDisposition(result SlackPersonaShadowResult, request persona.Request) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionStaySilent || len(result.workerRecords) > 0 {
+		return result, nil
+	}
+	if !slackPersonaRequestNeedsSecretaryLookup(request) {
+		return result, nil
+	}
+	worker := persona.WorkerRequest{
+		ID:     "secretary-link-fact-lookup",
+		Kind:   "codex",
+		Prompt: buildSecretaryLookupWorkerPrompt(request),
+		Context: map[string]any{
+			"delegation_scope":      "secretary_lookup",
+			"secretary_lookup_type": "external_link_fact_lookup",
+			"external_link_context": personaRequestContextText(request.Context, "external_link_context"),
+			"triage_digest":         personaRequestContextText(request.Context, "triage_digest"),
+		},
+	}
+	result.Decision = persona.DecisionDelegateWorker
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "external link fact question requires bounded secretary lookup before silence"))
+	result.workerRecords = []persona.WorkerRequest{worker}
+	result.WorkerRequests = personaWorkerRequestSummaries(result.workerRecords)
+	if result.Confidence < 0.55 {
+		result.Confidence = 0.55
+	}
+	return result, []SlackTriageToolCall{{
+		Tool:    "persona_runtime",
+		Action:  "secretary_lookup_auto_delegate",
+		Args:    marshalTriageArgs("persona", worker.ID, true),
+		Success: true,
+		Brief:   "Stay-silent external link fact question auto-delegated to secretary lookup",
+		Result:  "old slackd parity: fetch link/person/memory evidence before deciding visible reply",
+	}}
+}
+
+func slackPersonaRequestNeedsSecretaryLookup(request persona.Request) bool {
+	text := strings.Join([]string{
+		request.Event.Text,
+		personaRequestContextText(request.Context, "triage_digest"),
+		personaRequestContextText(request.Context, "slack_thread_context"),
+	}, "\n")
+	if strings.TrimSpace(personaRequestContextText(request.Context, "external_link_context")) == "" && len(extractSlackExternalLinkURLs([]SlackInboundMessage{{Text: text}})) == 0 {
+		return false
+	}
+	return slackTextContainsSecretaryLookupQuestion(text)
+}
+
+func personaRequestContextText(items []persona.ContextItem, kind string) string {
+	for _, item := range items {
+		if item.Kind == kind {
+			return item.Text
+		}
+	}
+	return ""
+}
+
+func slackTextContainsSecretaryLookupQuestion(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	markers := []string{
+		"这是谁", "是谁", "这是什么", "这是啥", "什么鬼", "啥意思", "什么情况", "靠不靠谱", "靠谱吗", "真假", "谁知道", "有人知道",
+		"who is", "what is this", "what's this", "what does this mean", "anyone know", "is this real", "is this legit",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildSecretaryLookupWorkerPrompt(request persona.Request) string {
+	parts := []string{
+		"Bounded Oneesama secretary lookup. Read the linked public source and the Slack thread context, then cross-check workspace Memory/person context if available.",
+		"Only return a Slack-visible answer when you have concrete evidence. Include 2-3 short evidence anchors such as URL ownership, profile details, repo links, previous workspace mentions, or memory/person records.",
+		"If evidence is insufficient, return no visible result instead of guessing or posting a routing/refusal template.",
+	}
+	if digest := strings.TrimSpace(personaRequestContextText(request.Context, "triage_digest")); digest != "" {
+		parts = append(parts, "\nTriage digest:\n"+digest)
+	}
+	if thread := strings.TrimSpace(personaRequestContextText(request.Context, "slack_thread_context")); thread != "" {
+		parts = append(parts, "\nSlack thread context:\n"+thread)
+	}
+	if external := strings.TrimSpace(personaRequestContextText(request.Context, "external_link_context")); external != "" {
+		parts = append(parts, "\nFetched external link context:\n"+external)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func personaDelegateBlockShouldStaySilent(result SlackPersonaShadowResult) bool {
+	for _, request := range result.workerRecords {
+		scope := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+			stringFromAny(request.Context["delegation_scope"]),
+			stringFromAny(request.Context["scope"]),
+			stringFromAny(request.Context["worker_scope"]),
+		)))
+		text := strings.TrimSpace(strings.Join([]string{
+			request.Kind,
+			request.Prompt,
+			personaWorkerRequestContextText(request.Context),
+			result.Reason,
+		}, "\n"))
+		if scope == "secretary_lookup" || scope == "workspace_memory" || personaDelegatedWorkerLooksLikeReadOnlySecretaryLookup(text) {
+			return true
+		}
+	}
+	return false
+}
+
+func personaDelegatedWorkerLooksLikeReadOnlySecretaryLookup(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	markers := []string{
+		"memory lookup", "workspace memory", "person_memory", "person memory", "fetch url", "read link", "linked source", "profile", "identify", "who is",
+		"查 memory", "查一下 memory", "查记忆", "查人", "识别", "这是谁", "链接内容", "读链接", "发推",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func personaDelegatedWorkerAllowedBySecretaryPolicy(request persona.WorkerRequest) (bool, string) {
@@ -575,6 +721,8 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	delegateWorkerJobsStarted := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker")
 	delegateWorkerFailures := countMatchingFailedTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker")
 	delegateWorkerScopeBlocks := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker_blocked_scope")
+	delegateWorkerBlockedSilent := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker_blocked_silent")
+	secretaryLookupAutoDelegates := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "persona_runtime", "secretary_lookup_auto_delegate")
 	if !result.Success {
 		patch.Status = "failed"
 		patch.Error = firstNonEmpty(result.Error, "persona_runtime_failed")
@@ -595,6 +743,8 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		"delegate_worker_jobs_started":    delegateWorkerJobsStarted,
 		"delegate_worker_failures":        delegateWorkerFailures,
 		"delegate_worker_scope_blocks":    delegateWorkerScopeBlocks,
+		"delegate_worker_blocked_silent":  delegateWorkerBlockedSilent,
+		"secretary_lookup_auto_delegates": secretaryLookupAutoDelegates,
 		"persona_memory_write_files":      memoryWritePersistence.Files,
 		"persona_memory_write_errors":     memoryWritePersistence.Errors,
 		"persona_memory_write_redactions": memoryWritePersistence.Redactions,
@@ -944,7 +1094,7 @@ func BuildSlackTriagePersonaRequestFromInput(input SlackTriagePersonaRequestInpu
 	}
 	contextItems = append(contextItems, persona.ContextItem{
 		Kind: "delegation_scope_policy",
-		Text: "Oneesama is a workspace secretary, not the default code investigator for every project. delegate_worker is allowed for bounded secretary work (workspace Memory lookup/synthesis, file/thread retrieval, Canvas/memo preparation), Oneesama's own runtime/code, or explicit human-authorized code work. For external staging/prod/deploy/infra/database/API latency/CI/performance/debug/code investigations, reply with routing/owner handoff or stay_silent instead of delegating.",
+		Text: "Oneesama is a workspace secretary, not the default code investigator for every project. delegate_worker is allowed for bounded secretary work (workspace Memory lookup/synthesis, file/thread retrieval, external URL identity/fact lookup, Canvas/memo preparation), Oneesama's own runtime/code, or explicit human-authorized code work. For external URL/link questions such as 这是谁/这是啥/who is this/what is this, use delegation_scope=secretary_lookup before staying silent unless the thread already has a substantive answer; 不认识/不知道/no idea is not a substantive answer. For external staging/prod/deploy/infra/database/API latency/CI/performance/debug/code investigations, reply with routing/owner handoff or stay_silent instead of delegating.",
 	})
 	metadata := map[string]any{
 		"decision_parse_ok":       decision.ParseOK,

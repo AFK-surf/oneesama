@@ -369,6 +369,9 @@ func TestSlackTriageQualityBucketThresholdsMatrix(t *testing.T) {
 	if len(got.HandledByOtherSummaryMarkers) == 0 {
 		t.Fatalf("HandledByOtherSummaryMarkers must not be empty")
 	}
+	if len(got.HandledByOtherSummaryNegations) == 0 {
+		t.Fatalf("HandledByOtherSummaryNegations must not be empty")
+	}
 }
 
 // TestTriageQualityRunIsHandledByOtherMatch pins the EN+ZH summary markers
@@ -429,6 +432,18 @@ func TestTriageQualityRunIsHandledByOtherMatch(t *testing.T) {
 		{"zh_being_handled_now", "正在处理这个 PR", "正在处理", false},
 		// "already" alone WITHOUT a compound — should NOT match (compound discipline).
 		{"already_alone_no_hit", "User already left the channel", "", true},
+		{
+			name:     "negative_resolution_no_hit",
+			summary:  "Vincent replied that he does not know who Johnson8053 is; the identity question is not actually handled.",
+			wantHit:  "",
+			wantNone: true,
+		},
+		{
+			name:     "zh_negative_resolution_no_hit",
+			summary:  "有人说不认识这个 HN 账号，这不是已被处理的结论，需要继续查证。",
+			wantHit:  "",
+			wantNone: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

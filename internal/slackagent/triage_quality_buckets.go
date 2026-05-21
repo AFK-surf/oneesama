@@ -507,6 +507,23 @@ var triageQualityHandledByOtherMarkers = []string{
 	"已在线程",
 }
 
+var triageQualityHandledByOtherNegations = []string{
+	"no idea",
+	"not sure",
+	"don't know",
+	"doesn't know",
+	"nobody knows",
+	"unknown who",
+	"unclear who",
+	"不认识",
+	"不知道",
+	"不清楚",
+	"搞不清",
+	"没人知道",
+	"无人知道",
+	"还没确定",
+}
+
 // triageQualityRunIsHandledByOther returns the first matching marker (for
 // audit / sample tagging) when the summary indicates another agent or
 // teammate already handled the thread.
@@ -516,6 +533,11 @@ func triageQualityRunIsHandledByOther(summary string) string {
 		return ""
 	}
 	lower := strings.ToLower(s)
+	for _, negation := range triageQualityHandledByOtherNegations {
+		if strings.Contains(lower, strings.ToLower(negation)) {
+			return ""
+		}
+	}
 	for _, marker := range triageQualityHandledByOtherMarkers {
 		needle := strings.ToLower(marker)
 		if strings.Contains(lower, needle) {
@@ -534,16 +556,19 @@ type SlackTriageQualityBucketThresholds struct {
 	DynamicContextFreshnessSkewSeconds int64    `json:"dynamicContextFreshnessSkewSeconds"`
 	IntentActionMismatchSummaryMarkers []string `json:"intentActionMismatchSummaryMarkers"`
 	HandledByOtherSummaryMarkers       []string `json:"handledByOtherSummaryMarkers"`
+	HandledByOtherSummaryNegations     []string `json:"handledByOtherSummaryNegations"`
 }
 
 func slackTriageQualityBucketThresholds() SlackTriageQualityBucketThresholds {
 	intentMarkers := append([]string(nil), triageQualityIntentActionMismatchMarkers...)
 	handledMarkers := append([]string(nil), triageQualityHandledByOtherMarkers...)
+	handledNegations := append([]string(nil), triageQualityHandledByOtherNegations...)
 	return SlackTriageQualityBucketThresholds{
 		HighContextInputChars:              triageQualityHighContextInputCharsThreshold,
 		LowConfidenceCeiling:               triageQualityLowConfidenceCeiling,
 		DynamicContextFreshnessSkewSeconds: int64(triageQualityDynamicContextFreshnessSkew.Seconds()),
 		IntentActionMismatchSummaryMarkers: intentMarkers,
 		HandledByOtherSummaryMarkers:       handledMarkers,
+		HandledByOtherSummaryNegations:     handledNegations,
 	}
 }

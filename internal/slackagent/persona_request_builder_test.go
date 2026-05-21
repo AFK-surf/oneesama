@@ -36,6 +36,9 @@ func TestBuildSlackTriagePersonaForegroundRequestSetsLiveBoundary(t *testing.T) 
 	if got := personaContextText(req.Context, "delegation_scope_policy"); !strings.Contains(got, "workspace secretary") {
 		t.Fatalf("delegation_scope_policy = %q, want secretary boundary", got)
 	}
+	if got := personaContextText(req.Context, "delegation_scope_policy"); !strings.Contains(got, "external URL identity/fact lookup") || !strings.Contains(got, "不认识/不知道/no idea is not a substantive answer") {
+		t.Fatalf("delegation_scope_policy = %q, want old-slackd secretary lookup boundary", got)
+	}
 	if got := personaContextText(req.Context, "workspace_custom_emoji"); got != "" {
 		t.Fatalf("workspace_custom_emoji stable context = %q, want dynamic envelope only", got)
 	}

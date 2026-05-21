@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -884,6 +886,90 @@ func TestSlackTriagePiFirstLiveDelegatesWorkerAfterPiDecision(t *testing.T) {
 	}
 }
 
+func TestSlackTriagePiFirstLiveAutoDelegatesExternalLinkIdentityLookupAfterStaySilent(t *testing.T) {
+	ctx := context.Background()
+	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`Title: User: Johnson8053 | Hacker News
+
+Markdown Content:
+HN profile for Johnson8053. Submissions include SQLite is the best home for AI agents and a link to github.com/zanwei/design-dna.`))
+	}))
+	defer reader.Close()
+	oldClient := slackExternalLinkHTTPClient
+	oldReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkHTTPClient = reader.Client()
+	slackExternalLinkReaderURL = func(string) string { return reader.URL + "/reader" }
+	t.Cleanup(func() {
+		slackExternalLinkHTTPClient = oldClient
+		slackExternalLinkReaderURL = oldReaderURL
+	})
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:    persona.ProviderPi,
+		Decision:   persona.DecisionStaySilent,
+		Reason:     "uncertain identity and teammate said no idea",
+		Confidence: 0.37,
+		ShadowOnly: false,
+	}}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_hn_secretary_lookup",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_HEYANG",
+		Text:           "https://news.ycombinator.com/user?id=Johnson8053 这是谁",
+		TS:             "500.000",
+	}, {
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_VINCENT",
+		Text:           "不认识 他咋了？",
+		TS:             "501.000",
+	}}, "#product: https://news.ycombinator.com/user?id=Johnson8053 这是谁\n不认识 他咋了？")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if runner.startCount != 1 {
+		t.Fatalf("runner.startCount = %d, want secretary lookup worker after Pi stay_silent", runner.startCount)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want no pre-evidence visible reply", got)
+	}
+	if updated.Metadata["pi_first_decision"] != persona.DecisionDelegateWorker || intFromAny(updated.Metadata["secretary_lookup_auto_delegates"]) != 1 {
+		t.Fatalf("metadata = %#v, want auto-delegated secretary lookup", updated.Metadata)
+	}
+	if got := stringFromAny(runner.startInput.Context["session_kind"]); got != agentrunner.SessionKindSlack {
+		t.Fatalf("runner session_kind = %q, want slack case", got)
+	}
+	if prompt := runner.startInput.Task + "\n" + stringFromAny(runner.startInput.Context["slackAssistantPrompt"]); !strings.Contains(prompt, "Johnson8053") || !strings.Contains(prompt, "github.com/zanwei/design-dna") || !strings.Contains(prompt, "concrete evidence") {
+		t.Fatalf("secretary lookup prompt missing old-slackd evidence shape:\n%s", prompt)
+	}
+}
+
 func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing.T) {
 	ctx := context.Background()
 	workspaceDir := t.TempDir()
@@ -988,6 +1074,67 @@ func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing
 	}
 	if got := len(poster.Calls()); got != 0 {
 		t.Fatalf("poster calls = %d, want worker to answer after reading images", got)
+	}
+}
+
+func TestSlackTriagePiFirstLiveSilencesBlockedReadOnlySecretaryLookup(t *testing.T) {
+	ctx := context.Background()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:  persona.ProviderPi,
+		Decision: persona.DecisionDelegateWorker,
+		Reason:   "Need workspace Memory lookup for what 明天发推 refers to, but surrounding loading/performance context is noisy.",
+		WorkerRequests: []persona.WorkerRequest{{
+			ID:     "lookup-launch-tweet",
+			Kind:   "codex",
+			Prompt: "Look up workspace Memory for 明天发推 / cue-launch context. Do not investigate loading performance or source code.",
+		}},
+		Confidence: 0.43,
+		ShadowOnly: false,
+	}}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_should_not_start",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_HUMAN",
+		Text:           "明天发推",
+		TS:             "510.000",
+	}}, "#cue-launch context: 一直 loading / performance discussion\n--- new messages ---\n明天发推")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if runner.startCount != 0 {
+		t.Fatalf("runner.startCount = %d, want blocked noisy read-only lookup not started", runner.startCount)
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want no canned secretary-routing refusal", calls)
+	}
+	if updated.Metadata["pi_first_decision"] != persona.DecisionStaySilent || intFromAny(updated.Metadata["delegate_worker_blocked_silent"]) != 1 {
+		t.Fatalf("metadata = %#v, want blocked read-only secretary lookup downgraded to silence", updated.Metadata)
 	}
 }
 

@@ -55,6 +55,7 @@ intent_action_negations='["no need","no further action","not needed","not be del
 # audit.qualityThresholds.handledByOtherSummaryMarkers. Inline fallback for
 # pre-follow-up servers mirrors the same EN+ZH compound set.
 handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryMarkers // []) + ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already been fully handled","already handled","already handles","already on it","already active","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","already being handled","being actively handled","being handled by","being investigated and resolved","being investigated","was already handled","is being handled","is already being handled","active agent","already complied","has opened a session","has already opened","has already responded","has already been fully handled","has already complied","已经查了","已经由","已经被充分分析","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]) | unique' <"${tmpdir}/audit.json")"
+handled_by_other_negations="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryNegations // []) + ["no idea","not sure","don'\''t know","doesn'\''t know","nobody knows","unknown who","unclear who","不认识","不知道","不清楚","搞不清","没人知道","无人知道","还没确定"]) | unique' <"${tmpdir}/audit.json")"
 harness_rollup="$(jq -c '.audit.harness // {}' <"${tmpdir}/audit.json")"
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
@@ -145,6 +146,15 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
   def is_delegate_started_pending_worker_audit($run):
     is_delegate_no_visible_action($run)
     and (delegate_delivery_status($run) == "delegate_started_pending_worker_audit");
+  def handled_by_other($run):
+    (.summary // "") as $raw
+    | ($raw | ascii_downcase) as $haystack
+    | ((any(($handled_negations // [])[]; (. | ascii_downcase) as $neg | $haystack | contains($neg))) | not)
+    and ((($handled // []) | length) > 0)
+    and (
+      ($handled // []) as $needles
+      | any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle))
+    );
   def brief($run):
     {
       id: $run.id,
@@ -188,12 +198,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           | map(
               select(
                 is_no_action(.)
-                and ((($handled // []) | length) > 0)
-                and (
-                  (.summary // "" | ascii_downcase) as $haystack
-                  | ($handled // []) as $needles
-                  | any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle))
-                )
+                and handled_by_other(.)
               )
               | brief(.)
             )
@@ -244,8 +249,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
               and input_chars(.) >= $high_context
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (
-                ((($handled // []) | length) == 0)
-                or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
+                (handled_by_other(.) | not)
               )
             ) | brief(.)
           )
@@ -258,8 +262,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
               and external_links(.) > 0
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (
-                ((($handled // []) | length) == 0)
-                or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
+                (handled_by_other(.) | not)
               )
             ) | brief(.)
           )
@@ -272,8 +275,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
               and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (
-                ((($handled // []) | length) == 0)
-                or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
+                (handled_by_other(.) | not)
               )
             ) | brief(.)
           )
@@ -305,8 +307,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
                   # also skip runs already classified as handled-by-other
                   # info-tier; they belong in info, not review.
                   and (
-                    ((($handled // []) | length) == 0)
-                    or ((($handled // []) as $hand | any($hand[]; (. | ascii_downcase) as $needle | $haystack | contains($needle))) | not)
+                    (handled_by_other(.) | not)
                   )
                   and (
                     ($markers // []) as $needles
@@ -319,7 +320,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       }
     }
-' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson handled_negations "$handled_by_other_negations" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
