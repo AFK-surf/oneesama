@@ -3,6 +3,7 @@ package slackagent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AFK-surf/oneesama/internal/persona"
 )
@@ -114,5 +115,78 @@ func TestBuildSlackTriagePiFirstForegroundRequestCarriesRichContext(t *testing.T
 	}
 	if len(req.Memory.Items) != 1 || req.Memory.Items[0].SourceRef != "memory/product.md" {
 		t.Fatalf("memory = %#v, want related memory item", req.Memory)
+	}
+}
+
+func TestSlackPersonaStablePromptIgnoresDynamicWorkspaceInputs(t *testing.T) {
+	originalNow := timeNow
+	defer func() { timeNow = originalNow }()
+
+	timeNow = func() time.Time {
+		return time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	}
+	first := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_PI",
+		ThreadTS:  "500.000",
+		Messages:  []SlackInboundMessage{{Text: "first article"}},
+		RelatedMemory: []SlackRelatedMemoryRecord{{
+			Kind:       "workspace_memory",
+			SourcePath: "memory/a.md",
+			Content:    "memory anchor alpha",
+			Score:      0.8,
+		}},
+		WorkspaceTriagePolicy: "policy alpha: engage browser harness posts",
+		CustomEmoji:           []string{"alpha_bridge"},
+	})
+
+	timeNow = func() time.Time {
+		return time.Date(2026, 5, 22, 11, 30, 0, 123, time.UTC)
+	}
+	second := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_PI",
+		ThreadTS:  "500.000",
+		Messages:  []SlackInboundMessage{{Text: "second article"}},
+		RelatedMemory: []SlackRelatedMemoryRecord{{
+			Kind:       "workspace_memory",
+			SourcePath: "memory/b.md",
+			Content:    "memory anchor beta",
+			Score:      0.9,
+		}},
+		WorkspaceTriagePolicy: "policy beta: stay silent on browser harness posts",
+		CustomEmoji:           []string{"beta_bridge"},
+	})
+
+	if got, want := personaDynamicContextText(first.DynamicContext, "current_time"), personaDynamicContextText(second.DynamicContext, "current_time"); got == "" || want == "" || got == want {
+		t.Fatalf("current_time envelopes = %q / %q, want distinct dynamic timestamps", got, want)
+	}
+	if got := personaDynamicContextText(first.DynamicContext, "workspace_triage_policy"); !strings.Contains(got, "policy alpha") {
+		t.Fatalf("first workspace policy dynamic context = %q, want alpha policy", got)
+	}
+	if got := personaDynamicContextText(second.DynamicContext, "workspace_triage_policy"); !strings.Contains(got, "policy beta") {
+		t.Fatalf("second workspace policy dynamic context = %q, want beta policy", got)
+	}
+	if got := personaDynamicContextText(first.DynamicContext, "workspace_custom_emoji"); !strings.Contains(got, "alpha_bridge") {
+		t.Fatalf("first custom emoji dynamic context = %q, want alpha emoji", got)
+	}
+	if got := personaDynamicContextText(second.DynamicContext, "workspace_custom_emoji"); !strings.Contains(got, "beta_bridge") {
+		t.Fatalf("second custom emoji dynamic context = %q, want beta emoji", got)
+	}
+	if len(first.Memory.Items) != 1 || len(second.Memory.Items) != 1 || first.Memory.Items[0].Text == second.Memory.Items[0].Text {
+		t.Fatalf("memory contexts = %#v / %#v, want distinct memory payloads", first.Memory, second.Memory)
+	}
+	if got, want := persona.OneesamaPIStablePromptHash(first), persona.OneesamaPIStablePromptHash(second); got != want {
+		t.Fatalf("stable prompt hash changed under dynamic time/policy/emoji/memory inputs: got %s want %s", got, want)
+	}
+	stablePrompt := persona.OneesamaPIStablePromptText(first)
+	for _, forbidden := range []string{
+		"policy alpha",
+		"alpha_bridge",
+		"2026-05-21T10:00:00Z",
+		"memory anchor alpha",
+		persona.DynamicContextCachePolicyNotStablePrefix,
+	} {
+		if strings.Contains(stablePrompt, forbidden) {
+			t.Fatalf("stable prompt leaked dynamic content %q:\n%s", forbidden, stablePrompt)
+		}
 	}
 }
