@@ -50,6 +50,7 @@ still load-bearing reference for "why does the code look like this".
 | `notes/rfc/secretary-routing-delegation-rfc-2026-05-21.md` | Accepted (implemented in task #283). | Tightens `delegate_worker` to bounded secretary scope; covers prompt + Go guard + canary fixtures. |
 | `notes/rfc/kwwk-cu-demo-surface-poc-rfc-2026-05-21.md` | Proposed (task #304). | Splits the mainline-bound KWWK / Computer Use meeting demo-surface POC into independently testable lifecycle, adapter, controller, presentation, realtime, feedback, safety, and audit/runbook slices. |
 | `notes/rfc/kwwk-cu-demo-surface-runbook-2026-05-21.md` | Operator runbook (task #312). | Start/inspect/stop a host-run demo session, where audit rows live, and the mainline integration gate checklist before the POC modules ship behind the meeting runtime flag. |
+| `notes/rfc/oneesama-harness-cache-tool-stability-rfc-2026-05-21.md` | Proposed. | Applies cache-locality / stable-tool-surface Harness practices to Oneesama: stable prefix hashes, dynamic context envelopes, bounded worker isolation, Browser/CU approval gates, and daily harness audit metrics. |
 
 ## Maintenance rules
 
