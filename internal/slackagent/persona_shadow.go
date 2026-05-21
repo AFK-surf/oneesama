@@ -154,7 +154,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		WorkspaceTriagePolicy:  s.triageWorkspacePolicy,
 		CustomEmoji:            s.workspaceCustomEmojiSnapshot(),
 	})
-	s.recordSlackTriagePersonaDynamicContextAudit(ctx, runID, request.DynamicContext)
+	s.recordSlackTriagePersonaRequestAudit(ctx, runID, request)
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
@@ -185,7 +185,7 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		return false
 	}
 	request.Mode = persona.ModeLive
-	s.recordSlackTriagePersonaDynamicContextAudit(ctx, runID, request.DynamicContext)
+	s.recordSlackTriagePersonaRequestAudit(ctx, runID, request)
 	go func() {
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
@@ -636,7 +636,7 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	return nil
 }
 
-func (s *Service) recordSlackTriagePersonaDynamicContextAudit(ctx context.Context, runID int64, envelopes []persona.DynamicContextEnvelope) {
+func (s *Service) recordSlackTriagePersonaRequestAudit(ctx context.Context, runID int64, request persona.Request) {
 	if s == nil || s.triage == nil || runID == 0 {
 		return
 	}
@@ -645,10 +645,14 @@ func (s *Service) recordSlackTriagePersonaDynamicContextAudit(ctx context.Contex
 		return
 	}
 	patch := *current
-	patch.Metadata = mergeStringAnyMaps(current.Metadata, slackPersonaDynamicContextAuditMetadata(envelopes))
+	patch.Metadata = mergeStringAnyMaps(
+		current.Metadata,
+		slackPersonaDynamicContextAuditMetadata(request.DynamicContext),
+		slackPersonaContextBudgetAuditMetadata(request),
+	)
 	updated, err := s.triage.UpdateRun(ctx, patch)
 	if err != nil {
-		s.logger.Warn("persona dynamic context audit metadata record failed", "triage_run_id", runID, "error", err)
+		s.logger.Warn("persona request audit metadata record failed", "triage_run_id", runID, "error", err)
 		return
 	}
 	if updated != nil {
@@ -955,7 +959,7 @@ func BuildSlackTriagePersonaRequestFromInput(input SlackTriagePersonaRequestInpu
 		})
 		metadata["ignore_existing_bot_reply"] = true
 	}
-	return persona.Request{
+	req := persona.Request{
 		ID:   fmt.Sprintf("triage:%s:%s", strings.TrimSpace(channelID), strings.TrimSpace(threadTS)),
 		Mode: persona.ModeShadow,
 		Event: persona.Event{
@@ -987,6 +991,8 @@ func BuildSlackTriagePersonaRequestFromInput(input SlackTriagePersonaRequestInpu
 		},
 		Metadata: metadata,
 	}
+	req.Metadata = mergeStringAnyMaps(req.Metadata, slackPersonaContextBudgetAuditMetadata(req))
+	return req
 }
 
 const (
@@ -1096,6 +1102,41 @@ func slackPersonaDynamicContextAuditMetadata(envelopes []persona.DynamicContextE
 	out["persona_dynamic_context"] = items
 	out["persona_dynamic_context_kinds"] = kinds
 	return out
+}
+
+func slackPersonaContextBudgetAuditMetadata(req persona.Request) map[string]any {
+	budget := persona.RequestHarnessContextBudget(req)
+	return map[string]any{
+		"context_budget_expected":                 true,
+		"context_budget_stable_chars":             budget.StableChars,
+		"context_budget_dynamic_chars":            budget.DynamicChars,
+		"context_budget_worker_result_chars":      budget.WorkerResultChars,
+		"context_budget_memory_evidence_chars":    budget.MemoryEvidenceChars,
+		"context_budget_event_context_chars":      budget.EventContextChars,
+		"context_budget_total_chars":              budget.TotalChars,
+		"context_budget_stable_tokens":            budget.StableTokens,
+		"context_budget_dynamic_tokens":           budget.DynamicTokens,
+		"context_budget_worker_result_tokens":     budget.WorkerResultTokens,
+		"context_budget_memory_evidence_tokens":   budget.MemoryEvidenceTokens,
+		"context_budget_event_context_tokens":     budget.EventContextTokens,
+		"context_budget_total_tokens":             budget.TotalTokens,
+		"context_budget_estimator":                "chars_div_4_ceil",
+		"context_budget_cache_locality_breakdown": "stable_dynamic_worker_result_memory_evidence_event_context",
+		"context_budget": map[string]any{
+			"stableChars":          budget.StableChars,
+			"dynamicChars":         budget.DynamicChars,
+			"workerResultChars":    budget.WorkerResultChars,
+			"memoryEvidenceChars":  budget.MemoryEvidenceChars,
+			"eventContextChars":    budget.EventContextChars,
+			"totalChars":           budget.TotalChars,
+			"stableTokens":         budget.StableTokens,
+			"dynamicTokens":        budget.DynamicTokens,
+			"workerResultTokens":   budget.WorkerResultTokens,
+			"memoryEvidenceTokens": budget.MemoryEvidenceTokens,
+			"eventContextTokens":   budget.EventContextTokens,
+			"totalTokens":          budget.TotalTokens,
+		},
+	}
 }
 
 func formatSlackTriagePersonaCandidateActions(actions []SlackTriageDecisionAction) string {

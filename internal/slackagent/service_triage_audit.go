@@ -84,6 +84,7 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		RealOutcome:       buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, false)),
 		ProbeOutcome:      buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, true)),
 		InputContext:      buildSlackTriageInputContext(windowRuns),
+		ContextBudget:     buildSlackTriageContextBudget(windowRuns),
 		ContextFetch:      buildSlackTriageContextFetch(windowRuns),
 		SkipReasons:       buildSlackTriageSkipReasons(windowRuns),
 		PersonaQuality:    buildSlackTriagePersonaQuality(windowRuns),
@@ -329,6 +330,45 @@ func buildSlackTriageInputContext(runs []SlackTriageContext) SlackTriageInputCon
 		}
 	}
 	return stats
+}
+
+func buildSlackTriageContextBudget(runs []SlackTriageContext) SlackTriageContextBudget {
+	totalChars := make([]int, 0, len(runs))
+	var budget SlackTriageContextBudget
+	for _, run := range runs {
+		total := intFromAny(run.Metadata["context_budget_total_chars"])
+		tokens := intFromAny(run.Metadata["context_budget_total_tokens"])
+		if total <= 0 && tokens <= 0 {
+			continue
+		}
+		budget.Count++
+		if total > 0 {
+			totalChars = append(totalChars, total)
+			if total > budget.MaxTotalChars {
+				budget.MaxTotalChars = total
+			}
+		}
+		if tokens > budget.MaxTotalTokens {
+			budget.MaxTotalTokens = tokens
+		}
+		if value := intFromAny(run.Metadata["context_budget_stable_tokens"]); value > budget.MaxStableTokens {
+			budget.MaxStableTokens = value
+		}
+		if value := intFromAny(run.Metadata["context_budget_dynamic_tokens"]); value > budget.MaxDynamicTokens {
+			budget.MaxDynamicTokens = value
+		}
+		if value := intFromAny(run.Metadata["context_budget_worker_result_tokens"]); value > budget.MaxWorkerResultTokens {
+			budget.MaxWorkerResultTokens = value
+		}
+		if value := intFromAny(run.Metadata["context_budget_memory_evidence_tokens"]); value > budget.MaxMemoryEvidenceTokens {
+			budget.MaxMemoryEvidenceTokens = value
+		}
+	}
+	if len(totalChars) > 0 {
+		sort.Ints(totalChars)
+		budget.MedianTotalChars = medianInt(totalChars)
+	}
+	return budget
 }
 
 func buildSlackTriageContextFetch(runs []SlackTriageContext) SlackTriageContextFetch {
@@ -742,6 +782,10 @@ func buildSlackTriageAuditRunBriefs(runs []SlackTriageContext, limit int) []Slac
 			Timestamp:             run.Timestamp,
 			Channels:              run.Channels,
 			InputContextChars:     intFromAny(run.Metadata["input_context_chars"]),
+			ContextBudgetTokens:   intFromAny(run.Metadata["context_budget_total_tokens"]),
+			DynamicContextTokens:  intFromAny(run.Metadata["context_budget_dynamic_tokens"]),
+			WorkerResultTokens:    intFromAny(run.Metadata["context_budget_worker_result_tokens"]),
+			MemoryEvidenceTokens:  intFromAny(run.Metadata["context_budget_memory_evidence_tokens"]),
 			ThreadContextFetched:  boolFromAny(run.Metadata["thread_context_fetched"], false),
 			ChannelContextFetched: boolFromAny(run.Metadata["channel_context_fetched"], false),
 			ContextFetchReason:    slackTriageContextFetchReason(run),

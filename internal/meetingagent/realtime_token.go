@@ -20,6 +20,10 @@ func (s *Service) RealtimeConfig() map[string]any {
 		BotName:     s.openai.BotName,
 		CurrentUser: currentUser,
 	}
+	instructions := buildRealtimeInstructions(options, s.openai)
+	tools := realtimeToolSchemas(s.demoBridge != nil)
+	session := buildRealtimeSessionConfig(options, s.openai)
+	demoSurface := s.demoSurfaceStatus()
 	return map[string]any{
 		"ok":              true,
 		"model":           s.openai.RealtimeModel,
@@ -28,12 +32,16 @@ func (s *Service) RealtimeConfig() map[string]any {
 		"turnDetection":   s.openai.RealtimeTurnDetection,
 		"sessionSchema":   s.openai.RealtimeSessionSchema,
 		"agentRuntime":    s.openai.RealtimeAgentRuntime,
-		"instructions":    buildRealtimeInstructions(options, s.openai),
-		"tools":           realtimeToolSchemas(s.demoBridge != nil),
-		"session":         buildRealtimeSessionConfig(options, s.openai),
+		"instructions":    instructions,
+		"tools":           tools,
+		"session":         session,
 		"currentUser":     currentUser,
 		"tuning":          realtimeTuningGuide(),
-		"demoSurface":     s.demoSurfaceStatus(),
+		"demoSurface":     demoSurface,
+		"contextBudget": realtimeHarnessContextBudget(instructions, tools, session, map[string]any{
+			"currentUser": currentUser,
+			"demoSurface": demoSurface,
+		}),
 	}
 }
 
@@ -43,6 +51,8 @@ func (s *Service) RealtimeContextHealth(ctx context.Context) map[string]any {
 		CurrentUser: s.realtimeCurrentUser(),
 	}
 	session := buildRealtimeSessionConfig(options, s.openai)
+	instructions := buildRealtimeInstructions(options, s.openai)
+	tools := realtimeToolSchemas(s.demoBridge != nil)
 	health := map[string]any{
 		"itemsCount":             0,
 		"tokenEstimate":          0,
@@ -51,6 +61,10 @@ func (s *Service) RealtimeContextHealth(ctx context.Context) map[string]any {
 		"source":                 "no_active_realtime_session",
 		"sessionTruncation":      session["truncation"],
 		"contextLifecyclePolicy": map[string]any{"recentItems": 20, "compactItemThreshold": 200},
+		"contextBudget": realtimeHarnessContextBudget(instructions, tools, session, map[string]any{
+			"currentUser": s.realtimeCurrentUser(),
+			"demoSurface": s.demoSurfaceStatus(),
+		}),
 	}
 	status, err := s.meetRunner.StatusSession(ctx, meetrunner.StatusSessionInput{})
 	if err != nil {

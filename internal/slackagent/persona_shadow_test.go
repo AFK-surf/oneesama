@@ -369,6 +369,12 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 	if intFromAny(updated.Metadata["persona_dynamic_context_count"]) == 0 {
 		t.Fatalf("metadata = %#v, want persona_dynamic_context_count > 0", updated.Metadata)
 	}
+	if updated.Metadata["context_budget_expected"] != true ||
+		intFromAny(updated.Metadata["context_budget_stable_tokens"]) <= 0 ||
+		intFromAny(updated.Metadata["context_budget_dynamic_tokens"]) <= 0 ||
+		intFromAny(updated.Metadata["context_budget_total_tokens"]) <= 0 {
+		t.Fatalf("metadata = %#v, want persona context budget audit", updated.Metadata)
+	}
 	if len(updated.Actions) != 1 || !strings.Contains(updated.Actions[0].Brief, "Persona reply") {
 		t.Fatalf("actions = %#v, want one persona action", updated.Actions)
 	}
@@ -1358,6 +1364,12 @@ func TestBuildSlackTriagePersonaRequestIncludesDecisionAndMemory(t *testing.T) {
 	}
 	if req.Metadata["actions"] != 1 || req.Metadata["decision_parse_ok"] != true {
 		t.Fatalf("metadata = %#v, want action count + parse flag", req.Metadata)
+	}
+	if req.Metadata["context_budget_expected"] != true ||
+		intFromAny(req.Metadata["context_budget_stable_tokens"]) <= 0 ||
+		intFromAny(req.Metadata["context_budget_memory_evidence_tokens"]) <= 0 ||
+		intFromAny(req.Metadata["context_budget_total_tokens"]) <= 0 {
+		t.Fatalf("metadata = %#v, want harness context budget", req.Metadata)
 	}
 	var sawCandidateAction bool
 	for _, item := range req.Context {

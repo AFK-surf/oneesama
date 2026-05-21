@@ -481,12 +481,18 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 			Summary:   "low context skip",
 			Channels:  []string{"C123"},
 			Metadata: map[string]any{
-				"input_context_chars":      120,
-				"channel_context_fetched":  true,
-				"thread_context_fetched":   false,
-				"external_links_fetched":   1,
-				"suppressed_reason":        "no_actions",
-				"channel_context_messages": 3,
+				"input_context_chars":                   120,
+				"context_budget_total_chars":            1000,
+				"context_budget_total_tokens":           250,
+				"context_budget_stable_tokens":          100,
+				"context_budget_dynamic_tokens":         30,
+				"context_budget_worker_result_tokens":   0,
+				"context_budget_memory_evidence_tokens": 20,
+				"channel_context_fetched":               true,
+				"thread_context_fetched":                false,
+				"external_links_fetched":                1,
+				"suppressed_reason":                     "no_actions",
+				"channel_context_messages":              3,
 			},
 		},
 		{
@@ -496,10 +502,16 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 			Channels:  []string{"C123"},
 			Actions:   []SlackTriageAction{{Tool: "suggest_action", Channel: "C123", Brief: "needs owner"}},
 			Metadata: map[string]any{
-				"input_context_chars":     300,
-				"thread_context_fetched":  true,
-				"external_links_fetched":  0,
-				"thread_context_messages": 4,
+				"input_context_chars":                   300,
+				"context_budget_total_chars":            2000,
+				"context_budget_total_tokens":           500,
+				"context_budget_stable_tokens":          100,
+				"context_budget_dynamic_tokens":         40,
+				"context_budget_worker_result_tokens":   12,
+				"context_budget_memory_evidence_tokens": 60,
+				"thread_context_fetched":                true,
+				"external_links_fetched":                0,
+				"thread_context_messages":               4,
 			},
 		},
 		{
@@ -510,8 +522,14 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 			Actions:   []SlackTriageAction{{Tool: "slack_api", Channel: "C123", Brief: "posted"}},
 			Mutations: 1,
 			Metadata: map[string]any{
-				"input_context_chars":    500,
-				"thread_context_fetched": true,
+				"input_context_chars":                   500,
+				"context_budget_total_chars":            3000,
+				"context_budget_total_tokens":           750,
+				"context_budget_stable_tokens":          100,
+				"context_budget_dynamic_tokens":         20,
+				"context_budget_worker_result_tokens":   0,
+				"context_budget_memory_evidence_tokens": 30,
+				"thread_context_fetched":                true,
 			},
 		},
 	}
@@ -531,6 +549,14 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 	if report.InputContext.Min != 120 || report.InputContext.Median != 300 || report.InputContext.Max != 500 || report.InputContext.LowUnder200 != 1 {
 		t.Fatalf("inputContext = %#v", report.InputContext)
 	}
+	if report.ContextBudget.Count != 3 ||
+		report.ContextBudget.MedianTotalChars != 2000 ||
+		report.ContextBudget.MaxTotalChars != 3000 ||
+		report.ContextBudget.MaxTotalTokens != 750 ||
+		report.ContextBudget.MaxWorkerResultTokens != 12 ||
+		report.ContextBudget.MaxMemoryEvidenceTokens != 60 {
+		t.Fatalf("contextBudget = %#v", report.ContextBudget)
+	}
 	if report.ContextFetch.ChannelContextFetched != 1 || report.ContextFetch.ThreadContextFetched != 2 || report.ContextFetch.ExternalLinksFetched != 1 {
 		t.Fatalf("contextFetch = %#v", report.ContextFetch)
 	}
@@ -542,6 +568,9 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 	}
 	if len(report.RecentRuns) == 0 || report.RecentRuns[0].ContextFetchReason == "" || report.RecentRuns[0].SkipReasonBucket == "" {
 		t.Fatalf("recentRuns = %#v, want context reason and skip bucket", report.RecentRuns)
+	}
+	if report.RecentRuns[0].ContextBudgetTokens == 0 || report.RecentRuns[0].DynamicContextTokens == 0 {
+		t.Fatalf("recentRuns = %#v, want context budget brief fields", report.RecentRuns)
 	}
 	if report.Canary.Total != 11 || report.Canary.Passed != 11 || report.Canary.NeedsLiveSample {
 		t.Fatalf("canary = %#v", report.Canary)

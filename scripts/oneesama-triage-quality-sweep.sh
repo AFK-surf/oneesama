@@ -321,6 +321,10 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
+  .audit.contextBudget as $budget
+  | "budget: count=\($budget.count // 0) max_total_tokens=\($budget.maxTotalTokens // 0) max_stable_tokens=\($budget.maxStableTokens // 0) max_dynamic_tokens=\($budget.maxDynamicTokens // 0) max_worker_result_tokens=\($budget.maxWorkerResultTokens // 0) max_memory_evidence_tokens=\($budget.maxMemoryEvidenceTokens // 0)"
+' <"${tmpdir}/audit.json"
+jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
   "review: dynamic_context_issue=\(.review.dynamicContextIssue | length) high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length) delegate_no_visible_action=\(.review.delegateNoVisibleAction | length)",

@@ -151,6 +151,7 @@ type SlackTriageAuditReport struct {
 	RealOutcome       SlackTriageAuditOutcome            `json:"realOutcome"`
 	ProbeOutcome      SlackTriageAuditOutcome            `json:"probeOutcome"`
 	InputContext      SlackTriageInputContext            `json:"inputContext"`
+	ContextBudget     SlackTriageContextBudget           `json:"contextBudget"`
 	ContextFetch      SlackTriageContextFetch            `json:"contextFetch"`
 	SkipReasons       map[string]int                     `json:"skipReasons,omitempty"`
 	ProcessHealth     SlackTriageProcessHealth           `json:"processHealth"`
@@ -182,6 +183,17 @@ type SlackTriageInputContext struct {
 	Median      int `json:"median"`
 	Max         int `json:"max"`
 	LowUnder200 int `json:"lowUnder200"`
+}
+
+type SlackTriageContextBudget struct {
+	Count                   int `json:"count"`
+	MaxTotalChars           int `json:"maxTotalChars"`
+	MedianTotalChars        int `json:"medianTotalChars"`
+	MaxTotalTokens          int `json:"maxTotalTokens"`
+	MaxStableTokens         int `json:"maxStableTokens"`
+	MaxDynamicTokens        int `json:"maxDynamicTokens"`
+	MaxWorkerResultTokens   int `json:"maxWorkerResultTokens"`
+	MaxMemoryEvidenceTokens int `json:"maxMemoryEvidenceTokens"`
 }
 
 type SlackTriageContextFetch struct {
@@ -376,6 +388,10 @@ type SlackTriageAuditRunBrief struct {
 	Timestamp             string   `json:"timestamp"`
 	Channels              []string `json:"channels,omitempty"`
 	InputContextChars     int      `json:"inputContextChars,omitempty"`
+	ContextBudgetTokens   int      `json:"contextBudgetTokens,omitempty"`
+	DynamicContextTokens  int      `json:"dynamicContextTokens,omitempty"`
+	WorkerResultTokens    int      `json:"workerResultTokens,omitempty"`
+	MemoryEvidenceTokens  int      `json:"memoryEvidenceTokens,omitempty"`
 	ThreadContextFetched  bool     `json:"threadContextFetched,omitempty"`
 	ChannelContextFetched bool     `json:"channelContextFetched,omitempty"`
 	ContextFetchReason    string   `json:"contextFetchReason,omitempty"`

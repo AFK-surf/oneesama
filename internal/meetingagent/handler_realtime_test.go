@@ -95,6 +95,16 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	if demoSurface["requireExternalWriteApproval"] != true {
 		t.Fatalf("demoSurface = %#v, want external-write approval required by default", demoSurface)
 	}
+	contextBudget := body["contextBudget"].(map[string]any)
+	if contextBudget["stableTokens"].(float64) <= 0 ||
+		contextBudget["dynamicTokens"].(float64) <= 0 ||
+		contextBudget["toolSchemaTokens"].(float64) <= 0 ||
+		contextBudget["totalTokens"].(float64) <= 0 {
+		t.Fatalf("contextBudget = %#v, want realtime harness budget metrics", contextBudget)
+	}
+	if contextBudget["workerResultTokens"] != float64(0) || contextBudget["memoryEvidenceTokens"] != float64(0) {
+		t.Fatalf("contextBudget = %#v, realtime foreground should not carry worker/memory payloads by default", contextBudget)
+	}
 }
 
 func TestRealtimeContextHealthExposesLifecycleDefaults(t *testing.T) {
@@ -125,6 +135,10 @@ func TestRealtimeContextHealthExposesLifecycleDefaults(t *testing.T) {
 	policy := body["contextLifecyclePolicy"].(map[string]any)
 	if policy["recentItems"] != float64(20) || policy["compactItemThreshold"] != float64(200) {
 		t.Fatalf("policy = %#v, want default compact policy", policy)
+	}
+	contextBudget := body["contextBudget"].(map[string]any)
+	if contextBudget["stableTokens"].(float64) <= 0 || contextBudget["totalTokens"].(float64) <= 0 {
+		t.Fatalf("contextBudget = %#v, want realtime context budget defaults", contextBudget)
 	}
 }
 

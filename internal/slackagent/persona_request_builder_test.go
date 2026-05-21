@@ -45,6 +45,11 @@ func TestBuildSlackTriagePersonaForegroundRequestSetsLiveBoundary(t *testing.T) 
 	if got := personaDynamicContextText(req.DynamicContext, "current_time"); got == "" {
 		t.Fatal("current_time dynamic context empty, want runtime freshness envelope")
 	}
+	if intFromAny(req.Metadata["context_budget_stable_tokens"]) <= 0 ||
+		intFromAny(req.Metadata["context_budget_dynamic_tokens"]) <= 0 ||
+		intFromAny(req.Metadata["context_budget_total_tokens"]) <= 0 {
+		t.Fatalf("metadata = %#v, want harness context budget token metrics", req.Metadata)
+	}
 }
 
 func TestBuildSlackTriagePiFirstForegroundRequestCarriesRichContext(t *testing.T) {
@@ -115,6 +120,12 @@ func TestBuildSlackTriagePiFirstForegroundRequestCarriesRichContext(t *testing.T
 	}
 	if len(req.Memory.Items) != 1 || req.Memory.Items[0].SourceRef != "memory/product.md" {
 		t.Fatalf("memory = %#v, want related memory item", req.Memory)
+	}
+	if intFromAny(req.Metadata["context_budget_memory_evidence_tokens"]) <= 0 {
+		t.Fatalf("metadata = %#v, want memory/evidence budget tokens", req.Metadata)
+	}
+	if intFromAny(req.Metadata["context_budget_dynamic_tokens"]) <= 0 {
+		t.Fatalf("metadata = %#v, want dynamic envelope budget tokens", req.Metadata)
 	}
 }
 

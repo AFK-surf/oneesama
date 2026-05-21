@@ -97,6 +97,10 @@ type SlackDailyTriageMetrics struct {
 	LinkReplies             int            `json:"link_replies"`
 	LowConfidenceNoAction   int            `json:"low_confidence_no_action"`
 	DynamicContextIssues    int            `json:"dynamic_context_issues"`
+	MaxContextBudgetTokens  int            `json:"max_context_budget_tokens,omitempty"`
+	MaxDynamicContextTokens int            `json:"max_dynamic_context_tokens,omitempty"`
+	MaxWorkerResultTokens   int            `json:"max_worker_result_tokens,omitempty"`
+	MaxMemoryEvidenceTokens int            `json:"max_memory_evidence_tokens,omitempty"`
 	IntentActionMismatch    int            `json:"intent_action_mismatch"`
 	DelegateNoVisibleAction int            `json:"delegate_no_visible_action"`
 	HandledByOtherNoAction  int            `json:"handled_by_other_no_action"`
@@ -529,6 +533,18 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 			metrics.InvalidPersonaJSON++
 		}
 		inputChars := intFromAny(run.Metadata["input_context_chars"])
+		if value := intFromAny(run.Metadata["context_budget_total_tokens"]); value > metrics.MaxContextBudgetTokens {
+			metrics.MaxContextBudgetTokens = value
+		}
+		if value := intFromAny(run.Metadata["context_budget_dynamic_tokens"]); value > metrics.MaxDynamicContextTokens {
+			metrics.MaxDynamicContextTokens = value
+		}
+		if value := intFromAny(run.Metadata["context_budget_worker_result_tokens"]); value > metrics.MaxWorkerResultTokens {
+			metrics.MaxWorkerResultTokens = value
+		}
+		if value := intFromAny(run.Metadata["context_budget_memory_evidence_tokens"]); value > metrics.MaxMemoryEvidenceTokens {
+			metrics.MaxMemoryEvidenceTokens = value
+		}
 		externalLinks := intFromAny(run.Metadata["external_links_fetched"])
 		if externalLinks > 0 {
 			metrics.LinkContextRuns++
