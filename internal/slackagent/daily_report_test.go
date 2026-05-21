@@ -41,9 +41,13 @@ func TestSlackDailyReportComparesLegacyEmojiUse(t *testing.T) {
 			{Tool: "slack_api", Action: "fetch_thread", Success: true, Brief: "thread context"},
 		},
 		Metadata: map[string]any{
-			"external_links_fetched":       1,
-			"input_context_chars":          8200,
-			"delegate_worker_jobs_started": 1,
+			"external_links_fetched":                1,
+			"input_context_chars":                   8200,
+			"context_budget_total_tokens":           1200,
+			"context_budget_dynamic_tokens":         80,
+			"context_budget_worker_result_tokens":   40,
+			"context_budget_memory_evidence_tokens": 160,
+			"delegate_worker_jobs_started":          1,
 		},
 	}); err != nil {
 		t.Fatalf("record run: %v", err)
@@ -74,6 +78,10 @@ func TestSlackDailyReportComparesLegacyEmojiUse(t *testing.T) {
 		"*Self-iteration notes*",
 		"custom_emoji +0",
 		":memo_bridge:",
+		"max_context_tokens 1200",
+		"max_dynamic_tokens 80",
+		"max_worker_result_tokens 40",
+		"max_memory_evidence_tokens 160",
 	} {
 		if !strings.Contains(report.Text, want) {
 			t.Fatalf("report text = %q, want %q", report.Text, want)

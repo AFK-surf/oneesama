@@ -557,6 +557,13 @@ func TestTriageAuditReportsSixHourRollupAndFlags(t *testing.T) {
 		report.ContextBudget.MaxMemoryEvidenceTokens != 60 {
 		t.Fatalf("contextBudget = %#v", report.ContextBudget)
 	}
+	if report.Harness.PIStablePromptHash == "" ||
+		report.Harness.RunsWithContextBudget != 3 ||
+		report.Harness.MaxContextBudgetTokens != 750 ||
+		report.Harness.MaxWorkerResultTokens != 12 ||
+		report.Harness.MaxMemoryEvidenceTokens != 60 {
+		t.Fatalf("harness = %#v", report.Harness)
+	}
 	if report.ContextFetch.ChannelContextFetched != 1 || report.ContextFetch.ThreadContextFetched != 2 || report.ContextFetch.ExternalLinksFetched != 1 {
 		t.Fatalf("contextFetch = %#v", report.ContextFetch)
 	}

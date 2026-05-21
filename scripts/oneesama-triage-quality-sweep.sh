@@ -55,6 +55,7 @@ intent_action_negations='["no need","no further action","not needed","not be del
 # audit.qualityThresholds.handledByOtherSummaryMarkers. Inline fallback for
 # pre-follow-up servers mirrors the same EN+ZH compound set.
 handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryMarkers // []) + ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already been fully handled","already handled","already handles","already on it","already active","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","already being handled","being actively handled","being handled by","being investigated and resolved","being investigated","was already handled","is being handled","is already being handled","active agent","already complied","has opened a session","has already opened","has already responded","has already been fully handled","has already complied","已经查了","已经由","已经被充分分析","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]) | unique' <"${tmpdir}/audit.json")"
+harness_rollup="$(jq -c '.audit.harness // {}' <"${tmpdir}/audit.json")"
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
@@ -166,6 +167,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         highContextInputChars: $high_context,
         lowConfidenceCeiling: $low_confidence
       },
+      harness: $harness,
       totals: {
         runs: ($runs | length),
         failed: ($runs | map(select(.status != "ok")) | length),
@@ -317,9 +319,13 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       }
     }
-' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson dynamic_skew "$dynamic_context_freshness_skew" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
+jq -r '
+  .harness as $h
+  | "harness: pi_stable_prompt_hash=\($h.piStablePromptHash // "unknown") dynamic_context_issue=\($h.dynamicContextIssueCount // 0) delegate_no_visible_action=\($h.delegateNoVisibleActionCount // 0) handled_by_other_no_action=\($h.handledByOtherNoActionCount // 0)"
+' <"${tmpdir}/quality.json"
 jq -r '
   .audit.contextBudget as $budget
   | "budget: count=\($budget.count // 0) max_total_tokens=\($budget.maxTotalTokens // 0) max_stable_tokens=\($budget.maxStableTokens // 0) max_dynamic_tokens=\($budget.maxDynamicTokens // 0) max_worker_result_tokens=\($budget.maxWorkerResultTokens // 0) max_memory_evidence_tokens=\($budget.maxMemoryEvidenceTokens // 0)"

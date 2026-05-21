@@ -74,6 +74,9 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 	}
 	freshness.GeneratedAt = now.Format(time.RFC3339Nano)
 	canary := buildSlackTriageCanarySummary(windowRuns)
+	contextBudget := buildSlackTriageContextBudget(windowRuns)
+	reviewBuckets := buildSlackTriageReviewBuckets(windowRuns, 5)
+	infoBuckets := buildSlackTriageInfoBuckets(windowRuns, 5)
 	report := SlackTriageAuditReport{
 		GeneratedAt:       now.Format(time.RFC3339Nano),
 		WindowSeconds:     int64(window.Seconds()),
@@ -84,7 +87,8 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		RealOutcome:       buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, false)),
 		ProbeOutcome:      buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, true)),
 		InputContext:      buildSlackTriageInputContext(windowRuns),
-		ContextBudget:     buildSlackTriageContextBudget(windowRuns),
+		ContextBudget:     contextBudget,
+		Harness:           buildSlackTriageHarnessDrift(contextBudget, reviewBuckets, infoBuckets),
 		ContextFetch:      buildSlackTriageContextFetch(windowRuns),
 		SkipReasons:       buildSlackTriageSkipReasons(windowRuns),
 		PersonaQuality:    buildSlackTriagePersonaQuality(windowRuns),
@@ -93,8 +97,8 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		FailureSamples:    buildSlackTriageFailureSamples(windowRuns, 5),
 		RecentRuns:        buildSlackTriageAuditRunBriefs(windowRuns, 20),
 		QualityThresholds: slackTriageQualityBucketThresholds(),
-		ReviewBuckets:     buildSlackTriageReviewBuckets(windowRuns, 5),
-		InfoBuckets:       buildSlackTriageInfoBuckets(windowRuns, 5),
+		ReviewBuckets:     reviewBuckets,
+		InfoBuckets:       infoBuckets,
 	}
 	report.Flags = buildSlackTriageAuditFlags(report)
 	return report
@@ -369,6 +373,21 @@ func buildSlackTriageContextBudget(runs []SlackTriageContext) SlackTriageContext
 		budget.MedianTotalChars = medianInt(totalChars)
 	}
 	return budget
+}
+
+func buildSlackTriageHarnessDrift(contextBudget SlackTriageContextBudget, reviewBuckets SlackTriageReviewBuckets, infoBuckets SlackTriageInfoBuckets) SlackTriageHarnessDrift {
+	return SlackTriageHarnessDrift{
+		PIStablePromptHash:           persona.OneesamaPIStablePromptHash(persona.Request{}),
+		DynamicContextIssueCount:     reviewBuckets.DynamicContextIssueCount,
+		DelegateNoVisibleActionCount: reviewBuckets.DelegateNoVisibleActionCount,
+		HandledByOtherNoActionCount:  infoBuckets.HandledByOtherNoActionCount,
+		RunsWithContextBudget:        contextBudget.Count,
+		MaxContextBudgetTokens:       contextBudget.MaxTotalTokens,
+		MaxStablePromptTokens:        contextBudget.MaxStableTokens,
+		MaxDynamicContextTokens:      contextBudget.MaxDynamicTokens,
+		MaxWorkerResultTokens:        contextBudget.MaxWorkerResultTokens,
+		MaxMemoryEvidenceTokens:      contextBudget.MaxMemoryEvidenceTokens,
+	}
 }
 
 func buildSlackTriageContextFetch(runs []SlackTriageContext) SlackTriageContextFetch {

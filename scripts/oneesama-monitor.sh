@@ -31,6 +31,9 @@ echo "oneesama-monitor: checking meeting-agent ${meeting_url}/healthz"
 curl -fsS "${meeting_url}/healthz" >"${tmpdir}/meeting-health.json"
 jq -e '.ok == true' <"${tmpdir}/meeting-health.json" >/dev/null
 
+echo "oneesama-monitor: checking realtime harness config ${meeting_url}/realtime/config"
+curl -fsS "${meeting_url}/realtime/config" >"${tmpdir}/realtime-config.json"
+
 echo "oneesama-monitor: checking slack status ${slack_url}/slack/status"
 curl -fsS "${slack_url}/slack/status" >"${tmpdir}/slack-status.json"
 persona_provider="$(jq -r '.persona_runtime.provider // ""' <"${tmpdir}/slack-status.json")"
@@ -63,6 +66,23 @@ persona_quality_summary="$(
   ' <"${tmpdir}/triage-audit.json"
 )"
 red_flags="$(jq -r '.audit.flags[]? | select(.level == "red") | "\(.code): \(.message)"' <"${tmpdir}/triage-audit.json")"
+harness_summary="$(
+  {
+    jq -r '
+      .audit.harness as $h
+      | [
+          "pi_stable_prompt_hash=\($h.piStablePromptHash // "unknown")",
+          "harness_drift=dynamic_context_issue:\($h.dynamicContextIssueCount // 0),delegate_no_visible_action:\($h.delegateNoVisibleActionCount // 0),handled_by_other_no_action:\($h.handledByOtherNoActionCount // 0)",
+          "harness_budget=max_total_tokens:\($h.maxContextBudgetTokens // 0),max_stable_tokens:\($h.maxStablePromptTokens // 0),max_dynamic_tokens:\($h.maxDynamicContextTokens // 0),max_worker_result_tokens:\($h.maxWorkerResultTokens // 0),max_memory_evidence_tokens:\($h.maxMemoryEvidenceTokens // 0)"
+        ]
+      | .[]
+    ' <"${tmpdir}/triage-audit.json"
+    jq -r '
+      .contextBudget as $b
+      | "realtime_budget=total_tokens:\($b.totalTokens // 0),stable_tokens:\($b.stableTokens // 0),tool_schema_tokens:\($b.toolSchemaTokens // 0),dynamic_tokens:\($b.dynamicTokens // 0)"
+    ' <"${tmpdir}/realtime-config.json"
+  } | sed '/^$/d'
+)"
 
 write_status_summary() {
   local status="$1"
@@ -80,7 +100,9 @@ write_status_summary() {
     --arg persona_mode "$persona_mode" \
     --arg red_flags "$red_flags" \
     --arg persona_summary "$persona_quality_summary" \
+    --arg harness_summary "$harness_summary" \
     --rawfile triage_audit "${tmpdir}/triage-audit.json" \
+    --rawfile realtime_config "${tmpdir}/realtime-config.json" \
     '{
       script: $script,
       status: $status,
@@ -93,6 +115,8 @@ write_status_summary() {
       },
       red_flags: ($red_flags | split("\n") | map(select(. != ""))),
       persona_foreground_context: ($persona_summary | split("\n") | map(select(. != ""))),
+      harness_context: ($harness_summary | split("\n") | map(select(. != ""))),
+      meeting_realtime_config: ($realtime_config | fromjson),
       triage_audit: ($triage_audit | fromjson)
     }' >"${status_output_dir}/monitor-result.json"
 }
@@ -102,9 +126,13 @@ if [[ -n "$red_flags" ]]; then
   echo "$red_flags" >&2
   echo "oneesama-monitor: persona foreground context:" >&2
   echo "$persona_quality_summary" >&2
+  echo "oneesama-monitor: harness context:" >&2
+  echo "$harness_summary" >&2
   write_status_summary "red"
   exit 1
 fi
 
 write_status_summary "ok"
+echo "oneesama-monitor: harness context:"
+echo "$harness_summary"
 echo "oneesama-monitor: ok"

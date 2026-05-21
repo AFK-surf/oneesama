@@ -152,6 +152,7 @@ type SlackTriageAuditReport struct {
 	ProbeOutcome      SlackTriageAuditOutcome            `json:"probeOutcome"`
 	InputContext      SlackTriageInputContext            `json:"inputContext"`
 	ContextBudget     SlackTriageContextBudget           `json:"contextBudget"`
+	Harness           SlackTriageHarnessDrift            `json:"harness"`
 	ContextFetch      SlackTriageContextFetch            `json:"contextFetch"`
 	SkipReasons       map[string]int                     `json:"skipReasons,omitempty"`
 	ProcessHealth     SlackTriageProcessHealth           `json:"processHealth"`
@@ -194,6 +195,22 @@ type SlackTriageContextBudget struct {
 	MaxDynamicTokens        int `json:"maxDynamicTokens"`
 	MaxWorkerResultTokens   int `json:"maxWorkerResultTokens"`
 	MaxMemoryEvidenceTokens int `json:"maxMemoryEvidenceTokens"`
+}
+
+// SlackTriageHarnessDrift is the operator-facing rollup of Harness-level
+// cache-locality and evidence-boundary signals. It intentionally aggregates
+// already-audited fields instead of introducing new triage decisions.
+type SlackTriageHarnessDrift struct {
+	PIStablePromptHash           string `json:"piStablePromptHash,omitempty"`
+	DynamicContextIssueCount     int    `json:"dynamicContextIssueCount"`
+	DelegateNoVisibleActionCount int    `json:"delegateNoVisibleActionCount"`
+	HandledByOtherNoActionCount  int    `json:"handledByOtherNoActionCount"`
+	RunsWithContextBudget        int    `json:"runsWithContextBudget"`
+	MaxContextBudgetTokens       int    `json:"maxContextBudgetTokens"`
+	MaxStablePromptTokens        int    `json:"maxStablePromptTokens"`
+	MaxDynamicContextTokens      int    `json:"maxDynamicContextTokens"`
+	MaxWorkerResultTokens        int    `json:"maxWorkerResultTokens"`
+	MaxMemoryEvidenceTokens      int    `json:"maxMemoryEvidenceTokens"`
 }
 
 type SlackTriageContextFetch struct {

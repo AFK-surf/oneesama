@@ -706,6 +706,9 @@ func buildSlackDailyReportFlags(report SlackDailyReport) []SlackDailyReportFlag 
 	if report.New.DynamicContextIssues > 0 {
 		flags = append(flags, SlackDailyReportFlag{Level: "yellow", Code: "dynamic_context_issue", Message: "Some persona runs had missing, incomplete, or stale dynamic context envelopes."})
 	}
+	if report.New.DelegateNoVisibleAction > 0 {
+		flags = append(flags, SlackDailyReportFlag{Level: "yellow", Code: "delegate_no_visible_action", Message: "Some persona delegate_worker decisions had no visible downstream worker action in triage audit."})
+	}
 	return flags
 }
 
@@ -750,8 +753,9 @@ func formatSlackDailyReportText(report SlackDailyReport) string {
 	}
 	fmt.Fprintf(&b, "- New evidence path: memory %d / external %d / thread %d / delegate %d\n",
 		report.New.MemoryLookups, report.New.ExternalSearches, report.New.ThreadFetches, report.New.DelegateWorkerJobs)
-	fmt.Fprintf(&b, "- Harness drift: dynamic_context_issue %d / delegate_no_visible_action %d / handled_by_other_no_action %d\n",
-		report.New.DynamicContextIssues, report.New.DelegateNoVisibleAction, report.New.HandledByOtherNoAction)
+	fmt.Fprintf(&b, "- Harness drift: dynamic_context_issue %d / delegate_no_visible_action %d / handled_by_other_no_action %d / max_context_tokens %d / max_dynamic_tokens %d / max_worker_result_tokens %d / max_memory_evidence_tokens %d\n",
+		report.New.DynamicContextIssues, report.New.DelegateNoVisibleAction, report.New.HandledByOtherNoAction,
+		report.New.MaxContextBudgetTokens, report.New.MaxDynamicContextTokens, report.New.MaxWorkerResultTokens, report.New.MaxMemoryEvidenceTokens)
 	b.WriteString("\n*Self-iteration notes*\n")
 	fmt.Fprintf(&b, "- Compare approved replies/reactions/skips in the same action buckets as old daily audit; do not invent a separate quality taxonomy.\n")
 	fmt.Fprintf(&b, "- Treat old slackd silence as one signal, not ground truth; workspace policy and Memory-backed synthesis still decide whether Oneesama should engage.\n")
