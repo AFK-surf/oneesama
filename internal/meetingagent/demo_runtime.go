@@ -8,19 +8,31 @@ import (
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
-const demoSurfaceAdapterFake = "fake"
+const (
+	demoSurfaceAdapterFake  = "fake"
+	demoSurfaceAdapterCodex = "codex"
+)
 
 func (s *Service) newRealtimeDemoBridgeFromConfig() *RealtimeDemoBridge {
 	cfg := s.demoSurface
 	if !cfg.Enabled {
 		return nil
 	}
-	if strings.TrimSpace(cfg.Adapter) != demoSurfaceAdapterFake {
+	var client DemoKWWKClient
+	switch normalizeDemoSurfaceAdapter(cfg.Adapter) {
+	case demoSurfaceAdapterFake:
+		client = NewFakeDemoKWWKClient()
+	case demoSurfaceAdapterCodex:
+		if s.runner == nil || s.runnerErr != nil {
+			s.logger.Warn("demo surface codex adapter disabled because agent runner is unavailable", "error", s.runnerErr)
+			return nil
+		}
+		client = NewDemoCodexBrowserClient(s.runner)
+	default:
 		s.logger.Warn("demo surface adapter disabled because adapter is unsupported", "adapter", cfg.Adapter)
 		return nil
 	}
 	lifecycle := NewDemoWorkspaceLifecycle(cfg.RootDir, demoWorkspaceNoopLauncher{})
-	client := NewFakeDemoKWWKClient()
 	return &RealtimeDemoBridge{
 		Lifecycle: lifecycle,
 		Controller: DemoController{
@@ -80,4 +92,8 @@ func normalizeDemoSurfaceConfig(cfg appconfig.DemoSurfaceConfig) appconfig.DemoS
 		cfg.RootDir = "./runtime/demo-surfaces"
 	}
 	return cfg
+}
+
+func normalizeDemoSurfaceAdapter(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }

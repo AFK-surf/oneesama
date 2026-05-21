@@ -17,6 +17,7 @@ type DemoKWWKAdapterKind string
 
 const (
 	DemoKWWKAdapterFake         DemoKWWKAdapterKind = "fake"
+	DemoKWWKAdapterCodex        DemoKWWKAdapterKind = "codex"
 	DemoKWWKAdapterStdioJSONRPC DemoKWWKAdapterKind = "stdio_json_rpc"
 	DemoKWWKAdapterLibrary      DemoKWWKAdapterKind = "library"
 )
@@ -29,12 +30,13 @@ type DemoKWWKAdapterDecision struct {
 
 func DefaultDemoKWWKAdapterDecision() DemoKWWKAdapterDecision {
 	return DemoKWWKAdapterDecision{
-		Preferred: DemoKWWKAdapterStdioJSONRPC,
-		Deferred:  []DemoKWWKAdapterKind{DemoKWWKAdapterLibrary},
+		Preferred: DemoKWWKAdapterCodex,
+		Deferred:  []DemoKWWKAdapterKind{DemoKWWKAdapterStdioJSONRPC, DemoKWWKAdapterLibrary},
 		Rationale: []string{
-			"host_run_poc_needs_a_process_boundary_around_swift_kwwk_permissions",
+			"codex_browser_use_reuses_existing_worker_runtime_without_reimplementing_desktop_minion_kwwk",
+			"host_run_poc_needs_a_process_boundary_around_browser_control_permissions",
 			"fake_adapter_unblocks_controller_tests_without_meet_or_realtime",
-			"library_binding_can_replace_stdio_without_changing_demo_controller",
+			"stdio_or_library_kwwk_binding_can_replace_codex_without_changing_demo_controller",
 		},
 	}
 }

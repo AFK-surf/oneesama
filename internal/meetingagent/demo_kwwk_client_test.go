@@ -8,17 +8,17 @@ import (
 	"time"
 )
 
-func TestDefaultDemoKWWKAdapterDecisionPrefersStdioJSONRPC(t *testing.T) {
+func TestDefaultDemoKWWKAdapterDecisionPrefersCodex(t *testing.T) {
 	decision := DefaultDemoKWWKAdapterDecision()
 
-	if decision.Preferred != DemoKWWKAdapterStdioJSONRPC {
-		t.Fatalf("Preferred = %q, want stdio_json_rpc", decision.Preferred)
+	if decision.Preferred != DemoKWWKAdapterCodex {
+		t.Fatalf("Preferred = %q, want codex", decision.Preferred)
 	}
-	if !reflect.DeepEqual(decision.Deferred, []DemoKWWKAdapterKind{DemoKWWKAdapterLibrary}) {
-		t.Fatalf("Deferred = %#v, want library deferred", decision.Deferred)
+	if !reflect.DeepEqual(decision.Deferred, []DemoKWWKAdapterKind{DemoKWWKAdapterStdioJSONRPC, DemoKWWKAdapterLibrary}) {
+		t.Fatalf("Deferred = %#v, want stdio/library deferred", decision.Deferred)
 	}
 	if len(decision.Rationale) < 3 {
-		t.Fatalf("Rationale = %#v, want process-boundary/fake/library rationale", decision.Rationale)
+		t.Fatalf("Rationale = %#v, want codex/fake/deferred-adapter rationale", decision.Rationale)
 	}
 }
 

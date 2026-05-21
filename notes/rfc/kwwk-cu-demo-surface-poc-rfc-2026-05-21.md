@@ -133,12 +133,15 @@ Thin interface between Oneesama and the KWWK / Computer Use implementation.
 Interface variants:
 
 - fake in-memory implementation for tests;
-- stdio JSON-RPC bridge to a Swift/KWWK helper;
+- Codex/browser-use worker adapter for the first real POC path;
+- deferred stdio JSON-RPC bridge to a Swift/KWWK helper;
 - future library binding if KWWK becomes importable as a package.
 
 Key decision:
 
-- choose stdio JSON-RPC vs library binding for the first real adapter.
+- use the existing Codex worker runtime as the first real adapter so the POC does
+  not reimplement desktop-minion's KWWK host-control stack; keep the KWWK
+  interface boundary so a Swift/helper adapter can replace it later.
 
 ### `DemoController`
 
@@ -339,15 +342,17 @@ should ask for demo-surface intents; the host decides which CU actions are safe.
 Done when: tests can prove Oneesama can represent a demo session independently
 from existing `screen_share.*` code.
 
-### Phase 1: Host Browser Demo Adapter
+### Phase 1: Codex Browser-Use Demo Adapter
 
-- [ ] Implement a host-run browser adapter with an isolated user-data-dir.
-- [ ] Support `open_url`, `capture_frame`, `scroll`, and `stop`.
+- [ ] Implement a Codex/browser-use adapter behind the existing `KWWKClient`
+      boundary.
+- [ ] Support `open_url`, `capture_frame`, `scroll`, and `stop` through bounded
+      demo actions.
 - [ ] Persist frames to `runtime/demo-surfaces/<session>/frames/`.
 - [ ] Add a dry-run smoke that uses a local fixture page.
 
-Done when: a local command can open a fixture page, capture a frame, scroll, and
-stop without touching a user's active browser.
+Done when: a local command can trigger a Codex browser-use worker, receive a
+structured observation, and stop without touching a user's active browser.
 
 ### Phase 2: Demo Surface Presentation Glue
 
@@ -373,9 +378,12 @@ surface without running full realtime.
 Done when: realtime can narrate "I opened it; I see ..." from a real observation
 instead of a tool log.
 
-### Phase 4: KWWK/CU Adapter Hardening
+### Phase 4: Adapter Hardening / KWWK Swap
 
-- [ ] Decide whether to call KWWK as a library, subprocess, or HTTP service.
+- [ ] Keep `adapter=fake` for deterministic tests and `adapter=codex` for POC
+      live verification.
+- [ ] Decide later whether to call KWWK as a library, subprocess, or HTTP
+      service once that stack is explicitly in scope.
 - [ ] Add a thin adapter that maps KWWK observation output into
       `DemoObservation`.
 - [ ] Keep `computer_use_step` inactive by default; add a separate approval gate
@@ -383,7 +391,7 @@ instead of a tool log.
 - [ ] Add failure taxonomy: permission denied, browser launch failed, URL
       blocked, observation failed, share failed.
 
-Done when: KWWK-backed observation can replace the fake/browser-only adapter
+Done when: KWWK-backed observation can replace the Codex/browser-use adapter
 without changing meeting/realtime call sites.
 
 ### Phase 5: Mainline Integration Gate
@@ -419,8 +427,8 @@ its own fake/local harness and should not require full meeting E2E to develop.
 - **304-A Demo workspace lifecycle**: bot-owned browser sandbox start/stop,
   profile/runtime cleanup, stale cleanup tests.
 - **304-B KWWK client adapter decision + interface**: define `KWWKClient`,
-  fake implementation, and pick stdio JSON-RPC vs library binding for the first
-  real adapter.
+  fake implementation, and pick Codex/browser-use as the first real adapter
+  while keeping stdio JSON-RPC / library binding deferred.
 - **304-C Demo controller**: `DemoIntent` -> `DemoObservation` loop using fake
   `KWWKClient`; cover open/observe/scroll/stop/failures.
 - **304-D Realtime demo bridge**: `start_demo_surface` / `cancel_demo_surface`
@@ -440,8 +448,8 @@ its own fake/local harness and should not require full meeting E2E to develop.
   service process?
 - For POC, should the browser be Chrome/Chromium through Playwright, or should
   it reuse a KWWK browser runner directly?
-- Should the first real adapter use stdio JSON-RPC to a Swift/KWWK helper, or a
-  library binding?
+- Should a later KWWK replacement use stdio JSON-RPC to a Swift/KWWK helper, a
+  service process, or a library binding?
 - Should a demo session be 1:1 with a meeting session, or independently
   startable/stoppable inside a meeting?
 - Who can stop a demo: only the initiator, any meeting participant, or Pi based

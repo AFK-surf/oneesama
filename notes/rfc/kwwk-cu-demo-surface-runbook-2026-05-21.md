@@ -1,4 +1,4 @@
-# KWWK CU Demo Surface — Operator Runbook (POC)
+# KWWK / Codex CU Demo Surface — Operator Runbook (POC)
 
 Date: 2026-05-21
 Owner: @喵喵 (task #312)
@@ -16,7 +16,9 @@ mainline meeting runtime.
 
 ## What this does NOT cover
 
-- KWWK adapter install / KWWK runtime topology — see task #306 thread.
+- Deferred KWWK adapter install / KWWK runtime topology — the first real POC
+  adapter is `adapter=codex`, which delegates bounded browser-use work to the
+  existing agent runner.
 - Realtime tool registration — see task #308 thread.
 - Production rollout — POC stays host-run, no Docker; see RFC
   Non-Goals section.
@@ -26,7 +28,7 @@ mainline meeting runtime.
 | Module | Code | Owner task |
 |---|---|---|
 | Workspace lifecycle (browser sandbox) | `internal/meetingagent/demo_workspace_lifecycle.go` | #305 |
-| KWWK client contract + fake | `internal/meetingagent/demo_kwwk_client.go` | #306 |
+| KWWK/CU client contract + fake/codex adapters | `internal/meetingagent/demo_kwwk_client.go`, `internal/meetingagent/demo_codex_browser_client.go` | #306/#316 |
 | Controller (intent → observation loop) | `internal/meetingagent/demo_controller.go` (in flight) | #307 |
 | Observation feedback renderer | `internal/meetingagent/demo_observation_feedback.go` | #310 |
 | Allowlist + safety policy | `internal/meetingagent/demo_safety_policy.go` | #311 |

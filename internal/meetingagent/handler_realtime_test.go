@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/httpserver"
 	"github.com/AFK-surf/oneesama/internal/internalauth"
 	"github.com/AFK-surf/oneesama/internal/postmeeting"
@@ -433,6 +434,74 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	decodeRealtimeBody(t, cancel.Body.String(), &cancelBody)
 	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
 		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
+	}
+}
+
+func TestRealtimeDemoSurfaceRuntimeFlagEnablesCodexAdapterSmoke(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	runner := &fakeDemoCodexRunner{
+		startJob: agentrunner.Job{
+			ID:       "job_demo_codex_runtime",
+			Provider: "codex",
+			Status:   agentrunner.StatusCompleted,
+			Result:   `{"summary":"Codex browser-use opened the demo page and saw the launch checklist.","confidence":0.88}`,
+		},
+	}
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		OpenAI: appconfig.OpenAIConfig{
+			RealtimeModel: "gpt-realtime-2",
+			BotName:       "Meeting Avatar Bot",
+		},
+		MeetRunner: fakeMeetRunner{},
+		Runner:     runner,
+		DemoSurface: appconfig.DemoSurfaceConfig{
+			Enabled:              true,
+			Adapter:              "codex",
+			RootDir:              rootDir + "/demo-surfaces",
+			URLAllowlistPatterns: []string{"https://example.test/"},
+			DryRun:               true,
+		},
+	})
+
+	configResponse := httptest.NewRecorder()
+	router.ServeHTTP(configResponse, realtimeRequest(http.MethodGet, "/realtime/config", ""))
+	if configResponse.Code != http.StatusOK {
+		t.Fatalf("config status = %d: %s", configResponse.Code, configResponse.Body.String())
+	}
+	var configBody map[string]any
+	decodeRealtimeBody(t, configResponse.Body.String(), &configBody)
+	demoSurface := configBody["demoSurface"].(map[string]any)
+	if demoSurface["enabled"] != true || demoSurface["adapter"] != "codex" {
+		t.Fatalf("demoSurface = %#v, want enabled codex adapter", demoSurface)
+	}
+
+	join := httptest.NewRecorder()
+	router.ServeHTTP(join, realtimeRequest(http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`))
+	if join.Code != http.StatusOK {
+		t.Fatalf("join status = %d: %s", join.Code, join.Body.String())
+	}
+
+	start := httptest.NewRecorder()
+	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_codex_flag","url":"https://example.test/demo","goal":"show it"}`))
+	if start.Code != http.StatusOK {
+		t.Fatalf("start status = %d: %s", start.Code, start.Body.String())
+	}
+	var startBody map[string]any
+	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	if startBody["ok"] != true || startBody["session_id"] != "demo_codex_flag" {
+		t.Fatalf("start body = %#v, want successful codex demo session", startBody)
+	}
+	if !strings.Contains(stringFromAny(startBody["observation_context"]), "Codex browser-use opened") {
+		t.Fatalf("start body = %#v, want observation context from codex adapter", startBody)
+	}
+	if runner.startCount != 1 || !strings.Contains(runner.startInput.Task, "browser-use") {
+		t.Fatalf("runner start = %d input=%#v, want codex browser-use job", runner.startCount, runner.startInput)
 	}
 }
 
