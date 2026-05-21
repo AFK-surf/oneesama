@@ -1031,6 +1031,76 @@ func TestSecretaryLookupWorkerPromptCarriesMemoryEvidenceAndFollowupInstruction(
 	}
 }
 
+func TestStartPersonaDelegatedSecretaryLookupWorkerEnrichesPiWorkerRequest(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C_TRIAGE",
+		UserID:    "U_HEYANG",
+		Text:      "https://news.ycombinator.com/user?id=Johnson8053 这是谁",
+		TS:        "500.000",
+	}}
+	req := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_TRIAGE",
+		ThreadTS:  "500.000",
+		Messages:  messages,
+		Digest:    "#product: https://news.ycombinator.com/user?id=Johnson8053 这是谁",
+		ExternalLinks: []SlackExternalLinkContext{{
+			URL:     "https://news.ycombinator.com/user?id=Johnson8053",
+			Title:   "Profile: Johnson8053 | Hacker News",
+			Excerpt: "user: Johnson8053 created: September 20, 2024 karma:33 about: submissions comments favorites",
+			Source:  "reader",
+		}},
+		RelatedMemory: []SlackRelatedMemoryRecord{{
+			Kind:       "person_memory",
+			SourcePath: "memory/people/zanwei.md",
+			Content:    "Johnson8053 evidence points at zanwei via github.com/zanwei/design-dna and workspace discussions.",
+			Score:      0.91,
+		}},
+	})
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_direct_pi_secretary",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{Runner: runner})
+	result := SlackPersonaShadowResult{
+		Success:   true,
+		RequestID: req.ID,
+		ChannelID: "C_TRIAGE",
+		ThreadTS:  "500.000",
+		Decision:  persona.DecisionDelegateWorker,
+		workerRecords: []persona.WorkerRequest{{
+			ID:     "pi-secretary-lookup",
+			Kind:   "codex",
+			Prompt: "Look up the HN user profile and answer who this is.",
+			Context: map[string]any{
+				"delegation_scope": "secretary_lookup",
+			},
+		}},
+	}
+
+	started := service.startPersonaDelegatedWorkerJobs(context.Background(), "T123", 99, result, req, messages)
+	if len(started.JobIDs) != 1 || runner.startCount != 1 {
+		t.Fatalf("started=%#v runner.startCount=%d, want one worker", started, runner.startCount)
+	}
+	if got := runner.startInput.Context["session_kind"]; got != agentrunner.SessionKindSecretaryLookup {
+		t.Fatalf("session_kind = %#v, want secretary_lookup", got)
+	}
+	for _, want := range []string{
+		"Do not stop at the first profile/article excerpt",
+		"Workspace Memory/person evidence",
+		"memory/people/zanwei.md",
+		"github.com/zanwei/design-dna",
+	} {
+		if !strings.Contains(runner.startInput.Task, want) {
+			t.Fatalf("direct Pi secretary worker task missing %q:\n%s", want, runner.startInput.Task)
+		}
+	}
+	if evidence := stringFromAny(runner.startInput.Context["workspace_memory_evidence"]); !strings.Contains(evidence, "memory/people/zanwei.md") || !strings.Contains(evidence, "Johnson8053") {
+		t.Fatalf("workspace_memory_evidence = %q, want request memory passed through", evidence)
+	}
+}
+
 func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing.T) {
 	ctx := context.Background()
 	workspaceDir := t.TempDir()

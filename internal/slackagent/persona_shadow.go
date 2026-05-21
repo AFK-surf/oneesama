@@ -175,7 +175,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		if len(policyToolCalls) > 0 {
 			toolCalls = append(toolCalls, policyToolCalls...)
 		}
-		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result, messages)
+		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result, request, messages)
 		if len(delegation.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, delegation.ToolCalls...)
 		}
@@ -213,7 +213,7 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		if len(policyToolCalls) > 0 {
 			toolCalls = append(toolCalls, policyToolCalls...)
 		}
-		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result, messages)
+		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result, request, messages)
 		if len(delegation.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, delegation.ToolCalls...)
 		}
@@ -581,7 +581,7 @@ func slackPersonaSecretaryRoutingText() string {
 	return "这看起来是具体项目代码/环境问题，我先不直接下场查 repo。更适合走项目 owner 处理；我可以帮忙把现象、链接和影响面整理成 brief，或者在你明确授权我查 Oneesama 自身/指定代码时再派 worker。"
 }
 
-func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspaceID string, runID int64, result SlackPersonaShadowResult, messages []SlackInboundMessage) personaDelegatedWorkerStartResult {
+func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspaceID string, runID int64, result SlackPersonaShadowResult, request persona.Request, messages []SlackInboundMessage) personaDelegatedWorkerStartResult {
 	out := personaDelegatedWorkerStartResult{}
 	if s == nil || strings.TrimSpace(result.Decision) != persona.DecisionDelegateWorker || len(result.workerRecords) == 0 {
 		return out
@@ -599,17 +599,21 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 		})
 		return out
 	}
-	for index, request := range result.workerRecords {
+	for index, workerRequest := range result.workerRecords {
 		if index >= 3 {
 			out.Errors = append(out.Errors, "delegate_worker_limit_exceeded")
 			break
 		}
-		prompt := strings.TrimSpace(request.Prompt)
+		sessionKind := personaDelegatedWorkerSessionKind(workerRequest)
+		if sessionKind == agentrunner.SessionKindSecretaryLookup {
+			workerRequest = enrichPersonaSecretaryLookupWorkerRequest(workerRequest, request)
+		}
+		prompt := strings.TrimSpace(workerRequest.Prompt)
 		if prompt == "" {
 			prompt = "Handle the delegated Slack task from Pi foreground triage."
 		}
-		workerID := firstNonEmpty(strings.TrimSpace(request.ID), fmt.Sprintf("%s:worker:%d", result.RequestID, index+1))
-		contextMap := mergeStringAnyMaps(request.Context, map[string]any{
+		workerID := firstNonEmpty(strings.TrimSpace(workerRequest.ID), fmt.Sprintf("%s:worker:%d", result.RequestID, index+1))
+		contextMap := mergeStringAnyMaps(workerRequest.Context, map[string]any{
 			"source":        "persona_delegate_worker",
 			"sessionId":     firstNonEmpty(strings.TrimSpace(result.RequestID), fmt.Sprintf("triage:%d", runID)),
 			"session_id":    firstNonEmpty(strings.TrimSpace(result.RequestID), fmt.Sprintf("triage:%d", runID)),
@@ -632,7 +636,6 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 				"worker_id":  workerID,
 			},
 		}, personaDelegatedWorkerSlackContext(result.ChannelID, result.ThreadTS, messages))
-		sessionKind := personaDelegatedWorkerSessionKind(request)
 		job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
 			Task:             prompt,
 			Context:          contextMap,
@@ -667,6 +670,45 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 		out.Failures = 1
 	}
 	return out
+}
+
+func enrichPersonaSecretaryLookupWorkerRequest(worker persona.WorkerRequest, request persona.Request) persona.WorkerRequest {
+	if worker.Context == nil {
+		worker.Context = map[string]any{}
+	}
+	if value := personaRequestContextText(request.Context, "external_link_context"); strings.TrimSpace(value) != "" && strings.TrimSpace(stringFromAny(worker.Context["external_link_context"])) == "" {
+		worker.Context["external_link_context"] = value
+	}
+	if value := personaRequestContextText(request.Context, "triage_digest"); strings.TrimSpace(value) != "" && strings.TrimSpace(stringFromAny(worker.Context["triage_digest"])) == "" {
+		worker.Context["triage_digest"] = value
+	}
+	if value := personaRequestMemoryEvidence(request, 5); value != "" && strings.TrimSpace(stringFromAny(worker.Context["workspace_memory_evidence"])) == "" {
+		worker.Context["workspace_memory_evidence"] = value
+	}
+	prompt := strings.TrimSpace(worker.Prompt)
+	var additions []string
+	if !strings.Contains(prompt, "Do not stop at the first profile/article excerpt") {
+		additions = append(additions,
+			"Secretary lookup evidence rules:",
+			"- Do not stop at the first profile/article excerpt. If the source exposes submissions, comments, favorites, repository, author, or source links, follow those read-only leads before answering.",
+			"- Use available read-only tools such as exa_search, exa_contents, person_memory, memory_search, and slack_api fetch/read methods when the provided excerpt is not enough.",
+			"- Only return a Slack-visible answer when you have concrete evidence. If evidence is insufficient, return no visible result instead of guessing or posting a routing/refusal template.",
+		)
+	}
+	if external := strings.TrimSpace(stringFromAny(worker.Context["external_link_context"])); external != "" && !strings.Contains(prompt, "Fetched external link context:") {
+		additions = append(additions, "Fetched external link context:\n"+external)
+	}
+	if memory := strings.TrimSpace(stringFromAny(worker.Context["workspace_memory_evidence"])); memory != "" && !strings.Contains(prompt, "Workspace Memory/person evidence:") {
+		additions = append(additions, "Workspace Memory/person evidence:\n"+memory)
+	}
+	if len(additions) > 0 {
+		if prompt != "" {
+			prompt += "\n\n"
+		}
+		prompt += strings.Join(additions, "\n")
+		worker.Prompt = prompt
+	}
+	return worker
 }
 
 func personaDelegatedWorkerSessionKind(request persona.WorkerRequest) string {
