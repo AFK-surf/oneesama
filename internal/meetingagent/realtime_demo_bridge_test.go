@@ -125,6 +125,93 @@ func TestRealtimeDemoBridgeCancelStopsPresentationAndWorkspace(t *testing.T) {
 	}
 }
 
+func TestRealtimeDemoBridgeStartPresentationFailureStopsWorkspace(t *testing.T) {
+	now := time.Date(2026, 5, 21, 16, 55, 0, 0, time.UTC)
+	process := &fakeDemoWorkspaceProcess{pid: 5154}
+	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: process})
+	lifecycle.now = func() time.Time { return now }
+	share := &fakeDemoSurfaceShareClient{
+		startResult: map[string]any{"ok": false, "error": "no_active_join"},
+	}
+	store := NewDemoSessionStore().WithClock(func() time.Time { return now })
+	bridge := &RealtimeDemoBridge{
+		Lifecycle: lifecycle,
+		Presenter: DemoSurfacePresenter{Share: share},
+		Controller: DemoController{
+			Client: NewFakeDemoKWWKClient(),
+			Safety: DemoSafetyPolicy{URLAllowlistPatterns: []string{"https://example.test/"}},
+			Now:    func() time.Time { return now },
+		},
+		Store: store,
+	}
+
+	result, err := bridge.Start(context.Background(), RealtimeDemoSurfaceStartRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_present_fail",
+		URL:              "https://example.test/dashboard",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no_active_join") {
+		t.Fatalf("Start() error = %v, want no_active_join", err)
+	}
+	if result.OK || result.Status != realtimeDemoBridgeStatusFailed || result.Workspace == nil || result.Workspace.Status != DemoWorkspaceStatusStopped {
+		t.Fatalf("result = %#v, want failed with stopped workspace", result)
+	}
+	if !process.stopped {
+		t.Fatalf("workspace process was not stopped after presentation failure")
+	}
+	if _, ok := lifecycle.ActiveSession(); ok {
+		t.Fatalf("active session still present after presentation failure")
+	}
+	entries, ok := store.Entries("demo_present_fail")
+	if !ok || len(entries) != 3 || entries[1].Result != DemoSessionResultFailed || entries[2].Result != DemoSessionResultStopped {
+		t.Fatalf("audit entries = %#v ok=%v, want trigger + failed action + close", entries, ok)
+	}
+}
+
+func TestRealtimeDemoBridgeCancelPresentationFailureStillStopsWorkspace(t *testing.T) {
+	now := time.Date(2026, 5, 21, 16, 58, 0, 0, time.UTC)
+	process := &fakeDemoWorkspaceProcess{pid: 5155}
+	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: process})
+	lifecycle.now = func() time.Time { return now }
+	share := &fakeDemoSurfaceShareClient{}
+	bridge := &RealtimeDemoBridge{
+		Lifecycle: lifecycle,
+		Presenter: DemoSurfacePresenter{Share: share},
+		Controller: DemoController{
+			Client: NewFakeDemoKWWKClient(),
+			Safety: DemoSafetyPolicy{URLAllowlistPatterns: []string{"https://example.test/"}},
+			Now:    func() time.Time { return now },
+		},
+		Store: NewDemoSessionStore().WithClock(func() time.Time { return now }),
+	}
+
+	if _, err := bridge.Start(context.Background(), RealtimeDemoSurfaceStartRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_cancel_fail",
+		URL:              "https://example.test/dashboard",
+	}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	share.stopResult = map[string]any{"ok": false, "error": "no_active_join"}
+	result, err := bridge.Cancel(context.Background(), RealtimeDemoSurfaceCancelRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_cancel_fail",
+		Reason:           "user_stop",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no_active_join") {
+		t.Fatalf("Cancel() error = %v, want no_active_join", err)
+	}
+	if result.OK || result.Status != realtimeDemoBridgeStatusFailed || result.Workspace == nil || result.Workspace.Status != DemoWorkspaceStatusStopped {
+		t.Fatalf("cancel result = %#v, want failed but stopped workspace", result)
+	}
+	if !process.stopped {
+		t.Fatalf("workspace process was not stopped after cancel presentation failure")
+	}
+	if _, ok := lifecycle.ActiveSession(); ok {
+		t.Fatalf("active session still present after cancel presentation failure")
+	}
+}
+
 func TestRealtimeDemoBridgeMissingControllerRecordsFailedObservation(t *testing.T) {
 	now := time.Date(2026, 5, 21, 14, 30, 0, 0, time.UTC)
 	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: &fakeDemoWorkspaceProcess{pid: 5153}})

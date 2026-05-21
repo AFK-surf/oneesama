@@ -128,12 +128,17 @@ func (b *RealtimeDemoBridge) Start(ctx context.Context, req RealtimeDemoSurfaceS
 	})
 	if err != nil {
 		b.recordAction(workspace.ID, DemoActionOpenURL, workspace.URL, DemoSessionResultFailed, presentation.Reason, nil)
+		stoppedWorkspace := workspace
+		if stopped, stopErr := b.Lifecycle.Stop(ctx, workspace.ID); stopErr == nil {
+			stoppedWorkspace = stopped
+			b.recordClose(stopped.ID, firstNonEmpty(presentation.Reason, "presentation_failed"))
+		}
 		return RealtimeDemoBridgeResult{
 			OK:               false,
 			Status:           realtimeDemoBridgeStatusFailed,
 			SessionID:        workspace.ID,
 			MeetingSessionID: strings.TrimSpace(req.MeetingSessionID),
-			Workspace:        &workspace,
+			Workspace:        &stoppedWorkspace,
 			Presentation:     &presentation,
 			Error:            err.Error(),
 		}, err
@@ -194,6 +199,7 @@ func (b *RealtimeDemoBridge) Cancel(ctx context.Context, req RealtimeDemoSurface
 	}
 
 	var presentation *DemoSurfacePresentation
+	var presentationErr error
 	if b.Presenter != nil {
 		stopped, err := b.Presenter.Stop(ctx, DemoSurfaceStopRequest{
 			MeetingSessionID: strings.TrimSpace(req.MeetingSessionID),
@@ -202,7 +208,7 @@ func (b *RealtimeDemoBridge) Cancel(ctx context.Context, req RealtimeDemoSurface
 		presentation = &stopped
 		if err != nil {
 			b.recordAction(sessionID, DemoActionCapture, "", DemoSessionResultFailed, stopped.Reason, nil)
-			return RealtimeDemoBridgeResult{OK: false, Status: realtimeDemoBridgeStatusFailed, SessionID: sessionID, Presentation: presentation, Error: err.Error()}, err
+			presentationErr = err
 		}
 	}
 	workspace, err := b.Lifecycle.Stop(ctx, sessionID)
@@ -210,6 +216,18 @@ func (b *RealtimeDemoBridge) Cancel(ctx context.Context, req RealtimeDemoSurface
 		return RealtimeDemoBridgeResult{OK: false, Status: realtimeDemoBridgeStatusFailed, SessionID: sessionID, Presentation: presentation, Error: err.Error()}, err
 	}
 	b.recordClose(workspace.ID, firstNonEmpty(strings.TrimSpace(req.Reason), "cancel_requested"))
+	if presentationErr != nil {
+		return RealtimeDemoBridgeResult{
+			OK:               false,
+			Status:           realtimeDemoBridgeStatusFailed,
+			SessionID:        workspace.ID,
+			MeetingSessionID: strings.TrimSpace(req.MeetingSessionID),
+			Workspace:        &workspace,
+			Presentation:     presentation,
+			Audit:            b.entries(workspace.ID),
+			Error:            presentationErr.Error(),
+		}, presentationErr
+	}
 	return RealtimeDemoBridgeResult{
 		OK:               true,
 		Status:           realtimeDemoBridgeStatusStopped,
