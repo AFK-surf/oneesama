@@ -75,7 +75,7 @@ func renderAppMentionMediaEvidenceSummary(files []SlackThreadFile) string {
 		lines = append(lines, fmt.Sprintf("- ... %d more file(s) omitted from evidence summary", len(files)-appMentionMediaEvidenceFileLimit))
 	}
 	header := fmt.Sprintf("Slack thread includes %d file(s): %d image(s), %d video(s), %d canvas doc(s), %d other file(s).", len(files), imageCount, videoCount, canvasCount, otherCount)
-	guidance := "Evidence boundary: file metadata is available here; image file_ids can be fetched with slack.fetchImage when relevant, but video/binary contents are not decoded by this evidence. Do not claim to have watched videos or read binary file contents unless a separate tool result provides that content. For media inventory requests, summarize metadata-backed candidates and state any content-reading blocker."
+	guidance := "Evidence boundary: file metadata is available here; image file_ids can be fetched with slack.fetchImage when relevant, but video/binary contents are not decoded by this evidence. Do not claim to have watched videos or read binary file contents unless a separate tool result provides that content. For media inventory requests, summarize metadata-backed candidates only when that is useful; do not post a visible reply whose main content is a content-reading blocker."
 	return strings.Join(append([]string{header, guidance, "Files:"}, lines...), "\n")
 }
 

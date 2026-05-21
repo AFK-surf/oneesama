@@ -62,6 +62,9 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if !strings.Contains(systemPrompt, "Oneesama's own Slack foreground Pi agent") {
 		t.Fatalf("system prompt did not establish Oneesama foreground boundary:\n%s", seen.Messages[0].Content)
 	}
+	if !strings.Contains(systemPrompt, "Never post visible self-limitations") {
+		t.Fatalf("system prompt missing media/tool self-limitation guard:\n%s", systemPrompt)
+	}
 	for _, forbidden := range []string{"[[", "telegram-pi", "Linger"} {
 		if strings.Contains(systemPrompt, forbidden) {
 			t.Fatalf("system prompt contains old/private marker %q:\n%s", forbidden, systemPrompt)
@@ -194,6 +197,22 @@ func TestNormalizeOneesamaPIResponseRequiresDecisionPayloads(t *testing.T) {
 			name:         "reply requires visible text",
 			resp:         Response{Decision: DecisionReply, VisibleText: "   "},
 			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "reply cannot narrate video limitation",
+			resp:         Response{Decision: DecisionReply, VisibleText: "能简单描述一下 timeout 的具体情况吗？我看不了视频文件。"},
+			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "reply cannot narrate english media limitation",
+			resp:         Response{Decision: DecisionReply, VisibleText: "I can't view the video attachment, can you describe it?"},
+			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "media limitation reply can downgrade to reaction",
+			resp:         Response{Decision: DecisionReply, VisibleText: "我看不了视频文件，简单描述一下？", Reactions: []ReactionIntent{{Emoji: ":thinking:"}}},
+			wantDecision: DecisionReact,
+			wantEmoji:    "thinking",
 		},
 		{
 			name:         "react requires emoji",

@@ -218,6 +218,7 @@ Decide exactly one action for this Slack event:
 - memory_write: when the event contains a durable fact/preference worth recording.
 
 Never answer with vague hedging as the main disposition. If your answer would be "maybe / might / seems / 可能 / 大概 / 也许", choose delegate_worker or stay_silent.
+Never post visible self-limitations such as "I can't view this video/file/image" or "我看不了视频/文件/图片". If media content is needed and no reader evidence is present, choose delegate_worker for bounded file/thread retrieval when useful, or stay_silent.
 Do not delegate arbitrary external project debugging. For staging/production/deploy/infra/database/API latency/CI/performance/code investigation in another project, act like a secretary: reply with a concise routing/owner handoff if useful, or stay silent if already handled.
 If you do delegate, include worker_requests[].context.delegation_scope when possible: oneesama_system, oneesama_code, secretary_lookup, or explicit_human_authorized_code.
 For link commentary, do not restate the headline. Combine fetched source evidence with workspace Memory/context when available; if that cannot be connected, delegate or stay silent.
@@ -282,6 +283,14 @@ func normalizeOneesamaPIResponse(req Request, resp Response, runtime *OneesamaPI
 		resp.VisibleText = truncateVisibleText(strings.TrimSpace(resp.VisibleText), req.Safety.MaxVisibleChars)
 		if resp.VisibleText == "" {
 			resp.Decision = DecisionStaySilent
+		} else if oneesamaPIVisibleTextNarratesMediaLimitation(resp.VisibleText) {
+			if req.Safety.AllowReactions && len(resp.Reactions) > 0 {
+				resp.Decision = DecisionReact
+			} else {
+				resp.Decision = DecisionStaySilent
+			}
+			resp.VisibleText = ""
+			resp.Reason = firstNonEmpty(resp.Reason, "reply narrated media/tool limitation instead of producing evidence-backed output")
 		}
 	}
 	if resp.Decision == DecisionReact && len(resp.Reactions) == 0 {
@@ -298,6 +307,38 @@ func normalizeOneesamaPIResponse(req Request, resp Response, runtime *OneesamaPI
 	}
 	resp.ShadowOnly = runtime.shadowOnly || strings.EqualFold(req.Mode, ModeShadow)
 	return resp
+}
+
+func oneesamaPIVisibleTextNarratesMediaLimitation(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	zhMedia := []string{"视频", "文件", "图片", "截图", "附件", "素材"}
+	zhLimitations := []string{"看不了", "看不到", "没法看", "无法查看", "不能查看", "无法读取", "不能读取", "打不开", "无法打开", "不能打开", "无法播放", "不能播放"}
+	if containsAny(trimmed, zhMedia) && containsAny(trimmed, zhLimitations) {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	enMedia := []string{"video", "file", "image", "screenshot", "attachment", "media"}
+	enLimitations := []string{
+		"can't view", "cannot view", "unable to view",
+		"can't watch", "cannot watch", "unable to watch",
+		"can't read", "cannot read", "unable to read",
+		"can't open", "cannot open", "unable to open",
+		"can't access", "cannot access", "unable to access",
+		"do not have access to", "don't have access to",
+	}
+	return containsAny(lower, enMedia) && containsAny(lower, enLimitations)
+}
+
+func containsAny(text string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func validOneesamaPIReactions(records []ReactionIntent) []ReactionIntent {

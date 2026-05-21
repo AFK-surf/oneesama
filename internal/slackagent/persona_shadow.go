@@ -489,6 +489,9 @@ func personaDelegatedWorkerSlackContext(channelID string, threadTS string, messa
 	if len(media.Images) > 0 {
 		prompt += "\n\n---\nImage reading rule:\nThis delegated Slack task includes image attachment file_ids. If the answer depends on image contents, request them with slack_api(method=\"slack.fetchImage\", params={\"file_id\":\"F...\"}) before answering. If image evidence cannot be fetched or remains insufficient, return no visible result instead of guessing."
 	}
+	if delegatedSlackFilesIncludeNonImageMedia(media.Files) {
+		prompt += "\n\n---\nNon-image media rule:\nThis delegated Slack task includes non-image media/file attachments. The available Slack evidence may be metadata-only for video, audio, PDF, or binary contents. Do not answer by saying you cannot view the media. If the answer depends on unread media contents and no separate reader evidence is available, return no visible result."
+	}
 	rich.Prompt = prompt
 	out := map[string]any{
 		"slackAssistantPrompt": prompt,
@@ -501,6 +504,18 @@ func personaDelegatedWorkerSlackContext(channelID string, threadTS string, messa
 		out["slack_image_files"] = append([]SlackThreadImage(nil), media.Images...)
 	}
 	return out
+}
+
+func delegatedSlackFilesIncludeNonImageMedia(files []SlackThreadFile) bool {
+	for _, file := range files {
+		if isSlackImageFile(file) || isSlackCanvasFile(file) {
+			continue
+		}
+		if isSlackVideoFile(file) || strings.TrimSpace(file.ID) != "" || strings.TrimSpace(file.Name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) recordSlackTriagePersonaShadowResult(ctx context.Context, runID int64, result SlackPersonaShadowResult) error {

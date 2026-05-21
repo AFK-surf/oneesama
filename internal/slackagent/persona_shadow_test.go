@@ -975,6 +975,34 @@ func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing
 	}
 }
 
+func TestPersonaDelegatedWorkerSlackContextForVideoForbidsVisibleSelfLimitation(t *testing.T) {
+	context := personaDelegatedWorkerSlackContext("C_TRIAGE", "300.000", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_ASK",
+		Text:           "",
+		TS:             "301.000",
+		ThreadTS:       "300.000",
+		Files: []SlackFile{{
+			ID:        "FVID",
+			Name:      "timeout.mov",
+			Filetype:  "mov",
+			Mimetype:  "video/quicktime",
+			Size:      412000,
+			Permalink: "https://slack.example/files/FVID",
+		}},
+	}})
+	prompt := stringFromAny(context["slackAssistantPrompt"])
+	for _, want := range []string{"timeout.mov", "Non-image media rule", "Do not answer by saying you cannot view the media", "return no visible result"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("slackAssistantPrompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if files, ok := context["slack_files"].([]SlackThreadFile); !ok || len(files) != 1 || files[0].ID != "FVID" {
+		t.Fatalf("slack_files = %#v, want video metadata", context["slack_files"])
+	}
+}
+
 func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T) {
 	ctx := context.Background()
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
