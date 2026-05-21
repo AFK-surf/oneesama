@@ -68,6 +68,10 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
     (($run.actions // []) | length);
   def is_no_action($run):
     (($run.mutations // 0) == 0 and actions_count($run) == 0);
+  def retry_scheduled_failure($run):
+    (($run.metadata.triage_timeout_needs_retry // false)
+      or ($run.metadata.triage_empty_final_needs_retry // false)
+      or ($run.metadata.persona_foreground_orphan_needs_retry // false));
   def brief($run):
     {
       id: $run.id,
@@ -97,11 +101,14 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         noAction: ($runs | map(select(is_no_action(.))) | length)
       },
       red: {
-        failures: ($runs | map(select(.status != "ok") | brief(.))),
+        failures: ($runs | map(select(.status != "ok" and (retry_scheduled_failure(.) | not)) | brief(.))),
         invalidPersonaJSON: ($runs | map(select(((.summary // "") + " " + (.error // "")) | test("not valid persona JSON|invalid persona JSON"; "i")) | brief(.))),
         placeholderSummaries: ($runs | map(select((.summary // "") | test("short reason for the shadow decision|placeholder|TODO"; "i")) | brief(.)))
       },
       info: {
+        retryScheduledFailures: (
+          $runs | map(select(.status != "ok" and retry_scheduled_failure(.)) | brief(.))
+        ),
         handledByOtherNoAction: (
           $runs
           | map(
@@ -201,7 +208,7 @@ jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
   "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length)",
-  "info: handled_by_other_no_action=\(.info.handledByOtherNoAction | length)"
+  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length)"
 ' <"${tmpdir}/quality.json"
 
 if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
