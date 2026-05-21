@@ -75,43 +75,43 @@ type SlackDailyReport struct {
 }
 
 type SlackDailyTriageMetrics struct {
-	Source                string         `json:"source"`
-	Available             bool           `json:"available"`
-	Error                 string         `json:"error,omitempty"`
-	Runs                  int            `json:"runs"`
-	FailedRuns            int            `json:"failed_runs"`
-	MutatingRuns          int            `json:"mutating_runs"`
-	Mutations             int            `json:"mutations"`
-	ReplyRuns             int            `json:"reply_runs"`
-	ReactionRuns          int            `json:"reaction_runs"`
-	ReactionMutations     int            `json:"reaction_mutations"`
-	CustomEmojiRuns       int            `json:"custom_emoji_runs"`
-	CustomEmojiUses       int            `json:"custom_emoji_uses"`
-	NoActionRuns          int            `json:"no_action_runs"`
-	ParseFallbacks        int            `json:"parse_fallbacks"`
-	PlaceholderSummaries  int            `json:"placeholder_summaries"`
-	InvalidPersonaJSON    int            `json:"invalid_persona_json"`
-	HighContextNoAction   int            `json:"high_context_no_action"`
-	LinkContextRuns       int            `json:"link_context_runs"`
-	LinkContextNoAction   int            `json:"link_context_no_action"`
-	LinkReplies           int            `json:"link_replies"`
-	LowConfidenceNoAction     int            `json:"low_confidence_no_action"`
-	IntentActionMismatch      int            `json:"intent_action_mismatch"`
-	DelegateNoVisibleAction   int            `json:"delegate_no_visible_action"`
-	HandledByOtherNoAction    int            `json:"handled_by_other_no_action"`
-	ToolCalls             int            `json:"tool_calls"`
-	MemoryLookups         int            `json:"memory_lookups"`
-	ExternalSearches      int            `json:"external_searches"`
-	ThreadFetches         int            `json:"thread_fetches"`
-	PersonaRuns           int            `json:"persona_runs,omitempty"`
-	PersonaFailures       int            `json:"persona_failures,omitempty"`
-	DelegateWorkerJobs    int            `json:"delegate_worker_jobs,omitempty"`
-	TopEmoji              map[string]int `json:"top_emoji,omitempty"`
-	TopCustomEmoji        map[string]int `json:"top_custom_emoji,omitempty"`
-	ReplySamples          []string       `json:"reply_samples,omitempty"`
-	ReactionSamples       []string       `json:"reaction_samples,omitempty"`
-	SkippedSamples        []string       `json:"skipped_samples,omitempty"`
-	FailedSamples         []string       `json:"failed_samples,omitempty"`
+	Source                  string         `json:"source"`
+	Available               bool           `json:"available"`
+	Error                   string         `json:"error,omitempty"`
+	Runs                    int            `json:"runs"`
+	FailedRuns              int            `json:"failed_runs"`
+	MutatingRuns            int            `json:"mutating_runs"`
+	Mutations               int            `json:"mutations"`
+	ReplyRuns               int            `json:"reply_runs"`
+	ReactionRuns            int            `json:"reaction_runs"`
+	ReactionMutations       int            `json:"reaction_mutations"`
+	CustomEmojiRuns         int            `json:"custom_emoji_runs"`
+	CustomEmojiUses         int            `json:"custom_emoji_uses"`
+	NoActionRuns            int            `json:"no_action_runs"`
+	ParseFallbacks          int            `json:"parse_fallbacks"`
+	PlaceholderSummaries    int            `json:"placeholder_summaries"`
+	InvalidPersonaJSON      int            `json:"invalid_persona_json"`
+	HighContextNoAction     int            `json:"high_context_no_action"`
+	LinkContextRuns         int            `json:"link_context_runs"`
+	LinkContextNoAction     int            `json:"link_context_no_action"`
+	LinkReplies             int            `json:"link_replies"`
+	LowConfidenceNoAction   int            `json:"low_confidence_no_action"`
+	IntentActionMismatch    int            `json:"intent_action_mismatch"`
+	DelegateNoVisibleAction int            `json:"delegate_no_visible_action"`
+	HandledByOtherNoAction  int            `json:"handled_by_other_no_action"`
+	ToolCalls               int            `json:"tool_calls"`
+	MemoryLookups           int            `json:"memory_lookups"`
+	ExternalSearches        int            `json:"external_searches"`
+	ThreadFetches           int            `json:"thread_fetches"`
+	PersonaRuns             int            `json:"persona_runs,omitempty"`
+	PersonaFailures         int            `json:"persona_failures,omitempty"`
+	DelegateWorkerJobs      int            `json:"delegate_worker_jobs,omitempty"`
+	TopEmoji                map[string]int `json:"top_emoji,omitempty"`
+	TopCustomEmoji          map[string]int `json:"top_custom_emoji,omitempty"`
+	ReplySamples            []string       `json:"reply_samples,omitempty"`
+	ReactionSamples         []string       `json:"reaction_samples,omitempty"`
+	SkippedSamples          []string       `json:"skipped_samples,omitempty"`
+	FailedSamples           []string       `json:"failed_samples,omitempty"`
 }
 
 type SlackDailyTriageComparison struct {
@@ -538,10 +538,14 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		// / link-context / low-confidence / intent-mismatch buckets so review
 		// queues stay focused on real "something might be wrong" candidates.
 		handledByOther := len(run.Actions) == 0 && run.Mutations == 0 && triageQualityRunIsHandledByOther(run.Summary) != ""
+		delegateStartedPending := false
+		if evidence, ok := triageQualityRunDelegateNoVisibleAction(run); ok && !triageQualityDelegateNeedsOperatorReview(evidence) {
+			delegateStartedPending = true
+		}
 		if handledByOther {
 			metrics.HandledByOtherNoAction++
 		}
-		if !handledByOther {
+		if !handledByOther && !delegateStartedPending {
 			if inputChars >= triageQualityHighContextInputCharsThreshold && len(run.Actions) == 0 && run.Mutations == 0 {
 				metrics.HighContextNoAction++
 			}
@@ -555,7 +559,7 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 				// Bucket precedence matches buildSlackTriageReviewBuckets:
 				// delegate_no_visible_action takes priority over the
 				// summary-narrative intent_action_mismatch bucket.
-				if _, ok := triageQualityRunDelegateNoVisibleAction(run); ok {
+				if evidence, ok := triageQualityRunDelegateNoVisibleAction(run); ok && triageQualityDelegateNeedsOperatorReview(evidence) {
 					metrics.DelegateNoVisibleAction++
 				} else if triageQualityIntentActionMismatchMatch(run.Summary) != "" {
 					metrics.IntentActionMismatch++

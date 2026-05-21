@@ -168,6 +168,9 @@ func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) S
 		// triage_quality_buckets.go classifier. Task #285 follow-up
 		// (driver 2h sweep 2026-05-21 15:00 review proposal).
 		if evidence, ok := triageQualityRunDelegateNoVisibleAction(run); ok {
+			if !triageQualityDelegateNeedsOperatorReview(evidence) {
+				continue
+			}
 			out.DelegateNoVisibleActionCount++
 			if sampleLimit > 0 && len(out.DelegateNoVisibleActionSamples) < sampleLimit {
 				out.DelegateNoVisibleActionSamples = append(out.DelegateNoVisibleActionSamples, SlackTriageDelegateNoVisibleActionSample{

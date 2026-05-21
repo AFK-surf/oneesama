@@ -159,14 +159,12 @@ func TestTriageQualityRunDelegateNoVisibleActionMatch(t *testing.T) {
 }
 
 // TestBuildSlackTriageReviewBucketsBucketPrecedence pins the dispatch
-// order: a no-action run that matches BOTH the delegate-no-visible-action
-// conditions AND the narrative intent_action_mismatch markers must land
-// ONLY in the delegate bucket. This is the explicit driver instruction
-// from the 2026-05-21 15:02 review thread message c00f5be0:
-// "别把 persona_foreground.decision=delegate_worker 且 worker_requests
-// 存在的样本继续归到 narrative mismatch".
+// order: no-action delegate_worker runs never fall through to the narrative
+// intent_action_mismatch bucket. If the worker visibly started, the sample is
+// no longer review-tier; if the worker did not start / has no visible job id,
+// it remains in delegate_no_visible_action for operator review.
 func TestBuildSlackTriageReviewBucketsBucketPrecedence(t *testing.T) {
-	delegateRun := SlackTriageContext{
+	delegateStartedRun := SlackTriageContext{
 		ID:        1,
 		Timestamp: "2026-05-21T07:00:00Z",
 		Channels:  []string{"C_A"},
@@ -180,6 +178,20 @@ func TestBuildSlackTriageReviewBucketsBucketPrecedence(t *testing.T) {
 		},
 		ToolCalls: []SlackTriageToolCall{{Tool: "agent_runner", Action: "delegate_worker", Args: `{"jobId":"job_dual"}`}},
 	}
+	delegateNotStartedRun := SlackTriageContext{
+		ID:        3,
+		Timestamp: "2026-05-21T07:02:00Z",
+		Channels:  []string{"C_C"},
+		Summary:   "I should delegate this to codex and reply later",
+		Metadata: map[string]any{
+			"persona_foreground": map[string]any{
+				"decision":        "delegate_worker",
+				"worker_requests": []any{"codex: do thing"},
+			},
+			"delegate_worker_jobs_started": 0,
+		},
+		ToolCalls: []SlackTriageToolCall{{Tool: "agent_runner", Action: "delegate_worker", Args: `{"jobId":"job_missing"}`}},
+	}
 	pureMismatchRun := SlackTriageContext{
 		ID:        2,
 		Timestamp: "2026-05-21T07:01:00Z",
@@ -187,18 +199,18 @@ func TestBuildSlackTriageReviewBucketsBucketPrecedence(t *testing.T) {
 		Summary:   "Should delegate to codex but did nothing",
 		Metadata:  map[string]any{},
 	}
-	buckets := buildSlackTriageReviewBuckets([]SlackTriageContext{delegateRun, pureMismatchRun}, 8)
+	buckets := buildSlackTriageReviewBuckets([]SlackTriageContext{delegateStartedRun, delegateNotStartedRun, pureMismatchRun}, 8)
 	if buckets.DelegateNoVisibleActionCount != 1 {
 		t.Fatalf("DelegateNoVisibleActionCount = %d, want 1", buckets.DelegateNoVisibleActionCount)
 	}
 	if buckets.IntentActionMismatchCount != 1 {
 		t.Fatalf("IntentActionMismatchCount = %d, want 1 (only pureMismatchRun)", buckets.IntentActionMismatchCount)
 	}
-	if len(buckets.DelegateNoVisibleActionSamples) != 1 || buckets.DelegateNoVisibleActionSamples[0].RunID != 1 {
-		t.Fatalf("DelegateNoVisibleActionSamples = %#v, want one row for run 1", buckets.DelegateNoVisibleActionSamples)
+	if len(buckets.DelegateNoVisibleActionSamples) != 1 || buckets.DelegateNoVisibleActionSamples[0].RunID != 3 {
+		t.Fatalf("DelegateNoVisibleActionSamples = %#v, want one row for run 3", buckets.DelegateNoVisibleActionSamples)
 	}
-	if buckets.DelegateNoVisibleActionSamples[0].JobID != "job_dual" {
-		t.Fatalf("delegate sample JobID = %q, want job_dual", buckets.DelegateNoVisibleActionSamples[0].JobID)
+	if buckets.DelegateNoVisibleActionSamples[0].JobID != "job_missing" {
+		t.Fatalf("delegate sample JobID = %q, want job_missing", buckets.DelegateNoVisibleActionSamples[0].JobID)
 	}
 	if len(buckets.IntentActionMismatchSamples) != 1 || buckets.IntentActionMismatchSamples[0].RunID != 2 {
 		t.Fatalf("IntentActionMismatchSamples = %#v, want one row for run 2", buckets.IntentActionMismatchSamples)
@@ -278,6 +290,12 @@ func TestTriageQualityRunIsHandledByOtherMatch(t *testing.T) {
 		},
 		// Edge cases / additional EN+ZH coverage.
 		{"en_actively_handled", "Being actively handled by Claude.", "actively handled", false},
+		{"en_already_being_handled", "Already being handled by U0ALY77RMJL and U0AMN6TKVJ8 in the thread.", "already being handled", false},
+		{"en_being_handled_by", "The deployment question is being handled by codex-3720.", "being handled by", false},
+		{"en_already_handles", "codex-3720 consistently acknowledges and already handles these deploy commands.", "already handles", false},
+		{"en_already_active", "U0ALY77RMJL is already active and has opened a session to handle it.", "already active", false},
+		{"zh_already_investigated", "codex-3720 已经查了 CI 失败原因并给出后续步骤。", "已经查了", false},
+		{"zh_fully_analyzed", "问题已经被充分分析和处理了，不需要我额外介入。", "已经被充分分析", false},
 		{"zh_already_processed", "已经处理掉了，跳过", "已经处理", false},
 		{"zh_being_handled_now", "正在处理这个 PR", "正在处理", false},
 		// "already" alone WITHOUT a compound — should NOT match (compound discipline).
@@ -331,10 +349,22 @@ func TestTriageQualityIntentActionMismatchMatch(t *testing.T) {
 			wantHit:  "",
 			wantNone: true,
 		},
-		// English compound markers still hit (no negation guard for EN side
-		// today since the model's English narration has been less prone to
-		// confusing historical phrasing). Add EN negation guard if a
-		// false-positive samples surfaces there.
+		// Driver 2026-05-21 17:00 false-positive: English summaries can also
+		// describe negated routing ("should not be delegated"). These must not
+		// trip the narrative mismatch bucket.
+		{
+			name:     "negated_en_should_not_delegate",
+			summary:  "This falls under delegation_scope_policy and should not be delegated. Reply would be intrusive; stay silent.",
+			wantHit:  "",
+			wantNone: true,
+		},
+		{
+			name:     "negated_en_no_further_action",
+			summary:  "Already handled by another agent; no further action is needed.",
+			wantHit:  "",
+			wantNone: true,
+		},
+		// English compound markers still hit when no negation is present.
 		{"en_delegate_marker", "Will delegate this to codex worker", "delegate", false},
 		{"en_will_reply_marker", "Will reply with citation", "will reply", false},
 		{"en_should_delegate_matches_first_marker", "should delegate to codex", "delegate", false},

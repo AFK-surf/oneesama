@@ -91,6 +91,18 @@ var triageQualityIntentActionMismatchMarkers = []string{
 // treat the whole summary as descriptive when any of these negation /
 // historical markers appear.
 var triageQualityIntentActionMismatchNegations = []string{
+	"no need",
+	"no further action",
+	"not needed",
+	"not be delegated",
+	"not delegated",
+	"should not",
+	"do not",
+	"does not",
+	"not to",
+	"stay silent",
+	"would be intrusive",
+	"would be noise",
 	"无需",
 	"不需",
 	"无须",
@@ -200,6 +212,15 @@ func triageQualityExtractDelegateJobID(calls []SlackTriageToolCall) string {
 	return ""
 }
 
+func triageQualityDelegateNeedsOperatorReview(evidence triageQualityDelegateNoVisibleAction) bool {
+	switch strings.TrimSpace(evidence.DeliveryStatus) {
+	case "delegate_started_pending_worker_audit":
+		return false
+	default:
+		return true
+	}
+}
+
 func triageQualityExtractDelegateJobIDFromArgs(args string) string {
 	args = strings.TrimSpace(args)
 	if args == "" {
@@ -297,6 +318,9 @@ var triageQualityHandledByOtherMarkers = []string{
 	"already addressed",
 	"already implemented",
 	"already handled",
+	"already handles",
+	"already on it",
+	"already active",
 	"already started reviewing",
 	"already joined",
 	"already executed",
@@ -304,12 +328,20 @@ var triageQualityHandledByOtherMarkers = []string{
 	"already resolved",
 	"already confirmed",
 	"actively handled",
+	"already being handled",
 	"being actively handled",
+	"being handled by",
 	"was already handled",
 	"is being handled",
 	"is already being handled",
+	"has opened a session",
+	"has already opened",
+	"has already responded",
 	// Chinese compound phrases. Same compound discipline as the
 	// intent-action markers — avoid bare `已被` / `已经`.
+	"已经查了",
+	"已经由",
+	"已经被充分分析",
 	"已被回复",
 	"已被处理",
 	"已被解决",

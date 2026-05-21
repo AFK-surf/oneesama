@@ -42,18 +42,18 @@ low_confidence_ceiling="$(jq -r '.audit.qualityThresholds.lowConfidenceCeiling /
 # audit.qualityThresholds.intentActionMismatchSummaryMarkers; servers older
 # than the #285 follow-up will not have it, so we fall back to a compact
 # in-script list mirroring the same EN+ZH set.
-intent_action_markers="$(jq -c '.audit.qualityThresholds.intentActionMismatchSummaryMarkers // ["delegate","will reply","will react","will post","should reply","should react","should delegate","should post","plan to","going to","应该回复","应该委托","应该反应","应该跟进","需要回复","需要委托","需要跟进","建议回复","建议委托","打算回复","打算委托","会回复","会委托","要回复","要委托","应当回复","应当委托"]' <"${tmpdir}/audit.json")"
+intent_action_markers="$(jq -c '((.audit.qualityThresholds.intentActionMismatchSummaryMarkers // []) + ["delegate","will reply","will react","will post","should reply","should react","should delegate","should post","plan to","going to","应该回复","应该委托","应该反应","应该跟进","需要回复","需要委托","需要跟进","建议回复","建议委托","打算回复","打算委托","会回复","会委托","要回复","要委托","应当回复","应当委托"]) | unique' <"${tmpdir}/audit.json")"
 # Same negation/historical markers triageQualityIntentActionMismatchMatch
 # uses in Go; presence of any anywhere in the summary suppresses the bucket
 # so "已被 X 回复" / "没有需要回复" do not false-positive trip a match.
-intent_action_negations='["无需","不需","无须","没有","已被","已由","已经","已回复","已反应","不再","不必"]'
+intent_action_negations='["no need","no further action","not needed","not be delegated","not delegated","should not","do not","does not","not to","stay silent","would be intrusive","would be noise","无需","不需","无须","没有","已被","已由","已经","已回复","已反应","不再","不必"]'
 # Task #285 follow-up #3: handled-by-other markers demote no-action runs from
 # review (operator-attention needed) to info (record-keeping only). Canonical
 # list lives in internal/slackagent/triage_quality_buckets.go via
 # triageQualityHandledByOtherMarkers; the audit endpoint exposes it via
 # audit.qualityThresholds.handledByOtherSummaryMarkers. Inline fallback for
 # pre-follow-up servers mirrors the same EN+ZH compound set.
-handled_by_other_markers="$(jq -c '.audit.qualityThresholds.handledByOtherSummaryMarkers // ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already handled","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","being actively handled","was already handled","is being handled","is already being handled","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]' <"${tmpdir}/audit.json")"
+handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryMarkers // []) + ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already handled","already handles","already on it","already active","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","already being handled","being actively handled","being handled by","was already handled","is being handled","is already being handled","has opened a session","has already opened","has already responded","已经查了","已经由","已经被充分分析","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]) | unique' <"${tmpdir}/audit.json")"
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
@@ -102,6 +102,9 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
       elif (($run.metadata.delegate_worker_jobs_started // 0) == 0) then "delegate_not_started_in_run"
       else "delegate_started_pending_worker_audit"
       end;
+  def is_delegate_started_pending_worker_audit($run):
+    is_delegate_no_visible_action($run)
+    and (delegate_delivery_status($run) == "delegate_started_pending_worker_audit");
   def brief($run):
     {
       id: $run.id,
@@ -153,6 +156,17 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
               )
               | brief(.)
             )
+        ),
+        delegateStartedPendingWorkerAudit: (
+          $runs
+          | map(
+              select(is_delegate_started_pending_worker_audit(.))
+              | brief(.) + {
+                  workerRequests: ((meta(.; "persona_foreground").worker_requests // []) | map(. | tostring | .[0:200])),
+                  jobId: delegate_job_id(.),
+                  deliveryStatus: delegate_delivery_status(.)
+                }
+            )
         )
       },
       review: {
@@ -169,6 +183,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           $runs
           | map(
               select(is_delegate_no_visible_action(.))
+              | select(delegate_delivery_status(.) != "delegate_started_pending_worker_audit")
               | brief(.) + {
                   workerRequests: ((meta(.; "persona_foreground").worker_requests // []) | map(. | tostring | .[0:200])),
                   jobId: delegate_job_id(.),
@@ -181,6 +196,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
             select(
               is_no_action(.)
               and input_chars(.) >= $high_context
+              and (is_delegate_started_pending_worker_audit(.) | not)
               and (
                 ((($handled // []) | length) == 0)
                 or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
@@ -193,6 +209,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
             select(
               is_no_action(.)
               and external_links(.) > 0
+              and (is_delegate_started_pending_worker_audit(.) | not)
               and (
                 ((($handled // []) | length) == 0)
                 or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
@@ -205,6 +222,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
             select(
               is_no_action(.)
               and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)
+              and (is_delegate_started_pending_worker_audit(.) | not)
               and (
                 ((($handled // []) | length) == 0)
                 or ((.summary // "" | ascii_downcase) as $haystack | ($handled // []) as $needles | (any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle)) | not))
@@ -227,6 +245,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
                 # bucket precedence: a real delegate_worker call belongs
                 # in delegateNoVisibleAction, not narrative mismatch.
                 and (is_delegate_no_visible_action(.) | not)
+                and (is_delegate_started_pending_worker_audit(.) | not)
                 and ((($markers // []) | length) > 0)
                 and (
                   (.summary // "") as $raw
@@ -258,7 +277,7 @@ jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
   "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length) delegate_no_visible_action=\(.review.delegateNoVisibleAction | length)",
-  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length)"
+  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length) delegate_started_pending_worker_audit=\(.info.delegateStartedPendingWorkerAudit | length)"
 ' <"${tmpdir}/quality.json"
 
 if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length) + (.review.delegateNoVisibleAction | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
