@@ -75,8 +75,18 @@ func TestBuildSlackTriagePersonaRequestIncludesWorkspaceCustomEmoji(t *testing.T
 	if !req.Safety.AllowReactions {
 		t.Fatalf("AllowReactions = false, want true")
 	}
-	if got := personaContextText(req.Context, "workspace_custom_emoji"); !strings.Contains(got, "ok_bridge") || !strings.Contains(got, "eyes_bridge") {
-		t.Fatalf("workspace_custom_emoji context = %q, want custom names", got)
+	if got := personaContextText(req.Context, "workspace_custom_emoji"); got != "" {
+		t.Fatalf("workspace_custom_emoji stable context = %q, want dynamic envelope only", got)
+	}
+	env, ok := personaDynamicContextEnvelope(req.DynamicContext, "workspace_custom_emoji")
+	if !ok {
+		t.Fatalf("dynamic context = %#v, want custom emoji envelope", req.DynamicContext)
+	}
+	if !strings.Contains(env.Content, "ok_bridge") || !strings.Contains(env.Content, "eyes_bridge") {
+		t.Fatalf("workspace_custom_emoji dynamic context = %q, want custom names", env.Content)
+	}
+	if env.Source != slackDynamicContextSourceCustomEmoji || !strings.HasPrefix(env.Version, "sha256:") || env.Metadata["emoji_count"] != 2 {
+		t.Fatalf("workspace_custom_emoji envelope = %#v, want source/version/count", env)
 	}
 }
 

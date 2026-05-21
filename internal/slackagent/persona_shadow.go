@@ -884,6 +884,7 @@ func BuildSlackTriagePersonaRequestFromInput(input SlackTriagePersonaRequestInpu
 	}
 	citations := personaCitationsFromRelatedMemory(relatedMemory)
 	contextItems := make([]persona.ContextItem, 0, 8)
+	dynamicContext := buildSlackTriagePersonaDynamicContext(options)
 	if options.PiFirst {
 		if digest := strings.TrimSpace(options.Digest); digest != "" {
 			contextItems = append(contextItems, persona.ContextItem{Kind: "triage_digest", Text: truncateSlackContextText(digest, slackTriageDigestBudgetChars)})
@@ -915,25 +916,6 @@ func BuildSlackTriagePersonaRequestFromInput(input SlackTriagePersonaRequestInpu
 			})
 		}
 	}
-	if workspacePolicy := strings.TrimSpace(options.WorkspaceTriagePolicy); workspacePolicy != "" {
-		status := normalizeSlackWorkspacePolicyStatus(workspacePolicy, options.WorkspacePolicyStatus)
-		contextItems = append(contextItems, persona.ContextItem{
-			Kind: "workspace_triage_policy",
-			Text: workspacePolicy,
-		})
-		if metadata := slackWorkspacePolicyMetadataText(status); metadata != "" {
-			contextItems = append(contextItems, persona.ContextItem{
-				Kind: "workspace_triage_policy_metadata",
-				Text: metadata,
-			})
-		}
-	}
-	if customEmoji := formatWorkspaceCustomEmojiPrompt(options.CustomEmoji); customEmoji != "" {
-		contextItems = append(contextItems, persona.ContextItem{
-			Kind: "workspace_custom_emoji",
-			Text: customEmoji,
-		})
-	}
 	contextItems = append(contextItems, persona.ContextItem{
 		Kind: "delegation_scope_policy",
 		Text: "Oneesama is a workspace secretary, not the default code investigator for every project. delegate_worker is allowed for bounded secretary work (workspace Memory lookup/synthesis, file/thread retrieval, Canvas/memo preparation), Oneesama's own runtime/code, or explicit human-authorized code work. For external staging/prod/deploy/infra/database/API latency/CI/performance/debug/code investigations, reply with routing/owner handoff or stay_silent instead of delegating.",
@@ -963,7 +945,8 @@ func BuildSlackTriagePersonaRequestFromInput(input SlackTriagePersonaRequestInpu
 			ChannelID: strings.TrimSpace(channelID),
 			ThreadTS:  strings.TrimSpace(threadTS),
 		},
-		Context: contextItems,
+		Context:        contextItems,
+		DynamicContext: dynamicContext,
 		Evidence: persona.EvidenceBundle{
 			Summary:   strings.TrimSpace(firstNonEmpty(decision.Summary, options.Digest)),
 			Citations: citations,
@@ -982,6 +965,83 @@ func BuildSlackTriagePersonaRequestFromInput(input SlackTriagePersonaRequestInpu
 		},
 		Metadata: metadata,
 	}
+}
+
+const (
+	slackDynamicContextSourceRuntime     = "oneesama_runtime"
+	slackDynamicContextSourceCustomEmoji = "slack.emoji.list"
+)
+
+func buildSlackTriagePersonaDynamicContext(options SlackTriagePersonaRequestOptions) []persona.DynamicContextEnvelope {
+	now := nowRFC3339()
+	items := make([]persona.DynamicContextEnvelope, 0, 3)
+	items = append(items, persona.NormalizeDynamicContextEnvelope(persona.DynamicContextEnvelope{
+		Kind:        "current_time",
+		Source:      slackDynamicContextSourceRuntime,
+		Version:     "runtime_clock",
+		Freshness:   now,
+		Confidence:  1,
+		Content:     now,
+		CachePolicy: persona.DynamicContextCachePolicyNotStablePrefix,
+		Metadata: map[string]any{
+			"format":   time.RFC3339Nano,
+			"timezone": "UTC",
+		},
+	}))
+	if workspacePolicy := strings.TrimSpace(options.WorkspaceTriagePolicy); workspacePolicy != "" {
+		status := normalizeSlackWorkspacePolicyStatus(workspacePolicy, options.WorkspacePolicyStatus)
+		source := firstNonEmpty(status.Source, slackWorkspacePolicySourceConfig)
+		items = append(items, persona.NormalizeDynamicContextEnvelope(persona.DynamicContextEnvelope{
+			Kind:        "workspace_triage_policy",
+			Source:      source,
+			Version:     status.Version,
+			Freshness:   now,
+			Confidence:  1,
+			Content:     workspacePolicy,
+			CachePolicy: persona.DynamicContextCachePolicyNotStablePrefix,
+			Metadata:    slackWorkspacePolicyMetadataMap(status),
+		}))
+	}
+	if customEmoji, metadata := slackCustomEmojiDynamicContextPayload(options.CustomEmoji); customEmoji != "" {
+		version := shortSHA256Hex(customEmoji)
+		items = append(items, persona.NormalizeDynamicContextEnvelope(persona.DynamicContextEnvelope{
+			Kind:        "workspace_custom_emoji",
+			Source:      slackDynamicContextSourceCustomEmoji,
+			Version:     "sha256:" + version,
+			Freshness:   now,
+			Confidence:  1,
+			Content:     customEmoji,
+			CachePolicy: persona.DynamicContextCachePolicyNotStablePrefix,
+			Metadata:    metadata,
+		}))
+	}
+	return persona.NormalizeDynamicContextEnvelopes(items)
+}
+
+func slackCustomEmojiDynamicContextPayload(names []string) (string, map[string]any) {
+	normalized := normalizeWorkspaceCustomEmojiNames(names)
+	if len(normalized) == 0 {
+		return "", nil
+	}
+	total := len(normalized)
+	truncated := false
+	if len(normalized) > slackCustomEmojiPromptLimit {
+		normalized = normalized[:slackCustomEmojiPromptLimit]
+		truncated = true
+	}
+	content := "## Workspace custom emoji\n" + strings.Join(normalized, ", ")
+	return content, map[string]any{
+		"emoji_count":      len(normalized),
+		"emoji_total":      total,
+		"emoji_limit":      slackCustomEmojiPromptLimit,
+		"emoji_truncated":  truncated,
+		"emoji_source_api": "emoji.list",
+	}
+}
+
+func shortSHA256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 func formatSlackTriagePersonaCandidateActions(actions []SlackTriageDecisionAction) string {

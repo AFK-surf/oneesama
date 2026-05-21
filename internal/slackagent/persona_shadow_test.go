@@ -253,8 +253,11 @@ func TestQueueSlackTriagePersonaShadowDoesNotBlockAndRecordsLater(t *testing.T) 
 		if req.Event.Kind != "slack_triage" || req.Anchor.ChannelID != "C_TRIAGE" {
 			t.Fatalf("persona request = %#v, want triage request for C_TRIAGE", req)
 		}
-		if got := personaContextText(req.Context, "workspace_triage_policy"); !strings.Contains(got, "product articles") {
-			t.Fatalf("workspace policy context = %q, want configured policy", got)
+		if got := personaContextText(req.Context, "workspace_triage_policy"); got != "" {
+			t.Fatalf("workspace policy stable context = %q, want dynamic envelope only", got)
+		}
+		if got := personaDynamicContextText(req.DynamicContext, "workspace_triage_policy"); !strings.Contains(got, "product articles") {
+			t.Fatalf("workspace policy dynamic context = %q, want configured policy", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("persona runtime was not called")
@@ -779,19 +782,20 @@ func TestSlackTriagePiFirstLiveSkipsPrePiRunnerAndPostsPersonaReply(t *testing.T
 	if len(runtime.requests) != 1 || runtime.requests[0].Mode != persona.ModeLive {
 		t.Fatalf("persona requests = %#v, want one live request", runtime.requests)
 	}
-	var sawPolicy, sawDigest, sawCandidate bool
+	var sawDigest, sawCandidate bool
 	for _, item := range runtime.requests[0].Context {
 		switch item.Kind {
-		case "workspace_triage_policy":
-			sawPolicy = strings.Contains(item.Text, "product-adjacent")
 		case "triage_digest":
 			sawDigest = strings.Contains(item.Text, "产品评论文章")
 		case "triage_candidate_actions":
 			sawCandidate = true
 		}
 	}
-	if !sawPolicy || !sawDigest || sawCandidate {
-		t.Fatalf("persona context = %#v, want policy+digest and no Codex candidate actions", runtime.requests[0].Context)
+	if policy := personaDynamicContextText(runtime.requests[0].DynamicContext, "workspace_triage_policy"); !strings.Contains(policy, "product-adjacent") {
+		t.Fatalf("persona dynamic context = %#v, want workspace policy envelope", runtime.requests[0].DynamicContext)
+	}
+	if !sawDigest || sawCandidate {
+		t.Fatalf("persona context = %#v, want digest and no Codex candidate actions", runtime.requests[0].Context)
 	}
 }
 
@@ -1378,6 +1382,9 @@ func TestBuildSlackTriagePersonaRequestIncludesWorkspacePolicyOnlyWhenConfigured
 	if got := personaContextText(base.Context, "workspace_triage_policy_metadata"); got != "" {
 		t.Fatalf("workspace policy metadata context = %q, want absent by default", got)
 	}
+	if got := personaDynamicContextText(base.DynamicContext, "workspace_triage_policy"); got != "" {
+		t.Fatalf("workspace policy dynamic context = %q, want absent by default", got)
+	}
 
 	withPolicy := BuildSlackTriagePersonaRequestWithOptions(
 		"C_TRIAGE",
@@ -1389,19 +1396,24 @@ func TestBuildSlackTriagePersonaRequestIncludesWorkspacePolicyOnlyWhenConfigured
 			WorkspaceTriagePolicy: "Reply to source-backed product-adjacent articles in this workspace.",
 		},
 	)
-	if got := personaContextText(withPolicy.Context, "workspace_triage_policy"); !strings.Contains(got, "product-adjacent articles") {
-		t.Fatalf("workspace policy context = %q, want configured policy", got)
+	if got := personaContextText(withPolicy.Context, "workspace_triage_policy"); got != "" {
+		t.Fatalf("workspace policy stable context = %q, want dynamic envelope only", got)
 	}
-	metadata := personaContextText(withPolicy.Context, "workspace_triage_policy_metadata")
-	for _, want := range []string{
-		"source=config.slack.triage.workspace_policy",
-		"version=sha256:",
-		"hash=",
-		"length_chars=",
-	} {
-		if !strings.Contains(metadata, want) {
-			t.Fatalf("workspace policy metadata = %q, want %q", metadata, want)
-		}
+	if got := personaContextText(withPolicy.Context, "workspace_triage_policy_metadata"); got != "" {
+		t.Fatalf("workspace policy metadata stable context = %q, want metadata on dynamic envelope", got)
+	}
+	env, ok := personaDynamicContextEnvelope(withPolicy.DynamicContext, "workspace_triage_policy")
+	if !ok {
+		t.Fatalf("dynamic context = %#v, want workspace policy envelope", withPolicy.DynamicContext)
+	}
+	if !strings.Contains(env.Content, "product-adjacent articles") {
+		t.Fatalf("workspace policy dynamic content = %q, want configured policy", env.Content)
+	}
+	if env.Source != slackWorkspacePolicySourceConfig || !strings.HasPrefix(env.Version, "sha256:") || env.CachePolicy != persona.DynamicContextCachePolicyNotStablePrefix {
+		t.Fatalf("workspace policy envelope = %#v, want source/version/cache policy", env)
+	}
+	if env.Metadata["workspace_policy_source"] != slackWorkspacePolicySourceConfig || env.Metadata["workspace_policy_hash"] == "" || env.Metadata["workspace_policy_length_chars"] == 0 {
+		t.Fatalf("workspace policy metadata = %#v, want source/hash/length", env.Metadata)
 	}
 }
 
@@ -1412,4 +1424,20 @@ func personaContextText(items []persona.ContextItem, kind string) string {
 		}
 	}
 	return ""
+}
+
+func personaDynamicContextText(items []persona.DynamicContextEnvelope, kind string) string {
+	if env, ok := personaDynamicContextEnvelope(items, kind); ok {
+		return env.Content
+	}
+	return ""
+}
+
+func personaDynamicContextEnvelope(items []persona.DynamicContextEnvelope, kind string) (persona.DynamicContextEnvelope, bool) {
+	for _, item := range items {
+		if item.Kind == kind {
+			return item, true
+		}
+	}
+	return persona.DynamicContextEnvelope{}, false
 }

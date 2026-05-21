@@ -35,8 +35,14 @@ func TestBuildSlackTriagePersonaForegroundRequestSetsLiveBoundary(t *testing.T) 
 	if got := personaContextText(req.Context, "delegation_scope_policy"); !strings.Contains(got, "workspace secretary") {
 		t.Fatalf("delegation_scope_policy = %q, want secretary boundary", got)
 	}
-	if got := personaContextText(req.Context, "workspace_custom_emoji"); !strings.Contains(got, "eyes_bridge") {
-		t.Fatalf("workspace_custom_emoji = %q, want custom emoji", got)
+	if got := personaContextText(req.Context, "workspace_custom_emoji"); got != "" {
+		t.Fatalf("workspace_custom_emoji stable context = %q, want dynamic envelope only", got)
+	}
+	if got := personaDynamicContextText(req.DynamicContext, "workspace_custom_emoji"); !strings.Contains(got, "eyes_bridge") {
+		t.Fatalf("workspace_custom_emoji dynamic context = %q, want custom emoji", got)
+	}
+	if got := personaDynamicContextText(req.DynamicContext, "current_time"); got == "" {
+		t.Fatal("current_time dynamic context empty, want runtime freshness envelope")
 	}
 }
 
@@ -81,18 +87,30 @@ func TestBuildSlackTriagePiFirstForegroundRequestCarriesRichContext(t *testing.T
 		t.Fatalf("triage_candidate_actions = %q, want absent for pi-first request", got)
 	}
 	for kind, want := range map[string]string{
-		"triage_digest":                    "product link digest",
-		"slack_thread_context":             "thread context clue",
-		"slack_channel_context":            "channel context clue",
-		"external_link_context":            "source excerpt beyond headline",
-		"previous_triage_context":          "previous triage clue",
-		"workspace_triage_policy":          "product-adjacent articles",
-		"workspace_triage_policy_metadata": "source=config.slack.triage.workspace_policy",
-		"workspace_custom_emoji":           "ok_bridge",
+		"triage_digest":           "product link digest",
+		"slack_thread_context":    "thread context clue",
+		"slack_channel_context":   "channel context clue",
+		"external_link_context":   "source excerpt beyond headline",
+		"previous_triage_context": "previous triage clue",
 	} {
 		if got := personaContextText(req.Context, kind); !strings.Contains(got, want) {
 			t.Fatalf("%s context = %q, want %q", kind, got, want)
 		}
+	}
+	for kind, want := range map[string]string{
+		"workspace_triage_policy": "product-adjacent articles",
+		"workspace_custom_emoji":  "ok_bridge",
+		"current_time":            "T",
+	} {
+		if got := personaDynamicContextText(req.DynamicContext, kind); !strings.Contains(got, want) {
+			t.Fatalf("%s dynamic context = %q, want %q", kind, got, want)
+		}
+		if got := personaContextText(req.Context, kind); got != "" {
+			t.Fatalf("%s stable context = %q, want dynamic envelope only", kind, got)
+		}
+	}
+	if got := personaContextText(req.Context, "workspace_triage_policy_metadata"); got != "" {
+		t.Fatalf("workspace_triage_policy_metadata stable context = %q, want metadata on dynamic envelope", got)
 	}
 	if len(req.Memory.Items) != 1 || req.Memory.Items[0].SourceRef != "memory/product.md" {
 		t.Fatalf("memory = %#v, want related memory item", req.Memory)
