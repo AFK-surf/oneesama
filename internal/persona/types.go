@@ -33,16 +33,17 @@ type Runtime interface {
 }
 
 type Request struct {
-	ID       string            `json:"id"`
-	Mode     string            `json:"mode,omitempty"`
-	Event    Event             `json:"event"`
-	Actor    Actor             `json:"actor,omitempty"`
-	Anchor   Anchor            `json:"anchor,omitempty"`
-	Context  []ContextItem     `json:"context,omitempty"`
-	Evidence EvidenceBundle    `json:"evidence,omitempty"`
-	Memory   MemoryContext     `json:"memory,omitempty"`
-	Safety   SafetyConstraints `json:"safety,omitempty"`
-	Metadata map[string]any    `json:"metadata,omitempty"`
+	ID             string                   `json:"id"`
+	Mode           string                   `json:"mode,omitempty"`
+	Event          Event                    `json:"event"`
+	Actor          Actor                    `json:"actor,omitempty"`
+	Anchor         Anchor                   `json:"anchor,omitempty"`
+	Context        []ContextItem            `json:"context,omitempty"`
+	DynamicContext []DynamicContextEnvelope `json:"dynamic_context,omitempty"`
+	Evidence       EvidenceBundle           `json:"evidence,omitempty"`
+	Memory         MemoryContext            `json:"memory,omitempty"`
+	Safety         SafetyConstraints        `json:"safety,omitempty"`
+	Metadata       map[string]any           `json:"metadata,omitempty"`
 }
 
 type Event struct {
@@ -72,6 +73,21 @@ type ContextItem struct {
 	Kind      string `json:"kind"`
 	Text      string `json:"text"`
 	SourceRef string `json:"source_ref,omitempty"`
+}
+
+const (
+	DynamicContextCachePolicyNotStablePrefix = "dynamic_not_stable_prefix"
+)
+
+type DynamicContextEnvelope struct {
+	Kind        string         `json:"kind"`
+	Source      string         `json:"source,omitempty"`
+	Version     string         `json:"version,omitempty"`
+	Freshness   string         `json:"freshness,omitempty"`
+	Confidence  float64        `json:"confidence,omitempty"`
+	Content     string         `json:"content,omitempty"`
+	CachePolicy string         `json:"cache_policy,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 type EvidenceBundle struct {
