@@ -30,8 +30,9 @@ func parseAvatarCommand(text string) parsedAvatarCommand {
 	}
 
 	parsed := parsedAvatarCommand{
-		Action:      strings.ToLower(strings.TrimSpace(tokens[0])),
-		StartJoiner: true,
+		Action:       strings.ToLower(strings.TrimSpace(tokens[0])),
+		StartJoiner:  true,
+		RealtimeJoin: true,
 	}
 	taskParts := make([]string, 0)
 

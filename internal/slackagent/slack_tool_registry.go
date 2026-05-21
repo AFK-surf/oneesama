@@ -83,7 +83,7 @@ var slackToolSpecs = []SlackToolSpec{
 	{Name: "usage_api", Source: "usage_tool.go", Category: "helper", Registration: "RegisterSlackHelperTools", Adapter: "local_usage_status_stub", Status: "validation_only"},
 	{Name: "manage_schedule", Source: "assistant_schedule_tool.go", Category: "assistant_schedule", Registration: "assistant prompt/defaults", Adapter: "assistant_thread_schedule_list", Status: "active"},
 	{Name: "notify_meeting_slack", Source: "meeting_slack_notify_tool.go", Category: "copilot", Registration: "RegisterCopilotHelperTools", Adapter: "slack_post_message", Status: "active"},
-	{Name: "send_meeting_chat", Source: "copilot_tools.go", Category: "copilot", Registration: "RegisterCopilotHelperTools", Adapter: "meeting_agent_chat", Status: "product_excluded", ProductScope: "Peng excluded meeting chat sending for task #147"},
+	{Name: "send_meeting_chat", Source: "copilot_tools.go", Category: "copilot", Registration: "RegisterCopilotHelperTools", Adapter: "meeting_agent_chat", Status: "active"},
 	{Name: "image_generation", Source: "image_generation_tool.go", Category: "assistant_only", Registration: "RegisterSlackHelperTools(RoleAssistant)", Adapter: "image_provider", Status: "product_excluded", ProductScope: "Peng excluded image generation for task #147"},
 	{Name: "audio_generation", Source: "audio_generation_tool.go", Category: "assistant_only", Registration: "RegisterSlackHelperTools(RoleAssistant)", Adapter: "audio_provider", Status: "product_excluded", ProductScope: "Peng excluded audio generation for task #147"},
 	{Name: "linear_api", Source: "linear_tools.go", Category: "credentialed_proxy", Registration: "RegisterCredentialedProxyTools", Adapter: "external_linear_provider", Status: "product_excluded", ProductScope: "Peng excluded credentialed external app integrations for task #147"},
@@ -192,6 +192,8 @@ func (s *Service) ExecuteSlackTool(ctx context.Context, request SlackToolCallReq
 		return slackToolOK(name, result), nil
 	case "notify_meeting_slack":
 		return s.executeNotifyMeetingSlackTool(ctx, args), nil
+	case "send_meeting_chat":
+		return s.executeSendMeetingChatTool(ctx, args), nil
 	default:
 		return slackToolError(name, "tool_not_available"), nil
 	}

@@ -146,8 +146,8 @@ func buildJoinSetupBlocks(parsed parsedAvatarCommand, captionLanguage string, ca
 			"type":     "actions",
 			"block_id": joinSetupActionsBlockID,
 			"elements": []map[string]any{
-				joinSetupButton("Join", joinSetupPlainActionID, parsed, captionLanguage, card, false, "primary"),
-				joinSetupButton("Join with realtime", joinSetupRealtimeActionID, parsed, captionLanguage, card, true, ""),
+				joinSetupButton("Join", joinSetupRealtimeActionID, parsed, captionLanguage, card, true, "primary"),
+				joinSetupButton("Join recording only", joinSetupPlainActionID, parsed, captionLanguage, card, false, ""),
 			},
 		},
 	}

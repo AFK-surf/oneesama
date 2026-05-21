@@ -113,15 +113,17 @@ type MeetdMeetingSummaryRecord struct {
 }
 
 type MeetdWebhookPayload struct {
-	Event         string                `json:"event"`
-	MeetingID     int64                 `json:"meeting_id"`
-	Title         string                `json:"title"`
-	SlackRef      *MeetdSlackRef        `json:"slack_ref,omitempty"`
-	TimeFrom      string                `json:"time_from,omitempty"`
-	TimeTo        string                `json:"time_to,omitempty"`
-	Status        string                `json:"status,omitempty"`
-	Summary       *MeetdSummaryData     `json:"summary,omitempty"`
-	Artifacts     MeetdMeetingArtifacts `json:"artifacts,omitempty"`
-	Error         string                `json:"error,omitempty"`
-	ForceDelivery bool                  `json:"force_delivery,omitempty"`
+	Event          string                `json:"event"`
+	MeetingID      int64                 `json:"meeting_id"`
+	Title          string                `json:"title"`
+	SlackRef       *MeetdSlackRef        `json:"slack_ref,omitempty"`
+	TimeFrom       string                `json:"time_from,omitempty"`
+	TimeTo         string                `json:"time_to,omitempty"`
+	Transcript     string                `json:"transcript,omitempty"`
+	ChatTranscript string                `json:"chat_transcript,omitempty"`
+	Status         string                `json:"status,omitempty"`
+	Summary        *MeetdSummaryData     `json:"summary,omitempty"`
+	Artifacts      MeetdMeetingArtifacts `json:"artifacts,omitempty"`
+	Error          string                `json:"error,omitempty"`
+	ForceDelivery  bool                  `json:"force_delivery,omitempty"`
 }

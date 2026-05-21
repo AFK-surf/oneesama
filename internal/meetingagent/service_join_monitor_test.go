@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,24 @@ func TestRuntimeJoinStateDetectsSoloParticipantCount(t *testing.T) {
 	})
 	if !state.Joined || !state.Alone || state.ParticipantCount != 1 || state.Reason != "empty_room" {
 		t.Fatalf("state = %+v, want joined solo empty_room", state)
+	}
+}
+
+func TestJoinDigestTranscriptPrefersCumulativeCaptionJSONOverTail(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "captions.json")
+	if err := os.WriteFile(path, []byte(`{"captions":[{"speaker":"Peng","text":"windows 怎么说，要不要考虑一下"},{"speaker":"Bridge Bot","text":"已记 Windows 评估项"}]}`), 0o644); err != nil {
+		t.Fatalf("write captions: %v", err)
+	}
+	transcript := joinDigestTranscriptFromRuntimeCaptions(map[string]any{
+		"paths": map[string]any{"json": path},
+		"tail":  []map[string]any{{"speaker": "Bridge Bot", "text": "已记 Windows 评估项"}},
+	})
+	for _, want := range []string{"Peng: windows 怎么说", "Bridge Bot: 已记 Windows 评估项"} {
+		if !strings.Contains(transcript, want) {
+			t.Fatalf("transcript = %q, want %q", transcript, want)
+		}
 	}
 }
 

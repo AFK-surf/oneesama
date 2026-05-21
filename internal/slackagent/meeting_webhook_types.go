@@ -117,4 +117,5 @@ type MeetingWebhookResponse struct {
 	AssistantStatus *AssistantAPIResult          `json:"assistant_status,omitempty"`
 	Delivery        *MeetingResultDeliveryRecord `json:"delivery,omitempty"`
 	MeetingThread   *MeetingThreadRecord         `json:"meeting_thread,omitempty"`
+	Copilot         *meetingCopilotRunResult     `json:"copilot,omitempty"`
 }

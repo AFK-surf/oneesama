@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
@@ -165,6 +166,87 @@ func TestMeetingWebhookPreservesLargeNumericMeetingID(t *testing.T) {
 	if !strings.Contains(inputs[0].ArtifactID, strconv.FormatInt(meetingID, 10)) ||
 		!strings.Contains(inputs[0].DedupKey, strconv.FormatInt(meetingID, 10)) {
 		t.Fatalf("canvas input = %#v, want exact large meeting id", inputs[0])
+	}
+}
+
+func TestMeetingWebhookDigestQueuesCaptionsCopilot(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{ID: "job_meeting_copilot", Provider: "codex", Status: agentrunner.StatusRunning}}
+	router := newTestRouter(t, Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
+		MeetWebhookSecret: "meet-secret",
+		Slack:             appconfig.SlackConfig{SigningSecret: "slack-secret"},
+		Runner:            runner,
+	})
+
+	body := `{"event":"meeting.digest","meeting_id":42,"title":"Cue Team Stand-up","transcript":"Peng: windows 怎么说，要不要考虑一下\nBridge Bot: 已记 Windows 评估项","slack_ref":{"channel_id":"C123","thread_ts":"123.456"}}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("digest status = %d, body=%s", response.Code, response.Body.String())
+	}
+	payload := decodeMeetingWebhookResponse(t, response)
+	if payload.Copilot == nil || !payload.Copilot.Queued {
+		t.Fatalf("copilot = %#v, want queued", payload.Copilot)
+	}
+	if runner.startCount != 1 {
+		t.Fatalf("runner start count = %d, want 1", runner.startCount)
+	}
+	if got := runner.startInput.Context["session_kind"]; got != agentrunner.SessionKindMeetingCopilot {
+		t.Fatalf("session_kind = %#v, want meeting_copilot", got)
+	}
+	if runner.startInput.AllowCodeChanges {
+		t.Fatal("meeting copilot must not allow code changes")
+	}
+	for _, want := range []string{"send_meeting_chat", "windows 怎么说", "Cue Team Stand-up"} {
+		if !strings.Contains(runner.startInput.Task, want) {
+			t.Fatalf("task = %q, want to contain %q", runner.startInput.Task, want)
+		}
+	}
+}
+
+func TestMeetingWebhookCopilotToolRequestSendsMeetChat(t *testing.T) {
+	var seenPath string
+	var seenText string
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		if r.Header.Get("X-Oneesama-Internal-Key") != "secret-key" {
+			t.Fatalf("internal auth header = %q, want secret-key", r.Header.Get("X-Oneesama-Internal-Key"))
+		}
+		if seenPath != "/meetings/42/chat" {
+			t.Fatalf("meeting-agent path = %s, want /meetings/42/chat", seenPath)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode meeting-agent request: %v", err)
+		}
+		seenText, _ = body["text"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "success": true})
+	}))
+	defer meetingAgent.Close()
+
+	service := NewService(Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
+		MeetingAgentURL:   meetingAgent.URL,
+		Slack:             appconfig.SlackConfig{InternalAuthKey: "secret-key"},
+		MeetWebhookSecret: "meet-secret",
+	})
+	service.handleAgentRunnerUpdate(context.Background(), agentrunner.Job{
+		ID:       "job_meeting_copilot_done",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Context: map[string]any{
+			"session_kind": agentrunner.SessionKindMeetingCopilot,
+			"meetingId":    "42",
+		},
+		Result: `<oneesama_tool_request>
+{"calls":[{"tool":"send_meeting_chat","args":{"meeting_id":42,"text":"📋 已记：Windows 也纳入评估。"}}],"reason":"meeting chat reply"}
+</oneesama_tool_request>`,
+	})
+
+	if seenPath != "/meetings/42/chat" {
+		t.Fatalf("meeting-agent path = %q, want /meetings/42/chat", seenPath)
+	}
+	if seenText != "📋 已记：Windows 也纳入评估。" {
+		t.Fatalf("meeting chat text = %q", seenText)
 	}
 }
 

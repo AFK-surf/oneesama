@@ -2,7 +2,9 @@ package meetingagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -24,6 +26,7 @@ func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 	defer ticker.Stop()
 	seenJoined := false
 	var aloneSince time.Time
+	lastDigestCaptionCount := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,6 +74,7 @@ func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 				StartedAt:        session.StartedAt,
 				Metadata:         session.Metadata,
 			})
+			s.maybeNotifyJoinDigestWebhook(ctx, *session, status, &lastDigestCaptionCount)
 			continue
 		}
 		if state.Failed {
@@ -82,6 +86,128 @@ func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 			return
 		}
 	}
+}
+
+func (s *Service) maybeNotifyJoinDigestWebhook(ctx context.Context, session SessionRecord, status meetrunner.StatusSessionResult, lastCount *int) {
+	slackChannel, slackThread := joinSlackRef(session)
+	if slackChannel == "" || slackThread == "" || s.meetdWebhookURL == "" {
+		return
+	}
+	active := mapFromAny(status.Active)
+	captions := mapFromAny(active["captions"])
+	count := intFromAny(captions["count"])
+	if count <= 0 || (lastCount != nil && count <= *lastCount) {
+		return
+	}
+	transcript := strings.TrimSpace(joinDigestTranscriptFromRuntimeCaptions(captions))
+	if transcript == "" {
+		return
+	}
+	meeting := syntheticMeetdMeeting(session, slackChannel, slackThread)
+	if persisted, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, "active", "", ""); err == nil && persisted != nil {
+		meeting = *persisted
+	} else if err != nil {
+		s.logger.Warn("persist active join meeting failed", "session_id", session.ID, "error", err)
+	}
+	if s.NotifyMeetdDigestWebhook(ctx, meeting, transcript, "") && lastCount != nil {
+		*lastCount = count
+	}
+}
+
+func (s *Service) NotifyMeetdDigestWebhook(ctx context.Context, meeting MeetdMeetingRecord, transcript string, chatTranscript string) bool {
+	if s.meetdWebhookURL == "" || strings.TrimSpace(transcript) == "" && strings.TrimSpace(chatTranscript) == "" {
+		return false
+	}
+	payload := buildMeetdWebhookPayload("meeting.digest", meeting, nil)
+	payload.Transcript = transcript
+	payload.ChatTranscript = chatTranscript
+	err := sendMeetdWebhook(ctx, s.meetdWebhookURL, s.meetdWebhookSecret, payload)
+	if err != nil {
+		s.logger.Warn("meetd digest webhook failed", "meeting_id", meeting.ID, "error", err)
+		_ = s.UpdateMeetdWebhookState(context.WithoutCancel(ctx), meeting.ID, "failed", err.Error(), 5, payload.Event)
+		return false
+	}
+	_ = s.UpdateMeetdWebhookState(context.WithoutCancel(ctx), meeting.ID, "delivered", "", 0, payload.Event)
+	return true
+}
+
+func joinDigestTranscriptFromRuntimeCaptions(captions map[string]any) string {
+	paths := mapFromAny(captions["paths"])
+	if path := stringFromMap(paths, "json"); path != "" {
+		if transcript := joinDigestTranscriptFromCaptionJSONFile(path); transcript != "" {
+			return transcript
+		}
+	}
+	if transcript := joinDigestTranscriptFromCaptionItems(captionItemsFromAny(captions["tail"])); transcript != "" {
+		return transcript
+	}
+	if transcript := joinDigestTranscriptFromCaptionItems(captionItemsFromAny(captions["latest"])); transcript != "" {
+		return transcript
+	}
+	return ""
+}
+
+func joinDigestTranscriptFromCaptionJSONFile(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Captions []map[string]any `json:"captions"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	captions := payload.Captions
+	if len(captions) > 80 {
+		captions = captions[len(captions)-80:]
+	}
+	return joinDigestTranscriptFromCaptionItems(captions)
+}
+
+func captionItemsFromAny(value any) []map[string]any {
+	if value == nil {
+		return nil
+	}
+	if items, ok := value.([]map[string]any); ok {
+		return items
+	}
+	var single map[string]any
+	if decodeAny(value, &single) && len(single) > 0 {
+		return []map[string]any{single}
+	}
+	var many []map[string]any
+	if decodeAny(value, &many) {
+		return many
+	}
+	return nil
+}
+
+func joinDigestTranscriptFromCaptionItems(items []map[string]any) string {
+	var lines []string
+	for _, item := range items {
+		text := strings.TrimSpace(firstNonEmpty(
+			stringFromMap(item, "text"),
+			stringFromMap(item, "caption"),
+			stringFromMap(item, "message"),
+		))
+		if text == "" {
+			continue
+		}
+		speaker := firstNonEmpty(
+			stringFromMap(item, "speaker"),
+			stringFromMap(item, "user"),
+			stringFromMap(item, "name"),
+			"Speaker",
+		)
+		ts := firstNonEmpty(stringFromMap(item, "timestamp"), stringFromMap(item, "ts"))
+		if ts != "" {
+			lines = append(lines, fmt.Sprintf("[%s] %s: %s", ts, speaker, text))
+		} else {
+			lines = append(lines, fmt.Sprintf("%s: %s", speaker, text))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func currentJoinMonitorInterval() time.Duration {

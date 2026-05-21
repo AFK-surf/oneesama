@@ -8,6 +8,7 @@ type Runner interface {
 	StatusSession(ctx context.Context, input StatusSessionInput) (StatusSessionResult, error)
 	StopSession(ctx context.Context, input StopSessionInput) (StopSessionResult, error)
 	InjectWorkerResult(ctx context.Context, input WorkerResultInput) (WorkerResultDelivery, error)
+	SendMeetChat(ctx context.Context, input MeetChatInput) (MeetChatResult, error)
 	StartScreenShare(ctx context.Context, input ScreenShareInput) (ScreenShareResult, error)
 	PresentScreenShare(ctx context.Context, input ScreenShareInput) (ScreenShareResult, error)
 	PresentVideoStage(ctx context.Context, input VideoStageInput) (ScreenShareResult, error)
@@ -151,6 +152,18 @@ type WorkerResultDelivery struct {
 	RealtimeBridge     any    `json:"realtimeBridge,omitempty"`
 	WorkerResultBridge any    `json:"workerResultBridge,omitempty"`
 	Error              string `json:"error,omitempty"`
+}
+
+type MeetChatInput struct {
+	SessionID string `json:"session_id,omitempty"`
+	Text      string `json:"text,omitempty"`
+}
+
+type MeetChatResult struct {
+	OK      bool   `json:"ok"`
+	Success bool   `json:"success,omitempty"`
+	Text    string `json:"text,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 type ScreenShareInput struct {

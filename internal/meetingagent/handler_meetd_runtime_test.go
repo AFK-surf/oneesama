@@ -58,6 +58,10 @@ func (runtimeMeetRunner) InjectWorkerResult(context.Context, meetrunner.WorkerRe
 	return meetrunner.WorkerResultDelivery{OK: true, Channel: "meeting-avatar-worker-result"}, nil
 }
 
+func (runtimeMeetRunner) SendMeetChat(context.Context, meetrunner.MeetChatInput) (meetrunner.MeetChatResult, error) {
+	return meetrunner.MeetChatResult{OK: true, Success: true}, nil
+}
+
 func (runtimeMeetRunner) StartScreenShare(context.Context, meetrunner.ScreenShareInput) (meetrunner.ScreenShareResult, error) {
 	return meetrunner.ScreenShareResult{"ok": true}, nil
 }

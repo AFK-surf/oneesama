@@ -81,6 +81,8 @@ type Service struct {
 	scheduleManager          ScheduleManager
 	slackContext             *slackContextStore
 	meetingWebhooks          *meetingWebhookStore
+	meetingCopilotMu         sync.Mutex
+	meetingCopilotStates     map[string]*meetingCopilotState
 	inbound                  *slackInboundBuffer
 	triage                   *slackTriageStore
 	cognition                *slackCognitionStore
@@ -281,6 +283,7 @@ func NewService(cfg Config) *Service {
 		scheduleManager:        cfg.ScheduleManager,
 		slackContext:           newSlackContextStore(cfg.Persistence, logger),
 		meetingWebhooks:        newMeetingWebhookStore(cfg.Persistence, logger),
+		meetingCopilotStates:   make(map[string]*meetingCopilotState),
 		inbound:                newSlackInboundBuffer(cfg.Slack.EventBuffer, nil),
 		triage:                 newSlackTriageStore(cfg.Persistence, logger),
 		cognition:              newSlackCognitionStore(cfg.Persistence, logger),

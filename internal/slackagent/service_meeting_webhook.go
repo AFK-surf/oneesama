@@ -43,7 +43,7 @@ func (s *Service) HandleMeetingWebhook(ctx context.Context, payload MeetingWebho
 	case "meeting.result":
 		return s.handleMeetingWebhookResult(ctx, normalized)
 	case "meeting.digest":
-		return MeetingWebhookResponse{OK: true, Accepted: true, Event: normalized.Event, MeetingID: normalized.MeetingID}
+		return s.handleMeetingWebhookDigest(ctx, normalized)
 	default:
 		return MeetingWebhookResponse{OK: true, Skipped: true, Event: normalized.Event, MeetingID: normalized.MeetingID, Reason: "unknown_meeting_webhook_event"}
 	}

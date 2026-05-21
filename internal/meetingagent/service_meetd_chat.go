@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/AFK-surf/oneesama/internal/meetrunner"
 )
 
 var errMeetdNoActiveJoiner = errors.New("no active joiner for this meeting")
 
 type meetdChatSender interface {
-	SendMeetChat(ctx context.Context, sessionID string, text string) (bool, error)
+	SendMeetChat(ctx context.Context, input meetrunner.MeetChatInput) (meetrunner.MeetChatResult, error)
 }
 
 func (s *Service) SendMeetdChat(ctx context.Context, meetingID int64, text string) (bool, error) {
@@ -28,5 +30,9 @@ func (s *Service) SendMeetdChat(ctx context.Context, meetingID int64, text strin
 	if !ok {
 		return false, errMeetdNoActiveJoiner
 	}
-	return sender.SendMeetChat(ctx, sessionID, text)
+	result, err := sender.SendMeetChat(ctx, meetrunner.MeetChatInput{SessionID: sessionID, Text: text})
+	if err != nil {
+		return false, err
+	}
+	return result.OK || result.Success, nil
 }

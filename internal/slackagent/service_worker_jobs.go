@@ -34,6 +34,9 @@ func (s *Service) handleAgentRunnerUpdate(ctx context.Context, job agentrunner.J
 	if !isTerminalJobStatus(job.Status) || !s.claimFinalizedWorkerJob(job.ID) {
 		return
 	}
+	if s.handleMeetingCopilotToolRequest(ctx, job) {
+		return
+	}
 	if s.handleSlackWorkerToolRequest(ctx, job) {
 		return
 	}

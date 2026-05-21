@@ -243,6 +243,7 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
               "join.session.status",
               "join.session.stop",
               "worker.result.inject",
+              "meet.chat.send",
               "screen_share.start",
               "screen_share.present",
               "screen_share.video",
@@ -275,6 +276,9 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
         writeResponse(
           success(request.id, await joiner.injectWorkerResult((request.params as any)?.job)),
         );
+        return;
+      case "meet.chat.send":
+        writeResponse(success(request.id, await joiner.sendMeetChat(request.params ?? {})));
         return;
       case "screen_share.start":
         writeResponse(success(request.id, await joiner.startScreenShare(request.params ?? {})));

@@ -42,7 +42,7 @@ func TestSlackToolParityReportBucketsByFourClassStatus(t *testing.T) {
 		"manage_schedule":      "active",
 		"notify_meeting_slack": "active",
 		"usage_api":            "validation_only",
-		"send_meeting_chat":    "product_excluded",
+		"send_meeting_chat":    "active",
 		"image_generation":     "product_excluded",
 		"audio_generation":     "product_excluded",
 		"linear_api":           "product_excluded",
@@ -156,7 +156,7 @@ func TestSlackAPIToolRegisteredUnavailableActionReturnsTruthfulError(t *testing.
 // parity advertised status matches the actual call path.
 func TestExecuteSlackToolProductExcludedRejectedAtGateway(t *testing.T) {
 	svc := &Service{}
-	for _, name := range []string{"linear_api", "notion_api", "google_calendar_api", "figma_api", "send_meeting_chat", "image_generation", "audio_generation"} {
+	for _, name := range []string{"linear_api", "notion_api", "google_calendar_api", "figma_api", "image_generation", "audio_generation"} {
 		resp, err := svc.ExecuteSlackTool(context.Background(), SlackToolCallRequest{Tool: name})
 		if err != nil {
 			t.Fatalf("ExecuteSlackTool(%q) returned error: %v", name, err)

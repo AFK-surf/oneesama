@@ -152,6 +152,10 @@ func (fakeMeetRunner) InjectWorkerResult(_ context.Context, _ meetrunner.WorkerR
 	return meetrunner.WorkerResultDelivery{OK: true, Channel: "meeting-avatar-worker-result"}, nil
 }
 
+func (fakeMeetRunner) SendMeetChat(_ context.Context, _ meetrunner.MeetChatInput) (meetrunner.MeetChatResult, error) {
+	return meetrunner.MeetChatResult{OK: true, Success: true}, nil
+}
+
 func (fakeMeetRunner) StartScreenShare(_ context.Context, input meetrunner.ScreenShareInput) (meetrunner.ScreenShareResult, error) {
 	return meetrunner.ScreenShareResult{"ok": true, "mode": input.Mode, "title": input.Title}, nil
 }

@@ -36,7 +36,7 @@ func TestCueboardParitySlackAssistantToolSetMatchesCurrentCategories(t *testing.
 	if !slices.Equal(got, want) {
 		t.Fatalf("assistant tool set\n got: %v\nwant: %v", got, want)
 	}
-	for _, excluded := range []string{"linear_api", "notion_api", "figma_api", "google_calendar_api", "image_generation", "audio_generation", "send_meeting_chat", "usage"} {
+	for _, excluded := range []string{"linear_api", "notion_api", "figma_api", "google_calendar_api", "image_generation", "audio_generation", "usage"} {
 		if slices.Contains(got, excluded) {
 			t.Fatalf("assistant tool set should not expose out-of-scope/credentialed tool %q: %v", excluded, got)
 		}
@@ -68,7 +68,7 @@ func TestCueboardParityMeetingCopilotToolSetKeepsMeetingOnlySurface(t *testing.T
 
 	capabilities := CapabilitiesForSessionKind(SessionKindMeetingCopilot)
 	got := sortedToolNames(capabilities.AllowedTools)
-	want := []string{"notify_meeting_slack"}
+	want := []string{"notify_meeting_slack", "send_meeting_chat"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("meeting copilot tool set\n got: %v\nwant: %v", got, want)
 	}

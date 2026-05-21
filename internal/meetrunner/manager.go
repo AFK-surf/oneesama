@@ -72,7 +72,7 @@ func (m *Manager) Ping(_ context.Context) (RunnerStatus, error) {
 		BridgeMode: "persistent-session",
 		Capabilities: []string{
 			"runner.ping", "join.google_meet.prepare", "join.session.status", "join.session.stop",
-			"worker.result.inject", "screen_share.start", "screen_share.present",
+			"worker.result.inject", "meet.chat.send", "screen_share.start", "screen_share.present",
 			"screen_share.video", "screen_share.apps", "screen_share.app", "screen_share.stop",
 		},
 	}, nil
@@ -111,6 +111,21 @@ func (m *Manager) InjectWorkerResult(ctx context.Context, input WorkerResultInpu
 	var result WorkerResultDelivery
 	if err := worker.Call(ctx, "worker.result.inject", input, &result); err != nil {
 		return WorkerResultDelivery{}, err
+	}
+	return result, nil
+}
+
+func (m *Manager) SendMeetChat(ctx context.Context, input MeetChatInput) (MeetChatResult, error) {
+	worker, err := m.resolveCallSession(input.SessionID)
+	if err != nil {
+		return MeetChatResult{}, err
+	}
+	var result MeetChatResult
+	if err := worker.Call(ctx, "meet.chat.send", input, &result); err != nil {
+		return MeetChatResult{}, err
+	}
+	if result.Success && !result.OK {
+		result.OK = true
 	}
 	return result, nil
 }
