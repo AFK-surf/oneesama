@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/internalauth"
 )
 
@@ -48,6 +50,39 @@ func TestWorkerReportPollAndMarkSlackDelivered(t *testing.T) {
 	router.ServeHTTP(pollAgain, pollAgainRequest)
 	if pollAgain.Code != http.StatusOK || strings.Contains(pollAgain.Body.String(), `"job_done"`) {
 		t.Fatalf("poll again = %d %s, want delivered job hidden", pollAgain.Code, pollAgain.Body.String())
+	}
+}
+
+func TestWorkerReportStoresBoundedResultEnvelope(t *testing.T) {
+	t.Parallel()
+
+	router := newTestRouter(t)
+	report := httptest.NewRecorder()
+	longResult := strings.Repeat("worker scratch line ", 900)
+	reportRequest := httptest.NewRequest(http.MethodPost, "/worker/report", strings.NewReader(`{"id":"job_long","status":"completed","provider":"codex","mode":"analysis","task":"summarize","result":`+strconv.Quote(longResult)+`}`))
+	reportRequest.Header.Set(internalauth.HeaderName, "secret-key")
+	reportRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(report, reportRequest)
+	if report.Code != http.StatusOK {
+		t.Fatalf("report response = %d %s, want stored job", report.Code, report.Body.String())
+	}
+	var body struct {
+		Job WorkerReport `json:"job"`
+	}
+	if err := json.Unmarshal(report.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	if body.Job.ResultEnvelope == nil {
+		t.Fatalf("ResultEnvelope nil in body %#v", body.Job)
+	}
+	if body.Job.ResultEnvelope.Schema != agentrunner.WorkerResultEnvelopeSchema {
+		t.Fatalf("schema = %q, want worker result envelope", body.Job.ResultEnvelope.Schema)
+	}
+	if len([]rune(body.Job.Result)) > 12000 {
+		t.Fatalf("Result length = %d, want bounded", len([]rune(body.Job.Result)))
+	}
+	if !body.Job.ResultEnvelope.Truncated || !strings.Contains(body.Job.Result, "[worker result truncated]") {
+		t.Fatalf("report result/envelope = %#v, want truncated bounded result", body.Job.ResultEnvelope)
 	}
 }
 

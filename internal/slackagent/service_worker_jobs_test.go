@@ -115,6 +115,17 @@ func TestSlackWorkerResultTextKeepsNormalWorkerAnswer(t *testing.T) {
 	}
 }
 
+func TestSlackWorkerResultTextUsesBoundedEnvelope(t *testing.T) {
+	longAnswer := "结论：可以复用 harness envelope。\n" + strings.Repeat("长段落", 6000)
+	got := slackWorkerResultText(agentrunner.Job{Status: agentrunner.StatusCompleted, Result: longAnswer})
+	if len([]rune(got)) > 12000 {
+		t.Fatalf("slackWorkerResultText length = %d, want bounded", len([]rune(got)))
+	}
+	if !strings.Contains(got, "[worker result truncated]") {
+		t.Fatalf("slackWorkerResultText() = %q, want truncation marker", got)
+	}
+}
+
 func TestSlackWorkerResultTextSilentOnNonCompletedStates(t *testing.T) {
 	// Every non-completed state must yield empty text so postSlackWorkerResult
 	// skips the Slack post entirely. Status is conveyed via the mention

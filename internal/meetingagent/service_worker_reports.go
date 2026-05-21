@@ -44,11 +44,16 @@ func (s *Service) createWorkerReport(ctx context.Context, input WorkerReportInpu
 	if err != nil {
 		return WorkerReport{}, fmt.Errorf("load worker report %s: %w", id, err)
 	}
+	result := workerResultString(input.Result)
+	errText := strings.TrimSpace(input.Error)
+	envelope := normalizedWorkerReportEnvelope(input, id, result, errText)
+	result = envelope.Result
+	errText = envelope.Error
 	report := WorkerReport{
 		ID: id, Status: firstNonEmpty(input.Status, "queued"), Provider: input.Provider,
 		Mode: input.Mode, Task: input.Task, Context: cloneWorkerContext(input.Context),
-		AllowCodeChanges: input.AllowCodeChanges, Result: workerResultString(input.Result),
-		Error: strings.TrimSpace(input.Error), CreatedAt: now, UpdatedAt: now,
+		AllowCodeChanges: input.AllowCodeChanges, Result: result,
+		Error: errText, ResultEnvelope: &envelope, CreatedAt: now, UpdatedAt: now,
 	}
 	if found {
 		report.CreatedAt = firstNonEmpty(previous.CreatedAt, now)
@@ -61,6 +66,26 @@ func (s *Service) createWorkerReport(ctx context.Context, input WorkerReportInpu
 		return WorkerReport{}, fmt.Errorf("save worker report %s: %w", id, err)
 	}
 	return report, nil
+}
+
+func normalizedWorkerReportEnvelope(input WorkerReportInput, id string, result string, errText string) agentrunner.WorkerResultEnvelope {
+	if input.ResultEnvelope != nil {
+		return agentrunner.NormalizeWorkerResultEnvelope(*input.ResultEnvelope, agentrunner.WorkerResultEnvelopeOptions{Source: "meetingagent"})
+	}
+	if input.ResultEnvelopeSnake != nil {
+		return agentrunner.NormalizeWorkerResultEnvelope(*input.ResultEnvelopeSnake, agentrunner.WorkerResultEnvelopeOptions{Source: "meetingagent"})
+	}
+	return agentrunner.BuildWorkerResultEnvelope(agentrunner.Job{
+		ID:               id,
+		Provider:         input.Provider,
+		Status:           agentrunner.JobStatus(firstNonEmpty(input.Status, "queued")),
+		Mode:             input.Mode,
+		Task:             input.Task,
+		Context:          input.Context,
+		AllowCodeChanges: input.AllowCodeChanges,
+		Result:           result,
+		Error:            errText,
+	}, agentrunner.WorkerResultEnvelopeOptions{Source: "meetingagent"})
 }
 
 func (s *Service) getWorkerReport(ctx context.Context, id string) (WorkerReport, bool, error) {

@@ -3,21 +3,22 @@ package meetingagent
 import "github.com/AFK-surf/oneesama/internal/agentrunner"
 
 type WorkerReport struct {
-	ID                  string         `json:"id"`
-	Status              string         `json:"status"`
-	Provider            string         `json:"provider,omitempty"`
-	Mode                string         `json:"mode,omitempty"`
-	Task                string         `json:"task,omitempty"`
-	Context             map[string]any `json:"context,omitempty"`
-	AllowCodeChanges    bool           `json:"allowCodeChanges"`
-	Result              string         `json:"result,omitempty"`
-	Error               string         `json:"error,omitempty"`
-	CreatedAt           string         `json:"createdAt"`
-	UpdatedAt           string         `json:"updatedAt"`
-	DeliveredToRealtime bool           `json:"deliveredToRealtime"`
-	DeliveredToSlack    bool           `json:"deliveredToSlack"`
-	RealtimeDelivery    *DeliveryMeta  `json:"realtimeDelivery,omitempty"`
-	SlackDelivery       *DeliveryMeta  `json:"slackDelivery,omitempty"`
+	ID                  string                            `json:"id"`
+	Status              string                            `json:"status"`
+	Provider            string                            `json:"provider,omitempty"`
+	Mode                string                            `json:"mode,omitempty"`
+	Task                string                            `json:"task,omitempty"`
+	Context             map[string]any                    `json:"context,omitempty"`
+	AllowCodeChanges    bool                              `json:"allowCodeChanges"`
+	Result              string                            `json:"result,omitempty"`
+	Error               string                            `json:"error,omitempty"`
+	ResultEnvelope      *agentrunner.WorkerResultEnvelope `json:"resultEnvelope,omitempty"`
+	CreatedAt           string                            `json:"createdAt"`
+	UpdatedAt           string                            `json:"updatedAt"`
+	DeliveredToRealtime bool                              `json:"deliveredToRealtime"`
+	DeliveredToSlack    bool                              `json:"deliveredToSlack"`
+	RealtimeDelivery    *DeliveryMeta                     `json:"realtimeDelivery,omitempty"`
+	SlackDelivery       *DeliveryMeta                     `json:"slackDelivery,omitempty"`
 }
 
 type DeliveryMeta struct {
@@ -30,16 +31,18 @@ type DeliveryMeta struct {
 }
 
 type WorkerReportInput struct {
-	ID               string         `json:"id,omitempty"`
-	JobID            string         `json:"jobId,omitempty"`
-	Status           string         `json:"status,omitempty"`
-	Provider         string         `json:"provider,omitempty"`
-	Mode             string         `json:"mode,omitempty"`
-	Task             string         `json:"task,omitempty"`
-	Context          map[string]any `json:"context,omitempty"`
-	AllowCodeChanges bool           `json:"allowCodeChanges,omitempty"`
-	Result           any            `json:"result,omitempty"`
-	Error            string         `json:"error,omitempty"`
+	ID                  string                            `json:"id,omitempty"`
+	JobID               string                            `json:"jobId,omitempty"`
+	Status              string                            `json:"status,omitempty"`
+	Provider            string                            `json:"provider,omitempty"`
+	Mode                string                            `json:"mode,omitempty"`
+	Task                string                            `json:"task,omitempty"`
+	Context             map[string]any                    `json:"context,omitempty"`
+	AllowCodeChanges    bool                              `json:"allowCodeChanges,omitempty"`
+	Result              any                               `json:"result,omitempty"`
+	Error               string                            `json:"error,omitempty"`
+	ResultEnvelope      *agentrunner.WorkerResultEnvelope `json:"resultEnvelope,omitempty"`
+	ResultEnvelopeSnake *agentrunner.WorkerResultEnvelope `json:"result_envelope,omitempty"`
 }
 
 type WorkerDelegateRequest struct {

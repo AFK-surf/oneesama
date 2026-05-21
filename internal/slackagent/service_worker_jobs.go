@@ -53,6 +53,7 @@ func (s *Service) handleAgentRunnerUpdate(ctx context.Context, job agentrunner.J
 }
 
 func (s *Service) reportWorkerJobToMeetingAgent(ctx context.Context, job agentrunner.Job) {
+	envelope := agentrunner.NewWorkerResultEnvelope(job)
 	var result map[string]any
 	err := s.postMeetingAgentJSON(ctx, "/worker/report", map[string]any{
 		"id":               job.ID,
@@ -62,8 +63,9 @@ func (s *Service) reportWorkerJobToMeetingAgent(ctx context.Context, job agentru
 		"task":             job.Task,
 		"context":          job.Context,
 		"allowCodeChanges": job.AllowCodeChanges,
-		"result":           job.Result,
-		"error":            job.Error,
+		"result":           envelope.Result,
+		"error":            envelope.Error,
+		"resultEnvelope":   envelope,
 	}, &result)
 	if err != nil {
 		s.logger.Warn("meeting worker report failed", "job_id", job.ID, "error", err)
@@ -399,10 +401,8 @@ func slackRefForWorkerJob(job agentrunner.Job) (AssistantThreadRef, bool) {
 // skips the post. Status is conveyed via the mention reaction, not via
 // hardcoded user-facing template strings.
 func slackWorkerResultText(job agentrunner.Job) string {
-	if job.Status != agentrunner.StatusCompleted {
-		return ""
-	}
-	text := strings.TrimSpace(job.Result)
+	envelope := agentrunner.NewWorkerResultEnvelope(job)
+	text := agentrunner.WorkerResultEnvelopeCompletedText(envelope)
 	if text == "" {
 		return ""
 	}
