@@ -1,6 +1,9 @@
 package slackagent
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Thresholds shared between the daily report's per-run quality bucketing
 // (`computeSlackDailyReportMetrics` in daily_report.go) and the operational
@@ -188,9 +191,31 @@ func triageQualityExtractDelegateJobID(calls []SlackTriageToolCall) string {
 		if args == "" {
 			continue
 		}
-		// args is a stringified JSON blob, e.g. {"jobId":"job_xxx","parseOk":true,"provider":"codex"}.
-		// Keep parsing local + tolerant; operator value is in the jobId substring even when other fields drift.
-		const marker = `"jobId":"`
+		jobID := triageQualityExtractDelegateJobIDFromArgs(args)
+		if jobID == "" {
+			continue
+		}
+		return jobID
+	}
+	return ""
+}
+
+func triageQualityExtractDelegateJobIDFromArgs(args string) string {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(args), &payload); err == nil {
+		if jobID := strings.TrimSpace(stringFromAny(payload["jobId"])); jobID != "" {
+			return jobID
+		}
+		if jobID := strings.TrimSpace(stringFromAny(payload["job_id"])); jobID != "" {
+			return jobID
+		}
+	}
+	// Tolerate legacy compact string snippets if the args blob was not valid JSON.
+	for _, marker := range []string{`"jobId":"`, `"job_id":"`} {
 		idx := strings.Index(args, marker)
 		if idx < 0 {
 			continue

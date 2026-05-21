@@ -86,7 +86,15 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
     and (((meta($run; "persona_foreground").worker_requests // []) | length) > 0);
   def delegate_job_id($run):
     ([($run.tool_calls // [])[] | select(.tool == "agent_runner" and .action == "delegate_worker") | (.args // "")] | first // "")
-    | (capture("\"jobId\":\"(?<id>[^\"]+)\"") // {id: ""}) | .id;
+    | . as $args
+    | (try ($args | fromjson | (.jobId // .job_id // "") | tostring) catch "") as $json_id
+    | if $json_id != "" then $json_id
+      else
+        (try ($args | capture("\"jobId\"\\s*:\\s*\"(?<id>[^\"]+)\"").id) catch "") as $camel_id
+        | if $camel_id != "" then $camel_id
+          else (try ($args | capture("\"job_id\"\\s*:\\s*\"(?<id>[^\"]+)\"").id) catch "")
+          end
+      end;
   def delegate_delivery_status($run):
     (delegate_job_id($run)) as $jid
     | if $jid == "" then "no_visible_job_id"
