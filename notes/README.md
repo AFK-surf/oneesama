@@ -28,6 +28,7 @@ Start here when navigating the polish work.
 | `notes/code-polish/memory-provider-ownership-matrix-2026-05-21.md` | Memory provider × Kind ownership matrix + ranking weights table + resolved/residual overlaps. Task #284 / #272. |
 | `notes/code-polish/openclaw-hermes-memory-roadmap-canary-first-2026-05-21.md` | Splits the remaining OpenClaw + Hermes Memory capabilities into canary-first sub-tasks (289-A trust scoring … 289-F contradiction at write). Task #289. |
 | `notes/code-polish/harness-stability-inventory-2026-05-21.md` | Stable-prefix vs dynamic-evidence inventory for the Oneesama Harness cache/tool-stability RFC. Task #319. |
+| `notes/code-polish/harness-foreground-tool-inventory-2026-05-21.md` | Realtime foreground tool class registry plus schema-hash migration gate for Harness tool-surface stability. Task #327. |
 
 ## Cueboard-era hubs (task #161-#234 era)
 

@@ -1,6 +1,15 @@
 package meetingagent
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+const (
+	wantRealtimeToolHashWithoutDemoSurface = "b78d70359eda4dab4fde7a4b3baa3084275bbfe68ff87eb4bdb525d57788e324"
+	wantRealtimeToolHashWithDemoSurface    = "15508289ff8afa8c446a79c8570485149353e045c2ee90f1085d9e0ef6274101"
+)
 
 func TestRealtimeToolSchemaStableHashIsDeterministic(t *testing.T) {
 	first, err := RealtimeToolSchemaStableHash(false)
@@ -27,5 +36,36 @@ func TestRealtimeToolSchemaStableHashCapturesDemoSurfaceGate(t *testing.T) {
 	}
 	if withoutDemoSurface == withDemoSurface {
 		t.Fatalf("hash without demo surface = hash with demo surface = %s, want gate to be visible", withoutDemoSurface)
+	}
+}
+
+func TestRealtimeToolSchemaStableHashGolden(t *testing.T) {
+	withoutDemoSurface, err := RealtimeToolSchemaStableHash(false)
+	if err != nil {
+		t.Fatalf("RealtimeToolSchemaStableHash(false): %v", err)
+	}
+	withDemoSurface, err := RealtimeToolSchemaStableHash(true)
+	if err != nil {
+		t.Fatalf("RealtimeToolSchemaStableHash(true): %v", err)
+	}
+	if withoutDemoSurface != wantRealtimeToolHashWithoutDemoSurface {
+		t.Fatalf("RealtimeToolSchemaStableHash(false) = %q, want %q", withoutDemoSurface, wantRealtimeToolHashWithoutDemoSurface)
+	}
+	if withDemoSurface != wantRealtimeToolHashWithDemoSurface {
+		t.Fatalf("RealtimeToolSchemaStableHash(true) = %q, want %q", withDemoSurface, wantRealtimeToolHashWithDemoSurface)
+	}
+}
+
+func TestRealtimeToolSchemaStableHashesAreDocumented(t *testing.T) {
+	const inventoryPath = "../../notes/code-polish/harness-foreground-tool-inventory-2026-05-21.md"
+	data, err := os.ReadFile(inventoryPath)
+	if err != nil {
+		t.Fatalf("read foreground tool inventory note: %v", err)
+	}
+	note := string(data)
+	for _, hash := range []string{wantRealtimeToolHashWithoutDemoSurface, wantRealtimeToolHashWithDemoSurface} {
+		if !strings.Contains(note, hash) {
+			t.Fatalf("foreground tool inventory note does not document realtime tool hash %s", hash)
+		}
 	}
 }
