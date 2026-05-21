@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 )
 
 // TestSlackToolParityReportBucketsByFourClassStatus pins the four-class
@@ -161,6 +163,34 @@ func TestSlackWorkerToolBridgeAllowsFetchFile(t *testing.T) {
 	}
 	if got := slackWorkerToolBridgeRequestRejection(call); got != "" {
 		t.Fatalf("slack.fetchFile worker bridge rejection = %q, want allowed", got)
+	}
+}
+
+func TestSlackWorkerToolBridgeBlocksSecretaryLookupMutations(t *testing.T) {
+	context := map[string]any{"session_kind": agentrunner.SessionKindSecretaryLookup}
+	fetchCall := SlackToolCallRequest{
+		Tool: "slack_api",
+		Args: map[string]any{
+			"method": "slack.fetchFile",
+			"params": map[string]any{"file_id": "FVID"},
+		},
+	}
+	if got := slackWorkerToolBridgeRequestRejection(fetchCall, context); got != "" {
+		t.Fatalf("secretary fetch rejection = %q, want allowed", got)
+	}
+	canvasCall := SlackToolCallRequest{
+		Tool: "slack_api",
+		Args: map[string]any{
+			"action": "create_canvas",
+			"params": map[string]any{"title": "draft", "markdown": "body"},
+		},
+	}
+	if got := slackWorkerToolBridgeRequestRejection(canvasCall, context); !strings.Contains(got, "secretary_lookup") {
+		t.Fatalf("secretary create_canvas rejection = %q, want secretary_lookup rejection", got)
+	}
+	memoryWriteCall := SlackToolCallRequest{Tool: "memory_write"}
+	if got := slackWorkerToolBridgeRequestRejection(memoryWriteCall, context); !strings.Contains(got, "secretary_lookup") {
+		t.Fatalf("secretary memory_write rejection = %q, want secretary_lookup rejection", got)
 	}
 }
 

@@ -61,6 +61,30 @@ func TestBuildPromptUsesDemoSurfaceWorkerForDemoSurfaceSessions(t *testing.T) {
 	}
 }
 
+func TestBuildPromptUsesReadOnlySecretaryBoundaryForSecretaryLookup(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task:             "Identify this linked HN profile from thread and memory evidence.",
+		Mode:             "analysis",
+		AllowCodeChanges: false,
+		Context: map[string]any{
+			"source": "persona_delegate_worker",
+		},
+	}, SessionKindSecretaryLookup))
+
+	for _, want := range []string{
+		"workspace assistant operating inside a Slack workspace",
+		"Secretary lookup boundary",
+		"read-only secretary lookup",
+		"do not edit repos",
+		"do not edit repos, schedule follow-ups, create canvases, or send Slack/Meet messages",
+		`"session_kind": "secretary_lookup"`,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildPromptReadsSlackAppMentionPromptFromGenericContext(t *testing.T) {
 	prompt := buildPrompt(StartInput{
 		Task: "看看补充的信息",

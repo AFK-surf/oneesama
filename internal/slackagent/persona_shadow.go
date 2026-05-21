@@ -159,12 +159,19 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
+		result, dispositionToolCalls := applyPersonaSecretaryLookupDisposition(result, request)
+		var cannedToolCalls []SlackTriageToolCall
+		result, cannedToolCalls = applyPersonaCannedRefusalDisposition(result)
+		dispositionToolCalls = append(dispositionToolCalls, cannedToolCalls...)
 		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
 		actions := slackPersonaForegroundActions(channelID, threadTS, result)
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
 		})
+		if len(dispositionToolCalls) > 0 {
+			toolCalls = append(toolCalls, dispositionToolCalls...)
+		}
 		if len(policyToolCalls) > 0 {
 			toolCalls = append(toolCalls, policyToolCalls...)
 		}
@@ -191,6 +198,9 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
 		result, dispositionToolCalls := applyPersonaSecretaryLookupDisposition(result, request)
+		var cannedToolCalls []SlackTriageToolCall
+		result, cannedToolCalls = applyPersonaCannedRefusalDisposition(result)
+		dispositionToolCalls = append(dispositionToolCalls, cannedToolCalls...)
 		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
 		actions := slackPersonaForegroundActions(channelID, threadTS, result)
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
@@ -313,6 +323,49 @@ func applyPersonaSecretaryLookupDisposition(result SlackPersonaShadowResult, req
 		Brief:   "Stay-silent external link fact question auto-delegated to secretary lookup",
 		Result:  "old slackd parity: fetch link/person/memory evidence before deciding visible reply",
 	}}
+}
+
+func applyPersonaCannedRefusalDisposition(result SlackPersonaShadowResult) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionReply || strings.TrimSpace(result.VisibleText) == "" {
+		return result, nil
+	}
+	if !slackPersonaVisibleTextLooksLikeCannedSecretaryRefusal(result.VisibleText) {
+		return result, nil
+	}
+	result.Decision = persona.DecisionStaySilent
+	result.VisibleText = ""
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "canned secretary routing/refusal reply downgraded to silence"))
+	return result, []SlackTriageToolCall{{
+		Tool:    "persona_runtime",
+		Action:  "reply_canned_refusal_downgraded_silent",
+		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+		Success: true,
+		Brief:   "Canned secretary routing reply downgraded to silence",
+		Result:  "Pi reply matched a generic project-owner/refusal template without concrete evidence",
+	}}
+}
+
+func slackPersonaVisibleTextLooksLikeCannedSecretaryRefusal(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	markers := []string{
+		"不直接下场查 repo",
+		"项目 owner 处理",
+		"明确授权我查 oneesama",
+		"整理成 brief",
+		"not directly inspect the repo",
+		"project owner",
+		"explicitly authorize me",
+	}
+	matches := 0
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			matches++
+		}
+	}
+	return matches >= 2
 }
 
 func slackPersonaRequestNeedsSecretaryLookup(request persona.Request) bool {
@@ -549,12 +602,13 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 				"worker_id":  workerID,
 			},
 		}, personaDelegatedWorkerSlackContext(result.ChannelID, result.ThreadTS, messages))
+		sessionKind := personaDelegatedWorkerSessionKind(request)
 		job, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
 			Task:             prompt,
 			Context:          contextMap,
 			Mode:             "analysis",
 			AllowCodeChanges: false,
-		}, agentrunner.SessionKindSlack))
+		}, sessionKind))
 		if err != nil {
 			errText := err.Error()
 			out.Errors = append(out.Errors, errText)
@@ -583,6 +637,18 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 		out.Failures = 1
 	}
 	return out
+}
+
+func personaDelegatedWorkerSessionKind(request persona.WorkerRequest) string {
+	scope := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		stringFromAny(request.Context["delegation_scope"]),
+		stringFromAny(request.Context["scope"]),
+		stringFromAny(request.Context["worker_scope"]),
+	)))
+	if scope == "secretary_lookup" {
+		return agentrunner.SessionKindSecretaryLookup
+	}
+	return agentrunner.SessionKindSlack
 }
 
 func personaDelegatedWorkerSlackContext(channelID string, threadTS string, messages []SlackInboundMessage) map[string]any {
@@ -723,6 +789,7 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 	delegateWorkerScopeBlocks := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker_blocked_scope")
 	delegateWorkerBlockedSilent := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "agent_runner", "delegate_worker_blocked_silent")
 	secretaryLookupAutoDelegates := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "persona_runtime", "secretary_lookup_auto_delegate")
+	replyCannedRefusalDowngradedSilent := countMatchingSuccessfulTriageToolCalls(actionToolCalls, "persona_runtime", "reply_canned_refusal_downgraded_silent")
 	if !result.Success {
 		patch.Status = "failed"
 		patch.Error = firstNonEmpty(result.Error, "persona_runtime_failed")
@@ -735,19 +802,20 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		patch.Summary = firstNonEmpty(result.VisibleText, result.Reason, patch.Summary)
 	}
 	metadata := map[string]any{
-		"persona_foreground":              result,
-		"persona_foreground_queued":       false,
-		"persona_foreground_done_at":      nowRFC3339(),
-		"pi_first_decision":               strings.TrimSpace(result.Decision),
-		"persona_foreground_action_count": len(actions),
-		"delegate_worker_jobs_started":    delegateWorkerJobsStarted,
-		"delegate_worker_failures":        delegateWorkerFailures,
-		"delegate_worker_scope_blocks":    delegateWorkerScopeBlocks,
-		"delegate_worker_blocked_silent":  delegateWorkerBlockedSilent,
-		"secretary_lookup_auto_delegates": secretaryLookupAutoDelegates,
-		"persona_memory_write_files":      memoryWritePersistence.Files,
-		"persona_memory_write_errors":     memoryWritePersistence.Errors,
-		"persona_memory_write_redactions": memoryWritePersistence.Redactions,
+		"persona_foreground":                     result,
+		"persona_foreground_queued":              false,
+		"persona_foreground_done_at":             nowRFC3339(),
+		"pi_first_decision":                      strings.TrimSpace(result.Decision),
+		"persona_foreground_action_count":        len(actions),
+		"delegate_worker_jobs_started":           delegateWorkerJobsStarted,
+		"delegate_worker_failures":               delegateWorkerFailures,
+		"delegate_worker_scope_blocks":           delegateWorkerScopeBlocks,
+		"delegate_worker_blocked_silent":         delegateWorkerBlockedSilent,
+		"secretary_lookup_auto_delegates":        secretaryLookupAutoDelegates,
+		"reply_canned_refusal_downgraded_silent": replyCannedRefusalDowngradedSilent,
+		"persona_memory_write_files":             memoryWritePersistence.Files,
+		"persona_memory_write_errors":            memoryWritePersistence.Errors,
+		"persona_memory_write_redactions":        memoryWritePersistence.Redactions,
 	}
 	if !result.Success && slackPersonaForegroundTimedOut(result) {
 		metadata["triage_timeout_needs_retry"] = true

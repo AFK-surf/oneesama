@@ -3,20 +3,22 @@ package agentrunner
 import "strings"
 
 const (
-	SessionKindSlack          = "slack_case"
-	SessionKindTriage         = "slack_triage"
-	SessionKindMeetingCopilot = "meeting_copilot"
-	SessionKindCompact        = "memory_compact"
-	SessionKindMeetingCalib   = "meeting_calibrate"
-	SessionKindMeetingSummary = "meeting_summary"
-	SessionKindDemoSurface    = "meeting_demo_surface"
+	SessionKindSlack           = "slack_case"
+	SessionKindTriage          = "slack_triage"
+	SessionKindMeetingCopilot  = "meeting_copilot"
+	SessionKindCompact         = "memory_compact"
+	SessionKindMeetingCalib    = "meeting_calibrate"
+	SessionKindMeetingSummary  = "meeting_summary"
+	SessionKindDemoSurface     = "meeting_demo_surface"
+	SessionKindSecretaryLookup = "secretary_lookup"
 
-	SessionRoleAssistant      = "assistant"
-	SessionRolePlanner        = "planner"
-	SessionRoleMeetingCopilot = "meeting_copilot"
-	SessionRoleCompact        = "compact"
-	SessionRoleCompletionOnly = "completion_only"
-	SessionRoleDemoSurface    = "demo_surface"
+	SessionRoleAssistant       = "assistant"
+	SessionRolePlanner         = "planner"
+	SessionRoleMeetingCopilot  = "meeting_copilot"
+	SessionRoleCompact         = "compact"
+	SessionRoleCompletionOnly  = "completion_only"
+	SessionRoleDemoSurface     = "demo_surface"
+	SessionRoleSecretaryLookup = "secretary_lookup"
 )
 
 type SessionCapabilities struct {
@@ -57,6 +59,24 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 			"notify_meeting_slack",
 			"slack_api",
 			"send_message",
+		})
+	case SessionKindSecretaryLookup:
+		return newCapabilities(normalized, SessionRoleSecretaryLookup, []string{
+			"read_doc",
+			"memory_search",
+			"memory_get",
+			"person_memory",
+			"exa_search",
+			"exa_contents",
+			"slack_api",
+		}, []string{
+			"send_meeting_chat",
+			"notify_meeting_slack",
+			"send_message",
+			"manage_schedule",
+			"memory_write",
+			"suggest_action",
+			"followup_memory",
 		})
 	case SessionKindMeetingCopilot:
 		return newCapabilities(normalized, SessionRoleMeetingCopilot, []string{
@@ -121,6 +141,8 @@ func NormalizeSessionKind(kind string) string {
 		return SessionKindMeetingSummary
 	case "meeting-demo-surface", "demo-surface", "demo-surface-browser", "browser-demo-surface":
 		return SessionKindDemoSurface
+	case "secretary-lookup", "workspace-secretary-lookup", "slack-secretary-lookup":
+		return SessionKindSecretaryLookup
 	default:
 		return SessionKindSlack
 	}

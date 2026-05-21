@@ -53,10 +53,17 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 		cueboardDefaultSystemPromptForAgentRunner(),
 		"## Oneesama delivery adapter\n- do not expose internal worker/job/delegate mechanics to users\n- do not frame normal Slack requests as internal repository work\n- for workspace-history questions, prefer injected related memory evidence over local repository search and cite the source when using it\n- for long-form writing or document revisions, produce clean Markdown; the delivery layer will publish it as a Slack Canvas\n- keep thread replies concise when the long-form content belongs in Canvas",
 		"## Slack tool evidence\nUse injected Slack thread context, related memory evidence, and explicit tool/evidence blocks as the source of truth. Do not attempt to reach localhost, loopback URLs, or internal gateways yourself. If required tool evidence is missing, say you cannot safely verify that fact yet and answer only from available evidence. Do not turn \"no evidence found\" into a negative product claim such as unsupported, unavailable, or not supported; say evidence is missing or stay silent when no useful answer is possible.",
+	}
+	if isSecretaryLookupStart(input) {
+		sections = append(sections,
+			"## Secretary lookup boundary\n- this is a read-only secretary lookup, not a project debugging or implementation session\n- use only read/fetch/search/memory evidence; do not edit repos, schedule follow-ups, create canvases, or send Slack/Meet messages\n- return Slack-visible text only when there are concrete evidence anchors; otherwise return no visible answer instead of a routing/refusal template",
+		)
+	}
+	sections = append(sections,
 		"Mode: " + defaultMode(input.Mode),
 		"Allow code changes: " + yesNo(input.AllowCodeChanges),
 		"Task: " + strings.TrimSpace(input.Task),
-	}
+	)
 	if strings.TrimSpace(assistantContext) != "" {
 		sections = append(sections, "Slack thread context:\n"+strings.TrimSpace(assistantContext))
 	}
@@ -147,7 +154,8 @@ Use the tools you have. When bash/read/edit/write/python tools are available, do
 }
 
 func isSlackAssistantStart(input StartInput) bool {
-	if NormalizeSessionKind(stringFromContext(input.Context, "session_kind", "sessionKind")) == SessionKindSlack {
+	kind := NormalizeSessionKind(stringFromContext(input.Context, "session_kind", "sessionKind"))
+	if kind == SessionKindSlack || kind == SessionKindSecretaryLookup {
 		return true
 	}
 	switch strings.TrimSpace(stringFromContext(input.Context, "source")) {
@@ -156,6 +164,10 @@ func isSlackAssistantStart(input StartInput) bool {
 	default:
 		return false
 	}
+}
+
+func isSecretaryLookupStart(input StartInput) bool {
+	return NormalizeSessionKind(stringFromContext(input.Context, "session_kind", "sessionKind")) == SessionKindSecretaryLookup
 }
 
 func isDemoSurfaceStart(input StartInput) bool {

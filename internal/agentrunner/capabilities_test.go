@@ -47,6 +47,18 @@ func TestCapabilitiesForSessionKindDemoSurfaceBlocksMeetingMutationTools(t *test
 	assertEqual(t, NormalizeSessionKind("demo-surface"), SessionKindDemoSurface)
 }
 
+func TestCapabilitiesForSessionKindSecretaryLookupIsReadOnly(t *testing.T) {
+	capabilities := CapabilitiesForSessionKind(SessionKindSecretaryLookup)
+	assertEqual(t, capabilities.Role, SessionRoleSecretaryLookup)
+	for _, name := range []string{"read_doc", "memory_search", "memory_get", "person_memory", "exa_search", "exa_contents", "slack_api"} {
+		assertContains(t, capabilities.AllowedTools, name)
+	}
+	for _, name := range []string{"send_meeting_chat", "notify_meeting_slack", "send_message", "manage_schedule", "memory_write", "suggest_action", "followup_memory"} {
+		assertContains(t, capabilities.BlockedTools, name)
+	}
+	assertEqual(t, NormalizeSessionKind("workspace-secretary-lookup"), SessionKindSecretaryLookup)
+}
+
 func TestCapabilitiesForSessionKindMirrorsCueboardCompactAndCompletionOnly(t *testing.T) {
 	compact := CapabilitiesForSessionKind(SessionKindCompact)
 	assertEqual(t, compact.Role, SessionRoleCompact)

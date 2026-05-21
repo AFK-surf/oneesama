@@ -878,8 +878,8 @@ func TestSlackTriagePiFirstLiveDelegatesWorkerAfterPiDecision(t *testing.T) {
 	if !ok || stringFromAny(slack["channel_id"]) != "C_TRIAGE" || stringFromAny(slack["thread_ts"]) != "221.000" {
 		t.Fatalf("runner slack context = %#v, want channel/thread context", runner.startInput.Context["slack"])
 	}
-	if runner.startInput.Context["session_kind"] != agentrunner.SessionKindSlack {
-		t.Fatalf("runner context session_kind = %#v, want slack_case", runner.startInput.Context["session_kind"])
+	if runner.startInput.Context["session_kind"] != agentrunner.SessionKindSecretaryLookup {
+		t.Fatalf("runner context session_kind = %#v, want secretary_lookup", runner.startInput.Context["session_kind"])
 	}
 	if got := len(poster.Calls()); got != 0 {
 		t.Fatalf("poster calls = %d, want worker to answer asynchronously later", got)
@@ -962,8 +962,8 @@ HN profile for Johnson8053. Submissions include SQLite is the best home for AI a
 	if updated.Metadata["pi_first_decision"] != persona.DecisionDelegateWorker || intFromAny(updated.Metadata["secretary_lookup_auto_delegates"]) != 1 {
 		t.Fatalf("metadata = %#v, want auto-delegated secretary lookup", updated.Metadata)
 	}
-	if got := stringFromAny(runner.startInput.Context["session_kind"]); got != agentrunner.SessionKindSlack {
-		t.Fatalf("runner session_kind = %q, want slack case", got)
+	if got := stringFromAny(runner.startInput.Context["session_kind"]); got != agentrunner.SessionKindSecretaryLookup {
+		t.Fatalf("runner session_kind = %q, want secretary lookup case", got)
 	}
 	if prompt := runner.startInput.Task + "\n" + stringFromAny(runner.startInput.Context["slackAssistantPrompt"]); !strings.Contains(prompt, "Johnson8053") || !strings.Contains(prompt, "github.com/zanwei/design-dna") || !strings.Contains(prompt, "concrete evidence") {
 		t.Fatalf("secretary lookup prompt missing old-slackd evidence shape:\n%s", prompt)
@@ -1135,6 +1135,55 @@ func TestSlackTriagePiFirstLiveSilencesBlockedReadOnlySecretaryLookup(t *testing
 	}
 	if updated.Metadata["pi_first_decision"] != persona.DecisionStaySilent || intFromAny(updated.Metadata["delegate_worker_blocked_silent"]) != 1 {
 		t.Fatalf("metadata = %#v, want blocked read-only secretary lookup downgraded to silence", updated.Metadata)
+	}
+}
+
+func TestSlackTriagePiFirstLiveDowngradesCannedRefusalReplyToSilence(t *testing.T) {
+	ctx := context.Background()
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:     persona.ProviderPi,
+		Decision:    persona.DecisionReply,
+		VisibleText: slackPersonaSecretaryRoutingText(),
+		Reason:      "The thread has noisy project/loading context and no safe actionable answer.",
+		Confidence:  0.61,
+		ShadowOnly:  false,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster: poster,
+		Runner: &fakeRunner{},
+	})
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C_TRIAGE", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C_TRIAGE",
+		UserIDSnake:    "U_HUMAN",
+		Text:           "明天发推",
+		TS:             "520.000",
+	}}, "#cue-launch context: 一直 loading / performance discussion\n--- new messages ---\n明天发推")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want canned refusal reply downgraded to silence", calls)
+	}
+	if updated.Metadata["pi_first_decision"] != persona.DecisionStaySilent || intFromAny(updated.Metadata["reply_canned_refusal_downgraded_silent"]) != 1 {
+		t.Fatalf("metadata = %#v, want canned refusal downgrade", updated.Metadata)
 	}
 }
 

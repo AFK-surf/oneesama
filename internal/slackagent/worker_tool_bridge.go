@@ -41,12 +41,13 @@ func (s *Service) handleSlackWorkerToolRequest(ctx context.Context, job agentrun
 	evidence := s.executeSlackWorkerToolBridgeRequest(ctx, request, job.Context)
 	nextContext := slackWorkerToolContinuationContext(job.Context, evidence)
 	nextTask := slackWorkerToolContinuationTask(job, request)
+	sessionKind := agentrunner.NormalizeSessionKind(stringFromAny(nextContext["session_kind"]))
 	_, err := s.runner.StartTask(ctx, agentrunner.WithSessionCapabilities(agentrunner.StartInput{
 		Task:             nextTask,
 		Context:          nextContext,
 		Mode:             job.Mode,
 		AllowCodeChanges: job.AllowCodeChanges,
-	}, agentrunner.SessionKindSlack))
+	}, sessionKind))
 	if err != nil {
 		s.postSlackWorkerToolBridgeFailure(ctx, job, err.Error())
 		return true
@@ -98,7 +99,7 @@ func (s *Service) executeSlackWorkerToolBridgeRequest(ctx context.Context, reque
 			Tool: call.Tool,
 			Args: call.Args,
 		}
-		if reason := slackWorkerToolBridgeRequestRejection(call); reason != "" {
+		if reason := slackWorkerToolBridgeRequestRejection(call, workerContext); reason != "" {
 			evidence.Error = reason
 			out = append(out, evidence)
 			continue
@@ -121,9 +122,18 @@ func (s *Service) executeSlackWorkerToolBridgeRequest(ctx context.Context, reque
 	return out
 }
 
-func slackWorkerToolBridgeRequestRejection(call SlackToolCallRequest) string {
+func slackWorkerToolBridgeRequestRejection(call SlackToolCallRequest, workerContext ...map[string]any) string {
+	secretaryLookup := false
+	if len(workerContext) > 0 {
+		secretaryLookup = agentrunner.NormalizeSessionKind(stringFromAny(workerContext[0]["session_kind"])) == agentrunner.SessionKindSecretaryLookup
+	}
 	switch call.Tool {
-	case "read_doc", "memory_search", "memory_get", "memory_write", "person_memory", "exa_search", "exa_contents", "runtime_status", "heartbeat_log", "suggest_action":
+	case "read_doc", "memory_search", "memory_get", "person_memory", "exa_search", "exa_contents":
+		return ""
+	case "memory_write", "runtime_status", "heartbeat_log", "suggest_action":
+		if secretaryLookup {
+			return "tool " + call.Tool + " is not available in secretary_lookup worker sessions"
+		}
 		return ""
 	case "slack_api":
 		method := stringFromAny(call.Args["method"])
@@ -133,7 +143,12 @@ func slackWorkerToolBridgeRequestRejection(call SlackToolCallRequest) string {
 			return err.Error()
 		}
 		switch resolved {
-		case "fetch_thread", "fetch_channel_history", "fetch_canvas", "fetch_image", "fetch_file", "create_canvas", "edit_canvas":
+		case "fetch_thread", "fetch_channel_history", "fetch_canvas", "fetch_image", "fetch_file":
+			return ""
+		case "create_canvas", "edit_canvas":
+			if secretaryLookup {
+				return "slack_api action " + resolved + " is not available in secretary_lookup worker sessions"
+			}
 			return ""
 		default:
 			return "slack_api action " + resolved + " is not available through the app_mention worker tool bridge"
