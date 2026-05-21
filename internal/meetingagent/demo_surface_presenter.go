@@ -3,6 +3,7 @@ package meetingagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/AFK-surf/oneesama/internal/meetrunner"
@@ -99,6 +100,11 @@ func (p DemoSurfacePresenter) Present(ctx context.Context, req DemoSurfacePresen
 		out.Reason = "screen_share_start_failed"
 		return out, err
 	}
+	if screenShareResultFailed(started) {
+		out.Status = DemoSurfacePresentationFailed
+		out.Reason = "screen_share_start_failed"
+		return out, screenShareResultFailureError(out.Reason, started)
+	}
 
 	if appRequest, ok := req.appShareRequest(base); ok {
 		presented, err := p.Share.PresentAppShare(ctx, appRequest)
@@ -108,6 +114,11 @@ func (p DemoSurfacePresenter) Present(ctx context.Context, req DemoSurfacePresen
 			out.Status = DemoSurfacePresentationFailed
 			out.Reason = "screen_share_app_failed"
 			return out, err
+		}
+		if screenShareResultFailed(presented) {
+			out.Status = DemoSurfacePresentationFailed
+			out.Reason = "screen_share_app_failed"
+			return out, screenShareResultFailureError(out.Reason, presented)
 		}
 		return out, nil
 	}
@@ -121,6 +132,11 @@ func (p DemoSurfacePresenter) Present(ctx context.Context, req DemoSurfacePresen
 		out.Status = DemoSurfacePresentationFailed
 		out.Reason = "screen_share_present_failed"
 		return out, err
+	}
+	if screenShareResultFailed(presented) {
+		out.Status = DemoSurfacePresentationFailed
+		out.Reason = "screen_share_present_failed"
+		return out, screenShareResultFailureError(out.Reason, presented)
 	}
 	return out, nil
 }
@@ -140,9 +156,33 @@ func (p DemoSurfacePresenter) Stop(ctx context.Context, req DemoSurfaceStopReque
 		out.Reason = "screen_share_stop_failed"
 		return out, err
 	}
+	if screenShareResultFailed(stopped) {
+		out.Status = DemoSurfacePresentationFailed
+		out.Reason = "screen_share_stop_failed"
+		return out, screenShareResultFailureError(out.Reason, stopped)
+	}
 	out.Status = DemoSurfacePresentationStopped
 	out.Source = "screen_share_stop"
 	return out, nil
+}
+
+func screenShareResultFailed(result meetrunner.ScreenShareResult) bool {
+	if len(result) == 0 {
+		return false
+	}
+	ok, exists := result["ok"].(bool)
+	return exists && !ok
+}
+
+func screenShareResultFailureError(reason string, result meetrunner.ScreenShareResult) error {
+	detail := strings.TrimSpace(stringFromAny(result["error"]))
+	if detail == "" {
+		detail = strings.TrimSpace(stringFromAny(result["reason"]))
+	}
+	if detail == "" {
+		detail = "screen_share_result_not_ok"
+	}
+	return fmt.Errorf("%s: %s", reason, detail)
 }
 
 func (req DemoSurfacePresentRequest) appShareRequest(base ScreenShareRequest) (AppShareRequest, bool) {

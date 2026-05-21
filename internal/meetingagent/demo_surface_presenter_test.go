@@ -3,6 +3,7 @@ package meetingagent
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/AFK-surf/oneesama/internal/meetrunner"
@@ -18,25 +19,42 @@ type fakeDemoSurfaceShareClient struct {
 	presentErr error
 	appErr     error
 	stopErr    error
+
+	startResult   meetrunner.ScreenShareResult
+	presentResult meetrunner.ScreenShareResult
+	appResult     meetrunner.ScreenShareResult
+	stopResult    meetrunner.ScreenShareResult
 }
 
 func (f *fakeDemoSurfaceShareClient) StartScreenShare(_ context.Context, input ScreenShareRequest) (meetrunner.ScreenShareResult, error) {
 	f.startCalls = append(f.startCalls, input)
+	if f.startResult != nil {
+		return f.startResult, f.startErr
+	}
 	return meetrunner.ScreenShareResult{"ok": true, "op": "start", "mode": input.Mode, "title": input.Title}, f.startErr
 }
 
 func (f *fakeDemoSurfaceShareClient) PresentScreenShare(_ context.Context, input ScreenShareRequest) (meetrunner.ScreenShareResult, error) {
 	f.presentCalls = append(f.presentCalls, input)
+	if f.presentResult != nil {
+		return f.presentResult, f.presentErr
+	}
 	return meetrunner.ScreenShareResult{"ok": true, "op": "present", "mode": input.Mode, "title": input.Title}, f.presentErr
 }
 
 func (f *fakeDemoSurfaceShareClient) PresentAppShare(_ context.Context, input AppShareRequest) (meetrunner.ScreenShareResult, error) {
 	f.appCalls = append(f.appCalls, input)
+	if f.appResult != nil {
+		return f.appResult, f.appErr
+	}
 	return meetrunner.ScreenShareResult{"ok": true, "op": "app", "mode": input.Mode, "processId": input.ProcessID}, f.appErr
 }
 
 func (f *fakeDemoSurfaceShareClient) StopScreenShare(_ context.Context, input ScreenShareRequest) (meetrunner.ScreenShareResult, error) {
 	f.stopCalls = append(f.stopCalls, input)
+	if f.stopResult != nil {
+		return f.stopResult, f.stopErr
+	}
 	return meetrunner.ScreenShareResult{"ok": true, "op": "stop", "stopped": true}, f.stopErr
 }
 
@@ -135,6 +153,48 @@ func TestDemoSurfacePresenterFailsBeforePresentWhenStartFails(t *testing.T) {
 	}
 	if len(share.presentCalls) != 0 || len(share.appCalls) != 0 {
 		t.Fatalf("present/app called after start failure: present=%d app=%d", len(share.presentCalls), len(share.appCalls))
+	}
+}
+
+func TestDemoSurfacePresenterFailsBeforePresentWhenStartReturnsNotOK(t *testing.T) {
+	share := &fakeDemoSurfaceShareClient{
+		startResult: meetrunner.ScreenShareResult{"ok": false, "error": "no_active_join"},
+	}
+	presenter := DemoSurfacePresenter{Share: share}
+
+	result, err := presenter.Present(context.Background(), DemoSurfacePresentRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_session",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no_active_join") {
+		t.Fatalf("Present() error = %v, want no_active_join", err)
+	}
+	if result.Status != DemoSurfacePresentationFailed || result.Reason != "screen_share_start_failed" {
+		t.Fatalf("result = %#v, want start failure", result)
+	}
+	if len(share.presentCalls) != 0 || len(share.appCalls) != 0 {
+		t.Fatalf("present/app called after not-ok start: present=%d app=%d", len(share.presentCalls), len(share.appCalls))
+	}
+}
+
+func TestDemoSurfacePresenterFailsWhenStopReturnsNotOK(t *testing.T) {
+	share := &fakeDemoSurfaceShareClient{
+		stopResult: meetrunner.ScreenShareResult{"ok": false, "error": "no_active_join"},
+	}
+	presenter := DemoSurfacePresenter{Share: share}
+
+	result, err := presenter.Stop(context.Background(), DemoSurfaceStopRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_session",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no_active_join") {
+		t.Fatalf("Stop() error = %v, want no_active_join", err)
+	}
+	if result.Status != DemoSurfacePresentationFailed || result.Reason != "screen_share_stop_failed" {
+		t.Fatalf("result = %#v, want stop failure", result)
+	}
+	if len(share.stopCalls) != 1 {
+		t.Fatalf("stop calls = %#v", share.stopCalls)
 	}
 }
 
