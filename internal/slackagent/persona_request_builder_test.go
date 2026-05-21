@@ -118,6 +118,51 @@ func TestBuildSlackTriagePiFirstForegroundRequestCarriesRichContext(t *testing.T
 	}
 }
 
+func TestBuildSlackTriagePiFirstForegroundRequestBoundsWorkerScratchContext(t *testing.T) {
+	t.Parallel()
+
+	rawWorkerTail := "RAW_WORKER_TAIL_SHOULD_NOT_ENTER_PI"
+	hugeTranscript := "worker file read started\n" + strings.Repeat("file-chunk ", 800) + rawWorkerTail
+	previous := formatTriageContexts([]SlackTriageContext{{
+		Timestamp: "2026-05-21T12:00:00Z",
+		Status:    "failed",
+		Channels:  []string{"C_PI"},
+		Summary:   "worker failed after reading scratch logs",
+		RawOutput: "<oneesama_tool_request>" + strings.Repeat("raw-tool-log ", 100) + "</oneesama_tool_request>",
+		Error:     "timeout",
+	}})
+	req := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_PI",
+		ThreadTS:  "501.000",
+		Messages:  []SlackInboundMessage{{Text: "这个线程继续看一下"}},
+		ThreadContexts: []SlackTriageThreadContext{{
+			ChannelID:    "C_PI",
+			ThreadTS:     "501.000",
+			FetchOK:      true,
+			MessageCount: 1,
+			Transcript:   hugeTranscript,
+		}},
+		PreviousTriage: previous,
+	})
+
+	threadContext := personaContextText(req.Context, "slack_thread_context")
+	if len(threadContext) > slackThreadContextBudgetChars+3 {
+		t.Fatalf("slack_thread_context length = %d, want bounded", len(threadContext))
+	}
+	if strings.Contains(threadContext, rawWorkerTail) {
+		t.Fatalf("slack_thread_context leaked raw worker tail: %q", threadContext)
+	}
+	previousContext := personaContextText(req.Context, "previous_triage_context")
+	for _, banned := range []string{"<oneesama_tool_request>", "raw-tool-log"} {
+		if strings.Contains(previousContext, banned) {
+			t.Fatalf("previous_triage_context leaked raw worker scratch %q: %q", banned, previousContext)
+		}
+	}
+	if !strings.Contains(previousContext, "FAILED") {
+		t.Fatalf("previous_triage_context = %q, want compact failure status", previousContext)
+	}
+}
+
 func TestSlackPersonaStablePromptIgnoresDynamicWorkspaceInputs(t *testing.T) {
 	originalNow := timeNow
 	defer func() { timeNow = originalNow }()

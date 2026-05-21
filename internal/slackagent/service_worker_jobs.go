@@ -115,6 +115,7 @@ func (s *Service) syncSlackWorkerMemoryTurn(ctx context.Context, job agentrunner
 	if job.Status != agentrunner.StatusCompleted {
 		return
 	}
+	envelope := agentrunner.NewWorkerResultEnvelope(job)
 	userContent := slackWorkerTurnUserContent(job)
 	if strings.TrimSpace(userContent) == "" && strings.TrimSpace(assistantText) == "" {
 		return
@@ -124,11 +125,14 @@ func (s *Service) syncSlackWorkerMemoryTurn(ctx context.Context, job agentrunner
 		UserContent:      userContent,
 		AssistantContent: assistantText,
 		Metadata: map[string]any{
-			"source":     "slack_worker_result",
-			"job_id":     strings.TrimSpace(job.ID),
-			"channel_id": strings.TrimSpace(ref.ChannelID),
-			"thread_ts":  strings.TrimSpace(ref.ThreadTS),
-			"delivery":   strings.TrimSpace(delivery),
+			"source":                           "slack_worker_result",
+			"job_id":                           strings.TrimSpace(job.ID),
+			"channel_id":                       strings.TrimSpace(ref.ChannelID),
+			"thread_ts":                        strings.TrimSpace(ref.ThreadTS),
+			"delivery":                         strings.TrimSpace(delivery),
+			"worker_result_envelope_schema":    envelope.Schema,
+			"worker_result_envelope_truncated": envelope.Truncated,
+			"worker_result_chars":              envelope.ResultChars,
 		},
 	})
 }

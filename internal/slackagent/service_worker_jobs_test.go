@@ -126,6 +126,28 @@ func TestSlackWorkerResultTextUsesBoundedEnvelope(t *testing.T) {
 	}
 }
 
+func TestSlackWorkerPostFailsClosedWithoutVisibleFallback(t *testing.T) {
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{Poster: poster})
+	delivered := service.postSlackWorkerResult(context.Background(), agentrunner.Job{
+		ID:          "job_timeout",
+		Status:      agentrunner.StatusTimeout,
+		FailureCode: agentrunner.FailureTimeout,
+		Result:      "partial raw scratch: opened 200 files and started reading logs",
+		Error:       "job timed out",
+		Context: map[string]any{
+			"source": "slack-agent",
+			"slack":  map[string]any{"channelId": "C123", "threadTs": "177.123"},
+		},
+	})
+	if delivered {
+		t.Fatal("postSlackWorkerResult delivered timeout worker, want fail-closed silence")
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want no user-visible fallback", calls)
+	}
+}
+
 func TestSlackWorkerResultTextSilentOnNonCompletedStates(t *testing.T) {
 	// Every non-completed state must yield empty text so postSlackWorkerResult
 	// skips the Slack post entirely. Status is conveyed via the mention
@@ -255,5 +277,38 @@ func TestSlackWorkerToolRequestRejectsUnsafeSlackPost(t *testing.T) {
 	evidence := NewService(Config{}).executeSlackWorkerToolBridgeRequest(context.Background(), request, nil)
 	if len(evidence) != 1 || evidence[0].OK || !strings.Contains(evidence[0].Error, "not available") {
 		t.Fatalf("evidence = %#v, want rejected unsafe Slack post", evidence)
+	}
+}
+
+func TestSlackWorkerMemorySyncUsesBoundedEnvelopeNotRawScratch(t *testing.T) {
+	t.Parallel()
+
+	provider := &simpleRecordingMemoryProvider{name: "turn_fake", available: true}
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{
+		Slack:           appconfig.SlackConfig{WorkspaceDir: t.TempDir()},
+		MemoryProviders: []SlackMemoryProvider{provider},
+		Poster:          poster,
+	})
+	rawTailSentinel := "RAW_WORKER_TAIL_SHOULD_NOT_ENTER_MEMORY"
+	assistantText := "结论：这个 worker 有结果。\n" + strings.Repeat("scratch-log-line ", 1200) + rawTailSentinel
+
+	service.handleAgentRunnerUpdate(context.Background(), completedWorkerJob("job_turn_bounded", "session_turn_bounded", "查一下这个长日志", assistantText))
+
+	if len(provider.turns) != 1 {
+		t.Fatalf("provider turns = %#v, want one SyncTurn", provider.turns)
+	}
+	got := provider.turns[0]
+	if strings.Contains(got.AssistantContent, rawTailSentinel) {
+		t.Fatalf("AssistantContent leaked raw tail sentinel: %q", got.AssistantContent)
+	}
+	if len(got.AssistantContent) > slackMemoryProviderTurnBudgetChars+3 {
+		t.Fatalf("AssistantContent length = %d, want memory turn budget", len(got.AssistantContent))
+	}
+	if got.Metadata["worker_result_envelope_schema"] != agentrunner.WorkerResultEnvelopeSchema {
+		t.Fatalf("turn metadata = %#v, want worker result envelope schema", got.Metadata)
+	}
+	if got.Metadata["worker_result_envelope_truncated"] != true {
+		t.Fatalf("turn metadata = %#v, want truncated envelope marker", got.Metadata)
 	}
 }
