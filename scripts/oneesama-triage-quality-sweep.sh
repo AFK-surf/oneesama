@@ -72,6 +72,28 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
     (($run.metadata.triage_timeout_needs_retry // false)
       or ($run.metadata.triage_empty_final_needs_retry // false)
       or ($run.metadata.persona_foreground_orphan_needs_retry // false));
+  # task #285 follow-up (driver 2h sweep 2026-05-21 15:00): a no-action
+  # run that is actually a delegate_worker call with a non-empty
+  # worker_requests list does NOT belong in the narrative
+  # summary_intent_action_mismatch bucket. The operator triple here is
+  # (worker_requests, jobId, delivery_status) — different from the
+  # narrative bucket has (summary, marker). Classifier mirrors
+  # triageQualityRunDelegateNoVisibleAction in
+  # internal/slackagent/triage_quality_buckets.go.
+  def is_delegate_no_visible_action($run):
+    is_no_action($run)
+    and (meta($run; "persona_foreground").decision == "delegate_worker")
+    and (((meta($run; "persona_foreground").worker_requests // []) | length) > 0);
+  def delegate_job_id($run):
+    ([($run.tool_calls // [])[] | select(.tool == "agent_runner" and .action == "delegate_worker") | (.args // "")] | first // "")
+    | (capture("\"jobId\":\"(?<id>[^\"]+)\"") // {id: ""}) | .id;
+  def delegate_delivery_status($run):
+    (delegate_job_id($run)) as $jid
+    | if $jid == "" then "no_visible_job_id"
+      elif (($run.metadata.delegate_worker_failures // 0) > 0) then "delegate_failed_in_run"
+      elif (($run.metadata.delegate_worker_jobs_started // 0) == 0) then "delegate_not_started_in_run"
+      else "delegate_started_pending_worker_audit"
+      end;
   def brief($run):
     {
       id: $run.id,
@@ -129,6 +151,23 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         # task #285 follow-up #3: review buckets exclude runs where the
         # summary already names another agent / teammate as the handler;
         # those are info-tier (not operator-attention).
+        # task #285 follow-up (driver 2h sweep 2026-05-21 15:00):
+        # delegate_no_visible_action is the visibility-gap bucket — Pi
+        # made a real delegation call but the audit layer cannot see
+        # whether the worker started, was blocked, queued, or dropped.
+        # The sample carries (worker_requests, jobId, delivery_status)
+        # so an operator can decide without re-deriving from raw runs.
+        delegateNoVisibleAction: (
+          $runs
+          | map(
+              select(is_delegate_no_visible_action(.))
+              | brief(.) + {
+                  workerRequests: ((meta(.; "persona_foreground").worker_requests // []) | map(. | tostring | .[0:200])),
+                  jobId: delegate_job_id(.),
+                  deliveryStatus: delegate_delivery_status(.)
+                }
+            )
+        ),
         highContextNoAction: (
           $runs | map(
             select(
@@ -177,6 +216,9 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           | map(
               select(
                 is_no_action(.)
+                # bucket precedence: a real delegate_worker call belongs
+                # in delegateNoVisibleAction, not narrative mismatch.
+                and (is_delegate_no_visible_action(.) | not)
                 and ((($markers // []) | length) > 0)
                 and (
                   (.summary // "") as $raw
@@ -207,11 +249,11 @@ echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
-  "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length)",
+  "review: high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length) delegate_no_visible_action=\(.review.delegateNoVisibleAction | length)",
   "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length)"
 ' <"${tmpdir}/quality.json"
 
-if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
+if jq -e '((.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length) + (.review.delegateNoVisibleAction | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
   echo "oneesama-triage-quality-sweep: review candidates:" >&2
   jq -r '
     .review

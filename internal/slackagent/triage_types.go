@@ -298,12 +298,38 @@ type SlackTriageIntentActionMismatchSample struct {
 	MarkerMatched   string   `json:"markerMatched,omitempty"`
 }
 
+// SlackTriageDelegateNoVisibleActionSample surfaces no-action runs whose
+// `persona_foreground.decision` is `delegate_worker` and that carry a
+// non-empty `worker_requests` list. These are NOT narrative mismatches
+// (the persona made a real delegation call) — they are visibility gaps:
+// the audit layer cannot confirm the downstream worker started, was
+// blocked by policy, is still queued, or silently dropped. The operator
+// triple is (worker_requests, job_id, delivery_status).
+// Task #285 follow-up (driver 2h sweep 2026-05-21 15:00 review proposal).
+type SlackTriageDelegateNoVisibleActionSample struct {
+	Timestamp      string   `json:"timestamp,omitempty"`
+	RunID          int64    `json:"runId,omitempty"`
+	Channels       []string `json:"channels,omitempty"`
+	Summary        string   `json:"summary,omitempty"`
+	ActionsCount   int      `json:"actionsCount"`
+	WorkerRequests []string `json:"workerRequests,omitempty"`
+	JobID          string   `json:"jobId,omitempty"`
+	DeliveryStatus string   `json:"deliveryStatus,omitempty"`
+}
+
 // SlackTriageReviewBuckets aggregates per-bucket counts + capped sample
 // lists for the triage audit review surface. Buckets count all matching runs
 // in the window; samples are limited and ordered newest-first.
+//
+// Bucket precedence (most-specific first): a no-action run that matches
+// DelegateNoVisibleAction is NOT also counted in IntentActionMismatch,
+// because the failure mode + the evidence the operator needs are
+// different. See `buildSlackTriageReviewBuckets` for the dispatch order.
 type SlackTriageReviewBuckets struct {
-	IntentActionMismatchCount   int                                     `json:"intentActionMismatchCount"`
-	IntentActionMismatchSamples []SlackTriageIntentActionMismatchSample `json:"intentActionMismatchSamples,omitempty"`
+	DelegateNoVisibleActionCount   int                                        `json:"delegateNoVisibleActionCount"`
+	DelegateNoVisibleActionSamples []SlackTriageDelegateNoVisibleActionSample `json:"delegateNoVisibleActionSamples,omitempty"`
+	IntentActionMismatchCount      int                                        `json:"intentActionMismatchCount"`
+	IntentActionMismatchSamples    []SlackTriageIntentActionMismatchSample    `json:"intentActionMismatchSamples,omitempty"`
 }
 
 // SlackTriageHandledByOtherSample records a no-action run whose summary

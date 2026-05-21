@@ -2,6 +2,185 @@ package slackagent
 
 import "testing"
 
+// TestTriageQualityRunDelegateNoVisibleActionMatch pins the bucket conditions
+// for `delegate_no_visible_action` review samples. Driver 2h sweep
+// 2026-05-21 15:00 observed 2 runs with persona_foreground.decision=
+// delegate_worker + non-empty worker_requests but actions=[]/mutations=0
+// being miscategorised as narrative `summary_intent_action_mismatch`. The
+// split is conditional on metadata evidence (not summary text) so the
+// classifier here is a pure shape test against synthetic SlackTriageContext
+// values.
+func TestTriageQualityRunDelegateNoVisibleActionMatch(t *testing.T) {
+	mkRun := func(decision string, workerRequests any, toolCalls []SlackTriageToolCall, extra map[string]any) SlackTriageContext {
+		md := map[string]any{
+			"persona_foreground": map[string]any{
+				"decision":        decision,
+				"worker_requests": workerRequests,
+			},
+		}
+		for k, v := range extra {
+			md[k] = v
+		}
+		return SlackTriageContext{Metadata: md, ToolCalls: toolCalls}
+	}
+	cases := []struct {
+		name        string
+		run         SlackTriageContext
+		wantOK      bool
+		wantReqs    int
+		wantJobID   string
+		wantDeliver string
+	}{
+		{
+			name: "delegate_worker_with_worker_requests_and_job_id_matches",
+			run: mkRun("delegate_worker",
+				[]any{"codex: read file F0B5A71MVSM and report"},
+				[]SlackTriageToolCall{{Tool: "agent_runner", Action: "delegate_worker", Args: `{"jobId":"job_577ca8b2","parseOk":true,"provider":"codex"}`}},
+				map[string]any{"delegate_worker_jobs_started": 1},
+			),
+			wantOK:      true,
+			wantReqs:    1,
+			wantJobID:   "job_577ca8b2",
+			wantDeliver: "delegate_started_pending_worker_audit",
+		},
+		{
+			name: "delegate_worker_with_failures_marks_failed_delivery",
+			run: mkRun("delegate_worker",
+				[]any{"codex: do thing"},
+				[]SlackTriageToolCall{{Tool: "agent_runner", Action: "delegate_worker", Args: `{"jobId":"job_abc","provider":"codex"}`}},
+				map[string]any{"delegate_worker_jobs_started": 1, "delegate_worker_failures": 1},
+			),
+			wantOK:      true,
+			wantReqs:    1,
+			wantJobID:   "job_abc",
+			wantDeliver: "delegate_failed_in_run",
+		},
+		{
+			name: "delegate_worker_without_visible_job_id_records_status",
+			run: mkRun("delegate_worker",
+				[]string{"codex: do thing"},
+				nil,
+				nil,
+			),
+			wantOK:      true,
+			wantReqs:    1,
+			wantJobID:   "",
+			wantDeliver: "no_visible_job_id",
+		},
+		{
+			name: "stay_silent_decision_does_not_match",
+			run: mkRun("stay_silent",
+				[]any{"would have asked codex"},
+				nil,
+				nil,
+			),
+			wantOK: false,
+		},
+		{
+			name: "delegate_worker_with_empty_worker_requests_does_not_match",
+			run: mkRun("delegate_worker",
+				[]any{},
+				nil,
+				nil,
+			),
+			wantOK: false,
+		},
+		{
+			name: "delegate_worker_with_whitespace_only_worker_request_does_not_match",
+			run: mkRun("delegate_worker",
+				[]any{"  "},
+				nil,
+				nil,
+			),
+			wantOK: false,
+		},
+		{
+			name:   "run_without_persona_foreground_does_not_match",
+			run:    SlackTriageContext{Metadata: map[string]any{}},
+			wantOK: false,
+		},
+		{
+			name: "delegate_worker_jobs_started_zero_marks_not_started",
+			run: mkRun("delegate_worker",
+				[]any{"codex: do thing"},
+				[]SlackTriageToolCall{{Tool: "agent_runner", Action: "delegate_worker", Args: `{"jobId":"job_xyz"}`}},
+				map[string]any{"delegate_worker_jobs_started": 0},
+			),
+			wantOK:      true,
+			wantReqs:    1,
+			wantJobID:   "job_xyz",
+			wantDeliver: "delegate_not_started_in_run",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ev, ok := triageQualityRunDelegateNoVisibleAction(tc.run)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !tc.wantOK {
+				return
+			}
+			if len(ev.WorkerRequests) != tc.wantReqs {
+				t.Fatalf("WorkerRequests len = %d, want %d (%#v)", len(ev.WorkerRequests), tc.wantReqs, ev.WorkerRequests)
+			}
+			if ev.JobID != tc.wantJobID {
+				t.Fatalf("JobID = %q, want %q", ev.JobID, tc.wantJobID)
+			}
+			if ev.DeliveryStatus != tc.wantDeliver {
+				t.Fatalf("DeliveryStatus = %q, want %q", ev.DeliveryStatus, tc.wantDeliver)
+			}
+		})
+	}
+}
+
+// TestBuildSlackTriageReviewBucketsBucketPrecedence pins the dispatch
+// order: a no-action run that matches BOTH the delegate-no-visible-action
+// conditions AND the narrative intent_action_mismatch markers must land
+// ONLY in the delegate bucket. This is the explicit driver instruction
+// from the 2026-05-21 15:02 review thread message c00f5be0:
+// "别把 persona_foreground.decision=delegate_worker 且 worker_requests
+// 存在的样本继续归到 narrative mismatch".
+func TestBuildSlackTriageReviewBucketsBucketPrecedence(t *testing.T) {
+	delegateRun := SlackTriageContext{
+		ID:        1,
+		Timestamp: "2026-05-21T07:00:00Z",
+		Channels:  []string{"C_A"},
+		Summary:   "I should delegate this to codex and reply later", // contains the en intent markers too
+		Metadata: map[string]any{
+			"persona_foreground": map[string]any{
+				"decision":        "delegate_worker",
+				"worker_requests": []any{"codex: do thing"},
+			},
+			"delegate_worker_jobs_started": 1,
+		},
+		ToolCalls: []SlackTriageToolCall{{Tool: "agent_runner", Action: "delegate_worker", Args: `{"jobId":"job_dual"}`}},
+	}
+	pureMismatchRun := SlackTriageContext{
+		ID:        2,
+		Timestamp: "2026-05-21T07:01:00Z",
+		Channels:  []string{"C_B"},
+		Summary:   "Should delegate to codex but did nothing",
+		Metadata:  map[string]any{},
+	}
+	buckets := buildSlackTriageReviewBuckets([]SlackTriageContext{delegateRun, pureMismatchRun}, 8)
+	if buckets.DelegateNoVisibleActionCount != 1 {
+		t.Fatalf("DelegateNoVisibleActionCount = %d, want 1", buckets.DelegateNoVisibleActionCount)
+	}
+	if buckets.IntentActionMismatchCount != 1 {
+		t.Fatalf("IntentActionMismatchCount = %d, want 1 (only pureMismatchRun)", buckets.IntentActionMismatchCount)
+	}
+	if len(buckets.DelegateNoVisibleActionSamples) != 1 || buckets.DelegateNoVisibleActionSamples[0].RunID != 1 {
+		t.Fatalf("DelegateNoVisibleActionSamples = %#v, want one row for run 1", buckets.DelegateNoVisibleActionSamples)
+	}
+	if buckets.DelegateNoVisibleActionSamples[0].JobID != "job_dual" {
+		t.Fatalf("delegate sample JobID = %q, want job_dual", buckets.DelegateNoVisibleActionSamples[0].JobID)
+	}
+	if len(buckets.IntentActionMismatchSamples) != 1 || buckets.IntentActionMismatchSamples[0].RunID != 2 {
+		t.Fatalf("IntentActionMismatchSamples = %#v, want one row for run 2", buckets.IntentActionMismatchSamples)
+	}
+}
+
 // TestSlackTriageQualityBucketThresholdsMatrix pins the per-run quality
 // bucket thresholds shared between the daily report's bucketing logic and
 // the operational triage quality sweep script. Task #285. If a threshold

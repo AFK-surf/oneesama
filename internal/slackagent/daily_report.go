@@ -95,9 +95,10 @@ type SlackDailyTriageMetrics struct {
 	LinkContextRuns       int            `json:"link_context_runs"`
 	LinkContextNoAction   int            `json:"link_context_no_action"`
 	LinkReplies           int            `json:"link_replies"`
-	LowConfidenceNoAction  int            `json:"low_confidence_no_action"`
-	IntentActionMismatch   int            `json:"intent_action_mismatch"`
-	HandledByOtherNoAction int            `json:"handled_by_other_no_action"`
+	LowConfidenceNoAction     int            `json:"low_confidence_no_action"`
+	IntentActionMismatch      int            `json:"intent_action_mismatch"`
+	DelegateNoVisibleAction   int            `json:"delegate_no_visible_action"`
+	HandledByOtherNoAction    int            `json:"handled_by_other_no_action"`
 	ToolCalls             int            `json:"tool_calls"`
 	MemoryLookups         int            `json:"memory_lookups"`
 	ExternalSearches      int            `json:"external_searches"`
@@ -550,8 +551,15 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 			if slackDailyReportLowConfidenceNoAction(run) {
 				metrics.LowConfidenceNoAction++
 			}
-			if len(run.Actions) == 0 && run.Mutations == 0 && triageQualityIntentActionMismatchMatch(run.Summary) != "" {
-				metrics.IntentActionMismatch++
+			if len(run.Actions) == 0 && run.Mutations == 0 {
+				// Bucket precedence matches buildSlackTriageReviewBuckets:
+				// delegate_no_visible_action takes priority over the
+				// summary-narrative intent_action_mismatch bucket.
+				if _, ok := triageQualityRunDelegateNoVisibleAction(run); ok {
+					metrics.DelegateNoVisibleAction++
+				} else if triageQualityIntentActionMismatchMatch(run.Summary) != "" {
+					metrics.IntentActionMismatch++
+				}
 			}
 		}
 		if raw, ok := mapFromAny(run.Metadata["persona_foreground"]); ok {

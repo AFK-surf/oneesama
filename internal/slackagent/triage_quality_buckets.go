@@ -101,6 +101,129 @@ var triageQualityIntentActionMismatchNegations = []string{
 	"不必",
 }
 
+// triageQualityDelegateNoVisibleAction holds the evidence extracted from a
+// no-action run whose `persona_foreground.decision` is `delegate_worker`
+// and that carries a non-empty `worker_requests` list. These runs land in
+// their own review bucket (separate from `summary_intent_action_mismatch`)
+// because the failure mode is different — Pi correctly requested
+// delegation, but the audit layer cannot see whether the downstream job
+// actually started, was blocked by policy, is still queued, or silently
+// dropped. Operator needs the worker_requests + job_id + delivery_status
+// triple to decide. Task #285 follow-up (driver 2h sweep 2026-05-21 15:00
+// review proposal).
+type triageQualityDelegateNoVisibleAction struct {
+	WorkerRequests []string
+	JobID          string
+	DeliveryStatus string
+}
+
+// triageQualityRunDelegateNoVisibleAction returns the extracted evidence
+// when the run matches the bucket conditions, or ok=false when it does
+// not. Conditions (caller must have already filtered actions=[] +
+// mutations=0):
+//
+//   - metadata.persona_foreground.decision == "delegate_worker"
+//   - metadata.persona_foreground.worker_requests is non-empty
+//
+// This bucket takes precedence over intent_action_mismatch because the
+// evidence triple is different (and the user-visible failure shape is
+// different).
+func triageQualityRunDelegateNoVisibleAction(run SlackTriageContext) (triageQualityDelegateNoVisibleAction, bool) {
+	out := triageQualityDelegateNoVisibleAction{}
+	raw, ok := mapFromAny(run.Metadata["persona_foreground"])
+	if !ok {
+		return out, false
+	}
+	if strings.TrimSpace(stringFromAny(raw["decision"])) != "delegate_worker" {
+		return out, false
+	}
+	requests := triageQualityStringSliceFromAny(raw["worker_requests"])
+	if len(requests) == 0 {
+		return out, false
+	}
+	out.WorkerRequests = requests
+	out.JobID = triageQualityExtractDelegateJobID(run.ToolCalls)
+	out.DeliveryStatus = triageQualityDelegateDeliveryStatus(run, out.JobID)
+	return out, true
+}
+
+// triageQualityStringSliceFromAny mirrors the test-only stringSliceFromAny
+// helper, scoped here so production triage code can pull worker_requests
+// from the persona_foreground metadata blob without taking a dependency on
+// the test file.
+func triageQualityStringSliceFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, s := range typed {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			s := strings.TrimSpace(stringFromAny(item))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// triageQualityExtractDelegateJobID scans the run's tool_calls for the
+// agent_runner / delegate_worker tool-call and pulls `jobId` out of its
+// JSON args. Returns "" if no match.
+func triageQualityExtractDelegateJobID(calls []SlackTriageToolCall) string {
+	for _, call := range calls {
+		if strings.TrimSpace(call.Tool) != "agent_runner" || strings.TrimSpace(call.Action) != "delegate_worker" {
+			continue
+		}
+		args := strings.TrimSpace(call.Args)
+		if args == "" {
+			continue
+		}
+		// args is a stringified JSON blob, e.g. {"jobId":"job_xxx","parseOk":true,"provider":"codex"}.
+		// Keep parsing local + tolerant; operator value is in the jobId substring even when other fields drift.
+		const marker = `"jobId":"`
+		idx := strings.Index(args, marker)
+		if idx < 0 {
+			continue
+		}
+		rest := args[idx+len(marker):]
+		end := strings.Index(rest, `"`)
+		if end < 0 {
+			continue
+		}
+		return strings.TrimSpace(rest[:end])
+	}
+	return ""
+}
+
+// triageQualityDelegateDeliveryStatus encodes what the audit layer can
+// observe about the requested delegation without crossing into worker
+// runtime internals. Today the persona_foreground metadata carries the
+// minimum we need; richer status (deliveredToSlack / finalReply present)
+// requires a worker_reports cross-reference and is left to a follow-up.
+func triageQualityDelegateDeliveryStatus(run SlackTriageContext, jobID string) string {
+	if jobID == "" {
+		return "no_visible_job_id"
+	}
+	if intFromAny(run.Metadata["delegate_worker_failures"]) > 0 {
+		return "delegate_failed_in_run"
+	}
+	started := intFromAny(run.Metadata["delegate_worker_jobs_started"])
+	if started == 0 {
+		return "delegate_not_started_in_run"
+	}
+	return "delegate_started_pending_worker_audit"
+}
+
 // triageQualityIntentActionMismatchMatch returns the first marker that
 // triggered the bucket so callers can record it in the review sample for
 // operator clarity. Returns empty string when no marker is present, the

@@ -154,9 +154,33 @@ func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) S
 		if len(run.Actions) > 0 || run.Mutations > 0 {
 			continue
 		}
-		// Skip handled-by-other runs from intent-action mismatch sampling too;
-		// they belong in the info tier, not the review tier. Task #285 follow-up #3.
+		// Skip handled-by-other runs from review-tier sampling; they belong
+		// in the info tier, not the review tier. Task #285 follow-up #3.
 		if triageQualityRunIsHandledByOther(run.Summary) != "" {
+			continue
+		}
+		// Bucket precedence: a no-action run that actually requested a
+		// delegate_worker (persona_foreground.decision=delegate_worker +
+		// non-empty worker_requests) goes to the delegate-no-visible-action
+		// bucket and is NOT also counted as a narrative
+		// intent-action-mismatch. The two failure modes need different
+		// operator evidence — see SlackTriageReviewBuckets doc and the
+		// triage_quality_buckets.go classifier. Task #285 follow-up
+		// (driver 2h sweep 2026-05-21 15:00 review proposal).
+		if evidence, ok := triageQualityRunDelegateNoVisibleAction(run); ok {
+			out.DelegateNoVisibleActionCount++
+			if sampleLimit > 0 && len(out.DelegateNoVisibleActionSamples) < sampleLimit {
+				out.DelegateNoVisibleActionSamples = append(out.DelegateNoVisibleActionSamples, SlackTriageDelegateNoVisibleActionSample{
+					Timestamp:      run.Timestamp,
+					RunID:          run.ID,
+					Channels:       run.Channels,
+					Summary:        slackTriageFailureSampleText(run.Summary),
+					ActionsCount:   len(run.Actions),
+					WorkerRequests: evidence.WorkerRequests,
+					JobID:          evidence.JobID,
+					DeliveryStatus: evidence.DeliveryStatus,
+				})
+			}
 			continue
 		}
 		marker := triageQualityIntentActionMismatchMatch(run.Summary)
