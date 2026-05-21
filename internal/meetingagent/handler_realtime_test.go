@@ -77,7 +77,7 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 		strings.Contains(instructions, "worker") {
 		t.Fatalf("instructions leaked identity/mechanism details: %q", instructions)
 	}
-	if !toolNamesInclude(body["tools"].([]any), "delegate_to_worker", "present_video_stage", "update_avatar_state", "resolve_speaker_identity") {
+	if !toolNamesInclude(body["tools"].([]any), "delegate_to_worker", "present_video_stage", "start_demo_surface", "cancel_demo_surface", "update_avatar_state", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
 	}
 }
@@ -292,6 +292,53 @@ func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
 	}
 }
 
+func TestRealtimeDemoSurfaceToolsUseBridge(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	lifecycle := NewDemoWorkspaceLifecycle(rootDir, &fakeDemoWorkspaceLauncher{process: &fakeDemoWorkspaceProcess{pid: 6001}})
+	kwwk := NewFakeDemoKWWKClient()
+	kwwk.QueueResult(DemoKWWKActionResult{
+		Summary:    "Demo page opened for the meeting.",
+		Confidence: 0.9,
+	})
+	bridge := &RealtimeDemoBridge{
+		Lifecycle: lifecycle,
+		Controller: DemoController{
+			Client: kwwk,
+			Safety: DemoSafetyPolicy{
+				URLAllowlistPatterns: []string{"https://example.test/"},
+			},
+		},
+		Presenter:    DemoSurfacePresenter{Share: &fakeDemoSurfaceShareClient{}},
+		Store:        NewDemoSessionStore(),
+		Observations: NewDemoObservationBus(),
+	}
+	router := newRealtimeTestRouterWithDemoBridge(t, appconfig.OpenAIConfig{}, bridge)
+
+	start := httptest.NewRecorder()
+	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","url":"https://example.test/demo","goal":"show it"}`))
+	if start.Code != http.StatusOK {
+		t.Fatalf("start status = %d: %s", start.Code, start.Body.String())
+	}
+	var startBody map[string]any
+	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	if startBody["ok"] != true || startBody["session_id"] != "demo_tool" || !strings.Contains(stringFromAny(startBody["observation_context"]), "Demo page opened") {
+		t.Fatalf("start body = %#v, want demo observation", startBody)
+	}
+
+	cancel := httptest.NewRecorder()
+	router.ServeHTTP(cancel, realtimeRequest(http.MethodPost, "/tools/cancel_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","reason":"done"}`))
+	if cancel.Code != http.StatusOK {
+		t.Fatalf("cancel status = %d: %s", cancel.Code, cancel.Body.String())
+	}
+	var cancelBody map[string]any
+	decodeRealtimeBody(t, cancel.Body.String(), &cancelBody)
+	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
+		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
+	}
+}
+
 func TestResolveSpeakerIdentityFusesSlackAndPeopleMemory(t *testing.T) {
 	t.Parallel()
 
@@ -452,6 +499,11 @@ func TestResolveSpeakerIdentityDisambiguatesAndFailsClosed(t *testing.T) {
 
 func newRealtimeTestRouter(t *testing.T, openai appconfig.OpenAIConfig) http.Handler {
 	t.Helper()
+	return newRealtimeTestRouterWithDemoBridge(t, openai, nil)
+}
+
+func newRealtimeTestRouterWithDemoBridge(t *testing.T, openai appconfig.OpenAIConfig, demoBridge *RealtimeDemoBridge) http.Handler {
+	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rootDir := t.TempDir()
@@ -463,6 +515,7 @@ func newRealtimeTestRouter(t *testing.T, openai appconfig.OpenAIConfig) http.Han
 		Pipeline:         postmeeting.NewPipeline(rootDir),
 		OpenAI:           openai,
 		MeetRunner:       fakeMeetRunner{},
+		DemoBridge:       demoBridge,
 	})
 	return httpserver.New("meeting-agent", logger, []string{"*"}, NewHandler(service))
 }

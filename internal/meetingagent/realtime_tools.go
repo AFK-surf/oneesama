@@ -60,6 +60,20 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"applicationName":  stringSchema("Application name from list_shareable_apps."),
 			"mode":             enumStringSchema("native", "native", "synthetic"),
 		})),
+		realtimeTool("start_demo_surface", "Start a bot-owned Computer Use demo surface for show-and-tell work. Use when the user asks you to open a page, demonstrate something visually, or inspect a UI while continuing the meeting conversation.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"url":             stringSchema("HTTP(S) URL to open in the bot-owned demo workspace."),
+			"goal":            stringSchema("Short user-facing goal for the demo, e.g. 'show the dashboard trend'."),
+			"instruction":     stringSchema("Internal instruction for the Computer Use adapter. Do not include secrets."),
+			"title":           stringSchema("Visible title for the shared demo surface."),
+			"subtitle":        stringSchema("Visible subtitle for the shared demo surface."),
+			"session_id":      stringSchema("Current meeting session id when known."),
+			"demo_session_id": stringSchema("Optional stable demo session id for audit/reuse."),
+		})),
+		realtimeTool("cancel_demo_surface", "Cancel and stop the active bot-owned Computer Use demo surface.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"session_id":      stringSchema("Current meeting session id when known."),
+			"demo_session_id": stringSchema("Demo session id to cancel. Omit to cancel the active demo session."),
+			"reason":          stringSchema("Short cancellation reason."),
+		})),
 		realtimeTool("read_meet_chat", "Read recent visible Google Meet chat messages and links from the current meeting.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"limit":     integerSchema("", float64(10)),
 			"onlyLinks": boolSchema(false),

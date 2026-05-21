@@ -164,6 +164,51 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
+    name: "start_demo_surface",
+    description:
+      "Start a bot-owned Computer Use demo surface for show-and-tell work. Use when the user asks you to open a page, demonstrate something visually, or inspect a UI while continuing the meeting conversation.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "HTTP(S) URL to open in the bot-owned demo workspace." },
+        goal: {
+          type: "string",
+          description: "Short user-facing goal for the demo, e.g. 'show the dashboard trend'.",
+        },
+        instruction: {
+          type: "string",
+          description: "Internal instruction for the Computer Use adapter. Do not include secrets.",
+        },
+        title: { type: "string", description: "Visible title for the shared demo surface." },
+        subtitle: { type: "string", description: "Visible subtitle for the shared demo surface." },
+        session_id: { type: "string", description: "Current meeting session id when known." },
+        demo_session_id: {
+          type: "string",
+          description: "Optional stable demo session id for audit/reuse.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "cancel_demo_surface",
+    description: "Cancel and stop the active bot-owned Computer Use demo surface.",
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "string", description: "Current meeting session id when known." },
+        demo_session_id: {
+          type: "string",
+          description: "Demo session id to cancel. Omit to cancel the active demo session.",
+        },
+        reason: { type: "string", description: "Short cancellation reason." },
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
     name: "read_meet_chat",
     description:
       "Read recent visible Google Meet chat messages and links from the current meeting.",

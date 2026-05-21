@@ -87,6 +87,36 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			"date":     now.Format("2006-01-02"),
 			"time":     now.Format("15:04:05"),
 		})
+	case "start_demo_surface":
+		var input RealtimeDemoSurfaceStartRequest
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"ok":    false,
+				"error": "invalid_json",
+			})
+			return
+		}
+		result, err := h.service.StartRealtimeDemoSurface(c.Request.Context(), input)
+		if err != nil {
+			c.JSON(realtimeDemoBridgeHTTPStatus(err), result)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	case "cancel_demo_surface":
+		var input RealtimeDemoSurfaceCancelRequest
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"ok":    false,
+				"error": "invalid_json",
+			})
+			return
+		}
+		result, err := h.service.CancelRealtimeDemoSurface(c.Request.Context(), input)
+		if err != nil {
+			c.JSON(realtimeDemoBridgeHTTPStatus(err), result)
+			return
+		}
+		c.JSON(http.StatusOK, result)
 	default:
 		c.JSON(http.StatusNotImplemented, gin.H{
 			"ok":    false,

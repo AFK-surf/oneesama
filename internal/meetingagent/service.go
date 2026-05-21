@@ -38,6 +38,7 @@ type Config struct {
 	SlackAPIBaseURL    string
 	Dialog             appconfig.DialogConfig
 	HTTPClient         *http.Client
+	DemoBridge         *RealtimeDemoBridge
 }
 
 type Service struct {
@@ -73,6 +74,7 @@ type Service struct {
 	slackAPIBaseURL     string
 	dialog              appconfig.DialogConfig
 	httpClient          *http.Client
+	demoBridge          *RealtimeDemoBridge
 	meetdWake           chan struct{}
 	meetdRuntimeCancel  context.CancelFunc
 	meetdRuntimeDone    chan struct{}
@@ -122,6 +124,7 @@ func NewService(cfg Config) *Service {
 		slackAPIBaseURL:    strings.TrimRight(strings.TrimSpace(cfg.SlackAPIBaseURL), "/"),
 		dialog:             cfg.Dialog,
 		httpClient:         cfg.HTTPClient,
+		demoBridge:         cfg.DemoBridge,
 		meetdWake:          make(chan struct{}, 1),
 	}
 	if service.httpClient == nil {
