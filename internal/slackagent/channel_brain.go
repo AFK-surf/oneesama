@@ -143,6 +143,13 @@ func channelBrainTextLooksLikeNoActionRationale(summary string) bool {
 		"无会议链接",
 		"foreground triage pending",
 		"pi-first foreground triage pending",
+		"不直接下场查 repo",
+		"项目 owner 处理",
+		"明确授权我查 oneesama",
+		"整理成 brief",
+		"not directly inspect the repo",
+		"project owner",
+		"explicitly authorize me",
 	} {
 		if strings.Contains(lower, phrase) || strings.Contains(summary, phrase) {
 			return true

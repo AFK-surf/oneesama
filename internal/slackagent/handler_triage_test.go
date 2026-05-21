@@ -1267,6 +1267,23 @@ func TestChannelBrainSanitizesStoredNoActionRationaleLines(t *testing.T) {
 	}
 }
 
+func TestChannelBrainSanitizesCannedSecretaryRoutingText(t *testing.T) {
+	raw := strings.Join([]string{
+		"Shared open loops:",
+		"- [thread 1779381024.001839] updated=2026-05-21T16:31:44Z 这看起来是具体项目代码/环境问题，我先不直接下场查 repo。更适合走项目 owner 处理；我可以帮忙把现象、链接和影响面整理成 brief，或者在你明确授权我查 Oneesama 自身/指定代码时再派 worker。",
+		"",
+		"Shared facts and conventions:",
+		"- Decision: product-adjacent link replies should cite workspace memory.",
+	}, "\n")
+	summary := sanitizeChannelBrainSummary(raw)
+	if strings.Contains(summary, "不直接下场查 repo") || strings.Contains(summary, "project owner") || strings.Contains(summary, "整理成 brief") {
+		t.Fatalf("summary retained canned secretary routing text:\n%s", summary)
+	}
+	if !strings.Contains(summary, "product-adjacent link replies") {
+		t.Fatalf("summary missing valid content:\n%s", summary)
+	}
+}
+
 func TestChannelBrainSanitizesEmptySectionsAndInternalPending(t *testing.T) {
 	raw := strings.Join([]string{
 		"Shared open loops:",
