@@ -49,6 +49,7 @@ still load-bearing reference for "why does the code look like this".
 | `notes/rfc/foreground-cognition-pivot-rfc-2026-05-19.md` | Accepted (drove tasks #200 through #237). | Establishes the persona-runtime + secretary boundary that the Pi runtime + delegation policy now enforce. |
 | `notes/rfc/secretary-routing-delegation-rfc-2026-05-21.md` | Accepted (implemented in task #283). | Tightens `delegate_worker` to bounded secretary scope; covers prompt + Go guard + canary fixtures. |
 | `notes/rfc/kwwk-cu-demo-surface-poc-rfc-2026-05-21.md` | Proposed (task #304). | Splits the mainline-bound KWWK / Computer Use meeting demo-surface POC into independently testable lifecycle, adapter, controller, presentation, realtime, feedback, safety, and audit/runbook slices. |
+| `notes/rfc/kwwk-cu-demo-surface-runbook-2026-05-21.md` | Operator runbook (task #312). | Start/inspect/stop a host-run demo session, where audit rows live, and the mainline integration gate checklist before the POC modules ship behind the meeting runtime flag. |
 
 ## Maintenance rules
 
