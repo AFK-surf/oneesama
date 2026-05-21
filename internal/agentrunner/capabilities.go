@@ -9,12 +9,14 @@ const (
 	SessionKindCompact        = "memory_compact"
 	SessionKindMeetingCalib   = "meeting_calibrate"
 	SessionKindMeetingSummary = "meeting_summary"
+	SessionKindDemoSurface    = "meeting_demo_surface"
 
 	SessionRoleAssistant      = "assistant"
 	SessionRolePlanner        = "planner"
 	SessionRoleMeetingCopilot = "meeting_copilot"
 	SessionRoleCompact        = "compact"
 	SessionRoleCompletionOnly = "completion_only"
+	SessionRoleDemoSurface    = "demo_surface"
 )
 
 type SessionCapabilities struct {
@@ -49,6 +51,13 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 	switch normalized {
 	case SessionKindMeetingCalib, SessionKindMeetingSummary:
 		return newCapabilities(normalized, SessionRoleCompletionOnly, nil, nil)
+	case SessionKindDemoSurface:
+		return newCapabilities(normalized, SessionRoleDemoSurface, nil, []string{
+			"send_meeting_chat",
+			"notify_meeting_slack",
+			"slack_api",
+			"send_message",
+		})
 	case SessionKindMeetingCopilot:
 		return newCapabilities(normalized, SessionRoleMeetingCopilot, []string{
 			"send_meeting_chat",
@@ -110,6 +119,8 @@ func NormalizeSessionKind(kind string) string {
 		return SessionKindMeetingCalib
 	case "meeting-summary", "summary":
 		return SessionKindMeetingSummary
+	case "meeting-demo-surface", "demo-surface", "demo-surface-browser", "browser-demo-surface":
+		return SessionKindDemoSurface
 	default:
 		return SessionKindSlack
 	}

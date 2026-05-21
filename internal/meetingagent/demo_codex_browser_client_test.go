@@ -104,9 +104,21 @@ func TestDemoCodexBrowserClientStartsWorkerAndParsesStructuredObservation(t *tes
 		runner.startInput.AllowCodeChanges {
 		t.Fatalf("start input = %#v, want browser-use read-only task", runner.startInput)
 	}
-	if runner.startInput.Context["session_kind"] != agentrunner.SessionKindMeetingCopilot ||
+	if runner.startInput.Context["session_kind"] != agentrunner.SessionKindDemoSurface ||
 		runner.startInput.Context["adapter"] != string(DemoKWWKAdapterCodex) {
-		t.Fatalf("context = %#v, want meeting copilot codex context", runner.startInput.Context)
+		t.Fatalf("context = %#v, want demo surface codex context", runner.startInput.Context)
+	}
+	capabilities, ok := runner.startInput.Context["session_capabilities"].(agentrunner.SessionCapabilities)
+	if !ok {
+		t.Fatalf("session_capabilities = %#v, want agentrunner.SessionCapabilities", runner.startInput.Context["session_capabilities"])
+	}
+	if demoCodexContainsString(capabilities.AllowedTools, "send_meeting_chat") ||
+		!demoCodexContainsString(capabilities.BlockedTools, "send_meeting_chat") ||
+		!demoCodexContainsString(capabilities.BlockedTools, "notify_meeting_slack") {
+		t.Fatalf("capabilities = %#v, want meeting/slack mutation tools blocked", capabilities)
+	}
+	if !strings.Contains(runner.startInput.Task, "Do not call meeting, Slack, or messaging tools") {
+		t.Fatalf("task prompt missing mutation-tool prohibition:\n%s", runner.startInput.Task)
 	}
 	if result.Source != demoCodexBrowserObservationSource || result.Summary != "Loaded the product dashboard and saw a green status panel." {
 		t.Fatalf("result = %#v, want codex observation", result)
@@ -120,6 +132,56 @@ func TestDemoCodexBrowserClientStartsWorkerAndParsesStructuredObservation(t *tes
 	if !result.CreatedAt.Equal(now) {
 		t.Fatalf("CreatedAt = %s, want %s", result.CreatedAt, now)
 	}
+}
+
+func TestDemoCodexBrowserClientProtectsReservedMetadataAndUnstructuredFallback(t *testing.T) {
+	t.Run("reserved metadata cannot override adapter fields", func(t *testing.T) {
+		runner := &fakeDemoCodexRunner{
+			startJob: agentrunner.Job{
+				ID:       "job_real",
+				Provider: "codex",
+				Status:   agentrunner.StatusCompleted,
+				Result:   `{"summary":"Loaded page.","confidence":0.8,"metadata":{"job_id":"spoofed","provider":"spoofed","custom":"kept"}}`,
+			},
+		}
+		client := NewDemoCodexBrowserClient(runner)
+
+		result, err := client.DoDemoAction(context.Background(), DemoKWWKActionRequest{
+			Session: DemoKWWKSessionRef{SessionID: "demo_reserved"},
+			Kind:    DemoActionOpenURL,
+			URL:     "https://example.test/demo",
+		})
+		if err != nil {
+			t.Fatalf("DoDemoAction() error = %v", err)
+		}
+		if result.Metadata["job_id"] != "job_real" || result.Metadata["provider"] != "codex" || result.Metadata["custom"] != "kept" {
+			t.Fatalf("metadata = %#v, want reserved adapter keys preserved and custom metadata kept", result.Metadata)
+		}
+	})
+
+	t.Run("unstructured worker output stays user-safe and low confidence", func(t *testing.T) {
+		runner := &fakeDemoCodexRunner{
+			startJob: agentrunner.Job{
+				ID:       "job_plain",
+				Provider: "codex",
+				Status:   agentrunner.StatusCompleted,
+				Result:   "I opened the page but forgot JSON.",
+			},
+		}
+		client := NewDemoCodexBrowserClient(runner)
+
+		result, err := client.DoDemoAction(context.Background(), DemoKWWKActionRequest{
+			Session: DemoKWWKSessionRef{SessionID: "demo_plain"},
+			Kind:    DemoActionOpenURL,
+			URL:     "https://example.test/demo",
+		})
+		if err != nil {
+			t.Fatalf("DoDemoAction() error = %v", err)
+		}
+		if result.Summary != "I could not verify the demo surface yet." || result.Confidence >= defaultDemoFeedbackConfidenceFloor {
+			t.Fatalf("result = %#v, want user-safe low-confidence fallback", result)
+		}
+	})
 }
 
 func TestDemoCodexBrowserClientParsesMarkdownFencedJSON(t *testing.T) {
@@ -201,4 +263,13 @@ func TestDemoCodexBrowserClientRequiresRunner(t *testing.T) {
 	if !errors.Is(err, errDemoCodexRunnerRequired) {
 		t.Fatalf("DoDemoAction() error = %v, want errDemoCodexRunnerRequired", err)
 	}
+}
+
+func demoCodexContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

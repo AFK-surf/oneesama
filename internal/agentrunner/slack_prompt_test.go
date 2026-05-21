@@ -29,6 +29,38 @@ func TestBuildPromptUsesWorkspaceAssistantForSlackSessions(t *testing.T) {
 	}
 }
 
+func TestBuildPromptUsesDemoSurfaceWorkerForDemoSurfaceSessions(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task:             `Return {"summary":"ok","confidence":1}`,
+		Mode:             "analysis",
+		AllowCodeChanges: false,
+		Context: map[string]any{
+			"adapter": "codex",
+			"url":     "https://example.test/demo",
+		},
+	}, SessionKindDemoSurface))
+
+	for _, want := range []string{
+		"read-only browser observation worker",
+		"Do not call meeting, Slack, or messaging tools",
+		"Return exactly the JSON object requested by the task",
+		`"session_kind": "meeting_demo_surface"`,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"background worker for the oneesama Go rewrite",
+		"Answer in concise Chinese",
+		"workspace assistant operating inside a Slack workspace",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("demo surface prompt leaked forbidden phrase %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestBuildPromptReadsSlackAppMentionPromptFromGenericContext(t *testing.T) {
 	prompt := buildPrompt(StartInput{
 		Task: "看看补充的信息",

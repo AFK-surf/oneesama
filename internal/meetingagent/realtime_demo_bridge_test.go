@@ -2,6 +2,7 @@ package meetingagent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -214,7 +215,8 @@ func TestRealtimeDemoBridgeCancelPresentationFailureStillStopsWorkspace(t *testi
 
 func TestRealtimeDemoBridgeMissingControllerRecordsFailedObservation(t *testing.T) {
 	now := time.Date(2026, 5, 21, 14, 30, 0, 0, time.UTC)
-	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: &fakeDemoWorkspaceProcess{pid: 5153}})
+	process := &fakeDemoWorkspaceProcess{pid: 5153}
+	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: process})
 	lifecycle.now = func() time.Time { return now }
 	bridge := &RealtimeDemoBridge{
 		Lifecycle:    lifecycle,
@@ -237,8 +239,105 @@ func TestRealtimeDemoBridgeMissingControllerRecordsFailedObservation(t *testing.
 	if result.Observation == nil || result.Observation.Kind != demoObservationKindFailed {
 		t.Fatalf("observation = %#v, want failed observation", result.Observation)
 	}
+	if result.Workspace == nil || result.Workspace.Status != DemoWorkspaceStatusStopped || !process.stopped {
+		t.Fatalf("workspace = %#v stopped=%v, want stopped after failed observation", result.Workspace, process.stopped)
+	}
+	if _, ok := lifecycle.ActiveSession(); ok {
+		t.Fatalf("active session still present after missing controller")
+	}
 	if !strings.Contains(result.ObservationContext, "controller_missing") {
 		t.Fatalf("observation context = %q, want controller_missing", result.ObservationContext)
+	}
+}
+
+func TestRealtimeDemoBridgeStartAdapterFailureStopsWorkspace(t *testing.T) {
+	now := time.Date(2026, 5, 21, 17, 20, 0, 0, time.UTC)
+	process := &fakeDemoWorkspaceProcess{pid: 5156}
+	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: process})
+	lifecycle.now = func() time.Time { return now }
+	client := NewFakeDemoKWWKClient()
+	client.SetError(context.DeadlineExceeded)
+	share := &fakeDemoSurfaceShareClient{}
+	store := NewDemoSessionStore().WithClock(func() time.Time { return now })
+	bridge := &RealtimeDemoBridge{
+		Lifecycle: lifecycle,
+		Presenter: DemoSurfacePresenter{Share: share},
+		Controller: DemoController{
+			Client: client,
+			Safety: DemoSafetyPolicy{
+				URLAllowlistPatterns: []string{"https://example.test/"},
+			},
+			Now: func() time.Time { return now },
+		},
+		Store:        store,
+		Observations: NewDemoObservationBus(),
+	}
+
+	result, err := bridge.Start(context.Background(), RealtimeDemoSurfaceStartRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_adapter_fail",
+		URL:              "https://example.test/dashboard",
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Start() error = %v, want deadline exceeded", err)
+	}
+	if result.OK || result.Status != realtimeDemoBridgeStatusFailed || result.Workspace == nil || result.Workspace.Status != DemoWorkspaceStatusStopped {
+		t.Fatalf("result = %#v, want failed with stopped workspace", result)
+	}
+	if !process.stopped || len(share.stopCalls) != 1 {
+		t.Fatalf("process stopped=%v stopCalls=%d, want cleanup after adapter failure", process.stopped, len(share.stopCalls))
+	}
+	if _, ok := lifecycle.ActiveSession(); ok {
+		t.Fatalf("active session still present after adapter failure")
+	}
+	entries, ok := store.Entries("demo_adapter_fail")
+	if !ok || len(entries) != 3 || entries[1].Result != DemoSessionResultFailed || entries[2].Result != DemoSessionResultStopped {
+		t.Fatalf("audit entries = %#v ok=%v, want trigger + failed action + close", entries, ok)
+	}
+}
+
+func TestRealtimeDemoBridgeStartBlockedActionStopsWorkspace(t *testing.T) {
+	now := time.Date(2026, 5, 21, 17, 25, 0, 0, time.UTC)
+	process := &fakeDemoWorkspaceProcess{pid: 5157}
+	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: process})
+	lifecycle.now = func() time.Time { return now }
+	client := NewFakeDemoKWWKClient()
+	share := &fakeDemoSurfaceShareClient{}
+	store := NewDemoSessionStore().WithClock(func() time.Time { return now })
+	bridge := &RealtimeDemoBridge{
+		Lifecycle: lifecycle,
+		Presenter: DemoSurfacePresenter{Share: share},
+		Controller: DemoController{
+			Client: client,
+			Safety: DemoSafetyPolicy{
+				URLAllowlistPatterns: []string{"https://allowed.test/"},
+			},
+			Now: func() time.Time { return now },
+		},
+		Store:        store,
+		Observations: NewDemoObservationBus(),
+	}
+
+	result, err := bridge.Start(context.Background(), RealtimeDemoSurfaceStartRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_blocked_url",
+		URL:              "https://not-allowed.test/dashboard",
+	})
+	if !errors.Is(err, errRealtimeDemoBridgeActionBlocked) {
+		t.Fatalf("Start() error = %v, want action blocked", err)
+	}
+	if result.OK || result.Status != realtimeDemoBridgeStatusFailed || result.Workspace == nil || result.Workspace.Status != DemoWorkspaceStatusStopped {
+		t.Fatalf("result = %#v, want failed with stopped workspace", result)
+	}
+	if len(client.Requests()) != 0 {
+		t.Fatalf("client requests = %#v, want blocked before adapter", client.Requests())
+	}
+	if !process.stopped || len(share.stopCalls) != 1 {
+		t.Fatalf("process stopped=%v stopCalls=%d, want cleanup after blocked action", process.stopped, len(share.stopCalls))
+	}
+	entries, ok := store.Entries("demo_blocked_url")
+	if !ok || len(entries) != 3 || entries[1].Result != DemoSessionResultBlocked || entries[2].Result != DemoSessionResultStopped {
+		t.Fatalf("audit entries = %#v ok=%v, want trigger + blocked action + close", entries, ok)
 	}
 }
 

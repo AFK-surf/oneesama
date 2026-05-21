@@ -37,6 +37,16 @@ func TestCapabilitiesForSessionKindMirrorsCueboardMeetingCopilot(t *testing.T) {
 	assertContains(t, capabilities.AllowedTools, "notify_meeting_slack")
 }
 
+func TestCapabilitiesForSessionKindDemoSurfaceBlocksMeetingMutationTools(t *testing.T) {
+	capabilities := CapabilitiesForSessionKind(SessionKindDemoSurface)
+	assertEqual(t, capabilities.Role, SessionRoleDemoSurface)
+	assertEqual(t, len(capabilities.AllowedTools), 0)
+	assertContains(t, capabilities.BlockedTools, "send_meeting_chat")
+	assertContains(t, capabilities.BlockedTools, "notify_meeting_slack")
+	assertContains(t, capabilities.BlockedTools, "slack_api")
+	assertEqual(t, NormalizeSessionKind("demo-surface"), SessionKindDemoSurface)
+}
+
 func TestCapabilitiesForSessionKindMirrorsCueboardCompactAndCompletionOnly(t *testing.T) {
 	compact := CapabilitiesForSessionKind(SessionKindCompact)
 	assertEqual(t, compact.Role, SessionRoleCompact)

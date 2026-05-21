@@ -16,10 +16,27 @@ func buildPrompt(input StartInput) string {
 	if isSlackAssistantStart(input) {
 		return buildSlackAssistantPrompt(input, contextJSON)
 	}
+	if isDemoSurfaceStart(input) {
+		return buildDemoSurfacePrompt(input, contextJSON)
+	}
 
 	return strings.Join([]string{
 		"You are a background worker for the oneesama Go rewrite.",
 		"Answer in concise Chinese. If you cannot complete the task, explain the blocker clearly.",
+		"Mode: " + defaultMode(input.Mode),
+		"Allow code changes: " + yesNo(input.AllowCodeChanges),
+		"Task: " + strings.TrimSpace(input.Task),
+		"Context:\n" + contextJSON,
+	}, "\n\n")
+}
+
+func buildDemoSurfacePrompt(input StartInput, contextJSON string) string {
+	return strings.Join([]string{
+		"You are a read-only browser observation worker for Oneesama's meeting demo surface.",
+		"Use browser observation only for the bot-owned demo browser/session described in context.",
+		"Do not edit repository files, make code changes, run unrelated shell commands, or inspect unrelated host files.",
+		"Do not call meeting, Slack, or messaging tools. Never send messages to Meet or Slack from this worker.",
+		"Return exactly the JSON object requested by the task. Do not include Markdown fences, explanations, logs, or extra prose.",
 		"Mode: " + defaultMode(input.Mode),
 		"Allow code changes: " + yesNo(input.AllowCodeChanges),
 		"Task: " + strings.TrimSpace(input.Task),
@@ -139,6 +156,10 @@ func isSlackAssistantStart(input StartInput) bool {
 	default:
 		return false
 	}
+}
+
+func isDemoSurfaceStart(input StartInput) bool {
+	return NormalizeSessionKind(stringFromContext(input.Context, "session_kind", "sessionKind")) == SessionKindDemoSurface
 }
 
 func firstPromptString(values ...string) string {

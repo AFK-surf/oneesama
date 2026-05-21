@@ -14,7 +14,7 @@ import (
 const (
 	demoCodexBrowserObservationSource = "codex_browser_use"
 	defaultDemoCodexPollInterval      = 250 * time.Millisecond
-	defaultDemoCodexTimeout           = 45 * time.Second
+	defaultDemoCodexTimeout           = 120 * time.Second
 )
 
 var (
@@ -47,7 +47,7 @@ func (c *DemoCodexBrowserClient) DoDemoAction(ctx context.Context, req DemoKWWKA
 		Context:          demoCodexBrowserContext(req),
 		Mode:             "analysis",
 		AllowCodeChanges: false,
-	}, agentrunner.SessionKindMeetingCopilot)
+	}, agentrunner.SessionKindDemoSurface)
 	job, err := c.Runner.StartTask(ctx, input)
 	if err != nil {
 		return DemoKWWKActionResult{}, err
@@ -136,6 +136,7 @@ func buildDemoCodexBrowserTask(req DemoKWWKActionRequest) string {
 	return strings.Join([]string{
 		"You are the Codex Browser Use adapter for Oneesama's meeting demo surface.",
 		"Use the browser-use capability if available. Work only inside the bot-owned demo browser/session described in context. Do not edit repository files.",
+		"Do not call meeting, Slack, or messaging tools such as send_meeting_chat, notify_meeting_slack, slack_api, or send_message. Your only output is the JSON object.",
 		"Perform the requested demo action and return exactly one JSON object, with no Markdown fences or extra prose.",
 		`Required JSON shape: {"summary":"what you observed in one sentence","confidence":0.0,"frame_path":"","kind":"surface_opened"}.`,
 		"Use confidence 0.0-1.0. If you cannot verify the requested surface, say that honestly in summary and use low confidence.",
@@ -177,13 +178,17 @@ func demoKWWKResultFromCodexJob(req DemoKWWKActionRequest, job agentrunner.Job, 
 	payload, ok := parseDemoCodexObservation(summary)
 	if ok {
 		summary = strings.TrimSpace(payload.Summary)
+	} else if summary != "" {
+		summary = "I could not verify the demo surface yet."
 	}
 	if summary == "" {
-		summary = "codex browser worker completed without a structured observation"
+		summary = "I could not verify the demo surface yet."
 	}
 	confidence := 0.6
 	if ok && payload.Confidence > 0 {
 		confidence = payload.Confidence
+	} else if !ok {
+		confidence = 0.2
 	}
 	if confidence > 1 {
 		confidence = 1
@@ -199,8 +204,10 @@ func demoKWWKResultFromCodexJob(req DemoKWWKActionRequest, job agentrunner.Job, 
 	}
 	if ok {
 		for key, value := range payload.Metadata {
-			if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
-				metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
+			key = strings.TrimSpace(key)
+			value = strings.TrimSpace(value)
+			if key != "" && value != "" && !demoCodexReservedMetadataKey(key) {
+				metadata[key] = value
 			}
 		}
 	}
@@ -216,6 +223,15 @@ func demoKWWKResultFromCodexJob(req DemoKWWKActionRequest, job agentrunner.Job, 
 		Metadata:   metadata,
 		CreatedAt:  now,
 	}, now), nil
+}
+
+func demoCodexReservedMetadataKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "adapter", "job_id", "provider", "job_status":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseDemoCodexObservation(raw string) (demoCodexObservationPayload, bool) {

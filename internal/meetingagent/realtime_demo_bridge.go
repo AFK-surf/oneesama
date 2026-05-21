@@ -19,6 +19,7 @@ var (
 	errRealtimeDemoBridgeMissingLifecycle  = errors.New("realtime_demo_bridge_lifecycle_required")
 	errRealtimeDemoBridgeMissingPresenter  = errors.New("realtime_demo_bridge_presenter_required")
 	errRealtimeDemoBridgeMissingController = errors.New("realtime_demo_bridge_controller_required")
+	errRealtimeDemoBridgeActionBlocked     = errors.New("realtime_demo_bridge_action_blocked")
 )
 
 type DemoWorkspaceLifecycleClient interface {
@@ -161,7 +162,9 @@ func (b *RealtimeDemoBridge) Start(ctx context.Context, req RealtimeDemoSurfaceS
 	}
 	if b.RunAsync {
 		go func() {
-			_, _, _ = run(context.Background())
+			if _, _, err := run(context.Background()); err != nil {
+				b.cleanupFailedStartedDemo(context.Background(), workspace, req, err.Error())
+			}
 		}()
 		return result, nil
 	}
@@ -173,9 +176,11 @@ func (b *RealtimeDemoBridge) Start(ctx context.Context, req RealtimeDemoSurfaceS
 	result.ShouldSpeak = feedback.ShouldSpeak
 	result.ObservationContext = b.observationContext(workspace.ID)
 	if err != nil {
+		stoppedWorkspace := b.cleanupFailedStartedDemo(ctx, workspace, req, err.Error())
 		result.OK = false
 		result.Status = realtimeDemoBridgeStatusFailed
 		result.Error = err.Error()
+		result.Workspace = &stoppedWorkspace
 		return result, err
 	}
 	return result, nil
@@ -283,7 +288,28 @@ func (b *RealtimeDemoBridge) runObservation(ctx context.Context, workspace DemoW
 		reason = firstNonEmpty(reason, err.Error())
 	}
 	b.recordAction(workspace.ID, kind, workspace.URL, result, reason, []string{obs.FramePath})
+	if controllerResult.Verdict.Decision == DemoActionDecisionBlock {
+		return obs, feedback, errRealtimeDemoBridgeActionBlocked
+	}
 	return obs, feedback, err
+}
+
+func (b *RealtimeDemoBridge) cleanupFailedStartedDemo(ctx context.Context, workspace DemoWorkspaceSession, req RealtimeDemoSurfaceStartRequest, reason string) DemoWorkspaceSession {
+	b.popCancel(workspace.ID)
+	if b.Presenter != nil {
+		_, _ = b.Presenter.Stop(ctx, DemoSurfaceStopRequest{
+			MeetingSessionID: strings.TrimSpace(req.MeetingSessionID),
+			DemoSessionID:    workspace.ID,
+		})
+	}
+	stoppedWorkspace := workspace
+	if b.Lifecycle != nil {
+		if stopped, stopErr := b.Lifecycle.Stop(ctx, workspace.ID); stopErr == nil {
+			stoppedWorkspace = stopped
+		}
+	}
+	b.recordClose(workspace.ID, firstNonEmpty(strings.TrimSpace(reason), "demo_start_failed"))
+	return stoppedWorkspace
 }
 
 func demoSessionResultFromController(result DemoControllerResult, err error) DemoSessionResult {

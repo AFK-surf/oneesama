@@ -29,5 +29,8 @@ func realtimeDemoBridgeHTTPStatus(err error) int {
 		errors.Is(err, errRealtimeDemoBridgeMissingController) {
 		return 503
 	}
+	if errors.Is(err, errRealtimeDemoBridgeActionBlocked) {
+		return 403
+	}
 	return 500
 }
