@@ -30,6 +30,7 @@ Start here when navigating the polish work.
 | `notes/code-polish/harness-stability-inventory-2026-05-21.md` | Stable-prefix vs dynamic-evidence inventory for the Oneesama Harness cache/tool-stability RFC. Task #319. |
 | `notes/code-polish/harness-foreground-tool-inventory-2026-05-21.md` | Realtime foreground tool class registry plus schema-hash migration gate for Harness tool-surface stability. Task #327. |
 | `notes/code-polish/harness-compaction-canary-plan-2026-05-21.md` | Source-preserving compaction gate: stable prompt hash unchanged and source refs retained before idle compaction can feed foreground context. Task #330. |
+| `notes/code-polish/harness-audit-cadence-checklist-2026-05-21.md` | Operator cadence and reviewer checklist for Harness drift metrics, stable prefix/tool hash, dynamic envelopes, worker isolation, Browser/CU approvals, budgets, and compaction. Task #332. |
 
 ## Cueboard-era hubs (task #161-#234 era)
 

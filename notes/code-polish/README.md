@@ -25,6 +25,7 @@ If a new polish-era doc lands under this directory, add a row here and in
 | `harness-stability-inventory-2026-05-21.md` | Classifies Oneesama prompt/tool inputs as stable prefix vs dynamic evidence, and defines the first hash contracts for the Harness cache/tool-stability RFC. | #319 |
 | `harness-foreground-tool-inventory-2026-05-21.md` | Classifies realtime foreground tools as stable/optional/deprecated/worker-only and records the schema hash migration gate. | #327 |
 | `harness-compaction-canary-plan-2026-05-21.md` | Defines the source-preserving compaction canary contract: stable prompt hash unchanged and all source refs retained before any idle compaction is enabled. | #330 |
+| `harness-audit-cadence-checklist-2026-05-21.md` | Defines the daily/3h/2h Harness audit cadence, red/yellow/info rules, reviewer checklist, and task evidence map for #319-#332. | #332 |
 
 ## Naming conventions
 
