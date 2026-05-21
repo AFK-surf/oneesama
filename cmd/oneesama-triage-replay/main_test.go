@@ -391,7 +391,7 @@ func TestRunPersistenceMergeFolds186StateIntoReport(t *testing.T) {
 	ndjson := `{"channelId":"C_FRESH","user_id":"U_PENG","ts":"100.000","text":"为什么 build cache 一直不命中？"}`
 	var stdout, stderr bytes.Buffer
 	code := run(
-		[]string{"--persistence-dir", dir, "--persistence-provider", "json-file", "--quiet"},
+		[]string{"--persistence-dir", dir, "--persistence-provider", "json-file", "--persistence-max-age", "0", "--quiet"},
 		strings.NewReader(ndjson), &stdout, &stderr,
 	)
 	if code != 0 {
