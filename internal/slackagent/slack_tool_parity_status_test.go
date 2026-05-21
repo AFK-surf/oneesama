@@ -109,7 +109,7 @@ func TestSlackAPIMethodParityBucketsRegisteredUnavailable(t *testing.T) {
 		}
 	}
 
-	wantActive := []string{"post_message", "post_thread_reply", "fetch_thread", "fetch_channel_history", "upload_file", "add_reaction", "fetch_canvas", "fetch_image", "create_canvas", "edit_canvas"}
+	wantActive := []string{"post_message", "post_thread_reply", "fetch_thread", "fetch_channel_history", "upload_file", "add_reaction", "fetch_canvas", "fetch_image", "fetch_file", "create_canvas", "edit_canvas"}
 	for _, action := range wantActive {
 		if methodStatus[action] != "active" {
 			t.Errorf("action %q status = %q, want active", action, methodStatus[action])
@@ -148,6 +148,19 @@ func TestSlackAPIToolRegisteredUnavailableActionReturnsTruthfulError(t *testing.
 		if !containsCI(result.Text, "registered") || !containsCI(result.Text, "not available") {
 			t.Errorf("Execute(%q) text = %q, want unavailable-action message", action, result.Text)
 		}
+	}
+}
+
+func TestSlackWorkerToolBridgeAllowsFetchFile(t *testing.T) {
+	call := SlackToolCallRequest{
+		Tool: "slack_api",
+		Args: map[string]any{
+			"method": "slack.fetchFile",
+			"params": map[string]any{"file_id": "FVID"},
+		},
+	}
+	if got := slackWorkerToolBridgeRequestRejection(call); got != "" {
+		t.Fatalf("slack.fetchFile worker bridge rejection = %q, want allowed", got)
 	}
 }
 

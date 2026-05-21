@@ -126,7 +126,7 @@ func multimodalToolEvidenceRelevant(item SlackAppMentionToolEvidence) bool {
 		resolved, _, err := resolveSlackAPIOperation(action, method)
 		if err == nil {
 			switch resolved {
-			case "fetch_image", "fetch_canvas":
+			case "fetch_image", "fetch_file", "fetch_canvas":
 				return true
 			}
 		}

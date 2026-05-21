@@ -48,7 +48,7 @@ func TestAppMentionMediaEvidenceWritesSearchableMultimodalMemory(t *testing.T) {
 		"oneesama.multimodal-memory-candidate.v1",
 		"bridge_cold_open_montage_v15.mp4",
 		"bridge_assets_brief.pdf",
-		"video/binary contents are not decoded",
+		"slack.fetchFile",
 		"Do not claim to have watched videos",
 	} {
 		if !strings.Contains(body, want) {
@@ -108,6 +108,41 @@ func TestMultimodalMemoryCandidateScrubsInlineImagePayload(t *testing.T) {
 	for _, want := range []string{"\"base64\":\"<redacted>\"", "\"mime_data_url\":\"<redacted>\"", "poster.png"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("multimodal memory missing scrubbed anchor %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestMultimodalMemoryCandidateKeepsFetchFileEvidence(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Memory:       appconfig.SlackMemoryConfig{Enabled: true},
+		},
+	})
+	mention := &SlackAppMentionContext{
+		ChannelID:   "CVID",
+		ThreadTS:    "1779330521.705819",
+		MentionText: "看一下这个视频为什么 timeout",
+		Files:       []SlackThreadFile{{ID: "FVID", Name: "timeout.mov", Filetype: "mov", Mimetype: "video/quicktime", Size: 12}},
+	}
+	evidence := []SlackAppMentionToolEvidence{{
+		Tool:    "slack_api",
+		Args:    map[string]any{"method": "slack.fetchFile", "params": map[string]any{"file_id": "FVID"}},
+		OK:      true,
+		Summary: `{"ok":true,"file_id":"FVID","local_path":"/tmp/oneesama-slack-file-fetch/FVID-timeout.mov","title":"timeout.mov","mimetype":"video/quicktime"}`,
+	}}
+
+	path := service.recordAppMentionMultimodalMemory(context.Background(), mention, evidence, "worker_tool_bridge")
+	if path == "" {
+		t.Fatal("recordAppMentionMultimodalMemory returned empty path")
+	}
+	body := readWorkspaceFile(t, workspaceDir, path)
+	for _, want := range []string{"slack.fetchFile", "FVID", "timeout.mov", "video/quicktime"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("multimodal memory missing fetch-file evidence %q:\n%s", want, body)
 		}
 	}
 }

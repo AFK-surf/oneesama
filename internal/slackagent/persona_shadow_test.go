@@ -975,7 +975,7 @@ func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing
 	}
 }
 
-func TestPersonaDelegatedWorkerSlackContextForVideoForbidsVisibleSelfLimitation(t *testing.T) {
+func TestPersonaDelegatedWorkerSlackContextForVideoCarriesFileReader(t *testing.T) {
 	context := personaDelegatedWorkerSlackContext("C_TRIAGE", "300.000", []SlackInboundMessage{{
 		TeamID:         "T123",
 		ChannelIDSnake: "C_TRIAGE",
@@ -993,7 +993,7 @@ func TestPersonaDelegatedWorkerSlackContextForVideoForbidsVisibleSelfLimitation(
 		}},
 	}})
 	prompt := stringFromAny(context["slackAssistantPrompt"])
-	for _, want := range []string{"timeout.mov", "Non-image media rule", "Do not answer by saying you cannot view the media", "return no visible result"} {
+	for _, want := range []string{"timeout.mov", "File reading rule", "slack.fetchFile", "FVID", "local_path", "Do not answer by saying you cannot view the media", "return no visible result"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("slackAssistantPrompt missing %q:\n%s", want, prompt)
 		}

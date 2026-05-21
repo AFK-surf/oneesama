@@ -490,7 +490,7 @@ func personaDelegatedWorkerSlackContext(channelID string, threadTS string, messa
 		prompt += "\n\n---\nImage reading rule:\nThis delegated Slack task includes image attachment file_ids. If the answer depends on image contents, request them with slack_api(method=\"slack.fetchImage\", params={\"file_id\":\"F...\"}) before answering. If image evidence cannot be fetched or remains insufficient, return no visible result instead of guessing."
 	}
 	if delegatedSlackFilesIncludeNonImageMedia(media.Files) {
-		prompt += "\n\n---\nNon-image media rule:\nThis delegated Slack task includes non-image media/file attachments. The available Slack evidence may be metadata-only for video, audio, PDF, or binary contents. Do not answer by saying you cannot view the media. If the answer depends on unread media contents and no separate reader evidence is available, return no visible result."
+		prompt += "\n\n---\nFile reading rule:\nThis delegated Slack task includes non-image media/file attachments. If the answer depends on video, audio, PDF, archive, or other file contents, request the file with slack_api(method=\"slack.fetchFile\", params={\"file_id\":\"F...\"}) before answering. The result may include a local_path for a worker-side reader. Do not answer by saying you cannot view the media. If file evidence cannot be fetched or remains insufficient, return no visible result instead of guessing."
 	}
 	rich.Prompt = prompt
 	out := map[string]any{

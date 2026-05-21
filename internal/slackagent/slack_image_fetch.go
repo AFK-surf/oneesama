@@ -74,7 +74,7 @@ func (t *slackAPITool) actionFetchImage(ctx context.Context, params map[string]a
 		inlineBudget = int64(limit)
 	}
 
-	info, err := t.fetchImageFileInfo(ctx, fileID)
+	info, err := t.fetchSlackFileInfo(ctx, fileID)
 	if err != nil {
 		return slackAPIToolResult{Success: false, Text: "Failed to fetch image: " + err.Error()}
 	}
@@ -133,7 +133,7 @@ func (t *slackAPITool) actionFetchImage(ctx context.Context, params map[string]a
 	return result
 }
 
-func (t *slackAPITool) fetchImageFileInfo(ctx context.Context, fileID string) (*slackImageFile, error) {
+func (t *slackAPITool) fetchSlackFileInfo(ctx context.Context, fileID string) (*slackImageFile, error) {
 	values := url.Values{"file": {fileID}}
 	var info slackImageFile
 	result := t.callSlackGET(ctx, t.apiURL, "files.info", values, &info)

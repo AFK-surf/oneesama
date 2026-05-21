@@ -222,14 +222,14 @@ func TestAppMentionMediaRequestAddsFileContextEvidence(t *testing.T) {
 	if !ok || !strings.Contains(evidence, "slack_file_context (ok)") || !strings.Contains(evidence, "1 video(s)") || !strings.Contains(evidence, "bridge_cold_open_montage_v15.mp4") {
 		t.Fatalf("slackToolEvidence = %q, want media file-context evidence", evidence)
 	}
-	if !strings.Contains(evidence, "Do not claim to have watched videos") || !strings.Contains(evidence, "video/binary contents are not decoded") {
+	if !strings.Contains(evidence, "Do not claim to have watched videos") || !strings.Contains(evidence, "non-image file_ids can be fetched with slack.fetchFile") {
 		t.Fatalf("slackToolEvidence = %q, want explicit media content boundary", evidence)
 	}
 	if len(rich.ToolEvidence) != 1 || rich.ToolEvidence[0].Tool != "slack_file_context" || !rich.ToolEvidence[0].OK {
 		t.Fatalf("rich.ToolEvidence = %#v, want successful slack_file_context evidence", rich.ToolEvidence)
 	}
 	prompt, ok := context["slackAssistantPrompt"].(string)
-	if !ok || !strings.Contains(prompt, "First-class tool evidence:") || !strings.Contains(prompt, "video/binary contents are not decoded") {
+	if !ok || !strings.Contains(prompt, "First-class tool evidence:") || !strings.Contains(prompt, "slack.fetchFile") {
 		t.Fatalf("slackAssistantPrompt = %q, want file-context evidence in worker prompt", prompt)
 	}
 }

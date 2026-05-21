@@ -47,7 +47,7 @@
     "family_boost:multimodal_memory",
     "bridge_cold_open_montage_v15.mp4",
     "bridge_assets_brief.pdf",
-    "video/binary contents are not decoded"
+    "slack.fetchFile"
   ],
   "must_not_contain": [
     "127.0.0.1",

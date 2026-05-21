@@ -77,6 +77,8 @@ func (t *slackAPITool) Execute(ctx context.Context, args map[string]any) (slackA
 		return t.actionFetchCanvas(ctx, params), nil
 	case "fetch_image":
 		return t.actionFetchImage(ctx, params), nil
+	case "fetch_file":
+		return t.actionFetchFile(ctx, params), nil
 	case "create_canvas":
 		return t.actionCreateCanvas(ctx, params), nil
 	case "edit_canvas":
@@ -509,6 +511,7 @@ var slackAPIMethodByAction = map[string]string{
 	"fetch_thread":          "conversations.replies",
 	"fetch_channel_history": "conversations.history",
 	"fetch_image":           "slack.fetchImage",
+	"fetch_file":            "slack.fetchFile",
 	"fetch_canvas":          "slack.fetchCanvas",
 	"upload_file":           "slack.uploadFile",
 	"post_message":          "chat.postMessage",
@@ -528,7 +531,7 @@ var slackAPIMethodByAction = map[string]string{
 }
 
 var slackAPIActions = []string{
-	"send_dm", "fetch_thread", "fetch_channel_history", "fetch_image", "fetch_canvas",
+	"send_dm", "fetch_thread", "fetch_channel_history", "fetch_image", "fetch_file", "fetch_canvas",
 	"upload_file", "post_message", "post_thread_reply", "delete_message", "edit_message",
 	"add_reaction", "list_emoji", "pin", "unpin", "set_topic", "set_purpose",
 	"add_bookmark", "invite", "create_canvas", "edit_canvas",
@@ -560,6 +563,7 @@ func slackAPIMethodMatrix() []SlackAPIMethodSpec {
 		"add_bookmark":          "active",
 		"invite":                "active",
 		"fetch_image":           "active",
+		"fetch_file":            "active",
 		"fetch_canvas":          "active",
 		"create_canvas":         "active",
 		"edit_canvas":           "active",

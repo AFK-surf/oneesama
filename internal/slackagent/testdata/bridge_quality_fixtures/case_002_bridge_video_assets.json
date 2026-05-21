@@ -43,7 +43,7 @@
     "1 video(s)",
     "bridge_cold_open_montage_v15.mp4",
     "Do not claim to have watched videos",
-    "video/binary contents are not decoded"
+    "slack.fetchFile"
   ],
   "expected_tools_invoked": [
     "slack_file_context"

@@ -133,7 +133,7 @@ func slackWorkerToolBridgeRequestRejection(call SlackToolCallRequest) string {
 			return err.Error()
 		}
 		switch resolved {
-		case "fetch_thread", "fetch_channel_history", "fetch_canvas", "fetch_image", "create_canvas", "edit_canvas":
+		case "fetch_thread", "fetch_channel_history", "fetch_canvas", "fetch_image", "fetch_file", "create_canvas", "edit_canvas":
 			return ""
 		default:
 			return "slack_api action " + resolved + " is not available through the app_mention worker tool bridge"

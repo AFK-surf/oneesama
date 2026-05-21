@@ -26,6 +26,7 @@ Old behavior contract:
 2. If the content cannot be read, that limitation is internal reasoning, not user-facing Slack text.
 3. A reaction is acceptable when it adds lightweight acknowledgement without claiming video contents.
 4. If no useful context exists, stay silent.
+5. When the answer actually depends on file contents, Oneesama should delegate file reading to a worker/tool path rather than treating non-image media as inherently unreadable. Images use `slack.fetchImage`; other Slack files use `slack.fetchFile`.
 
 ## New Failure
 
@@ -35,7 +36,9 @@ New Oneesama Pi-first foreground received metadata-only video context and chose 
 
 - Prompt-level guard: Oneesama Pi must not post visible self-limitations such as "I can't view this video/file/image" or "我看不了视频/文件/图片".
 - Normalization guard: if Pi still returns a self-limiting media reply, Go removes visible text. If a valid reaction intent exists and reactions are allowed, downgrade to `react`; otherwise downgrade to `stay_silent`.
-- Worker media prompt: delegated workers with non-image Slack media are told to return no visible result rather than saying they cannot view media.
+- Slack file reader: added `slack.fetchFile`, a generic Slack file fetch tool. It uses `files.info`, downloads the protected Slack file with the bot token into a workspace-scoped local artifact, optionally inlines small files, and returns `local_path` / type / size metadata for worker-side readers.
+- Worker media prompt: delegated workers with non-image Slack media are told to call `slack.fetchFile` before answering when the answer depends on video/audio/PDF/archive/document contents. If the file cannot be fetched or remains insufficient, they return no visible result rather than saying they cannot view media.
+- Tool bridge + memory: worker `slack_api` bridge allows `slack.fetchFile`, and multimodal memory candidates treat `fetch_file` reader evidence as relevant.
 - Media evidence guidance: metadata summaries may be used only when useful; content-reading blockers must not become the main visible reply.
 
 ## Regression Coverage
@@ -44,6 +47,15 @@ New Oneesama Pi-first foreground received metadata-only video context and chose 
   - Chinese video limitation reply -> `stay_silent`
   - English video limitation reply -> `stay_silent`
   - video limitation reply + valid reaction -> `react`
-- `TestPersonaDelegatedWorkerSlackContextForVideoForbidsVisibleSelfLimitation`
-  - video delegate context includes non-image media rule and `return no visible result` contract.
-
+- `TestActionFetchFileDownloadsNonImageToWorkspaceArtifact`
+  - non-image Slack file downloads to a workspace `.tmp/slack-file-fetch` artifact and preserves protected auth.
+- `TestActionFetchFileCanInlineSmallFileWhenExplicitlyRequested`
+  - small files can be inlined for worker readers when explicitly requested.
+- `TestActionFetchFileRejectsOverCapDownload`
+  - over-cap downloads fail closed instead of exhausting the Slack agent.
+- `TestPersonaDelegatedWorkerSlackContextForVideoCarriesFileReader`
+  - video delegate context includes `slack.fetchFile`, file id, `local_path`, and no-visible-result fallback.
+- `TestSlackWorkerToolBridgeAllowsFetchFile`
+  - worker tool bridge permits the new reader method.
+- `TestMultimodalMemoryCandidateKeepsFetchFileEvidence`
+  - fetch-file reader evidence is preserved in multimodal Memory candidates.
