@@ -59,6 +59,12 @@ func TestLoadUsesDefaultsWithoutConfigFile(t *testing.T) {
 	if cfg.Meetd.WebhookURL != "http://127.0.0.1:8780/webhooks/meeting-result" {
 		t.Fatalf("Meetd.WebhookURL = %q, want local slack-agent webhook", cfg.Meetd.WebhookURL)
 	}
+	if cfg.DemoSurface.Enabled {
+		t.Fatal("DemoSurface.Enabled = true, want default-off")
+	}
+	if cfg.DemoSurface.Adapter != defaultDemoSurfaceAdapter || cfg.DemoSurface.RootDir != defaultDemoSurfaceRootDir || !cfg.DemoSurface.DryRun {
+		t.Fatalf("DemoSurface defaults = %#v, want fake adapter, default root, dry-run", cfg.DemoSurface)
+	}
 	if len(cfg.Meetd.WebhookSecret) != 64 {
 		t.Fatalf("Meetd.WebhookSecret length = %d, want 64 hex chars", len(cfg.Meetd.WebhookSecret))
 	}
@@ -263,6 +269,18 @@ func clearAmbientEnvOverrides(t *testing.T) {
 		"GEMINI_API_KEY",
 		"ONEESAMA_GEMINI_ASR_MODEL",
 		"GEMINI_ASR_MODEL",
+		"ONEESAMA_DEMO_SURFACE_ENABLED",
+		"MAB_DEMO_SURFACE_ENABLED",
+		"ONEESAMA_DEMO_SURFACE_ADAPTER",
+		"MAB_DEMO_SURFACE_ADAPTER",
+		"ONEESAMA_DEMO_SURFACE_ROOT_DIR",
+		"MAB_DEMO_SURFACE_ROOT_DIR",
+		"ONEESAMA_DEMO_SURFACE_URL_ALLOWLIST",
+		"MAB_DEMO_SURFACE_URL_ALLOWLIST",
+		"ONEESAMA_DEMO_SURFACE_DRY_RUN",
+		"MAB_DEMO_SURFACE_DRY_RUN",
+		"ONEESAMA_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL",
+		"MAB_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL",
 		"ONEESAMA_SECRETS_FILE",
 		"SLACK_AGENT_CONFIG_FILE",
 		"SLACK_AGENT_SECRETS_FILE",

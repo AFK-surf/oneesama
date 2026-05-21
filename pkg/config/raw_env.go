@@ -213,6 +213,27 @@ func applyMeetdEnvOverrides(cfg *Config) {
 	}
 }
 
+func applyDemoSurfaceEnvOverrides(cfg *Config) {
+	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_ENABLED", "MAB_DEMO_SURFACE_ENABLED"); ok {
+		cfg.DemoSurface.Enabled = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_DEMO_SURFACE_ADAPTER", "MAB_DEMO_SURFACE_ADAPTER")); value != "" {
+		cfg.DemoSurface.Adapter = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_DEMO_SURFACE_ROOT_DIR", "MAB_DEMO_SURFACE_ROOT_DIR")); value != "" {
+		cfg.DemoSurface.RootDir = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_DEMO_SURFACE_URL_ALLOWLIST", "MAB_DEMO_SURFACE_URL_ALLOWLIST")); value != "" {
+		cfg.DemoSurface.URLAllowlistPatterns = parseCSV(value)
+	}
+	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_DRY_RUN", "MAB_DEMO_SURFACE_DRY_RUN"); ok {
+		cfg.DemoSurface.DryRun = value
+	}
+	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL", "MAB_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL"); ok {
+		cfg.DemoSurface.AllowActiveControl = value
+	}
+}
+
 func applyOpenAIEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(getenv("ONEESAMA_OPENAI_API_KEY", "MAB_OPENAI_API_KEY", "OPENAI_API_KEY")); value != "" {
 		cfg.OpenAI.APIKey = value

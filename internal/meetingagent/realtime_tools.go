@@ -22,6 +22,27 @@ func defaultRealtimeToolSchemas() []map[string]any {
 	return realtimeToolSchemasAsMaps(defaultRealtimeToolDefinitions())
 }
 
+func realtimeToolSchemas(includeDemoSurface bool) []map[string]any {
+	return realtimeToolSchemasAsMaps(realtimeToolDefinitions(includeDemoSurface))
+}
+
+func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
+	definitions := defaultRealtimeToolDefinitions()
+	if includeDemoSurface {
+		return definitions
+	}
+	out := make([]realtimeToolSchema, 0, len(definitions))
+	for _, definition := range definitions {
+		switch definition.Name {
+		case "start_demo_surface", "cancel_demo_surface":
+			continue
+		default:
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
 func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 	return []realtimeToolSchema{
 		realtimeTool("delegate_to_worker", "Start a background workspace job for complex work that should not be improvised in the realtime voice conversation.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{

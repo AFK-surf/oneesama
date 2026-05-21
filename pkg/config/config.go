@@ -9,6 +9,7 @@ type Config struct {
 	AgentRunner     AgentRunnerConfig
 	PersonaRuntime  PersonaRuntimeConfig
 	Meetd           MeetdConfig
+	DemoSurface     DemoSurfaceConfig
 	OpenAI          OpenAIConfig
 	Dialog          DialogConfig
 	Logging         LoggingConfig
@@ -122,6 +123,15 @@ type MeetdConfig struct {
 	ASRLanguage     string
 	GeminiAPIKey    string
 	GeminiASRModel  string
+}
+
+type DemoSurfaceConfig struct {
+	Enabled              bool
+	Adapter              string
+	RootDir              string
+	URLAllowlistPatterns []string
+	DryRun               bool
+	AllowActiveControl   bool
 }
 
 type OpenAIConfig struct {

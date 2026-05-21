@@ -29,10 +29,11 @@ func (s *Service) RealtimeConfig() map[string]any {
 		"sessionSchema":   s.openai.RealtimeSessionSchema,
 		"agentRuntime":    s.openai.RealtimeAgentRuntime,
 		"instructions":    buildRealtimeInstructions(options, s.openai),
-		"tools":           defaultRealtimeToolSchemas(),
+		"tools":           realtimeToolSchemas(s.demoBridge != nil),
 		"session":         buildRealtimeSessionConfig(options, s.openai),
 		"currentUser":     currentUser,
 		"tuning":          realtimeTuningGuide(),
+		"demoSurface":     s.demoSurfaceStatus(),
 	}
 }
 

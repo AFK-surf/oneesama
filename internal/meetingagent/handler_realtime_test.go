@@ -77,8 +77,19 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 		strings.Contains(instructions, "worker") {
 		t.Fatalf("instructions leaked identity/mechanism details: %q", instructions)
 	}
-	if !toolNamesInclude(body["tools"].([]any), "delegate_to_worker", "present_video_stage", "start_demo_surface", "cancel_demo_surface", "update_avatar_state", "resolve_speaker_identity") {
+	tools := body["tools"].([]any)
+	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "update_avatar_state", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
+	}
+	if toolNamesInclude(tools, "start_demo_surface", "cancel_demo_surface") {
+		t.Fatalf("tools = %#v, demo surface tools must stay hidden when default-off", body["tools"])
+	}
+	demoSurface := body["demoSurface"].(map[string]any)
+	if demoSurface["enabled"] != false || demoSurface["toolsExposed"] != false || demoSurface["configured"] != false {
+		t.Fatalf("demoSurface = %#v, want default-off status", demoSurface)
+	}
+	if demoSurface["dryRun"] != true || demoSurface["adapter"] != "fake" {
+		t.Fatalf("demoSurface = %#v, want dry-run fake defaults", demoSurface)
 	}
 }
 
@@ -339,6 +350,92 @@ func TestRealtimeDemoSurfaceToolsUseBridge(t *testing.T) {
 	}
 }
 
+func TestRealtimeDemoSurfaceToolsDefaultOff(t *testing.T) {
+	t.Parallel()
+
+	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{})
+	start := httptest.NewRecorder()
+	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_off","url":"https://example.test/demo","goal":"show it"}`))
+	if start.Code != http.StatusServiceUnavailable {
+		t.Fatalf("start status = %d, want 503: %s", start.Code, start.Body.String())
+	}
+	var startBody map[string]any
+	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	if startBody["ok"] != false || startBody["error"] != errRealtimeDemoBridgeUnavailable.Error() {
+		t.Fatalf("start body = %#v, want demo bridge unavailable", startBody)
+	}
+}
+
+func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		OpenAI: appconfig.OpenAIConfig{
+			RealtimeModel: "gpt-realtime-2",
+			BotName:       "Meeting Avatar Bot",
+		},
+		MeetRunner: fakeMeetRunner{},
+		DemoSurface: appconfig.DemoSurfaceConfig{
+			Enabled:              true,
+			Adapter:              "fake",
+			RootDir:              rootDir + "/demo-surfaces",
+			URLAllowlistPatterns: []string{"https://example.test/"},
+			DryRun:               true,
+		},
+	})
+
+	configResponse := httptest.NewRecorder()
+	router.ServeHTTP(configResponse, realtimeRequest(http.MethodGet, "/realtime/config", ""))
+	if configResponse.Code != http.StatusOK {
+		t.Fatalf("config status = %d: %s", configResponse.Code, configResponse.Body.String())
+	}
+	var configBody map[string]any
+	decodeRealtimeBody(t, configResponse.Body.String(), &configBody)
+	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_surface", "cancel_demo_surface") {
+		t.Fatalf("tools = %#v, want demo surface tools when flag enabled", configBody["tools"])
+	}
+	demoSurface := configBody["demoSurface"].(map[string]any)
+	if demoSurface["enabled"] != true || demoSurface["toolsExposed"] != true || demoSurface["configured"] != true {
+		t.Fatalf("demoSurface = %#v, want enabled configured status", demoSurface)
+	}
+
+	join := httptest.NewRecorder()
+	router.ServeHTTP(join, realtimeRequest(http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`))
+	if join.Code != http.StatusOK {
+		t.Fatalf("join status = %d: %s", join.Code, join.Body.String())
+	}
+
+	start := httptest.NewRecorder()
+	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","url":"https://example.test/demo","goal":"show it"}`))
+	if start.Code != http.StatusOK {
+		t.Fatalf("start status = %d: %s", start.Code, start.Body.String())
+	}
+	var startBody map[string]any
+	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	if startBody["ok"] != true || startBody["session_id"] != "demo_flag" {
+		t.Fatalf("start body = %#v, want successful demo session", startBody)
+	}
+	if !strings.Contains(stringFromAny(startBody["observation_context"]), "opened") {
+		t.Fatalf("start body = %#v, want observation context from fake demo loop", startBody)
+	}
+
+	cancel := httptest.NewRecorder()
+	router.ServeHTTP(cancel, realtimeRequest(http.MethodPost, "/tools/cancel_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","reason":"done"}`))
+	if cancel.Code != http.StatusOK {
+		t.Fatalf("cancel status = %d: %s", cancel.Code, cancel.Body.String())
+	}
+	var cancelBody map[string]any
+	decodeRealtimeBody(t, cancel.Body.String(), &cancelBody)
+	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
+		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
+	}
+}
+
 func TestResolveSpeakerIdentityFusesSlackAndPeopleMemory(t *testing.T) {
 	t.Parallel()
 
@@ -504,19 +601,46 @@ func newRealtimeTestRouter(t *testing.T, openai appconfig.OpenAIConfig) http.Han
 
 func newRealtimeTestRouterWithDemoBridge(t *testing.T, openai appconfig.OpenAIConfig, demoBridge *RealtimeDemoBridge) http.Handler {
 	t.Helper()
-	gin.SetMode(gin.ReleaseMode)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rootDir := t.TempDir()
-	service := NewService(Config{
-		Logger:           logger,
+	return newRealtimeTestRouterWithConfig(t, Config{
 		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
 		ArtifactsRootDir: rootDir,
 		InternalAuthKey:  "secret-key",
 		Pipeline:         postmeeting.NewPipeline(rootDir),
 		OpenAI:           openai,
 		MeetRunner:       fakeMeetRunner{},
-		DemoBridge:       demoBridge,
+		DemoSurface: appconfig.DemoSurfaceConfig{
+			Adapter: "fake",
+			RootDir: rootDir + "/demo-surfaces",
+			DryRun:  true,
+		},
+		DemoBridge: demoBridge,
 	})
+}
+
+func newRealtimeTestRouterWithConfig(t *testing.T, cfg Config) http.Handler {
+	t.Helper()
+	gin.SetMode(gin.ReleaseMode)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if cfg.Logger == nil {
+		cfg.Logger = logger
+	}
+	if cfg.Persistence.Provider == "" {
+		cfg.Persistence = appconfig.PersistenceConfig{Provider: "memory"}
+	}
+	if cfg.ArtifactsRootDir == "" {
+		cfg.ArtifactsRootDir = t.TempDir()
+	}
+	if cfg.InternalAuthKey == "" {
+		cfg.InternalAuthKey = "secret-key"
+	}
+	if cfg.Pipeline == nil {
+		cfg.Pipeline = postmeeting.NewPipeline(cfg.ArtifactsRootDir)
+	}
+	if cfg.MeetRunner == nil {
+		cfg.MeetRunner = fakeMeetRunner{}
+	}
+	service := NewService(cfg)
 	return httpserver.New("meeting-agent", logger, []string{"*"}, NewHandler(service))
 }
 

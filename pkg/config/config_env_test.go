@@ -167,6 +167,30 @@ func TestLoadHonorsMeetdEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadHonorsDemoSurfaceEnvOverrides(t *testing.T) {
+	t.Setenv(oneesamaConfigEnvOverrideKey, "")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_ENABLED", "true")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_ADAPTER", "fake")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_ROOT_DIR", "/tmp/oneesama-demo")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_URL_ALLOWLIST", "https://example.test/, https://docs.example.test/path")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_DRY_RUN", "false")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL", "true")
+
+	cfg := loadInTempDir(t)
+	if !cfg.DemoSurface.Enabled {
+		t.Fatal("DemoSurface.Enabled = false, want true")
+	}
+	if cfg.DemoSurface.Adapter != "fake" || cfg.DemoSurface.RootDir != "/tmp/oneesama-demo" {
+		t.Fatalf("DemoSurface adapter/root = %#v, want env values", cfg.DemoSurface)
+	}
+	if len(cfg.DemoSurface.URLAllowlistPatterns) != 2 || cfg.DemoSurface.URLAllowlistPatterns[0] != "https://example.test/" {
+		t.Fatalf("DemoSurface.URLAllowlistPatterns = %#v, want parsed env list", cfg.DemoSurface.URLAllowlistPatterns)
+	}
+	if cfg.DemoSurface.DryRun || !cfg.DemoSurface.AllowActiveControl {
+		t.Fatalf("DemoSurface dry/control = %#v, want dry_run=false active_control=true", cfg.DemoSurface)
+	}
+}
+
 func TestLoadMeetdSummaryModelFallbackStaysEnvOnly(t *testing.T) {
 	t.Setenv(oneesamaConfigEnvOverrideKey, "")
 	t.Setenv("LLM_MODEL", "summary-fallback-model")

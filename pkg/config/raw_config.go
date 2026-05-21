@@ -12,6 +12,7 @@ type rawConfig struct {
 	AgentRunner  rawAgentRunner    `json:"agent_runner"`
 	Persona      rawPersonaRuntime `json:"persona_runtime"`
 	Meetd        rawMeetdConfig    `json:"meetd"`
+	DemoSurface  rawDemoSurface    `json:"demo_surface"`
 	OpenAI       rawOpenAIConfig   `json:"openai"`
 	Dialog       rawDialogConfig   `json:"dialog"`
 	Logging      rawLoggingConfig  `json:"logging"`
@@ -120,6 +121,15 @@ type rawMeetdConfig struct {
 	ASRModel        string `json:"asr_model"`
 	ASRLanguage     string `json:"asr_language"`
 	GeminiASRModel  string `json:"gemini_asr_model"`
+}
+
+type rawDemoSurface struct {
+	Enabled              bool   `json:"enabled"`
+	Adapter              string `json:"adapter"`
+	RootDir              string `json:"root_dir"`
+	URLAllowlistPatterns string `json:"url_allowlist_patterns"`
+	DryRun               *bool  `json:"dry_run"`
+	AllowActiveControl   bool   `json:"allow_active_control"`
 }
 
 type rawOpenAIConfig struct {
@@ -268,6 +278,14 @@ func (r rawConfig) toConfig(path string) Config {
 			ASRLanguage:     strings.TrimSpace(r.Meetd.ASRLanguage),
 			GeminiASRModel:  strings.TrimSpace(r.Meetd.GeminiASRModel),
 		},
+		DemoSurface: DemoSurfaceConfig{
+			Enabled:              r.DemoSurface.Enabled,
+			Adapter:              stringOrDefault(r.DemoSurface.Adapter, defaultDemoSurfaceAdapter),
+			RootDir:              stringOrDefault(r.DemoSurface.RootDir, defaultDemoSurfaceRootDir),
+			URLAllowlistPatterns: splitConfigCSV(r.DemoSurface.URLAllowlistPatterns),
+			DryRun:               boolPtrOrDefault(r.DemoSurface.DryRun, defaultDemoSurfaceDryRun),
+			AllowActiveControl:   r.DemoSurface.AllowActiveControl,
+		},
 		OpenAI: buildOpenAIConfig(r.OpenAI),
 		Dialog: DialogConfig{
 			STTProvider: stringOrDefault(r.Dialog.STTProvider, defaultSTTProvider),
@@ -303,6 +321,7 @@ func applyEnvOverrides(cfg *Config) {
 	applyAgentRunnerEnvOverrides(cfg)
 	applyPersonaRuntimeEnvOverrides(cfg)
 	applyMeetdEnvOverrides(cfg)
+	applyDemoSurfaceEnvOverrides(cfg)
 	applyOpenAIEnvOverrides(cfg)
 	applyDialogEnvOverrides(cfg)
 	applyLoggingEnvOverrides(cfg)

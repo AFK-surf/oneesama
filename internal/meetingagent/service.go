@@ -32,6 +32,7 @@ type Config struct {
 	MeetdWebhookSecret string
 	MeetdWatchInterval time.Duration
 	Meetd              appconfig.MeetdConfig
+	DemoSurface        appconfig.DemoSurfaceConfig
 	CaptionLanguage    string
 	OpenAI             appconfig.OpenAIConfig
 	SlackBotToken      string
@@ -68,6 +69,7 @@ type Service struct {
 	meetdWebhookURL     string
 	meetdWebhookSecret  string
 	meetdWatchInterval  time.Duration
+	demoSurface         appconfig.DemoSurfaceConfig
 	captionLanguage     string
 	openai              appconfig.OpenAIConfig
 	slackBotToken       string
@@ -118,6 +120,7 @@ func NewService(cfg Config) *Service {
 		meetdWebhookURL:    strings.TrimSpace(cfg.MeetdWebhookURL),
 		meetdWebhookSecret: strings.TrimSpace(cfg.MeetdWebhookSecret),
 		meetdWatchInterval: watchInterval,
+		demoSurface:        normalizeDemoSurfaceConfig(cfg.DemoSurface),
 		captionLanguage:    strings.TrimSpace(cfg.CaptionLanguage),
 		openai:             cfg.OpenAI,
 		slackBotToken:      strings.TrimSpace(cfg.SlackBotToken),
@@ -152,6 +155,9 @@ func NewService(cfg Config) *Service {
 	}
 	service.runner = runner
 	service.runnerErr = runnerErr
+	if service.demoBridge == nil && service.demoSurface.Enabled {
+		service.demoBridge = service.newRealtimeDemoBridgeFromConfig()
+	}
 	return service
 }
 

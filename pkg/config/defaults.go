@@ -28,6 +28,9 @@ const (
 	defaultGoogleCalendarAPIBaseURL     = "https://www.googleapis.com/calendar/v3"
 	defaultGoogleOAuthTokenURL          = "https://oauth2.googleapis.com/token"
 	defaultMeetdWatch                   = time.Minute
+	defaultDemoSurfaceAdapter           = "fake"
+	defaultDemoSurfaceRootDir           = "./runtime/demo-surfaces"
+	defaultDemoSurfaceDryRun            = true
 	defaultOpenAIBaseURL                = "https://api.openai.com/v1"
 	defaultOpenAIRealtimeModel          = "gpt-realtime-2"
 	defaultOpenAIRealtimeReasoning      = "high"

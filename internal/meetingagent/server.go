@@ -22,6 +22,7 @@ func NewServer(cfg config.Config, logger *slog.Logger) *httpserver.ManagedServer
 		MeetdWebhookSecret: cfg.Meetd.WebhookSecret,
 		MeetdWatchInterval: cfg.Meetd.WatchInterval,
 		Meetd:              cfg.Meetd,
+		DemoSurface:        cfg.DemoSurface,
 		CaptionLanguage:    cfg.Meetd.CaptionLanguage,
 		OpenAI:             cfg.OpenAI,
 		SlackBotToken:      cfg.Slack.BotToken,
