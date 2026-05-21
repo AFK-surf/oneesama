@@ -24,6 +24,7 @@ If a new polish-era doc lands under this directory, add a row here and in
 | `openclaw-hermes-memory-roadmap-canary-first-2026-05-21.md` | Splits remaining OpenClaw + Hermes Memory capabilities into 6 canary-first sub-tasks (289-A trust scoring … 289-F contradiction at write) with dependency order + canary-first protocol. | #289 |
 | `harness-stability-inventory-2026-05-21.md` | Classifies Oneesama prompt/tool inputs as stable prefix vs dynamic evidence, and defines the first hash contracts for the Harness cache/tool-stability RFC. | #319 |
 | `harness-foreground-tool-inventory-2026-05-21.md` | Classifies realtime foreground tools as stable/optional/deprecated/worker-only and records the schema hash migration gate. | #327 |
+| `harness-compaction-canary-plan-2026-05-21.md` | Defines the source-preserving compaction canary contract: stable prompt hash unchanged and all source refs retained before any idle compaction is enabled. | #330 |
 
 ## Naming conventions
 
