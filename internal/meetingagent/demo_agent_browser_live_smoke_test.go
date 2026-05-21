@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
 	"sync/atomic"
@@ -102,6 +103,86 @@ func TestLiveDemoAgentBrowserBridgeCanChangeSharedContent(t *testing.T) {
 	}
 	if !strings.Contains(control.ObservationContext, "score: 0") || !strings.Contains(control.ObservationContext, "score: 1") {
 		t.Fatalf("observation context = %q, want before/after shared content", control.ObservationContext)
+	}
+	if len(share.startCalls) != 1 || len(share.appCalls) != 1 || len(share.presentCalls) != 0 {
+		t.Fatalf("share calls start=%d app=%d present=%d, want same shared window reused", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
+	}
+}
+
+func TestLiveDemoAgentBrowserReadOnlyGitHubScenario(t *testing.T) {
+	const targetURL = "https://github.com/openai/openai-node"
+
+	sessionID := "demo_live_agent_browser_github"
+	browserSession := demoAgentBrowserSessionName(sessionID)
+	_ = exec.Command("agent-browser", "--session", browserSession, "close").Run()
+	t.Cleanup(func() {
+		_ = exec.Command("agent-browser", "--session", browserSession, "close").Run()
+	})
+
+	now := time.Date(2026, 5, 21, 19, 8, 0, 0, time.UTC)
+	lifecycle := NewDemoWorkspaceLifecycle(t.TempDir(), &fakeDemoWorkspaceLauncher{process: &fakeDemoWorkspaceProcess{pid: 7002}})
+	lifecycle.now = func() time.Time { return now }
+	share := &fakeDemoSurfaceShareClient{}
+	bridge := &RealtimeDemoBridge{
+		Lifecycle: lifecycle,
+		Presenter: DemoSurfacePresenter{Share: share},
+		Controller: DemoController{
+			Client: &DemoAgentBrowserClient{
+				Timeout: 40 * time.Second,
+				Now:     func() time.Time { return now },
+			},
+			Safety: DemoSafetyPolicy{
+				URLAllowlistPatterns: []string{"https://github.com/openai/openai-node"},
+			},
+			Now: func() time.Time { return now },
+		},
+		Store:        NewDemoSessionStore().WithClock(func() time.Time { return now }),
+		Observations: NewDemoObservationBus(),
+	}
+
+	start, err := bridge.Start(context.Background(), RealtimeDemoSurfaceStartRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    sessionID,
+		URL:              targetURL,
+		Goal:             "show a real GitHub repo page",
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if !start.OK || start.Observation == nil || !strings.Contains(strings.ToLower(start.Observation.Summary), "openai-node") {
+		t.Fatalf("start = %#v, want visible openai-node observation", start)
+	}
+
+	scroll, err := bridge.Control(context.Background(), RealtimeDemoSurfaceControlRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    sessionID,
+		Action:           DemoActionScroll,
+		Direction:        "down",
+		Amount:           900,
+	})
+	if err != nil {
+		t.Fatalf("Control(scroll) error = %v", err)
+	}
+	if !scroll.OK || scroll.Observation == nil || scroll.Observation.Kind != demoObservationKindScrolled {
+		t.Fatalf("scroll = %#v, want scrolled observation", scroll)
+	}
+
+	capture, err := bridge.Control(context.Background(), RealtimeDemoSurfaceControlRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    sessionID,
+		Action:           DemoActionCapture,
+	})
+	if err != nil {
+		t.Fatalf("Control(capture) error = %v", err)
+	}
+	if !capture.OK || capture.Observation == nil || capture.Observation.FramePath == "" {
+		t.Fatalf("capture = %#v, want screenshot artifact", capture)
+	}
+	if _, err := os.Stat(capture.Observation.FramePath); err != nil {
+		t.Fatalf("screenshot artifact %q stat error = %v", capture.Observation.FramePath, err)
+	}
+	if !strings.Contains(capture.ObservationContext, "openai-node") {
+		t.Fatalf("observation context = %q, want real-page context retained", capture.ObservationContext)
 	}
 	if len(share.startCalls) != 1 || len(share.appCalls) != 1 || len(share.presentCalls) != 0 {
 		t.Fatalf("share calls start=%d app=%d present=%d, want same shared window reused", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
