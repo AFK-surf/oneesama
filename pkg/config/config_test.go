@@ -65,6 +65,9 @@ func TestLoadUsesDefaultsWithoutConfigFile(t *testing.T) {
 	if cfg.DemoSurface.Adapter != defaultDemoSurfaceAdapter || cfg.DemoSurface.RootDir != defaultDemoSurfaceRootDir || !cfg.DemoSurface.DryRun {
 		t.Fatalf("DemoSurface defaults = %#v, want fake adapter, default root, dry-run", cfg.DemoSurface)
 	}
+	if !cfg.DemoSurface.RequireExternalWriteApproval || cfg.DemoSurface.ExternalWriteApprovalTokenTTL != defaultDemoSurfaceApprovalTokenTTL {
+		t.Fatalf("DemoSurface approval defaults = %#v, want external-write approval required with default TTL", cfg.DemoSurface)
+	}
 	if len(cfg.Meetd.WebhookSecret) != 64 {
 		t.Fatalf("Meetd.WebhookSecret length = %d, want 64 hex chars", len(cfg.Meetd.WebhookSecret))
 	}

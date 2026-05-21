@@ -232,6 +232,12 @@ func applyDemoSurfaceEnvOverrides(cfg *Config) {
 	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL", "MAB_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL"); ok {
 		cfg.DemoSurface.AllowActiveControl = value
 	}
+	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_REQUIRE_EXTERNAL_WRITE_APPROVAL", "MAB_DEMO_SURFACE_REQUIRE_EXTERNAL_WRITE_APPROVAL"); ok {
+		cfg.DemoSurface.RequireExternalWriteApproval = value
+	}
+	if value, ok := getenvDuration("ONEESAMA_DEMO_SURFACE_APPROVAL_TOKEN_TTL", "MAB_DEMO_SURFACE_APPROVAL_TOKEN_TTL"); ok {
+		cfg.DemoSurface.ExternalWriteApprovalTokenTTL = value
+	}
 }
 
 func applyOpenAIEnvOverrides(cfg *Config) {

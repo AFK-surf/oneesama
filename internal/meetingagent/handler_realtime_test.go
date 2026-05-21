@@ -92,6 +92,9 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	if demoSurface["dryRun"] != true || demoSurface["adapter"] != "fake" {
 		t.Fatalf("demoSurface = %#v, want dry-run fake defaults", demoSurface)
 	}
+	if demoSurface["requireExternalWriteApproval"] != true {
+		t.Fatalf("demoSurface = %#v, want external-write approval required by default", demoSurface)
+	}
 }
 
 func TestRealtimeContextHealthExposesLifecycleDefaults(t *testing.T) {
@@ -695,9 +698,10 @@ func newRealtimeTestRouterWithDemoBridge(t *testing.T, openai appconfig.OpenAICo
 		OpenAI:           openai,
 		MeetRunner:       fakeMeetRunner{},
 		DemoSurface: appconfig.DemoSurfaceConfig{
-			Adapter: "fake",
-			RootDir: rootDir + "/demo-surfaces",
-			DryRun:  true,
+			Adapter:                      "fake",
+			RootDir:                      rootDir + "/demo-surfaces",
+			DryRun:                       true,
+			RequireExternalWriteApproval: true,
 		},
 		DemoBridge: demoBridge,
 	})

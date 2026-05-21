@@ -126,12 +126,14 @@ type MeetdConfig struct {
 }
 
 type DemoSurfaceConfig struct {
-	Enabled              bool
-	Adapter              string
-	RootDir              string
-	URLAllowlistPatterns []string
-	DryRun               bool
-	AllowActiveControl   bool
+	Enabled                       bool
+	Adapter                       string
+	RootDir                       string
+	URLAllowlistPatterns          []string
+	DryRun                        bool
+	AllowActiveControl            bool
+	RequireExternalWriteApproval  bool
+	ExternalWriteApprovalTokenTTL time.Duration
 }
 
 type OpenAIConfig struct {

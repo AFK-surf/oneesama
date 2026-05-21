@@ -124,12 +124,14 @@ type rawMeetdConfig struct {
 }
 
 type rawDemoSurface struct {
-	Enabled              bool   `json:"enabled"`
-	Adapter              string `json:"adapter"`
-	RootDir              string `json:"root_dir"`
-	URLAllowlistPatterns string `json:"url_allowlist_patterns"`
-	DryRun               *bool  `json:"dry_run"`
-	AllowActiveControl   bool   `json:"allow_active_control"`
+	Enabled                       bool   `json:"enabled"`
+	Adapter                       string `json:"adapter"`
+	RootDir                       string `json:"root_dir"`
+	URLAllowlistPatterns          string `json:"url_allowlist_patterns"`
+	DryRun                        *bool  `json:"dry_run"`
+	AllowActiveControl            bool   `json:"allow_active_control"`
+	RequireExternalWriteApproval  *bool  `json:"require_external_write_approval"`
+	ExternalWriteApprovalTokenTTL string `json:"external_write_approval_token_ttl"`
 }
 
 type rawOpenAIConfig struct {
@@ -279,12 +281,14 @@ func (r rawConfig) toConfig(path string) Config {
 			GeminiASRModel:  strings.TrimSpace(r.Meetd.GeminiASRModel),
 		},
 		DemoSurface: DemoSurfaceConfig{
-			Enabled:              r.DemoSurface.Enabled,
-			Adapter:              stringOrDefault(r.DemoSurface.Adapter, defaultDemoSurfaceAdapter),
-			RootDir:              stringOrDefault(r.DemoSurface.RootDir, defaultDemoSurfaceRootDir),
-			URLAllowlistPatterns: splitConfigCSV(r.DemoSurface.URLAllowlistPatterns),
-			DryRun:               boolPtrOrDefault(r.DemoSurface.DryRun, defaultDemoSurfaceDryRun),
-			AllowActiveControl:   r.DemoSurface.AllowActiveControl,
+			Enabled:                       r.DemoSurface.Enabled,
+			Adapter:                       stringOrDefault(r.DemoSurface.Adapter, defaultDemoSurfaceAdapter),
+			RootDir:                       stringOrDefault(r.DemoSurface.RootDir, defaultDemoSurfaceRootDir),
+			URLAllowlistPatterns:          splitConfigCSV(r.DemoSurface.URLAllowlistPatterns),
+			DryRun:                        boolPtrOrDefault(r.DemoSurface.DryRun, defaultDemoSurfaceDryRun),
+			AllowActiveControl:            r.DemoSurface.AllowActiveControl,
+			RequireExternalWriteApproval:  boolPtrOrDefault(r.DemoSurface.RequireExternalWriteApproval, defaultDemoSurfaceExternalWriteApproval),
+			ExternalWriteApprovalTokenTTL: durationOrDefault(r.DemoSurface.ExternalWriteApprovalTokenTTL, defaultDemoSurfaceApprovalTokenTTL),
 		},
 		OpenAI: buildOpenAIConfig(r.OpenAI),
 		Dialog: DialogConfig{

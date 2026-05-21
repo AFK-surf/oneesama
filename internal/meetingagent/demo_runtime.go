@@ -55,13 +55,15 @@ func (s *Service) newRealtimeDemoBridgeFromConfig() *RealtimeDemoBridge {
 func (s *Service) demoSurfaceStatus() map[string]any {
 	enabled := s.demoBridge != nil
 	status := map[string]any{
-		"enabled":            enabled,
-		"toolsExposed":       enabled,
-		"configured":         s.demoSurface.Enabled,
-		"adapter":            strings.TrimSpace(s.demoSurface.Adapter),
-		"rootDir":            strings.TrimSpace(s.demoSurface.RootDir),
-		"dryRun":             s.demoSurface.DryRun,
-		"allowActiveControl": s.demoSurface.AllowActiveControl,
+		"enabled":                       enabled,
+		"toolsExposed":                  enabled,
+		"configured":                    s.demoSurface.Enabled,
+		"adapter":                       strings.TrimSpace(s.demoSurface.Adapter),
+		"rootDir":                       strings.TrimSpace(s.demoSurface.RootDir),
+		"dryRun":                        s.demoSurface.DryRun,
+		"allowActiveControl":            s.demoSurface.AllowActiveControl,
+		"requireExternalWriteApproval":  s.demoSurface.RequireExternalWriteApproval,
+		"externalWriteApprovalTokenTTL": s.demoSurface.ExternalWriteApprovalTokenTTL.String(),
 	}
 	if s.demoBridge == nil && s.demoSurface.Enabled {
 		status["reason"] = "demo_surface_bridge_unavailable"

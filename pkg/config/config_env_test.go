@@ -175,6 +175,8 @@ func TestLoadHonorsDemoSurfaceEnvOverrides(t *testing.T) {
 	t.Setenv("ONEESAMA_DEMO_SURFACE_URL_ALLOWLIST", "https://example.test/, https://docs.example.test/path")
 	t.Setenv("ONEESAMA_DEMO_SURFACE_DRY_RUN", "false")
 	t.Setenv("ONEESAMA_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL", "true")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_REQUIRE_EXTERNAL_WRITE_APPROVAL", "false")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_APPROVAL_TOKEN_TTL", "2m")
 
 	cfg := loadInTempDir(t)
 	if !cfg.DemoSurface.Enabled {
@@ -188,6 +190,9 @@ func TestLoadHonorsDemoSurfaceEnvOverrides(t *testing.T) {
 	}
 	if cfg.DemoSurface.DryRun || !cfg.DemoSurface.AllowActiveControl {
 		t.Fatalf("DemoSurface dry/control = %#v, want dry_run=false active_control=true", cfg.DemoSurface)
+	}
+	if cfg.DemoSurface.RequireExternalWriteApproval || cfg.DemoSurface.ExternalWriteApprovalTokenTTL != 2*time.Minute {
+		t.Fatalf("DemoSurface approval config = %#v, want approval disabled with 2m TTL", cfg.DemoSurface)
 	}
 }
 
