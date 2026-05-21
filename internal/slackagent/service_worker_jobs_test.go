@@ -26,6 +26,34 @@ func TestShouldPublishWorkerResultAsCanvasWhenMentionRequestsCanvas(t *testing.T
 	}
 }
 
+func TestShouldNotPublishWorkerResultAsCanvasForFetchCanvasEvidencePrompt(t *testing.T) {
+	job := agentrunner.Job{
+		Status: agentrunner.StatusCompleted,
+		Task:   "Fetch the full thread context and any linked files/canvases. Synthesize a concise answer. Do NOT post to Slack.",
+		Context: map[string]any{
+			"slackAppMention": SlackAppMentionContext{
+				MentionText: "是不是有问题 看看",
+			},
+		},
+	}
+
+	text := strings.Join([]string{
+		"从 thread 和历史 memory 里能确认的信息很有限，我先把我看到的和你对齐一下——",
+		"",
+		"**当前 thread 全貌**",
+		"- 用户提了一个 bot 爬点子的想法",
+		"",
+		"**我查到的**",
+		"- 没有直接相关的历史讨论",
+		"",
+		"**需要补充**",
+		"- API 返回样例或错误日志",
+	}, "\n")
+	if shouldPublishWorkerResultAsCanvas(job, text) {
+		t.Fatal("worker prompt mentioning linked files/canvases should not imply Canvas publication")
+	}
+}
+
 func TestShouldNotPublishShortWorkerResultAsCanvasWithoutIntent(t *testing.T) {
 	job := agentrunner.Job{
 		Status: agentrunner.StatusCompleted,
@@ -66,6 +94,16 @@ func TestSlackWorkerResultTextSilentOnInternalGatewayLeak(t *testing.T) {
 	}
 	if got := slackWorkerResultText(job); got != "" {
 		t.Fatalf("slackWorkerResultText() = %q, want empty string (silent) when result leaks internal gateway", got)
+	}
+}
+
+func TestSlackWorkerResultTextSilentOnTransitionalAnnouncement(t *testing.T) {
+	job := agentrunner.Job{
+		Status: agentrunner.StatusCompleted,
+		Result: `"卡片"和"notch"在这里应该是指 app 里的 UI 通知组件。让我找找相关的 notification/通知实现代码。`,
+	}
+	if got := slackWorkerResultText(job); got != "" {
+		t.Fatalf("slackWorkerResultText() = %q, want empty string (silent) for transitional announcement", got)
 	}
 }
 

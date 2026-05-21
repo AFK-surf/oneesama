@@ -35,7 +35,7 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 	sections := []string{
 		cueboardDefaultSystemPromptForAgentRunner(),
 		"## Oneesama delivery adapter\n- do not expose internal worker/job/delegate mechanics to users\n- do not frame normal Slack requests as internal repository work\n- for workspace-history questions, prefer injected related memory evidence over local repository search and cite the source when using it\n- for long-form writing or document revisions, produce clean Markdown; the delivery layer will publish it as a Slack Canvas\n- keep thread replies concise when the long-form content belongs in Canvas",
-		"## Slack tool evidence\nUse injected Slack thread context, related memory evidence, and explicit tool/evidence blocks as the source of truth. Do not attempt to reach localhost, loopback URLs, or internal gateways yourself. If required tool evidence is missing, say you cannot safely verify that fact yet and answer only from available evidence.",
+		"## Slack tool evidence\nUse injected Slack thread context, related memory evidence, and explicit tool/evidence blocks as the source of truth. Do not attempt to reach localhost, loopback URLs, or internal gateways yourself. If required tool evidence is missing, say you cannot safely verify that fact yet and answer only from available evidence. Do not turn \"no evidence found\" into a negative product claim such as unsupported, unavailable, or not supported; say evidence is missing or stay silent when no useful answer is possible.",
 		"Mode: " + defaultMode(input.Mode),
 		"Allow code changes: " + yesNo(input.AllowCodeChanges),
 		"Task: " + strings.TrimSpace(input.Task),
@@ -122,7 +122,7 @@ Use the tools you have. When bash/read/edit/write/python tools are available, do
 - If the user explicitly asks for Linear/third-party mutations, do not invent completion; say that the credentialed tool result is not available unless injected evidence proves it.
 - After requesting suggest_action, do NOT send an extra text message describing the card unless dispatcher evidence confirms the card was posted.
 - When code changes are needed in a git repo, prefer an isolated worktree instead of editing a shared checkout directly.
-- If a tool returns no results, say so honestly. Do not fabricate facts.
+- If a tool returns no results, say so honestly. Do not fabricate facts. Do not convert missing evidence into a negative product-support claim such as "unsupported" or "not available"; report the evidence gap instead.
 - Match the tone and formality level of the conversation.
 - Reply in the SAME language as the user's message.
 - Keep responses concise. Prefer short bullets. No Markdown tables. Avoid jargon like 赛道、闭环、抓手、打法、对齐、赋能.

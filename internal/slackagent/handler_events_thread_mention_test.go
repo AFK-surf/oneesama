@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
@@ -212,6 +213,69 @@ func TestHandleEventsMessageRepliedIgnoresUnrelatedThreadAfterOlderBotMention(t 
 	}
 	if calls := poster.Calls(); len(calls) != 0 {
 		t.Fatalf("poster calls = %#v, want no direct bot reply for unrelated thread continuation", calls)
+	}
+}
+
+func TestHandleEventsShortThreadMentionExpandsWorkerTaskFromThreadContext(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_thread_context",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+		Mode:     "analysis",
+	}}
+	poster := &recordingPoster{callCh: make(chan struct{}, 4)}
+	router := newTestRouter(t, Config{
+		DefaultCaptionLanguage: "English",
+		Slack: appconfig.SlackConfig{
+			SigningSecret: "secret",
+			BotUserID:     "UBOT",
+		},
+		Poster: poster,
+		Runner: runner,
+	})
+
+	body := `{
+		"type":"event_callback",
+		"event_id":"EvShortThreadMentionContext",
+		"team_id":"T123",
+		"event":{
+			"type":"message",
+			"channel_type":"channel",
+			"user":"U123",
+			"text":"<@UBOT> 你来试试",
+			"channel":"C123",
+			"ts":"124.000",
+			"thread_ts":"123.000"
+		},
+		"replies":[
+			{"ts":"123.000","user":"U456","text":"刚刚会议最后 JC 讲了 Bridge 作为 managed agent 和 Manus 的区别，帮忙摘出来"},
+			{"ts":"124.000","user":"U123","text":"<@UBOT> 你来试试","thread_ts":"123.000"}
+		]
+	}`
+	timestamp, signature := signedSlackJSONBody("secret", body)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Slack-Request-Timestamp", timestamp)
+	request.Header.Set("X-Slack-Signature", signature)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	if runner.startCount != 1 {
+		t.Fatalf("runner starts = %d, want 1", runner.startCount)
+	}
+	if !strings.Contains(runner.startInput.Task, "Use the Slack thread context to infer and complete the concrete request") ||
+		!strings.Contains(runner.startInput.Task, "Latest mention: 你来试试") {
+		t.Fatalf("worker task = %q, want contextual task expansion", runner.startInput.Task)
+	}
+	prompt, _ := runner.startInput.Context["slackAssistantPrompt"].(string)
+	if !strings.Contains(prompt, "managed agent") || !strings.Contains(prompt, "Manus") {
+		t.Fatalf("slackAssistantPrompt = %q, want parent thread request", prompt)
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want no immediate visible ack for running worker", calls)
 	}
 }
 

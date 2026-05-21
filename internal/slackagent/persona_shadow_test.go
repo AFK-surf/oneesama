@@ -1121,6 +1121,17 @@ func TestPersonaDelegatedWorkerAllowedBySecretaryPolicyFixtures(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "out_of_scope/secretary_lookup_mislabel_does_not_bypass_project_debugging",
+			request: persona.WorkerRequest{
+				Kind:   "codex",
+				Prompt: "Fetch screenshot F0B522G0NUB and analyze why the staging 卡片/notch 没弹出; inspect notification 组件 and 触发条件 in source code.",
+				Context: map[string]any{
+					"delegation_scope": "secretary_lookup",
+				},
+			},
+			want: false,
+		},
+		{
 			name: "in_scope/explicit_oneesama_code_scope_overrides_markers",
 			request: persona.WorkerRequest{
 				Kind:   "codex",

@@ -65,6 +65,9 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if !strings.Contains(systemPrompt, "Never post visible self-limitations") {
 		t.Fatalf("system prompt missing media/tool self-limitation guard:\n%s", systemPrompt)
 	}
+	if !strings.Contains(systemPrompt, "Do not infer negative product support/status from missing evidence") {
+		t.Fatalf("system prompt missing missing-evidence product-claim guard:\n%s", systemPrompt)
+	}
 	for _, forbidden := range []string{"[[", "telegram-pi", "Linger"} {
 		if strings.Contains(systemPrompt, forbidden) {
 			t.Fatalf("system prompt contains old/private marker %q:\n%s", forbidden, systemPrompt)

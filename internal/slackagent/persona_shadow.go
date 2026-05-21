@@ -267,7 +267,7 @@ func personaDelegatedWorkerAllowedBySecretaryPolicy(request persona.WorkerReques
 		stringFromAny(request.Context["worker_scope"]),
 	)))
 	switch scope {
-	case "oneesama_system", "oneesama_code", "secretary_lookup", "workspace_memory", "explicit_human_authorized_code":
+	case "oneesama_system", "oneesama_code", "explicit_human_authorized_code":
 		return true, ""
 	case "external_project_code", "project_code", "project_debugging", "secretary_route":
 		return false, fmt.Sprintf("delegation_scope %q is outside Oneesama secretary worker scope", scope)
@@ -280,6 +280,10 @@ func personaDelegatedWorkerAllowedBySecretaryPolicy(request persona.WorkerReques
 	}, "\n"))
 	if personaDelegatedWorkerLooksLikeProjectDebugging(text) && !personaDelegatedWorkerMentionsOneesamaSystem(text) && !personaDelegatedWorkerExplicitlyAuthorized(text) {
 		return false, "external project debugging should be secretary-routed instead of delegated to Codex"
+	}
+	switch scope {
+	case "secretary_lookup", "workspace_memory":
+		return true, ""
 	}
 	return true, ""
 }
@@ -304,7 +308,9 @@ func personaDelegatedWorkerLooksLikeProjectDebugging(text string) bool {
 		"staging", "production", "deploy", "deployment", "infra", "infrastructure",
 		"database", "api latency", "latency", "performance", "perf", "slow", "timeout",
 		"build failure", "test failure", "regression", "incident", "debug", "fix bug", "bug",
-		"repository", "repo", "codebase", "source code", "recent deployments",
+		"codebase", "source code", "recent deployments",
+		"源码", "代码库", "仓库", "组件", "触发条件", "排查", "修复", "报错", "日志",
+		"线上", "生产", "部署", "接口", "性能", "延迟", "超时",
 	}
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {

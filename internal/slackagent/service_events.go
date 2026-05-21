@@ -252,7 +252,7 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 	}
 	if mentionMode {
 		if shouldRewriteMentionWorkerTask(commandText, richContext) {
-			commandText = "work " + strconv.Quote(richContext.MentionText)
+			commandText = "work " + strconv.Quote(mentionWorkerTaskText(richContext))
 		}
 	}
 
@@ -361,6 +361,57 @@ func shouldRewriteMentionWorkerTask(commandText string, richContext *SlackAppMen
 		return false
 	}
 	return strings.HasPrefix(strings.TrimSpace(commandText), "work ") && strings.TrimSpace(richContext.MentionText) != ""
+}
+
+func mentionWorkerTaskText(richContext *SlackAppMentionContext) string {
+	if richContext == nil {
+		return ""
+	}
+	mentionText := strings.TrimSpace(richContext.MentionText)
+	if mentionText == "" {
+		return ""
+	}
+	if !mentionTextNeedsThreadContext(mentionText) {
+		return mentionText
+	}
+	return strings.Join([]string{
+		"Use the Slack thread context to infer and complete the concrete request.",
+		"Latest mention: " + mentionText,
+		"If another bot is already active in the thread, add only missing evidence, a concise synthesis, or the next useful step; do not return an empty result just because the mention is short.",
+	}, "\n")
+}
+
+func mentionTextNeedsThreadContext(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	normalized = strings.Trim(normalized, " \t\r\n.,;:!?，。！？、")
+	if len([]rune(normalized)) > 16 {
+		return false
+	}
+	for _, marker := range []string{
+		"你来试试",
+		"来试试",
+		"试试",
+		"看看",
+		"看下",
+		"看一下",
+		"看这个",
+		"这个呢",
+		"你看下",
+		"你看看",
+		"帮看下",
+		"帮看看",
+		"try this",
+		"take a look",
+		"look at this",
+	} {
+		if normalized == marker {
+			return true
+		}
+	}
+	return false
 }
 
 func isSlackMentionCommandMode(mode string) bool {

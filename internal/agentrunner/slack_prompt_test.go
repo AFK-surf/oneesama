@@ -97,6 +97,25 @@ func TestBuildPromptSurfacesFirstClassSlackToolEvidence(t *testing.T) {
 	}
 }
 
+func TestBuildPromptForbidsNegativeSupportClaimFromMissingEvidence(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task: "Bridge 支持 Windows 吗？",
+		Context: map[string]any{
+			"source":            "slack-agent",
+			"slackToolEvidence": "1. memory_search (ok)\n   results: []",
+		},
+	}, SessionKindSlack))
+
+	for _, want := range []string{
+		"Do not turn \"no evidence found\" into a negative product claim",
+		"Do not convert missing evidence into a negative product-support claim",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing missing-evidence guard %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildPromptSurfacesRelatedMemoryEvidence(t *testing.T) {
 	prompt := buildPrompt(WithSessionCapabilities(StartInput{
 		Task: "jc说之前录制了5个Case Study的视频，这个有吗？",

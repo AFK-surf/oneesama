@@ -128,6 +128,34 @@ func TestWorkerTerminalFlipsMentionReaction(t *testing.T) {
 	})
 }
 
+func TestWorkerTerminalWarnsWhenCompletedWithoutVisibleDelivery(t *testing.T) {
+	reactions := &recordingReactions{}
+	service := NewService(Config{
+		Poster:    &recordingPoster{callCh: make(chan struct{}, 1)},
+		Assistant: &recordingAssistant{},
+		Reactions: reactions,
+	})
+
+	service.handleAgentRunnerUpdate(context.Background(), agentrunner.Job{
+		ID:       "job_reaction_empty_done",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   "   ",
+		Context: map[string]any{
+			"slack": map[string]any{
+				"channel_id":  "C123",
+				"thread_ts":   "123.000",
+				"reaction_ts": "123.456",
+			},
+		},
+	})
+
+	assertReactionCalls(t, reactions.Calls(), []reactionCall{
+		{Method: "remove", Channel: "C123", Timestamp: "123.456", Name: slackReactionEyes},
+		{Method: "add", Channel: "C123", Timestamp: "123.456", Name: slackReactionWarn},
+	})
+}
+
 func assertReactionCalls(t *testing.T, got []reactionCall, want []reactionCall) {
 	t.Helper()
 	if len(got) != len(want) {

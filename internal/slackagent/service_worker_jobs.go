@@ -41,10 +41,10 @@ func (s *Service) handleAgentRunnerUpdate(ctx context.Context, job agentrunner.J
 		return
 	}
 	s.reportWorkerJobToMeetingAgent(ctx, job)
-	s.postSlackWorkerResult(ctx, job)
+	delivered := s.postSlackWorkerResult(ctx, job)
 	if ref, ok := slackRefForWorkerJob(job); ok {
 		s.scheduleAssistantThreadStatus(ctx, ref, "", true)
-		if job.Status == agentrunner.StatusCompleted {
+		if job.Status == agentrunner.StatusCompleted && delivered {
 			s.finishMentionReaction(ctx, ref, slackReactionOK)
 		} else {
 			s.finishMentionReaction(ctx, ref, slackReactionWarn)
@@ -70,21 +70,21 @@ func (s *Service) reportWorkerJobToMeetingAgent(ctx context.Context, job agentru
 	}
 }
 
-func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job) {
+func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job) bool {
 	ref, ok := slackRefForWorkerJob(job)
 	if !ok {
-		return
+		return false
 	}
 	text := slackWorkerResultText(job)
 	if strings.TrimSpace(text) == "" {
-		return
+		return false
 	}
 	dedupKey := fmt.Sprintf("slack-worker-result:%s:%s:%s", job.ID, ref.ChannelID, firstNonEmpty(ref.ThreadTS, "root"))
 	if shouldPublishWorkerResultAsCanvas(job, text) {
 		manifest, err := s.PublishCanvas(ctx, workerResultCanvasInput(job, ref, text, dedupKey))
 		if err == nil && manifest.OK {
 			s.syncSlackWorkerMemoryTurn(ctx, job, ref, text, "canvas")
-			return
+			return true
 		}
 		if err != nil {
 			s.logger.Warn("slack worker canvas publish failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "error", err)
@@ -102,10 +102,11 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 	result := s.PostMessage(ctx, postInput)
 	if !result.OK {
 		s.logger.Warn("slack worker result post failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "error", result.Error, "detail", result.Detail)
-		return
+		return false
 	}
 	s.recordSlackOutboundLedger(ctx, "workspace", postInput, result, "worker_result: "+firstTextLine(text))
 	s.syncSlackWorkerMemoryTurn(ctx, job, ref, text, "thread_reply")
+	return true
 }
 
 func (s *Service) syncSlackWorkerMemoryTurn(ctx context.Context, job agentrunner.Job, ref AssistantThreadRef, assistantText string, delivery string) {
@@ -225,8 +226,54 @@ func slackWorkerJobRequestsCanvas(job agentrunner.Job) bool {
 	}
 	texts = append(texts, slackAppMentionRequestTexts(job.Context)...)
 	for _, text := range texts {
-		normalized := strings.ToLower(strings.TrimSpace(text))
-		if strings.Contains(normalized, "canvas") || strings.Contains(normalized, "画布") {
+		if slackTextRequestsCanvasOutput(text) {
+			return true
+		}
+	}
+	return false
+}
+
+func slackTextRequestsCanvasOutput(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"write canvas",
+		"write a canvas",
+		"write to canvas",
+		"write into canvas",
+		"put in canvas",
+		"put into canvas",
+		"publish canvas",
+		"create canvas",
+		"make a canvas",
+		"update canvas",
+		"edit canvas",
+		"canvas 里",
+		"canvas里",
+		"canvas 中",
+		"canvas中",
+		"写 canvas",
+		"写进 canvas",
+		"写到 canvas",
+		"放到 canvas",
+		"放进 canvas",
+		"生成 canvas",
+		"创建 canvas",
+		"更新 canvas",
+		"编辑 canvas",
+		"写画布",
+		"写进画布",
+		"写到画布",
+		"放到画布",
+		"放进画布",
+		"生成画布",
+		"创建画布",
+		"更新画布",
+		"编辑画布",
+	} {
+		if strings.Contains(normalized, marker) {
 			return true
 		}
 	}
@@ -362,6 +409,9 @@ func slackWorkerResultText(job agentrunner.Job) string {
 	if slackVisibleTextContainsInternalLeak(text) {
 		return ""
 	}
+	if slackVisibleTextIsTransitionalAnnouncement(text) {
+		return ""
+	}
 	return text
 }
 
@@ -387,6 +437,43 @@ func slackVisibleTextContainsInternalLeak(text string) bool {
 			strings.Contains(lower, "failed to connect") ||
 			strings.Contains(lower, "could not connect") ||
 			strings.Contains(lower, "exit status 7"))
+}
+
+func slackVisibleTextIsTransitionalAnnouncement(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	if lower == "" {
+		return false
+	}
+	if len([]rune(trimmed)) > 180 {
+		return false
+	}
+	for _, marker := range []string{
+		"让我找找",
+		"让我找一下",
+		"让我查查",
+		"让我查一下",
+		"我找找",
+		"我来找",
+		"我先找",
+		"我查一下",
+		"我看一下",
+		"我先看",
+		"我去定位",
+		"我开始修",
+		"下一步我会",
+		"let me check",
+		"let me look",
+		"i'll check",
+		"i will check",
+		"i'm going to check",
+		"working on it",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func assistantStatusTextForJob(job agentrunner.Job) string {
