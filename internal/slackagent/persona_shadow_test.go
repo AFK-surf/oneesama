@@ -970,6 +970,67 @@ HN profile for Johnson8053. Submissions include SQLite is the best home for AI a
 	}
 }
 
+func TestSecretaryLookupWorkerPromptCarriesMemoryEvidenceAndFollowupInstruction(t *testing.T) {
+	req := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_TRIAGE",
+		ThreadTS:  "500.000",
+		Messages: []SlackInboundMessage{{
+			TeamID:    "T123",
+			ChannelID: "C_TRIAGE",
+			UserID:    "U_HEYANG",
+			Text:      "https://news.ycombinator.com/user?id=Johnson8053 这是谁",
+			TS:        "500.000",
+		}, {
+			TeamID:    "T123",
+			ChannelID: "C_TRIAGE",
+			UserID:    "U_VINCENT",
+			Text:      "不认识 他咋了？",
+			TS:        "501.000",
+		}},
+		Digest: "#product: https://news.ycombinator.com/user?id=Johnson8053 这是谁\n不认识 他咋了？",
+		ExternalLinks: []SlackExternalLinkContext{{
+			URL:     "https://news.ycombinator.com/user?id=Johnson8053",
+			Title:   "Profile: Johnson8053 | Hacker News",
+			Excerpt: "user: Johnson8053 created: September 20, 2024 karma:33 about: submissions comments favorites",
+			Source:  "reader",
+		}},
+		RelatedMemory: []SlackRelatedMemoryRecord{{
+			Kind:       "person_memory",
+			SourcePath: "memory/people/zanwei.md",
+			StartLine:  4,
+			Content:    "Johnson8053 previously matched zanwei evidence: HN submissions mention affine, bridge, fireclaw, and github.com/zanwei/design-dna.",
+			Score:      0.92,
+		}},
+	})
+	result, calls := applyPersonaSecretaryLookupDisposition(SlackPersonaShadowResult{
+		Success:    true,
+		Runtime:    persona.ProviderPi,
+		Decision:   persona.DecisionStaySilent,
+		Reason:     "uncertain identity",
+		Confidence: 0.4,
+	}, req)
+
+	if len(calls) != 1 || result.Decision != persona.DecisionDelegateWorker || len(result.workerRecords) != 1 {
+		t.Fatalf("result=%#v calls=%#v, want one secretary lookup worker", result, calls)
+	}
+	worker := result.workerRecords[0]
+	prompt := worker.Prompt
+	for _, want := range []string{
+		"Do not stop at the first profile/article excerpt",
+		"submissions, comments, favorites, repository",
+		"Workspace Memory/person evidence",
+		"memory/people/zanwei.md",
+		"github.com/zanwei/design-dna",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("secretary lookup worker prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if evidence := stringFromAny(worker.Context["workspace_memory_evidence"]); !strings.Contains(evidence, "memory/people/zanwei.md") || !strings.Contains(evidence, "Johnson8053") {
+		t.Fatalf("workspace_memory_evidence = %q, want source-backed memory", evidence)
+	}
+}
+
 func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing.T) {
 	ctx := context.Background()
 	workspaceDir := t.TempDir()

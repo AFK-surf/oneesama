@@ -302,10 +302,11 @@ func applyPersonaSecretaryLookupDisposition(result SlackPersonaShadowResult, req
 		Kind:   "codex",
 		Prompt: buildSecretaryLookupWorkerPrompt(request),
 		Context: map[string]any{
-			"delegation_scope":      "secretary_lookup",
-			"secretary_lookup_type": "external_link_fact_lookup",
-			"external_link_context": personaRequestContextText(request.Context, "external_link_context"),
-			"triage_digest":         personaRequestContextText(request.Context, "triage_digest"),
+			"delegation_scope":          "secretary_lookup",
+			"secretary_lookup_type":     "external_link_fact_lookup",
+			"external_link_context":     personaRequestContextText(request.Context, "external_link_context"),
+			"triage_digest":             personaRequestContextText(request.Context, "triage_digest"),
+			"workspace_memory_evidence": personaRequestMemoryEvidence(request, 5),
 		},
 	}
 	result.Decision = persona.DecisionDelegateWorker
@@ -409,6 +410,8 @@ func slackTextContainsSecretaryLookupQuestion(text string) bool {
 func buildSecretaryLookupWorkerPrompt(request persona.Request) string {
 	parts := []string{
 		"Bounded Oneesama secretary lookup. Read the linked public source and the Slack thread context, then cross-check workspace Memory/person context if available.",
+		"Do not stop at the first profile/article excerpt. If the source exposes submissions, comments, favorites, repository, author, or source links, follow those read-only leads before answering.",
+		"Use available read-only tools such as exa_search, exa_contents, person_memory, memory_search, and slack_api fetch/read methods when the provided excerpt is not enough.",
 		"Only return a Slack-visible answer when you have concrete evidence. Include 2-3 short evidence anchors such as URL ownership, profile details, repo links, previous workspace mentions, or memory/person records.",
 		"If evidence is insufficient, return no visible result instead of guessing or posting a routing/refusal template.",
 	}
@@ -421,7 +424,34 @@ func buildSecretaryLookupWorkerPrompt(request persona.Request) string {
 	if external := strings.TrimSpace(personaRequestContextText(request.Context, "external_link_context")); external != "" {
 		parts = append(parts, "\nFetched external link context:\n"+external)
 	}
+	if memory := personaRequestMemoryEvidence(request, 5); memory != "" {
+		parts = append(parts, "\nWorkspace Memory/person evidence:\n"+memory)
+	}
 	return strings.Join(parts, "\n")
+}
+
+func personaRequestMemoryEvidence(request persona.Request, limit int) string {
+	if limit <= 0 || len(request.Memory.Items) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, limit)
+	for _, record := range request.Memory.Items {
+		if len(lines) >= limit {
+			break
+		}
+		text := truncateSlackContextText(strings.TrimSpace(sanitizeSlackVisibleText(record.Text)), 420)
+		if text == "" {
+			continue
+		}
+		source := strings.TrimSpace(record.SourceRef)
+		kind := strings.TrimSpace(record.Kind)
+		label := firstNonEmpty(source, kind, "memory")
+		if kind != "" && source != "" {
+			label += " [" + kind + "]"
+		}
+		lines = append(lines, fmt.Sprintf("%d. %s: %s", len(lines)+1, label, text))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func personaDelegateBlockShouldStaySilent(result SlackPersonaShadowResult) bool {
