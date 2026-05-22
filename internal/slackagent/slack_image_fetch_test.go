@@ -84,6 +84,12 @@ func TestActionFetchImageReturnsInlineBase64ForSmallFile(t *testing.T) {
 	if localPath, _ := decoded["local_path"].(string); strings.TrimSpace(localPath) == "" {
 		t.Fatalf("expected downloaded local_path to be populated")
 	}
+	if _, ok := decoded["url"]; ok {
+		t.Fatalf("protected Slack URL should not be exposed to workers: %#v", decoded["url"])
+	}
+	if omitted, _ := decoded["protected_url_omitted"].(bool); !omitted {
+		t.Fatalf("expected protected_url_omitted=true")
+	}
 }
 
 func TestActionFetchImageDownloadsLocalArtifactWhenOverInlineBudget(t *testing.T) {
@@ -137,6 +143,12 @@ func TestActionFetchImageDownloadsLocalArtifactWhenOverInlineBudget(t *testing.T
 	}
 	if access, _ := decoded["url_access"].(string); access != "slack_bot_token_required" {
 		t.Fatalf("url_access = %q, want slack_bot_token_required", access)
+	}
+	if _, ok := decoded["url"]; ok {
+		t.Fatalf("protected Slack URL should not be exposed to workers: %#v", decoded["url"])
+	}
+	if omitted, _ := decoded["protected_url_omitted"].(bool); !omitted {
+		t.Fatalf("expected protected_url_omitted=true")
 	}
 	reason, _ := decoded["inline_skipped_reason"].(string)
 	if !strings.Contains(reason, "inline budget") || !strings.Contains(reason, "local_path") {
@@ -264,6 +276,9 @@ func TestActionFetchImageDownloadFalseReturnsMetadataOnly(t *testing.T) {
 	}
 	if localPath, _ := decoded["local_path"].(string); strings.TrimSpace(localPath) != "" {
 		t.Fatalf("expected local_path empty when download=false, got %q", localPath)
+	}
+	if _, ok := decoded["url"]; ok {
+		t.Fatalf("protected Slack URL should not be exposed to workers: %#v", decoded["url"])
 	}
 	if calls != 1 {
 		t.Fatalf("expected exactly 1 HTTP call (files.info only), got %d", calls)
