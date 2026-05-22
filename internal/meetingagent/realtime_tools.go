@@ -34,7 +34,7 @@ func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
 	out := make([]realtimeToolSchema, 0, len(definitions))
 	for _, definition := range definitions {
 		switch definition.Name {
-		case "start_demo_surface", "control_demo_surface", "cancel_demo_surface":
+		case "start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface":
 			continue
 		default:
 			out = append(out, definition)
@@ -89,6 +89,18 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"subtitle":        stringSchema("Visible subtitle for the shared demo surface."),
 			"session_id":      stringSchema("Current meeting session id when known."),
 			"demo_session_id": stringSchema("Optional stable demo session id for audit/reuse."),
+		})),
+		realtimeTool("start_demo_execution", "Start an end-to-end demo execution: use this when the user asks you to directly do a task and show/share/demo the result, e.g. '做一个贪吃蛇，然后给我看/分享屏幕'. This starts the visual demo surface and a code-capable worker; do not answer with a plan instead.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
+			"task":                stringSchema("The exact user task to execute, preserving wording such as no-planning or show-the-work constraints."),
+			"task_url":            stringSchema("Optional Linear/task/GitHub URL that identifies the work item."),
+			"demo_url":            stringSchema("Optional initial URL to show on the demo surface while the worker starts."),
+			"title":               stringSchema("Visible title for the shared demo surface."),
+			"issue_id":            stringSchema("Optional fixture or external issue id. External writes still require approval."),
+			"issue_url":           stringSchema("Optional fixture or external issue URL. External writes still require approval."),
+			"request_issue_close": boolSchema(false),
+			"session_id":          stringSchema("Current meeting session id when known."),
+			"demo_session_id":     stringSchema("Optional stable demo session id for audit/reuse."),
+			"user_instruction":    stringSchema("Additional user constraints, e.g. concise, don't narrate, show progress visually."),
 		})),
 		realtimeTool("control_demo_surface", "Continue controlling the active bot-owned demo surface. Use after start_demo_surface to change the shared content, observe/capture the page, scroll, highlight, click approved UI, or type approved text without restarting the meeting share.", objectSchema([]string{"action"}, map[string]realtimeJSONSchema{
 			"action":          enumStringSchema("capture", "open_url", "capture", "scroll", "highlight", "click", "type"),

@@ -140,6 +140,7 @@ func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.Ope
 		"For personal task questions, resolve the current user profile first and use its workspace identifiers.",
 		"For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
 		"If the user says stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",
+		"For requests like “做一个贪吃蛇，然后给我看/分享屏幕/演示”, call start_demo_execution when the demo surface is available. The realtime avatar only confirms start/failure/completion briefly; execution happens in the background and the demo surface carries progress.",
 		"Ignore obvious self-echo: captions or transcript snippets attributed to “You” are usually your own prior speech, and your own prior speech may be duplicated inside another speaker's caption. Do not answer, apologize for, or diagnose that echo unless the user explicitly asks for debugging.",
 		"If a long-running result is not ready, say you are handling it and will report back automatically. Never pretend it is complete before the result arrives.",
 		"When live meeting participants or speaker context is injected, use it as conversation context. Do not recite detection sources, confidence values, or raw context fields unless the user asks for debugging.",

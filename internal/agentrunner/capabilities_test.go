@@ -47,6 +47,18 @@ func TestCapabilitiesForSessionKindDemoSurfaceBlocksMeetingMutationTools(t *test
 	assertEqual(t, NormalizeSessionKind("demo-surface"), SessionKindDemoSurface)
 }
 
+func TestCapabilitiesForSessionKindDemoExecutionAllowsCodeButBlocksMessaging(t *testing.T) {
+	capabilities := CapabilitiesForSessionKind(SessionKindDemoExecution)
+	assertEqual(t, capabilities.Role, SessionRoleDemoExecution)
+	for _, name := range []string{"read", "write", "edit", "bash", "browser"} {
+		assertContains(t, capabilities.AllowedTools, name)
+	}
+	for _, name := range []string{"send_meeting_chat", "notify_meeting_slack", "slack_api", "send_message", "manage_schedule", "memory_write"} {
+		assertContains(t, capabilities.BlockedTools, name)
+	}
+	assertEqual(t, NormalizeSessionKind("demo-execution"), SessionKindDemoExecution)
+}
+
 func TestCapabilitiesForSessionKindSecretaryLookupIsReadOnly(t *testing.T) {
 	capabilities := CapabilitiesForSessionKind(SessionKindSecretaryLookup)
 	assertEqual(t, capabilities.Role, SessionRoleSecretaryLookup)

@@ -192,6 +192,49 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
+    name: "start_demo_execution",
+    description:
+      "Start an end-to-end demo execution: use this when the user asks you to directly do a task and show/share/demo the result, e.g. '做一个贪吃蛇，然后给我看/分享屏幕'. This starts the visual demo surface and a code-capable worker; do not answer with a plan instead.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "The exact user task to execute, preserving wording such as no-planning or show-the-work constraints.",
+        },
+        task_url: {
+          type: "string",
+          description: "Optional Linear/task/GitHub URL that identifies the work item.",
+        },
+        demo_url: {
+          type: "string",
+          description: "Optional initial URL to show on the demo surface while the worker starts.",
+        },
+        title: { type: "string", description: "Visible title for the shared demo surface." },
+        issue_id: {
+          type: "string",
+          description: "Optional fixture or external issue id. External writes still require approval.",
+        },
+        issue_url: {
+          type: "string",
+          description: "Optional fixture or external issue URL. External writes still require approval.",
+        },
+        request_issue_close: { type: "boolean", default: false },
+        session_id: { type: "string", description: "Current meeting session id when known." },
+        demo_session_id: {
+          type: "string",
+          description: "Optional stable demo session id for audit/reuse.",
+        },
+        user_instruction: {
+          type: "string",
+          description: "Additional user constraints, e.g. concise, don't narrate, show progress visually.",
+        },
+      },
+      required: ["task"],
+    },
+  },
+  {
+    type: "function",
     name: "control_demo_surface",
     description:
       "Continue controlling the active bot-owned demo surface. Use after start_demo_surface to change the shared content, observe/capture the page, scroll, highlight, click approved UI, or type approved text without restarting the meeting share.",
@@ -930,6 +973,7 @@ export function buildRealtimeInstructions({
     "For personal task questions, resolve the current user profile first and use its workspace identifiers.",
     "For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
     "If the user says to stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",
+    "For requests like “做一个贪吃蛇，然后给我看/分享屏幕/演示”, call start_demo_execution when the demo surface is available. The realtime avatar only confirms start/failure/completion briefly; execution happens in the background and the demo surface carries progress.",
     "Ignore obvious self-echo: captions or transcript snippets attributed to “You” are usually your own prior speech, and your own prior speech may be duplicated inside another speaker's caption. Do not answer, apologize for, or diagnose that echo unless the user explicitly asks for debugging.",
     "If a long-running result is not ready, say you are handling it and will report back automatically. Never pretend it is complete before the result arrives.",
     "When live meeting participants or speaker context is injected, use it as conversation context. Do not recite detection sources, confidence values, or raw context fields unless the user asks for debugging.",

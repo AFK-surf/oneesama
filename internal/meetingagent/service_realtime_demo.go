@@ -34,8 +34,12 @@ func realtimeDemoBridgeHTTPStatus(err error) int {
 		errors.Is(err, errRealtimeDemoBridgeMissingLifecycle) ||
 		errors.Is(err, errRealtimeDemoBridgeMissingPresenter) ||
 		errors.Is(err, errRealtimeDemoBridgeMissingController) ||
-		errors.Is(err, errRealtimeDemoBridgeNoActiveSession) {
+		errors.Is(err, errRealtimeDemoBridgeNoActiveSession) ||
+		errors.Is(err, errDemoExecutionRunnerRequired) {
 		return 503
+	}
+	if errors.Is(err, errDemoExecutionMissingTask) {
+		return 400
 	}
 	if errors.Is(err, errRealtimeDemoBridgeActionBlocked) {
 		return 403

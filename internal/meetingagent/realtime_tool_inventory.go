@@ -65,6 +65,11 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Gate:  "demo_surface_enabled",
 		Notes: "bot-owned Browser/CU surface; hidden when demo surface bridge is disabled",
 	},
+	"start_demo_execution": {
+		Class: RealtimeToolClassOptionalForeground,
+		Gate:  "demo_surface_enabled_and_worker_runner",
+		Notes: "end-to-end do-and-show execution boundary; starts visual surface plus code-capable worker with external-write approval gate",
+	},
 	"control_demo_surface": {
 		Class: RealtimeToolClassOptionalForeground,
 		Gate:  "demo_surface_enabled_and_policy",

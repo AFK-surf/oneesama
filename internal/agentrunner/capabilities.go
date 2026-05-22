@@ -10,6 +10,7 @@ const (
 	SessionKindMeetingCalib    = "meeting_calibrate"
 	SessionKindMeetingSummary  = "meeting_summary"
 	SessionKindDemoSurface     = "meeting_demo_surface"
+	SessionKindDemoExecution   = "meeting_demo_execution"
 	SessionKindSecretaryLookup = "secretary_lookup"
 
 	SessionRoleAssistant       = "assistant"
@@ -18,6 +19,7 @@ const (
 	SessionRoleCompact         = "compact"
 	SessionRoleCompletionOnly  = "completion_only"
 	SessionRoleDemoSurface     = "demo_surface"
+	SessionRoleDemoExecution   = "demo_execution"
 	SessionRoleSecretaryLookup = "secretary_lookup"
 )
 
@@ -59,6 +61,25 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 			"notify_meeting_slack",
 			"slack_api",
 			"send_message",
+		})
+	case SessionKindDemoExecution:
+		return newCapabilities(normalized, SessionRoleDemoExecution, []string{
+			"read",
+			"write",
+			"edit",
+			"bash",
+			"browser",
+			"memory_search",
+			"memory_get",
+		}, []string{
+			"send_meeting_chat",
+			"notify_meeting_slack",
+			"slack_api",
+			"send_message",
+			"manage_schedule",
+			"memory_write",
+			"suggest_action",
+			"followup_memory",
 		})
 	case SessionKindSecretaryLookup:
 		return newCapabilities(normalized, SessionRoleSecretaryLookup, []string{
@@ -141,6 +162,8 @@ func NormalizeSessionKind(kind string) string {
 		return SessionKindMeetingSummary
 	case "meeting-demo-surface", "demo-surface", "demo-surface-browser", "browser-demo-surface":
 		return SessionKindDemoSurface
+	case "meeting-demo-execution", "demo-execution", "demo-exec":
+		return SessionKindDemoExecution
 	case "secretary-lookup", "workspace-secretary-lookup", "slack-secretary-lookup":
 		return SessionKindSecretaryLookup
 	default:

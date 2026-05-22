@@ -47,7 +47,7 @@ func TestRealtimeForegroundToolInventoryRespectsDemoSurfaceGate(t *testing.T) {
 			optional[item.Name] = true
 		}
 	}
-	for _, name := range []string{"start_demo_surface", "control_demo_surface", "cancel_demo_surface"} {
+	for _, name := range []string{"start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface"} {
 		if !optional[name] {
 			t.Fatalf("optional demo-surface tool %q missing from enabled inventory", name)
 		}

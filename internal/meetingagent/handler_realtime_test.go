@@ -83,11 +83,11 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "update_avatar_state", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
 	}
-	if toolNamesInclude(tools, "start_demo_surface", "cancel_demo_surface") {
+	if toolNamesInclude(tools, "start_demo_surface", "start_demo_execution", "cancel_demo_surface") {
 		t.Fatalf("tools = %#v, demo surface tools must stay hidden when default-off", body["tools"])
 	}
 	sessionTools := session["tools"].([]any)
-	if toolNamesInclude(sessionTools, "start_demo_surface", "control_demo_surface", "cancel_demo_surface") {
+	if toolNamesInclude(sessionTools, "start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface") {
 		t.Fatalf("session tools = %#v, demo surface tools must stay hidden when default-off", sessionTools)
 	}
 	demoSurface := body["demoSurface"].(map[string]any)
@@ -189,7 +189,7 @@ func TestRealtimeClientSecretStripsClientRequestedDemoToolsWhenDefaultOff(t *tes
 		BotName:                  "Meeting Avatar Bot",
 	})
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, realtimeRequest(http.MethodPost, "/realtime/client-secret", `{"tools":[{"type":"function","name":"start_demo_surface","parameters":{"type":"object"}},{"type":"function","name":"cancel_demo_surface","parameters":{"type":"object"}}]}`))
+	router.ServeHTTP(response, realtimeRequest(http.MethodPost, "/realtime/client-secret", `{"tools":[{"type":"function","name":"start_demo_surface","parameters":{"type":"object"}},{"type":"function","name":"start_demo_execution","parameters":{"type":"object"}},{"type":"function","name":"cancel_demo_surface","parameters":{"type":"object"}}]}`))
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want dry-run 200: %s", response.Code, response.Body.String())
@@ -198,7 +198,7 @@ func TestRealtimeClientSecretStripsClientRequestedDemoToolsWhenDefaultOff(t *tes
 	decodeRealtimeBody(t, response.Body.String(), &body)
 	session := body["session"].(map[string]any)
 	tools := session["tools"].([]any)
-	if toolNamesInclude(tools, "start_demo_surface", "cancel_demo_surface", "control_demo_surface") {
+	if toolNamesInclude(tools, "start_demo_surface", "start_demo_execution", "cancel_demo_surface", "control_demo_surface") {
 		t.Fatalf("session tools = %#v, demo tools must be server-gated off", tools)
 	}
 }
@@ -548,7 +548,7 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	}
 	var configBody map[string]any
 	decodeRealtimeBody(t, configResponse.Body.String(), &configBody)
-	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_surface", "control_demo_surface", "cancel_demo_surface") {
+	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface") {
 		t.Fatalf("tools = %#v, want demo surface tools when flag enabled", configBody["tools"])
 	}
 	demoSurface := configBody["demoSurface"].(map[string]any)
@@ -621,6 +621,97 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	trail := trailBody["trail"].(map[string]any)
 	if len(trail["entries"].([]any)) != 3 || len(trail["runbook_lines"].([]any)) != 3 {
 		t.Fatalf("trail = %#v, want trigger/action/stop feedback package", trail)
+	}
+}
+
+func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	runner := &fakeDemoCodexRunner{
+		startJob: agentrunner.Job{
+			ID:       "job_snake_demo",
+			Provider: "codex",
+			Status:   agentrunner.StatusCompleted,
+			Result:   `{"status":"completed","summary":"Snake page ready","demo_url":"https://example.test/snake","files_changed":["snake/index.html"],"needs_approval":["close issue after human approval"]}`,
+		},
+	}
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		OpenAI: appconfig.OpenAIConfig{
+			RealtimeModel:          "gpt-realtime-2",
+			BotName:                "Meeting Avatar Bot",
+			CurrentUserEnglishName: "Peng Xiao",
+		},
+		MeetRunner: fakeMeetRunner{},
+		Runner:     runner,
+		DemoSurface: appconfig.DemoSurfaceConfig{
+			Enabled:              true,
+			Mode:                 "safe",
+			Adapter:              "fake",
+			RootDir:              rootDir + "/demo-surfaces",
+			URLAllowlistPatterns: []string{"https://example.test/"},
+			DryRun:               true,
+		},
+	})
+
+	configResponse := httptest.NewRecorder()
+	router.ServeHTTP(configResponse, realtimeRequest(http.MethodGet, "/realtime/config", ""))
+	if configResponse.Code != http.StatusOK {
+		t.Fatalf("config status = %d: %s", configResponse.Code, configResponse.Body.String())
+	}
+	var configBody map[string]any
+	decodeRealtimeBody(t, configResponse.Body.String(), &configBody)
+	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_execution") {
+		t.Fatalf("tools = %#v, want demo execution tool when demo surface enabled", configBody["tools"])
+	}
+	if !strings.Contains(stringFromAny(configBody["instructions"]), "做一个贪吃蛇") ||
+		!strings.Contains(stringFromAny(configBody["instructions"]), "start_demo_execution") {
+		t.Fatalf("instructions = %q, want semantic demo-execution example", stringFromAny(configBody["instructions"]))
+	}
+
+	join := httptest.NewRecorder()
+	router.ServeHTTP(join, realtimeRequest(http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"install_screen_share_bridge":true}`))
+	if join.Code != http.StatusOK {
+		t.Fatalf("join status = %d: %s", join.Code, join.Body.String())
+	}
+
+	start := httptest.NewRecorder()
+	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_execution", `{"session_id":"meet_session","demo_session_id":"snake_demo","task":"做一个贪吃蛇，然后给我看屏幕，不要先讲规划","task_url":"https://example.test/tasks/snake","demo_url":"https://example.test/tasks/snake","issue_id":"MOCK-1","request_issue_close":true,"user_instruction":"短一点，进度走屏幕"}`))
+	if start.Code != http.StatusOK {
+		t.Fatalf("start status = %d: %s", start.Code, start.Body.String())
+	}
+	var startBody map[string]any
+	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	if startBody["ok"] != true || stringFromAny(startBody["status"]) != realtimeDemoExecutionStatusCompleted {
+		t.Fatalf("start body = %#v, want completed demo execution", startBody)
+	}
+	approval := startBody["approval"].(map[string]any)
+	if approval["required"] != true || approval["operation"] != "close_issue" || approval["reason"] != "external_write_approval_required" {
+		t.Fatalf("approval = %#v, want external close approval gate", approval)
+	}
+	if startBody["completion_demo"] == nil || !strings.Contains(stringFromAny(startBody["observation_context"]), "fake kwwk open_url observation") {
+		t.Fatalf("start body = %#v, want completion demo observation", startBody)
+	}
+	if runner.startCount != 1 || !runner.startInput.AllowCodeChanges || runner.startInput.Mode != "code" {
+		t.Fatalf("runner input = %#v count=%d, want code-capable worker", runner.startInput, runner.startCount)
+	}
+	if runner.startInput.Context["session_kind"] != agentrunner.SessionKindDemoExecution ||
+		runner.startInput.Context["session_role"] != agentrunner.SessionRoleDemoExecution {
+		t.Fatalf("runner context = %#v, want demo execution capabilities", runner.startInput.Context)
+	}
+	preferences := runner.startInput.Context["user_preferences"].(map[string]any)
+	if preferences["no_planning"] != true || preferences["concise"] != true ||
+		preferences["progress_channel"] != "demo_surface" || preferences["preferred_spoken_name"] != "Peng Xiao" {
+		t.Fatalf("preferences = %#v, want user preference snapshot", preferences)
+	}
+	if !strings.Contains(runner.startInput.Task, "Do the requested task; do not return a plan-only answer.") ||
+		!strings.Contains(runner.startInput.Task, "needs_approval") ||
+		!strings.Contains(runner.startInput.Task, "做一个贪吃蛇") {
+		t.Fatalf("worker task = %q, missing execution contract", runner.startInput.Task)
 	}
 }
 
