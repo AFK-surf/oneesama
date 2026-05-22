@@ -114,6 +114,10 @@ func slackVisibleReplyQualityBlockedSampleFromRun(run SlackTriageContext, call S
 }
 
 func buildSlackVisibleReplyQualitySampleSummary(actions []SlackPendingAction, runs []SlackTriageContext, window time.Duration, limit int) SlackVisibleReplyQualitySampleSummary {
+	return summarizeSlackVisibleReplyQualitySamples(slackVisibleReplyQualitySamples(actions, runs, window), limit)
+}
+
+func slackVisibleReplyQualitySamples(actions []SlackPendingAction, runs []SlackTriageContext, window time.Duration) []SlackVisibleReplyQualitySample {
 	now := timeNow().UTC()
 	cutoff := now.Add(-window)
 	if window <= 0 {
@@ -141,7 +145,7 @@ func buildSlackVisibleReplyQualitySampleSummary(actions []SlackPendingAction, ru
 			samples = append(samples, slackVisibleReplyQualityBlockedSampleFromRun(run, call))
 		}
 	}
-	return summarizeSlackVisibleReplyQualitySamples(samples, limit)
+	return samples
 }
 
 func summarizeSlackVisibleReplyQualitySamples(samples []SlackVisibleReplyQualitySample, limit int) SlackVisibleReplyQualitySampleSummary {

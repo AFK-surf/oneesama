@@ -234,11 +234,16 @@ var triageQualityIntentActionMismatchNegations = []string{
 	"not needed",
 	"not be delegated",
 	"not delegated",
+	"not delegate",
+	"instead of delegate",
+	"instead of delegating",
 	"should not",
 	"do not",
 	"does not",
 	"not to",
 	"stay silent",
+	"stay_silent",
+	"delegation scope policy",
 	"would be intrusive",
 	"would be noise",
 	"无需",
@@ -252,6 +257,8 @@ var triageQualityIntentActionMismatchNegations = []string{
 	"已反应",
 	"不再",
 	"不必",
+	"不是",
+	"应 stay",
 }
 
 // triageQualityDelegateNoVisibleAction holds the evidence extracted from a

@@ -85,6 +85,7 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 	contextBudget := buildSlackTriageContextBudget(windowRuns)
 	reviewBuckets := buildSlackTriageReviewBuckets(windowRuns, 5)
 	infoBuckets := buildSlackTriageInfoBuckets(windowRuns, 5)
+	replyQualitySamples := slackVisibleReplyQualitySamples(actions, windowRuns, window)
 	report := SlackTriageAuditReport{
 		GeneratedAt:         now.Format(time.RFC3339Nano),
 		WindowSeconds:       int64(window.Seconds()),
@@ -104,7 +105,9 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		LiveProbe:           buildSlackTriageLiveProbeSummary(windowRuns),
 		FailureSamples:      buildSlackTriageFailureSamples(windowRuns, 5),
 		RecentRuns:          buildSlackTriageAuditRunBriefs(windowRuns, 20),
-		ReplyQualitySamples: buildSlackVisibleReplyQualitySampleSummary(actions, windowRuns, window, 10),
+		ReplyQualitySamples: summarizeSlackVisibleReplyQualitySamples(replyQualitySamples, 10),
+		VisibleReplyCanary:  buildSlackVisibleReplyAllowListCanarySummary(),
+		VisibleReplyShadow:  buildSlackVisibleReplyAllowListShadowSummary(replyQualitySamples, 10),
 		QualityThresholds:   slackTriageQualityBucketThresholds(),
 		ReviewBuckets:       reviewBuckets,
 		InfoBuckets:         infoBuckets,

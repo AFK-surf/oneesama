@@ -47,7 +47,7 @@ intent_action_markers="$(jq -c '((.audit.qualityThresholds.intentActionMismatchS
 # Same negation/historical markers triageQualityIntentActionMismatchMatch
 # uses in Go; presence of any anywhere in the summary suppresses the bucket
 # so "已被 X 回复" / "没有需要回复" do not false-positive trip a match.
-intent_action_negations='["no need","no further action","not needed","not be delegated","not delegated","should not","do not","does not","not to","stay silent","would be intrusive","would be noise","无需","不需","无须","没有","已被","已由","已经","已回复","已反应","不再","不必"]'
+intent_action_negations='["no need","no further action","not needed","not be delegated","not delegated","not delegate","instead of delegate","instead of delegating","should not","do not","does not","not to","stay silent","stay_silent","delegation scope policy","would be intrusive","would be noise","无需","不需","无须","没有","已被","已由","已经","已回复","已反应","不再","不必","不是","应 stay"]'
 # Task #285 follow-up #3: handled-by-other markers demote no-action runs from
 # review (operator-attention needed) to info (record-keeping only). Canonical
 # list lives in internal/slackagent/triage_quality_buckets.go via
@@ -58,6 +58,8 @@ handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSumm
 handled_by_other_negations="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryNegations // []) + ["no idea","not sure","don'\''t know","doesn'\''t know","nobody knows","unknown who","unclear who","不认识","不知道","不清楚","搞不清","没人知道","无人知道","还没确定"]) | unique' <"${tmpdir}/audit.json")"
 harness_rollup="$(jq -c '.audit.harness // {}' <"${tmpdir}/audit.json")"
 reply_quality_samples="$(jq -c '.audit.replyQualitySamples // {}' <"${tmpdir}/audit.json")"
+visible_reply_canary="$(jq -c '.audit.visibleReplyAllowListCanary // {}' <"${tmpdir}/audit.json")"
+visible_reply_shadow="$(jq -c '.audit.visibleReplyAllowListShadow // {}' <"${tmpdir}/audit.json")"
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
@@ -216,6 +218,8 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
       },
       harness: $harness,
       replyQualitySamples: $reply_samples,
+      visibleReplyAllowListCanary: $visible_canary,
+      visibleReplyAllowListShadow: $visible_shadow,
       totals: {
         runs: ($runs | length),
         failed: ($runs | map(select(.status != "ok")) | length),
@@ -353,7 +357,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
                   | ($raw | ascii_downcase) as $haystack
                   # negation guard: any historical / negated marker in the
                   # summary suppresses the whole match.
-                  | (any(($negations // [])[]; . as $neg | $raw | contains($neg)) | not)
+                  | (any(($negations // [])[]; (. | ascii_downcase) as $neg | $haystack | contains($neg)) | not)
                   # also skip runs already classified as handled-by-other
                   # info-tier; they belong in info, not review.
                   and (
@@ -370,7 +374,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       }
     }
-' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson handled_negations "$handled_by_other_negations" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" --argjson reply_samples "$reply_quality_samples" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson handled_negations "$handled_by_other_negations" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" --argjson reply_samples "$reply_quality_samples" --argjson visible_canary "$visible_reply_canary" --argjson visible_shadow "$visible_reply_shadow" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
@@ -384,6 +388,11 @@ jq -r '
 jq -r '
   .replyQualitySamples as $samples
   | "reply_quality_samples: total=\($samples.total // 0) pending=\($samples.pending // 0) confirmed=\($samples.confirmed // 0) rejected=\($samples.rejected // 0) blocked=\($samples.blocked // 0)"
+' <"${tmpdir}/quality.json"
+jq -r '
+  .visibleReplyAllowListCanary as $canary
+  | .visibleReplyAllowListShadow as $shadow
+  | "visible_reply_allow_list: canary_passed=\($canary.passed // 0) canary_failed=\($canary.failed // 0) shadow_total=\($shadow.total // 0) allow=\($shadow.allowListWouldAllow // 0) block=\($shadow.allowListWouldBlock // 0) safety_net=\($shadow.safetyNetBlocks // 0)"
 ' <"${tmpdir}/quality.json"
 jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
@@ -412,13 +421,20 @@ write_status_summary() {
     '. + {script: $script, status: $status}' <"${tmpdir}/quality.json" >"${status_output_dir}/triage-quality-result.json"
 }
 
-if jq -e '((.red.failures | length) + (.red.invalidPersonaJSON | length) + (.red.placeholderSummaries | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
+if jq -e '((.red.failures | length) + (.red.invalidPersonaJSON | length) + (.red.placeholderSummaries | length) + (.visibleReplyAllowListCanary.failed // 0)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
   echo "oneesama-triage-quality-sweep: red quality samples:" >&2
   jq -r '
     .red
     | to_entries[]
     | select(.value | length > 0)
     | "## \(.key)\n" + (.value | map("- \(.at) \(.channels | join(",")) id=\(.id) summary=\(.summary)") | join("\n"))
+  ' <"${tmpdir}/quality.json" >&2
+  jq -r '
+    .visibleReplyAllowListCanary as $canary
+    | if (($canary.failed // 0) > 0)
+      then "## visibleReplyAllowListCanary\n" + (($canary.cases // []) | map(select((.passed // false) | not) | "- \(.name) expected=\(.expectedReason // "") actual=\(.actualReason // "")") | join("\n"))
+      else empty
+      end
   ' <"${tmpdir}/quality.json" >&2
   write_status_summary "red"
   exit 1

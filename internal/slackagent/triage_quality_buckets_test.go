@@ -585,6 +585,12 @@ func TestTriageQualityIntentActionMismatchMatch(t *testing.T) {
 			wantHit:  "",
 			wantNone: true,
 		},
+		{
+			name:     "user_request_narration_not_agent_action",
+			summary:  "消息是给 Oneesama 的测试请求，要求测试上传附件、生音频、图片、网站等权限相关 task，并将其固化为 agent 自动测试。这属于外部项目的具体功能测试/固化工作，不是 Oneesama 的 bounded secretary 工作。根据 delegation scope policy，此类外部项目功能测试调查应 stay_silent。",
+			wantHit:  "",
+			wantNone: true,
+		},
 		// English compound markers still hit when no negation is present.
 		{"en_delegate_marker", "Will delegate this to codex worker", "delegate", false},
 		{"en_will_reply_marker", "Will reply with citation", "will reply", false},
