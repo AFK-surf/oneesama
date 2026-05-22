@@ -191,6 +191,32 @@ is_true() {
   esac
 }
 
+socket_mode_competitor_labels() {
+  local labels="${ONEESAMA_SOCKET_MODE_COMPETITOR_LABELS:-com.openclaw.twitter-reply-bot.live}"
+  printf '%s\n' "$labels" | tr ', ' '\n' | sed '/^$/d'
+}
+
+check_no_socket_mode_competitors() {
+  if [[ "$subcommand" != "slack-agent" ]]; then
+    return 0
+  fi
+  if is_true "${ONEESAMA_ALLOW_SOCKET_MODE_COMPETITORS:-0}"; then
+    log "warn: skipping Slack Socket Mode competitor guard because ONEESAMA_ALLOW_SOCKET_MODE_COMPETITORS is enabled"
+    return 0
+  fi
+  if ! command -v launchctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local domain label
+  domain="gui/$(id -u)"
+  while IFS= read -r label; do
+    if launchctl print "${domain}/${label}" >/dev/null 2>&1; then
+      die "known Slack Socket Mode competitor is running: ${label}; bootout/disable it or set ONEESAMA_ALLOW_SOCKET_MODE_COMPETITORS=1"
+    fi
+  done < <(socket_mode_competitor_labels)
+}
+
 codex_required_env_key() {
   local provider dry_run base_url env_key
   provider="$(first_env_value ONEESAMA_AGENT_RUNNER MAB_AGENT_RUNNER || true)"
@@ -254,6 +280,7 @@ preflight_env() {
     else
       log "warn: ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY not exported"
     fi
+    check_no_socket_mode_competitors
     local persona_provider
     persona_provider="$(first_env_value ONEESAMA_PERSONA_RUNTIME MAB_PERSONA_RUNTIME || true)"
     persona_provider="$(normalize_provider "${persona_provider:-legacy}")"

@@ -20,6 +20,35 @@ need() {
 need curl
 need jq
 
+is_true() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|y|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+socket_mode_competitor_labels() {
+  local labels="${ONEESAMA_SOCKET_MODE_COMPETITOR_LABELS:-com.openclaw.twitter-reply-bot.live}"
+  printf '%s\n' "$labels" | tr ', ' '\n' | sed '/^$/d'
+}
+
+socket_mode_competitor_red_flags() {
+  if is_true "${ONEESAMA_ALLOW_SOCKET_MODE_COMPETITORS:-0}"; then
+    return 0
+  fi
+  if ! command -v launchctl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local domain label
+  domain="gui/$(id -u)"
+  while IFS= read -r label; do
+    if launchctl print "${domain}/${label}" >/dev/null 2>&1; then
+      printf 'socket_mode_competitor: known Slack Socket Mode competitor is running: %s\n' "$label"
+    fi
+  done < <(socket_mode_competitor_labels)
+}
+
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -66,6 +95,13 @@ persona_quality_summary="$(
   ' <"${tmpdir}/triage-audit.json"
 )"
 red_flags="$(jq -r '.audit.flags[]? | select(.level == "red") | "\(.code): \(.message)"' <"${tmpdir}/triage-audit.json")"
+socket_mode_red_flags="$(socket_mode_competitor_red_flags || true)"
+red_flags="$(
+  {
+    printf '%s\n' "$red_flags"
+    printf '%s\n' "$socket_mode_red_flags"
+  } | sed '/^$/d'
+)"
 harness_summary="$(
   {
     jq -r '
