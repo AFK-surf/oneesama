@@ -1,0 +1,23 @@
+{
+  "caseId": "raw_json_worker_output_must_block",
+  "description": "A raw worker JSON object should never be posted as human-visible Slack text.",
+  "label": "must_block",
+  "tags": ["incident", "raw_json", "worker_output"],
+  "sourceRefs": ["task:#365"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779450003.000003",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "worker 如果返回 {\"visible_text\":\"...\",\"evidence_anchors\":[]}，只能渲染 visible_text，不能把 JSON 原样发出来。",
+        "ts": "1779450003.000003",
+        "threadTs": "1779450003.000003"
+      }
+    ]
+  },
+  "expected": {
+    "visibleReplyAllowed": false
+  }
+}

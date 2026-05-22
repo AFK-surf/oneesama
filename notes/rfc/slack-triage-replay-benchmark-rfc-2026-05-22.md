@@ -485,17 +485,17 @@ Reviewer rule:
 
 ### Phase 0 — RFC And Seed Case Inventory
 
-- [ ] Write this RFC.
-- [ ] Collect v0 case list from today's incidents:
+- [x] Write this RFC.
+- [x] Collect v0 case list from today's incidents:
       DSML/tool protocol leak, persona meta leak, over-respond approval-card
       cases, HN identity lookup under-response, product-link commentary, and a
   direct smoke command.
-- [ ] Include the 2026-05-22 self-identity incident where a Codex worker
+- [x] Include the 2026-05-22 self-identity incident where a Codex worker
       answered "你是什么模型" as if Oneesama itself were Codex/OpenRouter.
-- [ ] Include the 2026-05-22 raw JSON worker output incident where
+- [x] Include the 2026-05-22 raw JSON worker output incident where
       `{visible_text,evidence_anchors}` was posted as JSON instead of rendering
       `visible_text`.
-- [ ] Mark each case as `must_block`, `must_allow`, `should_delegate`, or
+- [x] Mark each case as `must_block`, `must_allow`, `should_delegate`, or
       `freely_silent`.
 - [ ] Acceptance: Peng and `@喵喵` can read the case list and understand why
       each label exists.
@@ -525,9 +525,9 @@ Reviewer rule:
 
 ### Phase 3 — V0 Fixture Suite
 
-- [ ] Add `internal/slackagent/testdata/triage_benchmark/*.json`.
-- [ ] Include positive, negative, delegate, and freely-silent cases.
-- [ ] Add a unit/integration test that runs fixtures through the dry-run method.
+- [x] Add `internal/slackagent/testdata/triage_benchmark/*.json`.
+- [x] Include positive, negative, delegate, and freely-silent cases.
+- [x] Add a unit/integration test that runs fixtures through the dry-run method.
 - [ ] Acceptance: known leak cases are blocked; known source-backed cases do not
       fail the allow-list only because of missing fixture labels.
 

@@ -1,0 +1,23 @@
+{
+  "caseId": "product_link_comment_must_allow",
+  "description": "A source-backed product/public-link commentary requested by the user should be allowed through the evidence gate.",
+  "label": "must_allow",
+  "tags": ["positive", "source_backed_reply"],
+  "sourceRefs": ["rfc:slack-triage-replay-benchmark"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779450004.000004",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "看看这个产品链接，给我一句有证据的评论：https://example.com/product",
+        "ts": "1779450004.000004",
+        "threadTs": "1779450004.000004"
+      }
+    ]
+  },
+  "expected": {
+    "visibleReplyAllowed": true
+  }
+}

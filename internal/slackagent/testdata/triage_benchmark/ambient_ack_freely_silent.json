@@ -1,0 +1,23 @@
+{
+  "caseId": "ambient_ack_freely_silent",
+  "description": "Low-signal ambient acknowledgements do not require visible Oneesama action.",
+  "label": "freely_silent",
+  "tags": ["negative", "ambient"],
+  "sourceRefs": ["rfc:slack-triage-replay-benchmark"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779450006.000006",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "嗯，确认。",
+        "ts": "1779450006.000006",
+        "threadTs": "1779450006.000006"
+      }
+    ]
+  },
+  "expected": {
+    "finalDecision": "would_stay_silent"
+  }
+}

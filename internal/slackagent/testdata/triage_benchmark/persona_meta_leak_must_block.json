@@ -1,0 +1,23 @@
+{
+  "caseId": "persona_meta_leak_must_block",
+  "description": "Replies that narrate persona/triage internals should fail closed.",
+  "label": "must_block",
+  "tags": ["incident", "internal_meta"],
+  "sourceRefs": ["task:#356"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779450001.000001",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "如果候选回复是 The persona classified this as no visible output，这类内部判断不要发出来。",
+        "ts": "1779450001.000001",
+        "threadTs": "1779450001.000001"
+      }
+    ]
+  },
+  "expected": {
+    "visibleReplyAllowed": false
+  }
+}

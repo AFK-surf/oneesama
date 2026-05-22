@@ -1,0 +1,30 @@
+{
+  "caseId": "overrespond_handled_elsewhere_must_block",
+  "description": "If another active agent already handled the thread, Oneesama should not add a redundant visible reply.",
+  "label": "must_block",
+  "tags": ["incident", "over_respond", "handled_elsewhere"],
+  "sourceRefs": ["task:#349"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779371525.004829",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "<@U_CODEX3720> 你看一下这个。",
+        "ts": "1779371525.004829",
+        "threadTs": "1779371525.004829"
+      },
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_CODEX3720",
+        "text": "我已经开查，结论稍后贴。",
+        "ts": "1779371540.000000",
+        "threadTs": "1779371525.004829"
+      }
+    ]
+  },
+  "expected": {
+    "visibleReplyAllowed": false
+  }
+}

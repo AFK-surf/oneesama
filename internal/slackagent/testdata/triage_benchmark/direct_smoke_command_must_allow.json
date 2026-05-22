@@ -1,0 +1,23 @@
+{
+  "caseId": "direct_smoke_command_must_allow",
+  "description": "An explicit user smoke-test command with a concrete requested answer should not be suppressed merely because it is simple.",
+  "label": "must_allow",
+  "tags": ["positive", "explicit_user_command"],
+  "sourceRefs": ["rfc:slack-triage-replay-benchmark"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779450005.000005",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "@oneesama smoke：用一句话确认你看到了这条，不要展开。",
+        "ts": "1779450005.000005",
+        "threadTs": "1779450005.000005"
+      }
+    ]
+  },
+  "expected": {
+    "visibleReplyAllowed": true
+  }
+}

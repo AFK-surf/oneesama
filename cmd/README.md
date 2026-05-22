@@ -22,7 +22,7 @@ binary without reading each `main.go` header. If a new binary is added under
 | `oneesama-daily-dream` | Cluster LearningSignal NDJSON into review-gated Daily Dream memory candidates. | dry-run → stdout; `--output PATH` to write report |
 | `oneesama-legacy-slack-memory-import` | Import old Slack Agent D workspace memory + sqlite triage runs into `memory/legacy/slack-agent-d/` Markdown. | dry-run; `--write` to apply |
 | `oneesama-slock-workspace-import` | Import per-agent Slock D workspace knowledge into `memory/legacy/slock-d/` Markdown. | dry-run; `--write` to apply |
-| `oneesama-triage-benchmark` | Replay live Slack threads through the triage dry-run path and summarize self-evolution A/B signals. | read-only; dry-run endpoint only |
+| `oneesama-triage-benchmark` | Replay live Slack threads or labeled fixtures through the triage dry-run path and summarize expected-vs-actual quality signals. | read-only; dry-run endpoint only |
 | `oneesama-triage-replay` | Scan a window of recent Slack messages and propose lightweight follow-up replies for ones oneesama should have caught. | read-only by default |
 
 ## Audit / inventory tools

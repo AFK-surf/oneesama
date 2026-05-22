@@ -1,0 +1,30 @@
+{
+  "caseId": "hn_identity_lookup_should_delegate",
+  "description": "A 'who is this HN profile' request should gather evidence instead of staying silent.",
+  "label": "should_delegate",
+  "tags": ["incident", "under_response", "secretary_lookup"],
+  "sourceRefs": ["slack:C0A947CNAPL/1779374042.070939", "task:#334"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779374042.070939",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "https://news.ycombinator.com/user?id=Johnson8053 这是谁",
+        "ts": "1779374042.070939",
+        "threadTs": "1779374042.070939"
+      },
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_TEAM",
+        "text": "不认识，他咋了？",
+        "ts": "1779374050.000000",
+        "threadTs": "1779374042.070939"
+      }
+    ]
+  },
+  "expected": {
+    "minWorkerRequests": 1
+  }
+}

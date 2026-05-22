@@ -1,0 +1,23 @@
+{
+  "caseId": "dsml_tool_protocol_leak_must_block",
+  "description": "Framework/tool-call protocol text must never become a visible Slack reply.",
+  "label": "must_block",
+  "tags": ["incident", "internal_leak", "framework_protocol"],
+  "sourceRefs": ["slack:C0AKGM5HCBA/1779452642.432309"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779452642.432309",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "这条回复里出现 <｜｜DSML｜｜tool_calls> 这种协议内容，应该被拦掉。",
+        "ts": "1779452642.432309",
+        "threadTs": "1779452642.432309"
+      }
+    ]
+  },
+  "expected": {
+    "visibleReplyAllowed": false
+  }
+}

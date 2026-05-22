@@ -253,10 +253,94 @@ func TestRunLiveBenchmarkCanRenderMarkdownTable(t *testing.T) {
 		"## Final Decisions",
 		"| `would_stay_silent` | 1 |",
 		"## Replay Rows",
-		"| `C1` | `1779450000.000100` | 1 | `stay_silent` | `would_stay_silent` |",
+		"| `—` | `C1` | `1779450000.000100` | 1 | `—` | `—` | `stay_silent` | `would_stay_silent` |",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("markdown = %s, want %q", out, want)
+		}
+	}
+}
+
+func TestRunFixtureBenchmarkReportsExpectedOutcomes(t *testing.T) {
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		var request triageRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode dry-run request: %v", err)
+		}
+		if !request.DryRun || !request.IgnoreExistingBotReply || !request.RerunForce {
+			t.Fatalf("request = %#v, want side-effect-free rerun", request)
+		}
+		rootText := ""
+		if len(request.Messages) > 0 {
+			rootText = request.Messages[0].Text
+		}
+		result := slackagent.SlackTriageDryRunResult{
+			DryRun:       true,
+			ChannelID:    request.ChannelID,
+			ThreadTS:     request.Messages[0].ThreadTS,
+			MessageCount: len(request.Messages),
+			Persona: slackagent.SlackPersonaShadowResult{
+				Decision: persona.DecisionStaySilent,
+				Success:  true,
+			},
+			FinalDecision:      "would_stay_silent",
+			SideEffectsBlocked: []string{"slack_post", "approval_card", "worker_start"},
+			VisibleReplyVerdicts: []slackagent.SlackTriageDryRunVisibleReplyVerdict{{
+				Allowed: false,
+				Reason:  "missing_evidence_anchor",
+			}},
+		}
+		switch {
+		case strings.Contains(rootText, "Johnson8053"):
+			result.Persona.Decision = persona.DecisionDelegateWorker
+			result.FinalDecision = "would_delegate_worker"
+			result.WouldDelegateWorkers = []slackagent.SlackTriageDryRunWorker{{
+				ID:          "secretary-lookup",
+				SessionKind: "secretary_lookup",
+				WouldStart:  true,
+			}}
+		case strings.Contains(rootText, "产品链接"), strings.Contains(rootText, "smoke"):
+			result.Persona.Decision = persona.DecisionReply
+			result.FinalDecision = "would_request_reply_approval"
+			result.VisibleReplyVerdicts = []slackagent.SlackTriageDryRunVisibleReplyVerdict{{
+				Allowed: true,
+				Reason:  "allowed",
+			}}
+		case strings.Contains(rootText, "确认"):
+			result.VisibleReplyVerdicts = nil
+		}
+		writeBenchmarkJSON(t, w, triageRunResponse{OK: true, DryRun: result})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--fixture", "../../internal/slackagent/testdata/triage_benchmark/*.json",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var report benchmarkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, stdout.String())
+	}
+	if report.Mode != "fixture" || report.ThreadsSeen != 9 || report.ThreadsReplayed != 9 {
+		t.Fatalf("mode/threads = %s/%d/%d, want fixture 9/9", report.Mode, report.ThreadsSeen, report.ThreadsReplayed)
+	}
+	if report.Summary.FixtureFailures != 0 || report.Summary.FixturePasses != 9 {
+		t.Fatalf("fixture pass/fail = %d/%d, rows=%#v stderr=%s", report.Summary.FixturePasses, report.Summary.FixtureFailures, report.Rows, stderr.String())
+	}
+	for _, want := range []string{
+		"must_block_pass",
+		"must_allow_pass",
+		"should_delegate_pass",
+		"freely_silent_pass",
+	} {
+		if report.Summary.ByFixtureOutcome[want] == 0 {
+			t.Fatalf("fixture outcomes = %#v, want %s", report.Summary.ByFixtureOutcome, want)
 		}
 	}
 }
