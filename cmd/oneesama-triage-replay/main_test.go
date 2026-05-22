@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/AFK-surf/oneesama/internal/persona"
 	"github.com/AFK-surf/oneesama/internal/slackagent"
+	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
 // TestRunOnFlatNDJSONProducesCandidates covers the happy path: a small
@@ -475,6 +478,77 @@ func TestRunPersonaShadowReplayAgainstHTTPRuntime(t *testing.T) {
 	}
 }
 
+func TestRunCapturesBenchmarkFailuresAsLearningSignals(t *testing.T) {
+	dir := t.TempDir()
+	verdictsPath := dir + "/verdicts.ndjson"
+	signalsPath := dir + "/signals.ndjson"
+	verdicts := strings.Join([]string{
+		`{"case_id":"under-response-1","verdict":"fail","reason_code":"missing_visible_reply","summary":"stayed silent on source-backed request","channel_id":"C1","thread_ts":"1779450000.000","expected":"reply","actual":"stay_silent"}`,
+		`{"case_id":"clean-1","verdict":"pass","summary":"correct silence"}`,
+	}, "\n")
+	if err := os.WriteFile(verdictsPath, []byte(verdicts), 0o644); err != nil {
+		t.Fatalf("WriteFile verdicts: %v", err)
+	}
+
+	ndjson := `{"channelId":"C1","user_id":"U_PENG","ts":"100.000","text":"这个 HN profile 是谁？"}`
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{"--benchmark-verdicts", verdictsPath, "--learning-signal-output", signalsPath, "--quiet"},
+		strings.NewReader(ndjson), &stdout, &stderr,
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "## Learning signals captured") || !strings.Contains(out, "under-response-1") {
+		t.Fatalf("markdown missing learning signal section:\n%s", out)
+	}
+	signals := readLearningSignalsFile(t, signalsPath)
+	if len(signals) != 1 {
+		t.Fatalf("signals = %#v, want only the failing verdict", signals)
+	}
+	if signals[0].Subject != "under-response-1" ||
+		signals[0].ReasonCode != "missing_visible_reply" ||
+		signals[0].ProposedAction != "benchmark_case" {
+		t.Fatalf("signal = %#v", signals[0])
+	}
+	if !strings.Contains(strings.Join(signals[0].Refs, ","), "slack:C1/1779450000.000") {
+		t.Fatalf("refs = %#v, want Slack source ref", signals[0].Refs)
+	}
+}
+
+func TestRunPersistsBenchmarkFailuresAsLearningSignals(t *testing.T) {
+	dir := t.TempDir()
+	verdictsPath := dir + "/verdicts.ndjson"
+	if err := os.WriteFile(verdictsPath, []byte(`{"case_id":"case-store","verdict":"failed","reason_code":"judge_failed","summary":"judge found a miss"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile verdicts: %v", err)
+	}
+	persistenceDir := dir + "/state"
+
+	ndjson := `{"channelId":"C1","user_id":"U_PENG","ts":"100.000","text":"CI 卡住了，需要看吗？"}`
+	var stdout, stderr bytes.Buffer
+	code := run(
+		[]string{
+			"--benchmark-verdicts", verdictsPath,
+			"--learning-signal-store",
+			"--persistence-dir", persistenceDir,
+			"--persistence-provider", "json-file",
+			"--quiet",
+		},
+		strings.NewReader(ndjson), &stdout, &stderr,
+	)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+	signals, err := slackagent.ListSlackLearningSignals(context.Background(), appconfig.PersistenceConfig{Provider: "json-file", DataDir: persistenceDir}, 10)
+	if err != nil {
+		t.Fatalf("ListSlackLearningSignals: %v", err)
+	}
+	if len(signals) != 1 || signals[0].Subject != "case-store" || signals[0].ReasonCode != "judge_failed" {
+		t.Fatalf("signals = %#v, want persisted benchmark signal", signals)
+	}
+}
+
 func TestRunPersonaShadowReplayRejectsLiveMode(t *testing.T) {
 	_, err := runPersonaShadowReplay(nil, "fake", persona.ModeLive, "", time.Second)
 	if err == nil || !strings.Contains(err.Error(), "requires --persona-runtime-mode=shadow") {
@@ -489,4 +563,26 @@ func TestRunInvalidFlagReturnsTwo(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("invalid flag exit = %d, want 2", code)
 	}
+}
+
+func readLearningSignalsFile(t *testing.T, path string) []slackagent.SlackLearningSignal {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("Open signals: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	var out []slackagent.SlackLearningSignal
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var signal slackagent.SlackLearningSignal
+		if err := json.Unmarshal(scanner.Bytes(), &signal); err != nil {
+			t.Fatalf("decode signal: %v", err)
+		}
+		out = append(out, signal)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan signals: %v", err)
+	}
+	return out
 }

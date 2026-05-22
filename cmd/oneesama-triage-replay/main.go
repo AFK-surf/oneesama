@@ -160,6 +160,12 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	fs.StringVar(&personaRuntimeBaseURL, "persona-runtime-base-url", "", "Optional: local Pi/http sidecar base URL for persona shadow replay. Defaults to ONEESAMA_PERSONA_RUNTIME_BASE_URL / MAB_PERSONA_RUNTIME_BASE_URL.")
 	var personaRuntimeTimeout time.Duration
 	fs.DurationVar(&personaRuntimeTimeout, "persona-runtime-timeout", 90*time.Second, "Persona runtime request timeout for shadow replay.")
+	var benchmarkVerdictsPath string
+	fs.StringVar(&benchmarkVerdictsPath, "benchmark-verdicts", "", "Optional: NDJSON benchmark/judge verdicts to convert into LearningSignal rows. Only failing verdicts are captured.")
+	var learningSignalOutputPath string
+	fs.StringVar(&learningSignalOutputPath, "learning-signal-output", "", "Optional: write captured LearningSignal rows as NDJSON to this path.")
+	var learningSignalStore bool
+	fs.BoolVar(&learningSignalStore, "learning-signal-store", false, "Optional: persist captured LearningSignal rows into the configured persistence store. Requires --persistence-dir, --persistence-sqlite, or --persistence-provider memory.")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: oneesama-triage-replay [--output PATH] [--bot-user-ids U_BOT,U_OTHER] [--quiet]\n")
 		fmt.Fprintf(stderr, "       oneesama-triage-replay --live --channel C123,C456 [--since 24h] [--token xoxb-...] [--max-messages-per-channel 200]\n\n")
@@ -248,12 +254,52 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 
+	learningSignals := slackagent.SlackLearningSignalsFromPersonaShadowResults(personaShadowResults)
+	if strings.TrimSpace(benchmarkVerdictsPath) != "" {
+		benchmarkSignals, readErr := readBenchmarkLearningSignals(benchmarkVerdictsPath)
+		if readErr != nil {
+			fmt.Fprintf(stderr, "oneesama-triage-replay: benchmark verdicts: %v\n", readErr)
+			return 1
+		}
+		learningSignals = append(learningSignals, benchmarkSignals...)
+	}
+	if strings.TrimSpace(learningSignalOutputPath) != "" {
+		if err := writeLearningSignalsNDJSON(learningSignalOutputPath, learningSignals); err != nil {
+			fmt.Fprintf(stderr, "oneesama-triage-replay: write learning signals: %v\n", err)
+			return 1
+		}
+	}
+	if learningSignalStore {
+		if strings.TrimSpace(persistenceDir) == "" && strings.TrimSpace(persistenceSQLite) == "" && strings.TrimSpace(persistenceProvider) != "memory" {
+			fmt.Fprintf(stderr, "oneesama-triage-replay: --learning-signal-store requires --persistence-dir, --persistence-sqlite, or --persistence-provider memory\n")
+			return 1
+		}
+		cfg := appconfig.PersistenceConfig{
+			Provider:   strings.TrimSpace(persistenceProvider),
+			DataDir:    strings.TrimSpace(persistenceDir),
+			SQLitePath: strings.TrimSpace(persistenceSQLite),
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		written, persistErr := slackagent.PersistSlackLearningSignals(ctx, cfg, learningSignals)
+		cancel()
+		if persistErr != nil {
+			fmt.Fprintf(stderr, "oneesama-triage-replay: persist learning signals: %v\n", persistErr)
+			return 1
+		}
+		if !quiet {
+			fmt.Fprintf(stderr, "oneesama-triage-replay: persisted %d learning signal(s)\n", written)
+		}
+	}
+
 	markdown := slackagent.RenderBackfillCandidatesMarkdown(candidates)
 	if liveMode {
 		markdown = appendLiveStatsSection(markdown, liveStats)
 	}
 	if len(personaShadowResults) > 0 {
 		markdown = appendPersonaShadowSection(markdown, personaShadowResults)
+	}
+	if len(learningSignals) > 0 {
+		markdown = appendLearningSignalsSection(markdown, learningSignals)
 	}
 	// Footer should count actual rendered persisted candidates (the
 	// reality the operator sees in the report), not the raw load
@@ -294,8 +340,45 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 			"oneesama-triage-replay: scanned %d message(s), produced %d candidate(s) → %s\n",
 			scanned, len(candidates), describeOutput(outputPath),
 		)
+		if strings.TrimSpace(learningSignalOutputPath) != "" {
+			fmt.Fprintf(stderr,
+				"oneesama-triage-replay: captured %d learning signal(s) → %s\n",
+				len(learningSignals), learningSignalOutputPath,
+			)
+		}
 	}
 	return 0
+}
+
+func readBenchmarkLearningSignals(path string) ([]slackagent.SlackLearningSignal, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	verdicts, err := slackagent.ReadSlackTriageReplayBenchmarkVerdictsNDJSON(f)
+	if err != nil {
+		return nil, err
+	}
+	return slackagent.SlackLearningSignalsFromTriageReplayBenchmarkVerdicts(verdicts), nil
+}
+
+func writeLearningSignalsNDJSON(path string, signals []slackagent.SlackLearningSignal) error {
+	if strings.TrimSpace(path) == "-" {
+		return fmt.Errorf("--learning-signal-output does not support '-' because stdout is the Markdown report")
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	enc := json.NewEncoder(f)
+	for _, signal := range signals {
+		if err := enc.Encode(signal); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runPersonaShadowReplay(candidates []slackagent.SlackBackfillCandidate, provider string, mode string, baseURL string, timeout time.Duration) ([]slackagent.SlackPersonaShadowResult, error) {
@@ -514,6 +597,36 @@ func appendPersonaShadowSection(markdown string, results []slackagent.SlackPerso
 	return b.String()
 }
 
+func appendLearningSignalsSection(markdown string, signals []slackagent.SlackLearningSignal) string {
+	if len(signals) == 0 {
+		return markdown
+	}
+	var b strings.Builder
+	b.WriteString(markdown)
+	if !strings.HasSuffix(markdown, "\n\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("## Learning signals captured\n\n")
+	b.WriteString("Replay/judge failures are recorded as reviewable learning inputs; nothing is promoted automatically.\n\n")
+	b.WriteString("| Source | Subject | Verdict | Reason | Refs |\n")
+	b.WriteString("|---|---|---|---|---|\n")
+	for _, signal := range signals {
+		refs := "—"
+		if len(signal.Refs) > 0 {
+			refs = strings.Join(signal.Refs, ", ")
+		}
+		b.WriteString(fmt.Sprintf(
+			"| `%s` | `%s` | `%s` | `%s` | %s |\n",
+			escapeMarkdownCell(signal.Source),
+			escapeMarkdownCell(signal.Subject),
+			escapeMarkdownCell(signal.Verdict),
+			escapeMarkdownCell(signal.ReasonCode),
+			escapeMarkdownCell(refs),
+		))
+	}
+	return b.String()
+}
+
 // classifyAll groups messages by (channel, thread root), feeds each
 // group to slackagent.ClassifyBackfillMessage, and returns the
 // candidates in input order. Grouping is needed because the
@@ -597,6 +710,12 @@ func describeOutput(path string) string {
 		return "stdout"
 	}
 	return path
+}
+
+func escapeMarkdownCell(value string) string {
+	value = strings.ReplaceAll(value, "|", "\\|")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return value
 }
 
 func splitCSV(raw string) []string {
