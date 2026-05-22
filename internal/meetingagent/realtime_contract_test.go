@@ -109,6 +109,8 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 	for _, want := range []string{
 		"Addressing contract:",
 		"Do not say internal control-plane status",
+		"Do not announce what you are about to do",
+		"Do not proactively offer capabilities",
 		"If the user says stop planning",
 		"Ignore obvious self-echo",
 	} {
