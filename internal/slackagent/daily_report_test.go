@@ -215,6 +215,9 @@ func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
 		"Successfully wrote to memory/2026-05-22.md (mode: append)",
 		"mentioned_other_user_without_bot",
 		"这感觉怕是有点难哦\" [reactions: :吃瓜: ×1]",
+		"AgentRunner triage completed",
+		"**** just codex-3720 logging its own automated cleanup and download progress. No human ask, no coordination needed, nothing for me to add",
+		"SKIP — internal technical debugging thread about screen lock/sleep behavior. The team is working through the issue themselves.",
 	} {
 		if !slackDailyDiaryLowSignal(text) {
 			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)
