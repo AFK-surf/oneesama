@@ -57,6 +57,7 @@ still load-bearing reference for "why does the code look like this".
 | `notes/rfc/oneesama-harness-cache-tool-stability-rfc-2026-05-21.md` | Proposed. | Applies cache-locality / stable-tool-surface Harness practices to Oneesama: stable prefix hashes, dynamic context envelopes, bounded worker isolation, Browser/CU approval gates, and daily harness audit metrics. |
 | `notes/rfc/browser-cu-external-write-approval-gate-rfc-2026-05-21.md` | Proposed (task #328). | Defines the scoped approval-token gate for Browser/CU external writes while keeping `control_demo_surface` as the stable foreground boundary. |
 | `notes/rfc/slack-visible-reply-evidence-anchor-allowlist-rfc-2026-05-22.md` | Proposed (task #357). | Replaces the Slack-visible reply deny-list with an evidence-anchor allow-list, while keeping Peng approval cards as the pilot gate. |
+| `notes/rfc/oneesama-daily-dream-memory-self-learning-rfc-2026-05-22.md` | Proposed (task #367). | Turns the OpenClaw + latest Hermes memory contracts into a daily dream consolidation and self-learning loop before the triage replay benchmark lands. |
 
 ## Maintenance rules
 
