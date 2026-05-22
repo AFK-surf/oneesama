@@ -9,13 +9,17 @@ import (
 
 func buildSlackTriageActionText(action SlackTriageDecisionAction, pending SlackPendingAction) string {
 	if firstNonEmpty(action.Type, pending.ActionType) == slackActionTypeThreadReply {
-		return strings.Join([]string{
+		evidence := slackVisibleReplyEvidencePlainText(action)
+		lines := []string{
 			"待确认回复",
 			"",
 			action.Message,
-			"",
-			fmt.Sprintf("Pending action: %d", pending.ID),
-		}, "\n")
+		}
+		if evidence != "" {
+			lines = append(lines, "", evidence)
+		}
+		lines = append(lines, "", fmt.Sprintf("Pending action: %d", pending.ID))
+		return strings.Join(lines, "\n")
 	}
 	confidence := ""
 	if !math.IsNaN(action.Confidence) {
@@ -48,7 +52,7 @@ func buildSlackTriageActionBlocks(action SlackTriageDecisionAction, pending Slac
 		if threadTS != "" {
 			sourceParts = append(sourceParts, "Thread: `"+threadTS+"`")
 		}
-		return []map[string]any{
+		blocks := []map[string]any{
 			{
 				"type": "section",
 				"text": map[string]any{
@@ -63,15 +67,25 @@ func buildSlackTriageActionBlocks(action SlackTriageDecisionAction, pending Slac
 					"text": strings.Join(sourceParts, " | "),
 				}},
 			},
-			{
-				"type":     "actions",
-				"block_id": fmt.Sprintf("mab_pending_action:%d", pending.ID),
-				"elements": []map[string]any{
-					triageButton("通过并发送", "primary", "mab_pending_action_confirm", pending.ID, "confirmed", nil),
-					triageButton("不通过", "danger", "mab_pending_action_dismiss", pending.ID, "dismissed", map[string]any{"rejectReason": slackVisibleReplyRejectReasonOther}),
-				},
-			},
 		}
+		if evidenceText := slackVisibleReplyEvidenceMrkdwn(action); evidenceText != "" {
+			blocks = append(blocks, map[string]any{
+				"type": "context",
+				"elements": []map[string]any{{
+					"type": "mrkdwn",
+					"text": evidenceText,
+				}},
+			})
+		}
+		blocks = append(blocks, map[string]any{
+			"type":     "actions",
+			"block_id": fmt.Sprintf("mab_pending_action:%d", pending.ID),
+			"elements": []map[string]any{
+				triageButton("通过并发送", "primary", "mab_pending_action_confirm", pending.ID, "confirmed", nil),
+				triageButton("不通过", "danger", "mab_pending_action_dismiss", pending.ID, "dismissed", map[string]any{"rejectReason": slackVisibleReplyRejectReasonOther}),
+			},
+		})
+		return blocks
 	}
 	contextParts := []string{
 		"Action: `" + actionType + "`",
@@ -123,6 +137,88 @@ func buildSlackTriageActionBlocks(action SlackTriageDecisionAction, pending Slac
 		"elements": actionButtons,
 	})
 	return blocks
+}
+
+func slackVisibleReplyEvidencePlainText(action SlackTriageDecisionAction) string {
+	anchors := normalizeSlackVisibleEvidenceAnchors(action.EvidenceAnchors)
+	if len(anchors) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, minInt(len(anchors), 3)+1)
+	lines = append(lines, "Evidence: passed anchor gate")
+	for _, anchor := range anchors {
+		if len(lines) >= 4 {
+			break
+		}
+		lines = append(lines, "- "+slackVisibleReplyEvidencePlainLine(anchor))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func slackVisibleReplyEvidenceMrkdwn(action SlackTriageDecisionAction) string {
+	anchors := normalizeSlackVisibleEvidenceAnchors(action.EvidenceAnchors)
+	if len(anchors) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, minInt(len(anchors), 3)+1)
+	parts = append(parts, "*Evidence:* passed anchor gate")
+	for _, anchor := range anchors {
+		if len(parts) >= 4 {
+			break
+		}
+		parts = append(parts, slackVisibleReplyEvidenceMrkdwnLine(anchor))
+	}
+	return truncateSlackContextText(strings.Join(parts, " | "), 1800)
+}
+
+func slackVisibleReplyEvidencePlainLine(anchor SlackVisibleEvidenceAnchor) string {
+	source := slackVisibleReplyEvidenceSourcePlain(anchor.SourceRef)
+	quote := compactSlackVisibleEvidenceQuote(anchor.Quote, 110)
+	if quote != "" {
+		return fmt.Sprintf("%s: %s — %q", anchor.Kind, source, quote)
+	}
+	return fmt.Sprintf("%s: %s", anchor.Kind, source)
+}
+
+func slackVisibleReplyEvidenceMrkdwnLine(anchor SlackVisibleEvidenceAnchor) string {
+	source := slackVisibleReplyEvidenceSourceMrkdwn(anchor.SourceRef)
+	quote := compactSlackVisibleEvidenceQuote(anchor.Quote, 96)
+	if quote != "" {
+		return fmt.Sprintf("`%s` %s “%s”", slackMrkdwnEscape(anchor.Kind), source, slackMrkdwnEscape(quote))
+	}
+	return fmt.Sprintf("`%s` %s", slackMrkdwnEscape(anchor.Kind), source)
+}
+
+func slackVisibleReplyEvidenceSourcePlain(sourceRef string) string {
+	source := truncateSlackContextText(strings.Join(strings.Fields(strings.TrimSpace(sourceRef)), " "), 140)
+	if source == "" {
+		return "-"
+	}
+	return source
+}
+
+func slackVisibleReplyEvidenceSourceMrkdwn(sourceRef string) string {
+	sourceRef = truncateSlackContextText(strings.Join(strings.Fields(strings.TrimSpace(sourceRef)), " "), 140)
+	if sourceRef == "" {
+		return "`-`"
+	}
+	lower := strings.ToLower(sourceRef)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "slack://") {
+		return "<" + slackMrkdwnURLSafe(sourceRef) + ">"
+	}
+	return "`" + slackMrkdwnEscape(sourceRef) + "`"
+}
+
+func compactSlackVisibleEvidenceQuote(value string, maxLength int) string {
+	return truncateSlackContextText(strings.Join(strings.Fields(strings.TrimSpace(value)), " "), maxLength)
+}
+
+func slackMrkdwnURLSafe(value string) string {
+	return strings.NewReplacer(">", "%3E", "|", "%7C").Replace(strings.TrimSpace(value))
+}
+
+func slackMrkdwnEscape(value string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "`", "'").Replace(strings.TrimSpace(value))
 }
 
 func triageButton(text string, style string, actionID string, pendingID int64, status string, extra map[string]any) map[string]any {

@@ -348,6 +348,11 @@ func TestPostThreadReplyApprovalCardOnlyShowsApproveReject(t *testing.T) {
 		Confidence: 0.98,
 		ChannelID:  "C123",
 		ThreadTS:   "123.456",
+		EvidenceAnchors: []SlackVisibleEvidenceAnchor{{
+			Kind:      slackVisibleEvidenceKindFetchedLink,
+			SourceRef: "https://example.com/article",
+			Quote:     "This article explains the relevant runtime behavior.",
+		}},
 	}, SlackPendingAction{
 		ID:         42,
 		ChannelID:  "C123",
@@ -356,7 +361,19 @@ func TestPostThreadReplyApprovalCardOnlyShowsApproveReject(t *testing.T) {
 	})
 	encoded, _ := json.Marshal(blocks)
 	body := string(encoded)
-	for _, want := range []string{"待确认回复", "approval gate live smoke reply", "通过并发送", "不通过", "mab_pending_action_confirm", "mab_pending_action_dismiss"} {
+	for _, want := range []string{
+		"待确认回复",
+		"approval gate live smoke reply",
+		"通过并发送",
+		"不通过",
+		"mab_pending_action_confirm",
+		"mab_pending_action_dismiss",
+		"Evidence",
+		"passed anchor gate",
+		slackVisibleEvidenceKindFetchedLink,
+		"https://example.com/article",
+		"This article explains the relevant runtime behavior.",
+	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("blocks = %s, missing %q", body, want)
 		}
@@ -364,6 +381,35 @@ func TestPostThreadReplyApprovalCardOnlyShowsApproveReject(t *testing.T) {
 	for _, unwanted := range []string{"mab_pending_action_snooze", "mab_pending_action_open_thread", "mab_pending_action_assign", "Snooze", "Open thread", "Assign", "Quality gate", "Confidence", "Reason:"} {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("blocks = %s, unexpectedly contains %q", body, unwanted)
+		}
+	}
+}
+
+func TestPostThreadReplyApprovalTextShowsCompactEvidence(t *testing.T) {
+	text := buildSlackTriageActionText(SlackTriageDecisionAction{
+		Type:      slackActionTypeThreadReply,
+		Message:   "这条回复有证据才允许进入审批。",
+		ChannelID: "C123",
+		ThreadTS:  "123.456",
+		EvidenceAnchors: []SlackVisibleEvidenceAnchor{{
+			Kind:      slackVisibleEvidenceKindWorkspaceMemory,
+			SourceRef: "memory/team/person.md",
+			Quote:     "The relevant project owner is documented in memory.",
+		}},
+	}, SlackPendingAction{
+		ID:         42,
+		ChannelID:  "C123",
+		ThreadTS:   "123.456",
+		ActionType: slackActionTypeThreadReply,
+	})
+	for _, want := range []string{"Evidence: passed anchor gate", slackVisibleEvidenceKindWorkspaceMemory, "memory/team/person.md", "The relevant project owner is documented in memory."} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text = %q, missing %q", text, want)
+		}
+	}
+	for _, unwanted := range []string{"Quality gate", "Confidence", "Reason:"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("text = %q, unexpectedly contains %q", text, unwanted)
 		}
 	}
 }
