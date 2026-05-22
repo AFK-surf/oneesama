@@ -10,11 +10,15 @@ set -euo pipefail
 #   ONEESAMA_MONITOR_MEETING_URL      — meeting-agent base URL (default 127.0.0.1:8781)
 #   ONEESAMA_MONITOR_AUDIT_WINDOW     — audit window (default 3h)
 #   ONEESAMA_TRIAGE_QUALITY_WINDOW    — quality sweep window (defaults to audit window)
+#   ONEESAMA_STATUS_REPORT_TRIAGE_BENCHMARK — set to 1 to run live fixture benchmark
+#   ONEESAMA_TRIAGE_BENCHMARK_FIXTURES — fixture glob (default internal/slackagent/testdata/triage_benchmark/*.json)
+#   ONEESAMA_TRIAGE_BENCHMARK_TIMEOUT — fixture benchmark timeout (default 10m)
 #   ONEESAMA_STATUS_REPORT_OUTPUT_DIR — output dir for shared artifacts (default mktemp)
 #
 # Outputs:
 #   <output_dir>/monitor-result.json          ← written by oneesama-monitor.sh
 #   <output_dir>/triage-quality-result.json   ← written by oneesama-triage-quality-sweep.sh
+#   <output_dir>/triage-benchmark-fixtures.json ← optional live fixture benchmark report
 #   <output_dir>/status-report.json           ← merged manifest emitted by this script
 #   <output_dir>/status-report.md             ← human-readable summary
 #   stdout                                    ← short ok / red one-liner
@@ -39,6 +43,7 @@ export ONEESAMA_STATUS_OUTPUT_DIR="$output_dir"
 
 monitor_status="unknown"
 sweep_status="unknown"
+benchmark_status="skipped"
 
 if "${script_dir}/oneesama-monitor.sh"; then
   monitor_status="ok"
@@ -52,6 +57,21 @@ else
   sweep_status="red"
 fi
 
+benchmark_json="${output_dir}/triage-benchmark-fixtures.json"
+if [[ "${ONEESAMA_STATUS_REPORT_TRIAGE_BENCHMARK:-0}" == "1" ]]; then
+  benchmark_fixtures="${ONEESAMA_TRIAGE_BENCHMARK_FIXTURES:-internal/slackagent/testdata/triage_benchmark/*.json}"
+  benchmark_timeout="${ONEESAMA_TRIAGE_BENCHMARK_TIMEOUT:-10m}"
+  if (cd "${script_dir}/.." && go run ./cmd/oneesama-triage-benchmark \
+    --slack-url "${ONEESAMA_MONITOR_SLACK_URL:-http://127.0.0.1:8780}" \
+    --fixture "${benchmark_fixtures}" \
+    --timeout "${benchmark_timeout}" \
+    --output "${benchmark_json}"); then
+    benchmark_status="ok"
+  else
+    benchmark_status="red"
+  fi
+fi
+
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 monitor_json="${output_dir}/monitor-result.json"
@@ -61,23 +81,27 @@ sweep_json="${output_dir}/triage-quality-result.json"
 # the merge below cannot blow up with "file not found".
 [[ -f "$monitor_json" ]] || echo '{}' >"$monitor_json"
 [[ -f "$sweep_json" ]] || echo '{}' >"$sweep_json"
+[[ -f "$benchmark_json" ]] || jq -n --arg status "$benchmark_status" '{status: $status}' >"$benchmark_json"
 
 overall_status="ok"
-if [[ "$monitor_status" != "ok" || "$sweep_status" != "ok" ]]; then
+if [[ "$monitor_status" != "ok" || "$sweep_status" != "ok" || "$benchmark_status" == "red" ]]; then
   overall_status="red"
 fi
 
 jq -n \
   --arg generated_at "$generated_at" \
   --arg overall_status "$overall_status" \
+  --arg benchmark_status "$benchmark_status" \
   --slurpfile monitor "$monitor_json" \
   --slurpfile sweep "$sweep_json" \
+  --slurpfile benchmark "$benchmark_json" \
   '{
     schema: "oneesama.status-report.v1",
     generated_at: $generated_at,
     overall_status: $overall_status,
     monitor: ($monitor[0] // {}),
-    triage_quality: ($sweep[0] // {})
+    triage_quality: ($sweep[0] // {}),
+    triage_benchmark: (($benchmark[0] // {}) + {status: $benchmark_status})
   }' >"${output_dir}/status-report.json"
 
 {
@@ -87,6 +111,7 @@ jq -n \
   echo "- overall_status: ${overall_status}"
   echo "- monitor_status: ${monitor_status}"
   echo "- triage_quality_status: ${sweep_status}"
+  echo "- triage_benchmark_status: ${benchmark_status}"
   echo
   echo "## Monitor findings"
   jq -r '
@@ -117,6 +142,16 @@ jq -n \
     "- review.link_context_no_action: \(.review.linkContextNoAction // [] | length)",
     "- review.low_confidence_no_action: \(.review.lowConfidenceNoAction // [] | length)"
   ' <"$sweep_json"
+  echo
+  echo "## Triage benchmark fixtures"
+  jq -r '
+    "- status: \(.status // "n/a")",
+    "- mode: \(.mode // "n/a")",
+    "- fixtures: \(.fixtures // [] | length)",
+    "- fixture_passes: \(.summary.fixturePasses // 0)",
+    "- fixture_failures: \(.summary.fixtureFailures // 0)",
+    "- errors: \(.summary.errors // 0)"
+  ' <"$benchmark_json"
 } >"${output_dir}/status-report.md"
 
 echo "oneesama-status-report: overall_status=${overall_status} output_dir=${output_dir}"

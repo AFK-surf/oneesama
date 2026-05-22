@@ -8,7 +8,7 @@ LDFLAGS := -ldflags "-X github.com/AFK-surf/oneesama/pkg/version.Version=$(VERSI
 NODE_DEPS_SENTINEL := node_modules/typescript/package.json
 GO_PACKAGES := $(shell $(GO) list ./... | grep -v '/node_modules/')
 
-.PHONY: build vet tidy test ensure-js-deps js-build
+.PHONY: build vet tidy test ensure-js-deps js-build triage-benchmark-fixtures
 
 build: js-build
 	$(GO) build $(LDFLAGS) -o $(BINARY) $(PKG)
@@ -31,3 +31,6 @@ $(NODE_DEPS_SENTINEL): package.json package-lock.json
 
 test: ensure-js-deps
 	$(GO) test $(GO_PACKAGES)
+
+triage-benchmark-fixtures:
+	$(GO) test ./cmd/oneesama-triage-benchmark -run TestRunFixtureBenchmarkReportsExpectedOutcomes -count=1

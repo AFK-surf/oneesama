@@ -542,10 +542,10 @@ Reviewer rule:
 
 ### Phase 5 — CI / Cadence Integration
 
-- [ ] Add `make triage-benchmark-fixtures` for labeled fixtures.
+- [x] Add `make triage-benchmark-fixtures` for labeled fixtures.
 - [ ] Keep rolling live replay as manual/ops, not CI hard gate.
-- [ ] Add benchmark line to `oneesama-status-report.sh` only after runtime is
-      stable enough.
+- [x] Add optional benchmark line to `oneesama-status-report.sh`; keep it
+      skipped by default until runtime is stable enough.
 - [ ] Acceptance: PRs touching triage prompts/gates/workers have a focused
       benchmark command in their validation notes.
 
