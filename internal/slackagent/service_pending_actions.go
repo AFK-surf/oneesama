@@ -47,6 +47,7 @@ func parsePendingActionInteraction(payload SlackInteractionPayload) *SlackPendin
 		Status:         status,
 		UserID:         firstNonEmpty(userID(payload.User), payload.UserID),
 		ActionID:       action.ActionID,
+		RejectReason:   normalizeSlackVisibleReplyRejectReason(firstNonEmpty(stringFromAny(parsed["rejectReason"]), stringFromAny(parsed["reject_reason"]))),
 		AssigneeUserID: firstNonEmpty(action.SelectedUser, stringFromAny(parsed["assigneeUserId"]), stringFromAny(parsed["assignee_user_id"])),
 		SnoozeMinutes:  int(numberFromAny(firstNonEmpty(stringFromAny(parsed["snoozeMinutes"]), stringFromAny(parsed["snooze_minutes"])), 0)),
 		ChannelID:      firstNonEmpty(stringFromAny(parsed["channelId"]), stringFromAny(parsed["channel_id"])),
@@ -73,11 +74,15 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 		}
 		if action.ActionType == slackActionTypeThreadReply {
 			action.Params["approvalDecision"] = slackTriagePendingApprovalDecision(interaction.Status)
+			if interaction.Status == "dismissed" {
+				action.Params["rejectReason"] = normalizeSlackVisibleReplyRejectReason(interaction.RejectReason)
+			}
 			if interaction.Status != "confirmed" {
 				action.Params["finalOutcome"] = interaction.Status
 			}
 		}
 		action.Result = fmt.Sprintf("interaction:%s", interaction.Status)
+		recordSlackVisibleReplyQualitySampleParams(action)
 	})
 	if err != nil {
 		return AvatarCommandResponse{OK: false, ResponseType: "ephemeral", Text: "Pending action update failed: " + err.Error()}

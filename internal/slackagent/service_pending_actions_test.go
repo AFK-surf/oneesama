@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
@@ -161,6 +162,88 @@ func TestPendingActionDismissedPostThreadReplyShowsSilencedState(t *testing.T) {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("blocks = %s, unexpectedly contains %q", body, unwanted)
 		}
+	}
+}
+
+func TestPostThreadReplyApprovalRecordsQualitySample(t *testing.T) {
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}})
+	record, err := service.triage.InsertPendingAction(context.Background(), SlackPendingAction{
+		ChannelID:  "C123",
+		ThreadTS:   "123.456",
+		ActionType: slackActionTypeThreadReply,
+		Params: map[string]any{
+			"source":            "slack-triage-visible-reply-approval",
+			"triageRunId":       int64(99),
+			"jobId":             "job_visible_reply",
+			"cardId":            "pending_action:42",
+			"proposedReplyText": "这条回复缺少来源，不应该发。",
+			"message":           "这条回复缺少来源，不应该发。",
+			"approvalDecision":  "pending",
+		},
+		Status: PendingActionStatusPending,
+	})
+	if err != nil {
+		t.Fatalf("InsertPendingAction: %v", err)
+	}
+
+	response := service.HandlePendingActionInteraction(context.Background(), SlackPendingActionInteraction{
+		ID:           record.ID,
+		Status:       "dismissed",
+		UserID:       "U_PENG",
+		RejectReason: slackVisibleReplyRejectReasonNoCitation,
+	})
+	if !response.OK {
+		t.Fatalf("response = %#v, want ok", response)
+	}
+	actions, err := service.triage.ListPendingActions(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListPendingActions: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("pending actions = %#v, want one", actions)
+	}
+	sample, ok := actions[0].Params["replyQualitySample"].(map[string]any)
+	if !ok {
+		t.Fatalf("replyQualitySample = %#v, want object", actions[0].Params["replyQualitySample"])
+	}
+	if stringFromAny(sample["approvalDecision"]) != "rejected" || stringFromAny(sample["rejectReason"]) != slackVisibleReplyRejectReasonNoCitation || stringFromAny(sample["decisionUserId"]) != "U_PENG" {
+		t.Fatalf("replyQualitySample = %#v", sample)
+	}
+
+	report, err := service.TriageAudit(context.Background(), 6*time.Hour, 10)
+	if err != nil {
+		t.Fatalf("TriageAudit: %v", err)
+	}
+	if report.ReplyQualitySamples.Total != 1 || report.ReplyQualitySamples.Rejected != 1 || len(report.ReplyQualitySamples.Samples) != 1 {
+		t.Fatalf("replyQualitySamples = %#v", report.ReplyQualitySamples)
+	}
+	got := report.ReplyQualitySamples.Samples[0]
+	if got.RejectReason != slackVisibleReplyRejectReasonNoCitation || got.ApprovalDecision != "rejected" || got.TriageRunID != 99 || got.AnchorConfidenceSource != "not_collected_phase0" {
+		t.Fatalf("sample = %#v", got)
+	}
+}
+
+func TestSlackVisibleReplyQualitySamplesIncludeBlockedGateRuns(t *testing.T) {
+	now := time.Now().UTC()
+	report := buildSlackTriageAuditReport([]SlackTriageContext{{
+		ID:        123,
+		Timestamp: now.Format(time.RFC3339Nano),
+		Status:    "ok",
+		Channels:  []string{"C123"},
+		Summary:   "visible reply suppressed by Slack-visible quality gate",
+		ToolCalls: []SlackTriageToolCall{{
+			Tool:    "slack_api",
+			Action:  "persona_reply_quality_gate_silent",
+			Success: true,
+			Result:  "internal_control_plane_leak",
+		}},
+	}}, 6*time.Hour)
+	if report.ReplyQualitySamples.Total != 1 || report.ReplyQualitySamples.Blocked != 1 {
+		t.Fatalf("replyQualitySamples = %#v", report.ReplyQualitySamples)
+	}
+	sample := report.ReplyQualitySamples.Samples[0]
+	if sample.ApprovalDecision != "blocked" || sample.BlockReason != "internal_control_plane_leak" || sample.TriageRunID != 123 {
+		t.Fatalf("sample = %#v", sample)
 	}
 }
 

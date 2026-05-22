@@ -54,16 +54,24 @@ func (s *Service) TriageAudit(ctx context.Context, window time.Duration, limit i
 	if err != nil {
 		return SlackTriageAuditReport{}, err
 	}
-	report := buildSlackTriageAuditReport(runs, window)
+	actions, err := s.triage.ListPendingActions(ctx, limit)
+	if err != nil {
+		return SlackTriageAuditReport{}, err
+	}
+	report := buildSlackTriageAuditReport(runs, window, actions)
 	report.ProcessHealth = s.slackTriageProcessHealth(window)
 	report.PersonaRuntime = s.slackTriagePersonaRuntimeHealth(ctx)
 	report.Flags = buildSlackTriageAuditFlags(report)
 	return report, nil
 }
 
-func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration) SlackTriageAuditReport {
+func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration, pendingActions ...[]SlackPendingAction) SlackTriageAuditReport {
 	if window <= 0 {
 		window = slackTriageAuditDefaultWindow
+	}
+	actions := []SlackPendingAction{}
+	if len(pendingActions) > 0 {
+		actions = pendingActions[0]
 	}
 	now := timeNow().UTC()
 	cutoff := now.Add(-window)
@@ -78,27 +86,28 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 	reviewBuckets := buildSlackTriageReviewBuckets(windowRuns, 5)
 	infoBuckets := buildSlackTriageInfoBuckets(windowRuns, 5)
 	report := SlackTriageAuditReport{
-		GeneratedAt:       now.Format(time.RFC3339Nano),
-		WindowSeconds:     int64(window.Seconds()),
-		Cutoff:            cutoff.Format(time.RFC3339Nano),
-		RunCount:          len(windowRuns),
-		Freshness:         *freshness,
-		Outcome:           buildSlackTriageAuditOutcome(windowRuns),
-		RealOutcome:       buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, false)),
-		ProbeOutcome:      buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, true)),
-		InputContext:      buildSlackTriageInputContext(windowRuns),
-		ContextBudget:     contextBudget,
-		Harness:           buildSlackTriageHarnessDrift(contextBudget, reviewBuckets, infoBuckets),
-		ContextFetch:      buildSlackTriageContextFetch(windowRuns),
-		SkipReasons:       buildSlackTriageSkipReasons(windowRuns),
-		PersonaQuality:    buildSlackTriagePersonaQuality(windowRuns),
-		Canary:            canary,
-		LiveProbe:         buildSlackTriageLiveProbeSummary(windowRuns),
-		FailureSamples:    buildSlackTriageFailureSamples(windowRuns, 5),
-		RecentRuns:        buildSlackTriageAuditRunBriefs(windowRuns, 20),
-		QualityThresholds: slackTriageQualityBucketThresholds(),
-		ReviewBuckets:     reviewBuckets,
-		InfoBuckets:       infoBuckets,
+		GeneratedAt:         now.Format(time.RFC3339Nano),
+		WindowSeconds:       int64(window.Seconds()),
+		Cutoff:              cutoff.Format(time.RFC3339Nano),
+		RunCount:            len(windowRuns),
+		Freshness:           *freshness,
+		Outcome:             buildSlackTriageAuditOutcome(windowRuns),
+		RealOutcome:         buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, false)),
+		ProbeOutcome:        buildSlackTriageAuditOutcome(filterSlackTriageProbeRuns(windowRuns, true)),
+		InputContext:        buildSlackTriageInputContext(windowRuns),
+		ContextBudget:       contextBudget,
+		Harness:             buildSlackTriageHarnessDrift(contextBudget, reviewBuckets, infoBuckets),
+		ContextFetch:        buildSlackTriageContextFetch(windowRuns),
+		SkipReasons:         buildSlackTriageSkipReasons(windowRuns),
+		PersonaQuality:      buildSlackTriagePersonaQuality(windowRuns),
+		Canary:              canary,
+		LiveProbe:           buildSlackTriageLiveProbeSummary(windowRuns),
+		FailureSamples:      buildSlackTriageFailureSamples(windowRuns, 5),
+		RecentRuns:          buildSlackTriageAuditRunBriefs(windowRuns, 20),
+		ReplyQualitySamples: buildSlackVisibleReplyQualitySampleSummary(actions, windowRuns, window, 10),
+		QualityThresholds:   slackTriageQualityBucketThresholds(),
+		ReviewBuckets:       reviewBuckets,
+		InfoBuckets:         infoBuckets,
 	}
 	report.Flags = buildSlackTriageAuditFlags(report)
 	return report

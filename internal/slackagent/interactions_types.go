@@ -57,6 +57,7 @@ type SlackPendingActionInteraction struct {
 	Status         string `json:"status"`
 	UserID         string `json:"user_id,omitempty"`
 	ActionID       string `json:"action_id,omitempty"`
+	RejectReason   string `json:"reject_reason,omitempty"`
 	AssigneeUserID string `json:"assignee_user_id,omitempty"`
 	SnoozeMinutes  int    `json:"snooze_minutes,omitempty"`
 	ChannelID      string `json:"channel_id,omitempty"`

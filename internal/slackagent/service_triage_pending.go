@@ -54,6 +54,7 @@ func (s *Service) insertSlackTriagePendingActions(ctx context.Context, workspace
 					stored.Params = make(map[string]any)
 				}
 				stored.Params["cardId"] = fmt.Sprintf("pending_action:%d", stored.ID)
+				recordSlackVisibleReplyQualitySampleParams(stored)
 			})
 			if err != nil {
 				s.logger.Warn("slack pending reply card id update failed", "error", err)

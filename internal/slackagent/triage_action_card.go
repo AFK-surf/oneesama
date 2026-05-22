@@ -68,7 +68,7 @@ func buildSlackTriageActionBlocks(action SlackTriageDecisionAction, pending Slac
 				"block_id": fmt.Sprintf("mab_pending_action:%d", pending.ID),
 				"elements": []map[string]any{
 					triageButton("通过并发送", "primary", "mab_pending_action_confirm", pending.ID, "confirmed", nil),
-					triageButton("不通过", "danger", "mab_pending_action_dismiss", pending.ID, "dismissed", map[string]any{"rejectReason": "manual_reject"}),
+					triageButton("不通过", "danger", "mab_pending_action_dismiss", pending.ID, "dismissed", map[string]any{"rejectReason": slackVisibleReplyRejectReasonOther}),
 				},
 			},
 		}

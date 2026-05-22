@@ -57,6 +57,7 @@ intent_action_negations='["no need","no further action","not needed","not be del
 handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryMarkers // []) + ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already been answered","already been fully handled","already deeply handled","already handled","already handles","already on it","already active","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","already being handled","being actively handled","being handled by","being investigated and resolved","being investigated","was already handled","is being handled","is already being handled","active agent","active codex","active claude","already complied","has opened a session","has already opened","has already been answered","has already responded","has already been fully handled","has already complied","no actionable remainder","已经查了","已经由","已经被充分分析","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]) | unique' <"${tmpdir}/audit.json")"
 handled_by_other_negations="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryNegations // []) + ["no idea","not sure","don'\''t know","doesn'\''t know","nobody knows","unknown who","unclear who","不认识","不知道","不清楚","搞不清","没人知道","无人知道","还没确定"]) | unique' <"${tmpdir}/audit.json")"
 harness_rollup="$(jq -c '.audit.harness // {}' <"${tmpdir}/audit.json")"
+reply_quality_samples="$(jq -c '.audit.replyQualitySamples // {}' <"${tmpdir}/audit.json")"
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
@@ -214,6 +215,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         lowConfidenceCeiling: $low_confidence
       },
       harness: $harness,
+      replyQualitySamples: $reply_samples,
       totals: {
         runs: ($runs | length),
         failed: ($runs | map(select(.status != "ok")) | length),
@@ -368,7 +370,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       }
     }
-' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson handled_negations "$handled_by_other_negations" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson handled_negations "$handled_by_other_negations" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" --argjson reply_samples "$reply_quality_samples" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
@@ -379,6 +381,10 @@ jq -r '
   .audit.contextBudget as $budget
   | "budget: count=\($budget.count // 0) max_total_tokens=\($budget.maxTotalTokens // 0) max_stable_tokens=\($budget.maxStableTokens // 0) max_dynamic_tokens=\($budget.maxDynamicTokens // 0) max_worker_result_tokens=\($budget.maxWorkerResultTokens // 0) max_memory_evidence_tokens=\($budget.maxMemoryEvidenceTokens // 0)"
 ' <"${tmpdir}/audit.json"
+jq -r '
+  .replyQualitySamples as $samples
+  | "reply_quality_samples: total=\($samples.total // 0) pending=\($samples.pending // 0) confirmed=\($samples.confirmed // 0) rejected=\($samples.rejected // 0) blocked=\($samples.blocked // 0)"
+' <"${tmpdir}/quality.json"
 jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",

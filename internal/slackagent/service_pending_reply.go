@@ -80,6 +80,7 @@ func (s *Service) updatePostThreadReplyPendingResult(ctx context.Context, id int
 			action.Params = make(map[string]any)
 		}
 		action.Params["finalOutcome"] = result
+		recordSlackVisibleReplyQualitySampleParams(action)
 	}); err != nil {
 		s.logger.Warn("slack pending reply result update failed", "pending_action_id", id, "error", err)
 	}
