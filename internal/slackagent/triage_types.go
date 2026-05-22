@@ -154,6 +154,33 @@ type SlackVisibleReplyAllowListShadowSample struct {
 	EvidenceKinds    []string `json:"evidenceKinds,omitempty"`
 }
 
+type SlackEpisodeRecallStatus struct {
+	Ready   bool                             `json:"ready"`
+	Store   string                           `json:"store"`
+	Canary  SlackEpisodeRecallCanarySummary  `json:"canary"`
+	Error   string                           `json:"error,omitempty"`
+	Samples []SlackEpisodeRecallSearchResult `json:"samples,omitempty"`
+}
+
+type SlackEpisodeRecallCanarySummary struct {
+	Total  int                            `json:"total"`
+	Passed int                            `json:"passed"`
+	Failed int                            `json:"failed"`
+	Cases  []SlackEpisodeRecallCanaryCase `json:"cases,omitempty"`
+}
+
+type SlackEpisodeRecallCanaryCase struct {
+	Name                string   `json:"name"`
+	Query               string   `json:"query"`
+	ExpectedSurfaces    []string `json:"expectedSurfaces,omitempty"`
+	ExpectedSourceTypes []string `json:"expectedSourceTypes,omitempty"`
+	ActualSurfaces      []string `json:"actualSurfaces,omitempty"`
+	ActualSourceTypes   []string `json:"actualSourceTypes,omitempty"`
+	ActualSourceRefs    []string `json:"actualSourceRefs,omitempty"`
+	Passed              bool     `json:"passed"`
+	Reason              string   `json:"reason,omitempty"`
+}
+
 type SlackTriageStartResult struct {
 	Run          *SlackTriageContext      `json:"run,omitempty"`
 	Job          any                      `json:"job,omitempty"`
@@ -180,6 +207,7 @@ type SlackTriageStatus struct {
 	LastTriageJobID   string                     `json:"lastTriageJobId,omitempty"`
 	AuditFreshness    *SlackTriageFreshness      `json:"auditFreshness,omitempty"`
 	AuditFixtures     []SlackTriageAuditFixture  `json:"auditFixtures,omitempty"`
+	EpisodeRecall     SlackEpisodeRecallStatus   `json:"episodeRecall"`
 	Runs              []SlackTriageContext       `json:"runs,omitempty"`
 	PendingActions    []SlackPendingAction       `json:"pendingActions,omitempty"`
 	ChannelBrains     []SlackChannelBrain        `json:"channelBrains,omitempty"`
@@ -241,6 +269,7 @@ type SlackTriageAuditReport struct {
 	ReplyQualitySamples SlackVisibleReplyQualitySampleSummary   `json:"replyQualitySamples"`
 	VisibleReplyCanary  SlackVisibleReplyAllowListCanarySummary `json:"visibleReplyAllowListCanary"`
 	VisibleReplyShadow  SlackVisibleReplyAllowListShadowSummary `json:"visibleReplyAllowListShadow"`
+	EpisodeRecall       SlackEpisodeRecallStatus                `json:"episodeRecall"`
 	QualityThresholds   SlackTriageQualityBucketThresholds      `json:"qualityThresholds"`
 	ReviewBuckets       SlackTriageReviewBuckets                `json:"reviewBuckets"`
 	InfoBuckets         SlackTriageInfoBuckets                  `json:"infoBuckets"`

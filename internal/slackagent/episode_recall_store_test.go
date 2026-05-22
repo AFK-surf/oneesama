@@ -133,6 +133,33 @@ func TestEpisodeRecallStoreUpsertUpdatesIndexedContent(t *testing.T) {
 	}
 }
 
+func TestEpisodeRecallCanaryCoversSharedSlackMeetAndWorkerMeet(t *testing.T) {
+	status := BuildSlackEpisodeRecallStatus(context.Background())
+	if !status.Ready || status.Error != "" {
+		t.Fatalf("status = %#v, want ready canary", status)
+	}
+	if status.Canary.Total != 2 || status.Canary.Passed != 2 || status.Canary.Failed != 0 {
+		t.Fatalf("canary = %#v, want both cases passing", status.Canary)
+	}
+	byName := map[string]SlackEpisodeRecallCanaryCase{}
+	for _, c := range status.Canary.Cases {
+		byName[c.Name] = c
+	}
+	identity := byName["slack_meet_identity_lookup_recall"]
+	if !stringSliceContains(identity.ActualSurfaces, "slack") || !stringSliceContains(identity.ActualSurfaces, "meet") {
+		t.Fatalf("identity case = %#v, want Slack + Meet surfaces", identity)
+	}
+	demo := byName["worker_meet_demo_surface_recall"]
+	if !stringSliceContains(demo.ActualSourceTypes, slackEpisodeRecallSourceWorkerJob) ||
+		!stringSliceContains(demo.ActualSourceTypes, slackEpisodeRecallSourceTriageRun) ||
+		!stringSliceContains(demo.ActualSourceTypes, slackEpisodeRecallSourceMeetingArtifact) {
+		t.Fatalf("demo case = %#v, want Slack + worker + meeting sources", demo)
+	}
+	if len(status.Samples) == 0 {
+		t.Fatal("expected status samples for operator inspection")
+	}
+}
+
 func newTestEpisodeRecallStore(t *testing.T) *SlackEpisodeRecallStore {
 	t.Helper()
 	store, err := OpenSlackEpisodeRecallStore(context.Background(), filepath.Join(t.TempDir(), "episode-recall.sqlite3"))

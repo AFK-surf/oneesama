@@ -405,6 +405,9 @@ func TestTriageStatusIncludesAuditFixtures(t *testing.T) {
 	if len(status.AuditFixtures) != 11 {
 		t.Fatalf("fixtures = %#v, want parse controls plus memory-backed canaries", status.AuditFixtures)
 	}
+	if !status.EpisodeRecall.Ready || status.EpisodeRecall.Canary.Passed != status.EpisodeRecall.Canary.Total {
+		t.Fatalf("episode recall = %#v, want passing status canary", status.EpisodeRecall)
+	}
 	byName := map[string]SlackTriageAuditFixture{}
 	for _, fixture := range status.AuditFixtures {
 		byName[fixture.Name] = fixture
@@ -1186,7 +1189,7 @@ func TestHandleTriageAuditReturnsSelfServeReport(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 11 || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
+	if !payload.OK || payload.Audit.RunCount != 0 || payload.Audit.Canary.Total != 11 || !payload.Audit.EpisodeRecall.Ready || !hasAuditFlag(payload.Audit.Flags, "no_recent_runs") {
 		t.Fatalf("payload = %#v", payload)
 	}
 }

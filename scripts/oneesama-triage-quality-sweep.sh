@@ -60,6 +60,7 @@ harness_rollup="$(jq -c '.audit.harness // {}' <"${tmpdir}/audit.json")"
 reply_quality_samples="$(jq -c '.audit.replyQualitySamples // {}' <"${tmpdir}/audit.json")"
 visible_reply_canary="$(jq -c '.audit.visibleReplyAllowListCanary // {}' <"${tmpdir}/audit.json")"
 visible_reply_shadow="$(jq -c '.audit.visibleReplyAllowListShadow // {}' <"${tmpdir}/audit.json")"
+episode_recall="$(jq -c '.audit.episodeRecall // {}' <"${tmpdir}/audit.json")"
 
 jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --argjson low_confidence "$low_confidence_ceiling" '
   def runs:
@@ -220,6 +221,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
       replyQualitySamples: $reply_samples,
       visibleReplyAllowListCanary: $visible_canary,
       visibleReplyAllowListShadow: $visible_shadow,
+      episodeRecall: $episode_recall,
       totals: {
         runs: ($runs | length),
         failed: ($runs | map(select(.status != "ok")) | length),
@@ -374,7 +376,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         )
       }
     }
-' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson handled_negations "$handled_by_other_negations" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" --argjson reply_samples "$reply_quality_samples" --argjson visible_canary "$visible_reply_canary" --argjson visible_shadow "$visible_reply_shadow" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
+' --arg window "$audit_window" --argjson markers "$intent_action_markers" --argjson negations "$intent_action_negations" --argjson handled "$handled_by_other_markers" --argjson handled_negations "$handled_by_other_negations" --argjson dynamic_skew "$dynamic_context_freshness_skew" --argjson harness "$harness_rollup" --argjson reply_samples "$reply_quality_samples" --argjson visible_canary "$visible_reply_canary" --argjson visible_shadow "$visible_reply_shadow" --argjson episode_recall "$episode_recall" <"${tmpdir}/status.json" >"${tmpdir}/quality.json"
 
 echo "oneesama-triage-quality-sweep: window=${audit_window} cutoff=${cutoff}"
 jq -r '
@@ -393,6 +395,10 @@ jq -r '
   .visibleReplyAllowListCanary as $canary
   | .visibleReplyAllowListShadow as $shadow
   | "visible_reply_allow_list: canary_passed=\($canary.passed // 0) canary_failed=\($canary.failed // 0) shadow_total=\($shadow.total // 0) allow=\($shadow.allowListWouldAllow // 0) block=\($shadow.allowListWouldBlock // 0) safety_net=\($shadow.safetyNetBlocks // 0)"
+' <"${tmpdir}/quality.json"
+jq -r '
+  .episodeRecall as $recall
+  | "episode_recall: ready=\($recall.ready // false) canary_passed=\($recall.canary.passed // 0) canary_failed=\($recall.canary.failed // 0) store=\($recall.store // "unknown")"
 ' <"${tmpdir}/quality.json"
 jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
@@ -421,7 +427,7 @@ write_status_summary() {
     '. + {script: $script, status: $status}' <"${tmpdir}/quality.json" >"${status_output_dir}/triage-quality-result.json"
 }
 
-if jq -e '((.red.failures | length) + (.red.invalidPersonaJSON | length) + (.red.placeholderSummaries | length) + (.visibleReplyAllowListCanary.failed // 0)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
+if jq -e '((.red.failures | length) + (.red.invalidPersonaJSON | length) + (.red.placeholderSummaries | length) + (.visibleReplyAllowListCanary.failed // 0) + (.episodeRecall.canary.failed // 0)) > 0 or ((.episodeRecall.error // "") != "")' <"${tmpdir}/quality.json" >/dev/null; then
   echo "oneesama-triage-quality-sweep: red quality samples:" >&2
   jq -r '
     .red
@@ -433,6 +439,13 @@ if jq -e '((.red.failures | length) + (.red.invalidPersonaJSON | length) + (.red
     .visibleReplyAllowListCanary as $canary
     | if (($canary.failed // 0) > 0)
       then "## visibleReplyAllowListCanary\n" + (($canary.cases // []) | map(select((.passed // false) | not) | "- \(.name) expected=\(.expectedReason // "") actual=\(.actualReason // "")") | join("\n"))
+      else empty
+      end
+  ' <"${tmpdir}/quality.json" >&2
+  jq -r '
+    .episodeRecall as $recall
+    | if (($recall.canary.failed // 0) > 0 or (($recall.error // "") != ""))
+      then "## episodeRecall\nerror=\($recall.error // "")\n" + (($recall.canary.cases // []) | map(select((.passed // false) | not) | "- \(.name) query=\(.query // "") reason=\(.reason // "")") | join("\n"))
       else empty
       end
   ' <"${tmpdir}/quality.json" >&2

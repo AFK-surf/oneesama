@@ -37,6 +37,7 @@ func (s *Service) TriageStatus(ctx context.Context, limit int) (SlackTriageStatu
 		LastTriageJobID:   s.InboundStatus().EventBuffer.LastTriageJobID,
 		AuditFreshness:    buildSlackTriageFreshness(runs),
 		AuditFixtures:     buildSlackTriageAuditFixtures(),
+		EpisodeRecall:     BuildSlackEpisodeRecallStatus(ctx),
 		Runs:              runs,
 		PendingActions:    actions,
 		ChannelBrains:     brains,
@@ -61,6 +62,7 @@ func (s *Service) TriageAudit(ctx context.Context, window time.Duration, limit i
 	report := buildSlackTriageAuditReport(runs, window, actions)
 	report.ProcessHealth = s.slackTriageProcessHealth(window)
 	report.PersonaRuntime = s.slackTriagePersonaRuntimeHealth(ctx)
+	report.EpisodeRecall = BuildSlackEpisodeRecallStatus(ctx)
 	report.Flags = buildSlackTriageAuditFlags(report)
 	return report, nil
 }
@@ -108,6 +110,7 @@ func buildSlackTriageAuditReport(runs []SlackTriageContext, window time.Duration
 		ReplyQualitySamples: summarizeSlackVisibleReplyQualitySamples(replyQualitySamples, 10),
 		VisibleReplyCanary:  buildSlackVisibleReplyAllowListCanarySummary(),
 		VisibleReplyShadow:  buildSlackVisibleReplyAllowListShadowSummary(replyQualitySamples, 10),
+		EpisodeRecall:       BuildSlackEpisodeRecallStatus(context.Background()),
 		QualityThresholds:   slackTriageQualityBucketThresholds(),
 		ReviewBuckets:       reviewBuckets,
 		InfoBuckets:         infoBuckets,
@@ -789,6 +792,9 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 	}
 	if report.Canary.Passed != report.Canary.Total {
 		flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "canary_failed", Message: "One or more deterministic ACT/MAYBE/SKIP canary controls failed."})
+	}
+	if report.EpisodeRecall.Error != "" || report.EpisodeRecall.Canary.Failed > 0 {
+		flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "episode_recall_canary_failed", Message: "Slack/Meet episode recall canary failed; cross-session source lookup may be stale or unavailable."})
 	}
 	return flags
 }
