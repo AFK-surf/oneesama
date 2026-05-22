@@ -406,6 +406,91 @@ func TestRunFixtureBenchmarkReplaysConfigSetVariants(t *testing.T) {
 	}
 }
 
+func TestRunFixtureBenchmarkAddsLLMJudgeSignal(t *testing.T) {
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		var request triageRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode dry-run request: %v", err)
+		}
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:        true,
+				ChannelID:     request.ChannelID,
+				ThreadTS:      request.Messages[0].ThreadTS,
+				MessageCount:  len(request.Messages),
+				FinalDecision: "would_stay_silent",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionStaySilent,
+					Success:  true,
+				},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+	judgeMux := http.NewServeMux()
+	judgeMux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer judge-key" {
+			t.Fatalf("Authorization = %q, want bearer key", got)
+		}
+		var request struct {
+			Model          string `json:"model"`
+			ResponseFormat struct {
+				Type string `json:"type"`
+			} `json:"response_format"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode judge request: %v", err)
+		}
+		if request.Model != "judge-test" || request.ResponseFormat.Type != "json_object" || len(request.Messages) != 2 {
+			t.Fatalf("judge request = %#v, want model/json/messages", request)
+		}
+		if !strings.Contains(request.Messages[1].Content, "direct_smoke_command_must_allow") {
+			t.Fatalf("judge user payload = %s, want fixture context", request.Messages[1].Content)
+		}
+		writeBenchmarkJSON(t, w, map[string]any{
+			"choices": []map[string]any{{
+				"message": map[string]string{
+					"content": `{"score":0.25,"verdict":"BAD","flags":["Missing_Evidence","missing_evidence","under_respond"],"reasoning":"No useful reply."}`,
+				},
+			}},
+		})
+	})
+	judgeServer := httptest.NewServer(judgeMux)
+	defer judgeServer.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--fixture", "../../internal/slackagent/testdata/triage_benchmark/direct_smoke_command_must_allow.json",
+		"--judge-url", judgeServer.URL,
+		"--judge-model", "judge-test",
+		"--judge-api-key", "judge-key",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var report benchmarkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, stdout.String())
+	}
+	if !report.Judge.Enabled || report.Judge.Model != "judge-test" || report.Summary.JudgeRows != 1 || report.Summary.JudgeErrors != 0 {
+		t.Fatalf("judge summary = config:%#v summary:%#v", report.Judge, report.Summary)
+	}
+	if report.Summary.ByJudgeVerdict["bad"] != 1 || report.Summary.ByJudgeFlag["missing_evidence"] != 1 || report.Summary.ByJudgeFlag["under_respond"] != 1 {
+		t.Fatalf("judge counts = verdict:%#v flags:%#v", report.Summary.ByJudgeVerdict, report.Summary.ByJudgeFlag)
+	}
+	if len(report.Rows) != 1 || report.Rows[0].Judge == nil || report.Rows[0].Judge.Score != 0.25 || report.Rows[0].Judge.Verdict != "bad" {
+		t.Fatalf("judge row = %#v", report.Rows)
+	}
+}
+
 func writeFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

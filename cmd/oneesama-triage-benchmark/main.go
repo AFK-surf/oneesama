@@ -40,6 +40,7 @@ type benchmarkReport struct {
 	Rows             []benchmarkRow                            `json:"rows"`
 	Variants         []benchmarkVariant                        `json:"variants,omitempty"`
 	VariantSummaries []benchmarkVariantSummary                 `json:"variantSummaries,omitempty"`
+	Judge            benchmarkJudgeConfig                      `json:"judge,omitempty"`
 }
 
 type benchmarkSummary struct {
@@ -49,30 +50,39 @@ type benchmarkSummary struct {
 	ByPipelineSmell      map[string]int `json:"byPipelineSmell"`
 	ByFixtureLabel       map[string]int `json:"byFixtureLabel,omitempty"`
 	ByFixtureOutcome     map[string]int `json:"byFixtureOutcome,omitempty"`
+	ByJudgeVerdict       map[string]int `json:"byJudgeVerdict,omitempty"`
+	ByJudgeFlag          map[string]int `json:"byJudgeFlag,omitempty"`
 	FixturePasses        int            `json:"fixturePasses,omitempty"`
 	FixtureFailures      int            `json:"fixtureFailures,omitempty"`
 	Errors               int            `json:"errors"`
+	JudgeRows            int            `json:"judgeRows,omitempty"`
+	JudgeErrors          int            `json:"judgeErrors,omitempty"`
+	JudgeSkipped         int            `json:"judgeSkipped,omitempty"`
+	JudgeAverageScore    float64        `json:"judgeAverageScore,omitempty"`
 }
 
 type benchmarkRow struct {
-	VariantID            string   `json:"variantId"`
-	CaseID               string   `json:"caseId,omitempty"`
-	CaseDescription      string   `json:"caseDescription,omitempty"`
-	FixtureLabel         string   `json:"fixtureLabel,omitempty"`
-	FixturePassed        *bool    `json:"fixturePassed,omitempty"`
-	FixtureReason        string   `json:"fixtureReason,omitempty"`
-	FixtureFailureLayer  string   `json:"fixtureFailureLayer,omitempty"`
-	FixtureFailureDetail string   `json:"fixtureFailureDetail,omitempty"`
-	ChannelID            string   `json:"channelId"`
-	ThreadTS             string   `json:"threadTs"`
-	MessageCount         int      `json:"messageCount"`
-	PersonaDecision      string   `json:"personaDecision,omitempty"`
-	FinalDecision        string   `json:"finalDecision,omitempty"`
-	VisibleReplyAllowed  bool     `json:"visibleReplyAllowed"`
-	VisibleReplyReasons  []string `json:"visibleReplyReasons,omitempty"`
-	WorkerRequests       int      `json:"workerRequests"`
-	PipelineSmellSignals []string `json:"pipelineSmellSignals,omitempty"`
-	Error                string   `json:"error,omitempty"`
+	VariantID            string                 `json:"variantId"`
+	CaseID               string                 `json:"caseId,omitempty"`
+	CaseDescription      string                 `json:"caseDescription,omitempty"`
+	FixtureLabel         string                 `json:"fixtureLabel,omitempty"`
+	FixturePassed        *bool                  `json:"fixturePassed,omitempty"`
+	FixtureReason        string                 `json:"fixtureReason,omitempty"`
+	FixtureFailureLayer  string                 `json:"fixtureFailureLayer,omitempty"`
+	FixtureFailureDetail string                 `json:"fixtureFailureDetail,omitempty"`
+	ChannelID            string                 `json:"channelId"`
+	ThreadTS             string                 `json:"threadTs"`
+	MessageCount         int                    `json:"messageCount"`
+	PersonaDecision      string                 `json:"personaDecision,omitempty"`
+	FinalDecision        string                 `json:"finalDecision,omitempty"`
+	VisibleReplyAllowed  bool                   `json:"visibleReplyAllowed"`
+	VisibleReplyReasons  []string               `json:"visibleReplyReasons,omitempty"`
+	WorkerRequests       int                    `json:"workerRequests"`
+	PipelineSmellSignals []string               `json:"pipelineSmellSignals,omitempty"`
+	Judge                *benchmarkJudgeVerdict `json:"judge,omitempty"`
+	JudgeError           string                 `json:"judgeError,omitempty"`
+	JudgeSkipped         bool                   `json:"judgeSkipped,omitempty"`
+	Error                string                 `json:"error,omitempty"`
 }
 
 type benchmarkVariant struct {
@@ -87,6 +97,30 @@ type benchmarkVariantSummary struct {
 	Description string           `json:"description,omitempty"`
 	Knobs       map[string]any   `json:"knobs,omitempty"`
 	Summary     benchmarkSummary `json:"summary"`
+}
+
+type benchmarkJudgeConfig struct {
+	Enabled bool   `json:"enabled"`
+	Model   string `json:"model,omitempty"`
+	URL     string `json:"url,omitempty"`
+	MaxRows int    `json:"maxRows,omitempty"`
+}
+
+type benchmarkJudgeVerdict struct {
+	Score     float64  `json:"score"`
+	Verdict   string   `json:"verdict"`
+	Flags     []string `json:"flags,omitempty"`
+	Reasoning string   `json:"reasoning,omitempty"`
+}
+
+type benchmarkJudgeOptions struct {
+	benchmarkJudgeConfig
+	APIKey string
+}
+
+type benchmarkJudgeBudget struct {
+	MaxRows int
+	Used    int
 }
 
 type benchmarkFixture struct {
@@ -146,6 +180,10 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		timeout           time.Duration
 		fixtures          stringListFlag
 		configSets        stringListFlag
+		judgeURL          string
+		judgeModel        string
+		judgeAPIKey       string
+		judgeMaxRows      int
 	)
 	fs.StringVar(&slackURL, "slack-url", firstNonEmpty(os.Getenv("ONEESAMA_SLACK_AGENT_URL"), os.Getenv("ONEESAMA_MONITOR_SLACK_URL"), "http://127.0.0.1:8780"), "Local oneesama slack-agent URL.")
 	fs.BoolVar(&liveMode, "live", true, "Live Slack scan mode. This is currently the only supported input mode.")
@@ -162,6 +200,10 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs.StringVar(&format, "format", "json", "Output format: json or markdown.")
 	fs.StringVar(&variantID, "variant-id", "current", "Variant/config id recorded in the report.")
 	fs.DurationVar(&timeout, "timeout", 10*time.Minute, "Overall benchmark timeout.")
+	fs.StringVar(&judgeURL, "judge-url", firstNonEmpty(os.Getenv("ONEESAMA_TRIAGE_BENCHMARK_JUDGE_URL"), os.Getenv("OPENAI_BASE_URL")), "Optional OpenAI-compatible chat completions URL or base URL for LLM judge.")
+	fs.StringVar(&judgeModel, "judge-model", os.Getenv("ONEESAMA_TRIAGE_BENCHMARK_JUDGE_MODEL"), "Optional judge model. When set, each replay row receives an LLM judge signal.")
+	fs.StringVar(&judgeAPIKey, "judge-api-key", firstNonEmpty(os.Getenv("ONEESAMA_TRIAGE_BENCHMARK_JUDGE_API_KEY"), os.Getenv("ONEESAMA_OPENAI_API_KEY"), os.Getenv("MAB_OPENAI_API_KEY"), os.Getenv("OPENAI_API_KEY")), "Optional judge API key. Defaults to ONEESAMA_TRIAGE_BENCHMARK_JUDGE_API_KEY / OpenAI envs.")
+	fs.IntVar(&judgeMaxRows, "judge-max-rows", 0, "Maximum rows to judge. 0 means all replayed rows when judge is enabled.")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: oneesama-triage-benchmark [--live --channel auto|C123,C456] [--fixture 'internal/slackagent/testdata/triage_benchmark/*.json'] [--output report.json]\n\n")
 		fmt.Fprintf(stderr, "Replays Slack threads through /slack/triage/run with dry_run=true. No Slack posts or workers are started.\n\n")
@@ -173,6 +215,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 		return 2
 	}
+	judgeOpts, err := newBenchmarkJudgeOptions(judgeURL, judgeModel, judgeAPIKey, judgeMaxRows)
+	if err != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-benchmark: %v\n", err)
+		return 2
+	}
+	judgeBudget := benchmarkJudgeBudget{MaxRows: judgeOpts.MaxRows}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	fixtureInputs := append([]string(nil), fixtures...)
@@ -209,6 +257,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		MaxThreads:    maxTotalThreads,
 		Summary:       newBenchmarkSummary(),
 		Variants:      variants,
+		Judge:         judgeOpts.benchmarkJudgeConfig,
 	}
 	client := &http.Client{Timeout: 90 * time.Second}
 	if mode == "fixture" {
@@ -233,6 +282,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					row = evaluateCandidateFixture(variant.VariantID, fixture)
 				}
 				applyFixtureResult(&row, fixture)
+				applyBenchmarkJudge(ctx, client, judgeOpts, &judgeBudget, &row, fixture.Thread, &fixture)
 				report.Rows = append(report.Rows, row)
 				report.ThreadsReplayed++
 				recordRow(&report.Summary, row)
@@ -298,6 +348,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		for _, variant := range variants {
 			for _, thread := range replayThreads {
 				row := dryRunThread(ctx, client, report.SlackAgentURL, variant.VariantID, thread)
+				applyBenchmarkJudge(ctx, client, judgeOpts, &judgeBudget, &row, thread, nil)
 				report.Rows = append(report.Rows, row)
 				report.ThreadsReplayed++
 				recordRow(&report.Summary, row)
@@ -371,6 +422,8 @@ func newBenchmarkSummary() benchmarkSummary {
 		ByPipelineSmell:      map[string]int{},
 		ByFixtureLabel:       map[string]int{},
 		ByFixtureOutcome:     map[string]int{},
+		ByJudgeVerdict:       map[string]int{},
+		ByJudgeFlag:          map[string]int{},
 	}
 }
 
@@ -478,6 +531,208 @@ func readBenchmarkVariantConfig(path string) ([]benchmarkVariant, error) {
 		Knobs:       wrapper.Knobs,
 		SourcePath:  path,
 	}}, nil
+}
+
+func newBenchmarkJudgeOptions(rawURL string, model string, apiKey string, maxRows int) (benchmarkJudgeOptions, error) {
+	model = strings.TrimSpace(model)
+	if maxRows < 0 {
+		return benchmarkJudgeOptions{}, fmt.Errorf("--judge-max-rows must be >= 0")
+	}
+	if model == "" {
+		return benchmarkJudgeOptions{benchmarkJudgeConfig: benchmarkJudgeConfig{Enabled: false, MaxRows: maxRows}}, nil
+	}
+	url := normalizeBenchmarkJudgeURL(rawURL)
+	return benchmarkJudgeOptions{
+		benchmarkJudgeConfig: benchmarkJudgeConfig{
+			Enabled: true,
+			Model:   model,
+			URL:     url,
+			MaxRows: maxRows,
+		},
+		APIKey: strings.TrimSpace(apiKey),
+	}, nil
+}
+
+func normalizeBenchmarkJudgeURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "https://api.openai.com/v1"
+	}
+	raw = strings.TrimRight(raw, "/")
+	if strings.HasSuffix(raw, "/chat/completions") {
+		return raw
+	}
+	return raw + "/chat/completions"
+}
+
+func applyBenchmarkJudge(ctx context.Context, client *http.Client, opts benchmarkJudgeOptions, budget *benchmarkJudgeBudget, row *benchmarkRow, thread slackagent.SlackTriageReplayThread, fixture *benchmarkFixture) {
+	if !opts.Enabled {
+		return
+	}
+	if budget != nil && budget.MaxRows > 0 && budget.Used >= budget.MaxRows {
+		row.JudgeSkipped = true
+		return
+	}
+	if budget != nil {
+		budget.Used++
+	}
+	verdict, err := requestBenchmarkJudge(ctx, client, opts, *row, thread, fixture)
+	if err != nil {
+		row.JudgeError = err.Error()
+		return
+	}
+	row.Judge = &verdict
+}
+
+func requestBenchmarkJudge(ctx context.Context, client *http.Client, opts benchmarkJudgeOptions, row benchmarkRow, thread slackagent.SlackTriageReplayThread, fixture *benchmarkFixture) (benchmarkJudgeVerdict, error) {
+	payload := map[string]any{
+		"task": "Judge this Oneesama Slack triage dry-run row. Score the final human-visible behavior, not the internal implementation style.",
+		"contract": map[string]any{
+			"score":   "0.0 to 1.0 where 1.0 is clearly useful and safe",
+			"verdict": "good, bad, or uncertain",
+			"flags": []string{
+				"over_respond",
+				"under_respond",
+				"missing_evidence",
+				"internal_leak",
+				"self_identity_overreach",
+				"wrong_delegation",
+				"review_burden",
+			},
+			"reasoning": "one short private audit note; do not include chain-of-thought",
+		},
+		"thread": map[string]any{
+			"channel_id": thread.ChannelID,
+			"thread_ts":  thread.ThreadTS,
+			"messages":   judgeMessageSamples(thread.Messages),
+		},
+		"row": row,
+	}
+	if fixture != nil {
+		payload["fixture"] = map[string]any{
+			"case_id":     fixture.CaseID,
+			"description": fixture.Description,
+			"label":       fixture.Label,
+			"tags":        fixture.Tags,
+			"source_refs": fixture.SourceRefs,
+			"expected":    fixture.Expected,
+		}
+	}
+	userContent, err := json.Marshal(payload)
+	if err != nil {
+		return benchmarkJudgeVerdict{}, fmt.Errorf("marshal judge payload: %w", err)
+	}
+	requestBody := map[string]any{
+		"model":       opts.Model,
+		"temperature": 0,
+		"response_format": map[string]string{
+			"type": "json_object",
+		},
+		"messages": []map[string]string{
+			{
+				"role": "system",
+				"content": strings.Join([]string{
+					"You are an independent benchmark judge for Oneesama Slack triage.",
+					"Use a different lens from production Pi: product fit, factual grounding, usefulness, over-response risk, internal leak risk, evidence quality, and reviewer burden.",
+					"Return only compact JSON with keys: score, verdict, flags, reasoning.",
+					"The judge is not an oracle; uncertain is acceptable when the thread lacks enough evidence.",
+				}, "\n"),
+			},
+			{"role": "user", "content": string(userContent)},
+		},
+	}
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		return benchmarkJudgeVerdict{}, fmt.Errorf("marshal judge request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, opts.URL, bytes.NewReader(body))
+	if err != nil {
+		return benchmarkJudgeVerdict{}, fmt.Errorf("create judge request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if opts.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+opts.APIKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return benchmarkJudgeVerdict{}, fmt.Errorf("judge request: %w", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return benchmarkJudgeVerdict{}, fmt.Errorf("decode judge HTTP %d: %w", resp.StatusCode, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return benchmarkJudgeVerdict{}, fmt.Errorf("judge HTTP %d: %s", resp.StatusCode, firstNonEmpty(out.Error.Message, "unknown error"))
+	}
+	if len(out.Choices) == 0 || strings.TrimSpace(out.Choices[0].Message.Content) == "" {
+		return benchmarkJudgeVerdict{}, fmt.Errorf("judge response missing content")
+	}
+	var verdict benchmarkJudgeVerdict
+	if err := json.Unmarshal([]byte(out.Choices[0].Message.Content), &verdict); err != nil {
+		return benchmarkJudgeVerdict{}, fmt.Errorf("decode judge verdict: %w", err)
+	}
+	return normalizeBenchmarkJudgeVerdict(verdict), nil
+}
+
+func normalizeBenchmarkJudgeVerdict(verdict benchmarkJudgeVerdict) benchmarkJudgeVerdict {
+	if verdict.Score < 0 {
+		verdict.Score = 0
+	}
+	if verdict.Score > 1 {
+		verdict.Score = 1
+	}
+	verdict.Verdict = strings.ToLower(strings.TrimSpace(verdict.Verdict))
+	switch verdict.Verdict {
+	case "good", "bad", "uncertain":
+	default:
+		verdict.Verdict = "uncertain"
+	}
+	verdict.Reasoning = truncateForJudge(strings.TrimSpace(verdict.Reasoning), 360)
+	for i := range verdict.Flags {
+		verdict.Flags[i] = strings.ToLower(strings.TrimSpace(verdict.Flags[i]))
+	}
+	verdict.Flags = uniqueStrings(verdict.Flags)
+	return verdict
+}
+
+func judgeMessageSamples(messages []slackagent.SlackInboundMessage) []map[string]string {
+	limit := len(messages)
+	if limit > 12 {
+		limit = 12
+	}
+	out := make([]map[string]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		message := messages[i]
+		out = append(out, map[string]string{
+			"user":      firstNonEmpty(message.UserID, message.UserIDSnake, message.User, message.BotID, message.BotIDSnake, "unknown"),
+			"ts":        firstNonEmpty(message.TS, message.EventTS, message.EventTSSnake),
+			"thread_ts": firstNonEmpty(message.ThreadTS, message.ThreadTSSnake),
+			"text":      truncateForJudge(message.Text, 700),
+		})
+	}
+	return out
+}
+
+func truncateForJudge(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max]) + "..."
 }
 
 func dryRunThread(ctx context.Context, client *http.Client, baseURL string, variantID string, thread slackagent.SlackTriageReplayThread) benchmarkRow {
@@ -718,6 +973,7 @@ func recordRow(summary *benchmarkSummary, row benchmarkRow) {
 	if strings.TrimSpace(row.Error) != "" {
 		summary.Errors++
 	}
+	recordJudgeSummary(summary, row)
 	if row.FixtureLabel != "" {
 		summary.ByFixtureLabel[row.FixtureLabel]++
 		outcome := "unknown"
@@ -743,6 +999,26 @@ func recordRow(summary *benchmarkSummary, row benchmarkRow) {
 	for _, smell := range row.PipelineSmellSignals {
 		summary.ByPipelineSmell[firstNonEmpty(smell, "unknown")]++
 	}
+}
+
+func recordJudgeSummary(summary *benchmarkSummary, row benchmarkRow) {
+	if row.JudgeSkipped {
+		summary.JudgeSkipped++
+		return
+	}
+	if strings.TrimSpace(row.JudgeError) != "" {
+		summary.JudgeErrors++
+		return
+	}
+	if row.Judge == nil {
+		return
+	}
+	summary.ByJudgeVerdict[firstNonEmpty(row.Judge.Verdict, "uncertain")]++
+	for _, flag := range row.Judge.Flags {
+		summary.ByJudgeFlag[firstNonEmpty(flag, "unknown")]++
+	}
+	summary.JudgeAverageScore = ((summary.JudgeAverageScore * float64(summary.JudgeRows)) + row.Judge.Score) / float64(summary.JudgeRows+1)
+	summary.JudgeRows++
 }
 
 func buildVariantSummaries(variants []benchmarkVariant, rows []benchmarkRow) []benchmarkVariantSummary {
@@ -797,6 +1073,9 @@ func renderMarkdownReport(report benchmarkReport) string {
 	if len(report.Variants) > 0 {
 		fmt.Fprintf(&b, "| Variants | %d |\n", len(report.Variants))
 	}
+	if report.Judge.Enabled {
+		fmt.Fprintf(&b, "| Judge | `%s` max_rows=%d |\n", escapeMarkdownCell(report.Judge.Model), report.Judge.MaxRows)
+	}
 	if report.MaxThreads > 0 {
 		fmt.Fprintf(&b, "| Max threads | %d |\n", report.MaxThreads)
 	}
@@ -815,16 +1094,25 @@ func renderMarkdownReport(report benchmarkReport) string {
 	appendCountTable(&b, "Persona Decisions", report.Summary.ByPersonaDecision)
 	appendCountTable(&b, "Visible Reply Gate Reasons", report.Summary.ByVisibleReplyReason)
 	appendCountTable(&b, "Pipeline Smells", report.Summary.ByPipelineSmell)
+	if report.Summary.JudgeRows > 0 || report.Summary.JudgeErrors > 0 || report.Summary.JudgeSkipped > 0 {
+		fmt.Fprintf(&b, "## LLM Judge\n\n")
+		fmt.Fprintf(&b, "| Judged | Errors | Skipped | Average score |\n")
+		fmt.Fprintf(&b, "|---:|---:|---:|---:|\n")
+		fmt.Fprintf(&b, "| %d | %d | %d | %.2f |\n\n", report.Summary.JudgeRows, report.Summary.JudgeErrors, report.Summary.JudgeSkipped, report.Summary.JudgeAverageScore)
+		appendCountTable(&b, "Judge Verdicts", report.Summary.ByJudgeVerdict)
+		appendCountTable(&b, "Judge Flags", report.Summary.ByJudgeFlag)
+	}
 	if len(report.VariantSummaries) > 1 {
 		fmt.Fprintf(&b, "## Variant Summaries\n\n")
-		fmt.Fprintf(&b, "| Variant | Fixture passes | Fixture failures | Errors | Decisions |\n")
-		fmt.Fprintf(&b, "|---|---:|---:|---:|---|\n")
+		fmt.Fprintf(&b, "| Variant | Fixture passes | Fixture failures | Errors | Judge score | Decisions |\n")
+		fmt.Fprintf(&b, "|---|---:|---:|---:|---:|---|\n")
 		for _, variant := range report.VariantSummaries {
-			fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %s |\n",
+			fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %.2f | %s |\n",
 				escapeMarkdownCell(variant.VariantID),
 				variant.Summary.FixturePasses,
 				variant.Summary.FixtureFailures,
 				variant.Summary.Errors,
+				variant.Summary.JudgeAverageScore,
 				escapeMarkdownCell(formatCountMap(variant.Summary.ByFinalDecision)),
 			)
 		}
@@ -853,8 +1141,8 @@ func renderMarkdownReport(report benchmarkReport) string {
 	}
 
 	fmt.Fprintf(&b, "## Replay Rows\n\n")
-	fmt.Fprintf(&b, "| Variant | Case | Channel | Thread | Msgs | Label | Result | Failure layer | Persona | Final | Gate reasons | Workers | Smells | Error |\n")
-	fmt.Fprintf(&b, "|---|---|---|---|---:|---|---|---|---|---|---|---:|---|---|\n")
+	fmt.Fprintf(&b, "| Variant | Case | Channel | Thread | Msgs | Label | Result | Failure layer | Persona | Final | Gate reasons | Workers | Judge | Smells | Error |\n")
+	fmt.Fprintf(&b, "|---|---|---|---|---:|---|---|---|---|---|---|---:|---|---|---|\n")
 	for _, row := range report.Rows {
 		reasons := "—"
 		if len(row.VisibleReplyReasons) > 0 {
@@ -883,7 +1171,18 @@ func renderMarkdownReport(report benchmarkReport) string {
 		if row.FixtureFailureDetail != "" && layer != "—" {
 			layer += ":" + row.FixtureFailureDetail
 		}
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %d | `%s` | `%s` | `%s` | `%s` | `%s` | %s | %d | %s | %s |\n",
+		judgeCell := "—"
+		if row.Judge != nil {
+			judgeCell = fmt.Sprintf("%s %.2f", row.Judge.Verdict, row.Judge.Score)
+			if len(row.Judge.Flags) > 0 {
+				judgeCell += " " + strings.Join(row.Judge.Flags, ",")
+			}
+		} else if row.JudgeSkipped {
+			judgeCell = "skipped"
+		} else if row.JudgeError != "" {
+			judgeCell = "error:" + row.JudgeError
+		}
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %d | `%s` | `%s` | `%s` | `%s` | `%s` | %s | %d | `%s` | %s | %s |\n",
 			escapeMarkdownCell(firstNonEmpty(row.VariantID, "current")),
 			escapeMarkdownCell(firstNonEmpty(row.CaseID, "—")),
 			escapeMarkdownCell(row.ChannelID),
@@ -896,6 +1195,7 @@ func renderMarkdownReport(report benchmarkReport) string {
 			escapeMarkdownCell(firstNonEmpty(row.FinalDecision, "unknown")),
 			escapeMarkdownCell(reasons),
 			row.WorkerRequests,
+			escapeMarkdownCell(judgeCell),
 			escapeMarkdownCell(smells),
 			escapeMarkdownCell(errText),
 		)

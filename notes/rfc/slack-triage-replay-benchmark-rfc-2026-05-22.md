@@ -554,8 +554,8 @@ Reviewer rule:
 - [x] Add variant config input (`--config-set`) and per-variant report
       aggregation scaffold.
 - [ ] Wire variant knobs into prompt/gate/worker behavior.
-- [ ] Run all variants against the same case set.
-- [ ] Add judge request/response schema and report column.
+- [x] Run all variants against the same case set.
+- [x] Add judge request/response schema and report column.
 - [ ] Calibrate judge against Peng approval/reject samples.
 - [ ] Acceptance: one benchmark run can rank variants and surface
       judge/human/fixture disagreement samples.
