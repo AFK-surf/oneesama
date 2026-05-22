@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
 )
@@ -13,6 +14,9 @@ const (
 	realtimeDemoExecutionStatusStarted   = "started"
 	realtimeDemoExecutionStatusCompleted = "completed"
 	realtimeDemoExecutionStatusFailed    = "failed"
+
+	demoExecutionCompletionTimeout      = 5 * time.Minute
+	demoExecutionCompletionPollInterval = 200 * time.Millisecond
 )
 
 var (
@@ -112,6 +116,8 @@ func (s *Service) StartRealtimeDemoExecution(ctx context.Context, input Realtime
 		})
 		return RealtimeDemoExecutionResult{OK: false, Status: realtimeDemoExecutionStatusFailed, Demo: &demo, Error: err.Error()}, err
 	}
+	s.recordDemoExecutionObservation(demo.SessionID, demoObservationKindStep, "demo execution worker started: "+job.ID, DemoSessionResultObserved, "demo_execution_worker_started", "")
+	go s.completeRealtimeDemoExecution(input, demo, job)
 
 	result := RealtimeDemoExecutionResult{
 		OK:                 true,
@@ -124,30 +130,124 @@ func (s *Service) StartRealtimeDemoExecution(ctx context.Context, input Realtime
 		ShouldSpeak:        true,
 		ObservationContext: demo.ObservationContext,
 	}
-	if report := s.ReportFinishedWorkerJob(ctx, job); report != nil {
-		result.Report = report
-		if job.Status == agentrunner.StatusCompleted {
-			result.Status = realtimeDemoExecutionStatusCompleted
-			if completionURL := demoExecutionDemoURLFromWorkerResult(job.Result); completionURL != "" {
-				completion, _ := s.ControlRealtimeDemoSurface(ctx, RealtimeDemoSurfaceControlRequest{
-					MeetingSessionID: strings.TrimSpace(input.MeetingSessionID),
-					DemoSessionID:    demo.SessionID,
-					Action:           DemoActionOpenURL,
-					URL:              completionURL,
-					Instruction:      "open completed demo result for presentation",
-				})
-				result.CompletionDemo = &completion
-				result.ObservationContext = firstNonEmpty(completion.ObservationContext, result.ObservationContext)
-			}
-		}
-		if job.Status == agentrunner.StatusFailed || job.Status == agentrunner.StatusTimeout {
-			result.OK = false
-			result.Status = realtimeDemoExecutionStatusFailed
-			result.Error = firstNonEmpty(strings.TrimSpace(job.Error), string(job.Status))
-			result.FeedbackText = "执行卡住了，我需要你看一下 blocker。"
-		}
-	}
 	return result, nil
+}
+
+func (s *Service) completeRealtimeDemoExecution(input RealtimeDemoExecutionStartRequest, demo RealtimeDemoBridgeResult, startedJob agentrunner.Job) {
+	ctx, cancel := context.WithTimeout(context.Background(), demoExecutionCompletionTimeout)
+	defer cancel()
+	job := startedJob
+	for {
+		if isTerminalWorkerStatus(string(job.Status)) {
+			s.finishRealtimeDemoExecution(ctx, input, demo, job)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.recordDemoExecutionObservation(
+				demo.SessionID,
+				demoObservationKindFailed,
+				"demo execution worker status timed out: "+startedJob.ID,
+				DemoSessionResultFailed,
+				"demo_execution_worker_status_timeout",
+				"",
+			)
+			return
+		case <-time.After(demoExecutionCompletionPollInterval):
+		}
+		latest, found, err := s.runner.GetJob(ctx, startedJob.ID)
+		if err != nil {
+			s.recordDemoExecutionObservation(
+				demo.SessionID,
+				demoObservationKindFailed,
+				"demo execution worker status failed: "+err.Error(),
+				DemoSessionResultFailed,
+				"demo_execution_worker_status_failed",
+				"",
+			)
+			return
+		}
+		if !found {
+			s.recordDemoExecutionObservation(
+				demo.SessionID,
+				demoObservationKindFailed,
+				"demo execution worker disappeared: "+startedJob.ID,
+				DemoSessionResultFailed,
+				"demo_execution_worker_missing",
+				"",
+			)
+			return
+		}
+		job = latest
+	}
+}
+
+func (s *Service) finishRealtimeDemoExecution(ctx context.Context, input RealtimeDemoExecutionStartRequest, demo RealtimeDemoBridgeResult, job agentrunner.Job) {
+	_ = s.ReportFinishedWorkerJob(ctx, job)
+	switch job.Status {
+	case agentrunner.StatusCompleted:
+		completionURL := demoExecutionDemoURLFromWorkerResult(job.Result)
+		if completionURL != "" {
+			if completion, err := s.ControlRealtimeDemoSurface(ctx, RealtimeDemoSurfaceControlRequest{
+				MeetingSessionID: strings.TrimSpace(input.MeetingSessionID),
+				DemoSessionID:    demo.SessionID,
+				Action:           DemoActionOpenURL,
+				URL:              completionURL,
+				Instruction:      "open completed demo result for presentation",
+			}); err == nil && completion.Observation != nil {
+				return
+			}
+			s.recordDemoExecutionObservation(
+				demo.SessionID,
+				demoObservationKindFailed,
+				"demo execution completion URL could not be opened: "+completionURL,
+				DemoSessionResultFailed,
+				"demo_execution_completion_open_failed",
+				completionURL,
+			)
+			return
+		}
+		s.recordDemoExecutionObservation(
+			demo.SessionID,
+			demoObservationKindStep,
+			"demo execution worker completed without demo_url: "+job.ID,
+			DemoSessionResultObserved,
+			"demo_execution_worker_completed",
+			"",
+		)
+	case agentrunner.StatusFailed, agentrunner.StatusTimeout:
+		s.recordDemoExecutionObservation(
+			demo.SessionID,
+			demoObservationKindFailed,
+			"demo execution worker failed: "+firstNonEmpty(strings.TrimSpace(job.Error), string(job.Status)),
+			DemoSessionResultFailed,
+			"demo_execution_worker_failed",
+			"",
+		)
+	}
+}
+
+func (s *Service) recordDemoExecutionObservation(sessionID string, kind string, summary string, result DemoSessionResult, reason string, url string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || s.demoBridge == nil {
+		return
+	}
+	sequence := len(s.demoBridge.observationBus().Recent(sessionID, defaultDemoObservationContextLimit)) + 1
+	obs := DemoObservation{
+		SessionID:  sessionID,
+		Sequence:   sequence,
+		Source:     "demo_execution",
+		Kind:       kind,
+		Summary:    strings.TrimSpace(summary),
+		Confidence: 1,
+		CreatedAt:  time.Now().UTC(),
+	}
+	s.demoBridge.publishObservation(obs)
+	action := DemoActionCapture
+	if strings.TrimSpace(url) != "" {
+		action = DemoActionOpenURL
+	}
+	s.demoBridge.recordAction(sessionID, action, url, result, reason, nil)
 }
 
 func buildDemoExecutionWorkerTask(input RealtimeDemoExecutionStartRequest, demoSessionID string) string {

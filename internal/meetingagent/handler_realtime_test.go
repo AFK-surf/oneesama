@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/httpserver"
@@ -633,7 +634,7 @@ func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
 			ID:       "job_snake_demo",
 			Provider: "codex",
 			Status:   agentrunner.StatusCompleted,
-			Result:   `{"status":"completed","summary":"Snake page ready","demo_url":"https://example.test/snake","files_changed":["snake/index.html"],"needs_approval":["close issue after human approval"]}`,
+			Result:   `{"status":"completed","summary":"Snake page ready","demo_url":"https://example.test/snake/final","files_changed":["snake/index.html"],"needs_approval":["close issue after human approval"]}`,
 		},
 	}
 	router := newRealtimeTestRouterWithConfig(t, Config{
@@ -686,15 +687,18 @@ func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
 	}
 	var startBody map[string]any
 	decodeRealtimeBody(t, start.Body.String(), &startBody)
-	if startBody["ok"] != true || stringFromAny(startBody["status"]) != realtimeDemoExecutionStatusCompleted {
-		t.Fatalf("start body = %#v, want completed demo execution", startBody)
+	if startBody["ok"] != true || stringFromAny(startBody["status"]) != realtimeDemoExecutionStatusStarted {
+		t.Fatalf("start body = %#v, want started demo execution", startBody)
 	}
 	approval := startBody["approval"].(map[string]any)
 	if approval["required"] != true || approval["operation"] != "close_issue" || approval["reason"] != "external_write_approval_required" {
 		t.Fatalf("approval = %#v, want external close approval gate", approval)
 	}
-	if startBody["completion_demo"] == nil || !strings.Contains(stringFromAny(startBody["observation_context"]), "fake kwwk open_url observation") {
-		t.Fatalf("start body = %#v, want completion demo observation", startBody)
+	if startBody["completion_demo"] != nil || startBody["report"] != nil {
+		t.Fatalf("start body = %#v, want async worker completion outside immediate tool result", startBody)
+	}
+	if !strings.Contains(stringFromAny(startBody["observation_context"]), "fake kwwk open_url observation") {
+		t.Fatalf("start body = %#v, want initial demo observation", startBody)
 	}
 	if runner.startCount != 1 || !runner.startInput.AllowCodeChanges || runner.startInput.Mode != "code" {
 		t.Fatalf("runner input = %#v count=%d, want code-capable worker", runner.startInput, runner.startCount)
@@ -713,6 +717,7 @@ func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
 		!strings.Contains(runner.startInput.Task, "做一个贪吃蛇") {
 		t.Fatalf("worker task = %q, missing execution contract", runner.startInput.Task)
 	}
+	waitForDemoTrailEntry(t, router, "snake_demo", "https://example.test/snake/final", "demo_execution_worker_started")
 }
 
 func TestRealtimeDemoSurfaceRuntimeFlagEnablesCodexAdapterSmoke(t *testing.T) {
@@ -1009,6 +1014,31 @@ func decodeRealtimeReader(t *testing.T, reader io.Reader, target any) {
 	if err := json.NewDecoder(reader).Decode(target); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
+}
+
+func waitForDemoTrailEntry(t *testing.T, router http.Handler, sessionID string, wants ...string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, realtimeRequest(http.MethodGet, "/demo-surface/sessions/"+sessionID+"/trail", ""))
+		last = response.Body.String()
+		if response.Code == http.StatusOK {
+			ok := true
+			for _, want := range wants {
+				if !strings.Contains(last, want) {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("demo trail for %s never contained %v; last = %s", sessionID, wants, last)
 }
 
 func toolNamesInclude(tools []any, names ...string) bool {
