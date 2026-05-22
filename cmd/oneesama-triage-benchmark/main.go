@@ -29,7 +29,7 @@ type benchmarkReport struct {
 	Since           string                                    `json:"since"`
 	Channels        []string                                  `json:"channels"`
 	MaxThreads      int                                       `json:"maxThreads,omitempty"`
-	Truncated       bool                                      `json:"truncated,omitempty"`
+	Truncated       bool                                      `json:"truncated"`
 	Stats           []slackagent.SlackBackfillReplayLiveStats `json:"stats,omitempty"`
 	ThreadsSeen     int                                       `json:"threadsSeen"`
 	ThreadsReplayed int                                       `json:"threadsReplayed"`
