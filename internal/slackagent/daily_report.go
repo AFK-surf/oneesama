@@ -907,6 +907,9 @@ func slackDailyDiaryLowSignal(value string) bool {
 	if slackDailyDiaryLooksLikeRawPayload(text) {
 		return true
 	}
+	if slackDailyDiaryLooksLikeOpaqueIdentifier(text) {
+		return true
+	}
 	lowSignalMarkers := []string{
 		"routine automated daily",
 		"automated daily diary",
@@ -930,6 +933,7 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"approval gate live",
 		"approval card live",
 		"simplified approval card",
+		"pending_dm_card_posted",
 		"is active",
 		"repeat '/deploy' commands not directed",
 		"not directed at oneesama",
@@ -938,6 +942,7 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"directly answered by",
 		"thread is handled",
 		"handled and no further action",
+		"mentioned_other_user_without_bot",
 		"is already actively handling",
 		"fully in-progress",
 		"suppressed for ambient",
@@ -973,6 +978,14 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"let me look",
 		"tool calls:",
 		"slack_api",
+		"buffered ",
+		"slack message(s)",
+		"latest from",
+		"pass 1: classification",
+		"| ref | summary",
+		"**skip**",
+		"classification |",
+		"successfully wrote to memory",
 		"thread_ts",
 		"tool_capab",
 		"reaction acknowledges",
@@ -981,6 +994,8 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"patch if have problem",
 		"测测吧",
 		"suggest_acti",
+		"[reactions:",
+		"闭源版每次发布",
 		"未明确请求",
 		"没有明确",
 		"没有问题",
@@ -1033,6 +1048,22 @@ func slackDailyDiaryLooksLikeRawPayload(text string) bool {
 		}
 	}
 	return false
+}
+
+func slackDailyDiaryLooksLikeOpaqueIdentifier(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	digitOrDot := 0
+	for _, r := range trimmed {
+		if (r >= '0' && r <= '9') || r == '.' {
+			digitOrDot++
+			continue
+		}
+		return false
+	}
+	return digitOrDot >= 8
 }
 
 func slackDailyDiaryDigestSnippet(digest string) string {

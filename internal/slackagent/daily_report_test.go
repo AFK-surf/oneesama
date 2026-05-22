@@ -208,6 +208,13 @@ func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
 		"codex-3720 is already actively handling this cueboard bug report and is now working on the fix.",
 		"@codex-3720 review & merge cueboard#2022, patch if have problem",
 		"<https://x.com/studyouwei/status/2057767798752112906?s=20>",
+		"pending_dm_card_posted",
+		"1779446254.721159",
+		"Buffered 2 Slack message(s); latest from <@U09KY0GE28K>",
+		"## Pass 1: Classification | Ref | Summary | Classification | Reasoning |",
+		"Successfully wrote to memory/2026-05-22.md (mode: append)",
+		"mentioned_other_user_without_bot",
+		"这感觉怕是有点难哦\" [reactions: :吃瓜: ×1]",
 	} {
 		if !slackDailyDiaryLowSignal(text) {
 			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)
