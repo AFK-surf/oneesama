@@ -212,12 +212,15 @@ func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
 		"1779446254.721159",
 		"Buffered 2 Slack message(s); latest from <@U09KY0GE28K>",
 		"## Pass 1: Classification | Ref | Summary | Classification | Reasoning |",
+		"Pass 1 分类： - **m1** (`willow#441`, `U09L0U0SJ3F` → \"fixed\"): codex-3720 已完成 review→blocker→fix→merge 全流程，线程已收束。SKIP。",
 		"Successfully wrote to memory/2026-05-22.md (mode: append)",
 		"mentioned_other_user_without_bot",
 		"这感觉怕是有点难哦\" [reactions: :吃瓜: ×1]",
 		"AgentRunner triage completed",
 		"**** just codex-3720 logging its own automated cleanup and download progress. No human ask, no coordination needed, nothing for me to add",
 		"SKIP — internal technical debugging thread about screen lock/sleep behavior. The team is working through the issue themselves.",
+		"\" [file_id:F0B5KPVCT60, name: RE: Inquiry, type: text/html]",
+		"Shared link returns HTTP 400, no content. Best to stay silent",
 	} {
 		if !slackDailyDiaryLowSignal(text) {
 			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)
