@@ -142,6 +142,65 @@ func TestRunLiveBenchmarkCountsDryRunErrors(t *testing.T) {
 	}
 }
 
+func TestRunLiveBenchmarkHonorsTotalThreadCap(t *testing.T) {
+	slackMux := http.NewServeMux()
+	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		channel := r.URL.Query().Get("channel")
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				{"ts": "1779450000.000100", "channel": channel, "user": "U_PENG", "text": "这个要不要处理？"},
+			},
+		})
+	})
+	slackServer := httptest.NewServer(slackMux)
+	defer slackServer.Close()
+	previousSlackURL := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = slackServer.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previousSlackURL })
+
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:        true,
+				FinalDecision: "would_stay_silent",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionStaySilent,
+					Success:  true,
+				},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--token", "xoxb-test",
+		"--channel", "C1,C2",
+		"--max-threads", "1",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var report benchmarkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, stdout.String())
+	}
+	if report.MaxThreads != 1 || !report.Truncated {
+		t.Fatalf("cap fields = max:%d truncated:%v, want 1/true", report.MaxThreads, report.Truncated)
+	}
+	if report.ThreadsReplayed != 1 || len(report.Rows) != 1 {
+		t.Fatalf("threads/rows = %d/%d, want 1/1", report.ThreadsReplayed, len(report.Rows))
+	}
+	if len(report.Stats) != 1 || report.Stats[0].ChannelID != "C1" {
+		t.Fatalf("stats = %#v, want only first channel scanned before cap", report.Stats)
+	}
+}
+
 func TestRunLiveBenchmarkCanRenderMarkdownTable(t *testing.T) {
 	slackMux := http.NewServeMux()
 	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {

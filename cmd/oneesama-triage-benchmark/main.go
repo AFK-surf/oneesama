@@ -28,6 +28,8 @@ type benchmarkReport struct {
 	SlackAgentURL   string                                    `json:"slackAgentUrl"`
 	Since           string                                    `json:"since"`
 	Channels        []string                                  `json:"channels"`
+	MaxThreads      int                                       `json:"maxThreads,omitempty"`
+	Truncated       bool                                      `json:"truncated,omitempty"`
 	Stats           []slackagent.SlackBackfillReplayLiveStats `json:"stats,omitempty"`
 	ThreadsSeen     int                                       `json:"threadsSeen"`
 	ThreadsReplayed int                                       `json:"threadsReplayed"`
@@ -79,18 +81,19 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("oneesama-triage-benchmark", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		slackURL   string
-		liveMode   bool
-		channels   string
-		token      string
-		botIDs     string
-		since      time.Duration
-		maxPerChan int
-		maxThreads int
-		outputPath string
-		format     string
-		variantID  string
-		timeout    time.Duration
+		slackURL          string
+		liveMode          bool
+		channels          string
+		token             string
+		botIDs            string
+		since             time.Duration
+		maxPerChan        int
+		maxPerChanThreads int
+		maxTotalThreads   int
+		outputPath        string
+		format            string
+		variantID         string
+		timeout           time.Duration
 	)
 	fs.StringVar(&slackURL, "slack-url", firstNonEmpty(os.Getenv("ONEESAMA_SLACK_AGENT_URL"), os.Getenv("ONEESAMA_MONITOR_SLACK_URL"), "http://127.0.0.1:8780"), "Local oneesama slack-agent URL.")
 	fs.BoolVar(&liveMode, "live", true, "Live Slack scan mode. This is currently the only supported input mode.")
@@ -99,7 +102,8 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs.StringVar(&botIDs, "bot-user-ids", "", "Comma-separated bot user ids used only for legacy stats.")
 	fs.DurationVar(&since, "since", 24*time.Hour, "Live Slack scan window.")
 	fs.IntVar(&maxPerChan, "max-messages-per-channel", 200, "Max conversations.history rows per channel.")
-	fs.IntVar(&maxThreads, "max-threads-per-channel", 50, "Max root threads to dry-run per channel.")
+	fs.IntVar(&maxPerChanThreads, "max-threads-per-channel", 3, "Max root threads to collect per channel.")
+	fs.IntVar(&maxTotalThreads, "max-threads", 24, "Max total root threads to dry-run across all channels. Use 0 to disable the global cap.")
 	fs.StringVar(&outputPath, "output", "", "Optional JSON report path. Use '-' or omit for stdout JSON.")
 	fs.StringVar(&format, "format", "json", "Output format: json or markdown.")
 	fs.StringVar(&variantID, "variant-id", "current", "Variant/config id recorded in the report.")
@@ -119,9 +123,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "oneesama-triage-benchmark: only --live mode is currently supported")
 		return 2
 	}
-	token = firstNonEmpty(strings.TrimSpace(token), strings.TrimSpace(os.Getenv("ONEESAMA_SLACK_BOT_TOKEN")))
+	token = firstNonEmpty(
+		strings.TrimSpace(token),
+		strings.TrimSpace(os.Getenv("ONEESAMA_SLACK_BOT_TOKEN")),
+		strings.TrimSpace(os.Getenv("SLACK_BOT_TOKEN")),
+		strings.TrimSpace(os.Getenv("MAB_SLACK_BOT_TOKEN")),
+	)
 	if token == "" {
-		fmt.Fprintln(stderr, "oneesama-triage-benchmark: --token or ONEESAMA_SLACK_BOT_TOKEN is required")
+		fmt.Fprintln(stderr, "oneesama-triage-benchmark: --token or ONEESAMA_SLACK_BOT_TOKEN / SLACK_BOT_TOKEN / MAB_SLACK_BOT_TOKEN is required")
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -138,6 +147,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		SlackAgentURL: strings.TrimRight(strings.TrimSpace(slackURL), "/"),
 		Since:         since.String(),
 		Channels:      channelIDs,
+		MaxThreads:    maxTotalThreads,
 		Summary: benchmarkSummary{
 			ByFinalDecision:      map[string]int{},
 			ByPersonaDecision:    map[string]int{},
@@ -148,13 +158,24 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	client := &http.Client{Timeout: 90 * time.Second}
 	botUserIDs := splitCSV(botIDs)
 	for _, channelID := range channelIDs {
+		if maxTotalThreads > 0 && report.ThreadsReplayed >= maxTotalThreads {
+			report.Truncated = true
+			break
+		}
+		channelThreadLimit := maxPerChanThreads
+		if maxTotalThreads > 0 {
+			remaining := maxTotalThreads - report.ThreadsReplayed
+			if remaining < channelThreadLimit || channelThreadLimit <= 0 {
+				channelThreadLimit = remaining
+			}
+		}
 		threads, stats, scanErr := slackagent.SlackTriageReplayLiveThreads(ctx, slackagent.SlackBackfillReplayLiveOptions{
 			BotToken:              token,
 			BotUserIDs:            botUserIDs,
 			ChannelID:             channelID,
 			Since:                 since,
 			MaxMessagesPerChannel: maxPerChan,
-			MaxThreads:            maxThreads,
+			MaxThreads:            channelThreadLimit,
 		})
 		if scanErr != nil {
 			stats.ChannelID = channelID
@@ -162,11 +183,19 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 		report.Stats = append(report.Stats, stats)
 		report.ThreadsSeen += len(threads)
+		fmt.Fprintf(stderr, "oneesama-triage-benchmark: channel %s scan found %d thread(s)\n", channelID, len(threads))
 		for _, thread := range threads {
+			if maxTotalThreads > 0 && report.ThreadsReplayed >= maxTotalThreads {
+				report.Truncated = true
+				break
+			}
 			row := dryRunThread(ctx, client, report.SlackAgentURL, report.VariantID, thread)
 			report.Rows = append(report.Rows, row)
 			report.ThreadsReplayed++
 			recordRow(&report.Summary, row)
+		}
+		if report.Truncated {
+			break
 		}
 	}
 
@@ -304,6 +333,10 @@ func renderMarkdownReport(report benchmarkReport) string {
 	fmt.Fprintf(&b, "| Variant | `%s` |\n", escapeMarkdownCell(report.VariantID))
 	fmt.Fprintf(&b, "| Window | `%s` |\n", escapeMarkdownCell(report.Since))
 	fmt.Fprintf(&b, "| Channels | `%s` |\n", escapeMarkdownCell(strings.Join(report.Channels, ",")))
+	if report.MaxThreads > 0 {
+		fmt.Fprintf(&b, "| Max threads | %d |\n", report.MaxThreads)
+	}
+	fmt.Fprintf(&b, "| Truncated | %v |\n", report.Truncated)
 	fmt.Fprintf(&b, "| Threads seen | %d |\n", report.ThreadsSeen)
 	fmt.Fprintf(&b, "| Threads replayed | %d |\n", report.ThreadsReplayed)
 	fmt.Fprintf(&b, "| Errors | %d |\n\n", report.Summary.Errors)

@@ -174,13 +174,15 @@ A benchmark run must:
 Default operator mode:
 
 ```bash
-cmd/oneesama-triage-benchmark --live --since 24h --channel auto
+cmd/oneesama-triage-benchmark --live --since 24h --channel auto --max-threads 24
 ```
 
 Input source:
 
 - Slack conversations history / replies for configured channels;
 - existing fetch limits and bot-user filters;
+- a bounded dry-run cap by default (`--max-threads`, set to `0` only for an
+  intentionally long full sweep);
 - optional channel allow-list for a focused incident.
 
 Use:
