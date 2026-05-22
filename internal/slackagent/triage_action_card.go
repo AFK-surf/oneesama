@@ -8,6 +8,15 @@ import (
 )
 
 func buildSlackTriageActionText(action SlackTriageDecisionAction, pending SlackPendingAction) string {
+	if firstNonEmpty(action.Type, pending.ActionType) == slackActionTypeThreadReply {
+		return strings.Join([]string{
+			"待确认回复",
+			"",
+			action.Message,
+			"",
+			fmt.Sprintf("Pending action: %d", pending.ID),
+		}, "\n")
+	}
 	confidence := ""
 	if !math.IsNaN(action.Confidence) {
 		confidence = fmt.Sprintf(" confidence=%d%%", int(math.Round(action.Confidence*100)))
@@ -30,6 +39,40 @@ func buildSlackTriageActionText(action SlackTriageDecisionAction, pending SlackP
 func buildSlackTriageActionBlocks(action SlackTriageDecisionAction, pending SlackPendingAction) []map[string]any {
 	actionType := firstNonEmpty(action.Type, pending.ActionType, "follow_up")
 	threadTS := firstNonEmpty(action.ThreadTS, pending.ThreadTS)
+	if actionType == slackActionTypeThreadReply {
+		sourceParts := []string{fmt.Sprintf("Pending: %d", pending.ID)}
+		channelID := firstNonEmpty(action.ChannelID, pending.ChannelID)
+		if channelID != "" {
+			sourceParts = append(sourceParts, "Channel: `"+channelID+"`")
+		}
+		if threadTS != "" {
+			sourceParts = append(sourceParts, "Thread: `"+threadTS+"`")
+		}
+		return []map[string]any{
+			{
+				"type": "section",
+				"text": map[string]any{
+					"type": "mrkdwn",
+					"text": "*待确认回复*\n" + action.Message,
+				},
+			},
+			{
+				"type": "context",
+				"elements": []map[string]any{{
+					"type": "mrkdwn",
+					"text": strings.Join(sourceParts, " | "),
+				}},
+			},
+			{
+				"type":     "actions",
+				"block_id": fmt.Sprintf("mab_pending_action:%d", pending.ID),
+				"elements": []map[string]any{
+					triageButton("通过并发送", "primary", "mab_pending_action_confirm", pending.ID, "confirmed", nil),
+					triageButton("不通过", "danger", "mab_pending_action_dismiss", pending.ID, "dismissed", map[string]any{"rejectReason": "manual_reject"}),
+				},
+			},
+		}
+	}
 	contextParts := []string{
 		"Action: `" + actionType + "`",
 		fmt.Sprintf("Confidence: %d%%", int(math.Round(action.Confidence*100))),
@@ -63,29 +106,21 @@ func buildSlackTriageActionBlocks(action SlackTriageDecisionAction, pending Slac
 			}},
 		})
 	}
-	if actionType == slackActionTypeThreadReply {
-		blocks = append(blocks, map[string]any{
-			"type": "section",
-			"text": map[string]any{
-				"type": "mrkdwn",
-				"text": "*Quality gate before Confirm:*\n• Has a verified fact or cited source, not just thread synthesis\n• Adds information a human cannot get by re-reading the thread\n• No vague `可能/推断/也许/要不要` filler",
-			},
-		})
+	actionButtons := []map[string]any{
+		triageButton("Confirm", "primary", "mab_pending_action_confirm", pending.ID, "confirmed", nil),
+		triageButton("Dismiss", "danger", "mab_pending_action_dismiss", pending.ID, "dismissed", nil),
+		triageButton("Snooze", "", "mab_pending_action_snooze", pending.ID, "snoozed", map[string]any{"snoozeMinutes": 60}),
+		triageButton("Open thread", "", "mab_pending_action_open_thread", pending.ID, "opened", map[string]any{"channelId": firstNonEmpty(action.ChannelID, pending.ChannelID), "threadTs": threadTS}),
+		{
+			"type":        "users_select",
+			"action_id":   "mab_pending_action_assign",
+			"placeholder": map[string]any{"type": "plain_text", "text": "Assign"},
+		},
 	}
 	blocks = append(blocks, map[string]any{
 		"type":     "actions",
 		"block_id": fmt.Sprintf("mab_pending_action:%d", pending.ID),
-		"elements": []map[string]any{
-			triageButton("Confirm", "primary", "mab_pending_action_confirm", pending.ID, "confirmed", nil),
-			triageButton("Dismiss", "danger", "mab_pending_action_dismiss", pending.ID, "dismissed", nil),
-			triageButton("Snooze", "", "mab_pending_action_snooze", pending.ID, "snoozed", map[string]any{"snoozeMinutes": 60}),
-			triageButton("Open thread", "", "mab_pending_action_open_thread", pending.ID, "opened", map[string]any{"channelId": firstNonEmpty(action.ChannelID, pending.ChannelID), "threadTs": threadTS}),
-			{
-				"type":        "users_select",
-				"action_id":   "mab_pending_action_assign",
-				"placeholder": map[string]any{"type": "plain_text", "text": "Assign"},
-			},
-		},
+		"elements": actionButtons,
 	})
 	return blocks
 }

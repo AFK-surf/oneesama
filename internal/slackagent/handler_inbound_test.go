@@ -863,7 +863,7 @@ Caveat: It won't fix system architecture for ya, so you still need BRAIN as mast
 	if call.Channel != "D_PENG" || call.ThreadTS != "" || !strings.Contains(call.Text, "这条 X") {
 		t.Fatalf("post call = %#v, want approval card in pilot DM", call)
 	}
-	if len(call.Blocks) == 0 || !strings.Contains(call.Text, "Triage suggestion") || !strings.Contains(call.DedupKey, "pilot_dm:") {
+	if len(call.Blocks) == 0 || !strings.Contains(call.Text, "待确认回复") || !strings.Contains(call.DedupKey, "pilot_dm:") {
 		t.Fatalf("post call = %#v, want pending action card", call)
 	}
 	status, err := service.TriageStatus(context.Background(), 10)

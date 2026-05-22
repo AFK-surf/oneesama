@@ -113,3 +113,31 @@ func TestPendingActionConfirmedPostThreadReplyPublishesOriginalThread(t *testing
 		t.Fatalf("pending action = %#v, want posted result", updated)
 	}
 }
+
+func TestPostThreadReplyApprovalCardOnlyShowsApproveReject(t *testing.T) {
+	blocks := buildSlackTriageActionBlocks(SlackTriageDecisionAction{
+		Type:       slackActionTypeThreadReply,
+		Title:      "Review triage reply",
+		Message:    "approval gate live smoke reply",
+		Confidence: 0.98,
+		ChannelID:  "C123",
+		ThreadTS:   "123.456",
+	}, SlackPendingAction{
+		ID:         42,
+		ChannelID:  "C123",
+		ThreadTS:   "123.456",
+		ActionType: slackActionTypeThreadReply,
+	})
+	encoded, _ := json.Marshal(blocks)
+	body := string(encoded)
+	for _, want := range []string{"待确认回复", "approval gate live smoke reply", "通过并发送", "不通过", "mab_pending_action_confirm", "mab_pending_action_dismiss"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("blocks = %s, missing %q", body, want)
+		}
+	}
+	for _, unwanted := range []string{"mab_pending_action_snooze", "mab_pending_action_open_thread", "mab_pending_action_assign", "Snooze", "Open thread", "Assign", "Quality gate", "Confidence", "Reason:"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("blocks = %s, unexpectedly contains %q", body, unwanted)
+		}
+	}
+}
