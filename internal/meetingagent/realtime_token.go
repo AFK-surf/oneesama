@@ -178,7 +178,7 @@ func compactCurrentUserAliases(values []string, identityValues ...string) []stri
 	seen := map[string]struct{}{}
 	add := func(value string) {
 		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
+		if trimmed == "" || isRuntimeOnlyCurrentUserAlias(trimmed) {
 			return
 		}
 		key := strings.ToLower(trimmed)
@@ -195,6 +195,15 @@ func compactCurrentUserAliases(values []string, identityValues ...string) []stri
 		add(value)
 	}
 	return out
+}
+
+func isRuntimeOnlyCurrentUserAlias(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "老大":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) MintRealtimeClientSecret(ctx context.Context, options RealtimeSessionOptions) (map[string]any, int, error) {

@@ -315,8 +315,8 @@ func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
 		t.Fatalf("identity body = %#v, want configured current user", identityBody)
 	}
 	aliases := currentUser["aliases"].([]any)
-	if len(aliases) != 5 || aliases[2] != "彭潇" {
-		t.Fatalf("identity aliases = %#v, want configured aliases plus names", aliases)
+	if len(aliases) != 4 || aliases[1] != "彭潇" || containsAnyString(aliases, "老大") {
+		t.Fatalf("identity aliases = %#v, want stable configured aliases without runtime-only nickname", aliases)
 	}
 
 	resolveCurrent := httptest.NewRecorder()
@@ -355,6 +355,43 @@ func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
 	decodeRealtimeBody(t, now.Body.String(), &nowBody)
 	if nowBody["timezone"] != "Asia/Shanghai" || nowBody["now"] == "" {
 		t.Fatalf("now body = %#v, want Asia/Shanghai timestamp", nowBody)
+	}
+}
+
+func TestRealtimeCurrentUserDoesNotPreinjectRuntimeOnlyAlias(t *testing.T) {
+	t.Parallel()
+
+	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{
+		CurrentUserName:        "老大",
+		CurrentUserEnglishName: "Peng Xiao",
+		CurrentUserAliases:     []string{"老大", "彭潇"},
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, realtimeRequest(http.MethodGet, "/realtime/config", ""))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	decodeRealtimeBody(t, response.Body.String(), &body)
+	currentUser := body["currentUser"].(map[string]any)
+	aliases := currentUser["aliases"].([]any)
+	if containsAnyString(aliases, "老大") {
+		t.Fatalf("aliases = %#v, must not preinject runtime-only nickname", aliases)
+	}
+	if !containsAnyString(aliases, "Peng Xiao") || !containsAnyString(aliases, "彭潇") {
+		t.Fatalf("aliases = %#v, want stable configured names preserved", aliases)
+	}
+
+	resolveCurrent := httptest.NewRecorder()
+	router.ServeHTTP(resolveCurrent, realtimeRequest(http.MethodPost, "/tools/resolve_speaker_identity", `{"display_name":"老大","source":"manual"}`))
+	if resolveCurrent.Code != http.StatusOK {
+		t.Fatalf("resolve current status = %d: %s", resolveCurrent.Code, resolveCurrent.Body.String())
+	}
+	var resolveCurrentBody map[string]any
+	decodeRealtimeBody(t, resolveCurrent.Body.String(), &resolveCurrentBody)
+	currentIdentity := resolveCurrentBody["identity"].(map[string]any)
+	if currentIdentity["is_current_user"] == true {
+		t.Fatalf("identity = %#v, runtime-only nickname must not resolve from static config alone", currentIdentity)
 	}
 }
 
@@ -857,4 +894,13 @@ func toolNamesInclude(tools []any, names ...string) bool {
 		}
 	}
 	return true
+}
+
+func containsAnyString(values []any, want string) bool {
+	for _, value := range values {
+		if text, ok := value.(string); ok && text == want {
+			return true
+		}
+	}
+	return false
 }
