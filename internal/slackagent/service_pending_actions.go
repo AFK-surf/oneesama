@@ -96,6 +96,7 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 	}
 	s.syncPendingActionInteractionFollowup(ctx, *updated, interaction)
 	s.recordPendingActionFeedback(ctx, *updated, interaction)
+	s.recordLearningSignalFromPendingAction(ctx, *updated)
 	if interaction.Status == "confirmed" && updated.ActionType != slackActionTypeThreadReply {
 		s.recordConfirmedActionFollowup(ctx, *updated, interaction)
 	}

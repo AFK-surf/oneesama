@@ -96,6 +96,7 @@ type Service struct {
 	followups                *slackHeartbeatStore
 	improvements             *slackImprovementStore
 	feedback                 *slackFeedbackStore
+	learning                 *slackLearningSignalStore
 	agentRunner              appconfig.AgentRunnerConfig
 	runner                   agentrunner.Runner
 	runnerErr                error
@@ -308,6 +309,7 @@ func NewService(cfg Config) *Service {
 		followups:               newSlackHeartbeatStore(cfg.Persistence, logger),
 		improvements:            newSlackImprovementStore(cfg.Persistence, logger),
 		feedback:                newSlackFeedbackStore(cfg.Persistence, logger),
+		learning:                newSlackLearningSignalStore(cfg.Persistence, logger),
 		agentRunner:             cfg.AgentRunner,
 		runner:                  runner,
 		runnerErr:               runnerErr,
