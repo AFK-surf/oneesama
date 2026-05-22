@@ -17,7 +17,18 @@
       }
     ]
   },
+  "candidate": {
+    "message": "The persona already classified this thread as no visible output.",
+    "evidenceAnchors": [
+      {
+        "kind": "fetched_link",
+        "sourceRef": "https://example.com/source",
+        "quote": "source excerpt"
+      }
+    ]
+  },
   "expected": {
-    "visibleReplyAllowed": false
+    "visibleReplyAllowed": false,
+    "visibleReplyReason": "internal_meta"
   }
 }

@@ -17,7 +17,18 @@
       }
     ]
   },
+  "candidate": {
+    "message": "{\"visible_text\":\"我查到了这个链接的结论。\",\"evidence_anchors\":[]}",
+    "evidenceAnchors": [
+      {
+        "kind": "explicit_user_command",
+        "sourceRef": "slack:C_BENCH/1779450003.000003",
+        "quote": "用户要求 worker 渲染 visible_text"
+      }
+    ]
+  },
   "expected": {
-    "visibleReplyAllowed": false
+    "visibleReplyAllowed": false,
+    "visibleReplyReason": "internal_meta"
   }
 }

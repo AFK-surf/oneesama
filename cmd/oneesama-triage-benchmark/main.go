@@ -72,18 +72,20 @@ type benchmarkRow struct {
 }
 
 type benchmarkFixture struct {
-	CaseID      string                             `json:"caseId"`
-	Description string                             `json:"description,omitempty"`
-	Label       string                             `json:"label"`
-	Tags        []string                           `json:"tags,omitempty"`
-	SourceRefs  []string                           `json:"sourceRefs,omitempty"`
-	Thread      slackagent.SlackTriageReplayThread `json:"thread"`
-	Expected    benchmarkFixtureExpected           `json:"expected,omitempty"`
+	CaseID      string                                `json:"caseId"`
+	Description string                                `json:"description,omitempty"`
+	Label       string                                `json:"label"`
+	Tags        []string                              `json:"tags,omitempty"`
+	SourceRefs  []string                              `json:"sourceRefs,omitempty"`
+	Thread      slackagent.SlackTriageReplayThread    `json:"thread"`
+	Candidate   slackagent.SlackVisibleReplyCandidate `json:"candidate,omitempty"`
+	Expected    benchmarkFixtureExpected              `json:"expected,omitempty"`
 }
 
 type benchmarkFixtureExpected struct {
 	FinalDecision           string   `json:"finalDecision,omitempty"`
 	VisibleReplyAllowed     *bool    `json:"visibleReplyAllowed,omitempty"`
+	VisibleReplyReason      string   `json:"visibleReplyReason,omitempty"`
 	MinWorkerRequests       int      `json:"minWorkerRequests,omitempty"`
 	AnyVisibleReplyReasons  []string `json:"anyVisibleReplyReasons,omitempty"`
 	AnyPipelineSmellSignals []string `json:"anyPipelineSmellSignals,omitempty"`
@@ -202,6 +204,9 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				continue
 			}
 			row := dryRunThread(ctx, client, report.SlackAgentURL, report.VariantID, fixture.Thread)
+			if strings.TrimSpace(fixture.Candidate.Message) != "" {
+				row = evaluateCandidateFixture(report.VariantID, fixture)
+			}
 			applyFixtureResult(&row, fixture)
 			report.Rows = append(report.Rows, row)
 			report.ThreadsReplayed++
@@ -451,6 +456,24 @@ func applyFixtureResult(row *benchmarkRow, fixture benchmarkFixture) {
 	row.FixtureReason = reason
 }
 
+func evaluateCandidateFixture(variantID string, fixture benchmarkFixture) benchmarkRow {
+	verdict := slackagent.EvaluateSlackVisibleReplyCandidate(fixture.Candidate)
+	reasons := []string{}
+	if strings.TrimSpace(verdict.Reason) != "" {
+		reasons = []string{verdict.Reason}
+	}
+	return benchmarkRow{
+		VariantID:           variantID,
+		ChannelID:           fixture.Thread.ChannelID,
+		ThreadTS:            fixture.Thread.ThreadTS,
+		MessageCount:        len(fixture.Thread.Messages),
+		PersonaDecision:     "fixture_candidate",
+		FinalDecision:       "candidate_visible_reply_gate",
+		VisibleReplyAllowed: verdict.Allowed,
+		VisibleReplyReasons: reasons,
+	}
+}
+
 func evaluateFixtureRow(row benchmarkRow, fixture benchmarkFixture) (bool, string) {
 	if strings.TrimSpace(row.Error) != "" {
 		return false, "dry_run_error"
@@ -460,6 +483,9 @@ func evaluateFixtureRow(row benchmarkRow, fixture benchmarkFixture) (bool, strin
 	}
 	if fixture.Expected.VisibleReplyAllowed != nil && *fixture.Expected.VisibleReplyAllowed != row.VisibleReplyAllowed {
 		return false, "visible_reply_allowed_mismatch"
+	}
+	if expected := strings.TrimSpace(fixture.Expected.VisibleReplyReason); expected != "" && !containsAnyString(row.VisibleReplyReasons, []string{expected}) {
+		return false, "visible_reply_reason_mismatch"
 	}
 	if fixture.Expected.MinWorkerRequests > 0 && row.WorkerRequests < fixture.Expected.MinWorkerRequests {
 		return false, "worker_request_count_below_expected"

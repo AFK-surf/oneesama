@@ -17,6 +17,30 @@ type slackVisibleReplyAllowListVerdict struct {
 	EvidenceAnchors []SlackVisibleEvidenceAnchor
 }
 
+type SlackVisibleReplyCandidate struct {
+	Message         string                       `json:"message"`
+	EvidenceAnchors []SlackVisibleEvidenceAnchor `json:"evidenceAnchors,omitempty"`
+}
+
+type SlackVisibleReplyCandidateVerdict struct {
+	Allowed         bool                         `json:"allowed"`
+	Reason          string                       `json:"reason"`
+	EvidenceAnchors []SlackVisibleEvidenceAnchor `json:"evidenceAnchors,omitempty"`
+}
+
+func EvaluateSlackVisibleReplyCandidate(candidate SlackVisibleReplyCandidate) SlackVisibleReplyCandidateVerdict {
+	verdict := slackVisibleReplyAllowListVerdictForAction(SlackTriageDecisionAction{
+		Type:            slackActionTypeThreadReply,
+		Message:         candidate.Message,
+		EvidenceAnchors: candidate.EvidenceAnchors,
+	})
+	return SlackVisibleReplyCandidateVerdict{
+		Allowed:         verdict.Allowed,
+		Reason:          verdict.Reason,
+		EvidenceAnchors: verdict.EvidenceAnchors,
+	}
+}
+
 func slackVisibleReplyQualityBlockReason(text string) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -171,6 +195,13 @@ func slackVisibleReplyIsSelfDecisionMeta(lower string) bool {
 		"approval gate",
 		"runtime decided",
 		"worker classified",
+		"我是 codex",
+		"我是一个 codex",
+		"我是 openrouter",
+		"i am codex",
+		"i'm codex",
+		"i am openrouter",
+		"i'm openrouter",
 	}) {
 		return true
 	}

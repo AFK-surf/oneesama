@@ -17,7 +17,18 @@
       }
     ]
   },
+  "candidate": {
+    "message": "我是 Codex，运行在 OpenRouter 上，用 DeepSeek 模型处理 Slack triage。",
+    "evidenceAnchors": [
+      {
+        "kind": "explicit_user_command",
+        "sourceRef": "slack:C_BENCH/1779450002.000002",
+        "quote": "你是什么模型？"
+      }
+    ]
+  },
   "expected": {
-    "visibleReplyAllowed": false
+    "visibleReplyAllowed": false,
+    "visibleReplyReason": "internal_meta"
   }
 }

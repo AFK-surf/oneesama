@@ -10,15 +10,15 @@
     "messages": [
       {
         "channelId": "C_BENCH",
-        "userId": "U_PENG",
-        "text": "https://news.ycombinator.com/user?id=Johnson8053 这是谁",
+        "userId": "U_TEAM",
+        "text": "https://news.ycombinator.com/user?id=Johnson8053",
         "ts": "1779374042.070939",
         "threadTs": "1779374042.070939"
       },
       {
         "channelId": "C_BENCH",
-        "userId": "U_TEAM",
-        "text": "不认识，他咋了？",
+        "userId": "U_PENG",
+        "text": "不认识，他咋了？这是谁？",
         "ts": "1779374050.000000",
         "threadTs": "1779374042.070939"
       }

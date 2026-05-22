@@ -17,7 +17,18 @@
       }
     ]
   },
+  "candidate": {
+    "message": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"openrouter_web_search\">\n<｜｜DSML｜｜parameter name=\"query\" string=\"true\">nitter.net thet8or</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
+    "evidenceAnchors": [
+      {
+        "kind": "fetched_link",
+        "sourceRef": "https://nitter.net/thet8or",
+        "quote": "profile excerpt"
+      }
+    ]
+  },
   "expected": {
-    "visibleReplyAllowed": false
+    "visibleReplyAllowed": false,
+    "visibleReplyReason": "internal_meta"
   }
 }
