@@ -153,6 +153,126 @@ func TestEmojiReactionFeedbackPersistsMemoryAndImprovementSignal(t *testing.T) {
 	}
 }
 
+func TestPositiveReactionOnHumanThreadReplyPersistsLearningSignal(t *testing.T) {
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{BotUserID: "UBOT"},
+	})
+
+	response := service.HandleSlackEvent(context.Background(), SlackEventEnvelope{
+		Type:    "event_callback",
+		EventID: "EvHumanConclusion",
+		Event: SlackEventPayload{
+			Type:     "reaction_added",
+			User:     "UREVIEWER",
+			Reaction: "white_check_mark",
+			ItemUser: "UANSWER",
+			Item:     &SlackReactionItem{Type: "message", Channel: "C123", TS: "1779000030.000004"},
+			Message: &SlackMessage{
+				TS:       "1779000030.000004",
+				ThreadTS: "1779000000.000001",
+				User:     "UANSWER",
+				Text:     "结论：Johnson8053 是队友 HN 小号；证据是他发过 affine/bridge 相关内容。",
+			},
+		},
+	}, SlackEventHeaders{})
+	if !response.OK || !response.Handled || response.Mode != "reaction_backed_human_conclusion" {
+		t.Fatalf("response = %#v, want handled reaction-backed human conclusion", response)
+	}
+
+	entries, err := service.feedback.ListEntries(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries = %#v, want no assistant feedback entry for human conclusion", entries)
+	}
+
+	signals, err := service.learning.List(context.Background(), 10, time.Time{})
+	if err != nil {
+		t.Fatalf("ListSignals: %v", err)
+	}
+	if len(signals) != 1 {
+		t.Fatalf("signals = %#v, want one learning signal", signals)
+	}
+	signal := signals[0]
+	if signal.Source != slackLearningSourceReactionBackedConclusion || signal.Verdict != "confirm" || signal.Subject != "reaction_backed_human_conclusion" {
+		t.Fatalf("signal = %#v, want reaction-backed confirmation signal", signal)
+	}
+	if signal.ProposedAction != "memory_candidate" || signal.Target != "persona_triage_quality" || signal.ReasonCode != "positive_reaction_on_human_thread_reply" {
+		t.Fatalf("signal = %#v, want review-gated memory candidate signal", signal)
+	}
+	for _, want := range []string{"slack:C123/1779000000.000001", "slack_message:C123/1779000030.000004"} {
+		if !slackMemoryFactContainsString(signal.Refs, want) {
+			t.Fatalf("refs = %#v, missing %q", signal.Refs, want)
+		}
+	}
+	if !strings.Contains(signal.Content, "Johnson8053") || signal.Metadata["emoji"] != "white_check_mark" || signal.Metadata["message_user"] != "UANSWER" {
+		t.Fatalf("signal = %#v, want conclusion content and reaction provenance", signal)
+	}
+
+	candidates := BuildSlackDreamCandidates(SlackDreamSignalsFromLearningSignals(signals), SlackDreamCandidateOptions{Date: "2026-05-23"})
+	if len(candidates) != 1 || candidates[0].ProposalType != "memory_candidate" || !strings.Contains(candidates[0].Proposal, "Johnson8053") {
+		t.Fatalf("candidates = %#v, want review-gated memory candidate from human conclusion", candidates)
+	}
+}
+
+func TestHumanConclusionReactionRequiresSecondHumanThreadReply(t *testing.T) {
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{BotUserID: "UBOT"},
+	})
+
+	selfReaction := service.HandleSlackEvent(context.Background(), SlackEventEnvelope{
+		Type:    "event_callback",
+		EventID: "EvHumanConclusionSelf",
+		Event: SlackEventPayload{
+			Type:     "reaction_added",
+			User:     "UANSWER",
+			Reaction: "white_check_mark",
+			ItemUser: "UANSWER",
+			Item:     &SlackReactionItem{Type: "message", Channel: "C123", TS: "1779000030.000004"},
+			Message: &SlackMessage{
+				TS:       "1779000030.000004",
+				ThreadTS: "1779000000.000001",
+				User:     "UANSWER",
+				Text:     "结论：这条不能靠 self reaction 进入记忆。",
+			},
+		},
+	}, SlackEventHeaders{})
+	if !selfReaction.Ignored || selfReaction.Reason != "non_bot_message" {
+		t.Fatalf("selfReaction = %#v, want non-bot reaction ignored", selfReaction)
+	}
+
+	rootReaction := service.HandleSlackEvent(context.Background(), SlackEventEnvelope{
+		Type:    "event_callback",
+		EventID: "EvHumanConclusionRoot",
+		Event: SlackEventPayload{
+			Type:     "reaction_added",
+			User:     "UREVIEWER",
+			Reaction: "white_check_mark",
+			ItemUser: "UANSWER",
+			Item:     &SlackReactionItem{Type: "message", Channel: "C123", TS: "1779000040.000005"},
+			Message: &SlackMessage{
+				TS:   "1779000040.000005",
+				User: "UANSWER",
+				Text: "根消息被点赞不能直接当作同线程结论。",
+			},
+		},
+	}, SlackEventHeaders{})
+	if !rootReaction.Ignored || rootReaction.Reason != "non_bot_message" {
+		t.Fatalf("rootReaction = %#v, want root reaction ignored", rootReaction)
+	}
+
+	signals, err := service.learning.List(context.Background(), 10, time.Time{})
+	if err != nil {
+		t.Fatalf("ListSignals: %v", err)
+	}
+	if len(signals) != 0 {
+		t.Fatalf("signals = %#v, want no learning signals for weak reactions", signals)
+	}
+}
+
 func TestEmojiReactionFeedbackIgnoresNoiseAndNonBotMessages(t *testing.T) {
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},

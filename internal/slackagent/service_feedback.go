@@ -26,6 +26,16 @@ type SlackEmojiFeedbackEvent struct {
 	Summary    string
 }
 
+type SlackReactionBackedHumanConclusion struct {
+	Emoji      string
+	UserID     string
+	ItemUserID string
+	ChannelID  string
+	ThreadTS   string
+	MessageTS  string
+	Summary    string
+}
+
 func parseReplyFeedbackInteraction(payload SlackInteractionPayload) *SlackReplyFeedbackInteraction {
 	if len(payload.Actions) == 0 {
 		return nil
@@ -57,6 +67,27 @@ func (s *Service) handleReactionFeedbackEvent(ctx context.Context, envelope Slac
 	event := eventPayloadWithEnvelopeContext(envelope)
 	feedback, reason := s.emojiFeedbackFromReactionEvent(ctx, event)
 	if reason != "" {
+		if reason == "non_bot_message" {
+			conclusion, conclusionReason := s.reactionBackedHumanConclusionFromReactionEvent(ctx, event)
+			if conclusionReason == "" {
+				s.recordLearningSignal(ctx, slackLearningSignalFromReactionBackedHumanConclusion(conclusion))
+				return SlackEventResponse{
+					OK:        true,
+					Handled:   true,
+					Mode:      "reaction_backed_human_conclusion",
+					EventType: event.Type,
+					EventID:   strings.TrimSpace(envelope.EventID),
+					Response: &AvatarCommandResponse{
+						OK:           true,
+						ResponseType: "ephemeral",
+						Text:         "Reaction-backed human conclusion saved.",
+						Metadata: map[string]any{
+							"conclusion": conclusion,
+						},
+					},
+				}
+			}
+		}
 		return SlackEventResponse{
 			OK:        true,
 			Ignored:   true,
@@ -94,6 +125,67 @@ func (s *Service) handleReactionFeedbackEvent(ctx context.Context, envelope Slac
 			},
 		},
 	}
+}
+
+func (s *Service) reactionBackedHumanConclusionFromReactionEvent(ctx context.Context, event SlackEventPayload) (SlackReactionBackedHumanConclusion, string) {
+	if feedbackKindForReactionEmoji(event.Reaction) != replyFeedbackHelpful {
+		return SlackReactionBackedHumanConclusion{}, "non_positive_reaction"
+	}
+	channelID := ""
+	messageTS := ""
+	itemType := ""
+	if event.Item != nil {
+		channelID = strings.TrimSpace(event.Item.Channel)
+		messageTS = strings.TrimSpace(event.Item.TS)
+		itemType = strings.TrimSpace(event.Item.Type)
+	}
+	if itemType != "" && itemType != "message" {
+		return SlackReactionBackedHumanConclusion{}, "unsupported_reaction_item"
+	}
+	if channelID == "" || messageTS == "" {
+		return SlackReactionBackedHumanConclusion{}, "missing_reaction_item"
+	}
+	userID := strings.TrimSpace(event.User)
+	if userID == "" {
+		return SlackReactionBackedHumanConclusion{}, "missing_reaction_user"
+	}
+	if s.botUserID != "" && userID == s.botUserID {
+		return SlackReactionBackedHumanConclusion{}, "bot_self_reaction"
+	}
+	if s.botUserID != "" && strings.TrimSpace(event.ItemUser) == s.botUserID {
+		return SlackReactionBackedHumanConclusion{}, "bot_message"
+	}
+	message := s.reactionTargetMessage(ctx, event, channelID, messageTS)
+	messageUserID := firstNonEmpty(strings.TrimSpace(message.User), strings.TrimSpace(message.UserID), strings.TrimSpace(message.UserIDCamel), strings.TrimSpace(event.ItemUser))
+	if messageUserID == "" {
+		return SlackReactionBackedHumanConclusion{}, "missing_message_user"
+	}
+	if s.botUserID != "" && messageUserID == s.botUserID {
+		return SlackReactionBackedHumanConclusion{}, "bot_message"
+	}
+	if messageUserID == userID {
+		return SlackReactionBackedHumanConclusion{}, "self_reaction"
+	}
+	if strings.TrimSpace(message.BotID) != "" || strings.TrimSpace(message.Subtype) != "" {
+		return SlackReactionBackedHumanConclusion{}, "bot_or_subtype_message"
+	}
+	threadTS := strings.TrimSpace(message.ThreadTS)
+	if threadTS == "" || threadTS == messageTS {
+		return SlackReactionBackedHumanConclusion{}, "not_thread_reply"
+	}
+	summary := strings.TrimSpace(sanitizeSlackVisibleText(messageSummaryForFeedback(message)))
+	if summary == "" || slackDelayedNoReplyLooksLowSignal(summary) {
+		return SlackReactionBackedHumanConclusion{}, "low_signal_human_reply"
+	}
+	return SlackReactionBackedHumanConclusion{
+		Emoji:      normalizeReactionEmojiKey(event.Reaction),
+		UserID:     userID,
+		ItemUserID: messageUserID,
+		ChannelID:  channelID,
+		ThreadTS:   threadTS,
+		MessageTS:  messageTS,
+		Summary:    summary,
+	}, ""
 }
 
 func (s *Service) emojiFeedbackFromReactionEvent(ctx context.Context, event SlackEventPayload) (SlackEmojiFeedbackEvent, string) {

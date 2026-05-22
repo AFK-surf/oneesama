@@ -101,6 +101,36 @@ func SlackLearningSignalFromBenchmark(caseID string, verdict string, reasonCode 
 	}
 }
 
+func slackLearningSignalFromReactionBackedHumanConclusion(conclusion SlackReactionBackedHumanConclusion) SlackLearningSignal {
+	refs := []string{}
+	if conclusion.ChannelID != "" || conclusion.ThreadTS != "" {
+		refs = append(refs, "slack:"+strings.TrimSpace(conclusion.ChannelID)+"/"+strings.TrimSpace(conclusion.ThreadTS))
+	}
+	if conclusion.ChannelID != "" || conclusion.MessageTS != "" {
+		refs = append(refs, "slack_message:"+strings.TrimSpace(conclusion.ChannelID)+"/"+strings.TrimSpace(conclusion.MessageTS))
+	}
+	return SlackLearningSignal{
+		Source:         slackLearningSourceReactionBackedConclusion,
+		Surface:        "slack",
+		Verdict:        "confirm",
+		Refs:           refs,
+		ReasonCode:     "positive_reaction_on_human_thread_reply",
+		ProposedAction: "memory_candidate",
+		Target:         "persona_triage_quality",
+		Subject:        "reaction_backed_human_conclusion",
+		SourceType:     slackLearningSourceReactionBackedConclusion,
+		Content:        conclusion.Summary,
+		Metadata: map[string]any{
+			"emoji":         conclusion.Emoji,
+			"reactor_user":  conclusion.UserID,
+			"message_user":  conclusion.ItemUserID,
+			"thread_ts":     conclusion.ThreadTS,
+			"message_ts":    conclusion.MessageTS,
+			"source_signal": "reaction_added",
+		},
+	}
+}
+
 func (s *Service) RecordLearningSignal(ctx context.Context, signal SlackLearningSignal) {
 	s.recordLearningSignal(ctx, signal)
 }

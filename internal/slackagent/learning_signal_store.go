@@ -15,10 +15,11 @@ import (
 const slackLearningSignalsCollection = "slack_learning_signals"
 
 const (
-	slackLearningSourceApprovalCard = "approval_card"
-	slackLearningSourceAllowCanary  = "visible_reply_allow_list_canary"
-	slackLearningSourceIncident     = "production_incident"
-	slackLearningSourceBenchmark    = "benchmark"
+	slackLearningSourceApprovalCard             = "approval_card"
+	slackLearningSourceAllowCanary              = "visible_reply_allow_list_canary"
+	slackLearningSourceIncident                 = "production_incident"
+	slackLearningSourceBenchmark                = "benchmark"
+	slackLearningSourceReactionBackedConclusion = "reaction_backed_human_conclusion"
 )
 
 type SlackLearningSignal struct {
