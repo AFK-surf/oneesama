@@ -914,9 +914,13 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"candidate task review",
 		"pi-first foreground triage pending",
 		"persona reaction",
+		"persona reply",
 		"persona delegated worker",
+		"persona delegate_worker",
 		"persona runtime foreground",
 		"persona foreground orphaned",
+		"delegate_worker",
+		"reply posted to thread",
 		"decode oneesama pi decision json",
 		"call oneesama pi model",
 		"context deadline exceeded",
@@ -934,6 +938,9 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"directly answered by",
 		"thread is handled",
 		"handled and no further action",
+		"is already actively handling",
+		"fully in-progress",
+		"suppressed for ambient",
 		"no direct evidence",
 		"delegating to worker",
 		"bounded secretary work",
@@ -970,6 +977,9 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"tool_capab",
 		"reaction acknowledges",
 		"reply in thread",
+		"review & merge",
+		"patch if have problem",
+		"测测吧",
 		"suggest_acti",
 		"未明确请求",
 		"没有明确",
@@ -992,7 +1002,7 @@ func slackDailyDiaryLowSignal(value string) bool {
 			return true
 		}
 	}
-	if strings.HasPrefix(text, "#c0") || strings.HasPrefix(text, "[177") {
+	if strings.HasPrefix(text, "#c0") || strings.HasPrefix(text, "[177") || strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "<http") {
 		return true
 	}
 	if len([]rune(strings.TrimSpace(value))) < 12 && !slackDailyDiaryContainsAny(text, "fix", "ship", "release", "pr #", "ci", "修复", "根因", "上线", "发布") {

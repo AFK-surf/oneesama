@@ -201,6 +201,13 @@ func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
 		`[ { "file_path": "memory/2026-03-20.md", "start_line": 1, "end_line": 2 } ]`,
 		"reactions.add",
 		"No direct evidence about evaluation case capabilities in current context; delegating to worker to search memory, which is bounded secretary work",
+		"Persona reply",
+		"delegate_worker",
+		"Reply posted to thread (ts: 1779438652.245549, 2 blocks)",
+		"Persona delegate_worker suppressed for ambient/non-addressed triage",
+		"codex-3720 is already actively handling this cueboard bug report and is now working on the fix.",
+		"@codex-3720 review & merge cueboard#2022, patch if have problem",
+		"<https://x.com/studyouwei/status/2057767798752112906?s=20>",
 	} {
 		if !slackDailyDiaryLowSignal(text) {
 			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)
