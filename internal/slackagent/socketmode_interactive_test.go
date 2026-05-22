@@ -228,6 +228,90 @@ func TestSocketModeInteractiveCaptionSelectUpdatesCardAckFirst(t *testing.T) {
 	}
 }
 
+func TestSocketModeInteractivePendingThreadReplyUpdatesCardViaResponseURL(t *testing.T) {
+	responseURLCh := make(chan string, 1)
+	responseURLServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		raw, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read response_url body: %v", err)
+		}
+		responseURLCh <- string(raw)
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer responseURLServer.Close()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Poster:      poster,
+		Slack: appconfig.SlackConfig{
+			InternalAuthKey: "secret-key",
+		},
+	})
+	record, err := service.triage.InsertPendingAction(context.Background(), SlackPendingAction{
+		ChannelID:  "C123",
+		ThreadTS:   "123.456",
+		ActionType: slackActionTypeThreadReply,
+		Params: map[string]any{
+			"title":   "Review triage reply",
+			"message": "这条回复需要 Peng confirm 后才发。",
+		},
+		Status: PendingActionStatusPending,
+	})
+	if err != nil {
+		t.Fatalf("InsertPendingAction: %v", err)
+	}
+	runner := NewSocketModeRunner(SocketModeRunnerConfig{
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Service:  service,
+		AppToken: "app-token",
+	})
+	rawPayload := fmt.Sprintf(`{
+		"team":{"id":"T123"},
+		"channel":{"id":"D_PENG"},
+		"user":{"id":"U_PENG","username":"peng"},
+		"message":{"ts":"177.000","thread_ts":"177.000"},
+		"response_url":%q,
+		"actions":[{"block_id":"mab_pending_action:%d","action_id":"mab_pending_action_confirm","value":"{\"kind\":\"mab_pending_action\",\"id\":%d,\"status\":\"confirmed\",\"channelId\":\"C123\",\"threadTs\":\"123.456\"}"}]
+	}`, responseURLServer.URL, record.ID, record.ID)
+
+	var ackPayload any
+	err = runner.handleEnvelope(context.Background(), SlackSocketEnvelope{
+		Type:       "interactive",
+		EnvelopeID: "EnInteractivePendingReply",
+		Payload:    []byte(rawPayload),
+	}, func(payload any) error {
+		ackPayload = payload
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handle envelope: %v", err)
+	}
+	if ackPayload != nil {
+		t.Fatalf("ack payload = %#v, want nil socket envelope ack", ackPayload)
+	}
+	poster.WaitForCalls(t, 1)
+	calls := poster.Calls()
+	if len(calls) != 1 || calls[0].Channel != "C123" || calls[0].ThreadTS != "123.456" || !strings.Contains(calls[0].Text, "Peng confirm") {
+		t.Fatalf("poster calls = %#v, want original thread reply", calls)
+	}
+	select {
+	case body := <-responseURLCh:
+		for _, want := range []string{`"replace_original":true`, "已发送", "原 thread"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("response_url body = %s, missing %q", body, want)
+			}
+		}
+		for _, unwanted := range []string{"Triage suggestion", "post_thread_reply", "Persona"} {
+			if strings.Contains(body, unwanted) {
+				t.Fatalf("response_url body = %s, unexpectedly contains %q", body, unwanted)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for pending action response_url update")
+	}
+}
+
 func TestSocketModeInteractiveJoinSetupAcksBeforeResponseURLUpdate(t *testing.T) {
 	meetURL := "https://meet.google.com/abc-defg-hij"
 	releaseResponseURL := make(chan struct{})

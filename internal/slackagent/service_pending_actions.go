@@ -156,6 +156,23 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 	}
 }
 
+func (s *Service) StartPendingActionSocketInteraction(ctx context.Context, interaction SlackPendingActionInteraction) {
+	s.LaunchAsyncInteraction(ctx, "pending_action_socket", func(detached context.Context) {
+		response := s.HandlePendingActionInteraction(detached, interaction)
+		if strings.TrimSpace(response.Text) == "" {
+			response.Text = "Pending action updated."
+		}
+		response.ResponseType = ""
+		response.Metadata = nil
+		if strings.TrimSpace(interaction.ResponseURL) == "" {
+			return
+		}
+		if err := postSlackInteractionResponse(detached, interaction.ResponseURL, response); err != nil {
+			s.logger.Warn("slack pending action response update failed", "pending_action_id", interaction.ID, "status", interaction.Status, "error", err)
+		}
+	})
+}
+
 func slackTriagePendingApprovalDecision(status string) string {
 	switch strings.TrimSpace(status) {
 	case "confirmed":
@@ -178,6 +195,9 @@ func pendingActionInteractionReplacesOriginal(status string) bool {
 }
 
 func buildPendingActionResolvedBlocks(action SlackPendingAction, interaction SlackPendingActionInteraction, suffix string) []map[string]any {
+	if action.ActionType == slackActionTypeThreadReply {
+		return buildPostThreadReplyPendingResolvedBlocks(action, interaction, suffix)
+	}
 	status := firstNonEmpty(interaction.Status, action.Status, "updated")
 	actionType := firstNonEmpty(action.ActionType, "follow_up")
 	title := firstNonEmpty(stringFromAny(action.Params["title"]), stringFromAny(action.Params["summary"]), actionType)
@@ -199,6 +219,58 @@ func buildPendingActionResolvedBlocks(action SlackPendingAction, interaction Sla
 			"text": map[string]any{
 				"type": "mrkdwn",
 				"text": fmt.Sprintf("*Triage suggestion %s:* %s", status, title),
+			},
+		},
+		{
+			"type": "context",
+			"elements": []map[string]any{{
+				"type": "mrkdwn",
+				"text": strings.Join(contextParts, " | "),
+			}},
+		},
+	}
+}
+
+func buildPostThreadReplyPendingResolvedBlocks(action SlackPendingAction, interaction SlackPendingActionInteraction, suffix string) []map[string]any {
+	status := firstNonEmpty(interaction.Status, action.Status, "updated")
+	suffix = strings.TrimSpace(suffix)
+	title := "已处理"
+	detail := "这条待确认回复已处理。"
+	switch status {
+	case "confirmed":
+		if strings.Contains(strings.ToLower(suffix), "fail") {
+			title = "发送失败"
+			detail = "这条回复没有发出去，原 thread 保持静默。"
+		} else {
+			title = "已发送"
+			detail = "已把这条回复发送到原 thread。"
+		}
+	case "dismissed":
+		title = "已拒绝"
+		detail = "这条回复已保持静默。"
+	case "snoozed":
+		title = "已稍后再看"
+		detail = "这条回复暂时不发送。"
+	case "assigned":
+		title = "已转交"
+		detail = "这条回复暂时不发送。"
+	}
+	contextParts := []string{
+		fmt.Sprintf("Pending: %d", action.ID),
+		"Status: `" + status + "`",
+	}
+	if user := strings.TrimSpace(interaction.UserID); user != "" {
+		contextParts = append(contextParts, "By: <@"+user+">")
+	}
+	if suffix != "" {
+		contextParts = append(contextParts, suffix)
+	}
+	return []map[string]any{
+		{
+			"type": "section",
+			"text": map[string]any{
+				"type": "mrkdwn",
+				"text": "*" + title + "*\n" + detail,
 			},
 		},
 		{

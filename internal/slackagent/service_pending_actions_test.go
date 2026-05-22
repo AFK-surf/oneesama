@@ -112,6 +112,72 @@ func TestPendingActionConfirmedPostThreadReplyPublishesOriginalThread(t *testing
 	if len(updated) != 1 || !strings.HasPrefix(updated[0].Result, "posted:") {
 		t.Fatalf("pending action = %#v, want posted result", updated)
 	}
+	encoded, _ := json.Marshal(response.Blocks)
+	body := string(encoded)
+	for _, want := range []string{"已发送", "原 thread", "U_PENG"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("blocks = %s, missing %q", body, want)
+		}
+	}
+	for _, unwanted := range []string{"Triage suggestion", "post_thread_reply", "Persona"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("blocks = %s, unexpectedly contains %q", body, unwanted)
+		}
+	}
+}
+
+func TestPendingActionDismissedPostThreadReplyShowsSilencedState(t *testing.T) {
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}})
+	record, err := service.triage.InsertPendingAction(context.Background(), SlackPendingAction{
+		ChannelID:  "C123",
+		ThreadTS:   "123.456",
+		ActionType: slackActionTypeThreadReply,
+		Params: map[string]any{
+			"title":   "Review triage reply",
+			"message": "这条不该发。",
+		},
+		Status: PendingActionStatusPending,
+	})
+	if err != nil {
+		t.Fatalf("InsertPendingAction: %v", err)
+	}
+
+	response := service.HandlePendingActionInteraction(context.Background(), SlackPendingActionInteraction{
+		ID:     record.ID,
+		Status: "dismissed",
+		UserID: "U_PENG",
+	})
+	if !response.OK || !response.ReplaceOriginal {
+		t.Fatalf("response = %#v, want replacement", response)
+	}
+	encoded, _ := json.Marshal(response.Blocks)
+	body := string(encoded)
+	for _, want := range []string{"已拒绝", "保持静默", "U_PENG"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("blocks = %s, missing %q", body, want)
+		}
+	}
+	for _, unwanted := range []string{"Triage suggestion", "post_thread_reply", "Persona"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("blocks = %s, unexpectedly contains %q", body, unwanted)
+		}
+	}
+}
+
+func TestVisibleReplyQualityGateDropsInternalMetaReplies(t *testing.T) {
+	actions := requireSlackTriageVisibleReplyApproval([]SlackTriageDecisionAction{{
+		Type:      slackActionTypeThreadReply,
+		Title:     "Review triage reply",
+		Message:   "根据 persona 分析，persona 已判定 Oneesama 不应在此线程插话，我无可见输出。",
+		ChannelID: "C123",
+		ThreadTS:  "123.456",
+	}})
+	if len(actions) != 0 {
+		t.Fatalf("actions = %#v, want internal meta reply dropped", actions)
+	}
+	if got := slackVisibleReplyQualityBlockReason("The persona already classified this thread as no visible output."); got != "internal_control_plane_leak" {
+		t.Fatalf("block reason = %q, want internal_control_plane_leak", got)
+	}
 }
 
 func TestPostThreadReplyApprovalCardOnlyShowsApproveReject(t *testing.T) {

@@ -7,7 +7,9 @@ import (
 
 func (s *Service) HandleSlackInteraction(ctx context.Context, payload SlackInteractionPayload) AvatarCommandResponse {
 	if pendingAction := parsePendingActionInteraction(payload); pendingAction != nil {
-		return s.HandlePendingActionInteraction(ctx, *pendingAction)
+		response := s.HandlePendingActionInteraction(ctx, *pendingAction)
+		response.Metadata = nil
+		return response
 	}
 
 	if replyFeedback := parseReplyFeedbackInteraction(payload); replyFeedback != nil {

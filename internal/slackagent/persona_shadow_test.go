@@ -381,7 +381,7 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 		intFromAny(updated.Metadata["context_budget_total_tokens"]) <= 0 {
 		t.Fatalf("metadata = %#v, want persona context budget audit", updated.Metadata)
 	}
-	if len(updated.Actions) != 1 || !strings.Contains(updated.Actions[0].Brief, "Persona reply") {
+	if len(updated.Actions) != 1 || !strings.Contains(updated.Actions[0].Brief, "Review reply") {
 		t.Fatalf("actions = %#v, want one persona action", updated.Actions)
 	}
 	var sawForeground bool
@@ -639,7 +639,7 @@ func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleR
 	if updated.Mutations != 0 || updated.Failures != 0 {
 		t.Fatalf("updated mutations/failures = %d/%d, want no public mutation", updated.Mutations, updated.Failures)
 	}
-	if len(updated.Actions) != 1 || updated.Actions[0].Brief != "Persona reply" {
+	if len(updated.Actions) != 1 || updated.Actions[0].Brief != "Review reply" {
 		t.Fatalf("actions = %#v, want Pi persona action recorded", updated.Actions)
 	}
 	foreground, ok := mapFromAny(updated.Metadata["persona_foreground"])
@@ -1152,6 +1152,29 @@ func TestPersonaAmbientDirectReplyKeepsAddressedBotAnswer(t *testing.T) {
 	got, toolCalls := applyPersonaAmbientDirectReplyDisposition(result, messages, "U0AP5UFU0FR")
 	if got.Decision != persona.DecisionReply || got.VisibleText != result.VisibleText || len(toolCalls) != 0 {
 		t.Fatalf("result=%#v toolCalls=%#v, want addressed bot reply preserved", got, toolCalls)
+	}
+}
+
+func TestPersonaVisibleReplyQualityGateSuppressesInternalMeta(t *testing.T) {
+	result := SlackPersonaShadowResult{
+		Success:     true,
+		RequestID:   "triage:C09LB7V1WGJ:1779385051.079739",
+		ChannelID:   "C09LB7V1WGJ",
+		ThreadTS:    "1779371525.004829",
+		Decision:    persona.DecisionReply,
+		VisibleText: "根据 persona 分析，当前线程已被分类；persona 已判定 Oneesama 不应在此线程插话，我无可见输出。",
+		Reason:      "The persona already classified this thread as no visible output.",
+	}
+
+	got, toolCalls := applyPersonaVisibleReplyQualityDisposition(result)
+	if got.Decision != persona.DecisionStaySilent || got.VisibleText != "" {
+		t.Fatalf("result = %#v, want stay_silent with empty visible text", got)
+	}
+	if len(toolCalls) != 1 || toolCalls[0].Action != "persona_reply_quality_gate_silent" || toolCalls[0].Result != "internal_control_plane_leak" {
+		t.Fatalf("toolCalls = %#v, want quality gate block", toolCalls)
+	}
+	if actions := slackPersonaForegroundActions("C123", "123.456", got); len(actions) != 0 {
+		t.Fatalf("actions = %#v, want no pending reply for internal meta", actions)
 	}
 }
 

@@ -419,7 +419,7 @@ func TestHandleInteractionUpdatesPendingTriageAction(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), "marked confirmed") || !strings.Contains(response.Body.String(), `"status":"confirmed"`) {
+	if !strings.Contains(response.Body.String(), "marked confirmed") || !strings.Contains(response.Body.String(), "Status: `confirmed`") {
 		t.Fatalf("body = %s, want pending action confirmed", response.Body.String())
 	}
 }

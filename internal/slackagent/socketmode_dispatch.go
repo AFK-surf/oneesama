@@ -127,6 +127,20 @@ func (r *SocketModeRunner) handleInteractive(ctx context.Context, payload []byte
 		"thread_ts", slackInteractionThreadTS(interaction),
 		"response_url_present", strings.TrimSpace(interaction.ResponseURL) != "",
 	)
+	if pendingAction := parsePendingActionInteraction(interaction); pendingAction != nil {
+		r.service.logger.Info(
+			"slack socket interaction pending action",
+			"action_id", actionID,
+			"pending_action_id", pendingAction.ID,
+			"status", pendingAction.Status,
+			"response_url_present", strings.TrimSpace(interaction.ResponseURL) != "",
+		)
+		if strings.TrimSpace(interaction.ResponseURL) == "" {
+			return ack(r.service.HandlePendingActionInteraction(context.WithoutCancel(ctx), *pendingAction))
+		}
+		r.service.StartPendingActionSocketInteraction(context.WithoutCancel(ctx), *pendingAction)
+		return ack(nil)
+	}
 	if command, ok := joinSetupCommandInputFromInteraction(interaction); ok {
 		r.service.logger.Info(
 			"slack socket interaction join setup",

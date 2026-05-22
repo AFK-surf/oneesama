@@ -442,6 +442,22 @@ func slackVisibleTextContainsInternalLeak(text string) bool {
 		"/slack/tools/call",
 		"x-oneesama-internal-key",
 		"local slack tool gateway",
+		"the persona",
+		"persona already",
+		"persona classified",
+		"persona has classified",
+		"persona determined",
+		"persona decided",
+		"根据 persona",
+		"persona 分析",
+		"persona 判定",
+		"persona 已判定",
+		"persona 已经判定",
+		"foreground triage",
+		"pi-first foreground",
+		"delegate_worker",
+		"post_thread_reply",
+		"agent_runner",
 	} {
 		if strings.Contains(lower, marker) {
 			return true

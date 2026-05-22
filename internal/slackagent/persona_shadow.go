@@ -176,6 +176,9 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		var reactionGuardToolCalls []SlackTriageToolCall
 		result, reactionGuardToolCalls = applyPersonaProductLinkReactionDisposition(result, request)
 		dispositionToolCalls = append(dispositionToolCalls, reactionGuardToolCalls...)
+		var replyQualityToolCalls []SlackTriageToolCall
+		result, replyQualityToolCalls = applyPersonaVisibleReplyQualityDisposition(result)
+		dispositionToolCalls = append(dispositionToolCalls, replyQualityToolCalls...)
 		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
@@ -228,6 +231,9 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		var reactionGuardToolCalls []SlackTriageToolCall
 		result, reactionGuardToolCalls = applyPersonaProductLinkReactionDisposition(result, request)
 		dispositionToolCalls = append(dispositionToolCalls, reactionGuardToolCalls...)
+		var replyQualityToolCalls []SlackTriageToolCall
+		result, replyQualityToolCalls = applyPersonaVisibleReplyQualityDisposition(result)
+		dispositionToolCalls = append(dispositionToolCalls, replyQualityToolCalls...)
 		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
@@ -418,6 +424,27 @@ func applyPersonaAmbientDirectReplyDisposition(result SlackPersonaShadowResult, 
 		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
 		Success: true,
 		Brief:   "Persona direct reply suppressed for ambient/non-addressed triage",
+		Result:  reason,
+	}}
+}
+
+func applyPersonaVisibleReplyQualityDisposition(result SlackPersonaShadowResult) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionReply || strings.TrimSpace(result.VisibleText) == "" {
+		return result, nil
+	}
+	reason := slackVisibleReplyQualityBlockReason(result.VisibleText)
+	if reason == "" {
+		return result, nil
+	}
+	result.Decision = persona.DecisionStaySilent
+	result.VisibleText = ""
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "visible reply suppressed by Slack-visible quality gate"))
+	return result, []SlackTriageToolCall{{
+		Tool:    "slack_api",
+		Action:  "persona_reply_quality_gate_silent",
+		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+		Success: true,
+		Brief:   "Persona direct reply suppressed by Slack-visible quality gate",
 		Result:  reason,
 	}}
 }
@@ -1338,7 +1365,7 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 	if result.Decision == persona.DecisionReply && strings.TrimSpace(result.VisibleText) != "" {
 		actions = append(actions, SlackTriageDecisionAction{
 			Type:       "post_thread_reply",
-			Title:      "Persona reply",
+			Title:      "Review reply",
 			Message:    strings.TrimSpace(result.VisibleText),
 			ChannelID:  strings.TrimSpace(channelID),
 			ThreadTS:   strings.TrimSpace(threadTS),
