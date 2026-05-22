@@ -30,12 +30,13 @@ type SlackPersonaShadowResult struct {
 	memoryRecords   []persona.MemoryWrite
 	workerRecords   []persona.WorkerRequest
 	reactionRecords []persona.ReactionIntent
-	ShadowOnly      bool     `json:"shadow_only"`
-	Success         bool     `json:"success"`
-	Error           string   `json:"error,omitempty"`
-	Reason          string   `json:"reason,omitempty"`
-	LatencyMS       int64    `json:"latency_ms,omitempty"`
-	Citations       []string `json:"citations,omitempty"`
+	ShadowOnly      bool                         `json:"shadow_only"`
+	Success         bool                         `json:"success"`
+	Error           string                       `json:"error,omitempty"`
+	Reason          string                       `json:"reason,omitempty"`
+	LatencyMS       int64                        `json:"latency_ms,omitempty"`
+	Citations       []string                     `json:"citations,omitempty"`
+	EvidenceAnchors []SlackVisibleEvidenceAnchor `json:"evidence_anchors,omitempty"`
 }
 
 func BuildBackfillPersonaRequest(candidate SlackBackfillCandidate) persona.Request {
@@ -750,7 +751,8 @@ func buildSecretaryLookupWorkerPrompt(request persona.Request) string {
 		"Do not stop at the first profile/article excerpt. If the source exposes submissions, comments, favorites, repository, author, or source links, follow those read-only leads before answering.",
 		"Use available read-only tools such as exa_search, exa_contents, person_memory, memory_search, and slack_api fetch/read methods when the provided excerpt is not enough.",
 		"Only return a Slack-visible answer when you have concrete evidence. Include 2-3 short evidence anchors such as URL ownership, profile details, repo links, previous workspace mentions, or memory/person records.",
-		"If evidence is insufficient, return no visible result instead of guessing or posting a routing/refusal template.",
+		`Return only JSON matching {"visible_text":"Slack-visible answer","evidence_anchors":[{"kind":"fetched_link|workspace_memory|person_memory|slack_thread|file|image|worker_result|explicit_user_command","source_ref":"stable source ref or URL","quote":"short quoted source fact"}],"reason":"private audit reason"}.`,
+		`If evidence is insufficient, return {"visible_text":"","evidence_anchors":[],"reason":"insufficient_evidence"} instead of guessing or posting a routing/refusal template.`,
 	}
 	if digest := strings.TrimSpace(personaRequestContextText(request.Context, "triage_digest")); digest != "" {
 		parts = append(parts, "\nTriage digest:\n"+digest)
@@ -1029,7 +1031,8 @@ func enrichPersonaSecretaryLookupWorkerRequest(worker persona.WorkerRequest, req
 			"Secretary lookup evidence rules:",
 			"- Do not stop at the first profile/article excerpt. If the source exposes submissions, comments, favorites, repository, author, or source links, follow those read-only leads before answering.",
 			"- Use available read-only tools such as exa_search, exa_contents, person_memory, memory_search, and slack_api fetch/read methods when the provided excerpt is not enough.",
-			"- Only return a Slack-visible answer when you have concrete evidence. If evidence is insufficient, return no visible result instead of guessing or posting a routing/refusal template.",
+			`- Only return a Slack-visible answer when you have concrete evidence. If evidence is insufficient, return {"visible_text":"","evidence_anchors":[],"reason":"insufficient_evidence"} instead of guessing or posting a routing/refusal template.`,
+			`- Return only JSON matching {"visible_text":"Slack-visible answer","evidence_anchors":[{"kind":"fetched_link|workspace_memory|person_memory|slack_thread|file|image|worker_result|explicit_user_command","source_ref":"stable source ref or URL","quote":"short quoted source fact"}],"reason":"private audit reason"}.`,
 		)
 	}
 	if external := strings.TrimSpace(stringFromAny(worker.Context["external_link_context"])); external != "" && !strings.Contains(prompt, "Fetched external link context:") {
@@ -1398,6 +1401,7 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 
 func slackPersonaVisibleReplyEvidenceAnchors(channelID string, threadTS string, result SlackPersonaShadowResult, request persona.Request) []SlackVisibleEvidenceAnchor {
 	anchors := make([]SlackVisibleEvidenceAnchor, 0, 4)
+	anchors = append(anchors, result.EvidenceAnchors...)
 	for _, citation := range request.Evidence.Citations {
 		anchors = append(anchors, slackVisibleEvidenceAnchorFromPersonaCitation(citation))
 	}
@@ -1430,6 +1434,19 @@ func slackPersonaVisibleReplyEvidenceAnchors(channelID string, threadTS string, 
 	}
 	anchors = append(anchors, slackVisibleThreadEvidenceAnchors(channelID, threadTS, result.VisibleText)...)
 	return normalizeSlackVisibleEvidenceAnchors(anchors)
+}
+
+func slackVisibleEvidenceAnchorsFromPersona(anchors []persona.EvidenceAnchor) []SlackVisibleEvidenceAnchor {
+	out := make([]SlackVisibleEvidenceAnchor, 0, len(anchors))
+	for _, anchor := range anchors {
+		out = append(out, SlackVisibleEvidenceAnchor{
+			Kind:      anchor.Kind,
+			SourceRef: anchor.SourceRef,
+			Quote:     anchor.Quote,
+			Freshness: anchor.Freshness,
+		})
+	}
+	return normalizeSlackVisibleEvidenceAnchors(out)
 }
 
 func slackVisibleEvidenceAnchorFromPersonaCitation(citation persona.Citation) SlackVisibleEvidenceAnchor {
@@ -1974,6 +1991,7 @@ func callPersonaShadow(ctx context.Context, runtime persona.Runtime, source stri
 	result.ShadowOnly = resp.ShadowOnly
 	result.Reason = sanitizeSlackVisibleText(resp.Reason)
 	result.Citations = personaCitationRefs(resp.Citations)
+	result.EvidenceAnchors = slackVisibleEvidenceAnchorsFromPersona(resp.EvidenceAnchors)
 	return result
 }
 

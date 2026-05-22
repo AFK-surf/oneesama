@@ -3,6 +3,8 @@ package slackagent
 import (
 	"strings"
 	"testing"
+
+	"github.com/AFK-surf/oneesama/internal/persona"
 )
 
 func TestSlackVisibleEvidenceAnchorsUseSourceDerivedConfidence(t *testing.T) {
@@ -54,5 +56,22 @@ func TestSlackVisibleEvidenceAnchorsInferThreadSourceForVisibleReplies(t *testin
 	anchor := actions[0].EvidenceAnchors[0]
 	if anchor.Kind != slackVisibleEvidenceKindSlackThread || anchor.SourceRef != "slack://channel/C123/thread/177.000" || anchor.ConfidenceSource != "source_derived:slack_thread" {
 		t.Fatalf("anchor = %#v, want source-derived slack thread fallback", anchor)
+	}
+}
+
+func TestSlackPersonaVisibleReplyEvidenceAnchorsMapPiContractAnchors(t *testing.T) {
+	t.Parallel()
+
+	anchors := slackPersonaVisibleReplyEvidenceAnchors("C123", "177.000", SlackPersonaShadowResult{
+		VisibleText: "Johnson8053 是队友 HN 小号。",
+		EvidenceAnchors: slackVisibleEvidenceAnchorsFromPersona([]persona.EvidenceAnchor{{
+			Kind:      persona.EvidenceKindFetchedLink,
+			SourceRef: "https://news.ycombinator.com/user?id=Johnson8053",
+			Quote:     "created 2024-09 / karma 33",
+		}}),
+	}, persona.Request{})
+
+	if len(anchors) == 0 || anchors[0].Kind != slackVisibleEvidenceKindFetchedLink || anchors[0].ConfidenceSource != "source_derived:fetched_link" {
+		t.Fatalf("anchors = %#v, want Pi fetched_link anchor mapped before fallback thread evidence", anchors)
 	}
 }

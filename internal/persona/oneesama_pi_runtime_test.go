@@ -25,7 +25,7 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {
 			Message oneesamaPIChatMessage `json:"message"`
 		}{{
-			Message: oneesamaPIChatMessage{Role: "assistant", Content: `{"runtime":"oneesama-pi","decision":"reply","visible_text":"这条可以结合 workspace Memory 轻量评价。","confidence":0.82,"reason":"source-backed workspace policy"}`},
+			Message: oneesamaPIChatMessage{Role: "assistant", Content: `{"runtime":"oneesama-pi","decision":"reply","visible_text":"这条可以结合 workspace Memory 轻量评价。","evidence_anchors":[{"kind":"workspace_memory","source_ref":"memory/team.md:7","quote":"workspace Memory 支持这条判断"}],"confidence":0.82,"reason":"source-backed workspace policy"}`},
 		}}})
 	}))
 	defer server.Close()
@@ -71,8 +71,11 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if !strings.Contains(systemPrompt, "External URL identity/fact lookup is bounded secretary work") || !strings.Contains(systemPrompt, "不认识 / 不知道") {
 		t.Fatalf("system prompt missing old-slackd secretary lookup guard:\n%s", systemPrompt)
 	}
-	if !strings.Contains(systemPrompt, "A visible reply must have concrete evidence") || !strings.Contains(systemPrompt, "adds information beyond re-reading the thread") {
-		t.Fatalf("system prompt missing concrete-evidence reply quality guard:\n%s", systemPrompt)
+	if !strings.Contains(systemPrompt, "A visible reply must have concrete evidence") || !strings.Contains(systemPrompt, "typed evidence_anchors") {
+		t.Fatalf("system prompt missing typed evidence-anchor reply quality guard:\n%s", systemPrompt)
+	}
+	if !strings.Contains(systemPrompt, `"evidence_anchors"`) || !strings.Contains(systemPrompt, "fetched_link|workspace_memory|person_memory") {
+		t.Fatalf("system prompt missing evidence_anchors output schema:\n%s", systemPrompt)
 	}
 	for _, forbidden := range []string{"[[", "telegram-pi", "Linger"} {
 		if strings.Contains(systemPrompt, forbidden) {
@@ -84,6 +87,9 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	}
 	if resp.Runtime != ProviderOneesamaPi || resp.Decision != DecisionReply || !strings.Contains(resp.VisibleText, "workspace Memory") {
 		t.Fatalf("response = %#v, want oneesama-pi reply", resp)
+	}
+	if len(resp.EvidenceAnchors) != 1 || resp.EvidenceAnchors[0].Kind != EvidenceKindWorkspaceMemory {
+		t.Fatalf("evidence anchors = %#v, want workspace memory anchor", resp.EvidenceAnchors)
 	}
 	status := runtime.Status(context.Background())
 	if status.Provider != ProviderOneesamaPi || !status.Ready || !status.Healthy || status.Version == "" {
@@ -137,6 +143,7 @@ func TestOneesamaPIRuntimePreservesActionFields(t *testing.T) {
 				"memory_writes":[{"kind":"episode","text":"Peng prefers workspace-aware link commentary.","source_ref":"slack:C:123"}],
 				"reactions":[{"emoji":"eyes_bridge","reason":"worth watching","confidence":0.7}],
 				"citations":[{"kind":"memory","source_ref":"memory.md:7","snippet":"workspace-aware commentary"}],
+				"evidence_anchors":[{"kind":"workspace_memory","source_ref":"memory.md:7","quote":"workspace-aware commentary"}],
 				"confidence":0.62,
 				"reason":"needs source inspection"
 			}`},
@@ -179,6 +186,25 @@ func TestOneesamaPIRuntimePreservesActionFields(t *testing.T) {
 	if len(resp.Citations) != 1 || resp.Citations[0].SourceRef != "memory.md:7" {
 		t.Fatalf("citations = %#v, want preserved citation", resp.Citations)
 	}
+	if len(resp.EvidenceAnchors) != 1 || resp.EvidenceAnchors[0].SourceRef != "memory.md:7" {
+		t.Fatalf("evidence anchors = %#v, want preserved anchor", resp.EvidenceAnchors)
+	}
+}
+
+func TestDecodeOneesamaPIResponseAcceptsEvidenceAnchorAliases(t *testing.T) {
+	resp, err := decodeOneesamaPIResponse(`{
+		"runtime":"oneesama-pi",
+		"decision":"reply",
+		"visible_text":"source-backed answer",
+		"evidenceAnchors":[{"kind":"external_link","source_ref":"https://example.com/source","quote":"source fact"}]
+	}`)
+	if err != nil {
+		t.Fatalf("decodeOneesamaPIResponse: %v", err)
+	}
+	got := normalizeOneesamaPIResponse(Request{Safety: SafetyConstraints{AllowVisibleReply: true}}, resp, &OneesamaPIRuntime{provider: ProviderOneesamaPi})
+	if got.Decision != DecisionReply || len(got.EvidenceAnchors) != 1 || got.EvidenceAnchors[0].Kind != EvidenceKindFetchedLink {
+		t.Fatalf("normalized response = %#v, want reply with fetched_link alias anchor", got)
+	}
 }
 
 func TestNormalizeOneesamaPIResponseRequiresDecisionPayloads(t *testing.T) {
@@ -206,6 +232,16 @@ func TestNormalizeOneesamaPIResponseRequiresDecisionPayloads(t *testing.T) {
 			name:         "reply requires visible text",
 			resp:         Response{Decision: DecisionReply, VisibleText: "   "},
 			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "reply requires evidence anchors",
+			resp:         Response{Decision: DecisionReply, VisibleText: "source-backed answer"},
+			wantDecision: DecisionStaySilent,
+		},
+		{
+			name:         "legacy citation can satisfy reply evidence",
+			resp:         Response{Decision: DecisionReply, VisibleText: "source-backed answer", Citations: []Citation{{Kind: "link", SourceRef: "https://example.com/a", Snippet: "source says it"}}},
+			wantDecision: DecisionReply,
 		},
 		{
 			name:         "reply cannot narrate video limitation",

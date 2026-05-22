@@ -117,18 +117,19 @@ type SafetyConstraints struct {
 }
 
 type Response struct {
-	Runtime        string           `json:"runtime,omitempty"`
-	Decision       string           `json:"decision"`
-	VisibleText    string           `json:"visible_text,omitempty"`
-	SpeechIntent   string           `json:"speech_intent,omitempty"`
-	Reactions      []ReactionIntent `json:"reactions,omitempty"`
-	WorkerRequests []WorkerRequest  `json:"worker_requests,omitempty"`
-	MemoryWrites   []MemoryWrite    `json:"memory_writes,omitempty"`
-	Confidence     float64          `json:"confidence,omitempty"`
-	Citations      []Citation       `json:"citations,omitempty"`
-	Reason         string           `json:"reason,omitempty"`
-	ShadowOnly     bool             `json:"shadow_only,omitempty"`
-	Metadata       map[string]any   `json:"metadata,omitempty"`
+	Runtime         string           `json:"runtime,omitempty"`
+	Decision        string           `json:"decision"`
+	VisibleText     string           `json:"visible_text,omitempty"`
+	SpeechIntent    string           `json:"speech_intent,omitempty"`
+	Reactions       []ReactionIntent `json:"reactions,omitempty"`
+	WorkerRequests  []WorkerRequest  `json:"worker_requests,omitempty"`
+	MemoryWrites    []MemoryWrite    `json:"memory_writes,omitempty"`
+	Confidence      float64          `json:"confidence,omitempty"`
+	Citations       []Citation       `json:"citations,omitempty"`
+	EvidenceAnchors []EvidenceAnchor `json:"evidence_anchors,omitempty"`
+	Reason          string           `json:"reason,omitempty"`
+	ShadowOnly      bool             `json:"shadow_only,omitempty"`
+	Metadata        map[string]any   `json:"metadata,omitempty"`
 }
 
 type ReactionIntent struct {
@@ -160,6 +161,13 @@ type Citation struct {
 	LineStart int    `json:"line_start,omitempty"`
 	LineEnd   int    `json:"line_end,omitempty"`
 	Snippet   string `json:"snippet,omitempty"`
+}
+
+type EvidenceAnchor struct {
+	Kind      string `json:"kind,omitempty"`
+	SourceRef string `json:"source_ref,omitempty"`
+	Quote     string `json:"quote,omitempty"`
+	Freshness string `json:"freshness,omitempty"`
 }
 
 type Status struct {

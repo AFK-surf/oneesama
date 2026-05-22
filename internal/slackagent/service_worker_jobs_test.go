@@ -124,11 +124,14 @@ func TestSlackWorkerResultTextSilentOnUnverifiableSecretaryLookupSpeculation(t *
 	}
 }
 
-func TestSlackWorkerResultTextKeepsVerifiedSecretaryLookupAnswer(t *testing.T) {
+func TestSlackWorkerResultTextKeepsVerifiedSecretaryLookupJSONAnswer(t *testing.T) {
 	const answer = "Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33，历史发帖集中在 affine/bridge。"
 	job := agentrunner.Job{
 		Status: agentrunner.StatusCompleted,
-		Result: answer,
+		Result: `{
+			"visible_text":"Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33，历史发帖集中在 affine/bridge。",
+			"evidence_anchors":[{"kind":"fetched_link","source_ref":"https://news.ycombinator.com/user?id=Johnson8053","quote":"created 2024-09 / karma 33"}]
+		}`,
 		Context: map[string]any{
 			"source":       "persona_delegate_worker",
 			"session_kind": agentrunner.SessionKindSecretaryLookup,
@@ -136,6 +139,20 @@ func TestSlackWorkerResultTextKeepsVerifiedSecretaryLookupAnswer(t *testing.T) {
 	}
 	if got := slackWorkerResultText(job); got != answer {
 		t.Fatalf("slackWorkerResultText() = %q, want verified answer %q", got, answer)
+	}
+}
+
+func TestSlackWorkerResultTextSilentOnSecretaryLookupWithoutEvidenceAnchors(t *testing.T) {
+	job := agentrunner.Job{
+		Status: agentrunner.StatusCompleted,
+		Result: "Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33。",
+		Context: map[string]any{
+			"source":       "persona_delegate_worker",
+			"session_kind": agentrunner.SessionKindSecretaryLookup,
+		},
+	}
+	if got := slackWorkerResultText(job); got != "" {
+		t.Fatalf("slackWorkerResultText() = %q, want silent for secretary_lookup without typed evidence anchors", got)
 	}
 }
 

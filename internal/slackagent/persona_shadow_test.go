@@ -1262,7 +1262,7 @@ HN profile for Johnson8053. Submissions include SQLite is the best home for AI a
 	if got := stringFromAny(runner.startInput.Context["session_kind"]); got != agentrunner.SessionKindSecretaryLookup {
 		t.Fatalf("runner session_kind = %q, want secretary lookup case", got)
 	}
-	if prompt := runner.startInput.Task + "\n" + stringFromAny(runner.startInput.Context["slackAssistantPrompt"]); !strings.Contains(prompt, "Johnson8053") || !strings.Contains(prompt, "github.com/zanwei/design-dna") || !strings.Contains(prompt, "concrete evidence") {
+	if prompt := runner.startInput.Task + "\n" + stringFromAny(runner.startInput.Context["slackAssistantPrompt"]); !strings.Contains(prompt, "Johnson8053") || !strings.Contains(prompt, "github.com/zanwei/design-dna") || !strings.Contains(prompt, "concrete evidence") || !strings.Contains(prompt, `"evidence_anchors"`) {
 		t.Fatalf("secretary lookup prompt missing old-slackd evidence shape:\n%s", prompt)
 	}
 }
@@ -1529,6 +1529,7 @@ func TestStartPersonaDelegatedSecretaryLookupWorkerEnrichesPiWorkerRequest(t *te
 	}
 	for _, want := range []string{
 		"Do not stop at the first profile/article excerpt",
+		`"evidence_anchors"`,
 		"Workspace Memory/person evidence",
 		"memory/people/zanwei.md",
 		"github.com/zanwei/design-dna",

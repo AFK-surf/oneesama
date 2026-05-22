@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -419,6 +420,13 @@ func slackWorkerResultText(job agentrunner.Job) string {
 	if text == "" {
 		return ""
 	}
+	if isPersonaSecretaryLookupWorkerJob(job) {
+		visibleText, anchors, ok := slackSecretaryLookupWorkerVisibleResult(text)
+		if !ok || !slackVisibleReplyHasAllowListEvidenceAnchor(anchors, visibleText) {
+			return ""
+		}
+		text = visibleText
+	}
 	if slackVisibleTextContainsInternalLeak(text) {
 		return ""
 	}
@@ -429,6 +437,40 @@ func slackWorkerResultText(job agentrunner.Job) string {
 		return ""
 	}
 	return text
+}
+
+func slackSecretaryLookupWorkerVisibleResult(text string) (string, []SlackVisibleEvidenceAnchor, bool) {
+	var mapped map[string]any
+	if err := json.Unmarshal([]byte(stripSlackWorkerResultJSONFence(text)), &mapped); err != nil {
+		return "", nil, false
+	}
+	visibleText := strings.TrimSpace(firstNonEmpty(
+		stringFromAny(mapped["visible_text"]),
+		stringFromAny(mapped["visibleText"]),
+		stringFromAny(mapped["message"]),
+		stringFromAny(mapped["text"]),
+		stringFromAny(mapped["summary"]),
+	))
+	anchors := slackVisibleEvidenceAnchorsFromAny(firstNonEmptyAny(
+		mapped["evidence_anchors"],
+		mapped["evidenceAnchors"],
+		mapped["evidence"],
+	))
+	if visibleText == "" || len(anchors) == 0 {
+		return "", anchors, false
+	}
+	return visibleText, anchors, true
+}
+
+func stripSlackWorkerResultJSONFence(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```json")
+		trimmed = strings.TrimPrefix(trimmed, "```JSON")
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimSuffix(trimmed, "```")
+	}
+	return strings.TrimSpace(trimmed)
 }
 
 func slackVisibleTextContainsInternalLeak(text string) bool {

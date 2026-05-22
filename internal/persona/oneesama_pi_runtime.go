@@ -143,13 +143,33 @@ func (r *OneesamaPIRuntime) Decide(ctx context.Context, req Request) (Response, 
 		return Response{}, err
 	}
 	content := strings.TrimSpace(completion.Choices[0].Message.Content)
-	var decoded Response
-	if err := json.Unmarshal([]byte(stripJSONFence(content)), &decoded); err != nil {
+	decoded, err := decodeOneesamaPIResponse(content)
+	if err != nil {
 		r.record(start, err)
 		return Response{}, fmt.Errorf("decode oneesama Pi decision JSON: %w", err)
 	}
 	decoded = normalizeOneesamaPIResponse(req, decoded, r)
 	r.record(start, nil)
+	return decoded, nil
+}
+
+func decodeOneesamaPIResponse(content string) (Response, error) {
+	payload := []byte(stripJSONFence(content))
+	var decoded Response
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return Response{}, err
+	}
+	var aliases struct {
+		EvidenceAnchors []EvidenceAnchor `json:"evidenceAnchors"`
+		Evidence        []EvidenceAnchor `json:"evidence"`
+	}
+	if err := json.Unmarshal(payload, &aliases); err == nil && len(decoded.EvidenceAnchors) == 0 {
+		if len(aliases.EvidenceAnchors) > 0 {
+			decoded.EvidenceAnchors = aliases.EvidenceAnchors
+		} else if len(aliases.Evidence) > 0 {
+			decoded.EvidenceAnchors = aliases.Evidence
+		}
+	}
 	return decoded, nil
 }
 
@@ -218,7 +238,7 @@ Decide exactly one action for this Slack event:
 - memory_write: when the event contains a durable fact/preference worth recording.
 
 Never answer with vague hedging as the main disposition. If your answer would be "maybe / might / seems / 可能 / 大概 / 也许", choose delegate_worker or stay_silent.
-A visible reply must have concrete evidence: a citation, fetched/thread fact, or source-backed workspace memory that adds information beyond re-reading the thread. If you would only synthesize the thread, speculate, or suggest "要不要看看 / maybe check later", choose stay_silent or delegate_worker instead.
+A visible reply must have concrete evidence: a typed evidence_anchors entry from fetched_link, workspace_memory, person_memory, file, image, worker_result, explicit_user_command, or a routing/handoff slack_thread fact. If you cannot attach a typed anchor that adds information beyond re-reading the thread, choose delegate_worker or stay_silent.
 Never post visible self-limitations such as "I can't view this video/file/image" or "我看不了视频/文件/图片". If media content is needed and no reader evidence is present, choose delegate_worker for bounded file/thread retrieval when useful, or stay_silent.
 External URL identity/fact lookup is bounded secretary work, not project debugging: for "who is this / 这是谁 / what is this / 这是啥 / help look at this" with a link, choose delegate_worker with delegation_scope=secretary_lookup unless the thread already has a substantive answer. A teammate saying "don't know / 不认识 / 不知道" is not a substantive answer.
 Do not delegate arbitrary external project debugging. For staging/production/deploy/infra/database/API latency/CI/performance/code investigation in another project, act like a secretary: reply with a concise routing/owner handoff if useful, or stay silent if already handled.
@@ -236,7 +256,8 @@ Return only one JSON object matching:
   "worker_requests": [{"kind":"codex","prompt":"specific delegated task","context":{"delegation_scope":"secretary_lookup"}}],
   "memory_writes": [{"kind":"episode|preference|fact|lesson","text":"durable memory","source_ref":"..."}],
   "confidence": 0.0,
-  "citations": [{"kind":"memory|link|thread","source_ref":"...","snippet":"..."}],
+  "citations": [{"kind":"memory|link|thread","source_ref":"...","snippet":"legacy citation; prefer evidence_anchors"}],
+  "evidence_anchors": [{"kind":"fetched_link|workspace_memory|person_memory|slack_thread|file|image|worker_result|explicit_user_command","source_ref":"stable source ref or URL","quote":"short quoted source fact"}],
   "reason": "short private audit reason"
 }`)
 }
@@ -265,6 +286,10 @@ func normalizeOneesamaPIResponse(req Request, resp Response, runtime *OneesamaPI
 	resp.Reactions = validOneesamaPIReactions(resp.Reactions)
 	resp.WorkerRequests = validOneesamaPIWorkerRequests(resp.WorkerRequests)
 	resp.MemoryWrites = validOneesamaPIMemoryWrites(resp.MemoryWrites)
+	resp.EvidenceAnchors = NormalizeEvidenceAnchors(resp.EvidenceAnchors)
+	if len(resp.EvidenceAnchors) == 0 {
+		resp.EvidenceAnchors = EvidenceAnchorsFromCitations(resp.Citations)
+	}
 	switch resp.Decision {
 	case DecisionReply, DecisionReact, DecisionDelegateWorker, DecisionMemoryWrite, DecisionStaySilent:
 	default:
@@ -294,6 +319,10 @@ func normalizeOneesamaPIResponse(req Request, resp Response, runtime *OneesamaPI
 			}
 			resp.VisibleText = ""
 			resp.Reason = firstNonEmpty(resp.Reason, "reply narrated media/tool limitation instead of producing evidence-backed output")
+		} else if len(resp.EvidenceAnchors) == 0 {
+			resp.Decision = DecisionStaySilent
+			resp.VisibleText = ""
+			resp.Reason = firstNonEmpty(resp.Reason, "reply missing evidence anchors")
 		}
 	}
 	if resp.Decision == DecisionReact && len(resp.Reactions) == 0 {
