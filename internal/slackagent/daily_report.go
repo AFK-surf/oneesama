@@ -76,48 +76,49 @@ type SlackDailyReport struct {
 }
 
 type SlackDailyTriageMetrics struct {
-	Source                  string         `json:"source"`
-	Available               bool           `json:"available"`
-	Error                   string         `json:"error,omitempty"`
-	Runs                    int            `json:"runs"`
-	FailedRuns              int            `json:"failed_runs"`
-	MutatingRuns            int            `json:"mutating_runs"`
-	Mutations               int            `json:"mutations"`
-	ReplyRuns               int            `json:"reply_runs"`
-	ReactionRuns            int            `json:"reaction_runs"`
-	ReactionMutations       int            `json:"reaction_mutations"`
-	CustomEmojiRuns         int            `json:"custom_emoji_runs"`
-	CustomEmojiUses         int            `json:"custom_emoji_uses"`
-	NoActionRuns            int            `json:"no_action_runs"`
-	ParseFallbacks          int            `json:"parse_fallbacks"`
-	PlaceholderSummaries    int            `json:"placeholder_summaries"`
-	InvalidPersonaJSON      int            `json:"invalid_persona_json"`
-	HighContextNoAction     int            `json:"high_context_no_action"`
-	LinkContextRuns         int            `json:"link_context_runs"`
-	LinkContextNoAction     int            `json:"link_context_no_action"`
-	LinkReplies             int            `json:"link_replies"`
-	LowConfidenceNoAction   int            `json:"low_confidence_no_action"`
-	DynamicContextIssues    int            `json:"dynamic_context_issues"`
-	MaxContextBudgetTokens  int            `json:"max_context_budget_tokens,omitempty"`
-	MaxDynamicContextTokens int            `json:"max_dynamic_context_tokens,omitempty"`
-	MaxWorkerResultTokens   int            `json:"max_worker_result_tokens,omitempty"`
-	MaxMemoryEvidenceTokens int            `json:"max_memory_evidence_tokens,omitempty"`
-	IntentActionMismatch    int            `json:"intent_action_mismatch"`
-	DelegateNoVisibleAction int            `json:"delegate_no_visible_action"`
-	HandledByOtherNoAction  int            `json:"handled_by_other_no_action"`
-	ToolCalls               int            `json:"tool_calls"`
-	MemoryLookups           int            `json:"memory_lookups"`
-	ExternalSearches        int            `json:"external_searches"`
-	ThreadFetches           int            `json:"thread_fetches"`
-	PersonaRuns             int            `json:"persona_runs,omitempty"`
-	PersonaFailures         int            `json:"persona_failures,omitempty"`
-	DelegateWorkerJobs      int            `json:"delegate_worker_jobs,omitempty"`
-	TopEmoji                map[string]int `json:"top_emoji,omitempty"`
-	TopCustomEmoji          map[string]int `json:"top_custom_emoji,omitempty"`
-	ReplySamples            []string       `json:"reply_samples,omitempty"`
-	ReactionSamples         []string       `json:"reaction_samples,omitempty"`
-	SkippedSamples          []string       `json:"skipped_samples,omitempty"`
-	FailedSamples           []string       `json:"failed_samples,omitempty"`
+	Source                        string         `json:"source"`
+	Available                     bool           `json:"available"`
+	Error                         string         `json:"error,omitempty"`
+	Runs                          int            `json:"runs"`
+	FailedRuns                    int            `json:"failed_runs"`
+	MutatingRuns                  int            `json:"mutating_runs"`
+	Mutations                     int            `json:"mutations"`
+	ReplyRuns                     int            `json:"reply_runs"`
+	ReactionRuns                  int            `json:"reaction_runs"`
+	ReactionMutations             int            `json:"reaction_mutations"`
+	CustomEmojiRuns               int            `json:"custom_emoji_runs"`
+	CustomEmojiUses               int            `json:"custom_emoji_uses"`
+	NoActionRuns                  int            `json:"no_action_runs"`
+	ParseFallbacks                int            `json:"parse_fallbacks"`
+	PlaceholderSummaries          int            `json:"placeholder_summaries"`
+	InvalidPersonaJSON            int            `json:"invalid_persona_json"`
+	HighContextNoAction           int            `json:"high_context_no_action"`
+	LinkContextRuns               int            `json:"link_context_runs"`
+	LinkContextNoAction           int            `json:"link_context_no_action"`
+	LinkReplies                   int            `json:"link_replies"`
+	LowConfidenceNoAction         int            `json:"low_confidence_no_action"`
+	DynamicContextIssues          int            `json:"dynamic_context_issues"`
+	MaxContextBudgetTokens        int            `json:"max_context_budget_tokens,omitempty"`
+	MaxDynamicContextTokens       int            `json:"max_dynamic_context_tokens,omitempty"`
+	MaxWorkerResultTokens         int            `json:"max_worker_result_tokens,omitempty"`
+	MaxMemoryEvidenceTokens       int            `json:"max_memory_evidence_tokens,omitempty"`
+	IntentActionMismatch          int            `json:"intent_action_mismatch"`
+	DelegateNoVisibleAction       int            `json:"delegate_no_visible_action"`
+	HandledByOtherNoAction        int            `json:"handled_by_other_no_action"`
+	DirectedToActiveAgentNoAction int            `json:"directed_to_active_agent_no_action"`
+	ToolCalls                     int            `json:"tool_calls"`
+	MemoryLookups                 int            `json:"memory_lookups"`
+	ExternalSearches              int            `json:"external_searches"`
+	ThreadFetches                 int            `json:"thread_fetches"`
+	PersonaRuns                   int            `json:"persona_runs,omitempty"`
+	PersonaFailures               int            `json:"persona_failures,omitempty"`
+	DelegateWorkerJobs            int            `json:"delegate_worker_jobs,omitempty"`
+	TopEmoji                      map[string]int `json:"top_emoji,omitempty"`
+	TopCustomEmoji                map[string]int `json:"top_custom_emoji,omitempty"`
+	ReplySamples                  []string       `json:"reply_samples,omitempty"`
+	ReactionSamples               []string       `json:"reaction_samples,omitempty"`
+	SkippedSamples                []string       `json:"skipped_samples,omitempty"`
+	FailedSamples                 []string       `json:"failed_samples,omitempty"`
 }
 
 type SlackDailyTriageComparison struct {
@@ -555,7 +556,11 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		// HandledByOtherNoAction bucket and skip the review-tier high-context
 		// / link-context / low-confidence / intent-mismatch buckets so review
 		// queues stay focused on real "something might be wrong" candidates.
-		handledByOther := len(run.Actions) == 0 && run.Mutations == 0 && triageQualityRunIsHandledByOther(run.Summary) != ""
+		directedToActiveAgent := false
+		if len(run.Actions) == 0 && run.Mutations == 0 {
+			_, directedToActiveAgent = triageQualityRunDirectedToActiveAgent(run)
+		}
+		handledByOther := len(run.Actions) == 0 && run.Mutations == 0 && !directedToActiveAgent && triageQualityRunIsHandledByOther(run.Summary) != ""
 		dynamicContextIssue := len(run.Actions) == 0 && run.Mutations == 0
 		if _, ok := triageQualityRunDynamicContextIssue(run); !ok {
 			dynamicContextIssue = false
@@ -570,7 +575,10 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		if handledByOther {
 			metrics.HandledByOtherNoAction++
 		}
-		if !dynamicContextIssue && !handledByOther && !delegateStartedPending {
+		if directedToActiveAgent {
+			metrics.DirectedToActiveAgentNoAction++
+		}
+		if !dynamicContextIssue && !directedToActiveAgent && !handledByOther && !delegateStartedPending {
 			if inputChars >= triageQualityHighContextInputCharsThreshold && len(run.Actions) == 0 && run.Mutations == 0 {
 				metrics.HighContextNoAction++
 			}
@@ -754,8 +762,8 @@ func formatSlackDailyReportText(report SlackDailyReport) string {
 	}
 	fmt.Fprintf(&b, "- New evidence path: memory %d / external %d / thread %d / delegate %d\n",
 		report.New.MemoryLookups, report.New.ExternalSearches, report.New.ThreadFetches, report.New.DelegateWorkerJobs)
-	fmt.Fprintf(&b, "- Harness drift: dynamic_context_issue %d / delegate_no_visible_action %d / handled_by_other_no_action %d / max_context_tokens %d / max_dynamic_tokens %d / max_worker_result_tokens %d / max_memory_evidence_tokens %d\n",
-		report.New.DynamicContextIssues, report.New.DelegateNoVisibleAction, report.New.HandledByOtherNoAction,
+	fmt.Fprintf(&b, "- Harness drift: dynamic_context_issue %d / delegate_no_visible_action %d / directed_to_active_agent_no_action %d / handled_by_other_no_action %d / max_context_tokens %d / max_dynamic_tokens %d / max_worker_result_tokens %d / max_memory_evidence_tokens %d\n",
+		report.New.DynamicContextIssues, report.New.DelegateNoVisibleAction, report.New.DirectedToActiveAgentNoAction, report.New.HandledByOtherNoAction,
 		report.New.MaxContextBudgetTokens, report.New.MaxDynamicContextTokens, report.New.MaxWorkerResultTokens, report.New.MaxMemoryEvidenceTokens)
 	b.WriteString("\n*Self-iteration notes*\n")
 	fmt.Fprintf(&b, "- Compare approved replies/reactions/skips in the same action buckets as old daily audit; do not invent a separate quality taxonomy.\n")

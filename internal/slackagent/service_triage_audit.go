@@ -177,6 +177,9 @@ func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) S
 		}
 		// Skip handled-by-other runs from review-tier sampling; they belong
 		// in the info tier, not the review tier. Task #285 follow-up #3.
+		if _, ok := triageQualityRunDirectedToActiveAgent(run); ok {
+			continue
+		}
 		if triageQualityRunIsHandledByOther(run.Summary) != "" {
 			continue
 		}
@@ -248,6 +251,21 @@ func buildSlackTriageInfoBuckets(runs []SlackTriageContext, sampleLimit int) Sla
 	})
 	for _, run := range ordered {
 		if len(run.Actions) > 0 || run.Mutations > 0 {
+			continue
+		}
+		if evidence, ok := triageQualityRunDirectedToActiveAgent(run); ok {
+			out.DirectedToActiveAgentNoActionCount++
+			if sampleLimit > 0 && len(out.DirectedToActiveAgentNoActionSamples) < sampleLimit {
+				out.DirectedToActiveAgentNoActionSamples = append(out.DirectedToActiveAgentNoActionSamples, SlackTriageDirectedToActiveAgentSample{
+					Timestamp:       run.Timestamp,
+					RunID:           run.ID,
+					Channels:        run.Channels,
+					Summary:         slackTriageFailureSampleText(run.Summary),
+					MentionedUserID: evidence.MentionedUserID,
+					ActiveMessages:  evidence.ActiveMessages,
+					Evidence:        slackTriageFailureSampleText(evidence.Evidence),
+				})
+			}
 			continue
 		}
 		marker := triageQualityRunIsHandledByOther(run.Summary)

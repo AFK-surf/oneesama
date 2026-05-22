@@ -551,6 +551,125 @@ func triageQualityRunIsHandledByOther(summary string) string {
 	return ""
 }
 
+type triageQualityDirectedToActiveAgentEvidence struct {
+	MentionedUserID string
+	ActiveMessages  int
+	Evidence        string
+}
+
+// triageQualityRunDirectedToActiveAgent detects a stronger structural
+// handled-elsewhere signal than summary markers: the latest Slack activity
+// explicitly mentions a user/agent, and the fetched thread context shows that
+// same actor speaking in the thread. This covers Pi summaries that fall back
+// to generic "foreground triage pending" wording while the dispose decision is
+// still correct.
+func triageQualityRunDirectedToActiveAgent(run SlackTriageContext) (triageQualityDirectedToActiveAgentEvidence, bool) {
+	mentions := triageQualityActivityMentionedUserIDs(run.Digest)
+	if len(mentions) == 0 {
+		return triageQualityDirectedToActiveAgentEvidence{}, false
+	}
+	for _, userID := range mentions {
+		count, evidence := triageQualityThreadSpeakerEvidence(run.Digest, userID)
+		if count > 0 {
+			return triageQualityDirectedToActiveAgentEvidence{
+				MentionedUserID: userID,
+				ActiveMessages:  count,
+				Evidence:        evidence,
+			}, true
+		}
+	}
+	return triageQualityDirectedToActiveAgentEvidence{}, false
+}
+
+func triageQualityActivityMentionedUserIDs(digest string) []string {
+	activity := digest
+	if idx := strings.Index(activity, "Fetched Slack thread context:"); idx >= 0 {
+		activity = activity[:idx]
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(activity, "\n") {
+		// Slack activity lines render as:
+		//   • [ref:m1 ...] <@author>: "<@target> do this"
+		// Only scan the quoted message body; scanning the whole line would
+		// count the author mention as a target.
+		idx := strings.Index(line, ">: \"")
+		if idx < 0 {
+			continue
+		}
+		body := line[idx+len(">: \""):]
+		for _, userID := range triageQualitySlackMentionUserIDs(body) {
+			if seen[userID] {
+				continue
+			}
+			seen[userID] = true
+			out = append(out, userID)
+		}
+	}
+	return out
+}
+
+func triageQualityThreadSpeakerEvidence(digest, userID string) (int, string) {
+	idx := strings.Index(digest, "Fetched Slack thread context:")
+	if idx < 0 {
+		return 0, ""
+	}
+	thread := digest[idx+len("Fetched Slack thread context:"):]
+	count := 0
+	evidence := ""
+	for _, line := range strings.Split(thread, "\n") {
+		idx := strings.Index(line, ">: \"")
+		if idx < 0 {
+			continue
+		}
+		prefix := line[:idx+1]
+		if !triageQualityContainsString(triageQualitySlackMentionUserIDs(prefix), userID) {
+			continue
+		}
+		count++
+		if evidence == "" {
+			evidence = strings.TrimSpace(line)
+		}
+	}
+	return count, evidence
+}
+
+func triageQualitySlackMentionUserIDs(text string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for {
+		start := strings.Index(text, "<@")
+		if start < 0 {
+			break
+		}
+		rest := text[start+2:]
+		end := strings.Index(rest, ">")
+		if end < 0 {
+			break
+		}
+		token := rest[:end]
+		if pipe := strings.Index(token, "|"); pipe >= 0 {
+			token = token[:pipe]
+		}
+		token = strings.TrimSpace(token)
+		if token != "" && !seen[token] {
+			seen[token] = true
+			out = append(out, token)
+		}
+		text = rest[end+1:]
+	}
+	return out
+}
+
+func triageQualityContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 // SlackTriageQualityBucketThresholds is the snapshot exposed via the triage
 // audit endpoint so external tooling (sweep script, monitor, future
 // dashboards) can read the live thresholds instead of hard-coding them.

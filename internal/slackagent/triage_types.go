@@ -391,14 +391,31 @@ type SlackTriageHandledByOtherSample struct {
 	MarkerMatched string   `json:"markerMatched,omitempty"`
 }
 
+// SlackTriageDirectedToActiveAgentSample records a no-action run where the
+// latest user message explicitly mentions an agent / handler and the fetched
+// thread context shows that mentioned actor has already been active in the
+// same thread. This is stronger structural evidence than summary text
+// markers, so it lands in a separate info bucket.
+type SlackTriageDirectedToActiveAgentSample struct {
+	Timestamp       string   `json:"timestamp,omitempty"`
+	RunID           int64    `json:"runId,omitempty"`
+	Channels        []string `json:"channels,omitempty"`
+	Summary         string   `json:"summary,omitempty"`
+	MentionedUserID string   `json:"mentionedUserId,omitempty"`
+	ActiveMessages  int      `json:"activeMessages,omitempty"`
+	Evidence        string   `json:"evidence,omitempty"`
+}
+
 // SlackTriageInfoBuckets aggregates "info tier" (record-keeping only, NOT
 // operator-attention-needed) bucket counts + samples. Operators should be
 // able to glance at info bucket counts to confirm "system is correctly
 // staying silent because work was done elsewhere", without these counts
 // landing in review queues. Task #285 follow-up #3.
 type SlackTriageInfoBuckets struct {
-	HandledByOtherNoActionCount   int                               `json:"handledByOtherNoActionCount"`
-	HandledByOtherNoActionSamples []SlackTriageHandledByOtherSample `json:"handledByOtherNoActionSamples,omitempty"`
+	DirectedToActiveAgentNoActionCount   int                                      `json:"directedToActiveAgentNoActionCount"`
+	DirectedToActiveAgentNoActionSamples []SlackTriageDirectedToActiveAgentSample `json:"directedToActiveAgentNoActionSamples,omitempty"`
+	HandledByOtherNoActionCount          int                                      `json:"handledByOtherNoActionCount"`
+	HandledByOtherNoActionSamples        []SlackTriageHandledByOtherSample        `json:"handledByOtherNoActionSamples,omitempty"`
 }
 
 type SlackTriageAuditRunBrief struct {

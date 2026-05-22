@@ -158,6 +158,39 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
       ($handled // []) as $needles
       | any($needles[]; (. | ascii_downcase) as $needle | $haystack | contains($needle))
     );
+  def slack_mentions($text):
+    [
+      ($text // "")
+      | scan("<@([A-Z0-9]+)(?:\\|[^>]+)?>")
+      | if type == "array" then .[0] else . end
+    ];
+  def slack_activity_text($run):
+    (($run.digest // "") | split("Fetched Slack thread context:")[0] // "");
+  def slack_thread_text($run):
+    (($run.digest // "") | split("Fetched Slack thread context:") | if length > 1 then .[1] else "" end);
+  def slack_activity_mentioned_user_ids($run):
+    [
+      slack_activity_text($run)
+      | split("\n")[]
+      | select(contains(">: \""))
+      | split(">: \"")[1]
+      | slack_mentions(.)[]
+    ] | unique;
+  def slack_thread_speaker_count($run; $user_id):
+    [
+      slack_thread_text($run)
+      | split("\n")[]
+      | select(contains(">: \""))
+      | select((split(">: \"")[0]) as $prefix | ($prefix | contains("<@" + $user_id)))
+    ] | length;
+  def directed_to_active_agent($run):
+    is_no_action($run)
+    and (
+      [
+        slack_activity_mentioned_user_ids($run)[]
+        | select(slack_thread_speaker_count($run; .) > 0)
+      ] | length
+    ) > 0;
   def brief($run):
     {
       id: $run.id,
@@ -204,10 +237,15 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           | map(
               select(
                 is_no_action(.)
+                and (directed_to_active_agent(.) | not)
                 and handled_by_other(.)
               )
               | brief(.)
             )
+        ),
+        directedToActiveAgentNoAction: (
+          $runs
+          | map(select(directed_to_active_agent(.)) | brief(.))
         ),
         delegateStartedPendingWorkerAudit: (
           $runs
@@ -254,6 +292,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
               and (dynamic_context_issue(.) | not)
               and input_chars(.) >= $high_context
               and (is_delegate_started_pending_worker_audit(.) | not)
+              and (directed_to_active_agent(.) | not)
               and (
                 (handled_by_other(.) | not)
               )
@@ -267,6 +306,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
               and (dynamic_context_issue(.) | not)
               and external_links(.) > 0
               and (is_delegate_started_pending_worker_audit(.) | not)
+              and (directed_to_active_agent(.) | not)
               and (
                 (handled_by_other(.) | not)
               )
@@ -280,6 +320,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
               and (dynamic_context_issue(.) | not)
               and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)
               and (is_delegate_started_pending_worker_audit(.) | not)
+              and (directed_to_active_agent(.) | not)
               and (
                 (handled_by_other(.) | not)
               )
@@ -303,6 +344,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
                 # in delegateNoVisibleAction, not narrative mismatch.
                 and (is_delegate_no_visible_action(.) | not)
                 and (is_delegate_started_pending_worker_audit(.) | not)
+                and (directed_to_active_agent(.) | not)
                 and ((($markers // []) | length) > 0)
                 and (
                   (.summary // "") as $raw
@@ -341,7 +383,7 @@ jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
   "review: dynamic_context_issue=\(.review.dynamicContextIssue | length) high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length) delegate_no_visible_action=\(.review.delegateNoVisibleAction | length)",
-  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) fresh_pending=\(.info.freshPendingRuns | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length) delegate_started_pending_worker_audit=\(.info.delegateStartedPendingWorkerAudit | length)"
+  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) fresh_pending=\(.info.freshPendingRuns | length) directed_to_active_agent_no_action=\(.info.directedToActiveAgentNoAction | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length) delegate_started_pending_worker_audit=\(.info.delegateStartedPendingWorkerAudit | length)"
 ' <"${tmpdir}/quality.json"
 
 if jq -e '((.review.dynamicContextIssue | length) + (.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length) + (.review.delegateNoVisibleAction | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then

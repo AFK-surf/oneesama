@@ -1,6 +1,7 @@
 package slackagent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/AFK-surf/oneesama/internal/persona"
@@ -336,6 +337,77 @@ func TestBuildSlackTriageReviewBucketsBucketPrecedence(t *testing.T) {
 	}
 	if len(buckets.IntentActionMismatchSamples) != 1 || buckets.IntentActionMismatchSamples[0].RunID != 2 {
 		t.Fatalf("IntentActionMismatchSamples = %#v, want one row for run 2", buckets.IntentActionMismatchSamples)
+	}
+}
+
+func TestTriageQualityRunDirectedToActiveAgent(t *testing.T) {
+	run := directedToActiveAgentFixtureRun()
+	evidence, ok := triageQualityRunDirectedToActiveAgent(run)
+	if !ok {
+		t.Fatalf("triageQualityRunDirectedToActiveAgent() = false, want true")
+	}
+	if evidence.MentionedUserID != "U0ALY77RMJL" {
+		t.Fatalf("MentionedUserID = %q, want U0ALY77RMJL", evidence.MentionedUserID)
+	}
+	if evidence.ActiveMessages != 2 {
+		t.Fatalf("ActiveMessages = %d, want 2", evidence.ActiveMessages)
+	}
+	if !strings.Contains(evidence.Evidence, "开始做 web 版授权卡片") {
+		t.Fatalf("Evidence = %q, want active agent message", evidence.Evidence)
+	}
+
+	noActive := directedToActiveAgentFixtureRun()
+	noActive.Digest = strings.ReplaceAll(noActive.Digest, "<@U0ALY77RMJL>: \"开始做 web 版授权卡片。\"", "<@U0OTHERAGENT>: \"开始做 web 版授权卡片。\"")
+	noActive.Digest = strings.ReplaceAll(noActive.Digest, "<@U0ALY77RMJL>: \"进度：web host_access 授权卡片正在补。\"", "<@U0OTHERAGENT>: \"进度：web host_access 授权卡片正在补。\"")
+	if _, ok := triageQualityRunDirectedToActiveAgent(noActive); ok {
+		t.Fatalf("triageQualityRunDirectedToActiveAgent(noActive) = true, want false")
+	}
+}
+
+func TestDirectedToActiveAgentInfoBucketPrecedence(t *testing.T) {
+	run := directedToActiveAgentFixtureRun()
+	run.Summary = "active codex already handled; Pi-first foreground triage pending"
+	info := buildSlackTriageInfoBuckets([]SlackTriageContext{run}, 5)
+	if info.DirectedToActiveAgentNoActionCount != 1 {
+		t.Fatalf("DirectedToActiveAgentNoActionCount = %d, want 1", info.DirectedToActiveAgentNoActionCount)
+	}
+	if info.HandledByOtherNoActionCount != 0 {
+		t.Fatalf("HandledByOtherNoActionCount = %d, want 0 (directed bucket wins)", info.HandledByOtherNoActionCount)
+	}
+	if len(info.DirectedToActiveAgentNoActionSamples) != 1 || info.DirectedToActiveAgentNoActionSamples[0].MentionedUserID != "U0ALY77RMJL" {
+		t.Fatalf("Directed samples = %#v, want U0ALY77RMJL sample", info.DirectedToActiveAgentNoActionSamples)
+	}
+
+	metrics := buildSlackDailyTriageMetrics("new", []SlackTriageContext{directedToActiveAgentFixtureRun()}, nil)
+	if metrics.DirectedToActiveAgentNoAction != 1 {
+		t.Fatalf("DirectedToActiveAgentNoAction = %d, want 1", metrics.DirectedToActiveAgentNoAction)
+	}
+	if metrics.HighContextNoAction != 0 {
+		t.Fatalf("HighContextNoAction = %d, want 0", metrics.HighContextNoAction)
+	}
+}
+
+func directedToActiveAgentFixtureRun() SlackTriageContext {
+	return SlackTriageContext{
+		ID:        1779432596066002,
+		Timestamp: "2026-05-22T06:49:56.066854Z",
+		Status:    "ok",
+		Channels:  []string{"C09LB7V1WGJ"},
+		Summary:   "Pi-first foreground triage pending for 1 Slack message(s) in C09LB7V1WGJ",
+		Digest: `=== Slack Activity ===
+
+#C09LB7V1WGJ
+  • [ref:m1 msg_ts:1779432293.714139] <@U09KY0GE28K>: "<@U0AMN6TKVJ8> approve，<@U0ALY77RMJL> 推进合并" [reply in thread_ts:1779371525.004829]
+
+Fetched Slack thread context:
+thread C09LB7V1WGJ/1779371525.004829 (51 messages):
+• [msg_ts:1779371525.004829] <@U09KY0GE28K>: "<@U0ALY77RMJL> 看看为什么现在 agent 发起 local 环境执行权限申请的时候不会在 conversation 发出卡片"
+• [msg_ts:1779417418.980639] <@U0ALY77RMJL>: "开始做 web 版授权卡片。"
+• [msg_ts:1779418323.041209] <@U0ALY77RMJL>: "进度：web host_access 授权卡片正在补。"
+• [msg_ts:1779432293.714139] <@U09KY0GE28K>: "<@U0AMN6TKVJ8> approve，<@U0ALY77RMJL> 推进合并"`,
+		Metadata: map[string]any{
+			"input_context_chars": 9225,
+		},
 	}
 }
 
