@@ -40,6 +40,17 @@ func (s *Service) StartJoinSetupSocketInteraction(ctx context.Context, command A
 	})
 }
 
+func (s *Service) StartJoinSetupCaptionSocketInteraction(ctx context.Context, response AvatarCommandResponse, responseURL string) {
+	if strings.TrimSpace(responseURL) == "" {
+		return
+	}
+	s.LaunchAsyncInteraction(ctx, "join_setup_caption_update", func(detached context.Context) {
+		if err := postSlackInteractionResponse(detached, responseURL, response); err != nil {
+			s.logger.Warn("slack join setup caption response update failed", "error", err)
+		}
+	})
+}
+
 func (s *Service) startJoinSetupInteraction(ctx context.Context, command AvatarCommandInput, responseURL string, mode joinSetupInteractionMode) AvatarCommandResponse {
 	parsed := parseAvatarCommand(command.Text)
 	cardID := strings.Join([]string{
@@ -114,14 +125,14 @@ func buildJoinSetupProgressBlocks(parsed parsedAvatarCommand) []map[string]any {
 			"type": "section",
 			"text": map[string]any{
 				"type": "mrkdwn",
-				"text": fmt.Sprintf(":hourglass_flowing_sand: *Joining Google Meet*\n<%s|Open meeting>", parsed.MeetURL),
+				"text": fmt.Sprintf("*Joining Google Meet*\n<%s|Open meeting>", parsed.MeetURL),
 			},
 		},
 		{
 			"type": "context",
 			"elements": []map[string]any{{
 				"type": "mrkdwn",
-				"text": fmt.Sprintf(":closed_caption: %s captions · realtime %s · %s", firstNonEmpty(parsed.CaptionLanguage, defaultCaptionLanguage), realtime, mode),
+				"text": fmt.Sprintf("Captions: %s · realtime %s · %s", firstNonEmpty(parsed.CaptionLanguage, defaultCaptionLanguage), realtime, mode),
 			}},
 		},
 	}

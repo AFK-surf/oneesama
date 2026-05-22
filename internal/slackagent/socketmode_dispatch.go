@@ -138,6 +138,17 @@ func (r *SocketModeRunner) handleInteractive(ctx context.Context, payload []byte
 		r.service.StartJoinSetupSocketInteraction(context.WithoutCancel(ctx), command, interaction.ResponseURL)
 		return ack(nil)
 	}
+	if response, ok := joinSetupCaptionSelectionResponse(interaction); ok {
+		r.service.logger.Info(
+			"slack socket interaction join setup caption update",
+			"action_id", actionID,
+			"channel", slackInteractionChannelID(interaction),
+			"thread_ts", slackInteractionThreadTS(interaction),
+			"response_url_present", strings.TrimSpace(interaction.ResponseURL) != "",
+		)
+		r.service.StartJoinSetupCaptionSocketInteraction(context.WithoutCancel(ctx), response, interaction.ResponseURL)
+		return ack(nil)
+	}
 	return ack(r.service.HandleSlackInteraction(context.WithoutCancel(ctx), interaction))
 }
 

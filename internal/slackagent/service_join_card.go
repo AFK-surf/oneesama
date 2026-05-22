@@ -158,7 +158,7 @@ func joinSetupContextBlock(captionLanguage string) map[string]any {
 		"type": "context",
 		"elements": []map[string]any{{
 			"type": "mrkdwn",
-			"text": fmt.Sprintf(":closed_caption: %s captions · :page_facing_up: transcript, audio, and Canvas notes", firstNonEmpty(captionLanguage, defaultCaptionLanguage)),
+			"text": fmt.Sprintf("Captions: %s · transcript, audio, and Canvas notes", firstNonEmpty(captionLanguage, defaultCaptionLanguage)),
 		}},
 	}
 }
@@ -271,6 +271,81 @@ func joinSetupCommandInputFromInteraction(payload SlackInteractionPayload) (Avat
 	input.ThreadTS = firstNonEmpty(input.ThreadTS, value.SourceThreadTS)
 	input.Text = strings.Join(command, " ")
 	return input, true
+}
+
+func joinSetupCaptionSelectionResponse(payload SlackInteractionPayload) (AvatarCommandResponse, bool) {
+	if len(payload.Actions) == 0 {
+		return AvatarCommandResponse{}, false
+	}
+	action := payload.Actions[0]
+	if strings.TrimSpace(action.ActionID) != joinSetupCaptionActionID {
+		return AvatarCommandResponse{}, false
+	}
+	captionLanguage := firstNonEmpty(
+		selectedOptionValue(action.SelectedOption),
+		joinSetupSelectedCaptionLanguage(payload),
+		defaultCaptionLanguage,
+	)
+	value, ok := joinSetupActionValueFromPayloadMessage(payload)
+	if !ok || strings.TrimSpace(value.MeetingURL) == "" {
+		return AvatarCommandResponse{
+			OK:              true,
+			Text:            "Join setup updated.",
+			ReplaceOriginal: false,
+		}, true
+	}
+	card := joinSetupCardContext{
+		CardID:    value.CardID,
+		ChannelID: firstNonEmpty(value.SourceChannelID, slackInteractionChannelID(payload)),
+		ThreadTS:  firstNonEmpty(value.SourceThreadTS, slackInteractionThreadTS(payload)),
+		MessageTS: value.SourceMessageTS,
+	}
+	parsed := parsedAvatarCommand{
+		Action:          "join",
+		MeetURL:         value.MeetingURL,
+		ValidMeetURL:    slackMeetURLPattern.MatchString(value.MeetingURL),
+		SessionID:       value.SessionID,
+		BotName:         value.BotName,
+		DryRunJoiner:    value.DryRun,
+		RealtimeJoin:    value.Realtime,
+		ConfirmJoin:     value.ConfirmJoin,
+		CaptionLanguage: captionLanguage,
+	}
+	return AvatarCommandResponse{
+		OK:              true,
+		Text:            fmt.Sprintf("Join Google Meet: %s", value.MeetingURL),
+		Blocks:          buildJoinSetupBlocks(parsed, captionLanguage, card),
+		ReplaceOriginal: true,
+		Metadata: map[string]any{
+			"join_setup": map[string]any{
+				"meeting_url":      value.MeetingURL,
+				"caption_language": captionLanguage,
+				"status":           "caption_updated",
+				"card_id":          value.CardID,
+			},
+		},
+	}, true
+}
+
+func joinSetupActionValueFromPayloadMessage(payload SlackInteractionPayload) (joinSetupActionValue, bool) {
+	if payload.Message == nil {
+		return joinSetupActionValue{}, false
+	}
+	for _, block := range payload.Message.Blocks {
+		for _, element := range block.Elements {
+			if strings.TrimSpace(element.Value) == "" {
+				continue
+			}
+			var value joinSetupActionValue
+			if err := json.Unmarshal([]byte(element.Value), &value); err != nil {
+				continue
+			}
+			if value.Kind == joinSetupKind && strings.TrimSpace(value.MeetingURL) != "" {
+				return value, true
+			}
+		}
+	}
+	return joinSetupActionValue{}, false
 }
 
 func joinSetupInteractionActionValue(payload SlackInteractionPayload, action SlackInteractionAction) string {

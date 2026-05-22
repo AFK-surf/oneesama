@@ -100,7 +100,7 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 	case immediateBody := <-finalResponseCh:
 		if !strings.Contains(immediateBody, `"replace_original":true`) ||
 			!strings.Contains(immediateBody, "Bot is joining *Google Meet*") ||
-			!strings.Contains(immediateBody, ":hourglass_flowing_sand: *Joining Google Meet*") ||
+			!strings.Contains(immediateBody, "*Joining Google Meet*") ||
 			strings.Contains(immediateBody, `"response_type":"ephemeral"`) ||
 			strings.Contains(immediateBody, "Joining "+meetURL) {
 			t.Fatalf("immediate body = %s, want compact response_url card replacement", immediateBody)
@@ -145,6 +145,87 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 		t.Fatalf("extra thread posts = %#v, want joined only through response_url card update", calls)
 	}
 	assertStatusCalls(t, assistant.Calls(), []string{"Recording meeting..."})
+}
+
+func TestSocketModeInteractiveCaptionSelectUpdatesCardAckFirst(t *testing.T) {
+	meetURL := "https://meet.google.com/abc-defg-hij"
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		t.Fatalf("meeting agent should not be called by caption selection: %s", request.URL.Path)
+	}))
+	defer meetingAgent.Close()
+
+	responseURLCh := make(chan string, 1)
+	responseURLServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		raw, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read response_url body: %v", err)
+		}
+		responseURLCh <- string(raw)
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer responseURLServer.Close()
+
+	service := NewService(Config{
+		MeetingAgentURL: meetingAgent.URL,
+		Slack: appconfig.SlackConfig{
+			InternalAuthKey: "secret-key",
+		},
+	})
+	runner := NewSocketModeRunner(SocketModeRunnerConfig{
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Service:  service,
+		AppToken: "app-token",
+	})
+	blocks, err := json.Marshal(buildJoinSetupBlocks(
+		parsedAvatarCommand{MeetURL: meetURL, ValidMeetURL: true},
+		"English",
+		joinSetupCardContext{
+			CardID:    "join-card:C123:123.456:https___meet.google.com_abc-defg-hij",
+			ChannelID: "C123",
+			ThreadTS:  "123.456",
+			MessageTS: "123.456",
+		},
+	))
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	rawPayload := fmt.Sprintf(`{
+		"team":{"id":"T123"},
+		"channel":{"id":"C123"},
+		"user":{"id":"U123","username":"peng"},
+		"message":{"ts":"123.789","thread_ts":"123.456","blocks":%s},
+		"response_url":%q,
+		"actions":[{"action_id":%q,"selected_option":{"value":"Chinese (Simplified)"}}]
+	}`, string(blocks), responseURLServer.URL, joinSetupCaptionActionID)
+
+	var ackPayload any
+	err = runner.handleEnvelope(context.Background(), SlackSocketEnvelope{
+		Type:       "interactive",
+		EnvelopeID: "EnInteractiveCaptionSelect",
+		Payload:    []byte(rawPayload),
+	}, func(payload any) error {
+		ackPayload = payload
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handle envelope: %v", err)
+	}
+	if ackPayload != nil {
+		t.Fatalf("ack payload = %#v, want nil socket envelope ack", ackPayload)
+	}
+
+	select {
+	case body := <-responseURLCh:
+		if !strings.Contains(body, `"replace_original":true`) ||
+			!strings.Contains(body, "Chinese (Simplified)") ||
+			strings.Contains(body, "Action received.") ||
+			strings.Contains(body, ":closed_caption:") ||
+			strings.Contains(body, ":page_facing_up:") {
+			t.Fatalf("response_url body = %s, want caption card update without raw emoji codes", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for caption selection response_url update")
+	}
 }
 
 func TestSocketModeInteractiveJoinSetupAcksBeforeResponseURLUpdate(t *testing.T) {

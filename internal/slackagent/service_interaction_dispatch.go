@@ -14,6 +14,10 @@ func (s *Service) HandleSlackInteraction(ctx context.Context, payload SlackInter
 		return s.HandleReplyFeedbackInteraction(ctx, *replyFeedback)
 	}
 
+	if response, ok := joinSetupCaptionSelectionResponse(payload); ok {
+		return response
+	}
+
 	if command, ok := joinSetupCommandInputFromInteraction(payload); ok {
 		return s.StartJoinSetupInteraction(ctx, command, payload.ResponseURL)
 	}

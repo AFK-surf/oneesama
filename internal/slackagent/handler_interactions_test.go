@@ -159,7 +159,7 @@ func TestHandleInteractionJoinSetupCallsMeetingAgentWithSelectedOptions(t *testi
 	}
 	if !strings.Contains(response.Body.String(), `"replace_original":true`) ||
 		!strings.Contains(response.Body.String(), "Bot is joining *Google Meet*") ||
-		!strings.Contains(response.Body.String(), ":hourglass_flowing_sand: *Joining Google Meet*") ||
+		!strings.Contains(response.Body.String(), "*Joining Google Meet*") ||
 		strings.Contains(response.Body.String(), `"response_type":"ephemeral"`) ||
 		strings.Contains(response.Body.String(), "Joining "+meetURL) {
 		t.Fatalf("body = %s, want compact immediate card replacement", response.Body.String())
@@ -201,6 +201,60 @@ func TestHandleInteractionJoinSetupCallsMeetingAgentWithSelectedOptions(t *testi
 		t.Fatal("timed out waiting for response_url update")
 	}
 	assertStatusCalls(t, assistant.Calls(), []string{"Recording meeting..."})
+}
+
+func TestHandleInteractionJoinSetupCaptionSelectionUpdatesCard(t *testing.T) {
+	meetURL := "https://meet.google.com/abc-defg-hij"
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		t.Fatalf("meeting agent should not be called by caption selection: %s", request.URL.Path)
+	}))
+	defer meetingAgent.Close()
+	router := newTestRouter(t, Config{
+		MeetingAgentURL: meetingAgent.URL,
+		Slack: appconfig.SlackConfig{
+			SigningSecret:   "secret",
+			InternalAuthKey: "secret-key",
+		},
+	})
+	blocks, err := json.Marshal(buildJoinSetupBlocks(
+		parsedAvatarCommand{MeetURL: meetURL, ValidMeetURL: true},
+		"English",
+		joinSetupCardContext{
+			CardID:    "join-card:C123:123.456:https___meet.google.com_abc-defg-hij",
+			ChannelID: "C123",
+			ThreadTS:  "123.456",
+			MessageTS: "123.456",
+		},
+	))
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	rawPayload := fmt.Sprintf(`{
+		"team":{"id":"T123"},
+		"channel":{"id":"C123"},
+		"user":{"id":"U123","username":"peng"},
+		"message":{"ts":"123.789","thread_ts":"123.456","blocks":%s},
+		"actions":[{"action_id":%q,"selected_option":{"value":"Chinese (Simplified)"}}]
+	}`, string(blocks), joinSetupCaptionActionID)
+	payload := signAvatarCommand(t, "secret", url.Values{"payload": {rawPayload}})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/interactions", bytes.NewBufferString(payload.body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
+	request.Header.Set("X-Slack-Signature", payload.signature)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"replace_original":true`) ||
+		!strings.Contains(body, "Chinese (Simplified)") ||
+		strings.Contains(body, "Action received.") ||
+		strings.Contains(body, ":closed_caption:") ||
+		strings.Contains(body, ":page_facing_up:") {
+		t.Fatalf("body = %s, want card update without empty-action fallback or raw emoji codes", body)
+	}
 }
 
 func TestHandleInteractionJoinSetupFailureKeepsMetadataNilSafe(t *testing.T) {
