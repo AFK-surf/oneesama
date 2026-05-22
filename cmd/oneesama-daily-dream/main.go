@@ -1,7 +1,7 @@
-// Command oneesama-daily-dream builds review-gated Daily Dream memory
-// candidates from learning-signal NDJSON. It defaults to dry-run stdout output:
-// operators can inspect candidate clusters before any memory promotion path is
-// added or scheduled.
+// Command oneesama-daily-dream builds review-gated Daily Dream memory and
+// skill/policy candidates from learning-signal NDJSON. It defaults to dry-run
+// stdout output: operators can inspect candidate clusters before any promotion
+// path is added or scheduled.
 package main
 
 import (
@@ -53,12 +53,16 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		Date:                          date,
 		MinSignalsForNormalConfidence: minSignals,
 	})
-	markdown := slackagent.RenderSlackDreamCandidatesMarkdown(candidates)
+	skillPolicyCandidates := slackagent.BuildSlackSkillPolicyCandidates(signals, slackagent.SlackSkillPolicyCandidateOptions{
+		Date:                          date,
+		MinSignalsForNormalConfidence: minSignals,
+	})
+	markdown := slackagent.RenderSlackDailyDreamMarkdown(candidates, skillPolicyCandidates)
 	if err := writeOutput(outputPath, stdout, markdown); err != nil {
 		fmt.Fprintf(stderr, "write output: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stderr, "daily dream dry-run: signals=%d candidates=%d output=%s\n", len(signals), len(candidates), firstNonEmpty(strings.TrimSpace(outputPath), "-"))
+	fmt.Fprintf(stderr, "daily dream dry-run: signals=%d candidates=%d skill_policy_candidates=%d output=%s\n", len(signals), len(candidates), len(skillPolicyCandidates), firstNonEmpty(strings.TrimSpace(outputPath), "-"))
 	return 0
 }
 

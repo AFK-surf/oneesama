@@ -10,6 +10,7 @@ func TestRunDailyDreamDryRunPrintsCandidates(t *testing.T) {
 	input := strings.Join([]string{
 		`{"source":"approval_card","reason_code":"missing_evidence_anchor","proposed_action":"gate_fixture","subject":"visible_reply_quality","source_type":"approval_card","refs":["slack:C1/100"],"content":"missing source"}`,
 		`{"source":"triage_sweep","reason_code":"missing_evidence_anchor","proposed_action":"gate_fixture","subject":"visible_reply_quality","source_type":"approval_card","refs":["sweep:100"],"content":"shadow block"}`,
+		`{"source":"approval_card","reason_code":"missing_evidence_anchor","proposed_action":"gate_fixture","target":"visible_reply_gate","subject":"visible_reply_quality","source_type":"approval_card","refs":["approval:100"],"content":"promote to allow-list canary"}`,
 	}, "\n")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -20,10 +21,12 @@ func TestRunDailyDreamDryRunPrintsCandidates(t *testing.T) {
 	}
 	if output := stdout.String(); !strings.Contains(output, "Oneesama Daily Dream Candidates") ||
 		!strings.Contains(output, "visible_reply_quality|missing_evidence_anchor|approval_card|gate_fixture") ||
-		!strings.Contains(output, "Review notes: repeated_pattern") {
+		!strings.Contains(output, "Review notes: repeated_pattern") ||
+		!strings.Contains(output, "Oneesama Skill/Policy Candidates") ||
+		!strings.Contains(output, "Target: visible_reply_gate") {
 		t.Fatalf("stdout = %q, want repeated dream candidate", output)
 	}
-	if !strings.Contains(stderr.String(), "daily dream dry-run: signals=2 candidates=1") {
+	if !strings.Contains(stderr.String(), "daily dream dry-run: signals=3 candidates=1 skill_policy_candidates=1") {
 		t.Fatalf("stderr = %q, want dry-run summary", stderr.String())
 	}
 }

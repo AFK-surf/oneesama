@@ -10,8 +10,10 @@ func slackLearningSignalFromVisibleReplySample(sample SlackVisibleReplyQualitySa
 	verdict := firstNonEmpty(strings.TrimSpace(sample.ApprovalDecision), "pending")
 	reason := firstNonEmpty(strings.TrimSpace(sample.RejectReason), strings.TrimSpace(sample.BlockReason), strings.TrimSpace(sample.FinalOutcome), "visible_reply_review")
 	proposedAction := "memory_candidate"
+	target := ""
 	if verdict == "rejected" || verdict == "blocked" {
 		proposedAction = "gate_fixture"
+		target = "visible_reply_gate"
 	}
 	refs := []string{}
 	if sample.PendingActionID != 0 {
@@ -33,6 +35,7 @@ func slackLearningSignalFromVisibleReplySample(sample SlackVisibleReplyQualitySa
 		Refs:           refs,
 		ReasonCode:     reason,
 		ProposedAction: proposedAction,
+		Target:         target,
 		Subject:        "visible_reply_quality",
 		SourceType:     firstNonEmpty(strings.TrimSpace(sample.Source), slackLearningSourceApprovalCard),
 		Content:        sample.ProposedMessage,
@@ -58,6 +61,7 @@ func slackLearningSignalFromVisibleReplyCanaryCase(candidate SlackVisibleReplyAl
 		Refs:           []string{"visible_reply_allow_list_canary:" + candidate.Name},
 		ReasonCode:     reason,
 		ProposedAction: "gate_fixture",
+		Target:         "visible_reply_gate",
 		Subject:        "visible_reply_allow_list",
 		SourceType:     slackLearningSourceAllowCanary,
 		Content:        candidate.Name,
@@ -90,6 +94,7 @@ func SlackLearningSignalFromBenchmark(caseID string, verdict string, reasonCode 
 		Refs:           append([]string{"benchmark_case:" + strings.TrimSpace(caseID)}, refs...),
 		ReasonCode:     strings.TrimSpace(reasonCode),
 		ProposedAction: "benchmark_case",
+		Target:         "benchmark_case",
 		Subject:        strings.TrimSpace(caseID),
 		SourceType:     slackLearningSourceBenchmark,
 		Content:        strings.TrimSpace(summary),

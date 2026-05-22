@@ -23,6 +23,7 @@ type SlackDreamSignal struct {
 	Refs           []string `json:"refs,omitempty"`
 	ReasonCode     string   `json:"reason_code,omitempty"`
 	ProposedAction string   `json:"proposed_action,omitempty"`
+	Target         string   `json:"target,omitempty"`
 	Subject        string   `json:"subject,omitempty"`
 	SourceType     string   `json:"source_type,omitempty"`
 	Content        string   `json:"content,omitempty"`
@@ -173,6 +174,7 @@ func normalizeSlackDreamSignal(signal SlackDreamSignal) SlackDreamSignal {
 	signal.Verdict = strings.TrimSpace(signal.Verdict)
 	signal.ReasonCode = strings.TrimSpace(signal.ReasonCode)
 	signal.ProposedAction = strings.TrimSpace(signal.ProposedAction)
+	signal.Target = strings.TrimSpace(signal.Target)
 	signal.Subject = strings.TrimSpace(signal.Subject)
 	signal.SourceType = strings.TrimSpace(signal.SourceType)
 	signal.Content = truncateSlackContextText(strings.TrimSpace(signal.Content), 500)
