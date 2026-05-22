@@ -779,7 +779,7 @@ func personaDelegatedWorkerSlackContext(channelID string, threadTS string, messa
 	}
 	prompt := buildSlackAssistantThreadMessage(rich)
 	if len(media.Images) > 0 {
-		prompt += "\n\n---\nImage reading rule:\nThis delegated Slack task includes image attachment file_ids. If the answer depends on image contents, request them with slack_api(method=\"slack.fetchImage\", params={\"file_id\":\"F...\"}) before answering. If image evidence cannot be fetched or remains insufficient, return no visible result instead of guessing."
+		prompt += "\n\n---\nImage reading rule:\nThis delegated Slack task includes image attachment file_ids. If the answer depends on image contents, request them with slack_api(method=\"slack.fetchImage\", params={\"file_id\":\"F...\"}) before answering, then inspect the returned local_path. The Slack URL in the tool result is protected and requires a bot token; do not curl it directly. If image evidence cannot be fetched or remains insufficient, return no visible result instead of guessing."
 	}
 	if delegatedSlackFilesIncludeNonImageMedia(media.Files) {
 		prompt += "\n\n---\nFile reading rule:\nThis delegated Slack task includes non-image media/file attachments. If the answer depends on video, audio, PDF, archive, or other file contents, request the file with slack_api(method=\"slack.fetchFile\", params={\"file_id\":\"F...\"}) before answering. The result may include a local_path for a worker-side reader. Do not answer by saying you cannot view the media. If file evidence cannot be fetched or remains insufficient, return no visible result instead of guessing."

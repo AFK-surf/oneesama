@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 )
@@ -96,34 +97,46 @@ func (t *slackAPITool) actionFetchImage(ctx context.Context, params map[string]a
 		}
 	}
 
+	download := boolFromAny(params["download"], true)
 	payload := map[string]any{
-		"ok":         true,
-		"file_id":    info.File.ID,
-		"title":      firstNonEmpty(info.File.Title, info.File.Name),
-		"name":       info.File.Name,
-		"permalink":  info.File.Permalink,
-		"mimetype":   info.File.Mimetype,
-		"filetype":   info.File.Filetype,
-		"size_bytes": info.File.Size,
-		"url":        downloadURL,
+		"ok":                true,
+		"file_id":           info.File.ID,
+		"title":             firstNonEmpty(info.File.Title, info.File.Name),
+		"name":              info.File.Name,
+		"permalink":         info.File.Permalink,
+		"mimetype":          info.File.Mimetype,
+		"filetype":          info.File.Filetype,
+		"size_bytes":        info.File.Size,
+		"url":               downloadURL,
+		"url_access":        "slack_bot_token_required",
+		"worker_hint":       "Use local_path for worker-side image inspection; the Slack url is protected and requires the bot token.",
+		"downloaded":        false,
+		"inline":            false,
+		"local_path":        "",
+		"downloaded_bytes":  0,
+		"download_disabled": !download,
 	}
 
-	if inline {
-		raw, downloadErr := t.downloadImageBytes(ctx, downloadURL)
+	if download {
+		localPath, downloadedBytes, downloadErr := t.downloadSlackFileToLocalArtifact(ctx, info.File, downloadURL, defaultImageDownloadByteCap)
 		if downloadErr != nil {
 			return slackAPIToolResult{Success: false, Text: "Failed to download image: " + downloadErr.Error()}
 		}
-		if int64(len(raw)) > inlineBudget {
-			payload["inline"] = false
-			payload["inline_skipped_reason"] = fmt.Sprintf("image %d bytes exceeds inline budget %d; use the url field to fetch externally", len(raw), inlineBudget)
-		} else {
+		payload["downloaded"] = true
+		payload["downloaded_bytes"] = downloadedBytes
+		payload["local_path"] = localPath
+		if inline && downloadedBytes <= inlineBudget {
+			raw, readErr := os.ReadFile(localPath)
+			if readErr != nil {
+				return slackAPIToolResult{Success: false, Text: "Failed to inline downloaded image: " + readErr.Error()}
+			}
 			payload["inline"] = true
 			payload["base64"] = base64.StdEncoding.EncodeToString(raw)
 			payload["base64_bytes"] = len(payload["base64"].(string))
 			payload["mime_data_url"] = fmt.Sprintf("data:%s;base64,%s", firstNonEmpty(info.File.Mimetype, "application/octet-stream"), payload["base64"])
+		} else if inline {
+			payload["inline_skipped_reason"] = fmt.Sprintf("image %d bytes exceeds inline budget %d; use local_path", downloadedBytes, inlineBudget)
 		}
-	} else {
-		payload["inline"] = false
 	}
 
 	result, jsonErr := slackAPIJSONTextResult(payload)

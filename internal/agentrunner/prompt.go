@@ -60,9 +60,9 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 		)
 	}
 	sections = append(sections,
-		"Mode: " + defaultMode(input.Mode),
-		"Allow code changes: " + yesNo(input.AllowCodeChanges),
-		"Task: " + strings.TrimSpace(input.Task),
+		"Mode: "+defaultMode(input.Mode),
+		"Allow code changes: "+yesNo(input.AllowCodeChanges),
+		"Task: "+strings.TrimSpace(input.Task),
 	)
 	if strings.TrimSpace(assistantContext) != "" {
 		sections = append(sections, "Slack thread context:\n"+strings.TrimSpace(assistantContext))
@@ -115,7 +115,7 @@ When a reasonable default exists, act on it instead of asking to clarify.
 - When thread context is insufficient, request slack_api fetch/read evidence for the full thread or linked Slack/Canvas/image content.
 - If a user shares a Slack thread link, canvas, image, or external URL and asks about it, use injected context or request dispatcher evidence before answering.
 - Slack is not MCP-backed here. When Slack-specific behavior is unclear, read workspace docs before guessing.
-- Fetch transcript image references like "[image: ... file_id=F123]" by requesting slack_api(method="slack.fetchImage", params={"file_id":"F123"}) only when relevant.
+- Fetch transcript image references like "[image: ... file_id=F123]" by requesting slack_api(method="slack.fetchImage", params={"file_id":"F123"}) only when relevant; inspect the returned local_path rather than curling the protected Slack URL.
 
 ## Local execution and safety
 - You are running on a configured local host. If bash/read/edit/write/python tools are present, they can access the local runtime directly.

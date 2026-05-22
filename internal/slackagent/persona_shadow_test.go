@@ -1191,7 +1191,7 @@ func TestSlackTriagePiFirstLiveDelegateWorkerCarriesImageFetchContext(t *testing
 		t.Fatalf("metadata = %#v, want delegate decision + one worker job", updated.Metadata)
 	}
 	prompt := stringFromAny(runner.startInput.Context["slackAssistantPrompt"])
-	for _, want := range []string{"slack.fetchImage", "F0B540Q5J5Q", "F0B55RA382V", "IMG_0083.jpg", "[image:"} {
+	for _, want := range []string{"slack.fetchImage", "local_path", "do not curl", "F0B540Q5J5Q", "F0B55RA382V", "IMG_0083.jpg", "[image:"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("slackAssistantPrompt missing %q:\n%s", want, prompt)
 		}

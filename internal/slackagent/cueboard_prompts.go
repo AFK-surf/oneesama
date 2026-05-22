@@ -147,7 +147,7 @@ When a reasonable default exists, act on it instead of asking to clarify.
 - When thread context is insufficient, read the full thread first, then recent channel messages, linked URLs, and referenced issues/events/designs.
 - If a user shares a Slack thread link, canvas, image, or external URL and asks about it, fetch it before answering.
 - Slack is not MCP-backed here. When Slack-specific behavior is unclear, read workspace docs before guessing.
-- Fetch transcript image references like "[image: ... file_id=F123]" with slack_api(method="slack.fetchImage", params={"file_id":"F123"}) only when relevant.
+- Fetch transcript image references like "[image: ... file_id=F123]" with slack_api(method="slack.fetchImage", params={"file_id":"F123"}) only when relevant; inspect the returned local_path rather than curling the protected Slack URL.
 - Fetch non-image Slack file references (video, audio, PDF, archives, documents) with slack_api(method="slack.fetchFile", params={"file_id":"F123"}) when the answer depends on their contents; use the returned local_path with an appropriate reader, and stay silent if the file cannot be read safely.
 
 ## Local execution and safety
