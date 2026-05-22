@@ -160,6 +160,12 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
 		result, dispositionToolCalls := applyPersonaSecretaryLookupDisposition(result, request)
+		var completedToolCalls []SlackTriageToolCall
+		result, completedToolCalls = applyPersonaCompletedDelegationDisposition(result)
+		dispositionToolCalls = append(dispositionToolCalls, completedToolCalls...)
+		var ambientToolCalls []SlackTriageToolCall
+		result, ambientToolCalls = applyPersonaAmbientDelegationDisposition(result, messages, s.botUserID)
+		dispositionToolCalls = append(dispositionToolCalls, ambientToolCalls...)
 		var cannedToolCalls []SlackTriageToolCall
 		result, cannedToolCalls = applyPersonaCannedRefusalDisposition(result)
 		dispositionToolCalls = append(dispositionToolCalls, cannedToolCalls...)
@@ -201,6 +207,12 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
 		result, dispositionToolCalls := applyPersonaSecretaryLookupDisposition(result, request)
+		var completedToolCalls []SlackTriageToolCall
+		result, completedToolCalls = applyPersonaCompletedDelegationDisposition(result)
+		dispositionToolCalls = append(dispositionToolCalls, completedToolCalls...)
+		var ambientToolCalls []SlackTriageToolCall
+		result, ambientToolCalls = applyPersonaAmbientDelegationDisposition(result, messages, s.botUserID)
+		dispositionToolCalls = append(dispositionToolCalls, ambientToolCalls...)
 		var cannedToolCalls []SlackTriageToolCall
 		result, cannedToolCalls = applyPersonaCannedRefusalDisposition(result)
 		dispositionToolCalls = append(dispositionToolCalls, cannedToolCalls...)
@@ -294,6 +306,144 @@ func (s *Service) applyPersonaSecretaryDelegationPolicy(result SlackPersonaShado
 		}
 	}
 	return result, toolCalls
+}
+
+func applyPersonaCompletedDelegationDisposition(result SlackPersonaShadowResult) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionDelegateWorker || len(result.workerRecords) == 0 {
+		return result, nil
+	}
+	marker := personaCompletedDelegationMarker(result)
+	if marker == "" {
+		return result, nil
+	}
+	result.Decision = persona.DecisionStaySilent
+	result.VisibleText = ""
+	result.workerRecords = nil
+	result.WorkerRequests = nil
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "delegate_worker suppressed because the thread is already handled"))
+	return result, []SlackTriageToolCall{{
+		Tool:    "agent_runner",
+		Action:  "delegate_worker_already_handled_silent",
+		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+		Success: true,
+		Brief:   "Persona delegate_worker suppressed because reason says no further action",
+		Result:  marker,
+	}}
+}
+
+func personaCompletedDelegationMarker(result SlackPersonaShadowResult) string {
+	text := strings.Join([]string{
+		strings.TrimSpace(result.Reason),
+		strings.TrimSpace(result.VisibleText),
+	}, "\n")
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	if marker := triageQualityRunIsHandledByOther(text); marker != "" {
+		return marker
+	}
+	lower := strings.ToLower(text)
+	for _, marker := range []string{
+		"no further triage action needed",
+		"no further action needed",
+		"no further action is needed",
+		"no additional action needed",
+		"no action needed",
+		"nothing for me to add",
+		"nothing to add",
+		"already determined this thread is handled",
+		"无需进一步处理",
+		"无需进一步动作",
+		"不需要进一步处理",
+		"不需要再处理",
+		"无需再处理",
+		"无需介入",
+		"不用介入",
+		"这轮 review 已完成",
+	} {
+		if strings.Contains(lower, strings.ToLower(marker)) {
+			return marker
+		}
+	}
+	return ""
+}
+
+func applyPersonaAmbientDelegationDisposition(result SlackPersonaShadowResult, messages []SlackInboundMessage, botUserID string) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionDelegateWorker || len(result.workerRecords) == 0 {
+		return result, nil
+	}
+	reason := personaAmbientDelegationSilentReason(result, messages, botUserID)
+	if reason == "" {
+		return result, nil
+	}
+	result.Decision = persona.DecisionStaySilent
+	result.VisibleText = ""
+	result.workerRecords = nil
+	result.WorkerRequests = nil
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "delegate_worker suppressed because the Slack item was not addressed to Oneesama"))
+	return result, []SlackTriageToolCall{{
+		Tool:    "agent_runner",
+		Action:  "delegate_worker_ambient_silent",
+		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+		Success: true,
+		Brief:   "Persona delegate_worker suppressed for ambient/non-addressed triage",
+		Result:  reason,
+	}}
+}
+
+func personaAmbientDelegationSilentReason(result SlackPersonaShadowResult, messages []SlackInboundMessage, botUserID string) string {
+	if slackMessagesMentionOtherUsersWithoutBot(messages, botUserID) {
+		return "mentioned_other_user_without_bot"
+	}
+	reason := strings.ToLower(strings.TrimSpace(result.Reason))
+	if reason == "" {
+		return ""
+	}
+	noExplicitAskMarkers := []string{
+		"no explicit question",
+		"no explicit ask",
+		"no explicit request",
+		"no @oneesama",
+		"no @mention",
+		"没有明确问题",
+		"没有明确请求",
+		"没有 @oneesama",
+		"未 @oneesama",
+	}
+	var sawMarker bool
+	for _, marker := range noExplicitAskMarkers {
+		if strings.Contains(reason, strings.ToLower(marker)) {
+			sawMarker = true
+			break
+		}
+	}
+	if !sawMarker {
+		return ""
+	}
+	if slackMessagesHaveFetchableExternalLinks(messages) || personaMessagesContainExplicitQuestion(messages, botUserID) {
+		return ""
+	}
+	return "no_explicit_question_or_bot_mention"
+}
+
+func personaMessagesContainExplicitQuestion(messages []SlackInboundMessage, botUserID string) bool {
+	text := strings.TrimSpace(joinSlackMessageTexts(messages))
+	if text == "" {
+		return false
+	}
+	if botUserID != "" && slackTextMentionsUser(text, botUserID) {
+		return true
+	}
+	lower := strings.ToLower(text)
+	if strings.ContainsAny(text, "?？") {
+		return true
+	}
+	for _, marker := range []string{"什么", "怎么", "咋", "为啥", "为什么", "吗", "么", "啥", "看看", "查一下", "看一下", "帮我", "how", "what", "why", "can you", "could you"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func applyPersonaSecretaryLookupDisposition(result SlackPersonaShadowResult, request persona.Request) (SlackPersonaShadowResult, []SlackTriageToolCall) {

@@ -886,6 +886,167 @@ func TestSlackTriagePiFirstLiveDelegatesWorkerAfterPiDecision(t *testing.T) {
 	}
 }
 
+func TestPersonaDelegateWorkerAlreadyHandledReasonDowngradesToSilence(t *testing.T) {
+	cases := []struct {
+		name      string
+		reason    string
+		visible   string
+		wantMatch string
+	}{
+		{
+			name: "already_reviewed_pr",
+			reason: strings.Join([]string{
+				"Claude (U0AMN6TKVJ8) has already reviewed and approved PR #444 in msg_ts:1779442634.699649, directly addressing the request.",
+				"No further triage action needed.",
+			}, " "),
+			wantMatch: "already reviewed",
+		},
+		{
+			name: "nothing_to_add_reply",
+			visible: strings.Join([]string{
+				"This is a technical statement about the authorization flow working on web now.",
+				"No external link to look up here, and the persona already determined this thread is handled.",
+				"Nothing for me to add.",
+			}, " "),
+			wantMatch: "nothing for me to add",
+		},
+		{
+			name: "already_approved_sibling_pr",
+			reason: strings.Join([]string{
+				"codex-3720 resolved the underlying bug via PR #2017, and the sibling PR at #444 was already approved.",
+				"No further action is needed.",
+			}, " "),
+			wantMatch: "already approved",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := SlackPersonaShadowResult{
+				Success:     true,
+				RequestID:   "triage:C09LB7V1WGJ:1779442219.313689",
+				ChannelID:   "C09LB7V1WGJ",
+				ThreadTS:    "1779442219.313689",
+				Decision:    persona.DecisionDelegateWorker,
+				Reason:      tc.reason,
+				VisibleText: tc.visible,
+				workerRecords: []persona.WorkerRequest{{
+					ID:     "secretary-link-fact-lookup",
+					Kind:   "codex",
+					Prompt: "Summarize this thread.",
+					Context: map[string]any{
+						"delegation_scope": "secretary_lookup",
+					},
+				}},
+				WorkerRequests: []string{"secretary-link-fact-lookup"},
+			}
+
+			downgraded, toolCalls := applyPersonaCompletedDelegationDisposition(result)
+			if downgraded.Decision != persona.DecisionStaySilent {
+				t.Fatalf("Decision = %q, want stay_silent", downgraded.Decision)
+			}
+			if downgraded.VisibleText != "" {
+				t.Fatalf("VisibleText = %q, want empty", downgraded.VisibleText)
+			}
+			if len(downgraded.workerRecords) != 0 || len(downgraded.WorkerRequests) != 0 {
+				t.Fatalf("worker records = %#v summaries = %#v, want none", downgraded.workerRecords, downgraded.WorkerRequests)
+			}
+			if len(toolCalls) != 1 || toolCalls[0].Action != "delegate_worker_already_handled_silent" || !strings.Contains(toolCalls[0].Result, tc.wantMatch) {
+				t.Fatalf("toolCalls = %#v, want already-handled suppression with marker %q", toolCalls, tc.wantMatch)
+			}
+
+			runner := &fakeRunner{job: agentrunner.Job{
+				ID:       "job_should_not_start",
+				Provider: "codex",
+				Status:   agentrunner.StatusRunning,
+			}}
+			service := NewService(Config{Runner: runner})
+			started := service.startPersonaDelegatedWorkerJobs(context.Background(), "T123", 99, downgraded, persona.Request{}, nil)
+			if runner.startCount != 0 || len(started.JobIDs) != 0 {
+				t.Fatalf("runner.startCount=%d started=%#v, want no worker start", runner.startCount, started)
+			}
+		})
+	}
+}
+
+func TestPersonaAmbientDelegateWorkerDowngradesToSilence(t *testing.T) {
+	cases := []struct {
+		name      string
+		reason    string
+		messages  []SlackInboundMessage
+		botUserID string
+		wantMatch string
+	}{
+		{
+			name:   "mentions_another_user_without_bot",
+			reason: "用户分享了一个Cue共享链接询问压缩视频性能问题，但triage无法直接访问共享内容，需委托worker检索以提供有依据的回应。",
+			messages: []SlackInboundMessage{{
+				TeamID:    "T123",
+				ChannelID: "C09KVPBMLJ3",
+				UserID:    "U09L4CPK3BL",
+				Text:      "<https://app.cue.surf/c/eaa6adb7-129d-4542-b36d-c430d311a23b> 看看这个压缩视频的为什么这么慢，是不是在找工具 <@U09L0U0SJ3F> :eyes:",
+				TS:        "1779442587.111859",
+				ThreadTS:  "1779438182.306539",
+			}},
+			botUserID: "U0AP5UFU0FR",
+			wantMatch: "mentioned_other_user_without_bot",
+		},
+		{
+			name:   "no_explicit_question_or_bot_mention",
+			reason: "Two technical progress messages from team members in the same channel—one about API latency improvement/CH migration, another about redeem code UX limitation. No explicit question or @Oneesama. Workspace policy allows lightweight product-adjacent commentary, but the topic is internal engineering progress.",
+			messages: []SlackInboundMessage{{
+				TeamID:    "T123",
+				ChannelID: "C09KVPBMLJ3",
+				UserID:    "U09L0U0SJ3F",
+				Text:      "现在api响应基本压到1s以内了，ch还没搬完，下周搬完后把可以把历史数据和中转逻辑去掉，直传ch后应该可以进一步加速",
+				TS:        "1779438182.306539",
+				ThreadTS:  "1779438182.306539",
+				Files: []SlackFile{{
+					ID:       "F0B5NB5T75J",
+					Name:     "image.png",
+					Filetype: "png",
+					Mimetype: "image/png",
+				}},
+			}},
+			botUserID: "U0AP5UFU0FR",
+			wantMatch: "no_explicit_question_or_bot_mention",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := SlackPersonaShadowResult{
+				Success:   true,
+				RequestID: "triage:C09KVPBMLJ3:1779438182.306539",
+				ChannelID: "C09KVPBMLJ3",
+				ThreadTS:  "1779438182.306539",
+				Decision:  persona.DecisionDelegateWorker,
+				Reason:    tc.reason,
+				workerRecords: []persona.WorkerRequest{{
+					ID:     "ambient-secretary-lookup",
+					Kind:   "codex",
+					Prompt: "Synthesize a concise answer.",
+					Context: map[string]any{
+						"delegation_scope": "secretary_lookup",
+					},
+				}},
+				WorkerRequests: []string{"ambient-secretary-lookup"},
+			}
+
+			downgraded, toolCalls := applyPersonaAmbientDelegationDisposition(result, tc.messages, tc.botUserID)
+			if downgraded.Decision != persona.DecisionStaySilent {
+				t.Fatalf("Decision = %q, want stay_silent", downgraded.Decision)
+			}
+			if len(downgraded.workerRecords) != 0 || len(downgraded.WorkerRequests) != 0 {
+				t.Fatalf("worker records = %#v summaries = %#v, want none", downgraded.workerRecords, downgraded.WorkerRequests)
+			}
+			if len(toolCalls) != 1 || toolCalls[0].Action != "delegate_worker_ambient_silent" || !strings.Contains(toolCalls[0].Result, tc.wantMatch) {
+				t.Fatalf("toolCalls = %#v, want ambient suppression marker %q", toolCalls, tc.wantMatch)
+			}
+		})
+	}
+}
+
 func TestSlackTriagePiFirstLiveAutoDelegatesExternalLinkIdentityLookupAfterStaySilent(t *testing.T) {
 	ctx := context.Background()
 	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

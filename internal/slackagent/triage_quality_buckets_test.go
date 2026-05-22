@@ -491,6 +491,7 @@ func TestTriageQualityRunIsHandledByOtherMatch(t *testing.T) {
 		// Edge cases / additional EN+ZH coverage.
 		{"en_actively_handled", "Being actively handled by Claude.", "actively handled", false},
 		{"en_already_being_handled", "Already being handled by U0ALY77RMJL and U0AMN6TKVJ8 in the thread.", "already being handled", false},
+		{"en_already_reviewed_approved", "Claude has already reviewed and approved PR #444; no further triage action needed.", "already reviewed", false},
 		{"en_already_been_answered", "The question about 3s complexity has already been answered by Heyang in the thread; no need for Oneesama to reply.", "already been answered", false},
 		{"en_being_handled_by", "The deployment question is being handled by codex-3720.", "being handled by", false},
 		{"en_fully_handled", "This has already been fully handled by codex-3720 in the same thread.", "already been fully handled", false},

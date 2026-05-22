@@ -12,6 +12,9 @@ func (s *Service) handleAgentRunnerProgress(ctx context.Context, job agentrunner
 	if isSlackTriageJob(job) {
 		return
 	}
+	if isPersonaDelegatedWorkerJob(job) {
+		return
+	}
 	if job.Status != agentrunner.StatusRunning {
 		return
 	}
@@ -396,6 +399,10 @@ func slackRefForWorkerJob(job agentrunner.Job) (AssistantThreadRef, bool) {
 		return AssistantThreadRef{}, false
 	}
 	return ref, true
+}
+
+func isPersonaDelegatedWorkerJob(job agentrunner.Job) bool {
+	return strings.EqualFold(stringFromContext(job.Context, "source"), "persona_delegate_worker")
 }
 
 // slackWorkerResultText returns the model's actual completed result for posting

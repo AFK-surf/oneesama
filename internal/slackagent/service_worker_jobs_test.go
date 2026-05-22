@@ -174,6 +174,28 @@ func TestSlackWorkerResultTextSilentOnNonCompletedStates(t *testing.T) {
 	}
 }
 
+func TestAgentRunnerProgressSkipsPersonaDelegateWorkerAssistantStatus(t *testing.T) {
+	assistant := &recordingAssistant{}
+	service := NewService(Config{Assistant: assistant})
+
+	service.handleAgentRunnerProgress(context.Background(), agentrunner.Job{
+		ID:       "job_persona_delegate",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+		Context: map[string]any{
+			"source": "persona_delegate_worker",
+			"slack": map[string]any{
+				"channel_id": "C123",
+				"thread_ts":  "1779442219.313689",
+			},
+		},
+	})
+
+	if calls := assistant.Calls(); len(calls) != 0 {
+		t.Fatalf("assistant calls = %#v, want no shimmer/status for persona triage worker progress", calls)
+	}
+}
+
 func TestSlackWorkerToolRequestStartsContinuationWithDispatcherEvidence(t *testing.T) {
 	workspaceDir := t.TempDir()
 	writeRelatedMemoryFile(t, workspaceDir, "memory/team/bridge-tools.md", strings.Join([]string{
