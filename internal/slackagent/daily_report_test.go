@@ -228,6 +228,7 @@ func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
 		"Product-adjacent link reaction upgraded to secretary lookup",
 		"看下现在的 prompt，看有没有什么 prompt 还在引导 agent 发文件名或者文件路径",
 		"agent \\xe6",
+		"Person: Darksky Source: memory/people/darksky.md Identity:",
 	} {
 		if !slackDailyDiaryLowSignal(text) {
 			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)
