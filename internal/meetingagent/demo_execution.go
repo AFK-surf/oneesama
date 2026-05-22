@@ -117,7 +117,9 @@ func (s *Service) StartRealtimeDemoExecution(ctx context.Context, input Realtime
 		return RealtimeDemoExecutionResult{OK: false, Status: realtimeDemoExecutionStatusFailed, Demo: &demo, Error: err.Error()}, err
 	}
 	s.recordDemoExecutionObservation(demo.SessionID, demoObservationKindStep, "demo execution worker started: "+job.ID, DemoSessionResultObserved, "demo_execution_worker_started", "")
-	go s.completeRealtimeDemoExecution(input, demo, job)
+	s.GoBackground(func(ctx context.Context) {
+		s.completeRealtimeDemoExecution(ctx, input, demo, job)
+	})
 
 	result := RealtimeDemoExecutionResult{
 		OK:                 true,
@@ -133,8 +135,11 @@ func (s *Service) StartRealtimeDemoExecution(ctx context.Context, input Realtime
 	return result, nil
 }
 
-func (s *Service) completeRealtimeDemoExecution(input RealtimeDemoExecutionStartRequest, demo RealtimeDemoBridgeResult, startedJob agentrunner.Job) {
-	ctx, cancel := context.WithTimeout(context.Background(), demoExecutionCompletionTimeout)
+func (s *Service) completeRealtimeDemoExecution(parent context.Context, input RealtimeDemoExecutionStartRequest, demo RealtimeDemoBridgeResult, startedJob agentrunner.Job) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, demoExecutionCompletionTimeout)
 	defer cancel()
 	job := startedJob
 	for {
@@ -144,12 +149,18 @@ func (s *Service) completeRealtimeDemoExecution(input RealtimeDemoExecutionStart
 		}
 		select {
 		case <-ctx.Done():
+			reason := "demo_execution_worker_status_timeout"
+			summary := "demo execution worker status timed out: " + startedJob.ID
+			if errors.Is(ctx.Err(), context.Canceled) {
+				reason = "demo_execution_completion_cancelled"
+				summary = "demo execution completion cancelled: " + startedJob.ID
+			}
 			s.recordDemoExecutionObservation(
 				demo.SessionID,
 				demoObservationKindFailed,
-				"demo execution worker status timed out: "+startedJob.ID,
+				summary,
 				DemoSessionResultFailed,
-				"demo_execution_worker_status_timeout",
+				reason,
 				"",
 			)
 			return

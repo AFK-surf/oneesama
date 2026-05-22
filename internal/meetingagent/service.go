@@ -80,6 +80,11 @@ type Service struct {
 	meetdWake           chan struct{}
 	meetdRuntimeCancel  context.CancelFunc
 	meetdRuntimeDone    chan struct{}
+	backgroundMu        sync.Mutex
+	backgroundCtx       context.Context
+	backgroundCancel    context.CancelFunc
+	backgroundWG        sync.WaitGroup
+	backgroundStopping  bool
 }
 
 type shutdownRunner interface {
@@ -109,6 +114,7 @@ func NewService(cfg Config) *Service {
 	if watchInterval <= 0 {
 		watchInterval = time.Minute
 	}
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	service := &Service{
 		logger:             logger,
 		persistence:        cfg.Persistence,
@@ -129,6 +135,8 @@ func NewService(cfg Config) *Service {
 		httpClient:         cfg.HTTPClient,
 		demoBridge:         cfg.DemoBridge,
 		meetdWake:          make(chan struct{}, 1),
+		backgroundCtx:      backgroundCtx,
+		backgroundCancel:   backgroundCancel,
 	}
 	if service.httpClient == nil {
 		service.httpClient = httputil.NewHTTPClient(10 * time.Second)
@@ -174,6 +182,10 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	}
 	if stopped := s.stopActiveJoinSessionsForShutdown(ctx); stopped > 0 {
 		s.logger.Info("stopped active join sessions before shutdown", "count", stopped)
+	}
+	s.cancelBackground()
+	if err := s.waitBackground(ctx); err != nil {
+		return err
 	}
 	if runner, ok := s.meetRunner.(shutdownRunner); ok {
 		return runner.Shutdown(ctx)

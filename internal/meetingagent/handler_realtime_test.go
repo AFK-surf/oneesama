@@ -720,6 +720,68 @@ func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
 	waitForDemoTrailEntry(t, router, "snake_demo", "https://example.test/snake/final", "demo_execution_worker_started")
 }
 
+func TestServiceShutdownCancelsDemoExecutionCompletion(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	runner := &fakeDemoCodexRunner{
+		startJob: agentrunner.Job{
+			ID:       "job_slow_demo",
+			Provider: "codex",
+			Status:   agentrunner.StatusRunning,
+		},
+	}
+	service := NewService(Config{
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		OpenAI: appconfig.OpenAIConfig{
+			RealtimeModel: "gpt-realtime-2",
+			BotName:       "Meeting Avatar Bot",
+		},
+		MeetRunner: fakeMeetRunner{},
+		Runner:     runner,
+		DemoBridge: &RealtimeDemoBridge{
+			Mode:      "safe",
+			Lifecycle: NewDemoWorkspaceLifecycle(rootDir+"/demo-surfaces", demoWorkspaceNoopLauncher{}),
+			Controller: DemoController{
+				Client: NewFakeDemoKWWKClient(),
+				Safety: DemoSafetyPolicy{
+					URLAllowlistPatterns: []string{"https://example.test/"},
+					DryRun:               true,
+				},
+			},
+			Presenter:    fakeDemoSurfacePresenter{},
+			Store:        NewPersistentDemoSessionStore(rootDir + "/demo-surfaces/feedback"),
+			Observations: NewDemoObservationBus(),
+		},
+	})
+
+	result, err := service.StartRealtimeDemoExecution(context.Background(), RealtimeDemoExecutionStartRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "slow_demo",
+		Task:             "做一个慢任务，然后给我看屏幕",
+		DemoURL:          "https://example.test/tasks/slow",
+	})
+	if err != nil || !result.OK || result.Status != realtimeDemoExecutionStatusStarted {
+		t.Fatalf("StartRealtimeDemoExecution() = %#v, %v; want started", result, err)
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := service.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	trail, ok := service.DemoSurfaceTrail("slow_demo")
+	if !ok {
+		t.Fatalf("DemoSurfaceTrail(slow_demo) missing")
+	}
+	if !demoTrailHasReason(trail, "demo_execution_completion_cancelled") {
+		t.Fatalf("trail = %#v, want completion cancellation audit", trail)
+	}
+}
+
 func TestRealtimeDemoSurfaceRuntimeFlagEnablesCodexAdapterSmoke(t *testing.T) {
 	t.Parallel()
 
@@ -1039,6 +1101,35 @@ func waitForDemoTrailEntry(t *testing.T, router http.Handler, sessionID string, 
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("demo trail for %s never contained %v; last = %s", sessionID, wants, last)
+}
+
+func demoTrailHasReason(trail DemoSessionFeedbackPackage, reason string) bool {
+	for _, entry := range trail.Entries {
+		if entry.ReasonCode == reason {
+			return true
+		}
+	}
+	return false
+}
+
+type fakeDemoSurfacePresenter struct{}
+
+func (fakeDemoSurfacePresenter) Present(_ context.Context, req DemoSurfacePresentRequest) (DemoSurfacePresentation, error) {
+	return DemoSurfacePresentation{
+		MeetingSessionID: strings.TrimSpace(req.MeetingSessionID),
+		DemoSessionID:    firstNonEmpty(strings.TrimSpace(req.DemoSessionID), strings.TrimSpace(req.DemoSession.ID)),
+		Status:           DemoSurfacePresentationPresenting,
+		Reason:           "fake_presented",
+	}, nil
+}
+
+func (fakeDemoSurfacePresenter) Stop(_ context.Context, req DemoSurfaceStopRequest) (DemoSurfacePresentation, error) {
+	return DemoSurfacePresentation{
+		MeetingSessionID: strings.TrimSpace(req.MeetingSessionID),
+		DemoSessionID:    strings.TrimSpace(req.DemoSessionID),
+		Status:           DemoSurfacePresentationStopped,
+		Reason:           "fake_stopped",
+	}, nil
 }
 
 func toolNamesInclude(tools []any, names ...string) bool {
