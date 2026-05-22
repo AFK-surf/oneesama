@@ -930,6 +930,7 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"not valid persona json",
 		"invalid persona json",
 		"daily report",
+		"/deploy ",
 		"agentrunner triage completed",
 		"approval gate live",
 		"approval card live",
@@ -950,6 +951,12 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"no direct evidence",
 		"delegating to worker",
 		"bounded secretary work",
+		"auto-delegated to secretary lookup",
+		"stay-silent external link",
+		"workspace policy",
+		"轻量emoji反应",
+		"无实质内容",
+		"用户分享了同一个链接",
 		"from previous discussion",
 		"从之前的讨论看",
 		"要不要看看",
@@ -1033,7 +1040,7 @@ func slackDailyDiaryLowSignal(value string) bool {
 			return true
 		}
 	}
-	if strings.HasPrefix(text, "#c0") || strings.HasPrefix(text, "[177") || strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "<http") {
+	if strings.HasPrefix(text, "#c0") || strings.HasPrefix(text, "[177") || strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "<http") || strings.HasPrefix(text, "/deploy ") || strings.Contains(text, "c_replay_smoke") {
 		return true
 	}
 	if len([]rune(strings.TrimSpace(value))) < 12 && !slackDailyDiaryContainsAny(text, "fix", "ship", "release", "pr #", "ci", "修复", "根因", "上线", "发布") {

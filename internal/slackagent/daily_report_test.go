@@ -221,6 +221,10 @@ func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
 		"SKIP — internal technical debugging thread about screen lock/sleep behavior. The team is working through the issue themselves.",
 		"\" [file_id:F0B5KPVCT60, name: RE: Inquiry, type: text/html]",
 		"Shared link returns HTTP 400, no content. Best to stay silent",
+		"/deploy f27e61c91bf79323d2bfd3dbc01ca3abf2f5021d staging",
+		"workspace policy支持对AI agent/产品话题的轻量回应。这里选用轻量emoji反应即可，避免无实质内容的评论。",
+		"Stay-silent external link fact question auto-delegated to secretary lookup",
+		"C_REPLAY_SMOKE_HN",
 	} {
 		if !slackDailyDiaryLowSignal(text) {
 			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)
