@@ -58,17 +58,22 @@ func (t *slackAPITool) actionFetchFile(ctx context.Context, params map[string]an
 	}
 
 	payload := map[string]any{
-		"ok":         true,
-		"file_id":    info.File.ID,
-		"title":      firstNonEmpty(info.File.Title, info.File.Name),
-		"name":       info.File.Name,
-		"permalink":  info.File.Permalink,
-		"mimetype":   info.File.Mimetype,
-		"filetype":   info.File.Filetype,
-		"size_bytes": info.File.Size,
-		"url":        downloadURL,
-		"downloaded": false,
-		"inline":     false,
+		"ok":                    true,
+		"file_id":               info.File.ID,
+		"title":                 firstNonEmpty(info.File.Title, info.File.Name),
+		"name":                  info.File.Name,
+		"permalink":             info.File.Permalink,
+		"mimetype":              info.File.Mimetype,
+		"filetype":              info.File.Filetype,
+		"size_bytes":            info.File.Size,
+		"protected_url_omitted": true,
+		"url_access":            "slack_bot_token_required",
+		"worker_hint":           "Use local_path for worker-side file inspection. Protected Slack file URLs are omitted from worker-visible results because they require the bot token.",
+		"downloaded":            false,
+		"inline":                false,
+		"local_path":            "",
+		"downloaded_bytes":      0,
+		"download_disabled":     !download,
 	}
 
 	if download {

@@ -77,6 +77,15 @@ func TestActionFetchFileDownloadsNonImageToWorkspaceArtifact(t *testing.T) {
 	if decoded["file_id"] != "FVID" || decoded["mimetype"] != "video/quicktime" {
 		t.Fatalf("decoded metadata = %#v", decoded)
 	}
+	if _, ok := decoded["url"]; ok {
+		t.Fatalf("protected Slack URL should not be exposed to workers: %#v", decoded["url"])
+	}
+	if omitted, _ := decoded["protected_url_omitted"].(bool); !omitted {
+		t.Fatalf("expected protected_url_omitted=true")
+	}
+	if access, _ := decoded["url_access"].(string); access != "slack_bot_token_required" {
+		t.Fatalf("url_access = %q, want slack_bot_token_required", access)
+	}
 	localPath, _ := decoded["local_path"].(string)
 	if localPath == "" {
 		t.Fatalf("local_path missing from result: %#v", decoded)
@@ -140,6 +149,76 @@ func TestActionFetchFileCanInlineSmallFileWhenExplicitlyRequested(t *testing.T) 
 	}
 	if string(raw) != "hello worker" {
 		t.Fatalf("decoded bytes = %q", string(raw))
+	}
+	if _, ok := decoded["url"]; ok {
+		t.Fatalf("protected Slack URL should not be exposed to workers: %#v", decoded["url"])
+	}
+	if omitted, _ := decoded["protected_url_omitted"].(bool); !omitted {
+		t.Fatalf("expected protected_url_omitted=true")
+	}
+}
+
+func TestActionFetchFileDownloadFalseOmitsProtectedURL(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if strings.Contains(req.URL.String(), "files.info") {
+			payload, _ := json.Marshal(map[string]any{
+				"ok": true,
+				"file": slackImageFileBody{
+					ID:                 "FMETA",
+					Name:               "notes.pdf",
+					Mimetype:           "application/pdf",
+					Filetype:           "pdf",
+					URLPrivateDownload: "https://files.slack.example/notes.pdf",
+				},
+			})
+			return &http.Response{
+				StatusCode: 200,
+				Body:       io.NopCloser(strings.NewReader(string(payload))),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader("pdf")),
+			Header:     http.Header{"Content-Type": []string{"application/pdf"}},
+			Request:    req,
+		}, nil
+	})
+	tool := &slackAPITool{
+		role:          slackAPIRoleAssistant,
+		apiURL:        "https://slack.example",
+		token:         "xoxb-test",
+		workspaceDir:  t.TempDir(),
+		httpTransport: transport,
+	}
+
+	result := tool.actionFetchFile(context.Background(), map[string]any{
+		"file_id":  "FMETA",
+		"download": false,
+	})
+	if !result.Success {
+		t.Fatalf("expected success, got %q", result.Text)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(result.Text), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if downloaded, _ := decoded["downloaded"].(bool); downloaded {
+		t.Fatalf("expected downloaded=false when download=false")
+	}
+	if _, ok := decoded["url"]; ok {
+		t.Fatalf("protected Slack URL should not be exposed to workers: %#v", decoded["url"])
+	}
+	if omitted, _ := decoded["protected_url_omitted"].(bool); !omitted {
+		t.Fatalf("expected protected_url_omitted=true")
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 HTTP call (files.info only), got %d", calls)
 	}
 }
 
