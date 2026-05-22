@@ -188,6 +188,21 @@ func TestSlackDailyReportRunSampleScrubsInternalRuntimeDetails(t *testing.T) {
 	}
 }
 
+func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
+	for _, text := range []string{
+		"用户未明确请求 Oneesama 介入调查或做可见回复，自行跟进的动作表明不需要额外介入。",
+		"Let me look at these threads more carefully before deciding. Tool calls: slack_api conversations.replies",
+		"Casual banter reacting to a product pivot link share. No question or request. No reply needed.",
+	} {
+		if !slackDailyDiaryLowSignal(text) {
+			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)
+		}
+	}
+	if slackDailyDiaryLowSignal("修复 Join with realtime 按钮回到默认卡片的问题，root cause 是重复 Socket Mode listener 抢走 interaction。") {
+		t.Fatal("slackDailyDiaryLowSignal() filtered a concrete engineering update")
+	}
+}
+
 func TestSlackDailyReportPlaceholderSummaryDoesNotFlagTodoProductText(t *testing.T) {
 	run := SlackTriageContext{
 		Summary: "The thread is an internal product discussion about removing the todo tool and future multi-agent UI decisions.",
