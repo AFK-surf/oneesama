@@ -457,6 +457,7 @@ var triageQualityHandledByOtherMarkers = []string{
 	"already implemented",
 	"already been answered",
 	"already been fully handled",
+	"already deeply handled",
 	"already handled",
 	"already handles",
 	"already on it",
@@ -490,6 +491,7 @@ var triageQualityHandledByOtherMarkers = []string{
 	"has already responded",
 	"has already been fully handled",
 	"has already complied",
+	"no actionable remainder",
 	// Chinese compound phrases. Same compound discipline as the
 	// intent-action markers — avoid bare `已被` / `已经`.
 	"已经查了",

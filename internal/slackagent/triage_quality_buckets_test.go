@@ -495,6 +495,8 @@ func TestTriageQualityRunIsHandledByOtherMatch(t *testing.T) {
 		{"en_already_been_answered", "The question about 3s complexity has already been answered by Heyang in the thread; no need for Oneesama to reply.", "already been answered", false},
 		{"en_being_handled_by", "The deployment question is being handled by codex-3720.", "being handled by", false},
 		{"en_fully_handled", "This has already been fully handled by codex-3720 in the same thread.", "already been fully handled", false},
+		{"en_deeply_handled_no_remainder", "The PR review is already deeply handled by codex-3720 and Claude, and merges are progressing. No actionable remainder for Oneesama.", "already deeply handled", false},
+		{"en_no_actionable_remainder", "Claude has the deploy covered. No actionable remainder for Oneesama.", "no actionable remainder", false},
 		{"en_being_investigated", "The admin 404 issue is already being investigated and resolved by the developer in the thread; no further action needed.", "being investigated and resolved", false},
 		{"en_assistant_complied", "The assistant has already complied and closed the PR; the situation is fully handled.", "already complied", false},
 		{"en_active_agent", "The thread already has an active agent investigating the session slowness.", "active agent", false},
