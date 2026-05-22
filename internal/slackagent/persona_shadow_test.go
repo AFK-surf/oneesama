@@ -970,6 +970,121 @@ HN profile for Johnson8053. Submissions include SQLite is the best home for AI a
 	}
 }
 
+func TestSlackTriagePiFirstLiveUpgradesProductLinkReactionToSecretaryLookup(t *testing.T) {
+	ctx := context.Background()
+	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`Title: Tana announces meeting workspace
+
+Markdown Content:
+Tana is adding meeting workflows, agenda notes, and collaboration features.`))
+	}))
+	defer reader.Close()
+	oldClient := slackExternalLinkHTTPClient
+	oldReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkHTTPClient = reader.Client()
+	slackExternalLinkReaderURL = func(string) string { return reader.URL + "/reader" }
+	t.Cleanup(func() {
+		slackExternalLinkHTTPClient = oldClient
+		slackExternalLinkReaderURL = oldReaderURL
+	})
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	reactions := &recordingReactions{}
+	runtime := &capturePersonaRuntime{response: persona.Response{
+		Runtime:  persona.ProviderPi,
+		Decision: persona.DecisionReact,
+		Reason:   "Casual banter reacting to a product pivot link share. No question or request.",
+		Reactions: []persona.ReactionIntent{{
+			Emoji:      "吃瓜",
+			Confidence: 0.9,
+			Reason:     "spectating",
+		}},
+		Confidence: 0.9,
+		ShadowOnly: false,
+	}}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_tana_product_link_lookup",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{
+				ForegroundChain: "pi_first_live",
+				WorkspacePolicy: "For this workspace, lightweight source-backed comments are welcome for product-adjacent AI agent, coding tool, creative workflow, Memory, Bridge/Cue-like collaboration, AI lab/researcher, and coding-agent ecosystem topics, even in casual channels.",
+			},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider: persona.ProviderFake,
+			Mode:     persona.ModeLive,
+			Timeout:  time.Second,
+		},
+		Poster:    poster,
+		Reactions: reactions,
+		Runner:    runner,
+	})
+	service.personaRuntime = runtime
+	service.personaRuntimeErr = nil
+	service.personaRuntimeConfig.Provider = persona.ProviderPi
+	service.personaRuntimeConfig.Mode = persona.ModeLive
+	service.personaRuntimeConfig.ShadowOnly = false
+
+	started, err := service.StartSlackTriage(ctx, "C09L0TAN31T", []SlackInboundMessage{{
+		TeamID:         "T123",
+		ChannelIDSnake: "C09L0TAN31T",
+		UserIDSnake:    "U_PENG",
+		Text:           "转业了 https://tana.inc/",
+		TS:             "1779421855.728099",
+	}, {
+		TeamID:         "T123",
+		ChannelIDSnake: "C09L0TAN31T",
+		UserIDSnake:    "U_TEAMMATE",
+		Text:           "这尼玛 woc meeting 要和Zoom干？",
+		TS:             "1779421882.604639",
+	}, {
+		TeamID:         "T123",
+		ChannelIDSnake: "C09L0TAN31T",
+		UserIDSnake:    "U_TEAMMATE",
+		Text:           "这感觉怕是有点难哦",
+		TS:             "1779421920.854339",
+	}}, "#watercooler: 转业了 https://tana.inc/\n这尼玛 woc meeting 要和Zoom干？\n这感觉怕是有点难哦")
+	if err != nil {
+		t.Fatalf("StartSlackTriage: %v", err)
+	}
+	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
+	if runner.startCount != 1 {
+		t.Fatalf("runner.startCount = %d, want secretary lookup worker after product link reaction", runner.startCount)
+	}
+	if got := len(reactions.Calls()); got != 0 {
+		t.Fatalf("reaction calls = %d, want no reaction-only product link disposition", got)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want worker to answer asynchronously later", got)
+	}
+	if updated.Metadata["pi_first_decision"] != persona.DecisionDelegateWorker || intFromAny(updated.Metadata["delegate_worker_jobs_started"]) != 1 {
+		t.Fatalf("metadata = %#v, want delegate_worker after reaction guard", updated.Metadata)
+	}
+	if !hasTriageToolCall(updated.ToolCalls, "persona_runtime", "product_link_reaction_upgraded_to_secretary_lookup") {
+		t.Fatalf("tool calls = %#v, want product link reaction upgrade marker", updated.ToolCalls)
+	}
+	if got := stringFromAny(runner.startInput.Context["session_kind"]); got != agentrunner.SessionKindSecretaryLookup {
+		t.Fatalf("runner session_kind = %q, want secretary_lookup", got)
+	}
+	if prompt := runner.startInput.Task; !strings.Contains(prompt, "tana.inc") || !strings.Contains(prompt, "meeting") || !strings.Contains(prompt, "source") {
+		t.Fatalf("secretary lookup prompt missing Tana product-link context:\n%s", prompt)
+	}
+}
+
+func hasTriageToolCall(calls []SlackTriageToolCall, tool string, action string) bool {
+	for _, call := range calls {
+		if call.Tool == tool && call.Action == action && call.Success {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSecretaryLookupWorkerPromptCarriesMemoryEvidenceAndFollowupInstruction(t *testing.T) {
 	req := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
 		ChannelID: "C_TRIAGE",
