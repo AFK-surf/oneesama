@@ -54,6 +54,10 @@ func slackTriageSharedLinkSynthesisAction(channelID string, threadTS string, mes
 	if strings.TrimSpace(message) == "" {
 		return SlackTriageDecisionAction{}, false
 	}
+	anchors := append(
+		slackVisibleThreadEvidenceAnchors(channelID, thread, messageText),
+		slackVisibleFetchedLinkEvidenceAnchor(context)...,
+	)
 	return SlackTriageDecisionAction{
 		Type:                 "post_thread_reply",
 		Title:                "补充链接初步看法",
@@ -62,6 +66,7 @@ func slackTriageSharedLinkSynthesisAction(channelID string, threadTS string, mes
 		ThreadTS:             thread,
 		Confidence:           0.66,
 		Reason:               "A substantive shared link is synthesis-eligible under the workspace policy or explicit thread request.",
+		EvidenceAnchors:      normalizeSlackVisibleEvidenceAnchors(anchors),
 		RequiresConfirmation: false,
 	}, true
 }

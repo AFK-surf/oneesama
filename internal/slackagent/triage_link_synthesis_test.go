@@ -27,6 +27,34 @@ func TestSharedLinkSynthesisRequiresWorkspacePolicyOrExplicitAsk(t *testing.T) {
 	}
 }
 
+func TestSharedLinkSynthesisAddsFetchedLinkEvidenceAnchor(t *testing.T) {
+	t.Parallel()
+
+	context := SlackExternalLinkContext{
+		URL:     "https://antirez.com/news/166",
+		Title:   "Alternatives for the EDIT tool of LLM agents",
+		Excerpt: strings.Repeat("This article explains an LLM agent edit strategy with source-backed tradeoffs. ", 5),
+		Source:  "jina_reader",
+	}
+	action, ok := slackTriageSharedLinkSynthesisAction(
+		"C1",
+		"123.456",
+		[]SlackInboundMessage{{Text: "看看这个 <https://antirez.com/news/166>", TS: "123.456"}},
+		[]SlackExternalLinkContext{context},
+		"",
+	)
+	if !ok {
+		t.Fatal("explicit link-synthesis ask should trigger")
+	}
+	if len(action.EvidenceAnchors) != 2 {
+		t.Fatalf("EvidenceAnchors = %#v, want thread + fetched link anchors", action.EvidenceAnchors)
+	}
+	link := action.EvidenceAnchors[1]
+	if link.Kind != slackVisibleEvidenceKindFetchedLink || link.SourceRef != context.URL || link.ConfidenceSource != "source_derived:fetched_link" || link.Freshness != "jina_reader" {
+		t.Fatalf("link anchor = %#v", link)
+	}
+}
+
 func TestSharedLinkSynthesisRejectsLowSignalSocialStatus(t *testing.T) {
 	t.Parallel()
 

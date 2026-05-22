@@ -14,6 +14,9 @@ func (s *Service) insertSlackTriagePendingActions(ctx context.Context, workspace
 		}
 		effectiveChannel := firstNonEmpty(action.ChannelID, channelID)
 		effectiveThread := firstNonEmpty(action.ThreadTS, threadTS)
+		action.ChannelID = effectiveChannel
+		action.ThreadTS = effectiveThread
+		action.EvidenceAnchors = slackVisibleEvidenceAnchorsForAction(action)
 		runID := valueOrZero(run)
 		source := "slack-triage"
 		if action.Type == slackActionTypeThreadReply {
@@ -32,6 +35,8 @@ func (s *Service) insertSlackTriagePendingActions(ctx context.Context, workspace
 		if action.Type == slackActionTypeThreadReply {
 			params["proposedReplyText"] = action.Message
 			params["approvalDecision"] = "pending"
+			params["evidenceAnchors"] = action.EvidenceAnchors
+			params["anchorConfidenceSource"] = slackVisibleEvidenceAnchorConfidenceSummary(action.EvidenceAnchors)
 			params["qualityChecklist"] = []string{
 				"verified_fact_or_citation",
 				"adds_information_beyond_thread_reread",

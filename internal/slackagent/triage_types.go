@@ -53,16 +53,17 @@ type SlackTriageDecision struct {
 }
 
 type SlackTriageDecisionAction struct {
-	Type                 string  `json:"type"`
-	Title                string  `json:"title"`
-	Message              string  `json:"message"`
-	Emoji                string  `json:"emoji,omitempty"`
-	MessageTS            string  `json:"messageTs,omitempty"`
-	ChannelID            string  `json:"channelId,omitempty"`
-	ThreadTS             string  `json:"threadTs,omitempty"`
-	Confidence           float64 `json:"confidence"`
-	Reason               string  `json:"reason,omitempty"`
-	RequiresConfirmation bool    `json:"requiresConfirmation"`
+	Type                 string                       `json:"type"`
+	Title                string                       `json:"title"`
+	Message              string                       `json:"message"`
+	Emoji                string                       `json:"emoji,omitempty"`
+	MessageTS            string                       `json:"messageTs,omitempty"`
+	ChannelID            string                       `json:"channelId,omitempty"`
+	ThreadTS             string                       `json:"threadTs,omitempty"`
+	Confidence           float64                      `json:"confidence"`
+	Reason               string                       `json:"reason,omitempty"`
+	EvidenceAnchors      []SlackVisibleEvidenceAnchor `json:"evidenceAnchors,omitempty"`
+	RequiresConfirmation bool                         `json:"requiresConfirmation"`
 }
 
 type SlackPendingAction struct {
@@ -79,24 +80,34 @@ type SlackPendingAction struct {
 	UpdatedAt   string         `json:"updated_at"`
 }
 
+type SlackVisibleEvidenceAnchor struct {
+	Kind             string  `json:"kind"`
+	SourceRef        string  `json:"sourceRef"`
+	Quote            string  `json:"quote,omitempty"`
+	Confidence       float64 `json:"confidence"`
+	ConfidenceSource string  `json:"confidenceSource,omitempty"`
+	Freshness        string  `json:"freshness,omitempty"`
+}
+
 type SlackVisibleReplyQualitySample struct {
-	PendingActionID        int64  `json:"pendingActionId,omitempty"`
-	CardID                 string `json:"cardId,omitempty"`
-	TriageRunID            int64  `json:"triageRunId,omitempty"`
-	JobID                  string `json:"jobId,omitempty"`
-	ChannelID              string `json:"channelId,omitempty"`
-	ThreadTS               string `json:"threadTs,omitempty"`
-	CardTS                 string `json:"cardTs,omitempty"`
-	ProposedMessage        string `json:"proposedMessage,omitempty"`
-	ApprovalDecision       string `json:"approvalDecision"`
-	RejectReason           string `json:"rejectReason,omitempty"`
-	FinalOutcome           string `json:"finalOutcome,omitempty"`
-	DecisionUserID         string `json:"decisionUserId,omitempty"`
-	Source                 string `json:"source,omitempty"`
-	BlockReason            string `json:"blockReason,omitempty"`
-	AnchorConfidenceSource string `json:"anchorConfidenceSource,omitempty"`
-	CreatedAt              string `json:"createdAt,omitempty"`
-	UpdatedAt              string `json:"updatedAt,omitempty"`
+	PendingActionID        int64                        `json:"pendingActionId,omitempty"`
+	CardID                 string                       `json:"cardId,omitempty"`
+	TriageRunID            int64                        `json:"triageRunId,omitempty"`
+	JobID                  string                       `json:"jobId,omitempty"`
+	ChannelID              string                       `json:"channelId,omitempty"`
+	ThreadTS               string                       `json:"threadTs,omitempty"`
+	CardTS                 string                       `json:"cardTs,omitempty"`
+	ProposedMessage        string                       `json:"proposedMessage,omitempty"`
+	ApprovalDecision       string                       `json:"approvalDecision"`
+	RejectReason           string                       `json:"rejectReason,omitempty"`
+	FinalOutcome           string                       `json:"finalOutcome,omitempty"`
+	DecisionUserID         string                       `json:"decisionUserId,omitempty"`
+	Source                 string                       `json:"source,omitempty"`
+	BlockReason            string                       `json:"blockReason,omitempty"`
+	AnchorConfidenceSource string                       `json:"anchorConfidenceSource,omitempty"`
+	EvidenceAnchors        []SlackVisibleEvidenceAnchor `json:"evidenceAnchors,omitempty"`
+	CreatedAt              string                       `json:"createdAt,omitempty"`
+	UpdatedAt              string                       `json:"updatedAt,omitempty"`
 }
 
 type SlackVisibleReplyQualitySampleSummary struct {

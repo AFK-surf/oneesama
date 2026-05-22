@@ -1364,13 +1364,14 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 	actions := make([]SlackTriageDecisionAction, 0, 1+len(result.reactionRecords))
 	if result.Decision == persona.DecisionReply && strings.TrimSpace(result.VisibleText) != "" {
 		actions = append(actions, SlackTriageDecisionAction{
-			Type:       "post_thread_reply",
-			Title:      "Review reply",
-			Message:    strings.TrimSpace(result.VisibleText),
-			ChannelID:  strings.TrimSpace(channelID),
-			ThreadTS:   strings.TrimSpace(threadTS),
-			Reason:     strings.TrimSpace(result.Reason),
-			Confidence: result.Confidence,
+			Type:            "post_thread_reply",
+			Title:           "Review reply",
+			Message:         strings.TrimSpace(result.VisibleText),
+			ChannelID:       strings.TrimSpace(channelID),
+			ThreadTS:        strings.TrimSpace(threadTS),
+			Reason:          strings.TrimSpace(result.Reason),
+			Confidence:      result.Confidence,
+			EvidenceAnchors: slackVisibleThreadEvidenceAnchors(channelID, threadTS, result.VisibleText),
 		})
 	}
 	if result.Decision == persona.DecisionReact || len(result.reactionRecords) > 0 {

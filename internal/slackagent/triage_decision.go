@@ -403,7 +403,7 @@ func normalizeSlackTriageActions(values []any, fallback slackTriageFallback) []S
 		title := truncateSlackContextText(firstNonEmpty(action.Title, "Review Slack activity"), 160)
 		message := truncateSlackContextText(firstNonEmpty(action.Message, action.Reason, title), 2000)
 		requires := slackTriageActionRequiresConfirmation(typ, action.RequiresConfirmation)
-		actions = append(actions, SlackTriageDecisionAction{
+		normalizedAction := SlackTriageDecisionAction{
 			Type:                 typ,
 			Title:                title,
 			Message:              message,
@@ -414,7 +414,10 @@ func normalizeSlackTriageActions(values []any, fallback slackTriageFallback) []S
 			Emoji:                normalizeSlackReactionName(firstNonEmpty(action.Emoji, action.Message)),
 			MessageTS:            strings.TrimSpace(action.MessageTS),
 			RequiresConfirmation: requires,
-		})
+		}
+		normalizedAction.EvidenceAnchors = normalizeSlackVisibleEvidenceAnchors(action.EvidenceAnchors)
+		normalizedAction.EvidenceAnchors = slackVisibleEvidenceAnchorsForAction(normalizedAction)
+		actions = append(actions, normalizedAction)
 		if len(actions) >= 5 {
 			break
 		}
@@ -428,15 +431,20 @@ func triageActionFromAny(value any) SlackTriageDecisionAction {
 		return typed
 	case map[string]any:
 		return SlackTriageDecisionAction{
-			Type:                 firstNonEmpty(stringFromAny(typed["type"]), stringFromAny(typed["actionType"]), stringFromAny(typed["action_type"])),
-			Title:                firstNonEmpty(stringFromAny(typed["title"]), stringFromAny(typed["brief"]), stringFromAny(typed["summary"])),
-			Message:              firstNonEmpty(stringFromAny(typed["message"]), stringFromAny(typed["text"]), stringFromAny(typed["description"]), stringFromAny(typed["reason"])),
-			ChannelID:            firstNonEmpty(stringFromAny(typed["channelId"]), stringFromAny(typed["channel_id"]), stringFromAny(typed["channel"])),
-			ThreadTS:             firstNonEmpty(stringFromAny(typed["threadTs"]), stringFromAny(typed["thread_ts"])),
-			MessageTS:            firstNonEmpty(stringFromAny(typed["messageTs"]), stringFromAny(typed["message_ts"]), stringFromAny(typed["timestamp"]), stringFromAny(typed["ts"])),
-			Emoji:                firstNonEmpty(stringFromAny(typed["emoji"]), stringFromAny(typed["name"]), stringFromAny(typed["reaction"])),
-			Confidence:           numberFromAny(typed["confidence"], 0.5),
-			Reason:               firstNonEmpty(stringFromAny(typed["reason"]), stringFromAny(typed["rationale"])),
+			Type:       firstNonEmpty(stringFromAny(typed["type"]), stringFromAny(typed["actionType"]), stringFromAny(typed["action_type"])),
+			Title:      firstNonEmpty(stringFromAny(typed["title"]), stringFromAny(typed["brief"]), stringFromAny(typed["summary"])),
+			Message:    firstNonEmpty(stringFromAny(typed["message"]), stringFromAny(typed["text"]), stringFromAny(typed["description"]), stringFromAny(typed["reason"])),
+			ChannelID:  firstNonEmpty(stringFromAny(typed["channelId"]), stringFromAny(typed["channel_id"]), stringFromAny(typed["channel"])),
+			ThreadTS:   firstNonEmpty(stringFromAny(typed["threadTs"]), stringFromAny(typed["thread_ts"])),
+			MessageTS:  firstNonEmpty(stringFromAny(typed["messageTs"]), stringFromAny(typed["message_ts"]), stringFromAny(typed["timestamp"]), stringFromAny(typed["ts"])),
+			Emoji:      firstNonEmpty(stringFromAny(typed["emoji"]), stringFromAny(typed["name"]), stringFromAny(typed["reaction"])),
+			Confidence: numberFromAny(typed["confidence"], 0.5),
+			Reason:     firstNonEmpty(stringFromAny(typed["reason"]), stringFromAny(typed["rationale"])),
+			EvidenceAnchors: slackVisibleEvidenceAnchorsFromAny(firstNonEmptyAny(
+				typed["evidenceAnchors"],
+				typed["evidence_anchors"],
+				typed["evidence"],
+			)),
 			RequiresConfirmation: boolFromAny(typed["requiresConfirmation"], boolFromAny(typed["requires_confirmation"], true)),
 		}
 	default:

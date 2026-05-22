@@ -218,7 +218,7 @@ func TestPostThreadReplyApprovalRecordsQualitySample(t *testing.T) {
 		t.Fatalf("replyQualitySamples = %#v", report.ReplyQualitySamples)
 	}
 	got := report.ReplyQualitySamples.Samples[0]
-	if got.RejectReason != slackVisibleReplyRejectReasonNoCitation || got.ApprovalDecision != "rejected" || got.TriageRunID != 99 || got.AnchorConfidenceSource != "not_collected_phase0" {
+	if got.RejectReason != slackVisibleReplyRejectReasonNoCitation || got.ApprovalDecision != "rejected" || got.TriageRunID != 99 || got.AnchorConfidenceSource != "source_derived:slack_thread" || len(got.EvidenceAnchors) != 1 {
 		t.Fatalf("sample = %#v", got)
 	}
 }
@@ -260,6 +260,39 @@ func TestVisibleReplyQualityGateDropsInternalMetaReplies(t *testing.T) {
 	}
 	if got := slackVisibleReplyQualityBlockReason("The persona already classified this thread as no visible output."); got != "internal_control_plane_leak" {
 		t.Fatalf("block reason = %q, want internal_control_plane_leak", got)
+	}
+}
+
+func TestSlackVisibleReplyQualitySamplePreservesEvidenceAnchors(t *testing.T) {
+	t.Parallel()
+
+	action := SlackPendingAction{
+		ChannelID:  "C123",
+		ThreadTS:   "177.000",
+		ActionType: slackActionTypeThreadReply,
+		Params: map[string]any{
+			"proposedReplyText": "这条回复引用了链接内容。",
+			"approvalDecision":  "pending",
+			"evidenceAnchors": []any{map[string]any{
+				"kind":       "fetched_link",
+				"source_ref": "https://example.com/article",
+				"quote":      "Article source quote",
+				"confidence": 0.2,
+			}},
+		},
+		Status: PendingActionStatusPending,
+	}
+
+	sample := slackVisibleReplyQualitySampleFromAction(action)
+	if sample == nil || len(sample.EvidenceAnchors) != 1 {
+		t.Fatalf("sample = %#v, want one evidence anchor", sample)
+	}
+	anchor := sample.EvidenceAnchors[0]
+	if anchor.Kind != slackVisibleEvidenceKindFetchedLink || anchor.Confidence != 0.86 || anchor.ConfidenceSource != "source_derived:fetched_link" {
+		t.Fatalf("anchor = %#v, want normalized source-derived fetched-link anchor", anchor)
+	}
+	if sample.AnchorConfidenceSource != "source_derived:fetched_link" {
+		t.Fatalf("AnchorConfidenceSource = %q", sample.AnchorConfidenceSource)
 	}
 }
 

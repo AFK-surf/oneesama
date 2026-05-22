@@ -70,6 +70,13 @@ func slackVisibleReplyQualitySampleFromAction(action SlackPendingAction) *SlackV
 			rejectReason = slackVisibleReplyRejectReasonOther
 		}
 	}
+	anchors := slackVisibleEvidenceAnchorsFromAny(action.Params["evidenceAnchors"])
+	if len(anchors) == 0 {
+		anchors = slackVisibleEvidenceAnchorsFromAny(action.Params["evidence_anchors"])
+	}
+	if len(anchors) == 0 {
+		anchors = slackVisibleThreadEvidenceAnchors(action.ChannelID, action.ThreadTS, message)
+	}
 	return &SlackVisibleReplyQualitySample{
 		PendingActionID:        action.ID,
 		CardID:                 strings.TrimSpace(stringFromAny(action.Params["cardId"])),
@@ -84,7 +91,8 @@ func slackVisibleReplyQualitySampleFromAction(action SlackPendingAction) *SlackV
 		FinalOutcome:           firstNonEmpty(strings.TrimSpace(stringFromAny(action.Params["finalOutcome"])), strings.TrimSpace(action.Result)),
 		DecisionUserID:         strings.TrimSpace(action.ConfirmedBy),
 		Source:                 firstNonEmpty(strings.TrimSpace(stringFromAny(action.Params["source"])), "pending_action"),
-		AnchorConfidenceSource: firstNonEmpty(strings.TrimSpace(stringFromAny(action.Params["anchorConfidenceSource"])), "not_collected_phase0"),
+		AnchorConfidenceSource: firstNonEmpty(strings.TrimSpace(stringFromAny(action.Params["anchorConfidenceSource"])), slackVisibleEvidenceAnchorConfidenceSummary(anchors)),
+		EvidenceAnchors:        anchors,
 		CreatedAt:              strings.TrimSpace(action.CreatedAt),
 		UpdatedAt:              strings.TrimSpace(action.UpdatedAt),
 	}
