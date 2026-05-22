@@ -54,7 +54,7 @@ intent_action_negations='["no need","no further action","not needed","not be del
 # triageQualityHandledByOtherMarkers; the audit endpoint exposes it via
 # audit.qualityThresholds.handledByOtherSummaryMarkers. Inline fallback for
 # pre-follow-up servers mirrors the same EN+ZH compound set.
-handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryMarkers // []) + ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already been answered","already been fully handled","already handled","already handles","already on it","already active","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","already being handled","being actively handled","being handled by","being investigated and resolved","being investigated","was already handled","is being handled","is already being handled","active agent","already complied","has opened a session","has already opened","has already been answered","has already responded","has already been fully handled","has already complied","已经查了","已经由","已经被充分分析","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]) | unique' <"${tmpdir}/audit.json")"
+handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryMarkers // []) + ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already been answered","already been fully handled","already handled","already handles","already on it","already active","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","already being handled","being actively handled","being handled by","being investigated and resolved","being investigated","was already handled","is being handled","is already being handled","active agent","active codex","active claude","already complied","has opened a session","has already opened","has already been answered","has already responded","has already been fully handled","has already complied","已经查了","已经由","已经被充分分析","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]) | unique' <"${tmpdir}/audit.json")"
 handled_by_other_negations="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryNegations // []) + ["no idea","not sure","don'\''t know","doesn'\''t know","nobody knows","unknown who","unclear who","不认识","不知道","不清楚","搞不清","没人知道","无人知道","还没确定"]) | unique' <"${tmpdir}/audit.json")"
 harness_rollup="$(jq -c '.audit.harness // {}' <"${tmpdir}/audit.json")"
 
@@ -113,6 +113,9 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
     (($run.metadata.triage_timeout_needs_retry // false)
       or ($run.metadata.triage_empty_final_needs_retry // false)
       or ($run.metadata.persona_foreground_orphan_needs_retry // false));
+  def fresh_pending_run($run):
+    (($run.status // "") | test("^(pending|in_progress)$"; "i"))
+    and ((now - epoch($run.timestamp)) < 180);
   # task #285 follow-up (driver 2h sweep 2026-05-21 15:00): a no-action
   # run that is actually a delegate_worker call with a non-empty
   # worker_requests list does NOT belong in the narrative
@@ -185,13 +188,16 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         noAction: ($runs | map(select(is_no_action(.))) | length)
       },
       red: {
-        failures: ($runs | map(select(.status != "ok" and (retry_scheduled_failure(.) | not)) | brief(.))),
+        failures: ($runs | map(select(.status != "ok" and (retry_scheduled_failure(.) | not) and (fresh_pending_run(.) | not)) | brief(.))),
         invalidPersonaJSON: ($runs | map(select(((.summary // "") + " " + (.error // "")) | test("not valid persona JSON|invalid persona JSON"; "i")) | brief(.))),
-        placeholderSummaries: ($runs | map(select((.summary // "") | test("short reason for the shadow decision|placeholder|TODO"; "i")) | brief(.)))
+        placeholderSummaries: ($runs | map(select(((.summary // "") | test("short reason for the shadow decision|placeholder"; "i")) or ((.summary // "") | test("\\bTODO\\b"))) | brief(.)))
       },
       info: {
         retryScheduledFailures: (
           $runs | map(select(.status != "ok" and retry_scheduled_failure(.)) | brief(.))
+        ),
+        freshPendingRuns: (
+          $runs | map(select(fresh_pending_run(.)) | brief(.))
         ),
         handledByOtherNoAction: (
           $runs
@@ -335,7 +341,7 @@ jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
   "review: dynamic_context_issue=\(.review.dynamicContextIssue | length) high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length) delegate_no_visible_action=\(.review.delegateNoVisibleAction | length)",
-  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length) delegate_started_pending_worker_audit=\(.info.delegateStartedPendingWorkerAudit | length)"
+  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) fresh_pending=\(.info.freshPendingRuns | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length) delegate_started_pending_worker_audit=\(.info.delegateStartedPendingWorkerAudit | length)"
 ' <"${tmpdir}/quality.json"
 
 if jq -e '((.review.dynamicContextIssue | length) + (.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length) + (.review.delegateNoVisibleAction | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then

@@ -477,6 +477,8 @@ var triageQualityHandledByOtherMarkers = []string{
 	"is being handled",
 	"is already being handled",
 	"active agent",
+	"active codex",
+	"active claude",
 	"already complied",
 	"has opened a session",
 	"has already opened",

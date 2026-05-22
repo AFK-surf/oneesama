@@ -179,6 +179,18 @@ func TestSlackDailyReportRunSampleScrubsInternalRuntimeDetails(t *testing.T) {
 	}
 }
 
+func TestSlackDailyReportPlaceholderSummaryDoesNotFlagTodoProductText(t *testing.T) {
+	run := SlackTriageContext{
+		Summary: "The thread is an internal product discussion about removing the todo tool and future multi-agent UI decisions.",
+	}
+	if slackDailyReportPlaceholderSummary(run) {
+		t.Fatalf("lowercase product text containing todo should not count as placeholder")
+	}
+	if !slackDailyReportPlaceholderSummary(SlackTriageContext{Summary: "TODO: replace this summary"}) {
+		t.Fatal("uppercase TODO marker should count as placeholder")
+	}
+}
+
 func writeLegacySlackdDailyReportDB(t *testing.T, occurredAt time.Time) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "slackd.sqlite3")

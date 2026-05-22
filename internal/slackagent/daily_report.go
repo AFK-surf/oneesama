@@ -26,6 +26,7 @@ const (
 )
 
 var slackEmojiNamePattern = regexp.MustCompile(`:([a-zA-Z0-9_+\-]+):`)
+var slackDailyReportTodoPlaceholderPattern = regexp.MustCompile(`\bTODO\b`)
 
 type SlackDailyReportStatus struct {
 	Enabled          bool   `json:"enabled"`
@@ -1090,8 +1091,11 @@ func truncateSlackContextTextRunes(value string, maxLength int) string {
 }
 
 func slackDailyReportPlaceholderSummary(run SlackTriageContext) bool {
-	text := strings.ToLower(run.Summary + " " + run.Error)
-	return strings.Contains(text, "short reason for the shadow decision") || strings.Contains(text, "placeholder") || strings.Contains(text, "todo")
+	raw := run.Summary + " " + run.Error
+	text := strings.ToLower(raw)
+	return strings.Contains(text, "short reason for the shadow decision") ||
+		strings.Contains(text, "placeholder") ||
+		slackDailyReportTodoPlaceholderPattern.MatchString(raw)
 }
 
 func slackDailyReportInvalidPersonaJSON(run SlackTriageContext) bool {
