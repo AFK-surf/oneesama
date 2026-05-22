@@ -952,6 +952,7 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 			prompt = "Handle the delegated Slack task from Pi foreground triage."
 		}
 		workerID := firstNonEmpty(strings.TrimSpace(workerRequest.ID), fmt.Sprintf("%s:worker:%d", result.RequestID, index+1))
+		handoff := personaDelegatedWorkerHandoff(workerRequest, sessionKind, workerID, result, request, messages)
 		contextMap := mergeStringAnyMaps(workerRequest.Context, map[string]any{
 			"source":        "persona_delegate_worker",
 			"sessionId":     firstNonEmpty(strings.TrimSpace(result.RequestID), fmt.Sprintf("triage:%d", runID)),
@@ -960,6 +961,7 @@ func (s *Service) startPersonaDelegatedWorkerJobs(ctx context.Context, workspace
 			"workspace_id":  workspaceID,
 			"triageRunId":   runID,
 			"triage_run_id": runID,
+			"handoff":       handoff,
 			"slack": map[string]any{
 				"workspaceId": workspaceID,
 				"channelId":   strings.TrimSpace(result.ChannelID),

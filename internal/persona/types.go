@@ -145,6 +145,25 @@ type WorkerRequest struct {
 	Kind    string         `json:"kind"`
 	Prompt  string         `json:"prompt"`
 	Context map[string]any `json:"context,omitempty"`
+	Handoff *WorkerHandoff `json:"handoff,omitempty"`
+}
+
+type WorkerHandoff struct {
+	SourceAgent    string             `json:"source_agent,omitempty"`
+	TargetAgent    string             `json:"target_agent,omitempty"`
+	Reason         string             `json:"reason,omitempty"`
+	UserRequest    string             `json:"user_request,omitempty"`
+	Task           string             `json:"task,omitempty"`
+	ContextSummary string             `json:"context_summary,omitempty"`
+	ExpectedOutput string             `json:"expected_output,omitempty"`
+	Boundaries     []string           `json:"boundaries,omitempty"`
+	SourceRefs     []HandoffSourceRef `json:"source_refs,omitempty"`
+}
+
+type HandoffSourceRef struct {
+	Kind      string `json:"kind,omitempty"`
+	SourceRef string `json:"source_ref,omitempty"`
+	Summary   string `json:"summary,omitempty"`
 }
 
 type MemoryWrite struct {

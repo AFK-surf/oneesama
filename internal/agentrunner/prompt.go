@@ -60,6 +60,11 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 			"## Secretary lookup boundary\n- this is a read-only secretary lookup, not a project debugging or implementation session\n- use only read/fetch/search/memory evidence; do not edit repos, schedule follow-ups, create canvases, or send Slack/Meet messages\n- return Slack-visible text only when there are concrete evidence anchors; otherwise return no visible answer instead of a routing/refusal template",
 		)
 	}
+	if handoff := handoffContextJSON(input.Context); handoff != "" {
+		sections = append(sections,
+			"## Worker handoff contract\nYou are the target subagent for this explicit Oneesama handoff. Treat the handoff as the source of truth for why you were called, what task you own, what boundaries apply, and what result Oneesama expects back. Return results to Oneesama; do not send Slack, Meet, or other user-visible messages directly.\n\nHandoff:\n"+handoff,
+		)
+	}
 	sections = append(sections,
 		"Mode: "+defaultMode(input.Mode),
 		"Allow code changes: "+yesNo(input.AllowCodeChanges),
@@ -76,6 +81,17 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 	}
 	sections = append(sections, "Context:\n"+contextJSON)
 	return strings.Join(sections, "\n\n")
+}
+
+func handoffContextJSON(context map[string]any) string {
+	if len(context) == 0 || context["handoff"] == nil {
+		return ""
+	}
+	payload, err := json.MarshalIndent(context["handoff"], "", "  ")
+	if err != nil || len(payload) == 0 || string(payload) == "null" {
+		return ""
+	}
+	return string(payload)
 }
 
 func cueboardDefaultSystemPromptForAgentRunner() string {

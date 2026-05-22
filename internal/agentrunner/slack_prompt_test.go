@@ -86,6 +86,37 @@ func TestBuildPromptUsesReadOnlySecretaryBoundaryForSecretaryLookup(t *testing.T
 	}
 }
 
+func TestBuildPromptSurfacesWorkerHandoffContract(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task:             "Identify this linked HN profile from thread and memory evidence.",
+		Mode:             "analysis",
+		AllowCodeChanges: false,
+		Context: map[string]any{
+			"source": "persona_delegate_worker",
+			"handoff": map[string]any{
+				"source_agent":    "oneesama_pi_foreground",
+				"target_agent":    "secretary_lookup_worker",
+				"reason":          "needs source-backed identity lookup",
+				"expected_output": "JSON with visible_text and evidence_anchors",
+				"boundaries":      []string{"read-only", "do not send Slack messages"},
+			},
+		},
+	}, SessionKindSecretaryLookup))
+
+	for _, want := range []string{
+		"Worker handoff contract",
+		"target subagent",
+		`"source_agent": "oneesama_pi_foreground"`,
+		`"target_agent": "secretary_lookup_worker"`,
+		"do not send Slack messages",
+		"Return results to Oneesama",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing handoff contract %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildPromptInjectsLayeredIdentityBoundaryForSlackWorkers(t *testing.T) {
 	prompt := buildPrompt(WithSessionCapabilities(StartInput{
 		Task: "你是什么模型",

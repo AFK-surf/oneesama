@@ -1479,6 +1479,24 @@ func hasTriageToolCall(calls []SlackTriageToolCall, tool string, action string) 
 	return false
 }
 
+func handoffSourceRefsContain(refs []persona.HandoffSourceRef, kind string, sourceRef string) bool {
+	for _, ref := range refs {
+		if ref.Kind == kind && ref.SourceRef == sourceRef {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContainsSubstring(values []string, needle string) bool {
+	for _, value := range values {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSecretaryLookupWorkerPromptCarriesMemoryEvidenceAndFollowupInstruction(t *testing.T) {
 	req := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
 		ChannelID: "C_TRIAGE",
@@ -1608,6 +1626,92 @@ func TestStartPersonaDelegatedSecretaryLookupWorkerEnrichesPiWorkerRequest(t *te
 	}
 	if evidence := stringFromAny(runner.startInput.Context["workspace_memory_evidence"]); !strings.Contains(evidence, "memory/people/zanwei.md") || !strings.Contains(evidence, "Johnson8053") {
 		t.Fatalf("workspace_memory_evidence = %q, want request memory passed through", evidence)
+	}
+}
+
+func TestStartPersonaDelegatedWorkerCarriesSwarmStyleHandoff(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C_TRIAGE",
+		UserID:    "U_PENG",
+		Text:      "帮我查一下这个 HN 用户是谁",
+		TS:        "600.000",
+		ThreadTS:  "600.000",
+	}}
+	req := persona.Request{
+		ID:    "pi-req-handoff",
+		Event: persona.Event{Text: "帮我查一下这个 HN 用户是谁"},
+		Anchor: persona.Anchor{
+			Surface:   "slack",
+			ChannelID: "C_TRIAGE",
+			ThreadTS:  "600.000",
+		},
+		Context: []persona.ContextItem{{
+			Kind:      "external_link_context",
+			SourceRef: "https://news.ycombinator.com/user?id=Johnson8053",
+			Text:      "HN profile: Johnson8053, created September 20, 2024, karma 33.",
+		}},
+		Memory: persona.MemoryContext{Items: []persona.MemoryRecord{{
+			Kind:      "person_memory",
+			SourceRef: "memory/people/zanwei.md",
+			Text:      "Johnson8053 has prior workspace evidence linking affine and bridge submissions.",
+			Score:     0.91,
+		}}},
+	}
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_handoff",
+		Provider: "codex",
+		Status:   agentrunner.StatusRunning,
+	}}
+	service := NewService(Config{Runner: runner})
+	result := SlackPersonaShadowResult{
+		Success:   true,
+		RequestID: req.ID,
+		ChannelID: "C_TRIAGE",
+		ThreadTS:  "600.000",
+		Decision:  persona.DecisionDelegateWorker,
+		Reason:    "needs a source-backed identity lookup",
+		workerRecords: []persona.WorkerRequest{{
+			ID:     "identity-lookup",
+			Kind:   "codex",
+			Prompt: "Identify the HN user from the supplied thread, fetched link, and memory evidence.",
+			Context: map[string]any{
+				"delegation_scope": "secretary_lookup",
+			},
+			Handoff: &persona.WorkerHandoff{
+				Boundaries: []string{"custom read-only boundary"},
+			},
+		}},
+	}
+
+	started := service.startPersonaDelegatedWorkerJobs(context.Background(), "T123", 101, result, req, messages)
+	if len(started.JobIDs) != 1 || runner.startCount != 1 {
+		t.Fatalf("started=%#v runner.startCount=%d, want one worker", started, runner.startCount)
+	}
+	handoff, ok := runner.startInput.Context["handoff"].(persona.WorkerHandoff)
+	if !ok {
+		t.Fatalf("handoff = %#v, want persona.WorkerHandoff", runner.startInput.Context["handoff"])
+	}
+	if handoff.SourceAgent != "oneesama_pi_foreground" || handoff.TargetAgent != "secretary_lookup_worker" {
+		t.Fatalf("handoff agents = %#v, want Pi foreground -> secretary lookup worker", handoff)
+	}
+	if handoff.Reason != result.Reason || !strings.Contains(handoff.UserRequest, "HN 用户") || !strings.Contains(handoff.Task, "Identify the HN user") {
+		t.Fatalf("handoff = %#v, want reason/user request/task", handoff)
+	}
+	for _, want := range []string{
+		"custom read-only boundary",
+		"Return results to Oneesama",
+		"subagent handoff from Oneesama",
+		"Only produce Slack-visible text when concrete evidence anchors support it.",
+	} {
+		if !stringSliceContainsSubstring(handoff.Boundaries, want) {
+			t.Fatalf("handoff boundaries = %#v, missing %q", handoff.Boundaries, want)
+		}
+	}
+	if !handoffSourceRefsContain(handoff.SourceRefs, "slack_thread", "C_TRIAGE/600.000") ||
+		!handoffSourceRefsContain(handoff.SourceRefs, "external_link_context", "https://news.ycombinator.com/user?id=Johnson8053") ||
+		!handoffSourceRefsContain(handoff.SourceRefs, "person_memory", "memory/people/zanwei.md") {
+		t.Fatalf("handoff source refs = %#v, want Slack thread, fetched link, and memory refs", handoff.SourceRefs)
 	}
 }
 
