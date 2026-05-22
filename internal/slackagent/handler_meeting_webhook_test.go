@@ -250,7 +250,7 @@ func TestMeetingWebhookCopilotToolRequestSendsMeetChat(t *testing.T) {
 	}
 }
 
-func TestMeetingWebhookResultUploadsTranscriptAndAudioBeforeCanvasPublish(t *testing.T) {
+func TestMeetingWebhookResultUploadsTranscriptAndAudioWithoutExposingLinks(t *testing.T) {
 	transcriptPath := filepath.Join(t.TempDir(), "transcript.txt")
 	if err := os.WriteFile(transcriptPath, []byte("Peng: real transcript line\n"), 0o644); err != nil {
 		t.Fatalf("write transcript: %v", err)
@@ -353,10 +353,13 @@ func TestMeetingWebhookResultUploadsTranscriptAndAudioBeforeCanvasPublish(t *tes
 	if !completedFiles["transcript.txt"] || !completedFiles["audio.mp3"] {
 		t.Fatalf("completed files = %#v, want transcript and audio uploads", completedFiles)
 	}
-	if !strings.Contains(canvasMarkdown, "![transcript.txt](https://files.slack.com/transcript.txt)") ||
-		!strings.Contains(canvasMarkdown, "![audio.mp3](https://files.slack.com/audio.mp3)") ||
+	if strings.Contains(canvasMarkdown, "![transcript.txt]") ||
+		strings.Contains(canvasMarkdown, "![audio.mp3]") ||
+		strings.Contains(canvasMarkdown, "files.slack.com") ||
+		strings.Contains(canvasMarkdown, "transcript.txt") ||
+		strings.Contains(canvasMarkdown, "audio.mp3") ||
 		strings.Contains(canvasMarkdown, "```") {
-		t.Fatalf("canvas markdown = %s", canvasMarkdown)
+		t.Fatalf("canvas markdown leaked raw artifact links:\n%s", canvasMarkdown)
 	}
 	if !strings.Contains(postedText, "View full notes") || strings.Contains(postedText, "transcript.txt") || strings.Contains(postedText, "audio.mp3") {
 		t.Fatalf("posted text = %q, want only short Canvas notification", postedText)
@@ -475,11 +478,13 @@ func TestMeetingWebhookResultCompressesWavAudioBeforeUpload(t *testing.T) {
 	if !completedFiles["audio.mp3"] {
 		t.Fatalf("completed files = %#v, want compressed audio upload", completedFiles)
 	}
-	if !strings.Contains(canvasMarkdown, "![transcript.txt](https://files.slack.com/transcript.txt)") {
-		t.Fatalf("canvas markdown = %s, want transcript attachment", canvasMarkdown)
-	}
-	if !strings.Contains(canvasMarkdown, "![audio.mp3](https://files.slack.com/audio.mp3)") || strings.Contains(canvasMarkdown, "audio.wav") {
-		t.Fatalf("canvas markdown = %s, want compressed audio attachment only", canvasMarkdown)
+	if strings.Contains(canvasMarkdown, "![transcript.txt]") ||
+		strings.Contains(canvasMarkdown, "![audio.mp3]") ||
+		strings.Contains(canvasMarkdown, "files.slack.com") ||
+		strings.Contains(canvasMarkdown, "transcript.txt") ||
+		strings.Contains(canvasMarkdown, "audio.mp3") ||
+		strings.Contains(canvasMarkdown, "audio.wav") {
+		t.Fatalf("canvas markdown leaked raw artifact links:\n%s", canvasMarkdown)
 	}
 }
 

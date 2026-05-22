@@ -101,6 +101,7 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 		if !strings.Contains(immediateBody, `"replace_original":true`) ||
 			!strings.Contains(immediateBody, "Bot is joining *Google Meet*") ||
 			!strings.Contains(immediateBody, ":hourglass_flowing_sand: *Joining Google Meet*") ||
+			strings.Contains(immediateBody, `"response_type":"ephemeral"`) ||
 			strings.Contains(immediateBody, "Joining "+meetURL) {
 			t.Fatalf("immediate body = %s, want compact response_url card replacement", immediateBody)
 		}
@@ -133,6 +134,7 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 		if !strings.Contains(finalBody, `"replace_original":true`) ||
 			!strings.Contains(finalBody, ":studio_microphone: *Joined: Google Meet*") ||
 			!strings.Contains(finalBody, "Recording — summary will be posted when the meeting ends.") ||
+			strings.Contains(finalBody, `"response_type":"ephemeral"`) ||
 			strings.Contains(finalBody, "Session session_socket_realtime created") {
 			t.Fatalf("final body = %s, want cueboard-style response_url final replacement without visible session id", finalBody)
 		}

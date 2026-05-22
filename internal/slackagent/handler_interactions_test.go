@@ -160,6 +160,7 @@ func TestHandleInteractionJoinSetupCallsMeetingAgentWithSelectedOptions(t *testi
 	if !strings.Contains(response.Body.String(), `"replace_original":true`) ||
 		!strings.Contains(response.Body.String(), "Bot is joining *Google Meet*") ||
 		!strings.Contains(response.Body.String(), ":hourglass_flowing_sand: *Joining Google Meet*") ||
+		strings.Contains(response.Body.String(), `"response_type":"ephemeral"`) ||
 		strings.Contains(response.Body.String(), "Joining "+meetURL) {
 		t.Fatalf("body = %s, want compact immediate card replacement", response.Body.String())
 	}
@@ -192,6 +193,7 @@ func TestHandleInteractionJoinSetupCallsMeetingAgentWithSelectedOptions(t *testi
 		if !strings.Contains(finalBody, `"replace_original":true`) ||
 			!strings.Contains(finalBody, ":studio_microphone: *Joined: Google Meet*") ||
 			!strings.Contains(finalBody, "Recording — summary will be posted when the meeting ends.") ||
+			strings.Contains(finalBody, `"response_type":"ephemeral"`) ||
 			strings.Contains(finalBody, "Session session_realtime created") {
 			t.Fatalf("final body = %s, want cueboard-style joined replacement without visible session id", finalBody)
 		}
@@ -259,6 +261,7 @@ func TestHandleInteractionJoinSetupFailureKeepsMetadataNilSafe(t *testing.T) {
 	case finalBody := <-finalResponseCh:
 		if !strings.Contains(finalBody, `"replace_original":true`) ||
 			!strings.Contains(finalBody, "Join failed: meeting-agent /join/google-meet returned 500: join worker timed out") ||
+			strings.Contains(finalBody, `"response_type":"ephemeral"`) ||
 			!strings.Contains(finalBody, `"join_setup"`) {
 			t.Fatalf("final body = %s, want failed replacement with join_setup metadata", finalBody)
 		}

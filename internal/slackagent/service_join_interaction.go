@@ -50,7 +50,6 @@ func (s *Service) startJoinSetupInteraction(ctx context.Context, command AvatarC
 	}, ":")
 	ack := AvatarCommandResponse{
 		OK:              true,
-		ResponseType:    "ephemeral",
 		Text:            joinSetupInProgressText(parsed),
 		Blocks:          buildJoinSetupProgressBlocks(parsed),
 		ReplaceOriginal: true,
@@ -131,6 +130,7 @@ func buildJoinSetupProgressBlocks(parsed parsedAvatarCommand) []map[string]any {
 func (s *Service) finishJoinSetupInteraction(ctx context.Context, command AvatarCommandInput, responseURL string) {
 	response := s.RunAvatarCommand(ctx, command)
 	response.ReplaceOriginal = true
+	response.ResponseType = ""
 	if strings.TrimSpace(response.Text) == "" {
 		response.Text = "Join request finished."
 	}

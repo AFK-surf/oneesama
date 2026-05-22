@@ -48,8 +48,16 @@ func TestHandleEventsJoinPostsMeetingOptionCard(t *testing.T) {
 		t.Fatalf("blocks = %#v, want join setup card", calls[0].Blocks)
 	}
 	rawBlocks, _ := json.Marshal(calls[0].Blocks)
-	if !strings.Contains(string(rawBlocks), joinSetupCaptionActionID) || !strings.Contains(string(rawBlocks), joinSetupRealtimeActionID) {
-		t.Fatalf("blocks = %s, want caption select and realtime button", string(rawBlocks))
+	if !strings.Contains(string(rawBlocks), joinSetupCaptionActionID) ||
+		!strings.Contains(string(rawBlocks), joinSetupPlainActionID) ||
+		!strings.Contains(string(rawBlocks), joinSetupRealtimeActionID) {
+		t.Fatalf("blocks = %s, want caption select plus plain and realtime buttons", string(rawBlocks))
+	}
+	if !strings.Contains(string(rawBlocks), `"action_id":"`+joinSetupPlainActionID+`"`) ||
+		!strings.Contains(string(rawBlocks), `"text":"Join"`) ||
+		!strings.Contains(string(rawBlocks), `"action_id":"`+joinSetupRealtimeActionID+`"`) ||
+		!strings.Contains(string(rawBlocks), `"text":"Join with realtime"`) {
+		t.Fatalf("blocks = %s, want ordinary Join primary and explicit realtime secondary", string(rawBlocks))
 	}
 	if strings.Contains(string(rawBlocks), `"type":"input"`) ||
 		strings.Contains(string(rawBlocks), "ASR") ||
