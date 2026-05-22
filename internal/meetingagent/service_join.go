@@ -321,14 +321,14 @@ func runtimeMeetPageStatus(active any) string {
 		return ""
 	}
 	meetPage, _ := fields["meetPage"].(map[string]any)
-	if boolField(meetPage, "cannotJoin") {
-		return joinSessionStatusString(joinSessionStatusFailed)
+	if runtimeJoinedEvidence(fields, meetPage, runtimeParticipantCount(meetPage)) {
+		return joinSessionStatusString(joinSessionStatusJoined)
 	}
 	if boolField(meetPage, "waitingForAdmit") {
 		return joinSessionStatusString(joinSessionStatusWaiting)
 	}
-	if boolField(meetPage, "inMeeting") {
-		return joinSessionStatusString(joinSessionStatusJoined)
+	if boolField(meetPage, "cannotJoin") {
+		return joinSessionStatusString(joinSessionStatusFailed)
 	}
 	return ""
 }

@@ -239,19 +239,19 @@ func runtimeJoinState(active any) runtimeJoinSnapshot {
 		return runtimeJoinSnapshot{Left: true, Reason: "no_active_join"}
 	}
 	meetPage := mapFromAny(fields["meetPage"])
+	count := runtimeParticipantCount(meetPage)
 	switch {
-	case boolField(meetPage, "cannotJoin"):
-		return runtimeJoinSnapshot{Failed: true, Reason: "cannot_join"}
-	case boolField(meetPage, "waitingForAdmit"), boolField(meetPage, "preJoin"), boolField(meetPage, "signIn"):
-		return runtimeJoinSnapshot{}
-	case boolField(meetPage, "inMeeting"):
-		count := runtimeParticipantCount(meetPage)
+	case runtimeJoinedEvidence(fields, meetPage, count):
 		return runtimeJoinSnapshot{
 			Joined:           true,
 			Alone:            count > 0 && count <= 1,
 			Reason:           reasonIf(count > 0 && count <= 1, "empty_room"),
 			ParticipantCount: count,
 		}
+	case boolField(meetPage, "waitingForAdmit"), boolField(meetPage, "preJoin"), boolField(meetPage, "signIn"):
+		return runtimeJoinSnapshot{}
+	case boolField(meetPage, "cannotJoin"):
+		return runtimeJoinSnapshot{Failed: true, Reason: "cannot_join"}
 	default:
 		text := strings.ToLower(stringFromMap(meetPage, "textHead"))
 		if strings.Contains(text, "left the meeting") || strings.Contains(text, "return to home screen") {
@@ -259,6 +259,14 @@ func runtimeJoinState(active any) runtimeJoinSnapshot {
 		}
 		return runtimeJoinSnapshot{}
 	}
+}
+
+func runtimeJoinedEvidence(fields map[string]any, meetPage map[string]any, participantCount int) bool {
+	if boolField(meetPage, "inMeeting") || participantCount > 0 {
+		return true
+	}
+	captions := mapFromAny(fields["captions"])
+	return intFromAny(captions["count"]) > 0
 }
 
 func runtimeParticipantCount(meetPage map[string]any) int {

@@ -673,19 +673,23 @@ async function evaluateMeetAccessibilityState(page: Page): Promise<MeetPageState
       ),
     ),
   ];
+  const inMeeting = !waitingForAdmit && inMeetingSignals.some(Boolean);
+  const cannotJoin =
+    !inMeeting &&
+    !waitingForAdmit &&
+    /You can't join this video call|No one can join a meeting unless invited or admitted by the host/i.test(
+      text,
+    );
   return {
     ok: true,
     source: "accessibility",
     url: page.url(),
     title: "",
-    inMeeting: !waitingForAdmit && inMeetingSignals.some(Boolean),
+    inMeeting,
     waitingForAdmit,
     preJoin: /Join now|Ask to join|Getting ready/i.test(text),
     signIn: /Forgot email|Create account|Use your Google Account/i.test(text),
-    cannotJoin:
-      /You can't join this video call|No one can join a meeting unless invited or admitted by the host/i.test(
-        text,
-      ),
+    cannotJoin,
     textHead: text.slice(0, 1000),
     buttons,
   };
@@ -2267,21 +2271,25 @@ async function evaluateMeetPageState(page: Page): Promise<MeetPageState> {
         /Sign in/i.test(text) && /Next/i.test(text),
         /accounts\.google\.com/i.test(url),
       ];
+      const inMeeting = !waitingForAdmit && inMeetingSignals.some(Boolean);
+      const cannotJoin =
+        !inMeeting &&
+        !waitingForAdmit &&
+        /You can't join this video call|No one can join a meeting unless invited or admitted by the host/i.test(
+          text,
+        );
       return {
         ok: true,
         url,
         title,
-        inMeeting: !waitingForAdmit && inMeetingSignals.some(Boolean),
+        inMeeting,
         participantCount: participantCount(),
         participants,
         activeSpeaker,
         waitingForAdmit,
         preJoin: preJoinSignals.some(Boolean),
         signIn: signInSignals.some(Boolean),
-        cannotJoin:
-          /You can't join this video call|No one can join a meeting unless invited or admitted by the host/i.test(
-            text,
-          ),
+        cannotJoin,
         textHead: text.slice(0, 1000),
         buttons: buttons.slice(0, 30),
       };

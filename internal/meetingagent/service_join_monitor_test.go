@@ -74,6 +74,37 @@ func TestRuntimeJoinStateDoesNotMarkMultiParticipantMeetingAlone(t *testing.T) {
 	}
 }
 
+func TestRuntimeJoinStatePrefersJoinedEvidenceOverCannotJoin(t *testing.T) {
+	t.Parallel()
+
+	state := runtimeJoinState(map[string]any{
+		"meetPage": map[string]any{
+			"cannotJoin":       true,
+			"inMeeting":        true,
+			"participantCount": 18,
+		},
+		"captions": map[string]any{
+			"count": 6,
+		},
+	})
+	if !state.Joined || state.Failed || state.ParticipantCount != 18 {
+		t.Fatalf("state = %+v, want joined evidence to override cannot_join", state)
+	}
+}
+
+func TestRuntimeJoinStateStillFailsPureCannotJoin(t *testing.T) {
+	t.Parallel()
+
+	state := runtimeJoinState(map[string]any{
+		"meetPage": map[string]any{
+			"cannotJoin": true,
+		},
+	})
+	if !state.Failed || state.Joined || state.Reason != "cannot_join" {
+		t.Fatalf("state = %+v, want pure cannot_join failure", state)
+	}
+}
+
 func TestJoinMonitorStopsSoloMeetingAfterTimeout(t *testing.T) {
 	oldInterval := joinMonitorIntervalOverrideNanos.Swap(int64(time.Millisecond))
 	oldAloneTimeout := joinMonitorAloneTimeoutOverrideNanos.Swap(int64(time.Millisecond))

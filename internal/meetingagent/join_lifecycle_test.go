@@ -46,9 +46,14 @@ func TestRuntimeMeetPageStatusUsesJoinLifecycleStatuses(t *testing.T) {
 		want   joinSessionStatus
 	}{
 		{
-			name:   "cannot join maps failed",
-			active: map[string]any{"meetPage": map[string]any{"cannotJoin": true, "inMeeting": true}},
+			name:   "cannot join maps failed without joined evidence",
+			active: map[string]any{"meetPage": map[string]any{"cannotJoin": true}},
 			want:   joinSessionStatusFailed,
+		},
+		{
+			name:   "joined evidence wins over stale cannot join text",
+			active: map[string]any{"meetPage": map[string]any{"cannotJoin": true, "inMeeting": true, "participantCount": 18}},
+			want:   joinSessionStatusJoined,
 		},
 		{
 			name:   "waiting for admit maps waiting",
