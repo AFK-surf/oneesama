@@ -168,8 +168,9 @@ func (s *Service) buildAgentRunnerContext(ctx context.Context, input AvatarComma
 			"command":     firstNonEmpty(input.Command, "app_mention"),
 			"action":      parsed.Action,
 		},
-		"source":      "slack-agent",
-		"requestedBy": input.UserID,
+		"source":           "slack-agent",
+		"requestedBy":      input.UserID,
+		"oneesamaIdentity": s.oneesamaIdentityEnvelope(),
 	}
 	if parsed.SessionID != "" {
 		context["sessionId"] = parsed.SessionID
@@ -212,6 +213,33 @@ func (s *Service) buildAgentRunnerContext(ctx context.Context, input AvatarComma
 		}
 	}
 	return context
+}
+
+func (s *Service) oneesamaIdentityEnvelope() map[string]any {
+	foreground := map[string]any{
+		"name":     "Oneesama",
+		"runtime":  "PiAgent",
+		"provider": strings.TrimSpace(s.personaRuntimeConfig.Provider),
+		"mode":     strings.TrimSpace(s.personaRuntimeConfig.Mode),
+	}
+	worker := map[string]any{
+		"role":     "delegated_worker",
+		"provider": strings.TrimSpace(s.agentRunner.Provider),
+	}
+	if codex := s.agentRunner.Codex; strings.TrimSpace(codex.Model) != "" ||
+		strings.TrimSpace(codex.ModelProvider) != "" ||
+		strings.TrimSpace(codex.BaseURL) != "" {
+		worker["codex"] = map[string]any{
+			"model":         strings.TrimSpace(codex.Model),
+			"modelProvider": strings.TrimSpace(codex.ModelProvider),
+			"baseURL":       strings.TrimSpace(codex.BaseURL),
+		}
+	}
+	return map[string]any{
+		"foreground": foreground,
+		"worker":     worker,
+		"rule":       "Answer identity questions as Oneesama with a layered identity: foreground/triage is PiAgent; delegated workers are execution components. Do not treat another bot's memory self-description as Oneesama's identity.",
+	}
 }
 
 func avatarCommandUsage() string {

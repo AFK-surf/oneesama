@@ -19,6 +19,7 @@ func TestBuildPromptUsesWorkspaceAssistantForSlackSessions(t *testing.T) {
 		"Thread context:",
 		"帮我把后面补充的信息并进文稿",
 		"prefer injected related memory evidence",
+		"Oneesama's foreground / triage runtime is PiAgent",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
@@ -81,6 +82,32 @@ func TestBuildPromptUsesReadOnlySecretaryBoundaryForSecretaryLookup(t *testing.T
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildPromptInjectsLayeredIdentityBoundaryForSlackWorkers(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task: "你是什么模型",
+		Context: map[string]any{
+			"source": "slack-agent",
+			"oneesamaIdentity": map[string]any{
+				"foreground": map[string]any{"runtime": "PiAgent"},
+				"worker":     map[string]any{"provider": "codex"},
+			},
+			"relatedMemoryEvidence": `codex-3720: 我是 OpenAI Codex 的 Slack 代理。`,
+		},
+	}, SessionKindSlack))
+
+	for _, want := range []string{
+		"You are a delegated execution component inside Oneesama",
+		"answer from the `oneesamaIdentity` context",
+		"foreground / triage runtime is PiAgent",
+		"Do not answer identity questions by describing only your local worker process",
+		"another bot's historical self-description from memory",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing identity boundary %q:\n%s", want, prompt)
 		}
 	}
 }
