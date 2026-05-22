@@ -1214,20 +1214,22 @@ func (s *Service) recordSlackTriagePersonaForegroundResult(ctx context.Context, 
 		patch.Summary = firstNonEmpty(result.VisibleText, result.Reason, patch.Summary)
 	}
 	metadata := map[string]any{
-		"persona_foreground":                     result,
-		"persona_foreground_queued":              false,
-		"persona_foreground_done_at":             nowRFC3339(),
-		"pi_first_decision":                      strings.TrimSpace(result.Decision),
-		"persona_foreground_action_count":        len(actions),
-		"delegate_worker_jobs_started":           delegateWorkerJobsStarted,
-		"delegate_worker_failures":               delegateWorkerFailures,
-		"delegate_worker_scope_blocks":           delegateWorkerScopeBlocks,
-		"delegate_worker_blocked_silent":         delegateWorkerBlockedSilent,
-		"secretary_lookup_auto_delegates":        secretaryLookupAutoDelegates,
-		"reply_canned_refusal_downgraded_silent": replyCannedRefusalDowngradedSilent,
-		"persona_memory_write_files":             memoryWritePersistence.Files,
-		"persona_memory_write_errors":            memoryWritePersistence.Errors,
-		"persona_memory_write_redactions":        memoryWritePersistence.Redactions,
+		"persona_foreground":                              result,
+		"persona_foreground_queued":                       false,
+		"persona_foreground_done_at":                      nowRFC3339(),
+		"pi_first_decision":                               strings.TrimSpace(result.Decision),
+		"persona_foreground_action_count":                 len(actions),
+		"delegate_worker_jobs_started":                    delegateWorkerJobsStarted,
+		"delegate_worker_failures":                        delegateWorkerFailures,
+		"delegate_worker_scope_blocks":                    delegateWorkerScopeBlocks,
+		"delegate_worker_blocked_silent":                  delegateWorkerBlockedSilent,
+		"secretary_lookup_auto_delegates":                 secretaryLookupAutoDelegates,
+		"reply_canned_refusal_downgraded_silent":          replyCannedRefusalDowngradedSilent,
+		"persona_memory_write_files":                      memoryWritePersistence.Files,
+		"persona_memory_write_contradiction_review_files": memoryWritePersistence.ContradictionReviewFiles,
+		"persona_memory_write_contradiction_reviews":      memoryWritePersistence.ContradictionReviews,
+		"persona_memory_write_errors":                     memoryWritePersistence.Errors,
+		"persona_memory_write_redactions":                 memoryWritePersistence.Redactions,
 	}
 	if !result.Success && slackPersonaForegroundTimedOut(result) {
 		metadata["triage_timeout_needs_retry"] = true
@@ -1996,9 +1998,11 @@ func callPersonaShadow(ctx context.Context, runtime persona.Runtime, source stri
 }
 
 type personaMemoryWritePersistence struct {
-	Files      []string
-	Errors     []string
-	Redactions int
+	Files                    []string
+	ContradictionReviewFiles []string
+	Errors                   []string
+	Redactions               int
+	ContradictionReviews     int
 }
 
 func (s *Service) persistPersonaForegroundMemoryWrites(ctx context.Context, result SlackPersonaShadowResult) personaMemoryWritePersistence {
@@ -2018,6 +2022,36 @@ func (s *Service) persistPersonaForegroundMemoryWrites(ctx context.Context, resu
 		}
 		text := strings.TrimSpace(record.Text)
 		if text == "" {
+			continue
+		}
+		contradiction := s.personaMemoryWriteContradictionVerdict(record)
+		if contradiction.Outcome == slackMemoryScopeOutcomeContradictionReview {
+			body, redactions := renderPersonaMemoryWriteContradictionReview(result, record, contradiction)
+			out.Redactions += redactions
+			rel := personaMemoryWriteContradictionReviewPath(result, record)
+			if err := legacySlackWriteGeneratedFile(root, rel, []byte(body), true); err != nil {
+				out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", rel, err))
+				continue
+			}
+			s.notifyMemoryProvidersWrite(ctx, SlackMemoryProviderWriteEvent{
+				Action:  "contradiction_review",
+				Target:  "persona",
+				Path:    filepath.ToSlash(rel),
+				Content: body,
+				Source:  "persona_memory_write_contradiction_review",
+				Metadata: map[string]any{
+					"request_id": result.RequestID,
+					"channel_id": result.ChannelID,
+					"thread_ts":  result.ThreadTS,
+					"kind":       record.Kind,
+					"source_ref": record.SourceRef,
+					"outcome":    contradiction.Outcome,
+					"reason":     contradiction.Reason,
+					"evidence":   contradiction.Evidence,
+				},
+			})
+			out.ContradictionReviews++
+			out.ContradictionReviewFiles = append(out.ContradictionReviewFiles, rel)
 			continue
 		}
 		body, redactions := renderPersonaMemoryWrite(result, record)
@@ -2046,6 +2080,20 @@ func (s *Service) persistPersonaForegroundMemoryWrites(ctx context.Context, resu
 	return out
 }
 
+func (s *Service) personaMemoryWriteContradictionVerdict(record persona.MemoryWrite) SlackMemoryScopeCanaryResult {
+	if s == nil || !slackMemoryWriteIsIdentityFact(record) || !slackMemoryWriteIsWorkerScoped(record) {
+		return SlackMemoryScopeCanaryResult{
+			CaseID:  slackMemoryScopeCanaryContradictionCase,
+			Pass:    false,
+			Outcome: slackMemoryScopeOutcomeActiveMemory,
+			Reason:  "candidate_write_is_not_worker_scoped_identity",
+		}
+	}
+	query := personaMemoryWriteContradictionQuery(record)
+	related := s.SearchRelatedMemory(query, SlackRelatedMemorySearchOptions{Limit: 12})
+	return evaluateSlackMemoryContradictionCanary(related.Results, record)
+}
+
 func personaMemoryWritePath(result SlackPersonaShadowResult, record persona.MemoryWrite) string {
 	kind := sanitizePersonaMemoryPathComponent(firstNonEmpty(record.Kind, "memory"))
 	day := timeNow().UTC().Format("2006-01-02")
@@ -2060,7 +2108,30 @@ func personaMemoryWritePath(result SlackPersonaShadowResult, record persona.Memo
 	return filepath.ToSlash(filepath.Join("memory", "persona", "writes", day, kind+"-"+hex.EncodeToString(h[:])[:12]+".md"))
 }
 
+func personaMemoryWriteContradictionReviewPath(result SlackPersonaShadowResult, record persona.MemoryWrite) string {
+	kind := sanitizePersonaMemoryPathComponent(firstNonEmpty(record.Kind, "memory"))
+	day := timeNow().UTC().Format("2006-01-02")
+	h := sha256.Sum256([]byte(strings.Join([]string{
+		"contradiction_review",
+		result.RequestID,
+		result.ChannelID,
+		result.ThreadTS,
+		record.Kind,
+		record.SourceRef,
+		record.Text,
+	}, "\n")))
+	return filepath.ToSlash(filepath.Join("memory", "persona", "contradiction-review", day, kind+"-"+hex.EncodeToString(h[:])[:12]+".md"))
+}
+
 func renderPersonaMemoryWrite(result SlackPersonaShadowResult, record persona.MemoryWrite) (string, int) {
+	return renderPersonaMemoryWriteWithReview(result, record, nil)
+}
+
+func renderPersonaMemoryWriteContradictionReview(result SlackPersonaShadowResult, record persona.MemoryWrite, review SlackMemoryScopeCanaryResult) (string, int) {
+	return renderPersonaMemoryWriteWithReview(result, record, &review)
+}
+
+func renderPersonaMemoryWriteWithReview(result SlackPersonaShadowResult, record persona.MemoryWrite, review *SlackMemoryScopeCanaryResult) (string, int) {
 	text, redactions := redactSlockWorkspaceSecrets(strings.TrimSpace(record.Text))
 	metadata, err := json.MarshalIndent(record.Metadata, "", "  ")
 	if err != nil || string(metadata) == "null" {
@@ -2073,7 +2144,11 @@ func renderPersonaMemoryWrite(result SlackPersonaShadowResult, record persona.Me
 		redactions += metadataRedactions
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Persona memory write: %s\n\n", firstNonEmpty(record.Kind, "memory"))
+	if review != nil {
+		fmt.Fprintf(&b, "# Persona memory contradiction review: %s\n\n", firstNonEmpty(record.Kind, "memory"))
+	} else {
+		fmt.Fprintf(&b, "# Persona memory write: %s\n\n", firstNonEmpty(record.Kind, "memory"))
+	}
 	legacySlackWriteBullet(&b, "Request", result.RequestID)
 	legacySlackWriteBullet(&b, "Runtime", result.Runtime)
 	legacySlackWriteBullet(&b, "Decision", result.Decision)
@@ -2081,6 +2156,13 @@ func renderPersonaMemoryWrite(result SlackPersonaShadowResult, record persona.Me
 	legacySlackWriteBullet(&b, "Thread", result.ThreadTS)
 	legacySlackWriteBullet(&b, "Source", record.SourceRef)
 	legacySlackWriteBullet(&b, "Imported at", timeNow().UTC().Format(time.RFC3339Nano))
+	if review != nil {
+		legacySlackWriteBullet(&b, "Status", slackMemoryFactStatusContradictionReview)
+		legacySlackWriteBullet(&b, "Review reason", review.Reason)
+		if len(review.Evidence) > 0 {
+			legacySlackWriteBullet(&b, "Review evidence", strings.Join(review.Evidence, ", "))
+		}
+	}
 	b.WriteString("\n## Memory\n\n")
 	b.WriteString(text)
 	b.WriteString("\n")
@@ -2090,6 +2172,25 @@ func renderPersonaMemoryWrite(result SlackPersonaShadowResult, record persona.Me
 		b.WriteString("\n```\n")
 	}
 	return b.String(), redactions
+}
+
+func personaMemoryWriteContradictionQuery(record persona.MemoryWrite) string {
+	var parts []string
+	for _, value := range []string{
+		record.Kind,
+		record.Text,
+		record.SourceRef,
+		slackMemoryWriteMetadataString(record, "kind"),
+		slackMemoryWriteMetadataString(record, "scope"),
+		slackMemoryWriteMetadataString(record, "subject"),
+		"foreground_identity oneesama identity",
+	} {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func sanitizePersonaMemoryPathComponent(value string) string {

@@ -453,6 +453,74 @@ func firstPersonaRelatedMemory(records []SlackRelatedMemoryRecord) *SlackRelated
 	return nil
 }
 
+func TestPersistPersonaForegroundMemoryWritesRoutesIdentityContradictionToReview(t *testing.T) {
+	workspaceDir := t.TempDir()
+	writeRelatedMemoryFile(t, workspaceDir, "memory/team/facts/oneesama-identity.md", strings.Join([]string{
+		"# Oneesama identity",
+		"",
+		"kind: foreground_identity",
+		"scope: foreground",
+		"subject: oneesama",
+		"Oneesama foreground identity is Oneesama Pi agent serving Slack and meetings.",
+	}, "\n"))
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+	})
+	result := SlackPersonaShadowResult{
+		Success:   true,
+		RequestID: "req_identity_conflict",
+		Runtime:   persona.ProviderPi,
+		Decision:  persona.DecisionReply,
+		ChannelID: "C_TRIAGE",
+		ThreadTS:  "200.000",
+		memoryRecords: []persona.MemoryWrite{{
+			Kind:      "identity_fact",
+			Text:      "kind: worker_identity\nscope: worker\nsubject: oneesama\nOneesama is codex-3720 delegated worker.",
+			SourceRef: "slack:C_TRIAGE:200.000",
+			Metadata: map[string]any{
+				"kind":    "worker_identity",
+				"scope":   "worker",
+				"subject": "oneesama",
+				"source":  "codex-3720",
+			},
+		}},
+	}
+
+	persistence := service.persistPersonaForegroundMemoryWrites(context.Background(), result)
+	if len(persistence.Files) != 0 {
+		t.Fatalf("persona memory files = %#v, want no active writes for contradiction", persistence.Files)
+	}
+	if persistence.ContradictionReviews != 1 || len(persistence.ContradictionReviewFiles) != 1 {
+		t.Fatalf("persistence = %#v, want one contradiction review file", persistence)
+	}
+	reviewRel := persistence.ContradictionReviewFiles[0]
+	if !strings.HasPrefix(reviewRel, "memory/persona/contradiction-review/") {
+		t.Fatalf("contradiction review path = %q, want contradiction-review lane", reviewRel)
+	}
+	raw, err := os.ReadFile(filepath.Join(workspaceDir, filepath.FromSlash(reviewRel)))
+	if err != nil {
+		t.Fatalf("read contradiction review %s: %v", reviewRel, err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		"Status: contradiction_review",
+		"worker_identity_write_conflicts_with_foreground_identity_fact",
+		"memory/team/facts/oneesama-identity.md",
+		"Oneesama is codex-3720 delegated worker.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("contradiction review file = %q, want %q", text, want)
+		}
+	}
+	search := service.SearchRelatedMemory("Oneesama codex-3720 worker identity", SlackRelatedMemorySearchOptions{Limit: 8})
+	for _, record := range search.Results {
+		if strings.HasPrefix(record.SourcePath, "memory/persona/writes/") {
+			t.Fatalf("search results = %#v, contradiction leaked into active persona writes", search.Results)
+		}
+	}
+}
+
 func stringSliceFromAny(value any) []string {
 	switch typed := value.(type) {
 	case []string:

@@ -326,6 +326,8 @@ func relatedMemoryKindForPath(relPath string) string {
 		return "memory_index"
 	case regexp.MustCompile(`^memory/\d{4}-\d{2}-\d{2}\.md$`).MatchString(relPath):
 		return "daily_note"
+	case strings.HasPrefix(relPath, "memory/persona/contradiction-review/") && strings.HasSuffix(relPath, ".md"):
+		return "contradiction_review"
 	case strings.HasPrefix(relPath, "memory/persona/writes/") && strings.HasSuffix(relPath, ".md"):
 		return "persona_memory_write"
 	case strings.HasPrefix(relPath, "memory/people/") && strings.HasSuffix(relPath, ".md"):
