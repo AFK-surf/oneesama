@@ -434,26 +434,11 @@ func slackPersonaRequestNeedsProductLinkCommentary(request persona.Request) bool
 	if strings.TrimSpace(personaRequestContextText(request.Context, "external_link_context")) == "" && len(extractSlackExternalLinkURLs([]SlackInboundMessage{{Text: text}})) == 0 {
 		return false
 	}
-	if !workspacePolicyEnablesSharedLinkSynthesis(personaDynamicContextTextFromRequest(request, "workspace_triage_policy")) {
+	workspacePolicy := personaDynamicContextTextFromRequest(request, "workspace_triage_policy")
+	if !workspacePolicyEnablesSharedLinkSynthesis(workspacePolicy) && !slackMessageExplicitlyRequestsLinkSynthesis(text) {
 		return false
 	}
-	return slackTextLooksProductAdjacent(text)
-}
-
-func slackTextLooksProductAdjacent(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	if lower == "" {
-		return false
-	}
-	for _, marker := range []string{
-		"ai", "agent", "coding tool", "developer tool", "workflow", "memory", "bridge", "cue", "oneesama", "meeting", "zoom", "product", "harness",
-		"产品", "工作流", "会议", "编码", "代码", "开发", "多模态", "模型", "agent", "智能体",
-	} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 func personaDynamicContextTextFromRequest(request persona.Request, kind string) string {

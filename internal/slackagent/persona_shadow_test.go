@@ -1076,6 +1076,35 @@ Tana is adding meeting workflows, agenda notes, and collaboration features.`))
 	}
 }
 
+func TestProductLinkReactionGuardFollowsWorkspacePolicy(t *testing.T) {
+	request := persona.Request{
+		Event: persona.Event{Text: "转业了 https://tana.inc/"},
+		Context: []persona.ContextItem{{
+			Kind: "external_link_context",
+			Text: "1. https://tana.inc/\n   title: Tana\n   excerpt: Tana is adding meeting workflows and collaboration features.",
+		}},
+		DynamicContext: []persona.DynamicContextEnvelope{{
+			Kind:    "workspace_triage_policy",
+			Content: "For this workspace, lightweight source-backed comments are welcome for product-adjacent articles.",
+		}},
+	}
+	if !slackPersonaRequestNeedsProductLinkCommentary(request) {
+		t.Fatal("workspace policy should enable source-backed link commentary")
+	}
+
+	noPolicy := request
+	noPolicy.DynamicContext = nil
+	if slackPersonaRequestNeedsProductLinkCommentary(noPolicy) {
+		t.Fatal("reaction guard should not hard-code product topics without workspace policy")
+	}
+
+	explicitAsk := noPolicy
+	explicitAsk.Event.Text = "看看这个 https://tana.inc/"
+	if !slackPersonaRequestNeedsProductLinkCommentary(explicitAsk) {
+		t.Fatal("explicit link synthesis request should still trigger lookup without workspace policy")
+	}
+}
+
 func hasTriageToolCall(calls []SlackTriageToolCall, tool string, action string) bool {
 	for _, call := range calls {
 		if call.Tool == tool && call.Action == action && call.Success {
