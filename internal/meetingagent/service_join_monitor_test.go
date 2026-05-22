@@ -308,6 +308,193 @@ func TestJoinMonitorRecoversStaleSessionFromCapturedArtifacts(t *testing.T) {
 	}
 }
 
+func TestRecoverUnavailableJoinSessionsRecoversStartedSessionFromCapturedArtifacts(t *testing.T) {
+	sessionID := "session_startup_recovery_with_artifacts"
+	artifactDir := filepath.Join("/tmp/meeting-avatar-bot-data/meeting-artifacts", sessionID)
+	if err := os.RemoveAll(artifactDir); err != nil {
+		t.Fatalf("remove old artifact dir: %v", err)
+	}
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("create artifact dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(artifactDir) })
+	if err := os.WriteFile(filepath.Join(artifactDir, "captions.json"), []byte(`{"ok":true,"captions":[{"speaker":"Peng","text":"Startup recovery should deliver captured captions.","source":"google-meet-caption-dom"}]}`), 0o644); err != nil {
+		t.Fatalf("write captions: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "audio.wav"), []byte("wav"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	originalInspect := inspectMeetingAudioSignal
+	inspectMeetingAudioSignal = func(context.Context, string) (bool, bool) { return true, true }
+	t.Cleanup(func() { inspectMeetingAudioSignal = originalInspect })
+	originalTranscode := transcodeMeetingAudioToMP3
+	transcodeMeetingAudioToMP3 = func(_ context.Context, inputPath, outputPath string) error {
+		if inputPath != filepath.Join(artifactDir, "audio.wav") {
+			t.Fatalf("transcode input = %q, want startup raw audio", inputPath)
+		}
+		return os.WriteFile(outputPath, []byte("mp3"), 0o644)
+	}
+	t.Cleanup(func() { transcodeMeetingAudioToMP3 = originalTranscode })
+
+	webhooks := make(chan MeetdWebhookPayload, 4)
+	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
+	runner := &fakeClosedPipeStatusMeetRunner{}
+	_ = newJoinTestRouterWithWebhookAndRunner(t, webhookURL, "secret", runner)
+
+	service := runner.service
+	if service == nil {
+		t.Fatal("expected test service to be wired")
+	}
+	session, err := service.UpsertSession(context.Background(), SessionUpsertInput{
+		ID:         sessionID,
+		MeetingURL: "https://meet.google.com/abc-defg-hij",
+		Status:     "joined",
+		StartedAt:  time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+		Title:      "Startup Recovery With Artifacts",
+		Metadata: map[string]any{
+			"record_meeting":    true,
+			"slack_channel_id":  "C123",
+			"slack_thread_ts":   "123.456",
+			"capture_captions":  true,
+			"caption_language":  "Chinese (Simplified)",
+			"runner_name":       "meet-runner",
+			"started":           true,
+			"started_from_test": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	recoveredCount, err := service.RecoverUnavailableJoinSessions(context.Background())
+	if err != nil {
+		t.Fatalf("recover unavailable sessions: %v", err)
+	}
+	if recoveredCount != 1 {
+		t.Fatalf("recovered count = %d, want 1", recoveredCount)
+	}
+
+	processing := waitMeetdWebhook(t, webhooks, "meeting.processing")
+	if processing.SlackRef == nil || processing.SlackRef.ChannelID != "C123" || processing.SlackRef.ThreadTS != "123.456" {
+		t.Fatalf("processing result = %+v, want C123/123.456 slack ref", processing)
+	}
+	result := waitMeetdWebhook(t, webhooks, "meeting.result")
+	if result.Status != "done" || result.Summary == nil || result.Artifacts.CaptionsCount != 1 {
+		t.Fatalf("result = %+v, want recovered done result with captured captions", result)
+	}
+	recovered, err := service.GetSession(context.Background(), session.ID)
+	if err != nil || recovered == nil {
+		t.Fatalf("get recovered session: session=%+v err=%v", recovered, err)
+	}
+	if recovered.Status != "done" || !boolField(recovered.Metadata, "stale_recovered_from_artifacts") {
+		t.Fatalf("recovered session = %+v, want done with stale recovery metadata", recovered)
+	}
+	if stringFromMap(recovered.Metadata, "stale_recovery_source") != joinStartupRecoverySource {
+		t.Fatalf("recovered metadata = %+v, want startup recovery source", recovered.Metadata)
+	}
+}
+
+func TestRecoverUnavailableJoinSessionsMarksStartedSessionStaleWithoutArtifacts(t *testing.T) {
+	sessionID := "session_startup_recovery_without_artifacts"
+	artifactDir := filepath.Join("/tmp/meeting-avatar-bot-data/meeting-artifacts", sessionID)
+	if err := os.RemoveAll(artifactDir); err != nil {
+		t.Fatalf("remove old artifact dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(artifactDir) })
+
+	webhooks := make(chan MeetdWebhookPayload, 4)
+	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
+	runner := &fakeClosedPipeStatusMeetRunner{}
+	_ = newJoinTestRouterWithWebhookAndRunner(t, webhookURL, "secret", runner)
+
+	service := runner.service
+	if service == nil {
+		t.Fatal("expected test service to be wired")
+	}
+	session, err := service.UpsertSession(context.Background(), SessionUpsertInput{
+		ID:         sessionID,
+		MeetingURL: "https://meet.google.com/abc-defg-hij",
+		Status:     "joined",
+		StartedAt:  time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+		Title:      "Startup Recovery Without Artifacts",
+		Metadata: map[string]any{
+			"slack_channel_id": "C123",
+			"slack_thread_ts":  "123.456",
+			"started":          true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	recoveredCount, err := service.RecoverUnavailableJoinSessions(context.Background())
+	if err != nil {
+		t.Fatalf("recover unavailable sessions: %v", err)
+	}
+	if recoveredCount != 1 {
+		t.Fatalf("recovered count = %d, want 1 stale finalization", recoveredCount)
+	}
+	result := waitMeetdWebhook(t, webhooks, "meeting.result")
+	if result.Status != "failed" || result.Error != staleJoinFailureMessage || !result.ForceDelivery {
+		t.Fatalf("result = %+v, want forced stale failure", result)
+	}
+	stale, err := service.GetSession(context.Background(), session.ID)
+	if err != nil || stale == nil {
+		t.Fatalf("get stale session: session=%+v err=%v", stale, err)
+	}
+	if stale.Status != "stale" || stringFromMap(stale.Metadata, "stale_reason") != "meet_runner_session_missing" {
+		t.Fatalf("stale session = %+v, want stale missing", stale)
+	}
+	if stringFromMap(stale.Metadata, "stale_recovery_source") != joinStartupRecoverySource {
+		t.Fatalf("stale metadata = %+v, want startup recovery source", stale.Metadata)
+	}
+}
+
+func TestRecoverUnavailableJoinSessionsSkipsUnstartedSession(t *testing.T) {
+	webhooks := make(chan MeetdWebhookPayload, 1)
+	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
+	runner := &fakeClosedPipeStatusMeetRunner{}
+	_ = newJoinTestRouterWithWebhookAndRunner(t, webhookURL, "secret", runner)
+
+	service := runner.service
+	if service == nil {
+		t.Fatal("expected test service to be wired")
+	}
+	session, err := service.UpsertSession(context.Background(), SessionUpsertInput{
+		ID:         "session_startup_recovery_unstarted",
+		MeetingURL: "https://meet.google.com/abc-defg-hij",
+		Status:     "prepared",
+		Title:      "Prepared Only",
+		Metadata: map[string]any{
+			"slack_channel_id": "C123",
+			"slack_thread_ts":  "123.456",
+		},
+	})
+	if err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	recoveredCount, err := service.RecoverUnavailableJoinSessions(context.Background())
+	if err != nil {
+		t.Fatalf("recover unavailable sessions: %v", err)
+	}
+	if recoveredCount != 0 {
+		t.Fatalf("recovered count = %d, want 0", recoveredCount)
+	}
+	current, err := service.GetSession(context.Background(), session.ID)
+	if err != nil || current == nil {
+		t.Fatalf("get current session: session=%+v err=%v", current, err)
+	}
+	if current.Status != "prepared" {
+		t.Fatalf("session status = %q, want prepared", current.Status)
+	}
+	select {
+	case payload := <-webhooks:
+		t.Fatalf("unexpected webhook for unstarted session: %+v", payload)
+	default:
+	}
+}
+
 type soloMeetRunner struct {
 	fakeEmptyCaptionMeetRunner
 	service *Service

@@ -29,6 +29,16 @@ func NewServer(cfg config.Config, logger *slog.Logger) *httpserver.ManagedServer
 		Dialog:             cfg.Dialog,
 	})
 	service.StartMeetdRuntime(context.Background())
+	go func() {
+		finalized, err := service.RecoverUnavailableJoinSessions(context.Background())
+		if err != nil {
+			service.logger.Warn("recover unavailable join sessions failed", "error", err)
+			return
+		}
+		if finalized > 0 {
+			service.logger.Info("finalized unavailable join sessions", "count", finalized)
+		}
+	}()
 	handler := NewHandler(service)
 	router := httpserver.New("meeting-agent", logger, cfg.MeetingAgent.AllowedOrigins, handler)
 
