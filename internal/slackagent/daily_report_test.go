@@ -225,6 +225,9 @@ func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
 		"workspace policy支持对AI agent/产品话题的轻量回应。这里选用轻量emoji反应即可，避免无实质内容的评论。",
 		"Stay-silent external link fact question auto-delegated to secretary lookup",
 		"C_REPLAY_SMOKE_HN",
+		"Product-adjacent link reaction upgraded to secretary lookup",
+		"看下现在的 prompt，看有没有什么 prompt 还在引导 agent 发文件名或者文件路径",
+		"agent \\xe6",
 	} {
 		if !slackDailyDiaryLowSignal(text) {
 			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)
