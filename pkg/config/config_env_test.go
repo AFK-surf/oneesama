@@ -167,30 +167,12 @@ func TestLoadHonorsMeetdEnvOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadHonorsDemoSurfaceEnvOverrides(t *testing.T) {
+func TestLoadHonorsDemoSurfaceApprovalEnvOverrides(t *testing.T) {
 	t.Setenv(oneesamaConfigEnvOverrideKey, "")
-	t.Setenv("ONEESAMA_DEMO_SURFACE_ENABLED", "true")
-	t.Setenv("ONEESAMA_DEMO_SURFACE_ADAPTER", "fake")
-	t.Setenv("ONEESAMA_DEMO_SURFACE_ROOT_DIR", "/tmp/oneesama-demo")
-	t.Setenv("ONEESAMA_DEMO_SURFACE_URL_ALLOWLIST", "https://example.test/, https://docs.example.test/path")
-	t.Setenv("ONEESAMA_DEMO_SURFACE_DRY_RUN", "false")
-	t.Setenv("ONEESAMA_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL", "true")
 	t.Setenv("ONEESAMA_DEMO_SURFACE_REQUIRE_EXTERNAL_WRITE_APPROVAL", "false")
 	t.Setenv("ONEESAMA_DEMO_SURFACE_APPROVAL_TOKEN_TTL", "2m")
 
 	cfg := loadInTempDir(t)
-	if !cfg.DemoSurface.Enabled {
-		t.Fatal("DemoSurface.Enabled = false, want true")
-	}
-	if cfg.DemoSurface.Adapter != "fake" || cfg.DemoSurface.RootDir != "/tmp/oneesama-demo" {
-		t.Fatalf("DemoSurface adapter/root = %#v, want env values", cfg.DemoSurface)
-	}
-	if len(cfg.DemoSurface.URLAllowlistPatterns) != 2 || cfg.DemoSurface.URLAllowlistPatterns[0] != "https://example.test/" {
-		t.Fatalf("DemoSurface.URLAllowlistPatterns = %#v, want parsed env list", cfg.DemoSurface.URLAllowlistPatterns)
-	}
-	if cfg.DemoSurface.DryRun || !cfg.DemoSurface.AllowActiveControl {
-		t.Fatalf("DemoSurface dry/control = %#v, want dry_run=false active_control=true", cfg.DemoSurface)
-	}
 	if cfg.DemoSurface.RequireExternalWriteApproval || cfg.DemoSurface.ExternalWriteApprovalTokenTTL != 2*time.Minute {
 		t.Fatalf("DemoSurface approval config = %#v, want approval disabled with 2m TTL", cfg.DemoSurface)
 	}
@@ -250,18 +232,25 @@ func TestLoadHonorsDemoSurfaceModePresets(t *testing.T) {
 	}
 }
 
-func TestLoadDemoSurfaceModeKeepsLowLevelOverrides(t *testing.T) {
+func TestLoadDemoSurfaceModeIgnoresLegacyAcceptanceEnvOverrides(t *testing.T) {
 	t.Setenv(oneesamaConfigEnvOverrideKey, "")
 	t.Setenv("ONEESAMA_DEMO_SURFACE_MODE", "safe")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_ENABLED", "false")
 	t.Setenv("ONEESAMA_DEMO_SURFACE_ADAPTER", "fake")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_ROOT_DIR", "/tmp/oneesama-demo")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_URL_ALLOWLIST", "https://example.test/")
 	t.Setenv("ONEESAMA_DEMO_SURFACE_DRY_RUN", "false")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL", "true")
 
 	cfg := loadInTempDir(t)
 	if cfg.DemoSurface.Mode != "safe" {
 		t.Fatalf("DemoSurface.Mode = %q, want safe", cfg.DemoSurface.Mode)
 	}
-	if cfg.DemoSurface.Adapter != "fake" || cfg.DemoSurface.DryRun {
-		t.Fatalf("DemoSurface = %#v, want low-level env override after mode preset", cfg.DemoSurface)
+	if !cfg.DemoSurface.Enabled || cfg.DemoSurface.Adapter != "agent_browser" || !cfg.DemoSurface.DryRun || cfg.DemoSurface.AllowActiveControl {
+		t.Fatalf("DemoSurface = %#v, want legacy acceptance env ignored after mode preset", cfg.DemoSurface)
+	}
+	if cfg.DemoSurface.RootDir != defaultDemoSurfaceRootDir || len(cfg.DemoSurface.URLAllowlistPatterns) != 0 {
+		t.Fatalf("DemoSurface = %#v, want legacy root/allowlist env ignored", cfg.DemoSurface)
 	}
 }
 

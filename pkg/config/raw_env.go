@@ -217,24 +217,6 @@ func applyDemoSurfaceEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(getenv("ONEESAMA_DEMO_SURFACE_MODE", "MAB_DEMO_SURFACE_MODE")); value != "" {
 		applyDemoSurfaceModePreset(&cfg.DemoSurface, value)
 	}
-	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_ENABLED", "MAB_DEMO_SURFACE_ENABLED"); ok {
-		cfg.DemoSurface.Enabled = value
-	}
-	if value := strings.TrimSpace(getenv("ONEESAMA_DEMO_SURFACE_ADAPTER", "MAB_DEMO_SURFACE_ADAPTER")); value != "" {
-		cfg.DemoSurface.Adapter = value
-	}
-	if value := strings.TrimSpace(getenv("ONEESAMA_DEMO_SURFACE_ROOT_DIR", "MAB_DEMO_SURFACE_ROOT_DIR")); value != "" {
-		cfg.DemoSurface.RootDir = value
-	}
-	if value := strings.TrimSpace(getenv("ONEESAMA_DEMO_SURFACE_URL_ALLOWLIST", "MAB_DEMO_SURFACE_URL_ALLOWLIST")); value != "" {
-		cfg.DemoSurface.URLAllowlistPatterns = parseCSV(value)
-	}
-	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_DRY_RUN", "MAB_DEMO_SURFACE_DRY_RUN"); ok {
-		cfg.DemoSurface.DryRun = value
-	}
-	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL", "MAB_DEMO_SURFACE_ALLOW_ACTIVE_CONTROL"); ok {
-		cfg.DemoSurface.AllowActiveControl = value
-	}
 	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_REQUIRE_EXTERNAL_WRITE_APPROVAL", "MAB_DEMO_SURFACE_REQUIRE_EXTERNAL_WRITE_APPROVAL"); ok {
 		cfg.DemoSurface.RequireExternalWriteApproval = value
 	}
