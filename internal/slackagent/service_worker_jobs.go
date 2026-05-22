@@ -500,6 +500,13 @@ func slackVisibleTextContainsInternalLeak(text string) bool {
 		"delegate_worker",
 		"post_thread_reply",
 		"agent_runner",
+		"<｜｜dsml｜｜",
+		"</｜｜dsml｜｜",
+		"<tool_calls>",
+		"</tool_calls>",
+		"<|im_start|>",
+		"<|im_end|>",
+		"<|tool_call|>",
 	} {
 		if strings.Contains(lower, marker) {
 			return true
