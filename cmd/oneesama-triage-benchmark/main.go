@@ -24,20 +24,22 @@ import (
 )
 
 type benchmarkReport struct {
-	GeneratedAt     string                                    `json:"generatedAt"`
-	VariantID       string                                    `json:"variantId"`
-	SlackAgentURL   string                                    `json:"slackAgentUrl"`
-	Mode            string                                    `json:"mode"`
-	Since           string                                    `json:"since"`
-	Channels        []string                                  `json:"channels"`
-	Fixtures        []string                                  `json:"fixtures,omitempty"`
-	MaxThreads      int                                       `json:"maxThreads,omitempty"`
-	Truncated       bool                                      `json:"truncated"`
-	Stats           []slackagent.SlackBackfillReplayLiveStats `json:"stats,omitempty"`
-	ThreadsSeen     int                                       `json:"threadsSeen"`
-	ThreadsReplayed int                                       `json:"threadsReplayed"`
-	Summary         benchmarkSummary                          `json:"summary"`
-	Rows            []benchmarkRow                            `json:"rows"`
+	GeneratedAt      string                                    `json:"generatedAt"`
+	VariantID        string                                    `json:"variantId"`
+	SlackAgentURL    string                                    `json:"slackAgentUrl"`
+	Mode             string                                    `json:"mode"`
+	Since            string                                    `json:"since"`
+	Channels         []string                                  `json:"channels"`
+	Fixtures         []string                                  `json:"fixtures,omitempty"`
+	MaxThreads       int                                       `json:"maxThreads,omitempty"`
+	Truncated        bool                                      `json:"truncated"`
+	Stats            []slackagent.SlackBackfillReplayLiveStats `json:"stats,omitempty"`
+	ThreadsSeen      int                                       `json:"threadsSeen"`
+	ThreadsReplayed  int                                       `json:"threadsReplayed"`
+	Summary          benchmarkSummary                          `json:"summary"`
+	Rows             []benchmarkRow                            `json:"rows"`
+	Variants         []benchmarkVariant                        `json:"variants,omitempty"`
+	VariantSummaries []benchmarkVariantSummary                 `json:"variantSummaries,omitempty"`
 }
 
 type benchmarkSummary struct {
@@ -59,6 +61,8 @@ type benchmarkRow struct {
 	FixtureLabel         string   `json:"fixtureLabel,omitempty"`
 	FixturePassed        *bool    `json:"fixturePassed,omitempty"`
 	FixtureReason        string   `json:"fixtureReason,omitempty"`
+	FixtureFailureLayer  string   `json:"fixtureFailureLayer,omitempty"`
+	FixtureFailureDetail string   `json:"fixtureFailureDetail,omitempty"`
 	ChannelID            string   `json:"channelId"`
 	ThreadTS             string   `json:"threadTs"`
 	MessageCount         int      `json:"messageCount"`
@@ -69,6 +73,20 @@ type benchmarkRow struct {
 	WorkerRequests       int      `json:"workerRequests"`
 	PipelineSmellSignals []string `json:"pipelineSmellSignals,omitempty"`
 	Error                string   `json:"error,omitempty"`
+}
+
+type benchmarkVariant struct {
+	VariantID   string         `json:"variantId"`
+	Description string         `json:"description,omitempty"`
+	Knobs       map[string]any `json:"knobs,omitempty"`
+	SourcePath  string         `json:"sourcePath,omitempty"`
+}
+
+type benchmarkVariantSummary struct {
+	VariantID   string           `json:"variantId"`
+	Description string           `json:"description,omitempty"`
+	Knobs       map[string]any   `json:"knobs,omitempty"`
+	Summary     benchmarkSummary `json:"summary"`
 }
 
 type benchmarkFixture struct {
@@ -127,10 +145,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		variantID         string
 		timeout           time.Duration
 		fixtures          stringListFlag
+		configSets        stringListFlag
 	)
 	fs.StringVar(&slackURL, "slack-url", firstNonEmpty(os.Getenv("ONEESAMA_SLACK_AGENT_URL"), os.Getenv("ONEESAMA_MONITOR_SLACK_URL"), "http://127.0.0.1:8780"), "Local oneesama slack-agent URL.")
 	fs.BoolVar(&liveMode, "live", true, "Live Slack scan mode. This is currently the only supported input mode.")
 	fs.Var(&fixtures, "fixture", "Fixture JSON path or glob. Repeatable; extra positional args are also treated as fixtures when set.")
+	fs.Var(&configSets, "config-set", "Variant config JSON file, directory, or glob. Repeatable. This first pass records variant metadata and replays the same cases for every variant.")
 	fs.StringVar(&channels, "channel", "auto", "Comma-separated Slack channel ids or exactly 'auto'.")
 	fs.StringVar(&token, "token", "", "Slack bot token. Defaults to ONEESAMA_SLACK_BOT_TOKEN.")
 	fs.StringVar(&botIDs, "bot-user-ids", "", "Comma-separated bot user ids used only for legacy stats.")
@@ -170,47 +190,53 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "oneesama-triage-benchmark: --fixture path is required when --live=false")
 		return 2
 	}
+	variants, err := loadBenchmarkVariants(configSets, variantID)
+	if err != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-benchmark: %v\n", err)
+		return 1
+	}
+	reportVariantID := strings.TrimSpace(variantID)
+	if len(variants) > 1 {
+		reportVariantID = "multi"
+	}
 	report := benchmarkReport{
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-		VariantID:     strings.TrimSpace(variantID),
+		VariantID:     reportVariantID,
 		SlackAgentURL: strings.TrimRight(strings.TrimSpace(slackURL), "/"),
 		Mode:          mode,
 		Since:         since.String(),
 		Fixtures:      fixturePaths,
 		MaxThreads:    maxTotalThreads,
-		Summary: benchmarkSummary{
-			ByFinalDecision:      map[string]int{},
-			ByPersonaDecision:    map[string]int{},
-			ByVisibleReplyReason: map[string]int{},
-			ByPipelineSmell:      map[string]int{},
-			ByFixtureLabel:       map[string]int{},
-			ByFixtureOutcome:     map[string]int{},
-		},
+		Summary:       newBenchmarkSummary(),
+		Variants:      variants,
 	}
 	client := &http.Client{Timeout: 90 * time.Second}
 	if mode == "fixture" {
+		selectedFixturePaths := fixturePaths
+		if maxTotalThreads > 0 && len(selectedFixturePaths) > maxTotalThreads {
+			selectedFixturePaths = selectedFixturePaths[:maxTotalThreads]
+			report.Truncated = true
+		}
 		report.ThreadsSeen = len(fixturePaths)
-		for _, path := range fixturePaths {
-			if maxTotalThreads > 0 && report.ThreadsReplayed >= maxTotalThreads {
-				report.Truncated = true
-				break
-			}
-			fixture, readErr := readBenchmarkFixture(path)
-			if readErr != nil {
-				row := benchmarkRow{VariantID: report.VariantID, CaseID: strings.TrimSpace(path), Error: readErr.Error()}
+		for _, variant := range variants {
+			for _, path := range selectedFixturePaths {
+				fixture, readErr := readBenchmarkFixture(path)
+				if readErr != nil {
+					row := benchmarkRow{VariantID: variant.VariantID, CaseID: strings.TrimSpace(path), Error: readErr.Error()}
+					report.Rows = append(report.Rows, row)
+					report.ThreadsReplayed++
+					recordRow(&report.Summary, row)
+					continue
+				}
+				row := dryRunThread(ctx, client, report.SlackAgentURL, variant.VariantID, fixture.Thread)
+				if strings.TrimSpace(fixture.Candidate.Message) != "" {
+					row = evaluateCandidateFixture(variant.VariantID, fixture)
+				}
+				applyFixtureResult(&row, fixture)
 				report.Rows = append(report.Rows, row)
 				report.ThreadsReplayed++
 				recordRow(&report.Summary, row)
-				continue
 			}
-			row := dryRunThread(ctx, client, report.SlackAgentURL, report.VariantID, fixture.Thread)
-			if strings.TrimSpace(fixture.Candidate.Message) != "" {
-				row = evaluateCandidateFixture(report.VariantID, fixture)
-			}
-			applyFixtureResult(&row, fixture)
-			report.Rows = append(report.Rows, row)
-			report.ThreadsReplayed++
-			recordRow(&report.Summary, row)
 		}
 	} else {
 		token = firstNonEmpty(
@@ -230,14 +256,15 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 		report.Channels = channelIDs
 		botUserIDs := splitCSV(botIDs)
+		var replayThreads []slackagent.SlackTriageReplayThread
 		for _, channelID := range channelIDs {
-			if maxTotalThreads > 0 && report.ThreadsReplayed >= maxTotalThreads {
+			if maxTotalThreads > 0 && len(replayThreads) >= maxTotalThreads {
 				report.Truncated = true
 				break
 			}
 			channelThreadLimit := maxPerChanThreads
 			if maxTotalThreads > 0 {
-				remaining := maxTotalThreads - report.ThreadsReplayed
+				remaining := maxTotalThreads - len(replayThreads)
 				if remaining < channelThreadLimit || channelThreadLimit <= 0 {
 					channelThreadLimit = remaining
 				}
@@ -258,20 +285,26 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			report.ThreadsSeen += len(threads)
 			fmt.Fprintf(stderr, "oneesama-triage-benchmark: channel %s scan found %d thread(s)\n", channelID, len(threads))
 			for _, thread := range threads {
-				if maxTotalThreads > 0 && report.ThreadsReplayed >= maxTotalThreads {
+				if maxTotalThreads > 0 && len(replayThreads) >= maxTotalThreads {
 					report.Truncated = true
 					break
 				}
-				row := dryRunThread(ctx, client, report.SlackAgentURL, report.VariantID, thread)
-				report.Rows = append(report.Rows, row)
-				report.ThreadsReplayed++
-				recordRow(&report.Summary, row)
+				replayThreads = append(replayThreads, thread)
 			}
 			if report.Truncated {
 				break
 			}
 		}
+		for _, variant := range variants {
+			for _, thread := range replayThreads {
+				row := dryRunThread(ctx, client, report.SlackAgentURL, variant.VariantID, thread)
+				report.Rows = append(report.Rows, row)
+				report.ThreadsReplayed++
+				recordRow(&report.Summary, row)
+			}
+		}
 	}
+	report.VariantSummaries = buildVariantSummaries(variants, report.Rows)
 
 	var data []byte
 	switch strings.ToLower(strings.TrimSpace(format)) {
@@ -328,6 +361,123 @@ func resolveChannels(ctx context.Context, channels string, token string, stderr 
 	}
 	fmt.Fprintf(stderr, "oneesama-triage-benchmark: --channel auto discovered %d channel(s)\n", len(out))
 	return out, nil
+}
+
+func newBenchmarkSummary() benchmarkSummary {
+	return benchmarkSummary{
+		ByFinalDecision:      map[string]int{},
+		ByPersonaDecision:    map[string]int{},
+		ByVisibleReplyReason: map[string]int{},
+		ByPipelineSmell:      map[string]int{},
+		ByFixtureLabel:       map[string]int{},
+		ByFixtureOutcome:     map[string]int{},
+	}
+}
+
+func loadBenchmarkVariants(inputs []string, defaultID string) ([]benchmarkVariant, error) {
+	paths, err := expandConfigPaths(inputs)
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return []benchmarkVariant{{VariantID: firstNonEmpty(defaultID, "current")}}, nil
+	}
+	var out []benchmarkVariant
+	for _, path := range paths {
+		variants, err := readBenchmarkVariantConfig(path)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, variants...)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("config-set produced 0 variants")
+	}
+	seen := map[string]int{}
+	for i := range out {
+		out[i].VariantID = strings.TrimSpace(out[i].VariantID)
+		if out[i].VariantID == "" {
+			out[i].VariantID = strings.TrimSuffix(filepath.Base(out[i].SourcePath), filepath.Ext(out[i].SourcePath))
+		}
+		if out[i].VariantID == "" {
+			out[i].VariantID = fmt.Sprintf("variant_%d", i+1)
+		}
+		seen[out[i].VariantID]++
+		if seen[out[i].VariantID] > 1 {
+			out[i].VariantID = fmt.Sprintf("%s_%d", out[i].VariantID, seen[out[i].VariantID])
+		}
+	}
+	return out, nil
+}
+
+func expandConfigPaths(inputs []string) ([]string, error) {
+	var out []string
+	for _, input := range inputs {
+		input = strings.TrimSpace(input)
+		if input == "" {
+			continue
+		}
+		if info, err := os.Stat(input); err == nil && info.IsDir() {
+			entries, err := os.ReadDir(input)
+			if err != nil {
+				return nil, fmt.Errorf("read config-set dir %s: %w", input, err)
+			}
+			for _, entry := range entries {
+				if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+					continue
+				}
+				out = append(out, filepath.Join(input, entry.Name()))
+			}
+			continue
+		}
+		matches, err := filepath.Glob(input)
+		if err != nil {
+			return nil, fmt.Errorf("config-set glob %q: %w", input, err)
+		}
+		if len(matches) == 0 {
+			out = append(out, input)
+			continue
+		}
+		out = append(out, matches...)
+	}
+	sort.Strings(out)
+	return uniqueStrings(out), nil
+}
+
+func readBenchmarkVariantConfig(path string) ([]benchmarkVariant, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config-set %s: %w", path, err)
+	}
+	var variants []benchmarkVariant
+	if err := json.Unmarshal(data, &variants); err == nil && len(variants) > 0 {
+		for i := range variants {
+			variants[i].SourcePath = path
+		}
+		return variants, nil
+	}
+	var wrapper struct {
+		Variants    []benchmarkVariant `json:"variants"`
+		VariantID   string             `json:"variantId"`
+		ID          string             `json:"id"`
+		Description string             `json:"description"`
+		Knobs       map[string]any     `json:"knobs"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return nil, fmt.Errorf("decode config-set %s: %w", path, err)
+	}
+	if len(wrapper.Variants) > 0 {
+		for i := range wrapper.Variants {
+			wrapper.Variants[i].SourcePath = path
+		}
+		return wrapper.Variants, nil
+	}
+	return []benchmarkVariant{{
+		VariantID:   firstNonEmpty(wrapper.VariantID, wrapper.ID),
+		Description: strings.TrimSpace(wrapper.Description),
+		Knobs:       wrapper.Knobs,
+		SourcePath:  path,
+	}}, nil
 }
 
 func dryRunThread(ctx context.Context, client *http.Client, baseURL string, variantID string, thread slackagent.SlackTriageReplayThread) benchmarkRow {
@@ -454,6 +604,9 @@ func applyFixtureResult(row *benchmarkRow, fixture benchmarkFixture) {
 	passed, reason := evaluateFixtureRow(*row, fixture)
 	row.FixturePassed = &passed
 	row.FixtureReason = reason
+	if !passed {
+		row.FixtureFailureLayer, row.FixtureFailureDetail = diagnoseFixtureFailure(*row, fixture, reason)
+	}
 }
 
 func evaluateCandidateFixture(variantID string, fixture benchmarkFixture) benchmarkRow {
@@ -519,6 +672,36 @@ func evaluateFixtureRow(row benchmarkRow, fixture benchmarkFixture) (bool, strin
 	return true, "ok"
 }
 
+func diagnoseFixtureFailure(row benchmarkRow, fixture benchmarkFixture, reason string) (string, string) {
+	switch reason {
+	case "dry_run_error":
+		return "runtime", strings.TrimSpace(row.Error)
+	case "visible_reply_allowed_mismatch", "must_allow_blocked":
+		if row.WorkerRequests > 0 || row.FinalDecision == "would_delegate_worker" {
+			return "delegation", "pipeline delegated instead of producing an allowed visible reply"
+		}
+		if !row.VisibleReplyAllowed && (row.FinalDecision == "would_stay_silent" || row.PersonaDecision == "stay_silent" || len(row.VisibleReplyReasons) == 0) {
+			return "pi_decision", "pipeline stayed silent before producing a visible reply candidate"
+		}
+		if len(row.VisibleReplyReasons) > 0 {
+			return "visible_reply_gate", "gate reasons: " + strings.Join(row.VisibleReplyReasons, ",")
+		}
+		return "pipeline_decision", "visible reply expectation did not match final decision"
+	case "visible_reply_reason_mismatch", "visible_reply_reason_missing":
+		return "visible_reply_gate", "expected gate reason " + firstNonEmpty(fixture.Expected.VisibleReplyReason, strings.Join(fixture.Expected.AnyVisibleReplyReasons, ",")) + "; got " + strings.Join(row.VisibleReplyReasons, ",")
+	case "worker_request_count_below_expected", "should_delegate_missing_worker":
+		return "delegation", fmt.Sprintf("expected worker_requests >= %d; got %d", fixture.Expected.MinWorkerRequests, row.WorkerRequests)
+	case "final_decision_mismatch":
+		return "pipeline_decision", fmt.Sprintf("expected final decision %s; got %s", fixture.Expected.FinalDecision, row.FinalDecision)
+	case "must_block_visible_reply":
+		return "visible_reply_gate", "must_block fixture produced a visible reply"
+	case "freely_silent_not_silent":
+		return "pipeline_decision", "freely_silent fixture produced visible reply or worker request"
+	default:
+		return "fixture", reason
+	}
+}
+
 func normalizeFixtureLabel(label string) string {
 	label = strings.ToLower(strings.TrimSpace(label))
 	label = strings.ReplaceAll(label, "-", "_")
@@ -562,6 +745,41 @@ func recordRow(summary *benchmarkSummary, row benchmarkRow) {
 	}
 }
 
+func buildVariantSummaries(variants []benchmarkVariant, rows []benchmarkRow) []benchmarkVariantSummary {
+	summaries := make(map[string]benchmarkSummary, len(variants))
+	meta := make(map[string]benchmarkVariant, len(variants))
+	order := make([]string, 0, len(variants))
+	for _, variant := range variants {
+		id := firstNonEmpty(variant.VariantID, "current")
+		if _, ok := summaries[id]; !ok {
+			summaries[id] = newBenchmarkSummary()
+			order = append(order, id)
+		}
+		meta[id] = variant
+	}
+	for _, row := range rows {
+		id := firstNonEmpty(row.VariantID, "current")
+		if _, ok := summaries[id]; !ok {
+			summaries[id] = newBenchmarkSummary()
+			order = append(order, id)
+		}
+		summary := summaries[id]
+		recordRow(&summary, row)
+		summaries[id] = summary
+	}
+	out := make([]benchmarkVariantSummary, 0, len(order))
+	for _, id := range order {
+		variant := meta[id]
+		out = append(out, benchmarkVariantSummary{
+			VariantID:   id,
+			Description: variant.Description,
+			Knobs:       variant.Knobs,
+			Summary:     summaries[id],
+		})
+	}
+	return out
+}
+
 func renderMarkdownReport(report benchmarkReport) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Oneesama Triage Benchmark\n\n")
@@ -575,6 +793,9 @@ func renderMarkdownReport(report benchmarkReport) string {
 	}
 	if len(report.Fixtures) > 0 {
 		fmt.Fprintf(&b, "| Fixtures | %d |\n", len(report.Fixtures))
+	}
+	if len(report.Variants) > 0 {
+		fmt.Fprintf(&b, "| Variants | %d |\n", len(report.Variants))
 	}
 	if report.MaxThreads > 0 {
 		fmt.Fprintf(&b, "| Max threads | %d |\n", report.MaxThreads)
@@ -594,6 +815,21 @@ func renderMarkdownReport(report benchmarkReport) string {
 	appendCountTable(&b, "Persona Decisions", report.Summary.ByPersonaDecision)
 	appendCountTable(&b, "Visible Reply Gate Reasons", report.Summary.ByVisibleReplyReason)
 	appendCountTable(&b, "Pipeline Smells", report.Summary.ByPipelineSmell)
+	if len(report.VariantSummaries) > 1 {
+		fmt.Fprintf(&b, "## Variant Summaries\n\n")
+		fmt.Fprintf(&b, "| Variant | Fixture passes | Fixture failures | Errors | Decisions |\n")
+		fmt.Fprintf(&b, "|---|---:|---:|---:|---|\n")
+		for _, variant := range report.VariantSummaries {
+			fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %s |\n",
+				escapeMarkdownCell(variant.VariantID),
+				variant.Summary.FixturePasses,
+				variant.Summary.FixtureFailures,
+				variant.Summary.Errors,
+				escapeMarkdownCell(formatCountMap(variant.Summary.ByFinalDecision)),
+			)
+		}
+		fmt.Fprintf(&b, "\n")
+	}
 
 	if len(report.Stats) > 0 {
 		fmt.Fprintf(&b, "## Slack Scan Coverage\n\n")
@@ -617,8 +853,8 @@ func renderMarkdownReport(report benchmarkReport) string {
 	}
 
 	fmt.Fprintf(&b, "## Replay Rows\n\n")
-	fmt.Fprintf(&b, "| Case | Channel | Thread | Msgs | Label | Result | Persona | Final | Gate reasons | Workers | Smells | Error |\n")
-	fmt.Fprintf(&b, "|---|---|---|---:|---|---|---|---|---|---:|---|---|\n")
+	fmt.Fprintf(&b, "| Variant | Case | Channel | Thread | Msgs | Label | Result | Failure layer | Persona | Final | Gate reasons | Workers | Smells | Error |\n")
+	fmt.Fprintf(&b, "|---|---|---|---|---:|---|---|---|---|---|---|---:|---|---|\n")
 	for _, row := range report.Rows {
 		reasons := "—"
 		if len(row.VisibleReplyReasons) > 0 {
@@ -643,13 +879,19 @@ func renderMarkdownReport(report benchmarkReport) string {
 				fixtureResult += ":" + row.FixtureReason
 			}
 		}
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %d | `%s` | `%s` | `%s` | `%s` | %s | %d | %s | %s |\n",
+		layer := firstNonEmpty(row.FixtureFailureLayer, "—")
+		if row.FixtureFailureDetail != "" && layer != "—" {
+			layer += ":" + row.FixtureFailureDetail
+		}
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %d | `%s` | `%s` | `%s` | `%s` | `%s` | %s | %d | %s | %s |\n",
+			escapeMarkdownCell(firstNonEmpty(row.VariantID, "current")),
 			escapeMarkdownCell(firstNonEmpty(row.CaseID, "—")),
 			escapeMarkdownCell(row.ChannelID),
 			escapeMarkdownCell(row.ThreadTS),
 			row.MessageCount,
 			escapeMarkdownCell(firstNonEmpty(row.FixtureLabel, "—")),
 			escapeMarkdownCell(fixtureResult),
+			escapeMarkdownCell(layer),
 			escapeMarkdownCell(firstNonEmpty(row.PersonaDecision, "unknown")),
 			escapeMarkdownCell(firstNonEmpty(row.FinalDecision, "unknown")),
 			escapeMarkdownCell(reasons),
@@ -680,6 +922,17 @@ func sortedCountKeys(counts map[string]int) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func formatCountMap(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "—"
+	}
+	var parts []string
+	for _, key := range sortedCountKeys(counts) {
+		parts = append(parts, fmt.Sprintf("%s=%d", key, counts[key]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func writeOutput(path string, stdout io.Writer, data []byte) error {

@@ -551,7 +551,9 @@ Reviewer rule:
 
 ### Phase 6 — Multi-Config Sweep + LLM Judge
 
-- [ ] Add variant config input (`--config-set`) for prompt/gate/worker knobs.
+- [x] Add variant config input (`--config-set`) and per-variant report
+      aggregation scaffold.
+- [ ] Wire variant knobs into prompt/gate/worker behavior.
 - [ ] Run all variants against the same case set.
 - [ ] Add judge request/response schema and report column.
 - [ ] Calibrate judge against Peng approval/reject samples.

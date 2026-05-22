@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -253,7 +254,7 @@ func TestRunLiveBenchmarkCanRenderMarkdownTable(t *testing.T) {
 		"## Final Decisions",
 		"| `would_stay_silent` | 1 |",
 		"## Replay Rows",
-		"| `—` | `C1` | `1779450000.000100` | 1 | `—` | `—` | `stay_silent` | `would_stay_silent` |",
+		"| `current` | `—` | `C1` | `1779450000.000100` | 1 | `—` | `—` | `—` | `stay_silent` | `would_stay_silent` |",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("markdown = %s, want %q", out, want)
@@ -342,6 +343,73 @@ func TestRunFixtureBenchmarkReportsExpectedOutcomes(t *testing.T) {
 		if report.Summary.ByFixtureOutcome[want] == 0 {
 			t.Fatalf("fixture outcomes = %#v, want %s", report.Summary.ByFixtureOutcome, want)
 		}
+	}
+}
+
+func TestRunFixtureBenchmarkReplaysConfigSetVariants(t *testing.T) {
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		var request triageRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode dry-run request: %v", err)
+		}
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:        true,
+				ChannelID:     request.ChannelID,
+				ThreadTS:      request.Messages[0].ThreadTS,
+				MessageCount:  len(request.Messages),
+				FinalDecision: "would_stay_silent",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionStaySilent,
+					Success:  true,
+				},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+	configDir := t.TempDir()
+	writeFile(t, configDir+"/variants.json", `{
+	  "variants": [
+	    {"variantId": "current", "description": "current shipped config", "knobs": {"visible_reply_gate": "anchor_required"}},
+	    {"variantId": "candidate", "description": "candidate prompt", "knobs": {"visible_reply_gate": "candidate"}}
+	  ]
+	}`)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--fixture", "../../internal/slackagent/testdata/triage_benchmark/dsml_tool_protocol_leak_must_block.json",
+		"--config-set", configDir,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var report benchmarkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, stdout.String())
+	}
+	if report.VariantID != "multi" || len(report.Variants) != 2 || len(report.Rows) != 2 || len(report.VariantSummaries) != 2 {
+		t.Fatalf("variant report = id:%s variants:%d rows:%d summaries:%d\n%s", report.VariantID, len(report.Variants), len(report.Rows), len(report.VariantSummaries), stdout.String())
+	}
+	seen := map[string]bool{}
+	for _, row := range report.Rows {
+		seen[row.VariantID] = true
+		if row.FinalDecision != "candidate_visible_reply_gate" || row.FixtureReason != "ok" {
+			t.Fatalf("row = %#v, want candidate gate pass for each variant", row)
+		}
+	}
+	if !seen["current"] || !seen["candidate"] {
+		t.Fatalf("seen variants = %#v, want current and candidate", seen)
+	}
+}
+
+func writeFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 
