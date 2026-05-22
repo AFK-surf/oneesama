@@ -71,8 +71,33 @@ type SlackDailyReport struct {
 	New         SlackDailyTriageMetrics    `json:"new_oneesama"`
 	Legacy      SlackDailyTriageMetrics    `json:"legacy_slackd"`
 	Comparison  SlackDailyTriageComparison `json:"comparison"`
+	Diary       SlackDailyDiary            `json:"diary"`
 	Flags       []SlackDailyReportFlag     `json:"flags,omitempty"`
 	Text        string                     `json:"text"`
+}
+
+type SlackDailyDiary struct {
+	Intro     string                     `json:"intro"`
+	Themes    []SlackDailyDiaryTheme     `json:"themes,omitempty"`
+	Watchlist []string                   `json:"watchlist,omitempty"`
+	Sources   SlackDailyDiarySourceCount `json:"sources"`
+}
+
+type SlackDailyDiaryTheme struct {
+	Title string                `json:"title"`
+	Items []SlackDailyDiaryItem `json:"items,omitempty"`
+}
+
+type SlackDailyDiaryItem struct {
+	Channel string `json:"channel,omitempty"`
+	Time    string `json:"time,omitempty"`
+	Text    string `json:"text"`
+	Source  string `json:"source"`
+}
+
+type SlackDailyDiarySourceCount struct {
+	NewRuns    int `json:"new_runs"`
+	LegacyRuns int `json:"legacy_runs"`
 }
 
 type SlackDailyTriageMetrics struct {
@@ -367,6 +392,7 @@ func (s *Service) BuildDailyReport(ctx context.Context, windowStart time.Time, w
 		Legacy:      legacyMetrics,
 		Comparison:  comparison,
 	}
+	report.Diary = buildSlackDailyDiary(windowRuns, legacyRuns)
 	report.Flags = buildSlackDailyReportFlags(report)
 	report.Text = formatSlackDailyReportText(report)
 	return report, nil
@@ -721,60 +747,369 @@ func buildSlackDailyReportFlags(report SlackDailyReport) []SlackDailyReportFlag 
 	return flags
 }
 
-func formatSlackDailyReportText(report SlackDailyReport) string {
-	status := "green"
-	for _, flag := range report.Flags {
-		if flag.Level == "red" {
-			status = "red"
+type slackDailyDiaryCandidate struct {
+	item  SlackDailyDiaryItem
+	theme string
+	score int
+	at    time.Time
+	key   string
+}
+
+func buildSlackDailyDiary(newRuns []SlackTriageContext, legacyRuns []SlackTriageContext) SlackDailyDiary {
+	diary := SlackDailyDiary{
+		Sources: SlackDailyDiarySourceCount{NewRuns: len(newRuns), LegacyRuns: len(legacyRuns)},
+	}
+	candidates := make([]slackDailyDiaryCandidate, 0, len(newRuns)+len(legacyRuns))
+	for _, run := range newRuns {
+		if candidate, ok := slackDailyDiaryCandidateForRun(run, "new_oneesama"); ok {
+			candidates = append(candidates, candidate)
+		}
+	}
+	for _, run := range legacyRuns {
+		if candidate, ok := slackDailyDiaryCandidateForRun(run, "legacy_slackd"); ok {
+			candidates = append(candidates, candidate)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score == candidates[j].score {
+			return candidates[i].at.After(candidates[j].at)
+		}
+		return candidates[i].score > candidates[j].score
+	})
+	themeOrder := []string{
+		"Oneesama / meeting avatar",
+		"Cue / Bridge 工程",
+		"Recappi / 音频体验",
+		"Bazaar Buddy / simulator",
+		"社交自动化 / Linger",
+		"团队协作与 review",
+	}
+	themesByTitle := map[string]*SlackDailyDiaryTheme{}
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		if len(themesByTitle) >= 5 && themesByTitle[candidate.theme] == nil {
+			continue
+		}
+		if _, ok := seen[candidate.key]; ok {
+			continue
+		}
+		theme := themesByTitle[candidate.theme]
+		if theme == nil {
+			theme = &SlackDailyDiaryTheme{Title: candidate.theme}
+			themesByTitle[candidate.theme] = theme
+		}
+		if len(theme.Items) >= 3 {
+			continue
+		}
+		theme.Items = append(theme.Items, candidate.item)
+		seen[candidate.key] = struct{}{}
+	}
+	for _, title := range themeOrder {
+		if theme := themesByTitle[title]; theme != nil && len(theme.Items) > 0 {
+			diary.Themes = append(diary.Themes, *theme)
+		}
+	}
+	for title, theme := range themesByTitle {
+		if len(theme.Items) == 0 || slackDailyDiaryThemeInOrder(title, themeOrder) {
+			continue
+		}
+		diary.Themes = append(diary.Themes, *theme)
+	}
+	if len(diary.Themes) == 0 {
+		diary.Intro = "今天我没有观察到足够明确的团队进展，先不硬凑；我会继续看 Slack、GitHub、Linear 里的可见记录。"
+	} else {
+		diary.Intro = slackDailyDiaryIntro(diary.Themes)
+	}
+	diary.Watchlist = slackDailyDiaryWatchlist(newRuns, legacyRuns)
+	return diary
+}
+
+func slackDailyDiaryCandidateForRun(run SlackTriageContext, source string) (slackDailyDiaryCandidate, bool) {
+	if slackTriageRunFailed(run) {
+		return slackDailyDiaryCandidate{}, false
+	}
+	detail := slackDailyDiaryDetail(run)
+	if detail == "" || slackDailyDiaryLowSignal(detail) {
+		return slackDailyDiaryCandidate{}, false
+	}
+	at := parseTriageTimestamp(run.Timestamp)
+	theme := slackDailyDiaryThemeTitle(run, detail)
+	item := SlackDailyDiaryItem{
+		Channel: slackDailyDiaryChannelLabel(run),
+		Time:    slackDailyDiaryTimeLabel(at),
+		Text:    detail,
+		Source:  source,
+	}
+	return slackDailyDiaryCandidate{
+		item:  item,
+		theme: theme,
+		score: slackDailyDiaryScore(run, detail),
+		at:    at,
+		key:   strings.ToLower(theme + "|" + item.Channel + "|" + truncateSlackContextTextRunes(detail, 80)),
+	}, true
+}
+
+func slackDailyDiaryDetail(run SlackTriageContext) string {
+	candidates := []string{run.Summary}
+	for _, action := range run.Actions {
+		candidates = append(candidates, action.Brief)
+	}
+	for _, call := range run.ToolCalls {
+		candidates = append(candidates, call.Brief, call.Result)
+	}
+	candidates = append(candidates, slackDailyDiaryDigestSnippet(run.Digest))
+	for _, candidate := range candidates {
+		detail := slackDailyDiaryCleanDetail(candidate)
+		if detail != "" && !slackDailyDiaryLowSignal(detail) {
+			return truncateSlackContextTextRunes(detail, 220)
+		}
+	}
+	return ""
+}
+
+func slackDailyDiaryCleanDetail(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	replacements := []struct{ from, to string }{
+		{"Assistant turn 1 Text:", ""},
+		{"Assistant turn 1", ""},
+		{"Text:", ""},
+		{"**Classification: SKIP**", ""},
+		{"Classification: SKIP", ""},
+		{"The thread shows that ", ""},
+		{"The thread shows ", ""},
+		{"The message ", "消息 "},
+		{"This is ", ""},
+		{"No further action needed.", ""},
+		{"No action.", ""},
+		{"Stay silent.", ""},
+		{"stay_silent", ""},
+	}
+	for _, replacement := range replacements {
+		value = strings.ReplaceAll(value, replacement.from, replacement.to)
+	}
+	value = slackDailyReportVisibleDetail(value)
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.Join(strings.Fields(value), " ")
+	value = strings.Trim(value, " -—:;,.，。")
+	return value
+}
+
+func slackDailyDiaryLowSignal(value string) bool {
+	text := strings.ToLower(strings.TrimSpace(value))
+	if text == "" || text == "no action" || text == "n/a" {
+		return true
+	}
+	lowSignalMarkers := []string{
+		"routine automated daily",
+		"automated daily diary",
+		"pi-first foreground triage pending",
+		"persona foreground orphaned",
+		"decode oneesama pi decision json",
+		"call oneesama pi model",
+		"context deadline exceeded",
+		"not valid persona json",
+		"invalid persona json",
+		"daily report",
+	}
+	for _, marker := range lowSignalMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func slackDailyDiaryDigestSnippet(digest string) string {
+	for _, line := range strings.Split(digest, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, ": \"") {
+			continue
+		}
+		_, rest, ok := strings.Cut(line, ": \"")
+		if !ok {
+			continue
+		}
+		rest = strings.TrimSuffix(rest, "\"")
+		rest = strings.TrimSpace(rest)
+		if rest != "" {
+			return rest
+		}
+	}
+	return ""
+}
+
+func slackDailyDiaryThemeTitle(run SlackTriageContext, detail string) string {
+	text := strings.ToLower(strings.Join([]string{detail, run.Summary, run.Digest, strings.Join(run.Channels, " ")}, " "))
+	switch {
+	case slackDailyDiaryContainsAny(text, "oneesama", "onee", "meeting-avatar", "meeting agent", "realtime", "real time", "google meet", "demo surface", "computer use", "kwwk", "join card", "caption", "avatar hud", "贪吃蛇", "入会", "字幕"):
+		return "Oneesama / meeting avatar"
+	case slackDailyDiaryContainsAny(text, "recappi", "transcription", "speaker", "audio", "coreaudio", "cloud transcription", "音频", "转写"):
+		return "Recappi / 音频体验"
+	case slackDailyDiaryContainsAny(text, "bazaar", "simulator", "corpus", "karnok", "potion", "lifesteal", "bazaar-buddy"):
+		return "Bazaar Buddy / simulator"
+	case slackDailyDiaryContainsAny(text, "bridge", "cue.surf", "cueboard", "willow", "staging", "ci", "pr #", "pull request", "review", "deploy", "traffic", "140 gb", "mp4"):
+		return "Cue / Bridge 工程"
+	case slackDailyDiaryContainsAny(text, "twitter", "ootd", "linger", "wechat", "like", "social"):
+		return "社交自动化 / Linger"
+	default:
+		return "团队协作与 review"
+	}
+}
+
+func slackDailyDiaryScore(run SlackTriageContext, detail string) int {
+	score := 1
+	if run.Mutations > 0 || len(run.Actions) > 0 {
+		score += 6
+	}
+	text := strings.ToLower(detail + " " + run.Summary + " " + run.Digest)
+	for _, marker := range []string{"ship", "fix", "root cause", "review", "merge", "ci", "release", "deploy", "bug", "poc", "smoke", "验证", "修", "根因", "上线", "验收"} {
+		if strings.Contains(text, marker) {
+			score += 2
+		}
+	}
+	if intFromAny(run.Metadata["external_links_fetched"]) > 0 {
+		score += 1
+	}
+	if strings.Contains(text, "already") || strings.Contains(text, "已由") || strings.Contains(text, "已经") {
+		score -= 2
+	}
+	if score < 1 {
+		score = 1
+	}
+	return score
+}
+
+func slackDailyDiaryChannelLabel(run SlackTriageContext) string {
+	if label := slackDailyDiaryChannelFromDigest(run.Digest); label != "" {
+		return label
+	}
+	if channel := slackDailyReportRunChannel(run); channel != "" {
+		if strings.HasPrefix(channel, "C") || strings.HasPrefix(channel, "G") {
+			return "<#" + channel + ">"
+		}
+		return channel
+	}
+	return ""
+}
+
+func slackDailyDiaryChannelFromDigest(digest string) string {
+	for _, line := range strings.Split(digest, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "#") || !strings.Contains(line, " (") {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(strings.SplitN(line, " (", 2)[0], "#"))
+		if name != "" {
+			return "#" + name
+		}
+	}
+	return ""
+}
+
+func slackDailyDiaryTimeLabel(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	loc, err := time.LoadLocation(slackDailyReportDefaultTZ)
+	if err != nil {
+		return value.UTC().Format("15:04Z")
+	}
+	return value.In(loc).Format("15:04")
+}
+
+func slackDailyDiaryContainsAny(text string, markers ...string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func slackDailyDiaryThemeInOrder(title string, order []string) bool {
+	for _, entry := range order {
+		if entry == title {
+			return true
+		}
+	}
+	return false
+}
+
+func slackDailyDiaryIntro(themes []SlackDailyDiaryTheme) string {
+	titles := make([]string, 0, minInt(len(themes), 3))
+	for _, theme := range themes {
+		if len(theme.Items) == 0 {
+			continue
+		}
+		titles = append(titles, theme.Title)
+		if len(titles) >= 3 {
 			break
 		}
-		if flag.Level == "yellow" && status != "red" {
-			status = "yellow"
-		}
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, ":bar_chart: *Oneesama Daily Audit* · %s · last %.0fh\n", report.ReportDate, report.WindowHours)
-	fmt.Fprintf(&b, "*Status* · %s\n\n", status)
-	fmt.Fprintf(&b, "*New Oneesama summary* · reply %d / like(reaction) %d / repost 0 / quote 0 / pending 0 / skipped %d / stale-aged 0 / failed %d / discovered %d\n",
-		report.New.ReplyRuns, report.New.ReactionRuns, report.New.NoActionRuns, report.New.FailedRuns, report.New.Runs)
-	if report.Legacy.Available {
-		fmt.Fprintf(&b, "*Old slackd summary* · reply %d / like(reaction) %d / repost 0 / quote 0 / pending 0 / skipped %d / stale-aged 0 / failed %d / discovered %d\n",
-			report.Legacy.ReplyRuns, report.Legacy.ReactionRuns, report.Legacy.NoActionRuns, report.Legacy.FailedRuns, report.Legacy.Runs)
-		fmt.Fprintf(&b, "*Old-vs-new delta* · reply %+d / like(reaction) %+d / custom_emoji %+d / failed %+d\n",
-			report.Comparison.ReplyRunDelta, report.Comparison.ReactionRunDelta, report.Comparison.CustomEmojiUseDelta, report.Comparison.FailureDelta)
-	} else {
-		fmt.Fprintf(&b, "*Old slackd*: unavailable (%s)\n", report.Legacy.Error)
+	if len(titles) == 0 {
+		return "今天我没有观察到足够明确的团队进展，先不硬凑；我会继续看 Slack、GitHub、Linear 里的可见记录。"
 	}
+	return "今天我观察到的主线集中在 " + strings.Join(titles, "、") + "；下面按方向记，不按流水账堆计数。"
+}
 
-	b.WriteString("\n*Reply category mix:* slack_thread_reply\n")
-	b.WriteString(formatDailyAuditBullets(report.New.ReplySamples))
-	b.WriteString("\n\n*Liked / emoji reactions*\n")
-	b.WriteString(formatDailyAuditBullets(report.New.ReactionSamples))
-	b.WriteString("\n\n*Skipped category mix:* no_visible_action: ")
-	fmt.Fprintf(&b, "%d\n", report.New.NoActionRuns)
-	b.WriteString(formatDailyAuditBullets(report.New.SkippedSamples))
-	b.WriteString("\n\n*Failed*\n")
-	b.WriteString(formatDailyAuditBullets(report.New.FailedSamples))
-	b.WriteString("\n\n*Emoji audit*\n")
-	fmt.Fprintf(&b, "- New Oneesama custom emoji: %s\n", slackDailyReportEmojiSummary(report.New.TopCustomEmoji, report.New.ReactionRuns))
-	if report.Legacy.Available {
-		fmt.Fprintf(&b, "- Old slackd custom emoji: %s\n", slackDailyReportEmojiSummary(report.Legacy.TopCustomEmoji, report.Legacy.ReactionRuns))
-	}
-	fmt.Fprintf(&b, "- New evidence path: memory %d / external %d / thread %d / delegate %d\n",
-		report.New.MemoryLookups, report.New.ExternalSearches, report.New.ThreadFetches, report.New.DelegateWorkerJobs)
-	fmt.Fprintf(&b, "- Harness drift: dynamic_context_issue %d / delegate_no_visible_action %d / directed_to_active_agent_no_action %d / handled_by_other_no_action %d / max_context_tokens %d / max_dynamic_tokens %d / max_worker_result_tokens %d / max_memory_evidence_tokens %d\n",
-		report.New.DynamicContextIssues, report.New.DelegateNoVisibleAction, report.New.DirectedToActiveAgentNoAction, report.New.HandledByOtherNoAction,
-		report.New.MaxContextBudgetTokens, report.New.MaxDynamicContextTokens, report.New.MaxWorkerResultTokens, report.New.MaxMemoryEvidenceTokens)
-	b.WriteString("\n*Self-iteration notes*\n")
-	fmt.Fprintf(&b, "- Compare approved replies/reactions/skips in the same action buckets as old daily audit; do not invent a separate quality taxonomy.\n")
-	fmt.Fprintf(&b, "- Treat old slackd silence as one signal, not ground truth; workspace policy and Memory-backed synthesis still decide whether Oneesama should engage.\n")
-	if len(report.Flags) == 0 {
-		b.WriteString("- No red/yellow parity notes in this window.\n")
-	} else {
-		for _, flag := range report.Flags {
-			fmt.Fprintf(&b, "- %s: %s\n", flag.Code, flag.Message)
+func slackDailyDiaryWatchlist(newRuns []SlackTriageContext, legacyRuns []SlackTriageContext) []string {
+	var watchlist []string
+	failedNew := 0
+	for _, run := range newRuns {
+		if slackTriageRunFailed(run) {
+			failedNew++
 		}
 	}
+	if failedNew > 0 {
+		watchlist = append(watchlist, fmt.Sprintf("Oneesama 自己今天有 %d 条 triage/runtime 异常，继续走审计面单独跟进，不把日志细节塞进日记。", failedNew))
+	}
+	if len(legacyRuns) == 0 {
+		watchlist = append(watchlist, "旧 slackd 对照源今天不可用或没有样本；这篇日记只基于新 Oneesama 可见记录。")
+	}
+	return watchlist
+}
+
+func formatSlackDailyReportText(report SlackDailyReport) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, ":clock6: *今日日记 · %s*\n\n", report.ReportDate)
+	if strings.TrimSpace(report.Diary.Intro) != "" {
+		fmt.Fprintf(&b, "%s\n", report.Diary.Intro)
+	}
+	if len(report.Diary.Themes) == 0 {
+		b.WriteString("\n*我观察到的主线*\n- 今天没有足够明确的团队工作样本，先不编故事。\n")
+	} else {
+		b.WriteString("\n*我观察到的主线*\n")
+		for _, theme := range report.Diary.Themes {
+			if len(theme.Items) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "\n*%s*\n", theme.Title)
+			for _, item := range theme.Items {
+				var prefix []string
+				if strings.TrimSpace(item.Channel) != "" {
+					prefix = append(prefix, item.Channel)
+				}
+				if strings.TrimSpace(item.Time) != "" {
+					prefix = append(prefix, item.Time)
+				}
+				if len(prefix) > 0 {
+					fmt.Fprintf(&b, "- %s：%s\n", strings.Join(prefix, " · "), item.Text)
+				} else {
+					fmt.Fprintf(&b, "- %s\n", item.Text)
+				}
+			}
+		}
+	}
+	if len(report.Diary.Watchlist) > 0 {
+		b.WriteString("\n*我会继续留意*\n")
+		for _, item := range report.Diary.Watchlist {
+			fmt.Fprintf(&b, "- %s\n", item)
+		}
+	}
+	fmt.Fprintf(&b, "\n_基于过去 %.0fh 的可见 Slack / 工具记录整理；没录到的会议不写成一手结论。内部审计计数保留在 daily-report JSON，不在频道里展开。_", report.WindowHours)
 	return strings.TrimSpace(b.String())
 }
 

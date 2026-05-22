@@ -71,24 +71,33 @@ func TestSlackDailyReportComparesLegacyEmojiUse(t *testing.T) {
 		t.Fatalf("legacy metrics = %#v, want available reaction + custom emoji", report.Legacy)
 	}
 	for _, want := range []string{
-		"*Oneesama Daily Audit*",
-		"*New Oneesama summary* · reply 1 / like(reaction) 1",
-		"*Old slackd summary* · reply 1 / like(reaction) 1",
-		"*Liked / emoji reactions*",
-		"*Self-iteration notes*",
-		"custom_emoji +0",
-		":memo_bridge:",
-		"max_context_tokens 1200",
-		"max_dynamic_tokens 80",
-		"max_worker_result_tokens 40",
-		"max_memory_evidence_tokens 160",
+		"*今日日记 · 2026-05-19*",
+		"今天我观察到的主线集中在",
+		"*我观察到的主线*",
+		"*团队协作与 review*",
+		"posted workspace commentary and a custom reaction",
+		"legacy replied and reacted",
 	} {
 		if !strings.Contains(report.Text, want) {
 			t.Fatalf("report text = %q, want %q", report.Text, want)
 		}
 	}
-	if strings.Contains(report.Text, "*Quality buckets*") || strings.Contains(report.Text, "invalid_json=") {
-		t.Fatalf("report text = %q, should keep old daily-audit action buckets instead of invented quality bucket labels", report.Text)
+	for _, blocked := range []string{
+		"*Oneesama Daily Audit*",
+		"*New Oneesama summary*",
+		"*Old slackd summary*",
+		"*Old-vs-new delta*",
+		"*Emoji audit*",
+		"*Self-iteration notes*",
+		"max_context_tokens",
+		"invalid_json=",
+	} {
+		if strings.Contains(report.Text, blocked) {
+			t.Fatalf("report text = %q, should not expose audit label %q", report.Text, blocked)
+		}
+	}
+	if report.Diary.Sources.NewRuns != 1 || report.Diary.Sources.LegacyRuns != 1 || len(report.Diary.Themes) == 0 {
+		t.Fatalf("diary = %#v, want source counts and themes", report.Diary)
 	}
 }
 

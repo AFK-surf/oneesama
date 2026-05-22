@@ -6,7 +6,9 @@ Peng asked for new Oneesama to send a daily report like old cueboard slackd, and
 
 This audit follows the read-old-first migration rule: old behavior is the baseline, new behavior must either port the contract or explicitly justify divergence.
 
-**2026-05-20 correction after Peng review:** the first implementation invented a new "quality buckets" report vocabulary. Peng clarified the goal is to replicate the previous daily-audit reading shape so old/new reply quality can be compared in the same language. The report renderer now uses the old action-bucket form (`reply / like / repost / quote / pending / skipped / stale-aged / failed / discovered`) and keeps quality observations under `Self-iteration notes`, instead of creating a separate taxonomy.
+**2026-05-20 correction after Peng review:** the first implementation invented a new "quality buckets" report vocabulary. Peng clarified the goal is to replicate the previous daily-audit reading shape so old/new reply quality can be compared in the same language. The report renderer was moved to the old action-bucket form (`reply / like / repost / quote / pending / skipped / stale-aged / failed / discovered`) and kept quality observations under `Self-iteration notes`, instead of creating a separate taxonomy.
+
+**2026-05-22 correction after Peng review:** Peng clarified that the visible scheduled post should be a team diary ("今天观察到团队干了什么"), not an audit dashboard. The report now keeps `new_oneesama`, `legacy_slackd`, deltas, flags, and harness counters in the JSON/API response, while the Slack-visible `text` is a diary grouped by work theme with a short watchlist. Do not post internal counters, raw failures, or local runtime logs into the channel-facing diary.
 
 ## Cueboard source
 
