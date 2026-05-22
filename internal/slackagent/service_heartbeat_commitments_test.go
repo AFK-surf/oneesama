@@ -55,7 +55,7 @@ func TestPendingActionConfirmCreatesCompletionFollowupAndClosesDecisionFollowup(
 	action, err := service.triage.InsertPendingAction(context.Background(), SlackPendingAction{
 		ChannelID:  "C123",
 		ThreadTS:   "123.456",
-		ActionType: "create_task",
+		ActionType: slackActionTypeCreateIssue,
 		Params: map[string]any{
 			"title": "Create follow-up task",
 		},

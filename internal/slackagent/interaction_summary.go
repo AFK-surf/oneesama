@@ -10,6 +10,7 @@ const (
 	slackActionTypeCreateChannel = "create_channel"
 	slackActionTypeCreateCanvas  = "create_canvas"
 	slackActionTypeEditCanvas    = "edit_canvas"
+	slackActionTypeThreadReply   = "post_thread_reply"
 )
 
 func summarizeHandledThreadAction(actionType, resultText string) string {

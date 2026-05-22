@@ -743,10 +743,12 @@ func TestSlackHistoryScannerPostsPendingActionCard(t *testing.T) {
 				PostActions:       true,
 				HeuristicFallback: true,
 			},
+			PilotUserID: "U_PENG",
 		},
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	service.inbound.SetCursor("C123", "1778765800.000000")
 
 	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
@@ -830,10 +832,12 @@ Caveat: It won't fix system architecture for ya, so you still need BRAIN as mast
 				PostActions:       true,
 				HeuristicFallback: true,
 			},
+			PilotUserID: "U_PENG",
 		},
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	service.inbound.SetCursor("C123", "1778767000.000000")
 
 	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
@@ -853,21 +857,21 @@ Caveat: It won't fix system architecture for ya, so you still need BRAIN as mast
 	poster.WaitForCalls(t, 1)
 	calls := poster.Calls()
 	if len(calls) != 1 {
-		t.Fatalf("poster calls = %d, want 1 direct reply", len(calls))
+		t.Fatalf("poster calls = %d, want 1 approval card", len(calls))
 	}
 	call := calls[0]
-	if call.Channel != "C123" || call.ThreadTS != "1778767510.917049" || !strings.Contains(call.Text, "这条 X") {
-		t.Fatalf("post call = %#v, want direct summary in source thread", call)
+	if call.Channel != "D_PENG" || call.ThreadTS != "" || !strings.Contains(call.Text, "这条 X") {
+		t.Fatalf("post call = %#v, want approval card in pilot DM", call)
 	}
-	if len(call.Blocks) == 0 || strings.Contains(call.Text, "Triage suggestion") || !strings.Contains(call.DedupKey, "slack-triage-direct:") {
-		t.Fatalf("post call = %#v, want direct reply blocks without action card", call)
+	if len(call.Blocks) == 0 || !strings.Contains(call.Text, "Triage suggestion") || !strings.Contains(call.DedupKey, "pilot_dm:") {
+		t.Fatalf("post call = %#v, want pending action card", call)
 	}
 	status, err := service.TriageStatus(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("TriageStatus: %v", err)
 	}
-	if len(status.PendingActions) != 0 {
-		t.Fatalf("pending actions = %#v, want none for read-only reply", status.PendingActions)
+	if len(status.PendingActions) != 1 || status.PendingActions[0].ActionType != slackActionTypeThreadReply {
+		t.Fatalf("pending actions = %#v, want one read-only reply pending action", status.PendingActions)
 	}
 }
 

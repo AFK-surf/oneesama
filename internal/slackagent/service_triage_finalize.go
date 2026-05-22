@@ -42,6 +42,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 		}
 	}
 	actions = filterSlackTriageActionsForMessages(actions, messages, s.botUserID)
+	actions = requireSlackTriageVisibleReplyApproval(actions)
 	decision.Actions = actions
 	if !ok {
 		actions = nil

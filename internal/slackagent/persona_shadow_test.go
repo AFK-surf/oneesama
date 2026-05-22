@@ -306,7 +306,7 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 	}}
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
-		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir, PilotUserID: "U_PENG"},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
 			Mode:     persona.ModeLive,
@@ -315,6 +315,7 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	runtime := &capturePersonaRuntime{response: persona.Response{
 		Runtime:     persona.ProviderPi,
 		Decision:    persona.DecisionReply,
@@ -357,13 +358,16 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 
 	poster.WaitForCalls(t, 1)
 	calls := poster.Calls()
-	if got := calls[0].Text; !strings.Contains(got, "Pi 读完后") || strings.Contains(got, "codex visible reply") {
-		t.Fatalf("posted text = %q, want Pi reply and no Codex visible reply", got)
+	if calls[0].Channel != "D_PENG" || calls[0].ThreadTS != "" {
+		t.Fatalf("post call = %#v, want pilot DM approval card", calls[0])
+	}
+	if got := calls[0].Text; !strings.Contains(got, "Pi 读完后") || !strings.Contains(got, "Pending action") || strings.Contains(got, "codex visible reply") {
+		t.Fatalf("posted text = %q, want Pi approval card and no Codex visible reply", got)
 	}
 
 	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
-	if updated.Mutations != 1 || updated.Failures != 0 {
-		t.Fatalf("updated mutations/failures = %d/%d, want 1/0; run=%#v", updated.Mutations, updated.Failures, updated)
+	if updated.Mutations != 0 || updated.Failures != 0 {
+		t.Fatalf("updated mutations/failures = %d/%d, want no public mutation; run=%#v", updated.Mutations, updated.Failures, updated)
 	}
 	if updated.Metadata["persona_dynamic_context_expected"] != true {
 		t.Fatalf("metadata = %#v, want persona_dynamic_context_expected", updated.Metadata)
@@ -381,17 +385,24 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 		t.Fatalf("actions = %#v, want one persona action", updated.Actions)
 	}
 	var sawForeground bool
-	var sawPost bool
+	var sawApproval bool
 	for _, call := range updated.ToolCalls {
 		if call.Tool == "persona_runtime" && call.Action == "foreground_triage" && call.Success && call.Result == persona.DecisionReply {
 			sawForeground = true
 		}
-		if call.Tool == "slack_api" && call.Action == "post_thread_reply" && call.Success {
-			sawPost = true
+		if call.Tool == "slack_api" && call.Action == "persona_reply_pending_dm_approval" && call.Success {
+			sawApproval = true
 		}
 	}
-	if !sawForeground || !sawPost {
-		t.Fatalf("tool calls = %#v, want persona foreground + Slack post", updated.ToolCalls)
+	if !sawForeground || !sawApproval {
+		t.Fatalf("tool calls = %#v, want persona foreground + pilot approval DM", updated.ToolCalls)
+	}
+	pending, err := service.triage.ListPendingActions(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListPendingActions: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ActionType != slackActionTypeThreadReply || pending[0].Status != PendingActionStatusPending {
+		t.Fatalf("pending actions = %#v, want one pending thread reply", pending)
 	}
 	if updated.Metadata["persona_foreground_queued"] != false {
 		t.Fatalf("metadata = %#v, want foreground queue cleared", updated.Metadata)
@@ -479,6 +490,7 @@ func TestSlackTriageCodexOnlyDoesNotCallPersonaRuntime(t *testing.T) {
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
 			WorkspaceDir: workspaceDir,
+			PilotUserID:  "U_PENG",
 			Triage:       appconfig.SlackTriageConfig{ForegroundChain: "codex_only"},
 		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
@@ -489,6 +501,7 @@ func TestSlackTriageCodexOnlyDoesNotCallPersonaRuntime(t *testing.T) {
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	service.personaRuntime = runtime
 	service.personaRuntimeErr = nil
 	service.personaRuntimeConfig.Provider = persona.ProviderPi
@@ -509,8 +522,8 @@ func TestSlackTriageCodexOnlyDoesNotCallPersonaRuntime(t *testing.T) {
 		t.Fatalf("started = %#v, want Codex finalization", started)
 	}
 	poster.WaitForCalls(t, 1)
-	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "codex visible reply") {
-		t.Fatalf("poster calls = %#v, want Codex direct reply", calls)
+	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "codex visible reply") {
+		t.Fatalf("poster calls = %#v, want Codex approval card in pilot DM", calls)
 	}
 	runtime.mu.Lock()
 	requests := len(runtime.requests)
@@ -585,7 +598,7 @@ func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleR
 	}}
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
-		Slack:       appconfig.SlackConfig{BotUserID: "U_ONEE"},
+		Slack:       appconfig.SlackConfig{BotUserID: "U_ONEE", PilotUserID: "U_PENG"},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
 			Mode:     persona.ModeLive,
@@ -594,6 +607,7 @@ func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleR
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	service.personaRuntime = &capturePersonaRuntime{response: persona.Response{
 		Runtime:     persona.ProviderPi,
 		Decision:    persona.DecisionReply,
@@ -618,12 +632,12 @@ func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleR
 		t.Fatalf("StartSlackTriage: %v", err)
 	}
 	poster.WaitForCalls(t, 1)
-	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "我查了下") || strings.Contains(calls[0].Text, "Google 这轮发布") {
-		t.Fatalf("poster calls = %#v, want Pi-owned reply, not raw Codex candidate", calls)
+	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "我查了下") || strings.Contains(calls[0].Text, "Google 这轮发布") {
+		t.Fatalf("poster calls = %#v, want Pi-owned approval card, not raw Codex candidate", calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
-	if updated.Mutations != 1 || updated.Failures != 0 {
-		t.Fatalf("updated mutations/failures = %d/%d, want 1/0", updated.Mutations, updated.Failures)
+	if updated.Mutations != 0 || updated.Failures != 0 {
+		t.Fatalf("updated mutations/failures = %d/%d, want no public mutation", updated.Mutations, updated.Failures)
 	}
 	if len(updated.Actions) != 1 || updated.Actions[0].Brief != "Persona reply" {
 		t.Fatalf("actions = %#v, want Pi persona action recorded", updated.Actions)
@@ -731,6 +745,7 @@ func TestSlackTriagePiFirstLiveSkipsPrePiRunnerAndPostsPersonaReply(t *testing.T
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
 			WorkspaceDir: workspaceDir,
+			PilotUserID:  "U_PENG",
 			Triage: appconfig.SlackTriageConfig{
 				ForegroundChain: "pi_first_live",
 				WorkspacePolicy: "In this workspace, reply to source-backed product-adjacent articles when evidence is available.",
@@ -744,6 +759,7 @@ func TestSlackTriagePiFirstLiveSkipsPrePiRunnerAndPostsPersonaReply(t *testing.T
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	runtime := &capturePersonaRuntime{response: persona.Response{
 		Runtime:     persona.ProviderPi,
 		Decision:    persona.DecisionReply,
@@ -778,8 +794,8 @@ func TestSlackTriagePiFirstLiveSkipsPrePiRunnerAndPostsPersonaReply(t *testing.T
 	if runner.startCount != 0 {
 		t.Fatalf("runner.startCount after Pi reply = %d, want no StartTask", runner.startCount)
 	}
-	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "Pi-first 直接评价") {
-		t.Fatalf("poster calls = %#v, want Pi-first visible reply", calls)
+	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "Pi-first 直接评价") {
+		t.Fatalf("poster calls = %#v, want Pi-first approval card", calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
 	if updated.Metadata["foreground_chain"] != slackTriageForegroundChainPiFirstLive {
@@ -1173,7 +1189,8 @@ HN profile for Johnson8053. Submissions include SQLite is the best home for AI a
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
-			Triage: appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+			PilotUserID: "U_PENG",
+			Triage:      appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
 		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
@@ -1183,6 +1200,7 @@ HN profile for Johnson8053. Submissions include SQLite is the best home for AI a
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	service.personaRuntime = runtime
 	service.personaRuntimeErr = nil
 	service.personaRuntimeConfig.Provider = persona.ProviderPi
@@ -1628,7 +1646,8 @@ func TestSlackTriagePiFirstLiveSilencesBlockedReadOnlySecretaryLookup(t *testing
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
-			Triage: appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+			PilotUserID: "U_PENG",
+			Triage:      appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
 		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
@@ -1638,6 +1657,7 @@ func TestSlackTriagePiFirstLiveSilencesBlockedReadOnlySecretaryLookup(t *testing
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	service.personaRuntime = runtime
 	service.personaRuntimeErr = nil
 	service.personaRuntimeConfig.Provider = persona.ProviderPi
@@ -1680,7 +1700,8 @@ func TestSlackTriagePiFirstLiveDowngradesCannedRefusalReplyToSilence(t *testing.
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
-			Triage: appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+			PilotUserID: "U_PENG",
+			Triage:      appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
 		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
@@ -1766,7 +1787,8 @@ func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
-			Triage: appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
+			PilotUserID: "U_PENG",
+			Triage:      appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
 		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
@@ -1776,6 +1798,7 @@ func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	service.personaRuntime = runtime
 	service.personaRuntimeErr = nil
 	service.personaRuntimeConfig.Provider = persona.ProviderPi
@@ -1797,8 +1820,8 @@ func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T
 		t.Fatalf("runner.startCount = %d, want no project-code worker", runner.startCount)
 	}
 	calls := poster.Calls()
-	if len(calls) != 1 || !strings.Contains(calls[0].Text, "项目 owner") || !strings.Contains(calls[0].Text, "不直接下场查 repo") {
-		t.Fatalf("poster calls = %#v, want secretary routing reply", calls)
+	if len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "项目 owner") || !strings.Contains(calls[0].Text, "不直接下场查 repo") {
+		t.Fatalf("poster calls = %#v, want secretary routing approval card", calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
 	if updated.Metadata["pi_first_decision"] != persona.DecisionReply {

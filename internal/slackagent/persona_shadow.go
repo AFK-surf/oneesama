@@ -176,7 +176,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		var reactionGuardToolCalls []SlackTriageToolCall
 		result, reactionGuardToolCalls = applyPersonaProductLinkReactionDisposition(result, request)
 		dispositionToolCalls = append(dispositionToolCalls, reactionGuardToolCalls...)
-		actions := slackPersonaForegroundActions(channelID, threadTS, result)
+		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
@@ -187,6 +187,8 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		if len(policyToolCalls) > 0 {
 			toolCalls = append(toolCalls, policyToolCalls...)
 		}
+		pendingResults := s.insertSlackTriagePendingActions(ctx, workspaceID, channelID, threadTS, "persona:"+fmt.Sprint(runID), &SlackTriageContext{ID: runID}, actions)
+		toolCalls = append(toolCalls, personaTriageApprovalToolCalls(pendingResults)...)
 		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result, request, messages)
 		if len(delegation.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, delegation.ToolCalls...)
@@ -226,7 +228,7 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		var reactionGuardToolCalls []SlackTriageToolCall
 		result, reactionGuardToolCalls = applyPersonaProductLinkReactionDisposition(result, request)
 		dispositionToolCalls = append(dispositionToolCalls, reactionGuardToolCalls...)
-		actions := slackPersonaForegroundActions(channelID, threadTS, result)
+		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreExistingBotReply,
@@ -237,6 +239,8 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		if len(policyToolCalls) > 0 {
 			toolCalls = append(toolCalls, policyToolCalls...)
 		}
+		pendingResults := s.insertSlackTriagePendingActions(ctx, workspaceID, channelID, threadTS, "persona:"+fmt.Sprint(runID), &SlackTriageContext{ID: runID}, actions)
+		toolCalls = append(toolCalls, personaTriageApprovalToolCalls(pendingResults)...)
 		delegation := s.startPersonaDelegatedWorkerJobs(ctx, workspaceID, runID, result, request, messages)
 		if len(delegation.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, delegation.ToolCalls...)
@@ -1362,6 +1366,33 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 		}
 	}
 	return actions
+}
+
+func personaTriageApprovalToolCalls(pending []SlackTriagePendingResult) []SlackTriageToolCall {
+	if len(pending) == 0 {
+		return nil
+	}
+	calls := make([]SlackTriageToolCall, 0, len(pending))
+	for _, result := range pending {
+		if result.Action.Type != slackActionTypeThreadReply {
+			continue
+		}
+		post := result.Post
+		ok := post.OK
+		status := "pending_dm_card_posted"
+		if !ok {
+			status = firstNonEmpty(post.Error, post.Detail, "pending_dm_card_not_posted")
+		}
+		calls = append(calls, SlackTriageToolCall{
+			Tool:    "slack_api",
+			Action:  "persona_reply_pending_dm_approval",
+			Args:    marshalTriageArgs("chat.postMessage", firstNonEmpty(post.TS, post.ThreadTS), ok),
+			Success: ok,
+			Brief:   "Persona reply gated behind Peng approval DM",
+			Result:  status,
+		})
+	}
+	return calls
 }
 
 type SlackTriagePersonaRequestOptions struct {

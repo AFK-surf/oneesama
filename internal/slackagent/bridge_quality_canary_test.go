@@ -242,6 +242,7 @@ func assertBridgeQualityPiFirstForeground(t *testing.T, fixture bridgeQualityFix
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Slack: appconfig.SlackConfig{
 			WorkspaceDir: t.TempDir(),
+			PilotUserID:  "U_PENG",
 			Triage:       appconfig.SlackTriageConfig{ForegroundChain: "pi_first_live"},
 		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
@@ -252,6 +253,7 @@ func assertBridgeQualityPiFirstForeground(t *testing.T, fixture bridgeQualityFix
 		Poster: poster,
 		Runner: runner,
 	})
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	runtime := &capturePersonaRuntime{response: persona.Response{
 		Runtime:     persona.ProviderPi,
 		Decision:    persona.DecisionReply,
@@ -284,6 +286,9 @@ func assertBridgeQualityPiFirstForeground(t *testing.T, fixture bridgeQualityFix
 	poster.WaitForCalls(t, 1)
 	if runner.startCount != 0 {
 		t.Fatalf("[%s] runner.startCount after Pi reply = %d, want 0", fixture.CaseID, runner.startCount)
+	}
+	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "Pi-first canary reply") {
+		t.Fatalf("[%s] poster calls = %#v, want Pi approval card in pilot DM", fixture.CaseID, calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
 	if updated.Metadata["foreground_chain"] != slackTriageForegroundChainPiFirstLive || boolFromAny(updated.Metadata["pre_pi_agent_runner_started"], true) {

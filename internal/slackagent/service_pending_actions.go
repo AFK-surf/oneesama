@@ -71,6 +71,12 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 		if interaction.SnoozeMinutes > 0 {
 			action.Params["snoozeMinutes"] = interaction.SnoozeMinutes
 		}
+		if action.ActionType == slackActionTypeThreadReply {
+			action.Params["approvalDecision"] = slackTriagePendingApprovalDecision(interaction.Status)
+			if interaction.Status != "confirmed" {
+				action.Params["finalOutcome"] = interaction.Status
+			}
+		}
 		action.Result = fmt.Sprintf("interaction:%s", interaction.Status)
 	})
 	if err != nil {
@@ -84,8 +90,10 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 		s.logger.Warn("slack pending action cognition update failed", "error", err)
 	}
 	s.syncPendingActionInteractionFollowup(ctx, *updated, interaction)
-	s.recordConfirmedActionFollowup(ctx, *updated, interaction)
 	s.recordPendingActionFeedback(ctx, *updated, interaction)
+	if interaction.Status == "confirmed" && updated.ActionType != slackActionTypeThreadReply {
+		s.recordConfirmedActionFollowup(ctx, *updated, interaction)
+	}
 	if interaction.Status == "confirmed" {
 		switch updated.ActionType {
 		case slackActionTypeJoinMeeting:
@@ -130,6 +138,8 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 					"execution":      "started",
 				},
 			}
+		case slackActionTypeThreadReply:
+			return s.executePostThreadReplyPendingAction(ctx, *updated, interaction)
 		}
 	}
 	text := fmt.Sprintf("Pending action %d marked %s.", updated.ID, interaction.Status)
@@ -143,6 +153,23 @@ func (s *Service) HandlePendingActionInteraction(ctx context.Context, interactio
 			"pending_action": updated,
 			"interaction":    interaction,
 		},
+	}
+}
+
+func slackTriagePendingApprovalDecision(status string) string {
+	switch strings.TrimSpace(status) {
+	case "confirmed":
+		return "approved"
+	case "dismissed":
+		return "rejected"
+	case "snoozed":
+		return "snoozed"
+	case "opened":
+		return "opened"
+	case "assigned":
+		return "assigned"
+	default:
+		return firstNonEmpty(strings.TrimSpace(status), "updated")
 	}
 }
 

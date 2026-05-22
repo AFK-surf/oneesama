@@ -71,6 +71,9 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if !strings.Contains(systemPrompt, "External URL identity/fact lookup is bounded secretary work") || !strings.Contains(systemPrompt, "不认识 / 不知道") {
 		t.Fatalf("system prompt missing old-slackd secretary lookup guard:\n%s", systemPrompt)
 	}
+	if !strings.Contains(systemPrompt, "A visible reply must have concrete evidence") || !strings.Contains(systemPrompt, "adds information beyond re-reading the thread") {
+		t.Fatalf("system prompt missing concrete-evidence reply quality guard:\n%s", systemPrompt)
+	}
 	for _, forbidden := range []string{"[[", "telegram-pi", "Linger"} {
 		if strings.Contains(systemPrompt, forbidden) {
 			t.Fatalf("system prompt contains old/private marker %q:\n%s", forbidden, systemPrompt)

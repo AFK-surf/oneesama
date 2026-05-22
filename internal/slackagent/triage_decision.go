@@ -463,7 +463,7 @@ func joinSlackMessageTexts(messages []SlackInboundMessage) string {
 }
 
 func slackTriageActionRequiresConfirmation(actionType string, modelValue bool) bool {
-	if actionType == "post_thread_reply" || actionType == "add_reaction" {
+	if actionType == "add_reaction" {
 		return false
 	}
 	if _, ok := slackTriageMutationActionTypes[actionType]; ok {
@@ -727,7 +727,7 @@ func explicitlyRequestsSlackPermalinkHandling(text string) bool {
 }
 
 func slackTriageDirectReplyAction(action SlackTriageDecisionAction) bool {
-	return action.Type == "post_thread_reply" && !action.RequiresConfirmation
+	return action.Type == slackActionTypeThreadReply && !action.RequiresConfirmation
 }
 
 func slackTriageDirectReactionAction(action SlackTriageDecisionAction) bool {

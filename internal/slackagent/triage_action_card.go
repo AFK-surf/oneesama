@@ -63,6 +63,15 @@ func buildSlackTriageActionBlocks(action SlackTriageDecisionAction, pending Slac
 			}},
 		})
 	}
+	if actionType == slackActionTypeThreadReply {
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]any{
+				"type": "mrkdwn",
+				"text": "*Quality gate before Confirm:*\n• Has a verified fact or cited source, not just thread synthesis\n• Adds information a human cannot get by re-reading the thread\n• No vague `可能/推断/也许/要不要` filler",
+			},
+		})
+	}
 	blocks = append(blocks, map[string]any{
 		"type":     "actions",
 		"block_id": fmt.Sprintf("mab_pending_action:%d", pending.ID),

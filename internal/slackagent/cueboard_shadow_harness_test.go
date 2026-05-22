@@ -116,6 +116,8 @@ It is a public read-only link, so the assistant should read first and answer dir
 		Messages:  []string{`{"type":"message","user":"U123","text":"https://x.com/steipete/status/2054850632067019173","ts":"1778767510.917049"}`},
 	}, poster, runner)
 	defer cleanup()
+	service.operatorFallback.PilotUserID = "U_PENG"
+	service.operatorFallback.DM.CacheDM("U_PENG", "D_PENG")
 	service.inbound.SetCursor("C09LNPCGU3E", "1778767000.000000")
 
 	result, err := service.scanSlackHistoryOnce(context.Background(), time.Hour)
@@ -131,17 +133,17 @@ It is a public read-only link, so the assistant should read first and answer dir
 	poster.WaitForCalls(t, 1)
 	calls := poster.Calls()
 	if len(calls) != 1 {
-		t.Fatalf("poster calls = %d, want one direct read-only reply", len(calls))
+		t.Fatalf("poster calls = %d, want one approval card", len(calls))
 	}
-	if call := calls[0]; call.Channel != "C09LNPCGU3E" || call.ThreadTS != "1778767510.917049" || !strings.Contains(call.DedupKey, "slack-triage-direct:") {
-		t.Fatalf("post call = %#v, want direct source-thread reply without action card", call)
+	if call := calls[0]; call.Channel != "D_PENG" || call.ThreadTS != "" || !strings.Contains(call.DedupKey, "pilot_dm:") || !strings.Contains(call.Text, "这条 X") {
+		t.Fatalf("post call = %#v, want pilot DM approval card", call)
 	}
 	status, err := service.TriageStatus(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("TriageStatus: %v", err)
 	}
-	if len(status.PendingActions) != 0 {
-		t.Fatalf("pending actions = %#v, want no read-confirmation card", status.PendingActions)
+	if len(status.PendingActions) != 1 || status.PendingActions[0].ActionType != slackActionTypeThreadReply {
+		t.Fatalf("pending actions = %#v, want one read-confirmation card", status.PendingActions)
 	}
 }
 

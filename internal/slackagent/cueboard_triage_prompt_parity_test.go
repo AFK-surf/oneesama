@@ -33,6 +33,7 @@ func TestBuildSlackTriagePromptUsesCueboardTwoPassPolicy(t *testing.T) {
 		"fresh factual / current-events question",
 		"workspace-policy-eligible link",
 		"SKIP — routine discussion",
+		"Default silent. A question mark alone is not a question to you.",
 		"## Pass 2: investigate with tools",
 		`slack_api(method="conversations.replies")`,
 		`use suggest_action(action_type="join_meeting") immediately`,
@@ -41,6 +42,7 @@ func TestBuildSlackTriagePromptUsesCueboardTwoPassPolicy(t *testing.T) {
 		"workspace policy says source-backed synthesis is useful",
 		"Shared article/PDF links are not universally synthesis-eligible",
 		"Do not skip factual casual questions",
+		"Do not post a Slack-visible reply that is only synthesis",
 		"slack.postThreadReply for verified facts",
 		"followup_memory when a concrete follow-up should not evaporate",
 		"Know your lane: technical implementation is not your job",
@@ -56,6 +58,8 @@ func TestBuildSlackTriagePromptUsesCueboardTwoPassPolicy(t *testing.T) {
 		"You are porting Legacy Slack Agent triage behavior.",
 		"Confirmation cards are only for external mutations",
 		"Use `post_thread_reply`",
+		"one short synthesis",
+		"ACT bar is thoughtful, not timid",
 	} {
 		if strings.Contains(prompt, unwanted) {
 			t.Fatalf("triage prompt still contains invented/paraphrased policy %q:\n%s", unwanted, prompt)
