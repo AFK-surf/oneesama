@@ -39,6 +39,11 @@ type SlackPersonaShadowResult struct {
 	EvidenceAnchors []SlackVisibleEvidenceAnchor `json:"evidence_anchors,omitempty"`
 }
 
+type slackPersonaForegroundDisposition struct {
+	Result    SlackPersonaShadowResult
+	ToolCalls []SlackTriageToolCall
+}
+
 func BuildBackfillPersonaRequest(candidate SlackBackfillCandidate) persona.Request {
 	status, reason := backfillCandidateReviewStatus(candidate)
 	threadTS := firstNonEmpty(strings.TrimSpace(candidate.ThreadTS), strings.TrimSpace(candidate.OriginatorTS))
@@ -160,36 +165,15 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
-		result, dispositionToolCalls := applyPersonaSecretaryLookupDisposition(result, request)
-		var completedToolCalls []SlackTriageToolCall
-		result, completedToolCalls = applyPersonaCompletedDelegationDisposition(result)
-		dispositionToolCalls = append(dispositionToolCalls, completedToolCalls...)
-		var ambientToolCalls []SlackTriageToolCall
-		result, ambientToolCalls = applyPersonaAmbientDelegationDisposition(result, messages, s.botUserID)
-		dispositionToolCalls = append(dispositionToolCalls, ambientToolCalls...)
-		var cannedToolCalls []SlackTriageToolCall
-		result, cannedToolCalls = applyPersonaCannedRefusalDisposition(result)
-		dispositionToolCalls = append(dispositionToolCalls, cannedToolCalls...)
-		var directReplyToolCalls []SlackTriageToolCall
-		result, directReplyToolCalls = applyPersonaAmbientDirectReplyDisposition(result, messages, s.botUserID)
-		dispositionToolCalls = append(dispositionToolCalls, directReplyToolCalls...)
-		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
-		var reactionGuardToolCalls []SlackTriageToolCall
-		result, reactionGuardToolCalls = applyPersonaProductLinkReactionDisposition(result, request)
-		dispositionToolCalls = append(dispositionToolCalls, reactionGuardToolCalls...)
-		var replyQualityToolCalls []SlackTriageToolCall
-		result, replyQualityToolCalls = applyPersonaVisibleReplyQualityDisposition(result)
-		dispositionToolCalls = append(dispositionToolCalls, replyQualityToolCalls...)
+		disposition := s.applySlackPersonaForegroundDispositions(result, request, messages)
+		result = disposition.Result
 		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result, request))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
 		})
-		if len(dispositionToolCalls) > 0 {
-			toolCalls = append(toolCalls, dispositionToolCalls...)
-		}
-		if len(policyToolCalls) > 0 {
-			toolCalls = append(toolCalls, policyToolCalls...)
+		if len(disposition.ToolCalls) > 0 {
+			toolCalls = append(toolCalls, disposition.ToolCalls...)
 		}
 		pendingResults := s.insertSlackTriagePendingActions(ctx, workspaceID, channelID, threadTS, "persona:"+fmt.Sprint(runID), &SlackTriageContext{ID: runID}, actions)
 		toolCalls = append(toolCalls, personaTriageApprovalToolCalls(pendingResults)...)
@@ -215,36 +199,15 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		callCtx, cancel := context.WithTimeout(ctx, s.personaRuntimeShadowTimeout())
 		defer cancel()
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
-		result, dispositionToolCalls := applyPersonaSecretaryLookupDisposition(result, request)
-		var completedToolCalls []SlackTriageToolCall
-		result, completedToolCalls = applyPersonaCompletedDelegationDisposition(result)
-		dispositionToolCalls = append(dispositionToolCalls, completedToolCalls...)
-		var ambientToolCalls []SlackTriageToolCall
-		result, ambientToolCalls = applyPersonaAmbientDelegationDisposition(result, messages, s.botUserID)
-		dispositionToolCalls = append(dispositionToolCalls, ambientToolCalls...)
-		var cannedToolCalls []SlackTriageToolCall
-		result, cannedToolCalls = applyPersonaCannedRefusalDisposition(result)
-		dispositionToolCalls = append(dispositionToolCalls, cannedToolCalls...)
-		var directReplyToolCalls []SlackTriageToolCall
-		result, directReplyToolCalls = applyPersonaAmbientDirectReplyDisposition(result, messages, s.botUserID)
-		dispositionToolCalls = append(dispositionToolCalls, directReplyToolCalls...)
-		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
-		var reactionGuardToolCalls []SlackTriageToolCall
-		result, reactionGuardToolCalls = applyPersonaProductLinkReactionDisposition(result, request)
-		dispositionToolCalls = append(dispositionToolCalls, reactionGuardToolCalls...)
-		var replyQualityToolCalls []SlackTriageToolCall
-		result, replyQualityToolCalls = applyPersonaVisibleReplyQualityDisposition(result)
-		dispositionToolCalls = append(dispositionToolCalls, replyQualityToolCalls...)
+		disposition := s.applySlackPersonaForegroundDispositions(result, request, messages)
+		result = disposition.Result
 		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result, request))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreExistingBotReply,
 		})
-		if len(dispositionToolCalls) > 0 {
-			toolCalls = append(toolCalls, dispositionToolCalls...)
-		}
-		if len(policyToolCalls) > 0 {
-			toolCalls = append(toolCalls, policyToolCalls...)
+		if len(disposition.ToolCalls) > 0 {
+			toolCalls = append(toolCalls, disposition.ToolCalls...)
 		}
 		pendingResults := s.insertSlackTriagePendingActions(ctx, workspaceID, channelID, threadTS, "persona:"+fmt.Sprint(runID), &SlackTriageContext{ID: runID}, actions)
 		toolCalls = append(toolCalls, personaTriageApprovalToolCalls(pendingResults)...)
@@ -258,6 +221,26 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		}
 	}()
 	return true
+}
+
+func (s *Service) applySlackPersonaForegroundDispositions(result SlackPersonaShadowResult, request persona.Request, messages []SlackInboundMessage) slackPersonaForegroundDisposition {
+	result, toolCalls := applyPersonaSecretaryLookupDisposition(result, request)
+	var next []SlackTriageToolCall
+	result, next = applyPersonaCompletedDelegationDisposition(result)
+	toolCalls = append(toolCalls, next...)
+	result, next = applyPersonaAmbientDelegationDisposition(result, messages, s.botUserID)
+	toolCalls = append(toolCalls, next...)
+	result, next = applyPersonaCannedRefusalDisposition(result)
+	toolCalls = append(toolCalls, next...)
+	result, next = applyPersonaAmbientDirectReplyDisposition(result, messages, s.botUserID)
+	toolCalls = append(toolCalls, next...)
+	result, next = s.applyPersonaSecretaryDelegationPolicy(result)
+	toolCalls = append(toolCalls, next...)
+	result, next = applyPersonaProductLinkReactionDisposition(result, request)
+	toolCalls = append(toolCalls, next...)
+	result, next = applyPersonaVisibleReplyQualityDisposition(result)
+	toolCalls = append(toolCalls, next...)
+	return slackPersonaForegroundDisposition{Result: result, ToolCalls: toolCalls}
 }
 
 func (s *Service) personaRuntimeShadowTimeout() time.Duration {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
+	"github.com/AFK-surf/oneesama/internal/httpserver"
 	"github.com/AFK-surf/oneesama/internal/persona"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
@@ -90,6 +93,69 @@ func TestHandleTriageRunAcceptsIgnoreExistingBotReply(t *testing.T) {
 	}
 	if !strings.Contains(runner.startInput.Task, "Dev rerun override") || !strings.Contains(runner.startInput.Task, "Ignore bot-authored replies") {
 		t.Fatalf("task missing dev rerun override:\n%s", runner.startInput.Task)
+	}
+}
+
+func TestHandleTriageRunDryRunBlocksSideEffects(t *testing.T) {
+	cfg := Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			Triage: appconfig.SlackTriageConfig{PostActions: true},
+		},
+		PersonaRuntime: appconfig.PersonaRuntimeConfig{
+			Provider:   persona.ProviderPi,
+			Mode:       persona.ModeLive,
+			ShadowOnly: false,
+			Timeout:    time.Second,
+		},
+	}
+	service := NewService(cfg)
+	service.personaRuntimeErr = nil
+	service.personaRuntime = &capturePersonaRuntime{response: persona.Response{
+		Runtime:     persona.ProviderPi,
+		Decision:    persona.DecisionReply,
+		VisibleText: "我看到了，应该交给现有 owner 跟进。",
+		Confidence:  0.8,
+		EvidenceAnchors: []persona.EvidenceAnchor{{
+			Kind:      "explicit_user_command",
+			SourceRef: "slack:C123:123.456",
+			Quote:     "帮我看下这个",
+		}},
+	}}
+	handler := NewHandler(service)
+	router := httpserver.New("slack-agent", slog.New(slog.NewTextHandler(io.Discard, nil)), []string{"*"}, handler)
+
+	body := `{"team_id":"T123","channel_id":"C123","user_id":"U123","text":"帮我看下这个","ts":"123.456","dry_run":true}`
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/triage/run", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = "127.0.0.1:4040"
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		OK     bool                    `json:"ok"`
+		DryRun SlackTriageDryRunResult `json:"dry_run"`
+		Status string                  `json:"status"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.OK || !payload.DryRun.DryRun {
+		t.Fatalf("payload = %#v, want dry_run result", payload)
+	}
+	if payload.Status != "would_request_reply_approval" {
+		t.Fatalf("status = %q, want would_request_reply_approval", payload.Status)
+	}
+	if len(payload.DryRun.ActionsBeforeGate) != 1 || len(payload.DryRun.ActionsAfterGate) != 1 {
+		t.Fatalf("actions before/after = %d/%d, want 1/1", len(payload.DryRun.ActionsBeforeGate), len(payload.DryRun.ActionsAfterGate))
+	}
+	if len(payload.DryRun.VisibleReplyVerdicts) != 1 || !payload.DryRun.VisibleReplyVerdicts[0].Allowed {
+		t.Fatalf("visible verdicts = %#v, want allowed reply verdict", payload.DryRun.VisibleReplyVerdicts)
+	}
+	if !stringSliceContains(payload.DryRun.SideEffectsBlocked, "approval_card") || !stringSliceContains(payload.DryRun.SideEffectsBlocked, "slack_post") {
+		t.Fatalf("side effects = %#v, want approval_card + slack_post blocked", payload.DryRun.SideEffectsBlocked)
 	}
 }
 

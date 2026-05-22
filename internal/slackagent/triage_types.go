@@ -187,6 +187,42 @@ type SlackTriageStartResult struct {
 	Finalization *SlackTriageFinalization `json:"finalization,omitempty"`
 }
 
+type SlackTriageDryRunResult struct {
+	DryRun               bool                                   `json:"dryRun"`
+	ChannelID            string                                 `json:"channelId"`
+	ThreadTS             string                                 `json:"threadTs"`
+	MessageCount         int                                    `json:"messageCount"`
+	Digest               string                                 `json:"digest,omitempty"`
+	RequestID            string                                 `json:"requestId,omitempty"`
+	Persona              SlackPersonaShadowResult               `json:"persona"`
+	FinalDecision        string                                 `json:"finalDecision"`
+	ActionsBeforeGate    []SlackTriageDecisionAction            `json:"actionsBeforeGate,omitempty"`
+	ActionsAfterGate     []SlackTriageDecisionAction            `json:"actionsAfterGate,omitempty"`
+	VisibleReplyVerdicts []SlackTriageDryRunVisibleReplyVerdict `json:"visibleReplyVerdicts,omitempty"`
+	WouldDelegateWorkers []SlackTriageDryRunWorker              `json:"wouldDelegateWorkers,omitempty"`
+	WouldMemoryWrites    []string                               `json:"wouldMemoryWrites,omitempty"`
+	ToolCalls            []SlackTriageToolCall                  `json:"toolCalls,omitempty"`
+	SideEffectsBlocked   []string                               `json:"sideEffectsBlocked"`
+	ContextBudget        map[string]int                         `json:"contextBudget,omitempty"`
+	PipelineSmellSignals []string                               `json:"pipelineSmellSignals,omitempty"`
+}
+
+type SlackTriageDryRunVisibleReplyVerdict struct {
+	Message         string                       `json:"message,omitempty"`
+	Allowed         bool                         `json:"allowed"`
+	Reason          string                       `json:"reason"`
+	EvidenceAnchors []SlackVisibleEvidenceAnchor `json:"evidenceAnchors,omitempty"`
+}
+
+type SlackTriageDryRunWorker struct {
+	ID              string `json:"id,omitempty"`
+	Kind            string `json:"kind,omitempty"`
+	SessionKind     string `json:"sessionKind,omitempty"`
+	DelegationScope string `json:"delegationScope,omitempty"`
+	PromptPreview   string `json:"promptPreview,omitempty"`
+	WouldStart      bool   `json:"wouldStart"`
+}
+
 type SlackTriageFinalization struct {
 	Run            *SlackTriageContext        `json:"run,omitempty"`
 	Decision       SlackTriageDecision        `json:"decision"`

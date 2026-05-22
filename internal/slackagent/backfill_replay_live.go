@@ -60,6 +60,7 @@ type SlackBackfillReplayLiveOptions struct {
 	ChannelID             string
 	Since                 time.Duration
 	MaxMessagesPerChannel int
+	MaxThreads            int
 	Now                   time.Time // optional; defaults to time.Now() if zero
 }
 
@@ -76,6 +77,18 @@ type SlackBackfillReplayLiveStats struct {
 	Warnings        []string
 	APIRetriesTotal int
 	APIRetries429   int
+}
+
+// SlackTriageReplayThread is a concrete Slack thread bundle that can
+// be replayed through the live triage dry-run endpoint. Unlike
+// SlackBackfillCandidate, this preserves the raw root/reply message
+// sequence so the foreground persona sees the same event shape it
+// would have received in production.
+type SlackTriageReplayThread struct {
+	ChannelID string                `json:"channelId"`
+	ThreadTS  string                `json:"threadTs"`
+	RootTS    string                `json:"rootTs"`
+	Messages  []SlackInboundMessage `json:"messages"`
 }
 
 // BackfillReplayLive scans a single Slack channel for the past
@@ -142,6 +155,89 @@ func BackfillReplayLive(ctx context.Context, opts SlackBackfillReplayLiveOptions
 	}
 	stats.CandidatesFound = len(candidates)
 	return candidates, stats, nil
+}
+
+// SlackTriageReplayLiveThreads scans a live Slack channel and returns
+// raw thread bundles for replaying the actual Oneesama triage pipeline.
+// It is read-only and shares the same Slack fetch/pagination/429
+// behaviour as BackfillReplayLive.
+func SlackTriageReplayLiveThreads(ctx context.Context, opts SlackBackfillReplayLiveOptions) ([]SlackTriageReplayThread, SlackBackfillReplayLiveStats, error) {
+	stats := SlackBackfillReplayLiveStats{ChannelID: strings.TrimSpace(opts.ChannelID)}
+	if strings.TrimSpace(opts.BotToken) == "" {
+		return nil, stats, fmt.Errorf("SlackTriageReplayLiveThreads: BotToken is required")
+	}
+	if stats.ChannelID == "" {
+		return nil, stats, fmt.Errorf("SlackTriageReplayLiveThreads: ChannelID is required")
+	}
+	since := opts.Since
+	if since <= 0 {
+		since = 24 * time.Hour
+	}
+	maxPerChan := opts.MaxMessagesPerChannel
+	if maxPerChan <= 0 {
+		maxPerChan = backfillLiveDefaultMaxPerChan
+	}
+	maxThreads := opts.MaxThreads
+	if maxThreads <= 0 {
+		maxThreads = maxPerChan
+	}
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	oldest := now.Add(-since).Unix()
+
+	messages, truncated, scanStats, err := fetchHistoryWindow(ctx, opts.BotToken, stats.ChannelID, oldest, maxPerChan, &stats)
+	stats.MessagesScanned = scanStats.scanned
+	stats.OldestScannedTS = scanStats.oldestTS
+	stats.NewestScannedTS = scanStats.newestTS
+	stats.Truncated = truncated
+	if err != nil {
+		return nil, stats, err
+	}
+
+	threads := make([]SlackTriageReplayThread, 0, minInt(maxThreads, len(messages)))
+	seen := map[string]struct{}{}
+	for _, root := range messages {
+		if strings.TrimSpace(root.TS) == "" {
+			continue
+		}
+		threadTS := firstNonEmpty(root.ThreadTS, root.TS)
+		// conversations.history includes replies too. Only replay a
+		// thread once, anchored at the root row.
+		if root.ThreadTS != "" && root.ThreadTS != root.TS {
+			continue
+		}
+		key := root.ChannelID + "/" + threadTS
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		var replies []SlackInboundMessage
+		if root.ReplyCount > 0 {
+			fetched, fetchErr := fetchRepliesFor(ctx, opts.BotToken, root.ChannelID, threadTS, &stats)
+			if fetchErr != nil {
+				stats.Warnings = append(stats.Warnings, fmt.Sprintf("replies fetch failed for ts=%s: %v", root.TS, fetchErr))
+			} else {
+				stats.RepliesFetched++
+				replies = fetched
+			}
+		}
+		bundle := make([]SlackInboundMessage, 0, 1+len(replies))
+		bundle = append(bundle, root)
+		bundle = append(bundle, replies...)
+		threads = append(threads, SlackTriageReplayThread{
+			ChannelID: root.ChannelID,
+			ThreadTS:  threadTS,
+			RootTS:    root.TS,
+			Messages:  bundle,
+		})
+		if len(threads) >= maxThreads {
+			break
+		}
+	}
+	stats.CandidatesFound = len(threads)
+	return threads, stats, nil
 }
 
 func markBackfillLinkCandidateForAgentRead(candidate SlackBackfillCandidate) SlackBackfillCandidate {

@@ -77,6 +77,65 @@ func TestBackfillReplayLiveHappyPath(t *testing.T) {
 	}
 }
 
+func TestSlackTriageReplayLiveThreadsPreservesRootAndReplies(t *testing.T) {
+	mux := http.NewServeMux()
+	var repliesCalls int32
+	mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		writeFakeSlackJSON(t, w, backfillLiveHistoryResponse{
+			OK: true,
+			Messages: []SlackMessage{
+				{TS: "1779000300.000", User: "U_PENG", Text: "这个 HN profile 是谁？", ReplyCount: 1},
+				// conversations.history can contain replies too. The benchmark
+				// collector must not replay this row as a separate thread.
+				{TS: "1779000310.000", ThreadTS: "1779000300.000", User: "U_OTHER", Text: "我不认识"},
+				{TS: "1779000200.000", User: "U_PENG", Text: "确认"},
+			},
+		})
+	})
+	mux.HandleFunc("/conversations.replies", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&repliesCalls, 1)
+		if got := r.URL.Query().Get("ts"); got != "1779000300.000" {
+			t.Errorf("replies ts = %q, want root ts", got)
+		}
+		writeFakeSlackJSON(t, w, slackRepliesResponse{
+			OK: true,
+			Messages: []SlackMessage{
+				{TS: "1779000300.000", User: "U_PENG", Text: "这个 HN profile 是谁？"},
+				{TS: "1779000310.000", ThreadTS: "1779000300.000", User: "U_OTHER", Text: "我不认识"},
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	setLiveBaseURL(t, server.URL)
+
+	threads, stats, err := SlackTriageReplayLiveThreads(context.Background(), SlackBackfillReplayLiveOptions{
+		BotToken:   "xoxb-test",
+		ChannelID:  "C1",
+		Since:      24 * time.Hour,
+		Now:        time.Unix(1779000400, 0),
+		MaxThreads: 5,
+	})
+	if err != nil {
+		t.Fatalf("SlackTriageReplayLiveThreads: %v", err)
+	}
+	if got := atomic.LoadInt32(&repliesCalls); got != 1 {
+		t.Errorf("repliesCalls = %d, want 1", got)
+	}
+	if stats.CandidatesFound != 2 {
+		t.Errorf("CandidatesFound = %d, want 2 root threads", stats.CandidatesFound)
+	}
+	if len(threads) != 2 {
+		t.Fatalf("threads len = %d, want 2", len(threads))
+	}
+	if threads[0].ThreadTS != "1779000300.000" || len(threads[0].Messages) != 2 {
+		t.Fatalf("first thread = %+v, want root+reply bundle", threads[0])
+	}
+	if threads[1].ThreadTS != "1779000200.000" || len(threads[1].Messages) != 1 {
+		t.Fatalf("second thread = %+v, want standalone root", threads[1])
+	}
+}
+
 func TestBackfillReplayLiveDelegatesReadableLinkCandidate(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {

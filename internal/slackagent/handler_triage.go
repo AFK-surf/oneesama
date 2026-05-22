@@ -26,6 +26,7 @@ type triageRunRequest struct {
 	// parity checks where an old bot has already answered the same thread.
 	IgnoreExistingBotReply bool `json:"ignore_existing_bot_reply"`
 	RerunForce             bool `json:"rerun_force"`
+	DryRun                 bool `json:"dry_run"`
 }
 
 func (h *Handler) handleTriageStatus(c *gin.Context) {
@@ -78,12 +79,31 @@ func (h *Handler) handleTriageRun(c *gin.Context) {
 		}}
 	}
 	digest := firstNonEmpty(request.Digest, renderSlackActivityDigest(channelID, messages))
-	triage, err := h.service.startSlackTriage(c.Request.Context(), channelID, messages, digest, slackTriageStartOptions{
+	options := slackTriageStartOptions{
 		IgnoreExistingBotReply: request.IgnoreExistingBotReply || request.RerunForce,
 		ExtraMetadata: map[string]any{
 			"manual_triage_run":         true,
 			"ignore_existing_bot_reply": request.IgnoreExistingBotReply || request.RerunForce,
+			"triage_dry_run":            request.DryRun,
 		},
+	}
+	if request.DryRun {
+		dryRun, err := h.service.DryRunSlackTriage(c.Request.Context(), channelID, messages, digest, options)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"ok":      true,
+			"dry_run": dryRun,
+			"status":  dryRun.FinalDecision,
+			"inbound": h.service.InboundStatus(),
+		})
+		return
+	}
+	triage, err := h.service.startSlackTriage(c.Request.Context(), channelID, messages, digest, slackTriageStartOptions{
+		IgnoreExistingBotReply: options.IgnoreExistingBotReply,
+		ExtraMetadata:          options.ExtraMetadata,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": err.Error()})
