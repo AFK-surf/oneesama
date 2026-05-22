@@ -107,6 +107,38 @@ func TestSlackWorkerResultTextSilentOnTransitionalAnnouncement(t *testing.T) {
 	}
 }
 
+func TestSlackWorkerResultTextSilentOnUnverifiableSecretaryLookupSpeculation(t *testing.T) {
+	job := agentrunner.Job{
+		Status: agentrunner.StatusCompleted,
+		Result: strings.Join([]string{
+			"从 Cue 共享链接只拿到 `# Bridge\\nLoading shared chat…`，实际聊天内容没加载出来，所以没法直接看到那次对话的细节。",
+			"但结合 repo 和 memory 证据，可以拼出概况：压缩视频慢很可能是在找工具。",
+		}, "\n"),
+		Context: map[string]any{
+			"source":       "persona_delegate_worker",
+			"session_kind": agentrunner.SessionKindSecretaryLookup,
+		},
+	}
+	if got := slackWorkerResultText(job); got != "" {
+		t.Fatalf("slackWorkerResultText() = %q, want empty string (silent) for unverifiable secretary speculation", got)
+	}
+}
+
+func TestSlackWorkerResultTextKeepsVerifiedSecretaryLookupAnswer(t *testing.T) {
+	const answer = "Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33，历史发帖集中在 affine/bridge。"
+	job := agentrunner.Job{
+		Status: agentrunner.StatusCompleted,
+		Result: answer,
+		Context: map[string]any{
+			"source":       "persona_delegate_worker",
+			"session_kind": agentrunner.SessionKindSecretaryLookup,
+		},
+	}
+	if got := slackWorkerResultText(job); got != answer {
+		t.Fatalf("slackWorkerResultText() = %q, want verified answer %q", got, answer)
+	}
+}
+
 func TestSlackWorkerResultTextKeepsNormalWorkerAnswer(t *testing.T) {
 	const answer = "我看完了，这个线程主要是在讨论 Canvas parity。"
 	got := slackWorkerResultText(agentrunner.Job{Status: agentrunner.StatusCompleted, Result: answer})
@@ -194,6 +226,40 @@ func TestAgentRunnerProgressSkipsPersonaDelegateWorkerAssistantStatus(t *testing
 	if calls := assistant.Calls(); len(calls) != 0 {
 		t.Fatalf("assistant calls = %#v, want no shimmer/status for persona triage worker progress", calls)
 	}
+}
+
+func TestAgentRunnerUpdateRemovesEyesForSilentPersonaDelegateResult(t *testing.T) {
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	reactions := &recordingReactions{}
+	service := NewService(Config{
+		Poster:    poster,
+		Reactions: reactions,
+	})
+
+	service.handleAgentRunnerUpdate(context.Background(), agentrunner.Job{
+		ID:     "job_unverified_secretary",
+		Status: agentrunner.StatusCompleted,
+		Result: strings.Join([]string{
+			"从 Cue 共享链接只拿到 `# Bridge\\nLoading shared chat…`，实际聊天内容没加载出来。",
+			"但结合 repo 和 memory 证据，可以拼出概况。",
+		}, "\n"),
+		Context: map[string]any{
+			"source":       "persona_delegate_worker",
+			"session_kind": agentrunner.SessionKindSecretaryLookup,
+			"slack": map[string]any{
+				"channel_id":  "C123",
+				"thread_ts":   "177.123",
+				"reaction_ts": "177.111",
+			},
+		},
+	})
+
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want no Slack post", calls)
+	}
+	assertReactionCalls(t, reactions.Calls(), []reactionCall{
+		{Method: "remove", Channel: "C123", Timestamp: "177.111", Name: slackReactionEyes},
+	})
 }
 
 func TestSlackWorkerToolRequestStartsContinuationWithDispatcherEvidence(t *testing.T) {

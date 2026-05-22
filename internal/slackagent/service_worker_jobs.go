@@ -49,6 +49,8 @@ func (s *Service) handleAgentRunnerUpdate(ctx context.Context, job agentrunner.J
 		s.scheduleAssistantThreadStatus(ctx, ref, "", true)
 		if job.Status == agentrunner.StatusCompleted && delivered {
 			s.finishMentionReaction(ctx, ref, slackReactionOK)
+		} else if job.Status == agentrunner.StatusCompleted && isPersonaDelegatedWorkerJob(job) && slackWorkerResultText(job) == "" {
+			s.removeSlackReaction(ctx, ref.ChannelID, ref.ReactionTS, slackReactionEyes)
 		} else {
 			s.finishMentionReaction(ctx, ref, slackReactionWarn)
 		}
@@ -423,6 +425,9 @@ func slackWorkerResultText(job agentrunner.Job) string {
 	if slackVisibleTextIsTransitionalAnnouncement(text) {
 		return ""
 	}
+	if slackVisibleTextIsUnverifiableSecretaryLookupSpeculation(job, text) {
+		return ""
+	}
 	return text
 }
 
@@ -481,6 +486,91 @@ func slackVisibleTextIsTransitionalAnnouncement(text string) bool {
 		"working on it",
 	} {
 		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func slackVisibleTextIsUnverifiableSecretaryLookupSpeculation(job agentrunner.Job, text string) bool {
+	if !isPersonaSecretaryLookupWorkerJob(job) {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	if !slackVisibleTextContainsAny(lower, []string{
+		"loading shared chat",
+		"shared chat…",
+		"没加载出来",
+		"没法直接看到",
+		"无法直接看到",
+		"无法看到",
+		"无法访问",
+		"访问不了",
+		"看不到实际",
+		"看不到正文",
+		"没拿到正文",
+		"could not access",
+		"couldn't access",
+		"could not verify",
+		"couldn't verify",
+		"could not see",
+		"couldn't see",
+		"insufficient evidence",
+		"not enough evidence",
+	}) {
+		return false
+	}
+	return slackVisibleTextContainsAny(lower, []string{
+		"可以拼出",
+		"拼出概况",
+		"结合 repo",
+		"结合 memory",
+		"结合历史",
+		"结合上下文",
+		"推断",
+		"猜测",
+		"猜一下",
+		"可能",
+		"很可能",
+		"大概率",
+		"像是",
+		"应该是",
+		"speculate",
+		"speculation",
+		"guess",
+		"likely",
+		"probably",
+		"based on memory",
+		"based on context",
+	})
+}
+
+func isPersonaSecretaryLookupWorkerJob(job agentrunner.Job) bool {
+	if agentrunner.NormalizeSessionKind(stringFromContext(job.Context, "session_kind", "sessionKind")) == agentrunner.SessionKindSecretaryLookup {
+		return true
+	}
+	scope := strings.ToLower(stringFromContext(job.Context, "delegation_scope", "delegationScope"))
+	if scope == "secretary_lookup" {
+		return true
+	}
+	if nested, ok := mapFromAny(job.Context["worker_context"]); ok {
+		scope = strings.ToLower(firstNonEmpty(
+			stringFromAny(nested["delegation_scope"]),
+			stringFromAny(nested["delegationScope"]),
+			stringFromAny(nested["session_kind"]),
+			stringFromAny(nested["sessionKind"]),
+		))
+		return scope == "secretary_lookup"
+	}
+	return false
+}
+
+func slackVisibleTextContainsAny(text string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
 			return true
 		}
 	}
