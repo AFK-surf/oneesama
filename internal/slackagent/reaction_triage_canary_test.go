@@ -23,7 +23,7 @@ func TestReactionTriageCanaryReactOnlyUsesWorkspaceCustomEmoji(t *testing.T) {
 		}},
 	}
 
-	actions := slackPersonaForegroundActions("C123", "100.000", result)
+	actions := slackPersonaForegroundActions("C123", "100.000", result, persona.Request{})
 	if len(actions) != 1 || actions[0].Type != "add_reaction" {
 		t.Fatalf("actions = %#v, want one reaction action", actions)
 	}
@@ -52,7 +52,7 @@ func TestReactionTriageCanaryReplyOnlyDoesNotReact(t *testing.T) {
 		Reason:      "workspace-relevant commentary",
 	}
 
-	actions := slackPersonaForegroundActions("C123", "100.000", result)
+	actions := slackPersonaForegroundActions("C123", "100.000", result, persona.Request{})
 	if len(actions) != 1 || actions[0].Type != "post_thread_reply" {
 		t.Fatalf("actions = %#v, want one reply action", actions)
 	}
@@ -84,7 +84,7 @@ func TestReactionTriageCanaryReplyPlusReact(t *testing.T) {
 		}},
 	}
 
-	actions := slackPersonaForegroundActions("C123", "100.000", result)
+	actions := slackPersonaForegroundActions("C123", "100.000", result, persona.Request{})
 	if len(actions) != 2 || actions[0].Type != "post_thread_reply" || actions[1].Type != "add_reaction" {
 		t.Fatalf("actions = %#v, want reply then reaction", actions)
 	}
@@ -115,7 +115,7 @@ func TestReactionTriageCanarySkipsHallucinatedWorkspaceCustomEmoji(t *testing.T)
 		}},
 	}
 
-	actions := slackPersonaForegroundActions("C123", "100.000", result)
+	actions := slackPersonaForegroundActions("C123", "100.000", result, persona.Request{})
 	calls, failures, mutations := service.executeSlackTriageDirectActions(context.Background(), "W1", "C123", "100.000", 286, actions, reactionTriageCanaryMessages())
 	if failures != 0 || mutations != 0 || len(calls) != 1 || !calls[0].Success || calls[0].Result != "unknown_workspace_custom_emoji" {
 		t.Fatalf("calls=%#v failures=%d mutations=%d, want fail-closed custom emoji skip", calls, failures, mutations)

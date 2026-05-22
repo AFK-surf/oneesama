@@ -41,7 +41,10 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 			decision.Summary = firstNonEmpty(decision.Summary, "Shared link is synthesis-eligible; posting a lightweight initial opinion.")
 		}
 	}
+	actions = enrichSlackTriageActionsWithContextEvidence(actions, channelID, threadTS, messages, slackExternalLinksFromContext(job.Context["externalLinks"]))
 	actions = filterSlackTriageActionsForMessages(actions, messages, s.botUserID)
+	personaDecision := decision
+	personaDecision.Actions = append([]SlackTriageDecisionAction(nil), actions...)
 	actions = requireSlackTriageVisibleReplyApproval(actions)
 	decision.Actions = actions
 	if !ok {
@@ -105,7 +108,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	}
 	if personaForegroundQueued {
 		extraMetadata["persona_foreground_queued"] = true
-		extraMetadata["codex_suggested_actions"] = len(actions)
+		extraMetadata["codex_suggested_actions"] = len(personaDecision.Actions)
 	}
 	runPatch := SlackTriageContext{
 		ID:        runID,
@@ -148,10 +151,10 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	}
 	if personaForegroundQueued && updatedRun != nil {
 		relatedMemory := slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"])
-		s.queueSlackTriagePersonaForeground(context.WithoutCancel(ctx), workspaceID, updatedRun.ID, channelID, threadTS, messages, decision, relatedMemory, boolFromAny(job.Context["ignoreExistingBotReply"], false) || boolFromAny(job.Context["ignore_existing_bot_reply"], false))
+		s.queueSlackTriagePersonaForeground(context.WithoutCancel(ctx), workspaceID, updatedRun.ID, channelID, threadTS, messages, personaDecision, relatedMemory, boolFromAny(job.Context["ignoreExistingBotReply"], false) || boolFromAny(job.Context["ignore_existing_bot_reply"], false))
 	} else if personaShadowQueued && updatedRun != nil {
 		relatedMemory := slackRelatedMemoryRecordsFromAny(job.Context["relatedMemory"])
-		s.queueSlackTriagePersonaShadow(context.WithoutCancel(ctx), updatedRun.ID, channelID, threadTS, messages, decision, relatedMemory)
+		s.queueSlackTriagePersonaShadow(context.WithoutCancel(ctx), updatedRun.ID, channelID, threadTS, messages, personaDecision, relatedMemory)
 	}
 	go s.maybeCompactDailyNotes(context.WithoutCancel(ctx))
 	if ok && decision.Summary != "" {

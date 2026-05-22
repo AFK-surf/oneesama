@@ -322,6 +322,7 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 		VisibleText: "Pi 读完后给一个轻量回复。",
 		Reason:      "persona foreground owns the visible reply",
 		Confidence:  0.82,
+		Citations:   []persona.Citation{{Kind: "memory", SourceRef: "memory/team/persona-foreground.md:4", Snippet: "这个没人回，oneesama 应该补一下吗？"}},
 		WorkerRequests: []persona.WorkerRequest{{
 			Kind:   "agent_read",
 			Prompt: "read linked article before next follow-up",
@@ -477,7 +478,7 @@ func TestSlackTriageCodexOnlyDoesNotCallPersonaRuntime(t *testing.T) {
 		ID:       "job_codex_only",
 		Provider: "codex",
 		Status:   agentrunner.StatusCompleted,
-		Result:   `{"summary":"codex-only reply","actions":[{"type":"post_thread_reply","title":"codex reply","message":"codex visible reply","channelId":"C_TRIAGE","threadTs":"200.000"}]}`,
+		Result:   `{"summary":"codex-only reply","actions":[{"type":"post_thread_reply","title":"codex reply","message":"codex visible reply","channelId":"C_TRIAGE","threadTs":"200.000","evidence_anchors":[{"kind":"explicit_user_command","source_ref":"slack:C_TRIAGE:200.000","quote":"这个 thread 值得回一下。"}]}]}`,
 	}}
 	runtime := &capturePersonaRuntime{response: persona.Response{
 		Runtime:     persona.ProviderPi,
@@ -614,6 +615,7 @@ func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleR
 		VisibleText: "我查了下，更像是在预热 Gemini 2.5 的能力更新。",
 		Reason:      "persona used the candidate action as evidence, then owned the visible reply",
 		Confidence:  0.61,
+		Citations:   []persona.Citation{{Kind: "memory", SourceRef: "memory/team/model-launch.md:4", Snippet: "Google 这次到底要发什么模型？"}},
 		ShadowOnly:  false,
 	}}
 	service.personaRuntimeErr = nil
@@ -766,6 +768,7 @@ func TestSlackTriagePiFirstLiveSkipsPrePiRunnerAndPostsPersonaReply(t *testing.T
 		VisibleText: "Pi-first 直接评价：这篇文章和我们的产品判断很接近。",
 		Reason:      "workspace policy says to engage product-adjacent evidence-backed links",
 		Confidence:  0.86,
+		Citations:   []persona.Citation{{Kind: "memory", SourceRef: "memory/team/product-links.md:4", Snippet: "这条产品评论文章你怎么看？"}},
 		ShadowOnly:  false,
 	}}
 	service.personaRuntime = runtime
@@ -1173,7 +1176,7 @@ func TestPersonaVisibleReplyQualityGateSuppressesInternalMeta(t *testing.T) {
 	if len(toolCalls) != 1 || toolCalls[0].Action != "persona_reply_quality_gate_silent" || toolCalls[0].Result != "internal_control_plane_leak" {
 		t.Fatalf("toolCalls = %#v, want quality gate block", toolCalls)
 	}
-	if actions := slackPersonaForegroundActions("C123", "123.456", got); len(actions) != 0 {
+	if actions := slackPersonaForegroundActions("C123", "123.456", got, persona.Request{}); len(actions) != 0 {
 		t.Fatalf("actions = %#v, want no pending reply for internal meta", actions)
 	}
 }

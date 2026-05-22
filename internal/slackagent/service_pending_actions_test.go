@@ -263,6 +263,50 @@ func TestVisibleReplyQualityGateDropsInternalMetaReplies(t *testing.T) {
 	}
 }
 
+func TestVisibleReplyAllowListBlocksNoAnchorPoliteReplies(t *testing.T) {
+	t.Parallel()
+
+	action := SlackTriageDecisionAction{
+		Type:      slackActionTypeThreadReply,
+		Title:     "Review reply",
+		Message:   "我看了一下，这里应该可以继续按原计划推进。",
+		ChannelID: "C123",
+		ThreadTS:  "123.456",
+	}
+	verdict := slackVisibleReplyAllowListVerdictForAction(action)
+	if verdict.Allowed || verdict.Reason != slackVisibleReplyAllowReasonMissingEvidenceAnchor {
+		t.Fatalf("verdict = %#v, want missing evidence anchor", verdict)
+	}
+	if actions := requireSlackTriageVisibleReplyApproval([]SlackTriageDecisionAction{action}); len(actions) != 0 {
+		t.Fatalf("actions = %#v, want polite no-anchor reply blocked", actions)
+	}
+}
+
+func TestVisibleReplyAllowListAllowsFetchedLinkAnchor(t *testing.T) {
+	t.Parallel()
+
+	action := SlackTriageDecisionAction{
+		Type:      slackActionTypeThreadReply,
+		Title:     "Review reply",
+		Message:   "这篇文章的核心是 agent 编辑工具的取舍，作者明确比较了 EDIT 路径。",
+		ChannelID: "C123",
+		ThreadTS:  "123.456",
+		EvidenceAnchors: []SlackVisibleEvidenceAnchor{{
+			Kind:      slackVisibleEvidenceKindFetchedLink,
+			SourceRef: "https://antirez.com/news/166",
+			Quote:     "Alternatives for the EDIT tool of LLM agents",
+		}},
+	}
+
+	actions := requireSlackTriageVisibleReplyApproval([]SlackTriageDecisionAction{action})
+	if len(actions) != 1 || !actions[0].RequiresConfirmation || len(actions[0].EvidenceAnchors) != 1 {
+		t.Fatalf("actions = %#v, want allowed reply with evidence anchor and approval", actions)
+	}
+	if actions[0].EvidenceAnchors[0].ConfidenceSource != "source_derived:fetched_link" {
+		t.Fatalf("anchor = %#v", actions[0].EvidenceAnchors[0])
+	}
+}
+
 func TestSlackVisibleReplyQualitySamplePreservesEvidenceAnchors(t *testing.T) {
 	t.Parallel()
 

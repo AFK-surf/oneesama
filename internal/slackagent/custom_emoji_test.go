@@ -103,7 +103,7 @@ func TestPersonaReactDecisionBecomesDirectReactionAction(t *testing.T) {
 			Reason:    "light acknowledgement",
 		}},
 	}
-	actions := slackPersonaForegroundActions("C123", "100.000", result)
+	actions := slackPersonaForegroundActions("C123", "100.000", result, persona.Request{})
 	if len(actions) != 1 {
 		t.Fatalf("actions = %#v, want one reaction action", actions)
 	}

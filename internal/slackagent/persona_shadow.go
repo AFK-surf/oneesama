@@ -179,7 +179,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		var replyQualityToolCalls []SlackTriageToolCall
 		result, replyQualityToolCalls = applyPersonaVisibleReplyQualityDisposition(result)
 		dispositionToolCalls = append(dispositionToolCalls, replyQualityToolCalls...)
-		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result))
+		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result, request))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
@@ -234,7 +234,7 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		var replyQualityToolCalls []SlackTriageToolCall
 		result, replyQualityToolCalls = applyPersonaVisibleReplyQualityDisposition(result)
 		dispositionToolCalls = append(dispositionToolCalls, replyQualityToolCalls...)
-		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result))
+		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result, request))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreExistingBotReply,
@@ -1357,7 +1357,7 @@ func countMatchingFailedTriageToolCalls(calls []SlackTriageToolCall, tool string
 	return count
 }
 
-func slackPersonaForegroundActions(channelID string, threadTS string, result SlackPersonaShadowResult) []SlackTriageDecisionAction {
+func slackPersonaForegroundActions(channelID string, threadTS string, result SlackPersonaShadowResult, request persona.Request) []SlackTriageDecisionAction {
 	if !result.Success || result.ShadowOnly {
 		return nil
 	}
@@ -1371,7 +1371,7 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 			ThreadTS:        strings.TrimSpace(threadTS),
 			Reason:          strings.TrimSpace(result.Reason),
 			Confidence:      result.Confidence,
-			EvidenceAnchors: slackVisibleThreadEvidenceAnchors(channelID, threadTS, result.VisibleText),
+			EvidenceAnchors: slackPersonaVisibleReplyEvidenceAnchors(channelID, threadTS, result, request),
 		})
 	}
 	if result.Decision == persona.DecisionReact || len(result.reactionRecords) > 0 {
@@ -1394,6 +1394,89 @@ func slackPersonaForegroundActions(channelID string, threadTS string, result Sla
 		}
 	}
 	return actions
+}
+
+func slackPersonaVisibleReplyEvidenceAnchors(channelID string, threadTS string, result SlackPersonaShadowResult, request persona.Request) []SlackVisibleEvidenceAnchor {
+	anchors := make([]SlackVisibleEvidenceAnchor, 0, 4)
+	for _, citation := range request.Evidence.Citations {
+		anchors = append(anchors, slackVisibleEvidenceAnchorFromPersonaCitation(citation))
+	}
+	for _, sourceRef := range result.Citations {
+		anchors = append(anchors, slackVisibleEvidenceAnchorFromSourceRef(sourceRef, result.VisibleText))
+	}
+	for _, item := range request.Memory.Items {
+		anchors = append(anchors, slackVisibleEvidenceAnchorFromPersonaMemoryRecord(item))
+	}
+	if strings.TrimSpace(request.Anchor.URL) != "" {
+		anchors = append(anchors, SlackVisibleEvidenceAnchor{
+			Kind:      slackVisibleEvidenceKindFetchedLink,
+			SourceRef: strings.TrimSpace(request.Anchor.URL),
+			Quote:     result.VisibleText,
+		})
+	}
+	for _, item := range request.Context {
+		if strings.TrimSpace(item.Kind) != "external_link_context" {
+			continue
+		}
+		sourceRef := firstSlackVisibleURL(item.Text)
+		if sourceRef == "" {
+			sourceRef = "external_link_context"
+		}
+		anchors = append(anchors, SlackVisibleEvidenceAnchor{
+			Kind:      slackVisibleEvidenceKindFetchedLink,
+			SourceRef: sourceRef,
+			Quote:     item.Text,
+		})
+	}
+	anchors = append(anchors, slackVisibleThreadEvidenceAnchors(channelID, threadTS, result.VisibleText)...)
+	return normalizeSlackVisibleEvidenceAnchors(anchors)
+}
+
+func slackVisibleEvidenceAnchorFromPersonaCitation(citation persona.Citation) SlackVisibleEvidenceAnchor {
+	return slackVisibleEvidenceAnchorFromSourceRef(firstNonEmpty(citation.SourceRef, citation.Source), citation.Snippet)
+}
+
+func slackVisibleEvidenceAnchorFromPersonaMemoryRecord(record persona.MemoryRecord) SlackVisibleEvidenceAnchor {
+	sourceRef := strings.TrimSpace(record.SourceRef)
+	if sourceRef == "" {
+		return SlackVisibleEvidenceAnchor{}
+	}
+	kind := slackVisibleEvidenceKindWorkspaceMemory
+	normalizedKind := strings.ToLower(strings.TrimSpace(record.Kind))
+	if strings.Contains(normalizedKind, "person") || strings.Contains(sourceRef, "/people/") {
+		kind = slackVisibleEvidenceKindPersonMemory
+	}
+	return SlackVisibleEvidenceAnchor{
+		Kind:      kind,
+		SourceRef: sourceRef,
+		Quote:     record.Text,
+	}
+}
+
+func slackVisibleEvidenceAnchorFromSourceRef(sourceRef string, quote string) SlackVisibleEvidenceAnchor {
+	sourceRef = strings.TrimSpace(sourceRef)
+	if sourceRef == "" {
+		return SlackVisibleEvidenceAnchor{}
+	}
+	kind := slackVisibleEvidenceKindWorkspaceMemory
+	lower := strings.ToLower(sourceRef)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		kind = slackVisibleEvidenceKindFetchedLink
+	} else if strings.HasPrefix(lower, "slack:") || strings.HasPrefix(lower, "slack://") {
+		kind = slackVisibleEvidenceKindSlackThread
+	} else if strings.Contains(lower, "/people/") || strings.Contains(lower, "person") {
+		kind = slackVisibleEvidenceKindPersonMemory
+	}
+	return SlackVisibleEvidenceAnchor{
+		Kind:      kind,
+		SourceRef: sourceRef,
+		Quote:     quote,
+	}
+}
+
+func firstSlackVisibleURL(text string) string {
+	match := slackTriageURLPattern.FindString(strings.TrimSpace(text))
+	return strings.TrimSpace(match)
 }
 
 func personaTriageApprovalToolCalls(pending []SlackTriagePendingResult) []SlackTriageToolCall {

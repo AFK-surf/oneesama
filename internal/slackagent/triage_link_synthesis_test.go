@@ -55,6 +55,34 @@ func TestSharedLinkSynthesisAddsFetchedLinkEvidenceAnchor(t *testing.T) {
 	}
 }
 
+func TestEnrichTriageActionsWithFetchedLinkEvidence(t *testing.T) {
+	t.Parallel()
+
+	actions := enrichSlackTriageActionsWithContextEvidence(
+		[]SlackTriageDecisionAction{{
+			Type:      slackActionTypeThreadReply,
+			Message:   "这条链接讨论 agent 编辑工具的取舍。",
+			ChannelID: "C1",
+			ThreadTS:  "123.456",
+		}},
+		"C1",
+		"123.456",
+		[]SlackInboundMessage{{Text: "看看 <https://antirez.com/news/166>", TS: "123.456"}},
+		[]SlackExternalLinkContext{{
+			URL:     "https://antirez.com/news/166",
+			Title:   "Alternatives for the EDIT tool of LLM agents",
+			Excerpt: "Source-backed article excerpt.",
+			Source:  "jina_reader",
+		}},
+	)
+	if len(actions) != 1 || len(actions[0].EvidenceAnchors) != 2 {
+		t.Fatalf("actions = %#v, want thread + fetched-link anchors", actions)
+	}
+	if !slackVisibleReplyAllowListVerdictForAction(actions[0]).Allowed {
+		t.Fatalf("action = %#v, want allow-list eligible after fetched-link enrichment", actions[0])
+	}
+}
+
 func TestSharedLinkSynthesisRejectsLowSignalSocialStatus(t *testing.T) {
 	t.Parallel()
 

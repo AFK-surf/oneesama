@@ -34,6 +34,48 @@ func slackExternalLinksFromContext(value any) []SlackExternalLinkContext {
 	}
 }
 
+func enrichSlackTriageActionsWithContextEvidence(actions []SlackTriageDecisionAction, channelID string, threadTS string, messages []SlackInboundMessage, contexts []SlackExternalLinkContext) []SlackTriageDecisionAction {
+	if len(actions) == 0 {
+		return actions
+	}
+	context, hasLink := firstSlackVisibleFetchedLinkEvidenceContext(contexts)
+	out := make([]SlackTriageDecisionAction, 0, len(actions))
+	for _, action := range actions {
+		if strings.TrimSpace(action.Type) != slackActionTypeThreadReply {
+			out = append(out, action)
+			continue
+		}
+		action.ChannelID = firstNonEmpty(action.ChannelID, channelID)
+		action.ThreadTS = firstNonEmpty(action.ThreadTS, firstNonEmpty(lastMessageThreadTS(messages), threadTS))
+		anchors := normalizeSlackVisibleEvidenceAnchors(action.EvidenceAnchors)
+		if len(anchors) == 0 {
+			anchors = slackVisibleThreadEvidenceAnchors(action.ChannelID, action.ThreadTS, joinSlackMessageTexts(messages))
+		}
+		if hasLink && !slackVisibleReplyHasAllowListEvidenceAnchor(anchors, action.Message) {
+			anchors = normalizeSlackVisibleEvidenceAnchors(append(anchors, slackVisibleFetchedLinkEvidenceAnchor(context)...))
+		}
+		action.EvidenceAnchors = anchors
+		out = append(out, action)
+	}
+	return out
+}
+
+func firstSlackVisibleFetchedLinkEvidenceContext(contexts []SlackExternalLinkContext) (SlackExternalLinkContext, bool) {
+	for _, context := range contexts {
+		if strings.TrimSpace(context.URL) == "" || strings.TrimSpace(context.Error) != "" {
+			continue
+		}
+		if slackExternalLinkContextLooksBoilerplate(context) {
+			continue
+		}
+		if strings.TrimSpace(context.Title) == "" && strings.TrimSpace(context.Excerpt) == "" {
+			continue
+		}
+		return context, true
+	}
+	return SlackExternalLinkContext{}, false
+}
+
 func slackTriageSharedLinkSynthesisAction(channelID string, threadTS string, messages []SlackInboundMessage, contexts []SlackExternalLinkContext, workspacePolicy string) (SlackTriageDecisionAction, bool) {
 	if len(contexts) == 0 || !slackMessagesHaveFetchableExternalLinks(messages) {
 		return SlackTriageDecisionAction{}, false

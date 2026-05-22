@@ -260,6 +260,7 @@ func assertBridgeQualityPiFirstForeground(t *testing.T, fixture bridgeQualityFix
 		VisibleText: "Pi-first canary reply.",
 		Reason:      "Pi owns the foreground decision",
 		Confidence:  0.9,
+		Citations:   []persona.Citation{{Kind: "memory", SourceRef: "memory/team/pi-first-canary.md:4", Snippet: "这条产品评论文章你怎么看？"}},
 		ShadowOnly:  false,
 	}}
 	service.personaRuntime = runtime

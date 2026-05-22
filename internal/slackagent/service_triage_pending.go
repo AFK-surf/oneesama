@@ -95,12 +95,14 @@ func requireSlackTriageVisibleReplyApproval(actions []SlackTriageDecisionAction)
 	out := make([]SlackTriageDecisionAction, 0, len(actions))
 	for _, action := range actions {
 		if strings.TrimSpace(action.Type) == slackActionTypeThreadReply {
-			if reason := slackVisibleReplyQualityBlockReason(firstNonEmpty(action.Message, action.Reason)); reason != "" {
+			verdict := slackVisibleReplyAllowListVerdictForAction(action)
+			if !verdict.Allowed {
 				continue
 			}
 			action.Type = slackActionTypeThreadReply
 			action.RequiresConfirmation = true
 			action.Title = firstNonEmpty(strings.TrimSpace(action.Title), "Review triage reply")
+			action.EvidenceAnchors = verdict.EvidenceAnchors
 		}
 		out = append(out, action)
 	}

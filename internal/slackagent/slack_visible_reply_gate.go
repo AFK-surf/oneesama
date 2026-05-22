@@ -2,6 +2,21 @@ package slackagent
 
 import "strings"
 
+const (
+	slackVisibleReplyAllowReasonAllowed               = "allowed"
+	slackVisibleReplyAllowReasonMissingEvidenceAnchor = "missing_evidence_anchor"
+	slackVisibleReplyAllowReasonNotHumanFacing        = "not_human_facing"
+	slackVisibleReplyAllowReasonDuplicateHandled      = "duplicate_handled"
+	slackVisibleReplyAllowReasonBoundaryMismatch      = "boundary_mismatch"
+	slackVisibleReplyAllowReasonInternalMeta          = "internal_meta"
+)
+
+type slackVisibleReplyAllowListVerdict struct {
+	Allowed         bool
+	Reason          string
+	EvidenceAnchors []SlackVisibleEvidenceAnchor
+}
+
 func slackVisibleReplyQualityBlockReason(text string) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -18,6 +33,88 @@ func slackVisibleReplyQualityBlockReason(text string) string {
 		return "self_decision_meta"
 	}
 	return ""
+}
+
+func slackVisibleReplyAllowListVerdictForAction(action SlackTriageDecisionAction) slackVisibleReplyAllowListVerdict {
+	message := strings.TrimSpace(firstNonEmpty(action.Message, action.Reason))
+	if message == "" {
+		return slackVisibleReplyAllowListVerdict{Reason: slackVisibleReplyAllowReasonNotHumanFacing}
+	}
+	if reason := slackVisibleReplyQualityBlockReason(message); reason != "" {
+		return slackVisibleReplyAllowListVerdict{Reason: slackVisibleReplyAllowReasonInternalMeta}
+	}
+	anchors := slackVisibleEvidenceAnchorsForAction(action)
+	if !slackVisibleReplyHasAllowListEvidenceAnchor(anchors, message) {
+		return slackVisibleReplyAllowListVerdict{
+			Reason:          slackVisibleReplyAllowReasonMissingEvidenceAnchor,
+			EvidenceAnchors: anchors,
+		}
+	}
+	if slackVisibleReplyLooksLikeHandledMeta(message) {
+		return slackVisibleReplyAllowListVerdict{
+			Reason:          slackVisibleReplyAllowReasonDuplicateHandled,
+			EvidenceAnchors: anchors,
+		}
+	}
+	return slackVisibleReplyAllowListVerdict{
+		Allowed:         true,
+		Reason:          slackVisibleReplyAllowReasonAllowed,
+		EvidenceAnchors: anchors,
+	}
+}
+
+func slackVisibleReplyHasAllowListEvidenceAnchor(anchors []SlackVisibleEvidenceAnchor, message string) bool {
+	for _, anchor := range normalizeSlackVisibleEvidenceAnchors(anchors) {
+		switch strings.TrimSpace(anchor.Kind) {
+		case slackVisibleEvidenceKindFetchedLink,
+			slackVisibleEvidenceKindWorkspaceMemory,
+			slackVisibleEvidenceKindPersonMemory,
+			slackVisibleEvidenceKindFile,
+			slackVisibleEvidenceKindImage,
+			slackVisibleEvidenceKindWorkerResult,
+			slackVisibleEvidenceKindExplicitUserCommand:
+			return true
+		case slackVisibleEvidenceKindSlackThread:
+			if slackVisibleReplyLooksLikeRoutingHandoff(message) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func slackVisibleReplyLooksLikeRoutingHandoff(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return slackVisibleTextContainsAny(lower, []string{
+		"owner",
+		"handoff",
+		"route",
+		"routing",
+		"不直接下场查 repo",
+		"不直接下场",
+		"明确授权",
+		"项目 owner",
+		"路由",
+		"转给",
+	})
+}
+
+func slackVisibleReplyLooksLikeHandledMeta(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	return slackVisibleTextContainsAny(lower, []string{
+		"already handled",
+		"already answered",
+		"already replied",
+		"no additional value",
+		"no action needed",
+		"无需回复",
+		"无需处理",
+		"已经处理",
+		"已经回复",
+	})
 }
 
 func slackVisibleReplyIsNoVisibleOutputMeta(lower string) bool {
