@@ -16,12 +16,13 @@ const defaultRealtimeSafetyIdentifier = "meeting-avatar-bot-local"
 
 func (s *Service) RealtimeConfig() map[string]any {
 	currentUser := s.realtimeCurrentUser()
+	tools := s.realtimeServerToolSchemas()
 	options := RealtimeSessionOptions{
 		BotName:     s.openai.BotName,
 		CurrentUser: currentUser,
+		Tools:       tools,
 	}
 	instructions := buildRealtimeInstructions(options, s.openai)
-	tools := realtimeToolSchemas(s.demoBridge != nil)
 	session := buildRealtimeSessionConfig(options, s.openai)
 	demoSurface := s.demoSurfaceStatus()
 	return map[string]any{
@@ -46,13 +47,14 @@ func (s *Service) RealtimeConfig() map[string]any {
 }
 
 func (s *Service) RealtimeContextHealth(ctx context.Context) map[string]any {
+	tools := s.realtimeServerToolSchemas()
 	options := RealtimeSessionOptions{
 		BotName:     s.openai.BotName,
 		CurrentUser: s.realtimeCurrentUser(),
+		Tools:       tools,
 	}
 	session := buildRealtimeSessionConfig(options, s.openai)
 	instructions := buildRealtimeInstructions(options, s.openai)
-	tools := realtimeToolSchemas(s.demoBridge != nil)
 	health := map[string]any{
 		"itemsCount":             0,
 		"tokenEstimate":          0,
@@ -162,6 +164,15 @@ func (s *Service) realtimeCurrentUser() RealtimeCurrentUser {
 	}
 }
 
+func (s *Service) realtimeServerToolSchemas() []map[string]any {
+	return realtimeToolSchemas(s.demoBridge != nil)
+}
+
+func (s *Service) withRealtimeServerToolSchemas(options RealtimeSessionOptions) RealtimeSessionOptions {
+	options.Tools = s.realtimeServerToolSchemas()
+	return options
+}
+
 func compactCurrentUserAliases(values []string, identityValues ...string) []string {
 	out := make([]string, 0, len(values)+len(identityValues))
 	seen := map[string]struct{}{}
@@ -187,6 +198,7 @@ func compactCurrentUserAliases(values []string, identityValues ...string) []stri
 }
 
 func (s *Service) MintRealtimeClientSecret(ctx context.Context, options RealtimeSessionOptions) (map[string]any, int, error) {
+	options = s.withRealtimeServerToolSchemas(options)
 	session := buildRealtimeSessionConfig(options, s.openai)
 	upstream := map[string]any{
 		"baseUrl":          s.openai.BaseURL,

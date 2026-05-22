@@ -85,6 +85,97 @@ func incrementalTranscript(previous, current string) string {
 	return strings.Join(delta, "\n")
 }
 
+type meetingCopilotTranscriptFilterStats struct {
+	SelfLines     int
+	SelfEchoLines int
+	FilteredLines int
+}
+
+func filterMeetingCopilotTranscriptDelta(delta string) (string, meetingCopilotTranscriptFilterStats) {
+	delta = strings.TrimSpace(delta)
+	if delta == "" {
+		return "", meetingCopilotTranscriptFilterStats{}
+	}
+
+	var stats meetingCopilotTranscriptFilterStats
+	kept := make([]string, 0)
+	for _, rawLine := range strings.Split(delta, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		_, speaker, text, ok := meetingCopilotTranscriptLineParts(line)
+		if ok && meetingCopilotSpeakerIsSelf(speaker) {
+			stats.SelfLines++
+			stats.FilteredLines++
+			continue
+		}
+		if meetingCopilotLooksLikeSelfEchoText(text) {
+			stats.SelfEchoLines++
+			stats.FilteredLines++
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n"), stats
+}
+
+func meetingCopilotTranscriptLineParts(line string) (prefix string, speaker string, text string, ok bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", "", "", false
+	}
+	rest := line
+	if strings.HasPrefix(rest, "[") {
+		if end := strings.Index(rest, "]"); end >= 0 {
+			prefix = strings.TrimSpace(rest[:end+1])
+			rest = strings.TrimSpace(rest[end+1:])
+		}
+	}
+	colon := strings.Index(rest, ":")
+	if colon <= 0 {
+		return prefix, "", rest, false
+	}
+	speaker = strings.TrimSpace(rest[:colon])
+	text = strings.TrimSpace(rest[colon+1:])
+	return prefix, speaker, text, true
+}
+
+func meetingCopilotSpeakerIsSelf(speaker string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(speaker))
+	switch normalized {
+	case "you", "oneesama", "onee-sama", "onee sama", "meeting", "meeting avatar bot":
+		return true
+	default:
+		return false
+	}
+}
+
+func meetingCopilotLooksLikeSelfEchoText(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	for _, marker := range []string{
+		"后台结果是当前没有需要执行",
+		"当前没有额外需要执行",
+		"当前没有需要执行的会议动作",
+		"收到不再给代码",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	if strings.Contains(text, "你好，老大") && strings.Contains(text, "如果这个名字不对") {
+		return true
+	}
+	if strings.Contains(lower, "asr") && strings.Contains(text, "回环") && strings.Contains(text, "排查") && strings.Contains(text, "我可以") {
+		return true
+	}
+	return false
+}
+
 func meetingCopilotCompletionSummary(effects meetingCopilotToolEffects) string {
 	var parts []string
 	if strings.TrimSpace(effects.sentMeetingChatText) != "" {

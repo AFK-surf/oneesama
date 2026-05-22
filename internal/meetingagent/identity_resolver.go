@@ -145,7 +145,7 @@ func (s *Service) identityCandidateRecords(ctx context.Context, input resolveSpe
 func (s *Service) currentUserIdentityRecord() IdentityUserRecord {
 	currentUser := s.realtimeCurrentUser()
 	aliases := compactCurrentUserAliases(currentUser.Aliases, currentUser.Name, currentUser.EnglishName, currentUser.English)
-	canonical := firstNonEmpty(currentUser.Name, currentUser.EnglishName)
+	canonical := realtimeCurrentUserSpokenName(currentUser)
 	if strings.TrimSpace(canonical) == "" && len(aliases) > 0 {
 		canonical = aliases[0]
 	}
@@ -155,7 +155,7 @@ func (s *Service) currentUserIdentityRecord() IdentityUserRecord {
 	return IdentityUserRecord{
 		ID:               "workspace:current_user",
 		CanonicalName:    canonical,
-		PreferredName:    firstNonEmpty(currentUser.Name, currentUser.EnglishName, canonical),
+		PreferredName:    canonical,
 		Role:             "current_user",
 		Aliases:          aliases,
 		MeetDisplayNames: aliases,

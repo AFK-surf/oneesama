@@ -22,11 +22,14 @@ type meetingCopilotState struct {
 }
 
 type meetingCopilotRunResult struct {
-	Queued          bool             `json:"queued"`
-	SkippedReason   string           `json:"skipped_reason,omitempty"`
-	TranscriptDelta string           `json:"transcript_delta,omitempty"`
-	ChatDelta       string           `json:"chat_delta,omitempty"`
-	Job             *agentrunner.Job `json:"job,omitempty"`
+	Queued                  bool             `json:"queued"`
+	SkippedReason           string           `json:"skipped_reason,omitempty"`
+	TranscriptDelta         string           `json:"transcript_delta,omitempty"`
+	ChatDelta               string           `json:"chat_delta,omitempty"`
+	FilteredSelfLines       int              `json:"filtered_self_lines,omitempty"`
+	FilteredSelfEchoLines   int              `json:"filtered_self_echo_lines,omitempty"`
+	FilteredTranscriptLines int              `json:"filtered_transcript_lines,omitempty"`
+	Job                     *agentrunner.Job `json:"job,omitempty"`
 }
 
 func (s *Service) handleMeetingWebhookDigest(ctx context.Context, payload NormalizedMeetingWebhookPayload) MeetingWebhookResponse {
@@ -43,19 +46,38 @@ func (s *Service) enqueueMeetingCopilot(ctx context.Context, payload NormalizedM
 	state := s.meetingCopilotState(meetingID)
 
 	s.meetingCopilotMu.Lock()
-	transcriptDelta := incrementalTranscript(state.LastDigest, payload.Transcript)
+	rawTranscriptDelta := incrementalTranscript(state.LastDigest, payload.Transcript)
+	transcriptDelta, filterStats := filterMeetingCopilotTranscriptDelta(rawTranscriptDelta)
 	chatDelta := incrementalTranscript(state.LastChatDigest, payload.ChatTranscript)
 	if transcriptDelta == "" && chatDelta == "" {
 		state.UpdatedAt = now
 		s.meetingCopilotMu.Unlock()
-		return &meetingCopilotRunResult{Queued: false, SkippedReason: "no_new_delta"}, nil
+		reason := "no_new_delta"
+		if rawTranscriptDelta != "" {
+			reason = "transcript_self_echo_only"
+		}
+		return &meetingCopilotRunResult{
+			Queued:                  false,
+			SkippedReason:           reason,
+			FilteredSelfLines:       filterStats.SelfLines,
+			FilteredSelfEchoLines:   filterStats.SelfEchoLines,
+			FilteredTranscriptLines: filterStats.FilteredLines,
+		}, nil
 	}
 	state.LastDigest = strings.TrimSpace(payload.Transcript)
 	state.LastChatDigest = strings.TrimSpace(payload.ChatTranscript)
 	if !state.LastChatAt.IsZero() && now.Sub(state.LastChatAt) < meetingCopilotMinChatInterval && !containsExplicitMeetingFollowUp(strings.Join([]string{transcriptDelta, chatDelta}, "\n")) {
 		state.UpdatedAt = now
 		s.meetingCopilotMu.Unlock()
-		return &meetingCopilotRunResult{Queued: false, SkippedReason: "chat_cooldown", TranscriptDelta: transcriptDelta, ChatDelta: chatDelta}, nil
+		return &meetingCopilotRunResult{
+			Queued:                  false,
+			SkippedReason:           "chat_cooldown",
+			TranscriptDelta:         transcriptDelta,
+			ChatDelta:               chatDelta,
+			FilteredSelfLines:       filterStats.SelfLines,
+			FilteredSelfEchoLines:   filterStats.SelfEchoLines,
+			FilteredTranscriptLines: filterStats.FilteredLines,
+		}, nil
 	}
 	priorActions := append([]string(nil), state.PriorActions...)
 	generation := state.Generation
@@ -78,10 +100,13 @@ func (s *Service) enqueueMeetingCopilot(ctx context.Context, payload NormalizedM
 		return nil, err
 	}
 	return &meetingCopilotRunResult{
-		Queued:          true,
-		TranscriptDelta: transcriptDelta,
-		ChatDelta:       chatDelta,
-		Job:             &job,
+		Queued:                  true,
+		TranscriptDelta:         transcriptDelta,
+		ChatDelta:               chatDelta,
+		FilteredSelfLines:       filterStats.SelfLines,
+		FilteredSelfEchoLines:   filterStats.SelfEchoLines,
+		FilteredTranscriptLines: filterStats.FilteredLines,
+		Job:                     &job,
 	}, nil
 }
 

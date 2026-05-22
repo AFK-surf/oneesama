@@ -86,6 +86,10 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	if toolNamesInclude(tools, "start_demo_surface", "cancel_demo_surface") {
 		t.Fatalf("tools = %#v, demo surface tools must stay hidden when default-off", body["tools"])
 	}
+	sessionTools := session["tools"].([]any)
+	if toolNamesInclude(sessionTools, "start_demo_surface", "control_demo_surface", "cancel_demo_surface") {
+		t.Fatalf("session tools = %#v, demo surface tools must stay hidden when default-off", sessionTools)
+	}
 	demoSurface := body["demoSurface"].(map[string]any)
 	if demoSurface["enabled"] != false || demoSurface["toolsExposed"] != false || demoSurface["configured"] != false {
 		t.Fatalf("demoSurface = %#v, want default-off status", demoSurface)
@@ -170,6 +174,32 @@ func TestRealtimeClientSecretDryRunMissingAPIKey(t *testing.T) {
 	decodeRealtimeBody(t, response.Body.String(), &body)
 	if body["ok"] != false || body["dryRun"] != true || body["error"] != "MAB_OPENAI_API_KEY/OPENAI_API_KEY missing" {
 		t.Fatalf("body = %#v, want old missing-key dry-run shape", body)
+	}
+}
+
+func TestRealtimeClientSecretStripsClientRequestedDemoToolsWhenDefaultOff(t *testing.T) {
+	t.Parallel()
+
+	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{
+		BaseURL:                  "https://api.openai.com/v1",
+		RealtimeClientSecretsURL: "https://api.openai.com/v1/realtime/client_secrets",
+		RealtimeSDPURL:           "https://api.openai.com/v1/realtime/calls",
+		RealtimeModel:            "gpt-realtime-2",
+		RealtimeSessionSchema:    "realtime-2",
+		BotName:                  "Meeting Avatar Bot",
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, realtimeRequest(http.MethodPost, "/realtime/client-secret", `{"tools":[{"type":"function","name":"start_demo_surface","parameters":{"type":"object"}},{"type":"function","name":"cancel_demo_surface","parameters":{"type":"object"}}]}`))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want dry-run 200: %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	decodeRealtimeBody(t, response.Body.String(), &body)
+	session := body["session"].(map[string]any)
+	tools := session["tools"].([]any)
+	if toolNamesInclude(tools, "start_demo_surface", "cancel_demo_surface", "control_demo_surface") {
+		t.Fatalf("session tools = %#v, demo tools must be server-gated off", tools)
 	}
 }
 
@@ -297,8 +327,11 @@ func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
 	var resolveCurrentBody map[string]any
 	decodeRealtimeBody(t, resolveCurrent.Body.String(), &resolveCurrentBody)
 	currentIdentity := resolveCurrentBody["identity"].(map[string]any)
-	if currentIdentity["canonical_name"] != "老大" || currentIdentity["role"] != "current_user" || currentIdentity["is_current_user"] != true {
-		t.Fatalf("current identity = %#v, want current_user match", currentIdentity)
+	if currentIdentity["canonical_name"] != "Peng Xiao" ||
+		currentIdentity["preferred_name"] != "Peng Xiao" ||
+		currentIdentity["role"] != "current_user" ||
+		currentIdentity["is_current_user"] != true {
+		t.Fatalf("current identity = %#v, want current_user spoken-name match", currentIdentity)
 	}
 
 	resolveExternal := httptest.NewRecorder()

@@ -203,6 +203,61 @@ func TestMeetingWebhookDigestQueuesCaptionsCopilot(t *testing.T) {
 	}
 }
 
+func TestMeetingWebhookDigestFiltersRealtimeSelfEchoBeforeCopilot(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{ID: "job_meeting_copilot", Provider: "codex", Status: agentrunner.StatusRunning}}
+	router := newTestRouter(t, Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
+		MeetWebhookSecret: "meet-secret",
+		Slack:             appconfig.SlackConfig{SigningSecret: "slack-secret"},
+		Runner:            runner,
+	})
+
+	body := `{"event":"meeting.digest","meeting_id":42,"title":"Realtime Demo","transcript":"[2026-05-22T03:46:24Z] You: 你好，老大很高兴见到你。\n[2026-05-22T03:46:25Z] Peng Xiao: 你好，老大很高兴见到你，如果这个名字不对，或者你想用别的窗户，你可以告诉我。\n[2026-05-22T03:46:26Z] Peng Xiao: 我想做一个贪吃蛇游戏，你能够让我看着你一步一步做吗？","slack_ref":{"channel_id":"C123","thread_ts":"123.456"}}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("digest status = %d, body=%s", response.Code, response.Body.String())
+	}
+	payload := decodeMeetingWebhookResponse(t, response)
+	if payload.Copilot == nil || !payload.Copilot.Queued {
+		t.Fatalf("copilot = %#v, want queued", payload.Copilot)
+	}
+	if payload.Copilot.FilteredSelfLines != 1 || payload.Copilot.FilteredSelfEchoLines != 1 {
+		t.Fatalf("copilot filter counts = self:%d echo:%d", payload.Copilot.FilteredSelfLines, payload.Copilot.FilteredSelfEchoLines)
+	}
+	task := runner.startInput.Task
+	for _, leaked := range []string{"You: 你好", "如果这个名字不对"} {
+		if strings.Contains(task, leaked) {
+			t.Fatalf("task leaked self echo %q:\n%s", leaked, task)
+		}
+	}
+	if !strings.Contains(task, "贪吃蛇游戏") {
+		t.Fatalf("task = %q, want real user ask preserved", task)
+	}
+}
+
+func TestMeetingWebhookDigestSkipsSelfEchoOnlyTranscript(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{ID: "job_meeting_copilot", Provider: "codex", Status: agentrunner.StatusRunning}}
+	router := newTestRouter(t, Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
+		MeetWebhookSecret: "meet-secret",
+		Slack:             appconfig.SlackConfig{SigningSecret: "slack-secret"},
+		Runner:            runner,
+	})
+
+	body := `{"event":"meeting.digest","meeting_id":42,"title":"Realtime Demo","transcript":"[2026-05-22T03:46:24Z] You: 你好，老大很高兴见到你。\n[2026-05-22T03:46:25Z] Peng Xiao: 当前没有需要执行的会议动作，后台结果是当前没有需要执行。","slack_ref":{"channel_id":"C123","thread_ts":"123.456"}}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("digest status = %d, body=%s", response.Code, response.Body.String())
+	}
+	payload := decodeMeetingWebhookResponse(t, response)
+	if payload.Copilot == nil || payload.Copilot.Queued || payload.Copilot.SkippedReason != "transcript_self_echo_only" {
+		t.Fatalf("copilot = %#v, want self echo skip", payload.Copilot)
+	}
+	if runner.startCount != 0 {
+		t.Fatalf("runner start count = %d, want no copilot job", runner.startCount)
+	}
+}
+
 func TestMeetingWebhookCopilotToolRequestSendsMeetChat(t *testing.T) {
 	var seenPath string
 	var seenText string

@@ -1,6 +1,7 @@
 package meetingagent
 
 import (
+	"strings"
 	"testing"
 
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
@@ -95,6 +96,25 @@ func TestBuildRealtimeSessionSupportsStructuredTurnDetection(t *testing.T) {
 	turn := input["turn_detection"].(map[string]any)
 	if turn["type"] != "semantic_vad" || turn["eagerness"] != "low" {
 		t.Fatalf("turn_detection = %#v, want structured semantic_vad override", turn)
+	}
+}
+
+func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
+	t.Parallel()
+
+	instructions := buildRealtimeInstructions(RealtimeSessionOptions{
+		BotName: "Meeting Avatar Bot",
+	}, testRealtimeOpenAIConfig())
+
+	for _, want := range []string{
+		"Addressing contract:",
+		"Do not say internal control-plane status",
+		"If the user says stop planning",
+		"Ignore obvious self-echo",
+	} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("instructions missing %q:\n%s", want, instructions)
+		}
 	}
 }
 

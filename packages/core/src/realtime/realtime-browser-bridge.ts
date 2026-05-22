@@ -248,6 +248,7 @@
   let routingDestination = null;
   let routingSilenceSource = null;
   let silentMeetAudioTrack = null;
+  let realtimeInputGateReopenTimer = 0;
   let primaryMeetAudioSender = null;
   let peerConnectionHookInstalled = false;
   let reconnectTimer = null;
@@ -753,6 +754,10 @@
 
   function setRealtimeInputGate(open, reason = "") {
     if (!routingInputGate || !routingAudioContext) return;
+    if (!open && realtimeInputGateReopenTimer) {
+      window.clearTimeout(realtimeInputGateReopenTimer);
+      realtimeInputGateReopenTimer = 0;
+    }
     const target = open ? 1 : 0;
     try {
       routingInputGate.gain.setTargetAtTime(target, routingAudioContext.currentTime, 0.015);
@@ -761,6 +766,16 @@
     }
     state.connection.realtimeInputGateOpen = open;
     recordTimeline("realtime_input_gate", { open, reason });
+    updateFeedback();
+  }
+
+  function scheduleRealtimeInputGateOpen(reason = "", delayMs = 1200) {
+    if (realtimeInputGateReopenTimer) window.clearTimeout(realtimeInputGateReopenTimer);
+    realtimeInputGateReopenTimer = window.setTimeout(() => {
+      realtimeInputGateReopenTimer = 0;
+      setRealtimeInputGate(true, reason || "delayed-open");
+    }, Math.max(0, delayMs));
+    recordTimeline("realtime_input_gate_open_scheduled", { reason, delayMs });
     updateFeedback();
   }
 
@@ -1199,16 +1214,23 @@
 
   function injectCurrentUserContext() {
     const currentUser = (config.currentUser || {}) as Record<string, unknown>;
-    const name = String(currentUser.name || currentUser.englishName || currentUser.english || "").trim();
+    const configuredName = String(currentUser.name || "").trim();
+    const spokenName = String(
+      currentUser.englishName || currentUser.english || currentUser.name || "",
+    ).trim();
+    const name = spokenName || configuredName;
     if (!name) return { ok: true, skipped: true, reason: "no_current_user_context" };
     const identity = {
       resolved: true,
       role: "current_user",
       isCurrentUser: true,
       canonicalName: name,
-      preferredName: String(currentUser.name || name),
+      preferredName: spokenName || name,
       confidence: "high",
-      evidence: ["runtime_current_user_config"],
+      evidence:
+        configuredName && configuredName !== spokenName
+          ? ["runtime_current_user_config", "runtime_alias_not_spoken_name"]
+          : ["runtime_current_user_config"],
     };
     return pushSessionContext({
       reason: "current_user_bootstrap",
@@ -1592,6 +1614,10 @@
 
   function cleanupRealtimeConnection(reason = "cleanup") {
     reconnectGeneration += 1;
+    if (realtimeInputGateReopenTimer) {
+      window.clearTimeout(realtimeInputGateReopenTimer);
+      realtimeInputGateReopenTimer = 0;
+    }
     try {
       activeRealtimeAgentSession?.close?.();
     } catch {
@@ -1722,7 +1748,7 @@
       event.type === "response.output_audio.done"
     ) {
       window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
-      setRealtimeInputGate(true, event.type);
+      scheduleRealtimeInputGateOpen(event.type, 1200);
     }
     handleLocalToolCallEvent(event);
   }

@@ -13,11 +13,12 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 	switch toolName {
 	case "current_user_identity":
 		currentUser := h.service.realtimeCurrentUser()
+		spokenName := realtimeCurrentUserSpokenName(currentUser)
 		identity := h.service.resolveSpeakerIdentity(c.Request.Context(), resolveSpeakerIdentityInput{
-			DisplayName: firstNonEmpty(currentUser.Name, currentUser.EnglishName),
+			DisplayName: spokenName,
 			Source:      "manual",
 		})
-		preferredAddress := firstNonEmpty(stringFromAny(identity["preferred_name"]), currentUser.Name)
+		preferredAddress := firstNonEmpty(spokenName, stringFromAny(identity["preferred_name"]), currentUser.Name)
 		h.service.logger.Info(
 			"realtime current_user_identity tool",
 			"name", currentUser.Name,
@@ -140,4 +141,8 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			"note":  "This Go meeting-agent live build has not wired this workspace tool yet.",
 		})
 	}
+}
+
+func realtimeCurrentUserSpokenName(currentUser RealtimeCurrentUser) string {
+	return firstNonEmpty(currentUser.EnglishName, currentUser.English, currentUser.Name)
 }
