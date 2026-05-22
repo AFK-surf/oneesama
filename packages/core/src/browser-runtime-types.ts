@@ -4,6 +4,12 @@ export interface AvatarStateUpdate {
   intensity?: number;
   expressionHoldMs?: number;
   actionHoldMs?: number;
+  statusText?: string;
+  statusKind?: string;
+  statusHoldMs?: number;
+  status_text?: string;
+  status_kind?: string;
+  status_hold_ms?: number;
 }
 
 export interface AvatarExpressionOptions {
@@ -252,6 +258,10 @@ export interface HiyoriAvatarState {
   mood?: string;
   action?: string;
   intensity?: number;
+  statusText?: string;
+  statusKind?: string;
+  statusUpdatedAt?: string;
+  statusVisibleUntil?: number;
   expressionHoldMs?: number;
   actionHoldMs?: number;
   errors?: string[];

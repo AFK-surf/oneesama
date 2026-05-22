@@ -38,6 +38,30 @@
     "shrug",
     "speak",
   ];
+  const ALLOWED_STATUS_KINDS = [
+    "idle",
+    "thinking",
+    "writing_code",
+    "opening_preview",
+    "blocked",
+    "done",
+  ];
+  const STATUS_LABELS: Record<string, string> = {
+    idle: "",
+    thinking: "Thinking",
+    writing_code: "Writing code",
+    opening_preview: "Opening preview",
+    blocked: "Blocked",
+    done: "Done",
+  };
+  const STATUS_COLORS: Record<string, { accent: string; bg: string }> = {
+    idle: { accent: "#64748b", bg: "rgba(15, 23, 42, 0.78)" },
+    thinking: { accent: "#38bdf8", bg: "rgba(15, 23, 42, 0.78)" },
+    writing_code: { accent: "#a78bfa", bg: "rgba(24, 24, 27, 0.82)" },
+    opening_preview: { accent: "#34d399", bg: "rgba(6, 78, 59, 0.82)" },
+    blocked: { accent: "#fb7185", bg: "rgba(127, 29, 29, 0.84)" },
+    done: { accent: "#4ade80", bg: "rgba(20, 83, 45, 0.82)" },
+  };
   const EXPRESSION_PRESETS = {
     neutral: {
       ParamMouthForm: 0,
@@ -137,6 +161,10 @@
       actionStartedAt: 0,
       actionEndsAt: 0,
       actionHoldUntil: 0,
+      statusText: "",
+      statusKind: "idle",
+      statusVisibleUntil: 0,
+      statusUpdatedAt: "",
       updates: [],
       live2dParameterFrames: 0,
       lastUpdateAt: "",
@@ -176,6 +204,12 @@
       intensity?: number;
       expressionHoldMs?: number;
       actionHoldMs?: number;
+      statusText?: string;
+      statusKind?: string;
+      statusHoldMs?: number;
+      status_text?: string;
+      status_kind?: string;
+      status_hold_ms?: number;
     }
 
     function setExpression(mood: string = "neutral", options: SetExpressionOptions = {}) {
@@ -218,19 +252,83 @@
       return { ok: true, action: state.action, intensity: state.intensity };
     }
 
+    function defaultStatusText(kind: string) {
+      return STATUS_LABELS[kind] || "";
+    }
+
+    function normalizeStatusText(value: unknown) {
+      return String(value ?? "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 96);
+    }
+
+    function setStatus(kind = "idle", text = "", holdMs = 12000) {
+      const safeKind = normalizeEnum(kind, ALLOWED_STATUS_KINDS, "idle");
+      const safeText = normalizeStatusText(text || defaultStatusText(safeKind));
+      if (safeKind === "idle" || !safeText) {
+        state.statusKind = "idle";
+        state.statusText = "";
+        state.statusVisibleUntil = 0;
+        state.statusUpdatedAt = new Date().toISOString();
+        remember("status", { statusKind: "idle", statusText: "" });
+        return { ok: true, statusKind: state.statusKind, statusText: state.statusText };
+      }
+      state.statusKind = safeKind;
+      state.statusText = safeText;
+      state.statusVisibleUntil = performance.now() + Number(holdMs ?? 12000);
+      state.statusUpdatedAt = new Date().toISOString();
+      remember("status", { statusKind: safeKind, statusText: safeText });
+      return { ok: true, statusKind: state.statusKind, statusText: state.statusText };
+    }
+
+    function statusActive() {
+      return (
+        state.statusKind !== "idle" &&
+        Boolean(state.statusText) &&
+        performance.now() < Number(state.statusVisibleUntil || 0)
+      );
+    }
+
+    function visibleStatus() {
+      if (!statusActive()) {
+        if (state.statusKind !== "idle" || state.statusText) {
+          state.statusKind = "idle";
+          state.statusText = "";
+          state.statusVisibleUntil = 0;
+        }
+        return null;
+      }
+      return { kind: state.statusKind, text: state.statusText };
+    }
+
     function updateState(input: UpdateStateInput = {}) {
       const mood = input.mood || state.mood;
       const action = input.action || state.action;
       const intensity = input.intensity ?? state.intensity;
       const expression = setExpression(mood, { holdMs: input.expressionHoldMs ?? 11000 });
       const actionResult = setAction(action, intensity, { holdMs: input.actionHoldMs ?? 6500 });
+      const statusKind = input.statusKind ?? input.status_kind;
+      const statusText = input.statusText ?? input.status_text;
+      const statusHoldMs = input.statusHoldMs ?? input.status_hold_ms;
+      const statusResult =
+        statusKind !== undefined || statusText !== undefined || statusHoldMs !== undefined
+          ? setStatus(
+              String(statusKind ?? (statusText !== undefined ? "thinking" : state.statusKind)),
+              String(statusText ?? ""),
+              Number(statusHoldMs ?? 12000),
+            )
+          : { ok: true, skipped: true, statusKind: state.statusKind, statusText: state.statusText };
       return {
         ok: true,
         mood: state.mood,
         action: state.action,
         intensity: state.intensity,
+        statusKind: state.statusKind,
+        statusText: state.statusText,
         expression,
         actionResult,
+        statusResult,
       };
     }
 
@@ -249,6 +347,8 @@
       allowedActions: ALLOWED_ACTIONS,
       currentPreset: () => EXPRESSION_PRESETS[state.mood] || EXPRESSION_PRESETS.neutral,
       getActionEnvelope,
+      visibleStatus,
+      setStatus,
       setExpression,
       setAction,
       updateState,
@@ -415,6 +515,41 @@
     ctx.restore();
   }
 
+  function drawAvatarHud(ctx) {
+    const status = avatarController.visibleStatus();
+    if (!status) return;
+    const { canvasWidth: w, canvasHeight: h } = config;
+    const colors = STATUS_COLORS[status.kind] || STATUS_COLORS.thinking;
+    const margin = 56;
+    const maxWidth = Math.min(760, w - margin * 2);
+    const x = margin;
+    const y = h - 174;
+    const height = 118;
+    const radius = 28;
+    const label = STATUS_LABELS[status.kind] || "Working";
+    const text = status.text;
+
+    ctx.save();
+    ctx.shadowColor = "rgba(15, 23, 42, 0.28)";
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 8;
+    ctx.fillStyle = colors.bg;
+    drawRoundRect(ctx, x, y, maxWidth, height, radius);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.fillStyle = colors.accent;
+    drawRoundRect(ctx, x + 22, y + 28, 16, height - 56, 8);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
+    ctx.font = "700 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(label, x + 56, y + 40);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "800 36px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(text, x + 56, y + 86, maxWidth - 86);
+    ctx.restore();
+  }
+
   function createAvatarVisualTestHooks(sourceCanvas) {
     const testCanvas = document.createElement("canvas");
     testCanvas.width = config.canvasWidth;
@@ -493,6 +628,9 @@
       intensity?: number;
       actionElapsedMs?: number;
       actionRemainingMs?: number;
+      statusKind?: string;
+      statusText?: string;
+      statusHoldMs?: number;
       timeMs?: number;
       label?: string;
       includeDataUrl?: boolean;
@@ -507,6 +645,10 @@
         actionEndsAt: avatarController.state.actionEndsAt,
         actionHoldUntil: avatarController.state.actionHoldUntil,
         expressionHoldUntil: avatarController.state.expressionHoldUntil,
+        statusKind: avatarController.state.statusKind,
+        statusText: avatarController.state.statusText,
+        statusVisibleUntil: avatarController.state.statusVisibleUntil,
+        statusUpdatedAt: avatarController.state.statusUpdatedAt,
       };
       try {
         const now = performance.now();
@@ -517,7 +659,15 @@
         avatarController.state.actionEndsAt = now + Number(input.actionRemainingMs ?? 500);
         avatarController.state.actionHoldUntil = now + 1000;
         avatarController.state.expressionHoldUntil = now + 1000;
+        if (input.statusKind || input.statusText) {
+          avatarController.setStatus(
+            String(input.statusKind || "thinking"),
+            String(input.statusText || ""),
+            Number(input.statusHoldMs || 12000),
+          );
+        }
         drawFallback(testCtx, Number(input.timeMs ?? 1200));
+        drawAvatarHud(testCtx);
         sampleCtx.clearRect(0, 0, sampleCanvas.width, sampleCanvas.height);
         sampleCtx.drawImage(
           testCanvas,
@@ -532,15 +682,19 @@
         );
         const face = metricsFromContext(testCtx, { x: 600, y: 130, width: 720, height: 680 });
         const mouth = metricsFromContext(testCtx, { x: 760, y: 430, width: 400, height: 250 });
+        const status = metricsFromContext(testCtx, { x: 40, y: 860, width: 820, height: 170 });
         const compact = sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
         return {
           label: input.label || `${avatarController.state.mood}-${avatarController.state.action}`,
           mood: avatarController.state.mood,
           action: avatarController.state.action,
           intensity: avatarController.state.intensity,
+          statusKind: avatarController.state.statusKind,
+          statusText: avatarController.state.statusText,
           hash: hashBytes(compact.data),
           face,
           mouth,
+          status,
           dataUrl: input.includeDataUrl ? testCanvas.toDataURL("image/png") : undefined,
         };
       } finally {
@@ -594,6 +748,7 @@
             hash: hashBytes(compact.data),
             face: metricsFromContext(testCtx, { x: 600, y: 130, width: 720, height: 680 }),
             mouth: metricsFromContext(testCtx, { x: 760, y: 430, width: 400, height: 250 }),
+            status: metricsFromContext(testCtx, { x: 40, y: 860, width: 820, height: 170 }),
             dataUrl: input.includeDataUrl ? testCanvas.toDataURL("image/png") : undefined,
           };
         } catch (error) {
@@ -1077,6 +1232,7 @@
           try {
             bootCtx.clearRect(0, 0, canvas.width, canvas.height);
             bootCtx.drawImage(renderCanvas, 0, 0, canvas.width, canvas.height);
+            drawAvatarHud(bootCtx);
           } catch (error) {
             rendererState.fallbackReason =
               rendererState.fallbackReason || String(error?.message || error);

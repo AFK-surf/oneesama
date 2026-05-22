@@ -232,7 +232,9 @@ interface RealtimeBridgeSnapshot {
 interface AvatarStateSnapshot {
   mood?: string;
   action?: string;
-  updates?: Array<{ kind?: string; action?: string }>;
+  statusKind?: string;
+  statusText?: string;
+  updates?: Array<{ kind?: string; action?: string; statusKind?: string; statusText?: string }>;
   live2dParameterFrames?: number;
   [key: string]: unknown;
 }
@@ -242,6 +244,7 @@ interface AvatarVisualSnapshot {
   hash?: string;
   face?: { nonBackgroundRatio?: number };
   mouth?: { nonBackgroundRatio?: number };
+  status?: { nonBackgroundRatio?: number };
   [key: string]: unknown;
 }
 
@@ -8066,9 +8069,23 @@ async function avatarVisualSmoke() {
         intensity: 1.6,
         timeMs: 1200,
       };
+      const hudInputs = [
+        { label: "hud-thinking", statusKind: "thinking", statusText: "Thinking" },
+        { label: "hud-writing", statusKind: "writing_code", statusText: "Writing code" },
+        { label: "hud-preview", statusKind: "opening_preview", statusText: "Opening preview" },
+        { label: "hud-blocked", statusKind: "blocked", statusText: "Blocked" },
+        { label: "hud-done", statusKind: "done", statusText: "Done" },
+      ];
       const neutral = visualTest.renderSnapshot(neutralInput);
       const speaking = visualTest.renderSnapshot(speakingInput);
       const action = visualTest.renderSnapshot(actionInput);
+      const hudSnapshots = hudInputs.map((input) =>
+        visualTest.renderSnapshot({
+          ...neutralInput,
+          ...input,
+          timeMs: 1200,
+        }),
+      );
       const mouthDiff = visualTest.compareSnapshots(neutralInput, speakingInput, {
         x: 760,
         y: 430,
@@ -8092,13 +8109,27 @@ async function avatarVisualSmoke() {
               mood: "happy",
               action: "emphasize",
               intensity: 1.1,
+              status_kind: "writing_code",
+              status_text: "Writing code",
             }),
+          },
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      window.dispatchEvent(
+        new CustomEvent("meeting-avatar-worker-result", {
+          detail: {
+            id: "job_avatar_visual_smoke",
+            task: "mock HUD completion",
+            status: "completed",
+            result: "done",
           },
         }),
       );
       await new Promise((resolve) => setTimeout(resolve, 150));
       return {
         snapshots: { neutral, speaking, action },
+        hudSnapshots,
         diffs: { mouthDiff, actionDiff },
         liveHash: visualTest.getLiveHash(),
         avatar: window.MAB_AVATAR_STATE,
@@ -8111,6 +8142,7 @@ async function avatarVisualSmoke() {
         speaking?: AvatarVisualSnapshot;
         action?: AvatarVisualSnapshot;
       };
+      hudSnapshots?: AvatarVisualSnapshot[];
       diffs?: { mouthDiff?: AvatarVisualDiff; actionDiff?: AvatarVisualDiff };
       liveHash?: string;
       avatar?: AvatarStateSnapshot;
@@ -8154,8 +8186,28 @@ async function avatarVisualSmoke() {
       result.diffs?.actionDiff,
     );
     assertSmoke(
+      (result.hudSnapshots || []).length === 5 &&
+        (result.hudSnapshots || []).every(
+          (snapshot) => snapshot.status?.nonBackgroundRatio > 0.12,
+        ),
+      "avatar HUD visual smoke did not render all fixed status states",
+      result.hudSnapshots,
+    );
+    assertSmoke(
       result.avatar?.mood === "happy",
       "avatar visual smoke did not update mood through Realtime tool",
+      result.avatar,
+    );
+    assertSmoke(
+      result.avatar?.updates?.some(
+        (update) => update.kind === "status" && update.statusKind === "writing_code",
+      ),
+      "avatar visual smoke did not update HUD status through Realtime tool",
+      result.avatar,
+    );
+    assertSmoke(
+      result.avatar?.statusKind === "done" && result.avatar?.statusText === "Done",
+      "avatar visual smoke did not update HUD status through mock worker completion",
       result.avatar,
     );
     assertSmoke(

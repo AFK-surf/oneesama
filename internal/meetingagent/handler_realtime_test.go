@@ -84,6 +84,14 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "update_avatar_state", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
 	}
+	updateAvatarState := toolByName(tools, "update_avatar_state")
+	updateParams := updateAvatarState["parameters"].(map[string]any)
+	updateProperties := updateParams["properties"].(map[string]any)
+	statusKind := updateProperties["status_kind"].(map[string]any)
+	if !containsAnyString(statusKind["enum"].([]any), "writing_code") ||
+		updateProperties["status_text"] == nil {
+		t.Fatalf("update_avatar_state schema = %#v, want visual status HUD fields", updateAvatarState)
+	}
 	if toolNamesInclude(tools, "start_demo_surface", "start_demo_execution", "cancel_demo_surface") {
 		t.Fatalf("tools = %#v, demo surface tools must stay hidden when default-off", body["tools"])
 	}
@@ -1149,6 +1157,19 @@ func toolNamesInclude(tools []any, names ...string) bool {
 		}
 	}
 	return true
+}
+
+func toolByName(tools []any, name string) map[string]any {
+	for _, tool := range tools {
+		typed, ok := tool.(map[string]any)
+		if !ok {
+			continue
+		}
+		if typed["name"] == name {
+			return typed
+		}
+	}
+	return nil
 }
 
 func containsAnyString(values []any, want string) bool {

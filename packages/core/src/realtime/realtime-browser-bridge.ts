@@ -293,6 +293,7 @@
     "github_search",
     "fetch_url",
     "start_demo_surface",
+    "start_demo_execution",
     "control_demo_surface",
     "cancel_demo_surface",
     "memory_write",
@@ -1826,6 +1827,32 @@
     throw new Error(`unsupported local avatar tool: ${name}`);
   }
 
+  function updateAvatarHudStatus(
+    statusKind: string,
+    statusText: string,
+    options: { mood?: string; action?: string; holdMs?: number } = {},
+  ) {
+    try {
+      const controller = window.MAB_AVATAR_CONTROLLER;
+      if (!controller?.updateState) return { ok: false, reason: "avatar_controller_missing" };
+      const result = controller.updateState({
+        mood: options.mood,
+        action: options.action,
+        status_kind: statusKind,
+        status_text: statusText,
+        status_hold_ms: options.holdMs ?? 15000,
+      });
+      recordTimeline("avatar_status_hud", {
+        statusKind,
+        statusText: statusText.slice(0, 80),
+      });
+      return { ok: true, result };
+    } catch (error) {
+      rememberAvatarToolError(error, { name: "avatar_status_hud" });
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  }
+
   async function postJson(url: string, body: unknown) {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (config.toolCallbackToken) {
@@ -2445,7 +2472,33 @@
   async function runLocalWorkspaceTool(name, args = {}) {
     if (!LOCAL_WORKSPACE_TOOLS.has(name))
       throw new Error(`unsupported local workspace tool: ${name}`);
-    return postJson(localServiceUrl(`/tools/${encodeURIComponent(name)}`), args);
+    if (name === "start_demo_execution") {
+      updateAvatarHudStatus("writing_code", "Writing code", {
+        mood: "thinking",
+        action: "think",
+        holdMs: 30000,
+      });
+    } else if (name === "start_demo_surface" || name === "control_demo_surface") {
+      updateAvatarHudStatus("opening_preview", "Opening preview", {
+        mood: "thinking",
+        action: "lean_forward",
+        holdMs: 15000,
+      });
+    }
+    const result = await postJson(localServiceUrl(`/tools/${encodeURIComponent(name)}`), args);
+    if (name === "start_demo_execution") {
+      const status = (result as { status?: string; ok?: boolean; error?: string })?.status || "";
+      if ((result as { ok?: boolean })?.ok === false) {
+        updateAvatarHudStatus("blocked", "Blocked", { mood: "sad", action: "shrug" });
+      } else if (status === "started") {
+        updateAvatarHudStatus("writing_code", "Writing code", {
+          mood: "thinking",
+          action: "think",
+          holdMs: 30000,
+        });
+      }
+    }
+    return result;
   }
 
   interface FunctionCallOutputOptions {
@@ -3165,6 +3218,11 @@
   window.addEventListener("meeting-avatar-worker-result", (event: Event) => {
     try {
       const detail = (event as CustomEvent).detail || {};
+      if (detail?.status === "failed") {
+        updateAvatarHudStatus("blocked", "Blocked", { mood: "sad", action: "shrug" });
+      } else if (detail?.status === "completed" || detail?.status === "done") {
+        updateAvatarHudStatus("done", "Done", { mood: "happy", action: "emphasize" });
+      }
       injectWorkerResult(detail);
     } catch (error) {
       rememberError(error);

@@ -201,10 +201,13 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"action":    enumStringSchema("", "idle", "nod", "shake", "wave", "think", "lean_forward", "emphasize", "shrug", "speak"),
 			"intensity": numberSchema("0.2 to 1.2 is the normal visible range."),
 		})),
-		realtimeTool("update_avatar_state", "Set the avatar mood and action together for the current response.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"mood":      enumStringSchema("", "neutral", "happy", "surprised", "thinking", "sad", "shy"),
-			"action":    enumStringSchema("", "idle", "nod", "shake", "wave", "think", "lean_forward", "emphasize", "shrug", "speak"),
-			"intensity": numberSchema("0.2 to 1.2 is the normal visible range."),
+		realtimeTool("update_avatar_state", "Set the avatar mood/action and optional visual HUD status together. Use status_text/status_kind for progress that should be visible but not spoken.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"mood":           enumStringSchema("", "neutral", "happy", "surprised", "thinking", "sad", "shy"),
+			"action":         enumStringSchema("", "idle", "nod", "shake", "wave", "think", "lean_forward", "emphasize", "shrug", "speak"),
+			"intensity":      numberSchema("0.2 to 1.2 is the normal visible range."),
+			"status_text":    stringSchema("Short visual-only status shown on the avatar video frame, e.g. 'Writing code'. Do not include internal logs, tool names, or secrets."),
+			"status_kind":    enumStringSchema("thinking", "thinking", "writing_code", "opening_preview", "blocked", "done", "idle"),
+			"status_hold_ms": integerSchema("How long to keep the visual status visible.", float64(12000)),
 		})),
 	}
 }

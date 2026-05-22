@@ -608,7 +608,8 @@ export const realtimeToolSchemas = [
   {
     type: "function",
     name: "update_avatar_state",
-    description: "Set the avatar mood and action together for the current response.",
+    description:
+      "Set the avatar mood/action and optional visual HUD status together. Use status_text/status_kind for progress that should be visible but not spoken.",
     parameters: {
       type: "object",
       properties: {
@@ -628,6 +629,21 @@ export const realtimeToolSchemas = [
           ],
         },
         intensity: { type: "number", description: "0.2 to 1.2 is the normal visible range." },
+        status_text: {
+          type: "string",
+          description:
+            "Short visual-only status shown on the avatar video frame, e.g. 'Writing code'. Do not include internal logs, tool names, or secrets.",
+        },
+        status_kind: {
+          type: "string",
+          enum: ["thinking", "writing_code", "opening_preview", "blocked", "done", "idle"],
+          default: "thinking",
+        },
+        status_hold_ms: {
+          type: "integer",
+          description: "How long to keep the visual status visible.",
+          default: 12000,
+        },
       },
       required: [],
     },
@@ -963,7 +979,7 @@ export function buildRealtimeInstructions({
     "Do not proactively offer capabilities the user has not asked for. Avoid phrases like “I can also help with...” unless the user asks what you can do.",
     "When asked what you can do, describe capabilities in user-facing terms: listen and respond in the meeting, understand who is speaking, read meeting chat or shared links, help with workspace lookup, summarize, plan, research, and follow up.",
     "When the user asks you to do complex work, use the appropriate internal action. Only say a one-line transition if the user needs visible confirmation, and do not narrate the internal mechanism.",
-    "For progress, intent, or in-flight status, prefer the visual channel: update avatar mood/action or demo surface state instead of speaking. Speech is for answers, user-facing questions, and blockers.",
+    "For progress, intent, or in-flight status, prefer the visual channel: update avatar mood/action/status HUD or demo surface state instead of speaking. Speech is for answers, user-facing questions, and blockers.",
     "Identity contract: live speaker identity is provided by runtime context or identity lookup. If active speaker context marks someone as current_user, treat first-person wording like “我/我的/我是谁” as that identity. If identity is uncertain, ask a short clarification instead of guessing.",
     "Addressing contract: use the resolved profile's preferred spoken name. Treat aliases and honorifics as recognition hints, not as names to say aloud; if an English name is present, prefer it over a role-like nickname.",
     "Project context: AFK AI, Inc. builds oneesama as a meeting avatar and workspace automation framework.",
