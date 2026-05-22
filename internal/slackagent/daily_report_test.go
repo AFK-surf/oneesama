@@ -193,6 +193,14 @@ func TestSlackDailyDiaryFiltersNoActionAndToolIntrospection(t *testing.T) {
 		"用户未明确请求 Oneesama 介入调查或做可见回复，自行跟进的动作表明不需要额外介入。",
 		"Let me look at these threads more carefully before deciding. Tool calls: slack_api conversations.replies",
 		"Casual banter reacting to a product pivot link share. No question or request. No reply needed.",
+		"Repeat '/deploy' commands not directed at Oneesama; deployment operations are out of scope per secretary policy. Staying silent.",
+		"simplified approval card live 998150f is active",
+		"The question was directly answered by the tagged teammate; thread is handled and no further action is needed",
+		"从之前的讨论看，local VM 文件变更检测原本有一个确认面板，现在可能被「直接完成」取代了。要不要看看最近的 release note 或代码变更？",
+		`{"query":"studyouwei twitter status 2057767798752112906","count":10,"results":[{`,
+		`[ { "file_path": "memory/2026-03-20.md", "start_line": 1, "end_line": 2 } ]`,
+		"reactions.add",
+		"No direct evidence about evaluation case capabilities in current context; delegating to worker to search memory, which is bounded secretary work",
 	} {
 		if !slackDailyDiaryLowSignal(text) {
 			t.Fatalf("slackDailyDiaryLowSignal(%q) = false, want true", text)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -872,6 +873,7 @@ func slackDailyDiaryCleanDetail(value string) string {
 	if value == "" {
 		return ""
 	}
+	value = html.UnescapeString(value)
 	replacements := []struct{ from, to string }{
 		{"Assistant turn 1 Text:", ""},
 		{"Assistant turn 1", ""},
@@ -902,6 +904,9 @@ func slackDailyDiaryLowSignal(value string) bool {
 	if text == "" || text == "no action" || text == "n/a" {
 		return true
 	}
+	if slackDailyDiaryLooksLikeRawPayload(text) {
+		return true
+	}
 	lowSignalMarkers := []string{
 		"routine automated daily",
 		"automated daily diary",
@@ -918,6 +923,30 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"not valid persona json",
 		"invalid persona json",
 		"daily report",
+		"approval gate live",
+		"approval card live",
+		"simplified approval card",
+		"is active",
+		"repeat '/deploy' commands not directed",
+		"not directed at oneesama",
+		"out of scope per secretary policy",
+		"staying silent",
+		"directly answered by",
+		"thread is handled",
+		"handled and no further action",
+		"no direct evidence",
+		"delegating to worker",
+		"bounded secretary work",
+		"from previous discussion",
+		"从之前的讨论看",
+		"要不要看看",
+		"可能",
+		"推断",
+		"大概",
+		"也许",
+		"maybe",
+		"might",
+		"possibly",
 		"no explicit question",
 		"no explicit request",
 		"no question or request",
@@ -968,6 +997,30 @@ func slackDailyDiaryLowSignal(value string) bool {
 	}
 	if len([]rune(strings.TrimSpace(value))) < 12 && !slackDailyDiaryContainsAny(text, "fix", "ship", "release", "pr #", "ci", "修复", "根因", "上线", "发布") {
 		return true
+	}
+	return false
+}
+
+func slackDailyDiaryLooksLikeRawPayload(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		return true
+	}
+	rawMarkers := []string{
+		`"query"`,
+		`"results"`,
+		`"file_path"`,
+		`"start_line"`,
+		`"end_line"`,
+		"reactions.add",
+		"chat.postmessage",
+		"conversations.replies",
+		"tool_calls",
+	}
+	for _, marker := range rawMarkers {
+		if strings.Contains(trimmed, marker) {
+			return true
+		}
 	}
 	return false
 }
