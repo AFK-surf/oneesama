@@ -28,6 +28,7 @@ const (
 	defaultGoogleCalendarAPIBaseURL         = "https://www.googleapis.com/calendar/v3"
 	defaultGoogleOAuthTokenURL              = "https://oauth2.googleapis.com/token"
 	defaultMeetdWatch                       = time.Minute
+	defaultDemoSurfaceMode                  = "off"
 	defaultDemoSurfaceAdapter               = "fake"
 	defaultDemoSurfaceRootDir               = "./runtime/demo-surfaces"
 	defaultDemoSurfaceDryRun                = true

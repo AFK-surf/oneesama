@@ -25,10 +25,8 @@ func TestRealtimeDemoBridgeStartPublishesObservationContext(t *testing.T) {
 		Lifecycle: lifecycle,
 		Controller: DemoController{
 			Client: client,
-			Safety: DemoSafetyPolicy{
-				URLAllowlistPatterns: []string{"https://example.test/"},
-			},
-			Now: func() time.Time { return now },
+			Safety: DemoSafetyPolicy{},
+			Now:    func() time.Time { return now },
 		},
 		Presenter:    DemoSurfacePresenter{Share: share},
 		Store:        store,
@@ -73,6 +71,9 @@ func TestRealtimeDemoBridgeStartPublishesObservationContext(t *testing.T) {
 	}
 	if entries[1].Result != DemoSessionResultAllowed || entries[1].ArtifactRefs[0] != "/tmp/demo/frame-001.png" {
 		t.Fatalf("action audit entry = %#v", entries[1])
+	}
+	if entries[1].ReasonCode != "url_session_approved" {
+		t.Fatalf("action reason = %q, want session-approved URL", entries[1].ReasonCode)
 	}
 }
 
@@ -394,7 +395,7 @@ func TestRealtimeDemoBridgeStartBlockedActionStopsWorkspace(t *testing.T) {
 	result, err := bridge.Start(context.Background(), RealtimeDemoSurfaceStartRequest{
 		MeetingSessionID: "meet_session",
 		DemoSessionID:    "demo_blocked_url",
-		URL:              "https://not-allowed.test/dashboard",
+		URL:              "javascript:alert(1)",
 	})
 	if !errors.Is(err, errRealtimeDemoBridgeActionBlocked) {
 		t.Fatalf("Start() error = %v, want action blocked", err)

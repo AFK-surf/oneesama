@@ -124,6 +124,7 @@ type rawMeetdConfig struct {
 }
 
 type rawDemoSurface struct {
+	Mode                          string `json:"mode"`
 	Enabled                       bool   `json:"enabled"`
 	Adapter                       string `json:"adapter"`
 	RootDir                       string `json:"root_dir"`
@@ -280,17 +281,8 @@ func (r rawConfig) toConfig(path string) Config {
 			ASRLanguage:     strings.TrimSpace(r.Meetd.ASRLanguage),
 			GeminiASRModel:  strings.TrimSpace(r.Meetd.GeminiASRModel),
 		},
-		DemoSurface: DemoSurfaceConfig{
-			Enabled:                       r.DemoSurface.Enabled,
-			Adapter:                       stringOrDefault(r.DemoSurface.Adapter, defaultDemoSurfaceAdapter),
-			RootDir:                       stringOrDefault(r.DemoSurface.RootDir, defaultDemoSurfaceRootDir),
-			URLAllowlistPatterns:          splitConfigCSV(r.DemoSurface.URLAllowlistPatterns),
-			DryRun:                        boolPtrOrDefault(r.DemoSurface.DryRun, defaultDemoSurfaceDryRun),
-			AllowActiveControl:            r.DemoSurface.AllowActiveControl,
-			RequireExternalWriteApproval:  boolPtrOrDefault(r.DemoSurface.RequireExternalWriteApproval, defaultDemoSurfaceExternalWriteApproval),
-			ExternalWriteApprovalTokenTTL: durationOrDefault(r.DemoSurface.ExternalWriteApprovalTokenTTL, defaultDemoSurfaceApprovalTokenTTL),
-		},
-		OpenAI: buildOpenAIConfig(r.OpenAI),
+		DemoSurface: buildDemoSurfaceConfig(r.DemoSurface),
+		OpenAI:      buildOpenAIConfig(r.OpenAI),
 		Dialog: DialogConfig{
 			STTProvider: stringOrDefault(r.Dialog.STTProvider, defaultSTTProvider),
 			TTSProvider: stringOrDefault(r.Dialog.TTSProvider, defaultTTSProvider),
@@ -312,6 +304,39 @@ func (r rawConfig) toConfig(path string) Config {
 		),
 		ConfigFilePath: path,
 	}
+}
+
+func buildDemoSurfaceConfig(raw rawDemoSurface) DemoSurfaceConfig {
+	cfg := DemoSurfaceConfig{
+		Mode:                          stringOrDefault(raw.Mode, defaultDemoSurfaceMode),
+		Enabled:                       raw.Enabled,
+		Adapter:                       stringOrDefault(raw.Adapter, defaultDemoSurfaceAdapter),
+		RootDir:                       stringOrDefault(raw.RootDir, defaultDemoSurfaceRootDir),
+		URLAllowlistPatterns:          splitConfigCSV(raw.URLAllowlistPatterns),
+		DryRun:                        boolPtrOrDefault(raw.DryRun, defaultDemoSurfaceDryRun),
+		AllowActiveControl:            raw.AllowActiveControl,
+		RequireExternalWriteApproval:  boolPtrOrDefault(raw.RequireExternalWriteApproval, defaultDemoSurfaceExternalWriteApproval),
+		ExternalWriteApprovalTokenTTL: durationOrDefault(raw.ExternalWriteApprovalTokenTTL, defaultDemoSurfaceApprovalTokenTTL),
+	}
+	if strings.TrimSpace(raw.Mode) != "" {
+		applyDemoSurfaceModePreset(&cfg, raw.Mode)
+	}
+	if strings.TrimSpace(raw.Adapter) != "" {
+		cfg.Adapter = stringOrDefault(raw.Adapter, defaultDemoSurfaceAdapter)
+	}
+	if strings.TrimSpace(raw.RootDir) != "" {
+		cfg.RootDir = stringOrDefault(raw.RootDir, defaultDemoSurfaceRootDir)
+	}
+	if strings.TrimSpace(raw.URLAllowlistPatterns) != "" {
+		cfg.URLAllowlistPatterns = splitConfigCSV(raw.URLAllowlistPatterns)
+	}
+	if raw.DryRun != nil {
+		cfg.DryRun = boolPtrOrDefault(raw.DryRun, defaultDemoSurfaceDryRun)
+	}
+	if raw.AllowActiveControl {
+		cfg.AllowActiveControl = true
+	}
+	return cfg
 }
 
 func applyEnvOverrides(cfg *Config) {

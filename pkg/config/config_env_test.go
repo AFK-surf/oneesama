@@ -196,6 +196,75 @@ func TestLoadHonorsDemoSurfaceEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadHonorsDemoSurfaceModePresets(t *testing.T) {
+	cases := []struct {
+		name              string
+		mode              string
+		wantEnabled       bool
+		wantAdapter       string
+		wantDryRun        bool
+		wantActiveControl bool
+	}{
+		{
+			name:              "safe",
+			mode:              "safe",
+			wantEnabled:       true,
+			wantAdapter:       "agent_browser",
+			wantDryRun:        true,
+			wantActiveControl: false,
+		},
+		{
+			name:              "active",
+			mode:              "active",
+			wantEnabled:       true,
+			wantAdapter:       "agent_browser",
+			wantDryRun:        false,
+			wantActiveControl: true,
+		},
+		{
+			name:              "off",
+			mode:              "off",
+			wantEnabled:       false,
+			wantAdapter:       "fake",
+			wantDryRun:        true,
+			wantActiveControl: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(oneesamaConfigEnvOverrideKey, "")
+			t.Setenv("ONEESAMA_DEMO_SURFACE_MODE", tc.mode)
+
+			cfg := loadInTempDir(t)
+			if cfg.DemoSurface.Mode != tc.mode {
+				t.Fatalf("DemoSurface.Mode = %q, want %q", cfg.DemoSurface.Mode, tc.mode)
+			}
+			if cfg.DemoSurface.Enabled != tc.wantEnabled ||
+				cfg.DemoSurface.Adapter != tc.wantAdapter ||
+				cfg.DemoSurface.DryRun != tc.wantDryRun ||
+				cfg.DemoSurface.AllowActiveControl != tc.wantActiveControl {
+				t.Fatalf("DemoSurface = %#v, want enabled=%v adapter=%q dryRun=%v active=%v",
+					cfg.DemoSurface, tc.wantEnabled, tc.wantAdapter, tc.wantDryRun, tc.wantActiveControl)
+			}
+		})
+	}
+}
+
+func TestLoadDemoSurfaceModeKeepsLowLevelOverrides(t *testing.T) {
+	t.Setenv(oneesamaConfigEnvOverrideKey, "")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_MODE", "safe")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_ADAPTER", "fake")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_DRY_RUN", "false")
+
+	cfg := loadInTempDir(t)
+	if cfg.DemoSurface.Mode != "safe" {
+		t.Fatalf("DemoSurface.Mode = %q, want safe", cfg.DemoSurface.Mode)
+	}
+	if cfg.DemoSurface.Adapter != "fake" || cfg.DemoSurface.DryRun {
+		t.Fatalf("DemoSurface = %#v, want low-level env override after mode preset", cfg.DemoSurface)
+	}
+}
+
 func TestLoadMeetdSummaryModelFallbackStaysEnvOnly(t *testing.T) {
 	t.Setenv(oneesamaConfigEnvOverrideKey, "")
 	t.Setenv("LLM_MODEL", "summary-fallback-model")

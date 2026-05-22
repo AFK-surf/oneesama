@@ -1,7 +1,10 @@
 package meetingagent
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -290,6 +293,79 @@ func TestDemoSessionStoreEntriesReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestDemoSessionStoreWritesFeedbackPackage(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2026, 5, 22, 3, 0, 0, 0, time.UTC)
+	store := NewPersistentDemoSessionStore(root).WithClock(fixedClock(t, base))
+
+	if _, err := store.RecordTrigger(DemoSessionTriggerRequest{
+		SessionID: "demo feedback/unsafe",
+		Actor:     "U_PENG",
+		URL:       "https://example.test/demo",
+	}); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if _, err := store.RecordAction(DemoSessionActionRequest{
+		SessionID:    "demo feedback/unsafe",
+		ActionClass:  DemoActionCapture,
+		Result:       DemoSessionResultAllowed,
+		ReasonCode:   "read_only_action",
+		ArtifactRefs: []string{"frames/001.png"},
+	}); err != nil {
+		t.Fatalf("action: %v", err)
+	}
+	if _, err := store.RecordClose("demo feedback/unsafe", DemoSessionResultStopped, "done"); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	snap, ok := store.Snapshot("demo feedback/unsafe")
+	if !ok {
+		t.Fatal("snapshot missing")
+	}
+	if snap.FeedbackDir == "" || snap.AuditJSONL == "" || snap.SummaryJSON == "" {
+		t.Fatalf("feedback paths missing from snapshot: %#v", snap)
+	}
+	if !strings.Contains(snap.FeedbackDir, "demo_feedback_unsafe") {
+		t.Fatalf("FeedbackDir = %q, want sanitized session id", snap.FeedbackDir)
+	}
+	auditBytes, err := os.ReadFile(snap.AuditJSONL)
+	if err != nil {
+		t.Fatalf("read audit jsonl: %v", err)
+	}
+	if lines := strings.Count(strings.TrimSpace(string(auditBytes)), "\n") + 1; lines != 3 {
+		t.Fatalf("audit jsonl lines = %d, want 3\n%s", lines, string(auditBytes))
+	}
+	var pkg DemoSessionFeedbackPackage
+	if err := readJSONFile(snap.SummaryJSON, &pkg); err != nil {
+		t.Fatalf("read summary: %v", err)
+	}
+	if pkg.Snapshot.SessionID != "demo feedback/unsafe" || !pkg.Snapshot.Closed {
+		t.Fatalf("summary snapshot = %#v, want closed feedback session", pkg.Snapshot)
+	}
+	if len(pkg.Entries) != 3 || len(pkg.RunbookLines) != 3 {
+		t.Fatalf("summary entries/runbook = %d/%d, want 3/3", len(pkg.Entries), len(pkg.RunbookLines))
+	}
+	if !strings.Contains(pkg.RunbookLines[1], "action=capture") {
+		t.Fatalf("runbook lines = %#v, want capture action line", pkg.RunbookLines)
+	}
+	if filepath.Base(pkg.Snapshot.AuditJSONL) != "audit.jsonl" || filepath.Base(pkg.Snapshot.SummaryJSON) != "summary.json" {
+		t.Fatalf("summary paths = %#v, want stable file names", pkg.Snapshot)
+	}
+}
+
+func TestDemoSessionStoreRecentSnapshots(t *testing.T) {
+	store := NewDemoSessionStore().WithClock(fixedClock(t, time.Unix(1700000000, 0).UTC()))
+	for _, id := range []string{"first", "second", "third"} {
+		if _, err := store.RecordTrigger(DemoSessionTriggerRequest{SessionID: id, Actor: "U"}); err != nil {
+			t.Fatalf("trigger %s: %v", id, err)
+		}
+	}
+	recent := store.RecentSnapshots(2)
+	if len(recent) != 2 || recent[0].SessionID != "third" || recent[1].SessionID != "second" {
+		t.Fatalf("recent = %#v, want [third second]", recent)
+	}
+}
+
 func TestDemoSessionStoreSnapshotMissingSession(t *testing.T) {
 	store := NewDemoSessionStore()
 	if _, ok := store.Snapshot("nope"); ok {
@@ -363,4 +439,12 @@ func TestFormatRunbookLineUsesDashForEmpty(t *testing.T) {
 			t.Fatalf("runbook line missing %q: %q", want, line)
 		}
 	}
+}
+
+func readJSONFile(path string, out any) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, out)
 }

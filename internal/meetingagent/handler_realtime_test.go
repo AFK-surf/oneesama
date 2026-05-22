@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -91,6 +92,9 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	}
 	if demoSurface["dryRun"] != true || demoSurface["adapter"] != "fake" {
 		t.Fatalf("demoSurface = %#v, want dry-run fake defaults", demoSurface)
+	}
+	if demoSurface["mode"] != "off" {
+		t.Fatalf("demoSurface = %#v, want off mode by default", demoSurface)
 	}
 	if demoSurface["requireExternalWriteApproval"] != true {
 		t.Fatalf("demoSurface = %#v, want external-write approval required by default", demoSurface)
@@ -382,6 +386,7 @@ func TestRealtimeDemoSurfaceToolsUseBridge(t *testing.T) {
 	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
 		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
 	}
+
 }
 
 func TestRealtimeDemoSurfaceToolsDefaultOff(t *testing.T) {
@@ -467,6 +472,42 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	decodeRealtimeBody(t, cancel.Body.String(), &cancelBody)
 	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
 		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
+	}
+
+	postCancelConfig := httptest.NewRecorder()
+	router.ServeHTTP(postCancelConfig, realtimeRequest(http.MethodGet, "/realtime/config", ""))
+	if postCancelConfig.Code != http.StatusOK {
+		t.Fatalf("post-cancel config status = %d: %s", postCancelConfig.Code, postCancelConfig.Body.String())
+	}
+	var postCancelBody map[string]any
+	decodeRealtimeBody(t, postCancelConfig.Body.String(), &postCancelBody)
+	status := postCancelBody["demoSurface"].(map[string]any)
+	recent := status["recentSessions"].([]any)
+	if len(recent) != 1 {
+		t.Fatalf("recentSessions = %#v, want one demo feedback session", recent)
+	}
+	recentSession := recent[0].(map[string]any)
+	if recentSession["mode"] != "safe" {
+		t.Fatalf("recent session = %#v, want safe mode in audit trail", recentSession)
+	}
+	summaryPath := stringFromAny(recentSession["summary_json"])
+	if summaryPath == "" {
+		t.Fatalf("recent session = %#v, want summary json path for feedback package", recentSession)
+	}
+	if _, err := os.Stat(summaryPath); err != nil {
+		t.Fatalf("feedback summary %q not written: %v", summaryPath, err)
+	}
+
+	trailResponse := httptest.NewRecorder()
+	router.ServeHTTP(trailResponse, realtimeRequest(http.MethodGet, "/demo-surface/sessions/demo_flag/trail", ""))
+	if trailResponse.Code != http.StatusOK {
+		t.Fatalf("trail status = %d: %s", trailResponse.Code, trailResponse.Body.String())
+	}
+	var trailBody map[string]any
+	decodeRealtimeBody(t, trailResponse.Body.String(), &trailBody)
+	trail := trailBody["trail"].(map[string]any)
+	if len(trail["entries"].([]any)) != 3 || len(trail["runbook_lines"].([]any)) != 3 {
+		t.Fatalf("trail = %#v, want trigger/action/stop feedback package", trail)
 	}
 }
 

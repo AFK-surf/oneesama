@@ -126,6 +126,7 @@ type MeetdConfig struct {
 }
 
 type DemoSurfaceConfig struct {
+	Mode                          string
 	Enabled                       bool
 	Adapter                       string
 	RootDir                       string

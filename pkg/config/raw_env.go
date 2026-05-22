@@ -214,6 +214,9 @@ func applyMeetdEnvOverrides(cfg *Config) {
 }
 
 func applyDemoSurfaceEnvOverrides(cfg *Config) {
+	if value := strings.TrimSpace(getenv("ONEESAMA_DEMO_SURFACE_MODE", "MAB_DEMO_SURFACE_MODE")); value != "" {
+		applyDemoSurfaceModePreset(&cfg.DemoSurface, value)
+	}
 	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_ENABLED", "MAB_DEMO_SURFACE_ENABLED"); ok {
 		cfg.DemoSurface.Enabled = value
 	}
@@ -237,6 +240,36 @@ func applyDemoSurfaceEnvOverrides(cfg *Config) {
 	}
 	if value, ok := getenvDuration("ONEESAMA_DEMO_SURFACE_APPROVAL_TOKEN_TTL", "MAB_DEMO_SURFACE_APPROVAL_TOKEN_TTL"); ok {
 		cfg.DemoSurface.ExternalWriteApprovalTokenTTL = value
+	}
+}
+
+func applyDemoSurfaceModePreset(cfg *DemoSurfaceConfig, rawMode string) {
+	mode := strings.ToLower(strings.TrimSpace(rawMode))
+	mode = strings.NewReplacer("-", "_", " ", "_").Replace(mode)
+	if mode == "" {
+		return
+	}
+	cfg.Mode = mode
+	switch mode {
+	case "off", "disabled", "false":
+		cfg.Enabled = false
+		cfg.Adapter = defaultDemoSurfaceAdapter
+		cfg.DryRun = true
+		cfg.AllowActiveControl = false
+	case "safe", "preview", "read_only", "readonly":
+		cfg.Mode = "safe"
+		cfg.Enabled = true
+		cfg.Adapter = "agent_browser"
+		cfg.DryRun = true
+		cfg.AllowActiveControl = false
+	case "active", "live":
+		cfg.Mode = "active"
+		cfg.Enabled = true
+		cfg.Adapter = "agent_browser"
+		cfg.DryRun = false
+		cfg.AllowActiveControl = true
+	default:
+		cfg.Mode = mode
 	}
 }
 

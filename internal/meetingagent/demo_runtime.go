@@ -36,7 +36,9 @@ func (s *Service) newRealtimeDemoBridgeFromConfig() *RealtimeDemoBridge {
 		return nil
 	}
 	lifecycle := NewDemoWorkspaceLifecycle(cfg.RootDir, demoWorkspaceNoopLauncher{})
+	store := NewPersistentDemoSessionStore(demoFeedbackRootDir(cfg.RootDir))
 	return &RealtimeDemoBridge{
+		Mode:      strings.TrimSpace(cfg.Mode),
 		Lifecycle: lifecycle,
 		Controller: DemoController{
 			Client: client,
@@ -47,7 +49,7 @@ func (s *Service) newRealtimeDemoBridgeFromConfig() *RealtimeDemoBridge {
 			},
 		},
 		Presenter:    DemoSurfacePresenter{Share: s},
-		Store:        NewDemoSessionStore(),
+		Store:        store,
 		Observations: NewDemoObservationBus(),
 	}
 }
@@ -55,6 +57,7 @@ func (s *Service) newRealtimeDemoBridgeFromConfig() *RealtimeDemoBridge {
 func (s *Service) demoSurfaceStatus() map[string]any {
 	enabled := s.demoBridge != nil
 	status := map[string]any{
+		"mode":                          strings.TrimSpace(s.demoSurface.Mode),
 		"enabled":                       enabled,
 		"toolsExposed":                  enabled,
 		"configured":                    s.demoSurface.Enabled,
@@ -67,6 +70,10 @@ func (s *Service) demoSurfaceStatus() map[string]any {
 	}
 	if s.demoBridge == nil && s.demoSurface.Enabled {
 		status["reason"] = "demo_surface_bridge_unavailable"
+	}
+	if s.demoBridge != nil && s.demoBridge.Store != nil {
+		status["activeSessions"] = s.demoBridge.Store.ActiveSessionIDs()
+		status["recentSessions"] = s.demoBridge.Store.RecentSnapshots(5)
 	}
 	return status
 }
@@ -90,6 +97,17 @@ func (demoWorkspaceNoopProcess) Stop(context.Context) error {
 }
 
 func normalizeDemoSurfaceConfig(cfg appconfig.DemoSurfaceConfig) appconfig.DemoSurfaceConfig {
+	if strings.TrimSpace(cfg.Mode) == "" {
+		if cfg.Enabled {
+			if cfg.AllowActiveControl {
+				cfg.Mode = "active"
+			} else {
+				cfg.Mode = "safe"
+			}
+		} else {
+			cfg.Mode = "off"
+		}
+	}
 	if strings.TrimSpace(cfg.Adapter) == "" {
 		cfg.Adapter = demoSurfaceAdapterFake
 	}
@@ -108,4 +126,12 @@ func normalizeDemoSurfaceAdapter(value string) string {
 	default:
 		return normalized
 	}
+}
+
+func demoFeedbackRootDir(rootDir string) string {
+	rootDir = strings.TrimSpace(rootDir)
+	if rootDir == "" {
+		rootDir = "./runtime/demo-surfaces"
+	}
+	return rootDir + "/feedback"
 }

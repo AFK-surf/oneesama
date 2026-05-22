@@ -40,6 +40,7 @@ type DemoSurfacePresentationClient interface {
 }
 
 type RealtimeDemoBridge struct {
+	Mode         string
 	Lifecycle    DemoWorkspaceLifecycleClient
 	Controller   DemoIntentRunner
 	Presenter    DemoSurfacePresentationClient
@@ -126,6 +127,7 @@ func (b *RealtimeDemoBridge) Start(ctx context.Context, req RealtimeDemoSurfaceS
 	if b.Store != nil {
 		_, _ = b.Store.RecordTrigger(DemoSessionTriggerRequest{
 			SessionID: workspace.ID,
+			Mode:      strings.TrimSpace(b.Mode),
 			Actor:     strings.TrimSpace(req.Actor),
 			ThreadKey: DemoSessionThreadKey{
 				Surface:   strings.TrimSpace(req.Surface),
@@ -282,7 +284,8 @@ func (b *RealtimeDemoBridge) Control(ctx context.Context, req RealtimeDemoSurfac
 		sequence = len(b.observationBus().Recent(workspace.ID, defaultDemoObservationContextLimit)) + 1
 	}
 	token := b.cancelForSession(workspace.ID)
-	controllerResult, err := b.Controller.RunIntent(ctx, DemoIntent{
+	controller := b.controllerForSessionURLs(workspace.URL, req.URL)
+	controllerResult, err := controller.RunIntent(ctx, DemoIntent{
 		Session:     DemoKWWKSessionFromWorkspace(workspace),
 		Kind:        action,
 		URL:         strings.TrimSpace(req.URL),
@@ -355,7 +358,8 @@ func (b *RealtimeDemoBridge) runObservation(ctx context.Context, workspace DemoW
 	if strings.TrimSpace(workspace.URL) == "" {
 		kind = DemoActionCapture
 	}
-	controllerResult, err := b.Controller.RunIntent(ctx, DemoIntent{
+	controller := b.controllerForSessionURLs(workspace.URL)
+	controllerResult, err := controller.RunIntent(ctx, DemoIntent{
 		Session:     DemoKWWKSessionFromWorkspace(workspace),
 		Kind:        kind,
 		URL:         workspace.URL,
@@ -438,6 +442,22 @@ func (b *RealtimeDemoBridge) observationBus() *DemoObservationBus {
 
 func (b *RealtimeDemoBridge) renderer() DemoFeedbackRenderer {
 	return b.Renderer
+}
+
+func (b *RealtimeDemoBridge) controllerForSessionURLs(urls ...string) DemoIntentRunner {
+	controller := b.Controller
+	concrete, ok := controller.(DemoController)
+	if !ok {
+		return controller
+	}
+	for _, raw := range urls {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		concrete.Safety.ApprovedSessionURLs = append(concrete.Safety.ApprovedSessionURLs, raw)
+	}
+	return concrete
 }
 
 func (b *RealtimeDemoBridge) recordAction(sessionID string, action DemoActionKind, url string, result DemoSessionResult, reason string, artifactRefs []string) {

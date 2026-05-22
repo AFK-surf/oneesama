@@ -1,8 +1,11 @@
 package meetingagent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -28,9 +31,9 @@ const (
 // pulling Slack/Meet types into the audit layer (RFC: keep internal logs
 // audit-only, never direct-posted to Slack/Meet).
 type DemoSessionThreadKey struct {
-	Surface   string // "slack", "meeting"
-	ChannelID string
-	ThreadTS  string
+	Surface   string `json:"surface"` // "slack", "meeting"
+	ChannelID string `json:"channel_id"`
+	ThreadTS  string `json:"thread_ts"`
 }
 
 // Normalized returns a comparable map-key form. Empty fields are kept so a
@@ -53,38 +56,54 @@ func (k DemoSessionThreadKey) IsZero() bool {
 // DemoSessionAuditEntry is one row in the per-session audit log. Reason
 // codes are snake_case so the store can be grepped from a runbook.
 type DemoSessionAuditEntry struct {
-	SessionID    string
-	Sequence     int
-	Actor        string
-	ThreadKey    DemoSessionThreadKey
-	ActionClass  DemoActionKind
-	URL          string
-	Result       DemoSessionResult
-	ReasonCode   string
-	ArtifactRefs []string
-	RecordedAt   time.Time
+	SessionID    string               `json:"session_id"`
+	Sequence     int                  `json:"sequence"`
+	Mode         string               `json:"mode,omitempty"`
+	Actor        string               `json:"actor,omitempty"`
+	ThreadKey    DemoSessionThreadKey `json:"thread_key,omitempty"`
+	ActionClass  DemoActionKind       `json:"action_class,omitempty"`
+	URL          string               `json:"url,omitempty"`
+	Result       DemoSessionResult    `json:"result"`
+	ReasonCode   string               `json:"reason_code,omitempty"`
+	ArtifactRefs []string             `json:"artifact_refs,omitempty"`
+	RecordedAt   time.Time            `json:"recorded_at"`
 }
 
 // DemoSessionStatusSnapshot is the operator-facing summary suitable for a
 // /demo/status endpoint or runbook printout.
 type DemoSessionStatusSnapshot struct {
-	SessionID    string
-	ThreadKey    DemoSessionThreadKey
-	Actor        string
-	URL          string
-	StartedAt    time.Time
-	EndedAt      time.Time
-	LastAction   DemoActionKind
-	LastResult   DemoSessionResult
-	LastReason   string
-	ArtifactRefs []string
-	EntryCount   int
-	Closed       bool
+	SessionID    string               `json:"session_id"`
+	Mode         string               `json:"mode,omitempty"`
+	ThreadKey    DemoSessionThreadKey `json:"thread_key,omitempty"`
+	Actor        string               `json:"actor,omitempty"`
+	URL          string               `json:"url,omitempty"`
+	StartedAt    time.Time            `json:"started_at"`
+	EndedAt      time.Time            `json:"ended_at,omitempty"`
+	LastAction   DemoActionKind       `json:"last_action,omitempty"`
+	LastResult   DemoSessionResult    `json:"last_result"`
+	LastReason   string               `json:"last_reason,omitempty"`
+	ArtifactRefs []string             `json:"artifact_refs,omitempty"`
+	FeedbackDir  string               `json:"feedback_dir,omitempty"`
+	AuditJSONL   string               `json:"audit_jsonl,omitempty"`
+	SummaryJSON  string               `json:"summary_json,omitempty"`
+	EntryCount   int                  `json:"entry_count"`
+	Closed       bool                 `json:"closed"`
+}
+
+// DemoSessionFeedbackPackage is the durable per-session artifact operators
+// can attach to an acceptance report. It intentionally mirrors the in-memory
+// store so feedback can be inspected after a process restart.
+type DemoSessionFeedbackPackage struct {
+	Snapshot     DemoSessionStatusSnapshot `json:"snapshot"`
+	Entries      []DemoSessionAuditEntry   `json:"entries"`
+	RunbookLines []string                  `json:"runbook_lines"`
+	UpdatedAt    time.Time                 `json:"updated_at"`
 }
 
 // DemoSessionTriggerRequest is the input for the first audit row.
 type DemoSessionTriggerRequest struct {
 	SessionID string
+	Mode      string
 	Actor     string
 	ThreadKey DemoSessionThreadKey
 	URL       string
@@ -106,9 +125,10 @@ type DemoSessionActionRequest struct {
 // swap this for a persistent implementation behind the same interface
 // without touching callers (see runbook for the gate criteria).
 type DemoSessionStore struct {
-	now func() time.Time
+	now             func() time.Time
+	feedbackRootDir string
 
-	mu       sync.RWMutex
+	mu        sync.RWMutex
 	bySession map[string]*demoSessionRecord
 	byThread  map[string]string // normalized thread key → session id
 }
@@ -135,6 +155,12 @@ func NewDemoSessionStore() *DemoSessionStore {
 	}
 }
 
+// NewPersistentDemoSessionStore records the in-memory audit and also writes a
+// durable feedback package per session under rootDir/<session_id>/.
+func NewPersistentDemoSessionStore(rootDir string) *DemoSessionStore {
+	return NewDemoSessionStore().WithFeedbackRoot(rootDir)
+}
+
 // WithClock returns a copy of s using the given clock. Used by tests to
 // pin RecordedAt timestamps. The clock is also used for trigger StartedAt
 // and stop EndedAt when the caller does not supply them.
@@ -145,6 +171,15 @@ func (s *DemoSessionStore) WithClock(now func() time.Time) *DemoSessionStore {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.now = now
+	return s
+}
+
+// WithFeedbackRoot enables durable audit packages. It is safe to use in tests
+// and during service startup; empty root keeps the store memory-only.
+func (s *DemoSessionStore) WithFeedbackRoot(rootDir string) *DemoSessionStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.feedbackRootDir = strings.TrimSpace(rootDir)
 	return s
 }
 
@@ -164,6 +199,7 @@ func (s *DemoSessionStore) RecordTrigger(req DemoSessionTriggerRequest) (DemoSes
 	entry := DemoSessionAuditEntry{
 		SessionID:   id,
 		Sequence:    1,
+		Mode:        strings.TrimSpace(req.Mode),
 		Actor:       strings.TrimSpace(req.Actor),
 		ThreadKey:   req.ThreadKey,
 		URL:         strings.TrimSpace(req.URL),
@@ -175,6 +211,7 @@ func (s *DemoSessionStore) RecordTrigger(req DemoSessionTriggerRequest) (DemoSes
 	rec := &demoSessionRecord{
 		snapshot: DemoSessionStatusSnapshot{
 			SessionID:  id,
+			Mode:       entry.Mode,
 			ThreadKey:  req.ThreadKey,
 			Actor:      entry.Actor,
 			URL:        entry.URL,
@@ -186,10 +223,12 @@ func (s *DemoSessionStore) RecordTrigger(req DemoSessionTriggerRequest) (DemoSes
 		},
 		entries: []DemoSessionAuditEntry{entry},
 	}
+	rec.snapshot.FeedbackDir, rec.snapshot.AuditJSONL, rec.snapshot.SummaryJSON = s.feedbackPathsLocked(id)
 	s.bySession[id] = rec
 	if !req.ThreadKey.IsZero() {
 		s.byThread[req.ThreadKey.Normalized()] = id
 	}
+	s.persistSessionLocked(id, rec, entry)
 	return entry, nil
 }
 
@@ -213,6 +252,7 @@ func (s *DemoSessionStore) RecordAction(req DemoSessionActionRequest) (DemoSessi
 	entry := DemoSessionAuditEntry{
 		SessionID:    id,
 		Sequence:     len(rec.entries) + 1,
+		Mode:         rec.snapshot.Mode,
 		Actor:        rec.snapshot.Actor,
 		ThreadKey:    rec.snapshot.ThreadKey,
 		ActionClass:  req.ActionClass,
@@ -230,6 +270,7 @@ func (s *DemoSessionStore) RecordAction(req DemoSessionActionRequest) (DemoSessi
 	if len(entry.ArtifactRefs) > 0 {
 		rec.snapshot.ArtifactRefs = append(rec.snapshot.ArtifactRefs, entry.ArtifactRefs...)
 	}
+	s.persistSessionLocked(id, rec, entry)
 	return entry, nil
 }
 
@@ -253,6 +294,7 @@ func (s *DemoSessionStore) RecordClose(sessionID string, result DemoSessionResul
 	entry := DemoSessionAuditEntry{
 		SessionID:   id,
 		Sequence:    len(rec.entries) + 1,
+		Mode:        rec.snapshot.Mode,
 		Actor:       rec.snapshot.Actor,
 		ThreadKey:   rec.snapshot.ThreadKey,
 		ActionClass: DemoActionKind(""),
@@ -266,6 +308,7 @@ func (s *DemoSessionStore) RecordClose(sessionID string, result DemoSessionResul
 	rec.snapshot.LastReason = entry.ReasonCode
 	rec.snapshot.EndedAt = now
 	rec.snapshot.Closed = true
+	s.persistSessionLocked(id, rec, entry)
 	return entry, nil
 }
 
@@ -283,6 +326,30 @@ func (s *DemoSessionStore) Snapshot(sessionID string) (DemoSessionStatusSnapshot
 		snap.ArtifactRefs = append([]string(nil), snap.ArtifactRefs...)
 	}
 	return snap, true
+}
+
+// RecentSnapshots returns up to limit sessions by most recent update first.
+func (s *DemoSessionStore) RecentSnapshots(limit int) []DemoSessionStatusSnapshot {
+	if limit <= 0 {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	snaps := make([]DemoSessionStatusSnapshot, 0, len(s.bySession))
+	for _, rec := range s.bySession {
+		snap := rec.snapshot
+		if len(snap.ArtifactRefs) > 0 {
+			snap.ArtifactRefs = append([]string(nil), snap.ArtifactRefs...)
+		}
+		snaps = append(snaps, snap)
+	}
+	sort.Slice(snaps, func(i, j int) bool {
+		return snapshotUpdatedAt(snaps[i]).After(snapshotUpdatedAt(snaps[j]))
+	})
+	if len(snaps) > limit {
+		snaps = snaps[:limit]
+	}
+	return snaps
 }
 
 // Entries returns a copy of the audit log for the session in recorded
@@ -350,10 +417,11 @@ func FormatRunbookLine(e DemoSessionAuditEntry) string {
 		thread = e.ThreadKey.Normalized()
 	}
 	return fmt.Sprintf(
-		"%s session=%s seq=%d actor=%s thread=%s action=%s url=%s result=%s reason=%s artifacts=%d",
+		"%s session=%s seq=%d mode=%s actor=%s thread=%s action=%s url=%s result=%s reason=%s artifacts=%d",
 		e.RecordedAt.UTC().Format(time.RFC3339),
 		e.SessionID,
 		e.Sequence,
+		emptyDash(e.Mode),
 		emptyDash(e.Actor),
 		thread,
 		emptyDash(string(e.ActionClass)),
@@ -369,4 +437,99 @@ func emptyDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func (s *DemoSessionStore) feedbackPathsLocked(sessionID string) (string, string, string) {
+	root := strings.TrimSpace(s.feedbackRootDir)
+	if root == "" {
+		return "", "", ""
+	}
+	dir := filepath.Join(root, safeDemoSessionPathID(sessionID))
+	return dir, filepath.Join(dir, "audit.jsonl"), filepath.Join(dir, "summary.json")
+}
+
+func (s *DemoSessionStore) persistSessionLocked(sessionID string, rec *demoSessionRecord, entry DemoSessionAuditEntry) {
+	if strings.TrimSpace(s.feedbackRootDir) == "" || rec == nil {
+		return
+	}
+	dir, auditPath, summaryPath := s.feedbackPathsLocked(sessionID)
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	if auditPath != "" {
+		if file, err := os.OpenFile(auditPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+			_ = json.NewEncoder(file).Encode(entry)
+			_ = file.Close()
+		}
+	}
+	if summaryPath == "" {
+		return
+	}
+	snapshot := rec.snapshot
+	snapshot.FeedbackDir = dir
+	snapshot.AuditJSONL = auditPath
+	snapshot.SummaryJSON = summaryPath
+	if len(snapshot.ArtifactRefs) > 0 {
+		snapshot.ArtifactRefs = append([]string(nil), snapshot.ArtifactRefs...)
+	}
+	entries := make([]DemoSessionAuditEntry, len(rec.entries))
+	copy(entries, rec.entries)
+	runbook := make([]string, 0, len(entries))
+	for _, e := range entries {
+		runbook = append(runbook, FormatRunbookLine(e))
+	}
+	payload := DemoSessionFeedbackPackage{
+		Snapshot:     snapshot,
+		Entries:      entries,
+		RunbookLines: runbook,
+		UpdatedAt:    s.now(),
+	}
+	tmp := summaryPath + ".tmp"
+	if file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644); err == nil {
+		encoder := json.NewEncoder(file)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(payload); err == nil {
+			_ = file.Close()
+			_ = os.Rename(tmp, summaryPath)
+			return
+		}
+		_ = file.Close()
+	}
+	_ = os.Remove(tmp)
+}
+
+func safeDemoSessionPathID(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	for _, r := range sessionID {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "._-")
+	if out == "" {
+		return "unknown"
+	}
+	return out
+}
+
+func snapshotUpdatedAt(s DemoSessionStatusSnapshot) time.Time {
+	if !s.EndedAt.IsZero() {
+		return s.EndedAt
+	}
+	if !s.StartedAt.IsZero() {
+		return s.StartedAt.Add(time.Duration(s.EntryCount) * time.Nanosecond)
+	}
+	return time.Time{}
 }

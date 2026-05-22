@@ -56,6 +56,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	tools.Use(h.requireInternalAuth)
 	tools.POST("/:name", h.handleRealtimeWorkspaceTool)
 
+	demoSurface := rg.Group("/demo-surface")
+	demoSurface.Use(h.requireInternalAuth)
+	demoSurface.GET("/sessions/:id/trail", h.handleDemoSurfaceTrail)
+
 	dialog := rg.Group("/dialog")
 	dialog.Use(h.requireInternalAuth)
 	dialog.GET("/providers", h.handleDialogProviders)
