@@ -195,7 +195,7 @@ func (s *Service) upsertIdentityRecord(ctx context.Context, record IdentityUserR
 	if err != nil {
 		return err
 	}
-	if existing, ok, err := store.Get(ctx, record.ID); err == nil && ok {
+	if existing, ok, err := store.Get(ctx, record.ID); err == nil && ok && !isWorkspaceIdentityRecord(record) {
 		record = mergeIdentityRecord(existing, record)
 	}
 	return store.Set(ctx, record.ID, record)
@@ -668,6 +668,10 @@ func normalizeIdentityRecord(record IdentityUserRecord) IdentityUserRecord {
 	record.MeetDisplayNames = compactUniqueIdentityStrings(record.MeetDisplayNames)
 	record.CalendarEmails = compactUniqueIdentityStrings(record.CalendarEmails)
 	record.Sources = compactUniqueIdentityStrings(record.Sources)
+	if record.Role == "current_user" || isWorkspaceIdentityRecord(record) {
+		record.Aliases = filterRuntimeOnlyCurrentUserAliases(record.Aliases)
+		record.MeetDisplayNames = filterRuntimeOnlyCurrentUserAliases(record.MeetDisplayNames)
+	}
 	if record.Role == "" {
 		record.Role = "external"
 	}
@@ -709,7 +713,7 @@ func mergeIdentityRecords(records []IdentityUserRecord) []IdentityUserRecord {
 func mergeIdentityRecord(base IdentityUserRecord, next IdentityUserRecord) IdentityUserRecord {
 	base = normalizeIdentityRecord(base)
 	next = normalizeIdentityRecord(next)
-	if next.ID != "" && strings.HasPrefix(next.ID, "workspace:") {
+	if next.ID != "" && isWorkspaceIdentityRecord(next) {
 		base.ID = next.ID
 	}
 	base.CanonicalName = firstNonEmpty(base.CanonicalName, next.CanonicalName)
@@ -729,6 +733,21 @@ func mergeIdentityRecord(base IdentityUserRecord, next IdentityUserRecord) Ident
 	base.Sources = compactUniqueIdentityStrings(append(base.Sources, next.Sources...))
 	base.UpdatedAt = firstNonEmpty(next.UpdatedAt, base.UpdatedAt)
 	return normalizeIdentityRecord(base)
+}
+
+func isWorkspaceIdentityRecord(record IdentityUserRecord) bool {
+	return strings.HasPrefix(strings.TrimSpace(record.ID), "workspace:")
+}
+
+func filterRuntimeOnlyCurrentUserAliases(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if isRuntimeOnlyCurrentUserAlias(value) {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
 }
 
 func identityRecordKey(record IdentityUserRecord) string {

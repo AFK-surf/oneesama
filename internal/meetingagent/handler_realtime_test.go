@@ -395,6 +395,49 @@ func TestRealtimeCurrentUserDoesNotPreinjectRuntimeOnlyAlias(t *testing.T) {
 	}
 }
 
+func TestRealtimeCurrentUserOverwritesStaleWorkspaceAlias(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(Config{
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		OpenAI: appconfig.OpenAIConfig{
+			CurrentUserName:        "Peng Xiao",
+			CurrentUserEnglishName: "Peng Xiao",
+			CurrentUserEmail:       "peng@example.com",
+			CurrentUserLinear:      "pengxiao",
+			CurrentUserGitHub:      "pengx17",
+		},
+	})
+	if err := service.upsertIdentityRecord(context.Background(), IdentityUserRecord{
+		ID:               "workspace:current_user",
+		CanonicalName:    "老大",
+		PreferredName:    "Peng Xiao",
+		Role:             "current_user",
+		Aliases:          []string{"老大", "Peng Xiao"},
+		MeetDisplayNames: []string{"老大", "Peng Xiao"},
+		Email:            "peng@example.com",
+		Sources:          []string{"workspace_owner_config"},
+	}); err != nil {
+		t.Fatalf("seed stale workspace current user: %v", err)
+	}
+
+	identity := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
+		DisplayName: "老大",
+		Source:      "manual",
+	})
+	if identity["is_current_user"] == true {
+		t.Fatalf("identity = %#v, stale runtime-only alias must be overwritten", identity)
+	}
+	stored, ok, err := service.identityStore.Get(context.Background(), "workspace:current_user")
+	if err != nil || !ok {
+		t.Fatalf("load stored current user ok=%v err=%v", ok, err)
+	}
+	if stored.CanonicalName != "Peng Xiao" || containsString(stored.Aliases, "老大") || containsString(stored.MeetDisplayNames, "老大") {
+		t.Fatalf("stored current user = %#v, want stale runtime-only alias removed", stored)
+	}
+}
+
 func TestRealtimeDemoSurfaceToolsUseBridge(t *testing.T) {
 	t.Parallel()
 
