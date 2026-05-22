@@ -172,6 +172,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+	if stopped := s.stopActiveJoinSessionsForShutdown(ctx); stopped > 0 {
+		s.logger.Info("stopped active join sessions before shutdown", "count", stopped)
+	}
 	if runner, ok := s.meetRunner.(shutdownRunner); ok {
 		return runner.Shutdown(ctx)
 	}
