@@ -611,9 +611,9 @@ func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleR
 		TeamID:         "T123",
 		ChannelIDSnake: "C_TRIAGE",
 		UserIDSnake:    "U_PENG",
-		Text:           "Google 这次到底要发什么模型？",
+		Text:           "<@U_ONEE> Google 这次到底要发什么模型？",
 		TS:             "200.000",
-	}}, "#meeting-avatar: Google 这次到底要发什么模型？")
+	}}, "#meeting-avatar: <@U_ONEE> Google 这次到底要发什么模型？")
 	if err != nil {
 		t.Fatalf("StartSlackTriage: %v", err)
 	}
@@ -1044,6 +1044,98 @@ func TestPersonaAmbientDelegateWorkerDowngradesToSilence(t *testing.T) {
 				t.Fatalf("toolCalls = %#v, want ambient suppression marker %q", toolCalls, tc.wantMatch)
 			}
 		})
+	}
+}
+
+func TestPersonaAmbientDirectReplyDowngradesToSilence(t *testing.T) {
+	cases := []struct {
+		name      string
+		result    SlackPersonaShadowResult
+		messages  []SlackInboundMessage
+		botUserID string
+		wantMatch string
+	}{
+		{
+			name: "speculative_direct_reply_without_bot_mention",
+			result: SlackPersonaShadowResult{
+				Success:     true,
+				RequestID:   "triage:C09LB7V1WGJ:1779446155.743689",
+				ChannelID:   "C09LB7V1WGJ",
+				ThreadTS:    "1779446155.743689",
+				Decision:    persona.DecisionReply,
+				VisibleText: "从之前的讨论看，local VM 文件变更检测原本有一个确认面板，现在可能被「直接完成」取代了。要不要看看最近的 release note 或代码变更？",
+				Reason:      "User is discussing a missing file change panel; memory provides relevant context to comment briefly.",
+			},
+			messages: []SlackInboundMessage{{
+				TeamID:    "T123",
+				ChannelID: "C09LB7V1WGJ",
+				UserID:    "U09KY0GE28K",
+				Text:      "vm 用得少了？",
+				TS:        "1779446155.743689",
+				ThreadTS:  "1779446155.743689",
+			}},
+			botUserID: "U0AP5UFU0FR",
+			wantMatch: "ambient_speculative_direct_reply",
+		},
+		{
+			name: "mentions_another_user_without_bot",
+			result: SlackPersonaShadowResult{
+				Success:     true,
+				RequestID:   "triage:C09KVPBMLJ3:1779438182.306539",
+				ChannelID:   "C09KVPBMLJ3",
+				ThreadTS:    "1779438182.306539",
+				Decision:    persona.DecisionReply,
+				VisibleText: "这个压缩视频慢可能是因为 ffmpeg 转码。",
+			},
+			messages: []SlackInboundMessage{{
+				TeamID:    "T123",
+				ChannelID: "C09KVPBMLJ3",
+				UserID:    "U09L4CPK3BL",
+				Text:      "<https://app.cue.surf/c/eaa6adb7-129d-4542-b36d-c430d311a23b> 看看这个压缩视频的为什么这么慢，是不是在找工具 <@U09L0U0SJ3F> :eyes:",
+				TS:        "1779442587.111859",
+				ThreadTS:  "1779438182.306539",
+			}},
+			botUserID: "U0AP5UFU0FR",
+			wantMatch: "mentioned_other_user_without_bot",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			downgraded, toolCalls := applyPersonaAmbientDirectReplyDisposition(tc.result, tc.messages, tc.botUserID)
+			if downgraded.Decision != persona.DecisionStaySilent {
+				t.Fatalf("Decision = %q, want stay_silent", downgraded.Decision)
+			}
+			if downgraded.VisibleText != "" {
+				t.Fatalf("VisibleText = %q, want empty", downgraded.VisibleText)
+			}
+			if len(toolCalls) != 1 || toolCalls[0].Action != "persona_reply_ambient_silent" || !strings.Contains(toolCalls[0].Result, tc.wantMatch) {
+				t.Fatalf("toolCalls = %#v, want ambient direct reply suppression marker %q", toolCalls, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestPersonaAmbientDirectReplyKeepsAddressedBotAnswer(t *testing.T) {
+	result := SlackPersonaShadowResult{
+		Success:     true,
+		RequestID:   "triage:C123:177.123",
+		ChannelID:   "C123",
+		ThreadTS:    "177.123",
+		Decision:    persona.DecisionReply,
+		VisibleText: "看起来根因是重复 Socket Mode listener 抢走了 Slack interaction。",
+	}
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Text:      "<@U0AP5UFU0FR> 为什么 Join with realtime 点完会回到默认卡片？",
+		TS:        "177.123",
+		ThreadTS:  "177.123",
+	}}
+	got, toolCalls := applyPersonaAmbientDirectReplyDisposition(result, messages, "U0AP5UFU0FR")
+	if got.Decision != persona.DecisionReply || got.VisibleText != result.VisibleText || len(toolCalls) != 0 {
+		t.Fatalf("result=%#v toolCalls=%#v, want addressed bot reply preserved", got, toolCalls)
 	}
 }
 

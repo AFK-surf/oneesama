@@ -169,6 +169,9 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		var cannedToolCalls []SlackTriageToolCall
 		result, cannedToolCalls = applyPersonaCannedRefusalDisposition(result)
 		dispositionToolCalls = append(dispositionToolCalls, cannedToolCalls...)
+		var directReplyToolCalls []SlackTriageToolCall
+		result, directReplyToolCalls = applyPersonaAmbientDirectReplyDisposition(result, messages, s.botUserID)
+		dispositionToolCalls = append(dispositionToolCalls, directReplyToolCalls...)
 		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
 		var reactionGuardToolCalls []SlackTriageToolCall
 		result, reactionGuardToolCalls = applyPersonaProductLinkReactionDisposition(result, request)
@@ -216,6 +219,9 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		var cannedToolCalls []SlackTriageToolCall
 		result, cannedToolCalls = applyPersonaCannedRefusalDisposition(result)
 		dispositionToolCalls = append(dispositionToolCalls, cannedToolCalls...)
+		var directReplyToolCalls []SlackTriageToolCall
+		result, directReplyToolCalls = applyPersonaAmbientDirectReplyDisposition(result, messages, s.botUserID)
+		dispositionToolCalls = append(dispositionToolCalls, directReplyToolCalls...)
 		result, policyToolCalls := s.applyPersonaSecretaryDelegationPolicy(result)
 		var reactionGuardToolCalls []SlackTriageToolCall
 		result, reactionGuardToolCalls = applyPersonaProductLinkReactionDisposition(result, request)
@@ -389,6 +395,87 @@ func applyPersonaAmbientDelegationDisposition(result SlackPersonaShadowResult, m
 		Brief:   "Persona delegate_worker suppressed for ambient/non-addressed triage",
 		Result:  reason,
 	}}
+}
+
+func applyPersonaAmbientDirectReplyDisposition(result SlackPersonaShadowResult, messages []SlackInboundMessage, botUserID string) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionReply || strings.TrimSpace(result.VisibleText) == "" {
+		return result, nil
+	}
+	reason := personaAmbientDirectReplySilentReason(result, messages, botUserID)
+	if reason == "" {
+		return result, nil
+	}
+	result.Decision = persona.DecisionStaySilent
+	result.VisibleText = ""
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "direct reply suppressed because the Slack item was not addressed to Oneesama"))
+	return result, []SlackTriageToolCall{{
+		Tool:    "slack_api",
+		Action:  "persona_reply_ambient_silent",
+		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+		Success: true,
+		Brief:   "Persona direct reply suppressed for ambient/non-addressed triage",
+		Result:  reason,
+	}}
+}
+
+func personaAmbientDirectReplySilentReason(result SlackPersonaShadowResult, messages []SlackInboundMessage, botUserID string) string {
+	if slackMessagesMentionOtherUsersWithoutBot(messages, botUserID) {
+		return "mentioned_other_user_without_bot"
+	}
+	if personaMessagesAddressBot(messages, botUserID) {
+		return ""
+	}
+	if slackMessagesHaveFetchableExternalLinks(messages) {
+		return ""
+	}
+	text := strings.Join([]string{
+		strings.TrimSpace(result.VisibleText),
+		strings.TrimSpace(result.Reason),
+	}, "\n")
+	if personaDirectReplyLooksSpeculative(text) {
+		return "ambient_speculative_direct_reply"
+	}
+	if slackTriageDirectRepliesShouldStaySilent(messages, botUserID) {
+		return "ambient_direct_reply_without_bot_mention"
+	}
+	return ""
+}
+
+func personaMessagesAddressBot(messages []SlackInboundMessage, botUserID string) bool {
+	if strings.TrimSpace(botUserID) == "" {
+		return false
+	}
+	for _, message := range messages {
+		if slackTextMentionsUser(message.Text, botUserID) {
+			return true
+		}
+	}
+	return false
+}
+
+func personaDirectReplyLooksSpeculative(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	return slackVisibleTextContainsAny(lower, []string{
+		"可能",
+		"很可能",
+		"大概率",
+		"像是",
+		"应该是",
+		"要不要看看",
+		"看看最近",
+		"推断",
+		"猜测",
+		"speculate",
+		"guess",
+		"likely",
+		"probably",
+		"maybe",
+		"might be",
+		"could be",
+	})
 }
 
 func personaAmbientDelegationSilentReason(result SlackPersonaShadowResult, messages []SlackInboundMessage, botUserID string) string {

@@ -905,7 +905,12 @@ func slackDailyDiaryLowSignal(value string) bool {
 	lowSignalMarkers := []string{
 		"routine automated daily",
 		"automated daily diary",
+		"daily notes",
+		"candidate task review",
 		"pi-first foreground triage pending",
+		"persona reaction",
+		"persona delegated worker",
+		"persona runtime foreground",
 		"persona foreground orphaned",
 		"decode oneesama pi decision json",
 		"call oneesama pi model",
@@ -931,6 +936,11 @@ func slackDailyDiaryLowSignal(value string) bool {
 		"without more context",
 		"let me look",
 		"tool calls:",
+		"slack_api",
+		"thread_ts",
+		"tool_capab",
+		"reaction acknowledges",
+		"reply in thread",
 		"suggest_acti",
 		"未明确请求",
 		"没有明确",
@@ -952,6 +962,12 @@ func slackDailyDiaryLowSignal(value string) bool {
 		if strings.Contains(text, marker) {
 			return true
 		}
+	}
+	if strings.HasPrefix(text, "#c0") || strings.HasPrefix(text, "[177") {
+		return true
+	}
+	if len([]rune(strings.TrimSpace(value))) < 12 && !slackDailyDiaryContainsAny(text, "fix", "ship", "release", "pr #", "ci", "修复", "根因", "上线", "发布") {
+		return true
 	}
 	return false
 }
