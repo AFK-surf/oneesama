@@ -1441,6 +1441,60 @@ Tana is adding meeting workflows, agenda notes, and collaboration features.`))
 	}
 }
 
+func TestSlackTriageProductLinkReactionAlreadyHandledDoesNotDelegate(t *testing.T) {
+	request := persona.Request{
+		Event: persona.Event{Text: "review 一下 <https://github.com/AFK-surf/cue/pull/2033>"},
+		Context: []persona.ContextItem{{
+			Kind: "external_link_context",
+			Text: "1. https://github.com/AFK-surf/cue/pull/2033\n   title: PR #2033",
+		}},
+		DynamicContext: []persona.DynamicContextEnvelope{{
+			Kind:    "workspace_triage_policy",
+			Content: "For this workspace, lightweight source-backed comments are welcome for product-adjacent links.",
+		}},
+	}
+	result := SlackPersonaShadowResult{
+		Success:   true,
+		Decision:  persona.DecisionReact,
+		Reason:    "Claude already approved PR #2033 in-thread; request is fully handled and no action needed.",
+		Reactions: []string{"white_check_mark"},
+		reactionRecords: []persona.ReactionIntent{{
+			Emoji:      "white_check_mark",
+			Confidence: 0.9,
+			Reason:     "acknowledge completed review",
+		}},
+	}
+
+	updated, calls := applyPersonaProductLinkReactionDisposition(result, request)
+	if updated.Decision != persona.DecisionReact {
+		t.Fatalf("Decision = %q, want reaction preserved", updated.Decision)
+	}
+	if len(updated.workerRecords) != 0 || len(updated.WorkerRequests) != 0 {
+		t.Fatalf("worker records = %#v summaries=%#v, want no delegate", updated.workerRecords, updated.WorkerRequests)
+	}
+	if len(calls) != 1 || calls[0].Action != "product_link_reaction_preserved_already_handled" || !strings.Contains(calls[0].Result, "already approved") {
+		t.Fatalf("tool calls = %#v, want already-handled product-link guard", calls)
+	}
+}
+
+func TestPersonaDelegatedWorkerDefaultsToReadOnlyUnlessExplicitlyAuthorized(t *testing.T) {
+	lookup := personaDelegatedWorkerSessionKind(persona.WorkerRequest{
+		Prompt:  "Please inspect this PR review thread and summarize the facts.",
+		Context: map[string]any{"delegation_scope": "review_followup"},
+	})
+	if lookup != agentrunner.SessionKindSecretaryLookup {
+		t.Fatalf("session kind = %q, want secretary_lookup for untrusted delegated worker", lookup)
+	}
+
+	code := personaDelegatedWorkerSessionKind(persona.WorkerRequest{
+		Prompt:  "Peng explicitly asked: fix this Oneesama bug in code.",
+		Context: map[string]any{"delegation_scope": "implementation"},
+	})
+	if code != agentrunner.SessionKindSlack {
+		t.Fatalf("session kind = %q, want slack_case for explicitly authorized code work", code)
+	}
+}
+
 func TestProductLinkReactionGuardFollowsWorkspacePolicy(t *testing.T) {
 	request := persona.Request{
 		Event: persona.Event{Text: "转业了 https://tana.inc/"},

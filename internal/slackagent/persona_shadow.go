@@ -224,8 +224,10 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 }
 
 func (s *Service) applySlackPersonaForegroundDispositions(result SlackPersonaShadowResult, request persona.Request, messages []SlackInboundMessage) slackPersonaForegroundDisposition {
-	result, toolCalls := applyPersonaSecretaryLookupDisposition(result, request)
+	result, toolCalls := applyPersonaWorkerReturnNoDelegateDisposition(result, request)
 	var next []SlackTriageToolCall
+	result, next = applyPersonaSecretaryLookupDisposition(result, request)
+	toolCalls = append(toolCalls, next...)
 	result, next = applyPersonaCompletedDelegationDisposition(result)
 	toolCalls = append(toolCalls, next...)
 	result, next = applyPersonaAmbientDelegationDisposition(result, messages, s.botUserID)
@@ -306,6 +308,25 @@ func (s *Service) applyPersonaSecretaryDelegationPolicy(result SlackPersonaShado
 		}
 	}
 	return result, toolCalls
+}
+
+func applyPersonaWorkerReturnNoDelegateDisposition(result SlackPersonaShadowResult, request persona.Request) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !personaRequestIsWorkerReturn(request) || !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionDelegateWorker {
+		return result, nil
+	}
+	result.Decision = persona.DecisionStaySilent
+	result.VisibleText = ""
+	result.workerRecords = nil
+	result.WorkerRequests = nil
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "worker-result second pass cannot recursively delegate"))
+	return result, []SlackTriageToolCall{{
+		Tool:    "persona_runtime",
+		Action:  "worker_result_delegate_blocked_silent",
+		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+		Success: true,
+		Brief:   "Persona worker-result second pass cannot delegate again",
+		Result:  "worker_return_second_pass",
+	}}
 }
 
 func applyPersonaCompletedDelegationDisposition(result SlackPersonaShadowResult) (SlackPersonaShadowResult, []SlackTriageToolCall) {
@@ -552,6 +573,9 @@ func applyPersonaSecretaryLookupDisposition(result SlackPersonaShadowResult, req
 	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionStaySilent || len(result.workerRecords) > 0 {
 		return result, nil
 	}
+	if personaRequestIsWorkerReturn(request) {
+		return result, nil
+	}
 	if !slackPersonaRequestNeedsSecretaryLookup(request) {
 		return result, nil
 	}
@@ -608,8 +632,21 @@ func applyPersonaProductLinkReactionDisposition(result SlackPersonaShadowResult,
 	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionReact || len(result.reactionRecords) == 0 {
 		return result, nil
 	}
+	if personaRequestIsWorkerReturn(request) {
+		return result, nil
+	}
 	if !slackPersonaRequestNeedsProductLinkCommentary(request) {
 		return result, nil
+	}
+	if marker := personaCompletedDelegationMarker(result); marker != "" {
+		return result, []SlackTriageToolCall{{
+			Tool:    "persona_runtime",
+			Action:  "product_link_reaction_preserved_already_handled",
+			Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+			Success: true,
+			Brief:   "Product-link reaction was not upgraded because the thread is already handled",
+			Result:  marker,
+		}}
 	}
 	worker := persona.WorkerRequest{
 		ID:     "product-link-commentary-lookup",
@@ -640,6 +677,11 @@ func applyPersonaProductLinkReactionDisposition(result SlackPersonaShadowResult,
 		Brief:   "Product-adjacent link reaction upgraded to secretary lookup",
 		Result:  "workspace policy requires source-backed commentary or lookup before visible disposition",
 	}}
+}
+
+func personaRequestIsWorkerReturn(request persona.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(request.Event.Kind), "slack_worker_result_return") ||
+		boolFromAny(request.Metadata["worker_return_second_pass"], false)
 }
 
 func slackPersonaVisibleTextLooksLikeCannedSecretaryRefusal(text string) bool {
@@ -1037,12 +1079,24 @@ func enrichPersonaSecretaryLookupWorkerRequest(worker persona.WorkerRequest, req
 }
 
 func personaDelegatedWorkerSessionKind(request persona.WorkerRequest) string {
+	if value := strings.TrimSpace(firstNonEmpty(
+		stringFromAny(request.Context["session_kind"]),
+		stringFromAny(request.Context["sessionKind"]),
+	)); value != "" {
+		return agentrunner.NormalizeSessionKind(value)
+	}
 	scope := strings.ToLower(strings.TrimSpace(firstNonEmpty(
 		stringFromAny(request.Context["delegation_scope"]),
 		stringFromAny(request.Context["scope"]),
 		stringFromAny(request.Context["worker_scope"]),
 	)))
 	if scope == "secretary_lookup" {
+		return agentrunner.SessionKindSecretaryLookup
+	}
+	if scope == "demo_execution" || scope == "demo-execution" {
+		return agentrunner.SessionKindDemoExecution
+	}
+	if !personaDelegatedWorkerExplicitlyAuthorized(strings.TrimSpace(request.Prompt) + " " + personaWorkerRequestContextText(request.Context)) {
 		return agentrunner.SessionKindSecretaryLookup
 	}
 	return agentrunner.SessionKindSlack

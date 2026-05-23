@@ -45,12 +45,15 @@ func buildDemoSurfacePrompt(input StartInput, contextJSON string) string {
 }
 
 func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
+	if isSecretaryLookupStart(input) {
+		contextJSON = secretaryLookupContextJSON(input.Context, contextJSON)
+	}
 	assistantContext := firstPromptString(
 		stringFromContext(input.Context, "slackAssistantPrompt", "slack_assistant_prompt"),
 		stringFromNestedContext(input.Context, "slackAppMention", "prompt", "Prompt"),
 	)
 	sections := []string{
-		cueboardDefaultSystemPromptForAgentRunner(),
+		cueboardDefaultSystemPromptForAgentRunnerForInput(input),
 		"## Oneesama delivery adapter\n- do not expose internal worker/job/delegate mechanics to users\n- do not frame normal Slack requests as internal repository work\n- for workspace-history questions, prefer injected related memory evidence over local repository search and cite the source when using it\n- for long-form writing or document revisions, produce clean Markdown; the delivery layer will publish it as a Slack Canvas\n- keep thread replies concise when the long-form content belongs in Canvas",
 		"## Identity boundary\nYou are a delegated execution component inside Oneesama. If a user asks what Oneesama is, answer from the `oneesamaIdentity` context: Oneesama's foreground / triage runtime is PiAgent, while Codex or browser workers are execution components. Do not answer identity questions by describing only your local worker process, Codex CLI banner, provider, or another bot's historical self-description from memory. It is OK to disclose this layered implementation when asked, but be explicit about the layer.",
 		"## Slack tool evidence\nUse injected Slack thread context, related memory evidence, and explicit tool/evidence blocks as the source of truth. Do not attempt to reach localhost, loopback URLs, or internal gateways yourself. If required tool evidence is missing, say you cannot safely verify that fact yet and answer only from available evidence. Do not turn \"no evidence found\" into a negative product claim such as unsupported, unavailable, or not supported; say evidence is missing or stay silent when no useful answer is possible.",
@@ -81,6 +84,63 @@ func buildSlackAssistantPrompt(input StartInput, contextJSON string) string {
 	}
 	sections = append(sections, "Context:\n"+contextJSON)
 	return strings.Join(sections, "\n\n")
+}
+
+func cueboardDefaultSystemPromptForAgentRunnerForInput(input StartInput) string {
+	if !isSecretaryLookupStart(input) {
+		return cueboardDefaultSystemPromptForAgentRunner()
+	}
+	return `You are a read-only secretary lookup worker operating inside a Slack workspace.
+
+Your job:
+- read supplied Slack thread context, fetched links, files, and memory evidence
+- use only read-only lookup tools for facts
+- return evidence-backed findings to Oneesama; do not send user-visible messages yourself
+- do not edit repositories, create canvases, schedule follow-ups, write memory, or trigger external side effects
+
+## Dispatcher tool bridge
+If one more read-only result is essential before you can answer safely, output ONLY a dispatcher request block and no user-facing prose:
+
+<oneesama_tool_request>
+{"calls":[{"tool":"memory_search","args":{"query":"<specific query>","limit":5}}],"reason":"why this evidence is needed"}
+</oneesama_tool_request>
+
+Supported dispatcher tools for this secretary_lookup worker: read_doc, memory_search, memory_get, person_memory, exa_search, exa_contents, and slack_api fetch/read methods such as conversations.replies, slack.fetchCanvas, slack.fetchImage, and slack.fetchFile.
+
+Do not request message posting, reactions, file upload, canvas creation/editing, scheduling, status, heartbeat, memory writes, credentialed third-party tools, shell, repository edit, or browser-control work from this worker.
+
+## Evidence rules
+- Do not stop at the first profile/article excerpt when read-only links expose submissions, comments, source links, repository links, or author pages.
+- If required evidence is missing, say what is missing; do not guess.
+- Do not turn missing evidence into a negative product claim.
+- Return only JSON when the handoff asks for JSON.`
+}
+
+func secretaryLookupContextJSON(context map[string]any, fallback string) string {
+	if len(context) == 0 {
+		return fallback
+	}
+	sanitized := cloneContextMap(context)
+	if caps, ok := sanitized["session_capabilities"].(SessionCapabilities); ok {
+		caps.BlockedTools = nil
+		sanitized["session_capabilities"] = caps
+	}
+	payload, err := json.MarshalIndent(sanitized, "", "  ")
+	if err != nil {
+		return fallback
+	}
+	return string(payload)
+}
+
+func cloneContextMap(context map[string]any) map[string]any {
+	if len(context) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(context))
+	for key, value := range context {
+		out[key] = value
+	}
+	return out
 }
 
 func handoffContextJSON(context map[string]any) string {

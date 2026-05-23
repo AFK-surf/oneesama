@@ -73,15 +73,26 @@ func TestBuildPromptUsesReadOnlySecretaryBoundaryForSecretaryLookup(t *testing.T
 	}, SessionKindSecretaryLookup))
 
 	for _, want := range []string{
-		"workspace assistant operating inside a Slack workspace",
+		"read-only secretary lookup worker operating inside a Slack workspace",
 		"Secretary lookup boundary",
 		"read-only secretary lookup",
+		"Supported dispatcher tools for this secretary_lookup worker",
 		"do not edit repos",
 		"do not edit repos, schedule follow-ups, create canvases, or send Slack/Meet messages",
 		`"session_kind": "secretary_lookup"`,
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"memory_write",
+		"runtime_status",
+		"heartbeat_log",
+		"suggest_action",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("secretary lookup prompt exposed forbidden tool %q:\n%s", forbidden, prompt)
 		}
 	}
 }
