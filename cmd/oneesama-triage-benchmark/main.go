@@ -37,6 +37,8 @@ var (
 	slackChannelIDPattern = regexp.MustCompile(`(?:<#|#)([CG][A-Z0-9]+)`)
 )
 
+const benchmarkNameResolutionTimeout = 25 * time.Second
+
 type benchmarkReport struct {
 	GeneratedAt      string                                    `json:"generatedAt"`
 	VariantID        string                                    `json:"variantId"`
@@ -547,7 +549,12 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	report.VariantSummaries = buildVariantSummaries(variants, report.Rows)
 	if collectDetail {
 		attachHistoricalWorkerResults(ctx, &detail, workerJobsInput, stderr)
-		detail.NameMap = resolveSlackNames(ctx, token, detail.Rows, stderr)
+		nameCtx, nameCancel := context.WithTimeout(ctx, benchmarkNameResolutionTimeout)
+		detail.NameMap = resolveSlackNames(nameCtx, token, detail.Rows, stderr)
+		if nameCtx.Err() != nil {
+			fmt.Fprintf(stderr, "oneesama-triage-benchmark: slack name resolution stopped after %s: %v\n", benchmarkNameResolutionTimeout, nameCtx.Err())
+		}
+		nameCancel()
 	}
 
 	var data []byte
