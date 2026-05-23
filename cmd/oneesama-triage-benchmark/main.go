@@ -337,7 +337,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs.StringVar(&variantID, "variant-id", "current", "Variant/config id recorded in the report.")
 	fs.DurationVar(&timeout, "timeout", 10*time.Minute, "Overall benchmark timeout.")
 	fs.DurationVar(&dryRunTimeout, "dry-run-timeout", 90*time.Second, "HTTP timeout for each /slack/triage/run dry-run request.")
-	fs.IntVar(&parallel, "parallel", 1, "Number of concurrent dry-run requests. Use cautiously against live services.")
+	fs.IntVar(&parallel, "parallel", 5, "Number of concurrent dry-run requests. Use cautiously against live services.")
 	fs.BoolVar(&serveReview, "serve-review", false, "Start a temporary local review UI after the dry-run completes. Serves embedded review.html, detail.json, summary.json, and accepts human-review POSTs.")
 	fs.StringVar(&reviewListen, "review-listen", "127.0.0.1:0", "Listen address for --serve-review.")
 	fs.StringVar(&reviewOutput, "review-output", "", "Path to save human review JSON submitted by --serve-review. Defaults next to --detail-output or the current directory.")
