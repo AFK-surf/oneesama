@@ -138,3 +138,45 @@ func TestMeetingActionFollowupsUseDistinctSourceRefs(t *testing.T) {
 		}
 	}
 }
+
+func TestMeetingActionFollowupsDoNotSurfacePublicHeartbeat(t *testing.T) {
+	t.Parallel()
+
+	poster := &recordingPoster{}
+	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
+	service.enqueueMeetingActionFollowups(context.Background(), NormalizedMeetingWebhookPayload{
+		MeetingID: 42,
+		Title:     "Google Meet",
+		Summary: &MeetingSummaryData{
+			ActionItems: []MeetingActionItem{
+				{Title: "Keep testing the permission flow"},
+			},
+		},
+	}, MeetingSlackRef{ChannelID: "C123", ThreadTS: "123.456"})
+
+	open, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups(open): %v", err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("open followups = %#v, want one meeting action followup", open)
+	}
+
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: open[0].ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, meeting action followup should not post public heartbeat", got)
+	}
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "meeting_action_followup_not_user_visible" || response.Skipped[0].DeliveredSurface != "" {
+		t.Fatalf("response = %#v, want blocked meeting action followup without delivered surface", response)
+	}
+	updated, err := service.followups.GetFollowup(context.Background(), open[0].ID)
+	if err != nil {
+		t.Fatalf("GetFollowup: %v", err)
+	}
+	if updated == nil || updated.Status != "done" || stringFromAny(updated.Metadata["resolution"]) != "meeting_action_followup_not_user_visible" {
+		t.Fatalf("updated followup = %#v, want closed as non-user-visible", updated)
+	}
+}

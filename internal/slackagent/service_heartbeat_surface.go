@@ -187,6 +187,9 @@ func heartbeatFollowupClosesAfterBlockedSurface(followup SlackHeartbeatFollowup,
 	if heartbeatFollowupIsInternalTriageRetry(&followup) && blockReason == "internal_triage_retry_not_user_visible" {
 		return true
 	}
+	if heartbeatFollowupIsMeetingActionItem(&followup) && blockReason == "meeting_action_followup_not_user_visible" {
+		return true
+	}
 	return heartbeatFollowupClosesAfterSurface(followup) && blockReason == "thread_has_newer_activity"
 }
 
@@ -200,6 +203,17 @@ func heartbeatFollowupIsInternalTriageRetry(followup *SlackHeartbeatFollowup) bo
 	}
 	classification := strings.TrimSpace(stringFromAny(followup.Metadata["classification"]))
 	return classification == "triage_timeout_needs_retry" || classification == "triage_empty_final_needs_retry"
+}
+
+func heartbeatFollowupIsMeetingActionItem(followup *SlackHeartbeatFollowup) bool {
+	if followup == nil {
+		return false
+	}
+	if strings.TrimSpace(stringFromAny(followup.Metadata["source"])) == "meeting_action_item" {
+		return true
+	}
+	sourceRef := strings.TrimSpace(followup.SourceRef)
+	return strings.HasPrefix(sourceRef, "meeting:") && strings.Contains(sourceRef, ":action:")
 }
 
 type heartbeatDeliveryPlan struct {
@@ -255,6 +269,10 @@ func (s *Service) planHeartbeatDelivery(ctx context.Context, requested string, f
 	}
 	if heartbeatFollowupIsInternalTriageRetry(followup) && plan.DeliveredSurface != "" {
 		heartbeatBlockOrFallbackToDM(&plan, "internal_triage_retry_not_user_visible", false)
+		return plan, nil
+	}
+	if heartbeatFollowupIsMeetingActionItem(followup) && plan.DeliveredSurface != "" {
+		heartbeatBlockOrFallbackToDM(&plan, "meeting_action_followup_not_user_visible", false)
 		return plan, nil
 	}
 
