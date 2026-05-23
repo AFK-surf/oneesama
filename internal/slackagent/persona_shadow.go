@@ -776,6 +776,12 @@ func slackMessagesLookLikePositiveStatusSummary(messages []SlackInboundMessage) 
 		"status summary",
 		"ship summary",
 		"shipping summary",
+		"团队日报",
+		"今日日记",
+		"录了一个",
+		"录了个",
+		"演示",
+		"demo",
 	})
 	if !hasSummaryMarker {
 		return false
@@ -793,6 +799,10 @@ func slackMessagesLookLikePositiveStatusSummary(messages []SlackInboundMessage) 
 		"shipped",
 		"released",
 		"green",
+		"computer use",
+		"iphone mirroring",
+		"shortcut",
+		"创建",
 	})
 }
 
