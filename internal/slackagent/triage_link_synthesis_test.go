@@ -91,7 +91,7 @@ func TestSharedLinkSynthesisRejectsLowSignalSocialStatus(t *testing.T) {
 		Title:   `Fiachra on X: "the era of discomorphism has arrived"`,
 		Excerpt: "Log in Sign up Post Conversation the era of discomorphism has arrived Trending now Terms of Service Privacy Policy Cookie Policy",
 		Source:  "jina_reader",
-	}})
+	}}, false)
 	if ok {
 		t.Fatal("low-signal X status should not trigger deterministic link synthesis")
 	}
@@ -105,8 +105,26 @@ func TestSharedLinkSynthesisRejectsGitHubChromeBoilerplate(t *testing.T) {
 		Title:   "AI-Articles/llm-thinking.pdf at main · hangli-hl/AI-Articles",
 		Excerpt: "AI CODE CREATION GitHub Copilot Write better code with AI GitHub Spark Build and deploy intelligent apps GitHub Models Manage and compare prompts MCP Registry New Integrate external tools Developer workflow",
 		Source:  "jina_reader",
-	}})
+	}}, false)
 	if ok {
 		t.Fatal("GitHub chrome/marketing boilerplate should not be treated as linked article content")
+	}
+}
+
+func TestSharedLinkSynthesisAllowsShortContextForExplicitAsk(t *testing.T) {
+	t.Parallel()
+
+	action, ok := slackTriageSharedLinkSynthesisAction("C123", "100.000", []SlackInboundMessage{{
+		ChannelID: "C123",
+		Text:      "看看这个产品链接，给我一句有证据的评论：https://example.com/product",
+		TS:        "100.000",
+	}}, []SlackExternalLinkContext{{
+		URL:     "https://example.com/product",
+		Title:   "Example Product",
+		Excerpt: "A short but concrete product page excerpt.",
+		Source:  "reader",
+	}}, "")
+	if !ok || strings.TrimSpace(action.Message) == "" {
+		t.Fatalf("action=%#v ok=%v, want explicit short-context link synthesis", action, ok)
 	}
 }

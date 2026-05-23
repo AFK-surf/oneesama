@@ -1524,6 +1524,127 @@ func TestProductLinkReactionGuardFollowsWorkspacePolicy(t *testing.T) {
 	}
 }
 
+func TestProductLinkSynthesisDispositionConvertsDelegateToVisibleReply(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C_PAPERS",
+		UserID:    "U_PENG",
+		Text:      "<https://arxiv.org/html/2510.04607v2>",
+		TS:        "1779434704.255149",
+	}, {
+		TeamID:    "T123",
+		ChannelID: "C_PAPERS",
+		UserID:    "U_TEAMMATE",
+		Text:      "写成论文可还行",
+		TS:        "1779434750.000000",
+	}}
+	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_PAPERS",
+		ThreadTS:  "1779434704.255149",
+		Messages:  messages,
+		Digest:    "#papers: https://arxiv.org/html/2510.04607v2\n写成论文可还行",
+		ExternalLinks: []SlackExternalLinkContext{{
+			URL:     "https://arxiv.org/html/2510.04607v2",
+			Title:   "A Benchmark for Evaluating Agentic Systems",
+			Excerpt: "The paper evaluates AI agent systems, tool use, planning, reliability, and benchmark methodology across multiple tasks.",
+			Source:  "reader",
+		}},
+		WorkspaceTriagePolicy: "For this workspace, lightweight source-backed comments are welcome for product-adjacent AI agent papers and coding-agent ecosystem links.",
+	})
+	result, calls := applyPersonaProductLinkSynthesisDisposition(SlackPersonaShadowResult{
+		Success:       true,
+		Decision:      persona.DecisionDelegateWorker,
+		Reason:        "Paper link matches workspace policy but Memory evidence is missing.",
+		Confidence:    0.72,
+		workerRecords: []persona.WorkerRequest{{ID: "lookup", Kind: "codex"}},
+		WorkerRequests: []string{
+			"codex: lookup",
+		},
+	}, request, messages)
+
+	if result.Decision != persona.DecisionReply || strings.TrimSpace(result.VisibleText) == "" {
+		t.Fatalf("result=%#v, want visible reply", result)
+	}
+	if len(result.workerRecords) != 0 || len(result.WorkerRequests) != 0 {
+		t.Fatalf("worker records = %#v summaries=%#v, want cleared", result.workerRecords, result.WorkerRequests)
+	}
+	if !strings.Contains(result.VisibleText, "A Benchmark for Evaluating Agentic Systems") {
+		t.Fatalf("VisibleText = %q, want synthesized paper title", result.VisibleText)
+	}
+	if len(result.EvidenceAnchors) < 2 || result.EvidenceAnchors[1].Kind != slackVisibleEvidenceKindFetchedLink {
+		t.Fatalf("evidence anchors = %#v, want fetched-link evidence", result.EvidenceAnchors)
+	}
+	if len(calls) != 1 || calls[0].Action != "product_link_synthesized_visible_reply" {
+		t.Fatalf("tool calls = %#v, want synthesis marker", calls)
+	}
+}
+
+func TestProductLinkSynthesisDispositionKeepsIdentityLookupDelegated(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C_TRIAGE",
+		UserID:    "U_PENG",
+		Text:      "https://news.ycombinator.com/user?id=Johnson8053 这是谁",
+		TS:        "500.000",
+	}}
+	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_TRIAGE",
+		ThreadTS:  "500.000",
+		Messages:  messages,
+		Digest:    "#product: https://news.ycombinator.com/user?id=Johnson8053 这是谁",
+		ExternalLinks: []SlackExternalLinkContext{{
+			URL:     "https://news.ycombinator.com/user?id=Johnson8053",
+			Title:   "Profile: Johnson8053 | Hacker News",
+			Excerpt: "user: Johnson8053 created: September 20, 2024 karma:33 about: submissions comments favorites",
+			Source:  "reader",
+		}},
+		WorkspaceTriagePolicy: "For this workspace, lightweight source-backed comments are welcome for product-adjacent links.",
+	})
+	result, calls := applyPersonaProductLinkSynthesisDisposition(SlackPersonaShadowResult{
+		Success:       true,
+		Decision:      persona.DecisionDelegateWorker,
+		workerRecords: []persona.WorkerRequest{{ID: "lookup", Kind: "codex"}},
+	}, request, messages)
+
+	if result.Decision != persona.DecisionDelegateWorker || len(result.workerRecords) != 1 {
+		t.Fatalf("result=%#v, want identity lookup to remain delegated", result)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("tool calls = %#v, want no synthesis for identity lookup", calls)
+	}
+}
+
+func TestExplicitSmokeCommandDispositionConvertsSilentToAck(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C_BENCH",
+		UserID:    "U_PENG",
+		Text:      "@oneesama smoke：用一句话确认你看到了这条，不要展开。",
+		TS:        "1779450005.000005",
+	}}
+	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_BENCH",
+		ThreadTS:  "1779450005.000005",
+		Messages:  messages,
+		Digest:    "#bench: @oneesama smoke：用一句话确认你看到了这条，不要展开。",
+	})
+	result, calls := applyPersonaExplicitSmokeCommandDisposition(SlackPersonaShadowResult{
+		Success:    true,
+		Decision:   persona.DecisionStaySilent,
+		Confidence: 0.4,
+	}, request, messages)
+
+	if result.Decision != persona.DecisionReply || result.VisibleText != "看到了。" {
+		t.Fatalf("result=%#v, want short ack reply", result)
+	}
+	if len(result.EvidenceAnchors) != 1 || result.EvidenceAnchors[0].Kind != slackVisibleEvidenceKindExplicitUserCommand {
+		t.Fatalf("anchors=%#v, want explicit command anchor", result.EvidenceAnchors)
+	}
+	if len(calls) != 1 || calls[0].Action != "explicit_smoke_command_visible_reply" {
+		t.Fatalf("tool calls=%#v, want explicit smoke marker", calls)
+	}
+}
+
 func hasTriageToolCall(calls []SlackTriageToolCall, tool string, action string) bool {
 	for _, call := range calls {
 		if call.Tool == tool && call.Action == action && call.Success {

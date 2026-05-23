@@ -81,10 +81,11 @@ func slackTriageSharedLinkSynthesisAction(channelID string, threadTS string, mes
 		return SlackTriageDecisionAction{}, false
 	}
 	messageText := joinSlackMessageTexts(messages)
-	if !workspacePolicyEnablesSharedLinkSynthesis(workspacePolicy) && !slackMessageExplicitlyRequestsLinkSynthesis(messageText) {
+	explicitAsk := slackMessageExplicitlyRequestsLinkSynthesis(messageText)
+	if !workspacePolicyEnablesSharedLinkSynthesis(workspacePolicy) && !explicitAsk {
 		return SlackTriageDecisionAction{}, false
 	}
-	context, ok := firstSynthesisEligibleExternalLink(contexts)
+	context, ok := firstSynthesisEligibleExternalLink(contexts, explicitAsk)
 	if !ok {
 		return SlackTriageDecisionAction{}, false
 	}
@@ -167,7 +168,7 @@ func slackMessageExplicitlyRequestsLinkSynthesis(text string) bool {
 	return false
 }
 
-func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext) (SlackExternalLinkContext, bool) {
+func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext, explicitAsk bool) (SlackExternalLinkContext, bool) {
 	for _, context := range contexts {
 		title := strings.TrimSpace(context.Title)
 		excerpt := strings.TrimSpace(context.Excerpt)
@@ -182,6 +183,9 @@ func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext) (Sl
 		}
 		if title == "" && len([]rune(excerpt)) < slackSharedLinkSynthesisExcerptMin {
 			continue
+		}
+		if explicitAsk {
+			return context, true
 		}
 		if len([]rune(excerpt)) < slackSharedLinkSynthesisExcerptMin && !looksLikeArticleOrDocumentURL(context.URL) {
 			continue
