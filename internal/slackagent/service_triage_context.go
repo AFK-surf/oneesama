@@ -69,7 +69,7 @@ func filterSlackTriageThreadContextBotReplies(contexts []SlackTriageThreadContex
 		messages := make([]SlackInboundMessage, 0, len(context.Messages))
 		for _, message := range context.Messages {
 			message = normalizeSlackInboundMessage(message)
-			if isAuthoredByBot(message, botUserIDs) {
+			if isAuthoredByKnownBotUser(message, botUserIDs) {
 				removed++
 				continue
 			}
@@ -91,13 +91,26 @@ func filterSlackTriageBotInboundMessages(messages []SlackInboundMessage, botUser
 	var removed int
 	for _, message := range messages {
 		message = normalizeSlackInboundMessage(message)
-		if isAuthoredByBot(message, botUserIDs) {
+		if isAuthoredByKnownBotUser(message, botUserIDs) {
 			removed++
 			continue
 		}
 		filtered = append(filtered, message)
 	}
 	return filtered, removed
+}
+
+func isAuthoredByKnownBotUser(message SlackInboundMessage, botUserIDs []string) bool {
+	user := strings.TrimSpace(firstNonEmpty(message.UserID, message.UserIDSnake, message.User))
+	if user == "" {
+		return false
+	}
+	for _, botID := range botUserIDs {
+		if strings.EqualFold(strings.TrimSpace(botID), user) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) fetchSlackTriageChannelContexts(ctx context.Context, channelID string, messages []SlackInboundMessage, digest string, threadContexts []SlackTriageThreadContext) []SlackInboundMessage {

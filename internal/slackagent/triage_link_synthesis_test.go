@@ -156,6 +156,55 @@ func TestSharedLinkSynthesisReplyAvoidsReadingProcessNarration(t *testing.T) {
 			t.Fatalf("message %q contains narration marker %q", action.Message, marker)
 		}
 	}
+	if reason := slackVisibleReplyQualityBlockReason(action.Message); reason != "" {
+		t.Fatalf("message %q blocked by quality gate: %s", action.Message, reason)
+	}
+}
+
+func TestSharedLinkSynthesisExamplesPassVisibleQualityGate(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		message string
+		context SlackExternalLinkContext
+	}{
+		{
+			name:    "arxiv paper",
+			message: "<https://arxiv.org/html/2510.04607v2>\n写成论文可还行",
+			context: SlackExternalLinkContext{
+				URL:     "https://arxiv.org/html/2510.04607v2",
+				Title:   "From Imperative to Declarative: Towards LLM-friendly OS Interfaces for Boosted Computer-Use Agents",
+				Excerpt: "Computer-use agents powered by large language models have emerged as a promising approach to automating computer tasks, yet they struggle with existing human-oriented OS interfaces. The paper proposes Declarative Model Interface, transforming GUIs into declarative primitives: access, state, and observation.",
+				Source:  "reader",
+			},
+		},
+		{
+			name:    "deno claw patrol",
+			message: "<https://deno.com/blog/clawpatrol>\n这里面倒是提到不少好东西",
+			context: SlackExternalLinkContext{
+				URL:     "https://deno.com/blog/clawpatrol",
+				Title:   "Claw Patrol: an open-source security firewall for agents | Deno",
+				Excerpt: "At Deno, we run production services and increasingly use agents to help with operations: triage PagerDuty alerts, check dashboards, query logs, run kubectl, roll back a bad deploy, and so on. An agent cannot be trusted to police itself.",
+				Source:  "reader",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			action, ok := slackTriageSharedLinkSynthesisAction("C123", "100.000", []SlackInboundMessage{{
+				ChannelID: "C123",
+				Text:      tc.message,
+				TS:        "100.000",
+			}}, []SlackExternalLinkContext{tc.context}, "Reply to source-backed product-adjacent articles in this workspace.")
+			if !ok || strings.TrimSpace(action.Message) == "" {
+				t.Fatalf("action=%#v ok=%v, want link synthesis", action, ok)
+			}
+			if reason := slackVisibleReplyQualityBlockReason(action.Message); reason != "" {
+				t.Fatalf("message %q blocked by quality gate: %s", action.Message, reason)
+			}
+		})
+	}
 }
 
 func TestSharedLinkSynthesisAllowsShortContextForExplicitAsk(t *testing.T) {
