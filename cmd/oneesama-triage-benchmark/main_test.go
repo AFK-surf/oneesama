@@ -49,10 +49,20 @@ func TestRunLiveBenchmarkReplaysThreadsThroughDryRunEndpoint(t *testing.T) {
 		writeBenchmarkJSON(t, w, triageRunResponse{
 			OK: true,
 			DryRun: slackagent.SlackTriageDryRunResult{
-				DryRun:        true,
-				ChannelID:     "C1",
-				ThreadTS:      "1779450000.000100",
-				MessageCount:  1,
+				DryRun:       true,
+				ChannelID:    "C1",
+				ThreadTS:     "1779450000.000100",
+				MessageCount: 1,
+				RelatedMemory: slackagent.SlackRelatedMemorySearchResult{
+					Query:  "HN profile identity lookup",
+					Status: "ok",
+					Results: []slackagent.SlackRelatedMemoryRecord{{
+						Kind:    "team_fact",
+						Source:  "workspace:memory/team/hn.md",
+						Content: "HN profile identity lookup should connect to workspace memory.",
+						Score:   0.7,
+					}},
+				},
 				FinalDecision: "would_request_reply_approval",
 				Persona: slackagent.SlackPersonaShadowResult{
 					Decision: persona.DecisionReply,
@@ -97,6 +107,75 @@ func TestRunLiveBenchmarkReplaysThreadsThroughDryRunEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "replayed 1 thread") {
 		t.Fatalf("stderr = %q, want replay summary", stderr.String())
+	}
+}
+
+func TestDetailOutputIncludesDryRunRelatedMemory(t *testing.T) {
+	slackMux := http.NewServeMux()
+	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				{"ts": "1779450000.000100", "channel": "C1", "user": "U_PENG", "text": "帮我看看这个 HN profile 是谁"},
+			},
+		})
+	})
+	slackServer := httptest.NewServer(slackMux)
+	defer slackServer.Close()
+	previousSlackURL := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = slackServer.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previousSlackURL })
+
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:       true,
+				ChannelID:    "C1",
+				ThreadTS:     "1779450000.000100",
+				MessageCount: 1,
+				RelatedMemory: slackagent.SlackRelatedMemorySearchResult{
+					Query:  "HN profile identity lookup",
+					Status: "ok",
+					Results: []slackagent.SlackRelatedMemoryRecord{{
+						Kind:    "team_fact",
+						Source:  "workspace:memory/team/hn.md",
+						Content: "HN profile identity lookup should connect to workspace memory.",
+						Score:   0.7,
+					}},
+				},
+				FinalDecision: "would_stay_silent",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionStaySilent,
+					Success:  true,
+				},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+
+	detailPath := t.TempDir() + "/detail.json"
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--token", "xoxb-test",
+		"--channel", "C1",
+		"--since", "24h",
+		"--detail-output", detailPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	raw, err := os.ReadFile(detailPath)
+	if err != nil {
+		t.Fatalf("read detail: %v", err)
+	}
+	if !strings.Contains(string(raw), `"relatedMemory"`) ||
+		!strings.Contains(string(raw), "workspace:memory/team/hn.md") ||
+		!strings.Contains(string(raw), "HN profile identity lookup") {
+		t.Fatalf("detail output missing related memory evidence:\n%s", string(raw))
 	}
 }
 

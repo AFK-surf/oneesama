@@ -706,6 +706,56 @@ function renderHistoricalWorkerResults(results, row) {
   return wrap;
 }
 
+function renderRelatedMemory(relatedMemory) {
+  const wrap = el("div", { class: "section" });
+  wrap.appendChild(el("h3", { text: "Workspace memory supplied to Pi" }));
+  if (!relatedMemory || typeof relatedMemory !== "object") {
+    wrap.appendChild(el("div", { class: "muted-note", text: "(not captured)" }));
+    return wrap;
+  }
+  const meta = [];
+  if (relatedMemory.status) meta.push("status: " + relatedMemory.status);
+  if (relatedMemory.noRelevantMemory) meta.push("no relevant memory");
+  const results = Array.isArray(relatedMemory.results) ? relatedMemory.results : [];
+  meta.push(results.length + " record(s)");
+  wrap.appendChild(el("div", { class: "muted-note", text: meta.join(" · ") }));
+
+  if (relatedMemory.query) {
+    const queryFold = el("details", { class: "fold" });
+    queryFold.appendChild(el("summary", { text: "Memory search query" }));
+    const pre = el("pre");
+    pre.textContent = relatedMemory.query;
+    queryFold.appendChild(pre);
+    wrap.appendChild(queryFold);
+  }
+
+  if (results.length === 0) {
+    wrap.appendChild(el("div", { class: "muted-note", text: "(no workspace memory records were supplied)" }));
+    return wrap;
+  }
+  for (const r of results) {
+    const item = el("div", { class: "action-item" });
+    const head = el("div", { class: "action-head" });
+    head.appendChild(el("span", { class: "action-type", text: r.kind || "memory" }));
+    if (r.source || r.sourcePath || r.sourceRef) {
+      head.appendChild(el("span", { class: "action-confidence", text: r.sourceRef || r.sourcePath || r.source }));
+    }
+    if (typeof r.score === "number") head.appendChild(el("span", { class: "action-confidence", text: "score " + r.score.toFixed(3) }));
+    item.appendChild(head);
+    if (r.title) item.appendChild(el("div", { class: "action-reason", text: r.title }));
+    if (r.content) {
+      const msg = el("div", { class: "action-message" });
+      msg.appendChild(renderTextWithMentions(r.content));
+      item.appendChild(msg);
+    }
+    if (Array.isArray(r.reasons) && r.reasons.length > 0) {
+      item.appendChild(el("div", { class: "action-reason", text: "↳ " + r.reasons.join(", ") }));
+    }
+    wrap.appendChild(item);
+  }
+  return wrap;
+}
+
 function renderToolCalls(toolCalls) {
   const wrap = el("div", { class: "section" });
   wrap.appendChild(el("h3", { text: "Dry-run side-effect trace" }));
@@ -805,6 +855,7 @@ function renderCase(row, idx) {
     card.appendChild(renderVerdicts(row.dryRun.visibleReplyVerdicts || []));
     card.appendChild(renderWorkers(row.dryRun.wouldDelegateWorkers || []));
     card.appendChild(renderHistoricalWorkerResults(row.historicalWorkerResults || [], row));
+    card.appendChild(renderRelatedMemory(row.dryRun.relatedMemory));
 
     if (Array.isArray(row.dryRun.wouldMemoryWrites) && row.dryRun.wouldMemoryWrites.length > 0) {
       const memWrap = el("div", { class: "section" });

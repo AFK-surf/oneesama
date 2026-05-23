@@ -34,6 +34,7 @@ func (s *Service) DryRunSlackTriage(ctx context.Context, channelID string, messa
 		ThreadTS:             prepared.ThreadTS,
 		MessageCount:         len(prepared.Messages),
 		Digest:               prepared.Digest,
+		RelatedMemory:        prepared.RelatedMemory,
 		RequestID:            request.ID,
 		Persona:              result,
 		FinalDecision:        slackTriageDryRunFinalDecision(result, actionsAfterGate, workers),
@@ -62,6 +63,7 @@ type slackTriagePersonaRequestPreparation struct {
 	Messages        []SlackInboundMessage
 	Digest          string
 	ExternalLinks   []SlackExternalLinkContext
+	RelatedMemory   SlackRelatedMemorySearchResult
 	AuditMetadata   map[string]any
 	Request         persona.Request
 	WorkspaceID     string
@@ -113,7 +115,7 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 	}, options.ExtraMetadata)
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
-	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest)
+	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest, externalLinks)
 	relatedMemory := s.searchSlackTriageRelatedMemory(memoryQuery, 5)
 	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
 		ChannelID:              channelID,
@@ -137,6 +139,7 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 		Messages:        messages,
 		Digest:          digest,
 		ExternalLinks:   externalLinks,
+		RelatedMemory:   relatedMemory,
 		AuditMetadata:   auditMetadata,
 		Request:         request,
 		WorkspaceID:     workspaceID,

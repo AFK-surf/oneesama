@@ -144,7 +144,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	channelBrain, _ := s.cognition.GetChannelBrain(ctx, workspaceID, channelID)
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
-	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest)
+	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest, externalLinks)
 	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(memoryQuery, 5), memoryQuery)
 	relatedMemory := s.searchSlackTriageRelatedMemory(memoryQuery, 5)
 	if piFirstLive {
@@ -299,7 +299,7 @@ func (s *Service) recordSlackTriageOnly(ctx context.Context, channelID string, m
 	return run, err
 }
 
-func slackTriageRelatedMemoryQuery(messages []SlackInboundMessage, digest string) string {
+func slackTriageRelatedMemoryQuery(messages []SlackInboundMessage, digest string, externalLinks []SlackExternalLinkContext) string {
 	messages = normalizeSlackInboundMessages(messages)
 	lines := make([]string, 0, len(messages))
 	for _, message := range messages {
@@ -315,8 +315,33 @@ func slackTriageRelatedMemoryQuery(messages []SlackInboundMessage, digest string
 			}
 		}
 	}
+	if external := slackTriageExternalLinkRelatedMemoryQuery(externalLinks); external != "" {
+		lines = append(lines, external)
+	}
 	if query := strings.TrimSpace(strings.Join(lines, "\n")); query != "" {
 		return query
 	}
 	return strings.TrimSpace(digest)
+}
+
+func slackTriageExternalLinkRelatedMemoryQuery(externalLinks []SlackExternalLinkContext) string {
+	if len(externalLinks) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, link := range externalLinks {
+		parts := []string{link.Title, link.Excerpt}
+		if strings.TrimSpace(link.Error) == "" {
+			parts = append(parts, link.URL)
+		}
+		text := strings.TrimSpace(strings.Join(parts, "\n"))
+		if text == "" {
+			continue
+		}
+		lines = append(lines, truncateSlackContextText(text, appMentionRelatedMemorySupplementLimit))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "external link context:\n" + strings.TrimSpace(strings.Join(lines, "\n\n"))
 }

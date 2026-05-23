@@ -193,6 +193,7 @@ type SlackTriageDryRunResult struct {
 	ThreadTS             string                                 `json:"threadTs"`
 	MessageCount         int                                    `json:"messageCount"`
 	Digest               string                                 `json:"digest,omitempty"`
+	RelatedMemory        SlackRelatedMemorySearchResult         `json:"relatedMemory,omitempty"`
 	RequestID            string                                 `json:"requestId,omitempty"`
 	Persona              SlackPersonaShadowResult               `json:"persona"`
 	FinalDecision        string                                 `json:"finalDecision"`
