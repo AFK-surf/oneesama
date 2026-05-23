@@ -1249,6 +1249,31 @@ func TestPersonaVisibleReplyQualityGateSuppressesInternalMeta(t *testing.T) {
 	}
 }
 
+func TestPersonaVisibleReplyQualityGateAllowsSourceBackedLinkSynthesis(t *testing.T) {
+	result := SlackPersonaShadowResult{
+		Success:     true,
+		RequestID:   "triage:C09L0TAN31T:1779425315.544949",
+		ChannelID:   "C09L0TAN31T",
+		ThreadTS:    "1779425315.544949",
+		Decision:    persona.DecisionReply,
+		VisibleText: "《Claw Patrol: an open-source security firewall for agents | Deno》这条值得看的一点是：At Deno, agents help with production operations, but an agent cannot be trusted to police itself.",
+		Reason:      "A substantive shared link is synthesis-eligible under the workspace policy or explicit thread request.",
+		EvidenceAnchors: []SlackVisibleEvidenceAnchor{{
+			Kind:      slackVisibleEvidenceKindFetchedLink,
+			SourceRef: "https://deno.com/blog/clawpatrol",
+			Quote:     "Claw Patrol: an open-source security firewall for agents | Deno",
+		}},
+	}
+
+	got, toolCalls := applyPersonaVisibleReplyQualityDisposition(result)
+	if got.Decision != persona.DecisionReply || got.VisibleText == "" {
+		t.Fatalf("result = %#v, want source-backed reply preserved", got)
+	}
+	if len(toolCalls) != 0 {
+		t.Fatalf("toolCalls = %#v, want no quality gate block", toolCalls)
+	}
+}
+
 func TestSlackTriagePiFirstLiveAutoDelegatesExternalLinkIdentityLookupAfterStaySilent(t *testing.T) {
 	ctx := context.Background()
 	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

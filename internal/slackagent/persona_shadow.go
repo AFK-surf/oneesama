@@ -449,6 +449,9 @@ func applyPersonaVisibleReplyQualityDisposition(result SlackPersonaShadowResult)
 	if reason == "" {
 		return result, nil
 	}
+	if reason == "reading_process_narration" && personaVisibleReplyIsSourceBackedLinkSynthesis(result) {
+		return result, nil
+	}
 	result.Decision = persona.DecisionStaySilent
 	result.VisibleText = ""
 	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "visible reply suppressed by Slack-visible quality gate"))
@@ -460,6 +463,22 @@ func applyPersonaVisibleReplyQualityDisposition(result SlackPersonaShadowResult)
 		Brief:   "Persona direct reply suppressed by Slack-visible quality gate",
 		Result:  reason,
 	}}
+}
+
+func personaVisibleReplyIsSourceBackedLinkSynthesis(result SlackPersonaShadowResult) bool {
+	if !strings.Contains(strings.ToLower(strings.TrimSpace(result.Reason)), "synthesis-eligible") {
+		return false
+	}
+	for _, anchor := range normalizeSlackVisibleEvidenceAnchors(result.EvidenceAnchors) {
+		if strings.TrimSpace(anchor.Kind) != slackVisibleEvidenceKindFetchedLink {
+			continue
+		}
+		if slackVisibleEvidenceAnchorLooksLikeReaderFailure(anchor) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func personaAmbientDirectReplySilentReason(result SlackPersonaShadowResult, messages []SlackInboundMessage, botUserID string) string {
