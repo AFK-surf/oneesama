@@ -62,6 +62,7 @@ type SlackBackfillReplayLiveOptions struct {
 	MaxMessagesPerChannel int
 	MaxThreads            int
 	Now                   time.Time // optional; defaults to time.Now() if zero
+	Latest                time.Time // optional; defaults to Now; caps the upper bound of conversations.history
 }
 
 // SlackBackfillReplayLiveStats reports what a single channel scan
@@ -120,9 +121,13 @@ func BackfillReplayLive(ctx context.Context, opts SlackBackfillReplayLiveOptions
 	if now.IsZero() {
 		now = time.Now()
 	}
+	latest := opts.Latest
+	if latest.IsZero() {
+		latest = now
+	}
 	oldest := now.Add(-since).Unix()
 
-	messages, truncated, scanStats, err := fetchHistoryWindow(ctx, opts.BotToken, stats.ChannelID, oldest, maxPerChan, &stats)
+	messages, truncated, scanStats, err := fetchHistoryWindow(ctx, opts.BotToken, stats.ChannelID, oldest, latest.Unix(), maxPerChan, &stats)
 	stats.MessagesScanned = scanStats.scanned
 	stats.OldestScannedTS = scanStats.oldestTS
 	stats.NewestScannedTS = scanStats.newestTS
@@ -185,9 +190,13 @@ func SlackTriageReplayLiveThreads(ctx context.Context, opts SlackBackfillReplayL
 	if now.IsZero() {
 		now = time.Now()
 	}
+	latest := opts.Latest
+	if latest.IsZero() {
+		latest = now
+	}
 	oldest := now.Add(-since).Unix()
 
-	messages, truncated, scanStats, err := fetchHistoryWindow(ctx, opts.BotToken, stats.ChannelID, oldest, maxPerChan, &stats)
+	messages, truncated, scanStats, err := fetchHistoryWindow(ctx, opts.BotToken, stats.ChannelID, oldest, latest.Unix(), maxPerChan, &stats)
 	stats.MessagesScanned = scanStats.scanned
 	stats.OldestScannedTS = scanStats.oldestTS
 	stats.NewestScannedTS = scanStats.newestTS
@@ -261,13 +270,13 @@ type historyScanStats struct {
 	newestTS string
 }
 
-func fetchHistoryWindow(ctx context.Context, token string, channelID string, oldest int64, maxPerChannel int, stats *SlackBackfillReplayLiveStats) ([]SlackInboundMessage, bool, historyScanStats, error) {
+func fetchHistoryWindow(ctx context.Context, token string, channelID string, oldest int64, latest int64, maxPerChannel int, stats *SlackBackfillReplayLiveStats) ([]SlackInboundMessage, bool, historyScanStats, error) {
 	collected := make([]SlackInboundMessage, 0, maxPerChannel)
 	cursor := ""
 	scan := historyScanStats{}
 	truncated := false
 	for {
-		page, nextCursor, err := callConversationsHistory(ctx, token, channelID, oldest, cursor, stats)
+		page, nextCursor, err := callConversationsHistory(ctx, token, channelID, oldest, latest, cursor, stats)
 		if err != nil {
 			return nil, false, scan, err
 		}
@@ -356,11 +365,15 @@ type backfillLiveHistoryResponseCursor struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-func callConversationsHistory(ctx context.Context, token string, channelID string, oldest int64, cursor string, stats *SlackBackfillReplayLiveStats) ([]SlackMessage, string, error) {
+func callConversationsHistory(ctx context.Context, token string, channelID string, oldest int64, latest int64, cursor string, stats *SlackBackfillReplayLiveStats) ([]SlackMessage, string, error) {
 	values := url.Values{
-		"channel": {channelID},
-		"limit":   {strconv.Itoa(backfillLiveHistoryLimit)},
-		"oldest":  {strconv.FormatInt(oldest, 10)},
+		"channel":   {channelID},
+		"inclusive": {"true"},
+		"limit":     {strconv.Itoa(backfillLiveHistoryLimit)},
+		"oldest":    {strconv.FormatInt(oldest, 10)},
+	}
+	if latest > 0 {
+		values.Set("latest", strconv.FormatInt(latest, 10))
 	}
 	if strings.TrimSpace(cursor) != "" {
 		values.Set("cursor", cursor)

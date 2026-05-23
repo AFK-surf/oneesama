@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oneesama Triage Benchmark · Human Review</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel2: #1f232b;
+    --panel3: #262b35;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --text-dim: #8b919e;
+    --text-dim2: #6a737d;
+    --accent: #4f8cff;
+    --accent2: #6f42c1;
+    --ok: #34c759;
+    --bad: #ff5a5f;
+    --warn: #ffb020;
+    --silent: #6a737d;
+    --user: #4f8cff;
+    --bot: #ffb020;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 10px 18px;
+  }
+  header.top h1 { margin: 0; font-size: 15px; font-weight: 600; display: inline; }
+  .hint { color: var(--text-dim); font-size: 11px; display: inline; margin-left: 12px; }
+  .progress-wrap { margin-top: 8px; display: flex; gap: 10px; align-items: center; }
+  .progress { flex: 1; height: 4px; background: var(--panel2); border-radius: 2px; overflow: hidden; }
+  .progress-bar { height: 100%; background: var(--accent); width: 0%; transition: width 0.2s; }
+  .controls { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+  .controls input[type="text"], .controls input[type="file"], .controls select {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 4px 6px; border-radius: 4px; font: inherit; font-size: 12px;
+  }
+  .controls input[type="text"] { min-width: 180px; }
+  .controls button {
+    background: var(--accent); color: white; border: 0;
+    padding: 4px 12px; border-radius: 4px; font: inherit; cursor: pointer; font-size: 12px;
+  }
+  .controls button:disabled { background: var(--silent); cursor: not-allowed; }
+  .controls button.secondary { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
+
+  .drop-zone {
+    margin: 20px; padding: 40px; border: 2px dashed var(--border); border-radius: 8px;
+    text-align: center; color: var(--text-dim); cursor: pointer;
+  }
+  .drop-zone.drag { border-color: var(--accent); color: var(--accent); }
+  .drop-zone code { background: var(--panel2); padding: 2px 6px; border-radius: 3px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+
+  main { padding: 16px; max-width: 1080px; margin: 0 auto; }
+
+  article.case {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 18px; padding: 14px 16px;
+  }
+  article.case.voted { border-color: var(--panel2); opacity: 0.85; }
+
+  article.case > header.case-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 10px;
+  }
+  .case-title { font-size: 13px; font-weight: 600; }
+  .case-meta { color: var(--text-dim); font-size: 11px; font-family: ui-monospace, SFMono-Regular, monospace; }
+  .case-slack-link {
+    color: var(--accent); text-decoration: none; font-family: ui-monospace, monospace; font-size: 11px;
+    background: var(--panel2); padding: 3px 7px; border-radius: 4px; border: 1px solid var(--border);
+  }
+  .case-slack-link:hover { background: var(--border); }
+
+  .section { margin: 10px 0; }
+  .section h3 {
+    margin: 0 0 6px 0; font-size: 10px; font-weight: 700;
+    color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.7px;
+  }
+
+  .messages { display: flex; flex-direction: column; gap: 6px; }
+  .msg { background: var(--panel2); border-radius: 6px; padding: 8px 10px; border-left: 3px solid var(--user); }
+  .msg .msg-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+  .msg .msg-user { font-weight: 600; color: var(--user); font-size: 12px; }
+  .msg .msg-ts { color: var(--text-dim2); font-size: 10px; font-family: ui-monospace, monospace; }
+  .msg .msg-text { white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+  .msg .msg-files { color: var(--text-dim); font-size: 11px; margin-top: 4px; }
+
+  .pi-block {
+    background: linear-gradient(180deg, var(--panel2) 0%, var(--panel) 100%);
+    border: 1px solid var(--border); border-radius: 6px; padding: 12px;
+  }
+  .pi-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .pi-decision-label { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.7px; }
+  .pi-reason {
+    background: var(--bg); padding: 10px; border-radius: 4px;
+    white-space: pre-wrap; word-break: break-word;
+    font-size: 13px; line-height: 1.6;
+    border-left: 3px solid var(--accent2);
+  }
+  .pi-meta { margin-top: 6px; color: var(--text-dim); font-size: 11px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .pi-meta span { font-family: ui-monospace, monospace; }
+
+  .action-item { background: var(--panel2); border-radius: 4px; padding: 8px 10px; margin-bottom: 5px; border-left: 3px solid var(--bot); }
+  .action-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; flex-wrap: wrap; }
+  .action-type { font-weight: 600; font-size: 11px; color: var(--bot); font-family: ui-monospace, monospace; }
+  .action-confidence { color: var(--text-dim); font-size: 10px; }
+  .action-message {
+    background: var(--bg); padding: 8px; border-radius: 4px;
+    white-space: pre-wrap; word-break: break-word; font-size: 13px;
+    margin-top: 4px;
+  }
+  .action-reason { color: var(--text-dim); font-size: 11px; margin-top: 4px; font-style: italic; }
+
+  .verdict-item { background: var(--panel2); border-radius: 4px; padding: 8px 10px; margin-bottom: 5px; border-left: 3px solid var(--silent); }
+  .verdict-item.allowed { border-left-color: var(--ok); }
+  .verdict-item.blocked { border-left-color: var(--bad); }
+  .verdict-head { display: flex; gap: 8px; align-items: baseline; }
+  .verdict-reason { color: var(--text-dim); font-size: 12px; font-family: ui-monospace, monospace; }
+  .verdict-text { background: var(--bg); padding: 6px; border-radius: 4px; margin-top: 4px; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+
+  .worker-item { background: var(--panel2); border-radius: 4px; padding: 8px 10px; margin-bottom: 5px; border-left: 3px solid var(--accent2); }
+  .worker-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .worker-kind { font-weight: 600; color: var(--accent2); font-size: 11px; font-family: ui-monospace, monospace; }
+  .worker-scope { color: var(--text-dim); font-size: 11px; }
+  .worker-prompt {
+    background: var(--bg); padding: 8px; border-radius: 4px; margin-top: 4px;
+    white-space: pre-wrap; word-break: break-word; font-size: 12px; font-family: ui-monospace, monospace;
+    max-height: 180px; overflow: auto;
+  }
+
+  .toolcall-item {
+    font-size: 11px; padding: 4px 8px; background: var(--panel2); border-radius: 3px;
+    margin-bottom: 3px; font-family: ui-monospace, monospace;
+    border-left: 3px solid var(--text-dim2);
+    word-break: break-word;
+  }
+  .toolcall-item.fail { border-left-color: var(--bad); }
+
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .badge {
+    padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600;
+    background: var(--silent); color: white; white-space: nowrap;
+  }
+  .badge.silent { background: var(--silent); }
+  .badge.react { background: var(--accent2); }
+  .badge.delegate { background: var(--accent); }
+  .badge.reply { background: var(--ok); }
+  .badge.smell { background: #d29922; color: #1a1a1a; }
+  .badge.error { background: var(--bad); }
+  .badge.fixture-allow { background: var(--ok); }
+  .badge.fixture-block { background: var(--bad); }
+  .badge.fixture-delegate { background: var(--accent); }
+  .badge.fixture-silent { background: var(--silent); }
+  .badge.muted { background: var(--panel3); color: var(--text-dim); }
+
+  .vote-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .vote-btn {
+    flex: 1; min-width: 120px; padding: 14px;
+    border: 2px solid var(--border); background: var(--panel2); color: var(--text);
+    border-radius: 8px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 600;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    transition: all 0.1s;
+  }
+  .vote-btn:hover { border-color: var(--accent); }
+  .vote-btn .key { font-size: 10px; color: var(--text-dim); font-weight: normal; }
+  .vote-btn.correct.active { border-color: var(--ok); background: rgba(52, 199, 89, 0.15); color: var(--ok); }
+  .vote-btn.wrong.active { border-color: var(--bad); background: rgba(255, 90, 95, 0.15); color: var(--bad); }
+  .vote-btn.unsure.active { border-color: var(--warn); background: rgba(255, 176, 32, 0.15); color: var(--warn); }
+  .note-input {
+    width: 100%; margin-top: 8px;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 8px; border-radius: 4px; font: inherit; resize: vertical; font-size: 12px;
+    min-height: 28px;
+  }
+
+  .expected-panel {
+    margin-top: 10px; padding: 12px;
+    background: rgba(255, 90, 95, 0.05); border: 1px solid rgba(255, 90, 95, 0.3); border-radius: 6px;
+  }
+  .expected-panel-title { color: var(--bad); font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  .expected-options { display: flex; flex-wrap: wrap; gap: 6px; }
+  .expected-options label {
+    display: inline-flex; gap: 4px; align-items: center;
+    padding: 5px 10px; border-radius: 4px;
+    background: var(--panel2); border: 1px solid var(--border); cursor: pointer;
+    font-size: 12px;
+  }
+  .expected-options label input[type="radio"] { margin: 0; }
+  .expected-options label.active { border-color: var(--bad); background: rgba(255, 90, 95, 0.15); color: var(--bad); }
+  .expected-free {
+    width: 100%; margin-top: 8px;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 6px; border-radius: 4px; font: inherit; font-size: 12px;
+  }
+  .expected-required-hint { color: var(--warn); font-size: 11px; margin-top: 4px; font-style: italic; }
+
+  details.fold {
+    margin-top: 8px; background: var(--panel2); border-radius: 4px; padding: 6px 10px;
+    font-size: 12px;
+  }
+  details.fold summary { cursor: pointer; color: var(--text-dim); user-select: none; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  details.fold pre {
+    margin: 6px 0 0 0; padding: 8px; background: var(--bg); border-radius: 4px;
+    overflow: auto; max-height: 320px; font-size: 11px;
+    color: var(--text-dim); font-family: ui-monospace, SFMono-Regular, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .context-budget {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px;
+    margin-top: 6px;
+  }
+  .budget-item { background: var(--bg); padding: 6px 8px; border-radius: 4px; font-size: 11px; }
+  .budget-item .k { color: var(--text-dim); }
+  .budget-item .v { float: right; font-family: ui-monospace, monospace; color: var(--text); }
+
+  footer.bottom {
+    position: sticky; bottom: 0;
+    background: var(--panel); border-top: 1px solid var(--border);
+    padding: 10px 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  }
+  footer.bottom .summary { color: var(--text-dim); flex: 1; font-size: 12px; }
+
+  .empty-state { text-align: center; color: var(--text-dim); padding: 60px 20px; }
+  .empty-state h2 { margin-bottom: 8px; color: var(--text); }
+  .empty-state code { background: var(--panel2); padding: 2px 6px; border-radius: 3px; font-size: 12px; font-family: ui-monospace, monospace; }
+  kbd {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 3px;
+    padding: 1px 5px; font-family: ui-monospace, monospace; font-size: 10px;
+  }
+  .muted-note { color: var(--text-dim); font-size: 11px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>Oneesama Triage Benchmark · Human Review</h1>
+  <span class="hint">每条看 原消息 + Pi 思考 + 候选输出 → 判断对不对 → 下载 JSON. 快捷键 <kbd>1</kbd>对 <kbd>2</kbd>不对 <kbd>3</kbd>说不准 <kbd>j</kbd>/<kbd>k</kbd>下/上</span>
+  <div class="controls">
+    <input type="file" id="file-input" accept=".json,application/json">
+    <input type="text" id="workspace-url" placeholder="Slack workspace URL" value="https://cue-3kl2780.slack.com">
+    <input type="text" id="reviewer-name" placeholder="reviewer">
+    <select id="filter-mode">
+      <option value="actionable">重点：有动作/错误</option>
+      <option value="all">全部</option>
+      <option value="reply">只看回复</option>
+      <option value="delegate">只看 delegate</option>
+      <option value="silent">只看 stay_silent</option>
+      <option value="unreviewed">只看未评</option>
+      <option value="wrong">只看标错</option>
+    </select>
+    <select id="filter-channel"><option value="all">全部频道</option></select>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+    <div class="hint" id="progress-text">0 / 0</div>
+  </div>
+</header>
+
+<div id="drop-zone" class="drop-zone">
+  拖入 <code>detail.json</code>（由 <code>oneesama-triage-benchmark --detail-output detail.json</code> 生成），或上面选文件，或 URL 加 <code>?data=PATH</code>
+</div>
+
+<main id="cases"></main>
+
+<footer class="bottom" id="footer" style="display:none;">
+  <div class="summary" id="summary-text">0 / 0 reviewed</div>
+  <button class="secondary" id="btn-skip-unrated" type="button">跳到下一未评</button>
+  <button id="btn-download" type="button" disabled>下载 human review JSON</button>
+  <button id="btn-submit" type="button" disabled>提交到 benchmark</button>
+</footer>
+
+<script>
+"use strict";
+
+const state = {
+  detail: null,
+  rows: [],
+  votes: {},
+  notes: {},
+  expected: {},
+  expectedNotes: {},
+  userNames: {},
+  channelNames: {},
+  visibleCount: 0,
+};
+
+const els = {
+  fileInput: document.getElementById("file-input"),
+  workspaceUrl: document.getElementById("workspace-url"),
+  reviewerName: document.getElementById("reviewer-name"),
+  progressBar: document.getElementById("progress-bar"),
+  progressText: document.getElementById("progress-text"),
+  dropZone: document.getElementById("drop-zone"),
+  cases: document.getElementById("cases"),
+  footer: document.getElementById("footer"),
+  summaryText: document.getElementById("summary-text"),
+  btnDownload: document.getElementById("btn-download"),
+  btnSubmit: document.getElementById("btn-submit"),
+  btnSkipUnrated: document.getElementById("btn-skip-unrated"),
+  filterMode: document.getElementById("filter-mode"),
+  filterChannel: document.getElementById("filter-channel"),
+};
+
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  if (props) {
+    for (const k of Object.keys(props)) {
+      if (k === "class") node.className = props[k];
+      else if (k === "text") node.textContent = props[k];
+      else if (k === "dataset") for (const dk of Object.keys(props.dataset)) node.dataset[dk] = props.dataset[dk];
+      else if (k === "attrs") for (const ak of Object.keys(props.attrs)) node.setAttribute(ak, props.attrs[ak]);
+      else if (k.startsWith("on") && typeof props[k] === "function") node.addEventListener(k.slice(2).toLowerCase(), props[k]);
+      else node[k] = props[k];
+    }
+  }
+  for (const c of children) {
+    if (c == null || c === false) continue;
+    if (typeof c === "string") node.appendChild(document.createTextNode(c));
+    else node.appendChild(c);
+  }
+  return node;
+}
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+function rowKey(idx) { return "row_" + idx; }
+
+function resolveUser(id) {
+  if (!id) return "";
+  const trimmed = String(id).trim();
+  return state.userNames[trimmed] || trimmed;
+}
+function resolveChannel(id) {
+  if (!id) return "";
+  const trimmed = String(id).trim();
+  return state.channelNames[trimmed] || trimmed;
+}
+function withTitle(node, id) {
+  if (node && id) node.title = id;
+  return node;
+}
+
+function tsToSlackPermalinkPart(ts) {
+  if (typeof ts !== "string") return "";
+  return "p" + ts.replace(".", "");
+}
+function buildSlackLink(channelId, threadTs) {
+  const base = (els.workspaceUrl.value || "").trim().replace(/\/$/, "");
+  if (!base || !channelId || !threadTs) return null;
+  if (channelId.startsWith("C_")) return null;
+  return base + "/archives/" + encodeURIComponent(channelId) + "/" + tsToSlackPermalinkPart(threadTs);
+}
+
+function fixtureLabelBadge(label) {
+  if (!label) return null;
+  let klass = "fixture-silent";
+  if (label === "must_allow") klass = "fixture-allow";
+  else if (label === "must_block") klass = "fixture-block";
+  else if (label === "should_delegate") klass = "fixture-delegate";
+  else if (label === "freely_silent") klass = "fixture-silent";
+  return el("span", { class: "badge " + klass, text: "label: " + label });
+}
+
+function decisionBadge(decision) {
+  if (!decision) return null;
+  const lower = decision.toLowerCase();
+  let klass = "silent";
+  if (lower.includes("react")) klass = "react";
+  else if (lower.includes("delegate")) klass = "delegate";
+  else if (lower.includes("reply") || lower.includes("would_request_reply")) klass = "reply";
+  else if (lower.includes("silent")) klass = "silent";
+  return el("span", { class: "badge " + klass, text: decision });
+}
+
+function botActualKind(row) {
+  const dry = row.dryRun || {};
+  const finalDecision = dry.finalDecision || "";
+  const verdicts = Array.isArray(dry.visibleReplyVerdicts) ? dry.visibleReplyVerdicts : [];
+  const workers = Array.isArray(dry.wouldDelegateWorkers) ? dry.wouldDelegateWorkers : [];
+  if (verdicts.some(v => v.allowed) || finalDecision === "would_request_reply_approval" || finalDecision === "would_post_reply") return "visible_reply";
+  if (workers.length > 0 || finalDecision === "would_delegate_worker") return "delegate_worker";
+  if (finalDecision === "would_react" || finalDecision === "would_add_reaction") return "react";
+  if (finalDecision === "would_stay_silent" || finalDecision === "stay_silent") return "stay_silent";
+  if (row.error) return "error";
+  return finalDecision || "unknown";
+}
+
+function rowIsActionable(row) {
+  const kind = botActualKind(row);
+  return row.error || kind === "visible_reply" || kind === "delegate_worker" || kind === "react";
+}
+
+function rowMatchesFilters(row, idx) {
+  const mode = els.filterMode.value || "actionable";
+  const channel = els.filterChannel.value || "all";
+  if (channel !== "all" && row.channelId !== channel) return false;
+  const vote = state.votes[rowKey(idx)] || "";
+  const kind = botActualKind(row);
+  if (mode === "all") return true;
+  if (mode === "actionable") return rowIsActionable(row);
+  if (mode === "reply") return kind === "visible_reply";
+  if (mode === "delegate") return kind === "delegate_worker";
+  if (mode === "silent") return kind === "stay_silent";
+  if (mode === "unreviewed") return !vote;
+  if (mode === "wrong") return vote === "wrong";
+  return true;
+}
+
+function populateChannelFilter() {
+  clear(els.filterChannel);
+  els.filterChannel.appendChild(el("option", { value: "all", text: "全部频道" }));
+  const ids = Array.from(new Set(state.rows.map(r => r.channelId).filter(Boolean))).sort((a, b) => resolveChannel(a).localeCompare(resolveChannel(b)));
+  for (const id of ids) {
+    const name = resolveChannel(id);
+    els.filterChannel.appendChild(el("option", { value: id, text: "#" + name }));
+  }
+}
+
+// Replace Slack-style <@Uxxx> / <#Cxxx|name> / bare @Uxxx with friendly names.
+// Returns a div with text+span children so titles can hold the raw ID.
+function renderTextWithMentions(text) {
+  const wrap = el("div", { class: "msg-text" });
+  if (!text) { wrap.appendChild(document.createTextNode("(empty)")); return wrap; }
+  const pattern = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>|<#([CG][A-Z0-9]+)(?:\|([^>]*))?>|@([UW][A-Z0-9]{6,})|@([CG][A-Z0-9]{6,})/g;
+  const matches = Array.from(text.matchAll(pattern));
+  let last = 0;
+  for (const mm of matches) {
+    if (mm.index > last) wrap.appendChild(document.createTextNode(text.slice(last, mm.index)));
+    const userInBracket = mm[1];
+    const channelInBracket = mm[2];
+    const channelBracketName = mm[3];
+    const userBareID = mm[4];
+    const channelBareID = mm[5];
+    if (userInBracket) {
+      const resolved = resolveUser(userInBracket);
+      wrap.appendChild(withTitle(el("span", { class: "mention-user", text: "@" + resolved, style: "color:var(--user);font-weight:600;" }), userInBracket));
+    } else if (channelInBracket) {
+      const resolved = channelBracketName ? channelBracketName : resolveChannel(channelInBracket);
+      wrap.appendChild(withTitle(el("span", { class: "mention-channel", text: "#" + resolved, style: "color:var(--accent);font-weight:600;" }), channelInBracket));
+    } else if (userBareID) {
+      const resolved = resolveUser(userBareID);
+      wrap.appendChild(withTitle(el("span", { class: "mention-user", text: "@" + resolved, style: "color:var(--user);font-weight:600;" }), userBareID));
+    } else if (channelBareID) {
+      const resolved = resolveChannel(channelBareID);
+      wrap.appendChild(withTitle(el("span", { class: "mention-channel", text: "#" + resolved, style: "color:var(--accent);font-weight:600;" }), channelBareID));
+    }
+    last = mm.index + mm[0].length;
+  }
+  if (last < text.length) wrap.appendChild(document.createTextNode(text.slice(last)));
+  return wrap;
+}
+
+function renderMessages(messages) {
+  const wrap = el("div", { class: "messages" });
+  if (!Array.isArray(messages) || messages.length === 0) {
+    wrap.appendChild(el("div", { class: "muted-note", text: "(no messages captured)" }));
+    return wrap;
+  }
+  for (const m of messages) {
+    const rawAuthor = m.userId || m.user_id || m.user || m.botId || m.bot_id || "";
+    const author = resolveUser(rawAuthor) || "unknown";
+    const ts = m.ts || "";
+    const text = (m.text || "").trim() || "(empty)";
+    const fileCount = Array.isArray(m.files) ? m.files.length : 0;
+    const card = el("div", { class: "msg" });
+    const head = el("div", { class: "msg-head" });
+    const userSpan = el("span", { class: "msg-user", text: "@" + author });
+    if (rawAuthor && rawAuthor !== author) userSpan.title = rawAuthor;
+    head.appendChild(userSpan);
+    if (ts) head.appendChild(el("span", { class: "msg-ts", text: ts }));
+    card.appendChild(head);
+    card.appendChild(renderTextWithMentions(text));
+    if (fileCount > 0) {
+      const fnames = m.files.map(f => f.name || f.title || f.id || "?").join(", ");
+      card.appendChild(el("div", { class: "msg-files", text: "📎 " + fileCount + " file(s): " + fnames }));
+    }
+    wrap.appendChild(card);
+  }
+  return wrap;
+}
+
+function renderPiBlock(dryRun) {
+  const persona = (dryRun && dryRun.persona) || {};
+  const block = el("div", { class: "pi-block" });
+
+  const head = el("div", { class: "pi-head" });
+  head.appendChild(el("span", { class: "pi-decision-label", text: "PI DECISION:" }));
+  const dec = decisionBadge(persona.decision || "(unknown)");
+  if (dec) head.appendChild(dec);
+  if (typeof persona.confidence === "number") {
+    head.appendChild(el("span", { class: "badge muted", text: "conf " + persona.confidence.toFixed(2) }));
+  }
+  if (persona.classification) {
+    head.appendChild(el("span", { class: "badge muted", text: persona.classification }));
+  }
+  block.appendChild(head);
+
+  const reasonText = (persona.reason || "(no reason given by Pi)").trim();
+  block.appendChild(el("div", { class: "pi-reason", text: reasonText }));
+
+  const meta = el("div", { class: "pi-meta" });
+  if (persona.runtime) meta.appendChild(el("span", { text: "runtime: " + persona.runtime }));
+  if (persona.latency_ms != null) meta.appendChild(el("span", { text: "latency: " + persona.latency_ms + " ms" }));
+  if (persona.success === false && persona.error) meta.appendChild(el("span", { class: "badge error", text: "persona error: " + persona.error }));
+  if (persona.visible_text) meta.appendChild(el("span", { text: "visible_text → " + persona.visible_text }));
+  if (meta.children.length > 0) block.appendChild(meta);
+
+  if (Array.isArray(persona.evidence_anchors) && persona.evidence_anchors.length > 0) {
+    const anchorBlock = el("div", { class: "section" });
+    anchorBlock.appendChild(el("h3", { text: "Pi cited evidence anchors" }));
+    for (const a of persona.evidence_anchors) {
+      const ai = el("div", { class: "action-item" });
+      const ah = el("div", { class: "action-head" });
+      ah.appendChild(el("span", { class: "action-type", text: a.kind || "anchor" }));
+      if (a.sourceRef) ah.appendChild(el("span", { class: "action-confidence", text: "src: " + a.sourceRef }));
+      if (typeof a.confidence === "number") ah.appendChild(el("span", { class: "action-confidence", text: "conf " + a.confidence.toFixed(2) }));
+      ai.appendChild(ah);
+      if (a.quote) ai.appendChild(el("div", { class: "action-message", text: a.quote }));
+      anchorBlock.appendChild(ai);
+    }
+    block.appendChild(anchorBlock);
+  }
+
+  return block;
+}
+
+function renderActions(actions, label) {
+  const wrap = el("div", { class: "section" });
+  wrap.appendChild(el("h3", { text: label }));
+  if (!Array.isArray(actions) || actions.length === 0) {
+    wrap.appendChild(el("div", { class: "muted-note", text: "(none — bot would not act)" }));
+    return wrap;
+  }
+  for (const a of actions) {
+    const item = el("div", { class: "action-item" });
+    const head = el("div", { class: "action-head" });
+    head.appendChild(el("span", { class: "action-type", text: a.type || "?" }));
+    if (a.title) head.appendChild(el("span", { class: "action-confidence", text: a.title }));
+    if (typeof a.confidence === "number") head.appendChild(el("span", { class: "action-confidence", text: "conf " + a.confidence.toFixed(2) }));
+    if (a.emoji) head.appendChild(el("span", { class: "badge react", text: ":" + a.emoji + ":" }));
+    item.appendChild(head);
+    if (a.message && a.message.trim()) {
+      const msgBox = el("div", { class: "action-message" });
+      msgBox.appendChild(renderTextWithMentions(a.message));
+      item.appendChild(msgBox);
+    }
+    if (a.reason) item.appendChild(el("div", { class: "action-reason", text: "↳ " + a.reason }));
+    wrap.appendChild(item);
+  }
+  return wrap;
+}
+
+function renderVerdicts(verdicts) {
+  const wrap = el("div", { class: "section" });
+  wrap.appendChild(el("h3", { text: "Visible reply gate verdicts" }));
+  if (!Array.isArray(verdicts) || verdicts.length === 0) {
+    wrap.appendChild(el("div", { class: "muted-note", text: "(no visible reply attempted)" }));
+    return wrap;
+  }
+  for (const v of verdicts) {
+    const item = el("div", { class: "verdict-item " + (v.allowed ? "allowed" : "blocked") });
+    const head = el("div", { class: "verdict-head" });
+    head.appendChild(el("span", { class: "badge " + (v.allowed ? "reply" : "error"), text: v.allowed ? "ALLOWED" : "BLOCKED" }));
+    head.appendChild(el("span", { class: "verdict-reason", text: v.reason || "(no reason)" }));
+    item.appendChild(head);
+    if (v.message) {
+      const vt = el("div", { class: "verdict-text" });
+      vt.appendChild(renderTextWithMentions(v.message));
+      item.appendChild(vt);
+    }
+    wrap.appendChild(item);
+  }
+  return wrap;
+}
+
+function renderWorkers(workers) {
+  const wrap = el("div", { class: "section" });
+  wrap.appendChild(el("h3", { text: "Would delegate workers" }));
+  if (!Array.isArray(workers) || workers.length === 0) {
+    wrap.appendChild(el("div", { class: "muted-note", text: "(none)" }));
+    return wrap;
+  }
+  for (const w of workers) {
+    const item = el("div", { class: "worker-item" });
+    const head = el("div", { class: "worker-head" });
+    head.appendChild(el("span", { class: "worker-kind", text: w.sessionKind || w.kind || "worker" }));
+    if (w.delegationScope) head.appendChild(el("span", { class: "worker-scope", text: "scope: " + w.delegationScope }));
+    if (w.id) head.appendChild(el("span", { class: "worker-scope", text: "id: " + w.id }));
+    item.appendChild(head);
+    if (w.promptPreview) item.appendChild(el("div", { class: "worker-prompt", text: w.promptPreview }));
+    wrap.appendChild(item);
+  }
+  return wrap;
+}
+
+function renderToolCalls(toolCalls) {
+  const wrap = el("div", { class: "section" });
+  wrap.appendChild(el("h3", { text: "Dry-run side-effect trace" }));
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
+    wrap.appendChild(el("div", { class: "muted-note", text: "(no side effects)" }));
+    return wrap;
+  }
+  for (const t of toolCalls) {
+    const item = el("div", { class: "toolcall-item" + (t.success ? "" : " fail") });
+    item.textContent = (t.tool || "?") + "." + (t.action || "?") + " · " + (t.brief || t.result || "");
+    wrap.appendChild(item);
+  }
+  return wrap;
+}
+
+function renderContextBudget(budget) {
+  if (!budget || typeof budget !== "object") return null;
+  const wrap = el("div", { class: "section" });
+  wrap.appendChild(el("h3", { text: "Context budget (tokens)" }));
+  const grid = el("div", { class: "context-budget" });
+  const keys = Object.keys(budget).sort();
+  for (const k of keys) {
+    const item = el("div", { class: "budget-item" });
+    item.appendChild(el("span", { class: "k", text: k }));
+    item.appendChild(el("span", { class: "v", text: String(budget[k]) }));
+    grid.appendChild(item);
+  }
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+function renderCase(row, idx) {
+  const card = el("article", { class: "case", id: "case-" + idx });
+
+  const head = el("header", { class: "case-head" });
+  const leftBlock = el("div");
+  const channelName = row.channelId ? resolveChannel(row.channelId) : "?";
+  const channelDisplay = (channelName !== row.channelId && row.channelId) ? "#" + channelName : (row.channelId || "?");
+  const title = row.caseId
+    ? row.caseId + (row.caseDescription ? " — " + row.caseDescription : "")
+    : channelDisplay + " / " + (row.threadTs || "?");
+  leftBlock.appendChild(el("div", { class: "case-title", text: "#" + (idx + 1) + "  " + title }));
+  const metaText = channelDisplay + " · " + (row.threadTs || "?") + " · " + ((row.messages || []).length) + " msg" + (row.variantId ? " · variant=" + row.variantId : "");
+  const metaNode = el("div", { class: "case-meta", text: metaText });
+  if (row.channelId && row.channelId !== channelDisplay) metaNode.title = row.channelId;
+  leftBlock.appendChild(metaNode);
+  head.appendChild(leftBlock);
+
+  const rightBlock = el("div", { class: "badges" });
+  if (row.fixtureLabel) {
+    const lb = fixtureLabelBadge(row.fixtureLabel);
+    if (lb) rightBlock.appendChild(lb);
+  }
+  if (row.dryRun && row.dryRun.finalDecision) {
+    rightBlock.appendChild(decisionBadge(row.dryRun.finalDecision));
+  }
+  if (row.dryRun && Array.isArray(row.dryRun.pipelineSmellSignals)) {
+    for (const s of row.dryRun.pipelineSmellSignals) {
+      rightBlock.appendChild(el("span", { class: "badge smell", text: "smell: " + s }));
+    }
+  }
+  const slackUrl = buildSlackLink(row.channelId, row.threadTs);
+  if (slackUrl) {
+    rightBlock.appendChild(el("a", { class: "case-slack-link", href: slackUrl, target: "_blank", rel: "noopener noreferrer", text: "🔗 Slack ↗" }));
+  }
+  head.appendChild(rightBlock);
+  card.appendChild(head);
+
+  if (row.error) {
+    const errBlock = el("div", { class: "section" });
+    errBlock.appendChild(el("h3", { text: "Replay error" }));
+    const item = el("div", { class: "verdict-item blocked" });
+    item.appendChild(el("span", { class: "verdict-reason", text: row.error }));
+    errBlock.appendChild(item);
+    card.appendChild(errBlock);
+  }
+
+  const msgSection = el("div", { class: "section" });
+  msgSection.appendChild(el("h3", { text: "Original Slack messages" }));
+  msgSection.appendChild(renderMessages(row.messages || []));
+  card.appendChild(msgSection);
+
+  if (row.dryRun) {
+    const piSection = el("div", { class: "section" });
+    piSection.appendChild(el("h3", { text: "Pi / LLM reasoning" }));
+    piSection.appendChild(renderPiBlock(row.dryRun));
+    card.appendChild(piSection);
+
+    card.appendChild(renderActions(row.dryRun.actionsBeforeGate || [], "Would-do actions (before approval gate)"));
+
+    const before = row.dryRun.actionsBeforeGate || [];
+    const after = row.dryRun.actionsAfterGate || [];
+    if (after.length !== before.length || (before.length > 0 && after.length === 0)) {
+      card.appendChild(renderActions(after, "After approval gate"));
+    }
+
+    card.appendChild(renderVerdicts(row.dryRun.visibleReplyVerdicts || []));
+    card.appendChild(renderWorkers(row.dryRun.wouldDelegateWorkers || []));
+
+    if (Array.isArray(row.dryRun.wouldMemoryWrites) && row.dryRun.wouldMemoryWrites.length > 0) {
+      const memWrap = el("div", { class: "section" });
+      memWrap.appendChild(el("h3", { text: "Would write memory" }));
+      for (const m of row.dryRun.wouldMemoryWrites) {
+        memWrap.appendChild(el("div", { class: "toolcall-item", text: m }));
+      }
+      card.appendChild(memWrap);
+    }
+
+    card.appendChild(renderToolCalls(row.dryRun.toolCalls || []));
+
+    const budget = renderContextBudget(row.dryRun.contextBudget);
+    if (budget) card.appendChild(budget);
+
+    if (row.dryRun.digest) {
+      const digestFold = el("details", { class: "fold" });
+      digestFold.appendChild(el("summary", { text: "Input digest / fetched context (what Pi actually saw)" }));
+      const pre = el("pre");
+      pre.textContent = row.dryRun.digest;
+      digestFold.appendChild(pre);
+      card.appendChild(digestFold);
+    }
+  } else {
+    card.appendChild(el("div", { class: "muted-note", text: "(no dry-run result captured for this row)" }));
+  }
+
+  const rawFold = el("details", { class: "fold" });
+  rawFold.appendChild(el("summary", { text: "raw JSON (everything)" }));
+  const rawPre = el("pre");
+  rawPre.textContent = JSON.stringify(row, null, 2);
+  rawFold.appendChild(rawPre);
+  card.appendChild(rawFold);
+
+  const voteRow = el("div", { class: "vote-row" });
+  const makeBtn = (kind, label, keyHint) => {
+    const btn = el("button", {
+      class: "vote-btn " + kind,
+      type: "button",
+      onClick: () => recordVote(idx, kind),
+    },
+      el("span", { text: label }),
+      el("span", { class: "key", text: keyHint }),
+    );
+    btn.dataset.kind = kind;
+    return btn;
+  };
+  voteRow.appendChild(makeBtn("correct", "✅ Bot 做对了", "[1]"));
+  voteRow.appendChild(makeBtn("wrong",   "❌ Bot 做错了", "[2]"));
+  voteRow.appendChild(makeBtn("unsure",  "⚠️ 说不准",    "[3]"));
+  card.appendChild(voteRow);
+
+  // Expected-action panel (shown only when verdict=wrong; required for valid review)
+  const expectedPanel = el("div", { class: "expected-panel", id: "expected-panel-" + idx, style: "display:none;" });
+  expectedPanel.appendChild(el("div", { class: "expected-panel-title", text: "❌ Bot 错了 → 那期望应该做什么？(benchmark gold label, 必填)" }));
+  const expectedOptions = el("div", { class: "expected-options" });
+  const expectedKinds = [
+    { kind: "stay_silent", label: "stay_silent (不回应)" },
+    { kind: "react", label: "react (加 emoji)" },
+    { kind: "delegate_worker", label: "delegate_worker (派子任务)" },
+    { kind: "visible_reply", label: "visible_reply (Slack 回复)" },
+    { kind: "other", label: "其他 / 自由文本" },
+  ];
+  for (const opt of expectedKinds) {
+    const lbl = el("label", { dataset: { kind: opt.kind } });
+    const radio = el("input", { type: "radio", name: "expected-" + idx, value: opt.kind });
+    radio.addEventListener("change", () => recordExpected(idx, opt.kind));
+    lbl.appendChild(radio);
+    lbl.appendChild(document.createTextNode(opt.label));
+    expectedOptions.appendChild(lbl);
+  }
+  expectedPanel.appendChild(expectedOptions);
+  const expectedFree = el("textarea", {
+    class: "expected-free", id: "expected-free-" + idx,
+    placeholder: "(选 \"其他\" 时必填) 期望 bot 的具体行为，例如：'@person 私聊问 X' / '不要 @ 任何人' / '只 react :eyes:'",
+    style: "display:none;",
+  });
+  expectedFree.addEventListener("input", (e) => { state.expectedNotes[rowKey(idx)] = e.target.value; });
+  expectedPanel.appendChild(expectedFree);
+  const expectedHint = el("div", { class: "expected-required-hint", id: "expected-hint-" + idx, text: "→ 必选一个，否则 review 提交时这条会算 invalid" });
+  expectedPanel.appendChild(expectedHint);
+  card.appendChild(expectedPanel);
+
+  const note = el("textarea", { class: "note-input", placeholder: "备注：为什么不对，备注 (可选)" });
+  note.addEventListener("input", (e) => { state.notes[rowKey(idx)] = e.target.value; });
+  card.appendChild(note);
+
+  return card;
+}
+
+function recordVote(idx, kind) {
+  state.votes[rowKey(idx)] = kind;
+  const card = document.getElementById("case-" + idx);
+  if (card) {
+    card.classList.add("voted");
+    const btns = card.querySelectorAll(".vote-btn");
+    for (const b of btns) {
+      if (b.dataset.kind === kind) b.classList.add("active");
+      else b.classList.remove("active");
+    }
+  }
+  const expectedPanel = document.getElementById("expected-panel-" + idx);
+  if (expectedPanel) expectedPanel.style.display = kind === "wrong" ? "block" : "none";
+  if (kind !== "wrong") delete state.expected[rowKey(idx)];
+  updateProgress();
+  if (kind !== "wrong") scrollToNextUnrated(idx);
+}
+
+function recordExpected(idx, kind) {
+  state.expected[rowKey(idx)] = kind;
+  const panel = document.getElementById("expected-panel-" + idx);
+  if (panel) {
+    const labels = panel.querySelectorAll(".expected-options label");
+    for (const lbl of labels) {
+      if (lbl.dataset.kind === kind) lbl.classList.add("active");
+      else lbl.classList.remove("active");
+    }
+  }
+  const freeEl = document.getElementById("expected-free-" + idx);
+  if (freeEl) freeEl.style.display = (kind === "other") ? "block" : "none";
+  const hint = document.getElementById("expected-hint-" + idx);
+  if (hint) hint.style.display = "none";
+  updateProgress();
+  scrollToNextUnrated(idx);
+}
+
+function scrollToNextUnrated(fromIdx) {
+  for (let i = fromIdx + 1; i < state.rows.length; i++) {
+    if (!state.votes[rowKey(i)]) {
+      const next = document.getElementById("case-" + i);
+      if (next) next.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+  }
+}
+function findFirstUnrated() {
+  for (let i = 0; i < state.rows.length; i++) if (!state.votes[rowKey(i)]) return i;
+  return -1;
+}
+
+function updateProgress() {
+  const total = state.rows.length;
+  const voted = Object.keys(state.votes).length;
+  const wrongCount = Object.values(state.votes).filter(v => v === "wrong").length;
+  let wrongMissingExpected = 0;
+  for (const k of Object.keys(state.votes)) {
+    if (state.votes[k] === "wrong") {
+      const exp = state.expected[k];
+      const free = state.expectedNotes[k] || "";
+      if (!exp || (exp === "other" && !free.trim())) wrongMissingExpected++;
+    }
+  }
+  const pct = total === 0 ? 0 : Math.round((voted / total) * 100);
+  els.progressBar.style.width = pct + "%";
+  els.progressText.textContent = voted + " / " + total + " (" + pct + "%)";
+  let summary = voted + " / " + total + " reviewed";
+  summary += " · 当前显示 " + state.visibleCount;
+  if (wrongCount > 0) summary += " · ❌×" + wrongCount;
+  if (wrongMissingExpected > 0) summary += " · ⚠️ " + wrongMissingExpected + " 条 wrong 没标 expected";
+  els.summaryText.textContent = summary;
+  els.btnDownload.disabled = voted === 0;
+  els.btnSubmit.disabled = voted === 0;
+}
+
+function renderAll() {
+  clear(els.cases);
+  if (state.rows.length === 0) {
+    els.cases.appendChild(el("div", { class: "empty-state" },
+      el("h2", { text: "没有数据" }),
+      el("div", null,
+        "运行 ",
+        el("code", { text: "oneesama-triage-benchmark --detail-output detail.json" }),
+        " 生成数据文件，然后拖入即可",
+      ),
+    ));
+    els.footer.style.display = "none";
+    els.dropZone.style.display = "block";
+    return;
+  }
+  els.dropZone.style.display = "none";
+  let visible = 0;
+  for (let i = 0; i < state.rows.length; i++) {
+    if (!rowMatchesFilters(state.rows[i], i)) continue;
+    visible++;
+    els.cases.appendChild(renderCase(state.rows[i], i));
+  }
+  state.visibleCount = visible;
+  if (visible === 0) {
+    els.cases.appendChild(el("div", { class: "empty-state" },
+      el("h2", { text: "当前 filter 没有命中" }),
+      el("div", { text: "切到「全部」或换频道看看。" }),
+    ));
+  }
+  els.footer.style.display = "flex";
+  updateProgress();
+}
+
+function loadDetail(detail) {
+  if (!detail || !Array.isArray(detail.rows)) {
+    alert("JSON 没有 rows[] — 不是 detail report (schema 应为 oneesama.triage.benchmark_detail.v1)");
+    return;
+  }
+  if (detail.schema && detail.schema !== "oneesama.triage.benchmark_detail.v1") {
+    console.warn("schema mismatch:", detail.schema);
+  }
+  state.detail = detail;
+  state.rows = detail.rows;
+  state.votes = {};
+  state.notes = {};
+  state.expected = {};
+  state.expectedNotes = {};
+  state.userNames = (detail.nameMap && detail.nameMap.users) || {};
+  state.channelNames = (detail.nameMap && detail.nameMap.channels) || {};
+  populateChannelFilter();
+  renderAll();
+}
+
+async function loadFromFile(file) {
+  try {
+    const text = await file.text();
+    loadDetail(JSON.parse(text));
+  } catch (e) {
+    alert("解析失败: " + e.message);
+  }
+}
+async function loadFromUrl(url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    loadDetail(await resp.json());
+  } catch (e) {
+    alert("加载失败: " + e.message);
+  }
+}
+
+function buildReviewJson() {
+  const items = [];
+  for (let i = 0; i < state.rows.length; i++) {
+    const r = state.rows[i];
+    const k = rowKey(i);
+    const verdict = state.votes[k] || null;
+    const expectedKind = state.expected[k] || null;
+    const expectedFree = state.expectedNotes[k] || "";
+    const item = {
+      index: i,
+      caseId: r.caseId || "",
+      fixtureLabel: r.fixtureLabel || "",
+      channelId: r.channelId || "",
+      threadTs: r.threadTs || "",
+      variantId: r.variantId || "",
+      dedupKey: [r.channelId || "", r.threadTs || "", r.variantId || ""].join("+"),
+      botFinalDecision: (r.dryRun && r.dryRun.finalDecision) || "",
+      botPersonaDecision: (r.dryRun && r.dryRun.persona && r.dryRun.persona.decision) || "",
+      botPersonaConfidence: (r.dryRun && r.dryRun.persona && r.dryRun.persona.confidence) || null,
+      verdict: verdict,
+      note: state.notes[k] || "",
+      actual: {
+        kind: botActualKind(r),
+        finalDecision: (r.dryRun && r.dryRun.finalDecision) || "",
+        visibleReplyAllowed: !!(r.dryRun && Array.isArray(r.dryRun.visibleReplyVerdicts) && r.dryRun.visibleReplyVerdicts.some(v => v.allowed)),
+        minWorkerRequests: (r.dryRun && Array.isArray(r.dryRun.wouldDelegateWorkers)) ? r.dryRun.wouldDelegateWorkers.length : 0,
+      },
+    };
+    if (verdict === "wrong") {
+      const valid = expectedKind && (expectedKind !== "other" || expectedFree.trim().length > 0);
+      item.expected = {
+        kind: expectedKind || "",
+        freeform: expectedKind === "other" ? expectedFree : "",
+        valid: !!valid,
+      };
+    }
+    items.push(item);
+  }
+  const verdicts = Object.values(state.votes);
+  const wrongInvalid = items.filter(i => i.verdict === "wrong" && (!i.expected || !i.expected.valid)).length;
+  return {
+    schema: "oneesama.triage.human_review.v1",
+    reviewer: els.reviewerName.value || "anonymous",
+    reviewedAt: new Date().toISOString(),
+    sourceDetailGeneratedAt: state.detail ? state.detail.generatedAt || "" : "",
+    sourceVariantId: state.detail ? state.detail.variantId || "" : "",
+    sourceMode: state.detail ? state.detail.mode || "" : "",
+    dedupKey: "channelId+threadTs+variantId",
+    totals: {
+      cases: state.rows.length,
+      voted: verdicts.length,
+      correct: verdicts.filter(v => v === "correct").length,
+      wrong: verdicts.filter(v => v === "wrong").length,
+      unsure: verdicts.filter(v => v === "unsure").length,
+      wrongWithoutExpected: wrongInvalid,
+    },
+    items: items,
+  };
+}
+
+function downloadReview() {
+  const data = buildReviewJson();
+  const text = JSON.stringify(data, null, 2);
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  a.href = url;
+  a.download = "oneesama-triage-human-review-" + stamp + ".json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function submitReview() {
+  const data = buildReviewJson();
+  try {
+    const resp = await fetch("/human-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data, null, 2),
+    });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(text || ("HTTP " + resp.status));
+    let payload = {};
+    try { payload = JSON.parse(text); } catch (_) {}
+    const gold = payload.gold || {};
+    alert("已提交到 benchmark。\n保存路径: " + (payload.path || "(unknown)") +
+      "\nGold: pass=" + (gold.goldPasses || 0) + " fail=" + (gold.goldFailures || 0) + " unrated=" + (gold.goldUnrated || 0));
+  } catch (e) {
+    alert("提交失败（如果是 file:// 打开，请用 --serve-review）： " + e.message);
+  }
+}
+
+function attachEvents() {
+  els.fileInput.addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) loadFromFile(f);
+  });
+  els.dropZone.addEventListener("click", () => els.fileInput.click());
+  els.dropZone.addEventListener("dragover", (e) => { e.preventDefault(); els.dropZone.classList.add("drag"); });
+  els.dropZone.addEventListener("dragleave", () => els.dropZone.classList.remove("drag"));
+  els.dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    els.dropZone.classList.remove("drag");
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) loadFromFile(f);
+  });
+  els.btnDownload.addEventListener("click", downloadReview);
+  els.btnSubmit.addEventListener("click", submitReview);
+  els.btnSkipUnrated.addEventListener("click", () => {
+    const i = findFirstUnrated();
+    if (i < 0) return;
+    const node = document.getElementById("case-" + i);
+    if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
+    if (state.rows.length === 0) return;
+    const cards = document.querySelectorAll("article.case");
+    let focusIdx = -1;
+    for (let i = 0; i < cards.length; i++) {
+      const rect = cards[i].getBoundingClientRect();
+      if (rect.top >= -50 && rect.top < window.innerHeight / 2) { focusIdx = i; break; }
+    }
+    if (focusIdx < 0) return;
+    if (e.key === "1") { e.preventDefault(); recordVote(focusIdx, "correct"); }
+    else if (e.key === "2") { e.preventDefault(); recordVote(focusIdx, "wrong"); }
+    else if (e.key === "3") { e.preventDefault(); recordVote(focusIdx, "unsure"); }
+    else if (e.key === "j" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = cards[focusIdx + 1];
+      if (next) next.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (e.key === "k" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const prev = cards[focusIdx - 1];
+      if (prev) prev.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+
+  els.workspaceUrl.addEventListener("input", () => {
+    if (state.rows.length > 0) renderAll();
+  });
+  els.filterMode.addEventListener("change", renderAll);
+  els.filterChannel.addEventListener("change", renderAll);
+}
+
+function init() {
+  attachEvents();
+  const params = new URLSearchParams(window.location.search);
+  const dataUrl = params.get("data");
+  if (dataUrl) loadFromUrl(dataUrl);
+  else if (window.location.protocol === "http:" || window.location.protocol === "https:") loadFromUrl("/detail.json");
+  else renderAll();
+}
+
+init();
+</script>
+</body>
+</html>

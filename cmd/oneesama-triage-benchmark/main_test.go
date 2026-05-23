@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AFK-surf/oneesama/internal/persona"
 	"github.com/AFK-surf/oneesama/internal/slackagent"
@@ -197,8 +198,130 @@ func TestRunLiveBenchmarkHonorsTotalThreadCap(t *testing.T) {
 	if report.ThreadsReplayed != 1 || len(report.Rows) != 1 {
 		t.Fatalf("threads/rows = %d/%d, want 1/1", report.ThreadsReplayed, len(report.Rows))
 	}
-	if len(report.Stats) != 1 || report.Stats[0].ChannelID != "C1" {
-		t.Fatalf("stats = %#v, want only first channel scanned before cap", report.Stats)
+	if len(report.Stats) != 2 || report.Stats[0].ChannelID != "C1" || report.Stats[1].ChannelID != "C2" {
+		t.Fatalf("stats = %#v, want all channels scanned before balanced cap selection", report.Stats)
+	}
+}
+
+func TestSelectBalancedReplayThreadsSpreadsAcrossChannels(t *testing.T) {
+	thread := func(channel string, ts string) slackagent.SlackTriageReplayThread {
+		return slackagent.SlackTriageReplayThread{ChannelID: channel, ThreadTS: ts}
+	}
+	selected := selectBalancedReplayThreads([][]slackagent.SlackTriageReplayThread{
+		{thread("C1", "1"), thread("C1", "2"), thread("C1", "3")},
+		{thread("C2", "1"), thread("C2", "2")},
+		{thread("C3", "1")},
+	}, 4)
+	got := []string{}
+	for _, item := range selected {
+		got = append(got, item.ChannelID+"/"+item.ThreadTS)
+	}
+	want := []string{"C1/1", "C2/1", "C3/1", "C1/2"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("selected = %#v, want %#v", got, want)
+	}
+}
+
+func TestRunLiveBenchmarkHonorsAbsoluteWindowAndWritesDetail(t *testing.T) {
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	afterTime := time.Date(2026, 5, 22, 9, 0, 0, 0, location)
+	beforeTime := time.Date(2026, 5, 22, 20, 0, 0, 0, location)
+	slackMux := http.NewServeMux()
+	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("oldest"); got != "1779411600" {
+			t.Fatalf("oldest = %q, want 1779411600", got)
+		}
+		if got := r.URL.Query().Get("latest"); got != "1779451200" {
+			t.Fatalf("latest = %q, want 1779451200", got)
+		}
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				{"ts": "1779410000.000100", "channel": "C1", "user": "U_PENG", "text": "工作日 triage 样本"},
+			},
+		})
+	})
+	slackMux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"channels": []map[string]any{
+				{"id": "C1", "name": "meeting-avatar", "is_member": true},
+			},
+		})
+	})
+	slackMux.HandleFunc("/users.list", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"members": []map[string]any{
+				{"id": "U_PENG", "name": "peng-xiao", "profile": map[string]any{"display_name": "Peng Xiao"}},
+			},
+		})
+	})
+	slackServer := httptest.NewServer(slackMux)
+	defer slackServer.Close()
+	previousSlackURL := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = slackServer.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previousSlackURL })
+
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		var request triageRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode dry-run request: %v", err)
+		}
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:        true,
+				ChannelID:     request.ChannelID,
+				ThreadTS:      request.Messages[0].ThreadTS,
+				MessageCount:  len(request.Messages),
+				Digest:        "Pi saw the workday triage sample.",
+				FinalDecision: "would_stay_silent",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionStaySilent,
+					Success:  true,
+					Reason:   "No action needed.",
+				},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+	detailPath := t.TempDir() + "/detail.json"
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--token", "xoxb-test",
+		"--channel", "C1",
+		"--after", afterTime.Format("2006-01-02 15:04"),
+		"--before", beforeTime.Format("2006-01-02 15:04"),
+		"--detail-output", detailPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var report benchmarkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(report.Since, "2026-05-22T09:00:00+08:00..2026-05-22T20:00:00+08:00") {
+		t.Fatalf("report window = %q, want absolute SHA range", report.Since)
+	}
+	data, err := os.ReadFile(detailPath)
+	if err != nil {
+		t.Fatalf("read detail: %v", err)
+	}
+	var detail benchmarkDetail
+	if err := json.Unmarshal(data, &detail); err != nil {
+		t.Fatalf("decode detail: %v\n%s", err, string(data))
+	}
+	if detail.Schema != "oneesama.triage.benchmark_detail.v1" || len(detail.Rows) != 1 || detail.Rows[0].DryRun == nil {
+		t.Fatalf("detail = %#v, want one dry-run row", detail)
+	}
+	if detail.NameMap.Users["U_PENG"] != "Peng Xiao" || detail.NameMap.Channels["C1"] != "meeting-avatar" {
+		t.Fatalf("name map = %#v, want friendly user/channel names", detail.NameMap)
 	}
 }
 
@@ -259,6 +382,152 @@ func TestRunLiveBenchmarkCanRenderMarkdownTable(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("markdown = %s, want %q", out, want)
 		}
+	}
+}
+
+func TestRunLiveBenchmarkAppliesHumanReviewGoldInput(t *testing.T) {
+	slackMux := http.NewServeMux()
+	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				{"ts": "1779450000.000100", "channel": "C1", "user": "U_PENG", "text": "看看这个产品链接，给一句有证据的评论"},
+				{"ts": "1779450001.000100", "channel": "C1", "user": "U_PENG", "text": "确认", "thread_ts": "1779450000.000100"},
+			},
+		})
+	})
+	slackServer := httptest.NewServer(slackMux)
+	defer slackServer.Close()
+	previousSlackURL := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = slackServer.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previousSlackURL })
+
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		var request triageRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode dry-run request: %v", err)
+		}
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:        true,
+				ChannelID:     request.ChannelID,
+				ThreadTS:      request.Messages[0].ThreadTS,
+				MessageCount:  len(request.Messages),
+				FinalDecision: "would_stay_silent",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionStaySilent,
+					Success:  true,
+				},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+	goldPath := t.TempDir() + "/human_review.json"
+	writeFile(t, goldPath, `{
+	  "schema": "oneesama.triage.human_review.v1",
+	  "cases": [
+	    {
+	      "dedupKey": "C1+1779450000.000100+current",
+	      "channelId": "C1",
+	      "threadTs": "1779450000.000100",
+	      "variantId": "current",
+	      "humanVerdict": "wrong",
+	      "notes": "用户明确要求一句评论，应该可见回复",
+	      "expected": {"kind": "visible_reply", "valid": true}
+	    }
+	  ]
+	}`)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--token", "xoxb-test",
+		"--channel", "C1",
+		"--gold-input", goldPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var report benchmarkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, stdout.String())
+	}
+	if report.Summary.GoldFailures != 1 || report.Summary.ByGoldStatus["fail"] != 1 {
+		t.Fatalf("gold summary = %#v, want one failure", report.Summary)
+	}
+	if len(report.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(report.Rows))
+	}
+	row := report.Rows[0]
+	if row.GoldStatus != "fail" || row.GoldExpected != "visible_reply" || row.GoldActual != "would_stay_silent" {
+		t.Fatalf("gold row = %#v, want visible_reply failure against silent actual", row)
+	}
+	if !strings.Contains(row.GoldNotes, "应该可见回复") {
+		t.Fatalf("gold notes = %q, want human note carried through", row.GoldNotes)
+	}
+}
+
+func TestRunLiveBenchmarkMarksGoldUnratedWhenLabelMissing(t *testing.T) {
+	slackMux := http.NewServeMux()
+	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				{"ts": "1779450000.000100", "channel": "C1", "user": "U_PENG", "text": "确认"},
+			},
+		})
+	})
+	slackServer := httptest.NewServer(slackMux)
+	defer slackServer.Close()
+	previousSlackURL := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = slackServer.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previousSlackURL })
+
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		var request triageRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode dry-run request: %v", err)
+		}
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:        true,
+				ChannelID:     request.ChannelID,
+				ThreadTS:      request.Messages[0].ThreadTS,
+				MessageCount:  len(request.Messages),
+				FinalDecision: "would_stay_silent",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionStaySilent,
+					Success:  true,
+				},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+	goldPath := t.TempDir() + "/human_review.json"
+	writeFile(t, goldPath, `{"schema":"oneesama.triage.human_review.v1","cases":[]}`)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--token", "xoxb-test",
+		"--channel", "C1",
+		"--gold-input", goldPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var report benchmarkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, stdout.String())
+	}
+	if report.Summary.GoldUnrated != 1 || report.Rows[0].GoldStatus != "unrated" {
+		t.Fatalf("gold summary/row = %#v/%#v, want unrated", report.Summary, report.Rows[0])
 	}
 }
 
