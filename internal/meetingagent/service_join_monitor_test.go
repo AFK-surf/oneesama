@@ -60,6 +60,24 @@ func TestRuntimeJoinStateDetectsSoloParticipantButton(t *testing.T) {
 	}
 }
 
+func TestRuntimeJoinStatePrefersTopParticipantButtonOverStaleCount(t *testing.T) {
+	t.Parallel()
+
+	state := runtimeJoinState(map[string]any{
+		"meetPage": map[string]any{
+			"inMeeting":        true,
+			"participantCount": 2,
+			"buttons": []map[string]any{{
+				"label": "1",
+				"rect":  map[string]any{"y": 14},
+			}},
+		},
+	})
+	if !state.Joined || !state.Alone || state.ParticipantCount != 1 || state.Reason != "empty_room" {
+		t.Fatalf("state = %+v, want top participant button to override stale count", state)
+	}
+}
+
 func TestRuntimeJoinStateDoesNotMarkMultiParticipantMeetingAlone(t *testing.T) {
 	t.Parallel()
 

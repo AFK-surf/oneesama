@@ -273,13 +273,13 @@ func runtimeParticipantCount(meetPage map[string]any) int {
 	if len(meetPage) == 0 {
 		return 0
 	}
-	for _, key := range []string{"participantCount", "participant_count", "participantsCount", "participants_count"} {
-		if count := intFromAny(meetPage[key]); count > 0 {
+	for _, count := range participantCountsFromButtons(meetPage["buttons"]) {
+		if count > 0 {
 			return count
 		}
 	}
-	for _, count := range participantCountsFromButtons(meetPage["buttons"]) {
-		if count > 0 {
+	for _, key := range []string{"participantCount", "participant_count", "participantsCount", "participants_count"} {
+		if count := intFromAny(meetPage[key]); count > 0 {
 			return count
 		}
 	}
