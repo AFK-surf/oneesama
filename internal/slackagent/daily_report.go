@@ -107,6 +107,7 @@ type SlackDailyTriageMetrics struct {
 	Error                         string         `json:"error,omitempty"`
 	Runs                          int            `json:"runs"`
 	FailedRuns                    int            `json:"failed_runs"`
+	RecoveredProviderFailures     int            `json:"recovered_provider_failures,omitempty"`
 	MutatingRuns                  int            `json:"mutating_runs"`
 	Mutations                     int            `json:"mutations"`
 	ReplyRuns                     int            `json:"reply_runs"`
@@ -540,7 +541,12 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 	}
 	for _, run := range runs {
 		metrics.Runs++
-		if slackTriageRunFailed(run) {
+		recoveredProviderFailure := false
+		if _, ok := triageQualityRunRecoveredProviderFailure(run, runs); ok {
+			recoveredProviderFailure = true
+			metrics.RecoveredProviderFailures++
+		}
+		if slackTriageRunFailed(run) && !recoveredProviderFailure {
 			metrics.FailedRuns++
 			metrics.FailedSamples = appendLimitedString(metrics.FailedSamples, slackDailyReportRunSample(run, firstNonEmpty(run.Error, run.Summary, "failed")), 8)
 		}
@@ -605,7 +611,7 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		if directedToActiveAgent {
 			metrics.DirectedToActiveAgentNoAction++
 		}
-		if !dynamicContextIssue && !directedToActiveAgent && !handledByOther && !delegateStartedPending {
+		if !dynamicContextIssue && !directedToActiveAgent && !handledByOther && !delegateStartedPending && !recoveredProviderFailure {
 			if inputChars >= triageQualityHighContextInputCharsThreshold && len(run.Actions) == 0 && run.Mutations == 0 {
 				metrics.HighContextNoAction++
 			}
@@ -628,7 +634,7 @@ func buildSlackDailyTriageMetrics(source string, runs []SlackTriageContext, cust
 		}
 		if raw, ok := mapFromAny(run.Metadata["persona_foreground"]); ok {
 			metrics.PersonaRuns++
-			if !boolFromAny(raw["success"], false) {
+			if !boolFromAny(raw["success"], false) && !recoveredProviderFailure {
 				metrics.PersonaFailures++
 			}
 		}
@@ -1235,7 +1241,7 @@ func slackDailyDiaryWatchlist(newRuns []SlackTriageContext, legacyRuns []SlackTr
 	var watchlist []string
 	failedNew := 0
 	for _, run := range newRuns {
-		if slackTriageRunFailed(run) {
+		if _, recovered := triageQualityRunRecoveredProviderFailure(run, newRuns); slackTriageRunFailed(run) && !recovered {
 			failedNew++
 		}
 	}

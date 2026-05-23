@@ -174,6 +174,9 @@ func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) S
 		if len(run.Actions) > 0 || run.Mutations > 0 {
 			continue
 		}
+		if _, ok := triageQualityRunRecoveredProviderFailure(run, runs); ok {
+			continue
+		}
 		if issue, ok := triageQualityRunDynamicContextIssue(run); ok {
 			out.DynamicContextIssueCount++
 			if sampleLimit > 0 && len(out.DynamicContextIssueSamples) < sampleLimit {
@@ -249,12 +252,11 @@ func buildSlackTriageReviewBuckets(runs []SlackTriageContext, sampleLimit int) S
 	return out
 }
 
-// buildSlackTriageInfoBuckets collects no-action runs whose summary indicates
-// "another agent / teammate already handled this thread". These runs land in
-// the info tier so operator review queues stay focused on real
-// "something might be wrong" candidates. Counts run independently of the
-// review-tier buckets; samples are limited and ordered newest-first. Task
-// #285 follow-up #3 (driver 6h audit 2026-05-21 proposal #2).
+// buildSlackTriageInfoBuckets collects record-keeping-only buckets: no-action
+// runs whose evidence says the work was handled elsewhere, plus transient
+// provider failures that were followed by a same-thread successful recovery.
+// These runs land in the info tier so operator review queues stay focused on
+// real "something might be wrong" candidates.
 func buildSlackTriageInfoBuckets(runs []SlackTriageContext, sampleLimit int) SlackTriageInfoBuckets {
 	out := SlackTriageInfoBuckets{}
 	if len(runs) == 0 {
@@ -265,6 +267,23 @@ func buildSlackTriageInfoBuckets(runs []SlackTriageContext, sampleLimit int) Sla
 		return parseTriageTimestamp(ordered[i].Timestamp).After(parseTriageTimestamp(ordered[j].Timestamp))
 	})
 	for _, run := range ordered {
+		if evidence, ok := triageQualityRunRecoveredProviderFailure(run, runs); ok {
+			out.RecoveredProviderFailureCount++
+			if sampleLimit > 0 && len(out.RecoveredProviderFailureSamples) < sampleLimit {
+				out.RecoveredProviderFailureSamples = append(out.RecoveredProviderFailureSamples, SlackTriageRecoveredProviderFailureSample{
+					Timestamp:        run.Timestamp,
+					RunID:            run.ID,
+					Channels:         run.Channels,
+					ThreadTS:         evidence.ThreadTS,
+					Summary:          slackTriageFailureSampleText(run.Summary),
+					Error:            slackTriageFailureSampleText(evidence.Error),
+					RecoveredByRunID: evidence.RecoveredByRunID,
+					RecoveredAt:      evidence.RecoveredAt,
+					RecoverySummary:  slackTriageFailureSampleText(evidence.RecoverySummary),
+				})
+			}
+			continue
+		}
 		if len(run.Actions) > 0 || run.Mutations > 0 {
 			continue
 		}
@@ -317,6 +336,9 @@ func buildSlackTriageFailureSamples(runs []SlackTriageContext, limit int) []Slac
 		if !slackTriageRunFailed(run) {
 			continue
 		}
+		if _, ok := triageQualityRunRecoveredProviderFailure(run, runs); ok {
+			continue
+		}
 		samples = append(samples, SlackTriageFailureSample{
 			Timestamp: run.Timestamp,
 			Channels:  run.Channels,
@@ -330,6 +352,111 @@ func buildSlackTriageFailureSamples(runs []SlackTriageContext, limit int) []Slac
 		return nil
 	}
 	return samples
+}
+
+type triageQualityRecoveredProviderFailureEvidence struct {
+	ThreadTS         string
+	Error            string
+	RecoveredByRunID int64
+	RecoveredAt      string
+	RecoverySummary  string
+}
+
+type triageQualityThreadKey struct {
+	ChannelID string
+	ThreadTS  string
+}
+
+func triageQualityRunRecoveredProviderFailure(run SlackTriageContext, runs []SlackTriageContext) (triageQualityRecoveredProviderFailureEvidence, bool) {
+	if !slackTriageRunFailed(run) || !triageQualityRunProviderTransientFailure(run) {
+		return triageQualityRecoveredProviderFailureEvidence{}, false
+	}
+	key, ok := triageQualityRunThreadKey(run)
+	if !ok {
+		return triageQualityRecoveredProviderFailureEvidence{}, false
+	}
+	failedAt := parseTriageTimestamp(run.Timestamp).UTC()
+	if failedAt.IsZero() {
+		return triageQualityRecoveredProviderFailureEvidence{}, false
+	}
+	var recovery SlackTriageContext
+	var recoveredAt time.Time
+	for _, candidate := range runs {
+		if candidate.ID == run.ID {
+			continue
+		}
+		candidateKey, ok := triageQualityRunThreadKey(candidate)
+		if !ok || candidateKey != key || slackTriageRunFailed(candidate) {
+			continue
+		}
+		candidateAt := parseTriageTimestamp(candidate.Timestamp).UTC()
+		if candidateAt.IsZero() || !candidateAt.After(failedAt) {
+			continue
+		}
+		if recoveredAt.IsZero() || candidateAt.Before(recoveredAt) {
+			recovery = candidate
+			recoveredAt = candidateAt
+		}
+	}
+	if recoveredAt.IsZero() {
+		return triageQualityRecoveredProviderFailureEvidence{}, false
+	}
+	return triageQualityRecoveredProviderFailureEvidence{
+		ThreadTS:         key.ThreadTS,
+		Error:            firstNonEmpty(run.Error, triageQualityRunPersonaError(run)),
+		RecoveredByRunID: recovery.ID,
+		RecoveredAt:      recovery.Timestamp,
+		RecoverySummary:  firstNonEmpty(recovery.Summary, triageQualityRunPersonaReason(recovery)),
+	}, true
+}
+
+func triageQualityRunProviderTransientFailure(run SlackTriageContext) bool {
+	text := strings.ToLower(firstNonEmpty(run.Error, triageQualityRunPersonaError(run), run.Summary))
+	if text == "" {
+		return false
+	}
+	if strings.Contains(text, "eof") && (strings.Contains(text, "openrouter") || strings.Contains(text, "chat/completions")) {
+		return true
+	}
+	return strings.Contains(text, "connection reset by peer") || strings.Contains(text, "unexpected eof")
+}
+
+func triageQualityRunThreadKey(run SlackTriageContext) (triageQualityThreadKey, bool) {
+	channelID := strings.TrimSpace(firstNonEmpty(
+		stringFromAny(run.Metadata["channel_id"]),
+		stringFromAny(run.Metadata["channelId"]),
+	))
+	threadTS := strings.TrimSpace(firstNonEmpty(
+		stringFromAny(run.Metadata["thread_ts"]),
+		stringFromAny(run.Metadata["threadTs"]),
+	))
+	if raw, ok := mapFromAny(run.Metadata["persona_foreground"]); ok {
+		channelID = firstNonEmpty(channelID, stringFromAny(raw["channel_id"]), stringFromAny(raw["channelId"]))
+		threadTS = firstNonEmpty(threadTS, stringFromAny(raw["thread_ts"]), stringFromAny(raw["threadTs"]))
+	}
+	if channelID == "" && len(run.Channels) > 0 {
+		channelID = strings.TrimSpace(run.Channels[0])
+	}
+	if channelID == "" || threadTS == "" {
+		return triageQualityThreadKey{}, false
+	}
+	return triageQualityThreadKey{ChannelID: channelID, ThreadTS: threadTS}, true
+}
+
+func triageQualityRunPersonaError(run SlackTriageContext) string {
+	raw, ok := mapFromAny(run.Metadata["persona_foreground"])
+	if !ok {
+		return ""
+	}
+	return stringFromAny(raw["error"])
+}
+
+func triageQualityRunPersonaReason(run SlackTriageContext) string {
+	raw, ok := mapFromAny(run.Metadata["persona_foreground"])
+	if !ok {
+		return ""
+	}
+	return stringFromAny(raw["reason"])
 }
 
 func filterSlackTriageProbeRuns(runs []SlackTriageContext, probe bool) []SlackTriageContext {
@@ -634,6 +761,8 @@ func buildSlackTriagePersonaQuality(runs []SlackTriageContext) SlackTriagePerson
 		success := boolFromAny(raw["success"], false)
 		if success {
 			quality.Successes++
+		} else if _, ok := triageQualityRunRecoveredProviderFailure(run, runs); ok {
+			quality.RecoveredProviderFailures++
 		} else {
 			quality.Failures++
 			if slackTriageRunHasRetryScheduled(run) {
@@ -740,10 +869,10 @@ func buildSlackTriageAuditFlags(report SlackTriageAuditReport) []SlackTriageAudi
 		flags = append(flags, SlackTriageAuditFlag{Level: level, Code: code, Message: message})
 	}
 	if report.RealOutcome.FailedRuns > 0 {
-		unhandled := report.RealOutcome.FailedRuns - report.RealOutcome.RetryScheduledFailures
+		unhandled := report.RealOutcome.FailedRuns - report.RealOutcome.RetryScheduledFailures - report.InfoBuckets.RecoveredProviderFailureCount
 		if unhandled > 0 {
 			flags = append(flags, SlackTriageAuditFlag{Level: "red", Code: "real_outcome_failures", Message: fmt.Sprintf("%d unhandled real triage failure(s) in the audit window.", unhandled)})
-		} else {
+		} else if report.RealOutcome.RetryScheduledFailures > 0 {
 			flags = append(flags, SlackTriageAuditFlag{Level: "yellow", Code: "real_outcome_failures_retry_scheduled", Message: fmt.Sprintf("%d real triage failure(s) already have retry follow-up scheduled.", report.RealOutcome.RetryScheduledFailures)})
 		}
 	}

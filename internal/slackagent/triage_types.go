@@ -405,6 +405,7 @@ type SlackTriagePersonaQuality struct {
 	Replies                   int    `json:"replies"`
 	Failures                  int    `json:"failures"`
 	RetryScheduledFailures    int    `json:"retryScheduledFailures,omitempty"`
+	RecoveredProviderFailures int    `json:"recoveredProviderFailures,omitempty"`
 	AuthFailures              int    `json:"authFailures,omitempty"`
 	ShadowOnlyResponses       int    `json:"shadowOnlyResponses"`
 	WorkerRequests            int    `json:"workerRequests"`
@@ -549,16 +550,34 @@ type SlackTriageDirectedToActiveAgentSample struct {
 	Evidence        string   `json:"evidence,omitempty"`
 }
 
+// SlackTriageRecoveredProviderFailureSample records a provider/transient
+// foreground failure that was followed by a successful triage run for the
+// same channel/thread. These runs are useful telemetry but should not stay in
+// red failure queues once user-visible recovery is confirmed.
+type SlackTriageRecoveredProviderFailureSample struct {
+	Timestamp        string   `json:"timestamp,omitempty"`
+	RunID            int64    `json:"runId,omitempty"`
+	Channels         []string `json:"channels,omitempty"`
+	ThreadTS         string   `json:"threadTs,omitempty"`
+	Summary          string   `json:"summary,omitempty"`
+	Error            string   `json:"error,omitempty"`
+	RecoveredByRunID int64    `json:"recoveredByRunId,omitempty"`
+	RecoveredAt      string   `json:"recoveredAt,omitempty"`
+	RecoverySummary  string   `json:"recoverySummary,omitempty"`
+}
+
 // SlackTriageInfoBuckets aggregates "info tier" (record-keeping only, NOT
 // operator-attention-needed) bucket counts + samples. Operators should be
 // able to glance at info bucket counts to confirm "system is correctly
 // staying silent because work was done elsewhere", without these counts
 // landing in review queues. Task #285 follow-up #3.
 type SlackTriageInfoBuckets struct {
-	DirectedToActiveAgentNoActionCount   int                                      `json:"directedToActiveAgentNoActionCount"`
-	DirectedToActiveAgentNoActionSamples []SlackTriageDirectedToActiveAgentSample `json:"directedToActiveAgentNoActionSamples,omitempty"`
-	HandledByOtherNoActionCount          int                                      `json:"handledByOtherNoActionCount"`
-	HandledByOtherNoActionSamples        []SlackTriageHandledByOtherSample        `json:"handledByOtherNoActionSamples,omitempty"`
+	RecoveredProviderFailureCount        int                                         `json:"recoveredProviderFailureCount"`
+	RecoveredProviderFailureSamples      []SlackTriageRecoveredProviderFailureSample `json:"recoveredProviderFailureSamples,omitempty"`
+	DirectedToActiveAgentNoActionCount   int                                         `json:"directedToActiveAgentNoActionCount"`
+	DirectedToActiveAgentNoActionSamples []SlackTriageDirectedToActiveAgentSample    `json:"directedToActiveAgentNoActionSamples,omitempty"`
+	HandledByOtherNoActionCount          int                                         `json:"handledByOtherNoActionCount"`
+	HandledByOtherNoActionSamples        []SlackTriageHandledByOtherSample           `json:"handledByOtherNoActionSamples,omitempty"`
 }
 
 type SlackTriageAuditRunBrief struct {

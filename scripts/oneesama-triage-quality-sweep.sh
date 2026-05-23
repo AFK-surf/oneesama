@@ -120,6 +120,42 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
   def fresh_pending_run($run):
     (($run.status // "") | test("^(pending|in_progress)$"; "i"))
     and ((now - epoch($run.timestamp)) < 180);
+  def run_failed($run):
+    (($run.status // "") != "ok")
+    or (($run.failures // 0) > 0)
+    or ((($run.error // "") | tostring | length) > 0);
+  def channel_id($run):
+    (meta($run; "channel_id") // meta($run; "persona_foreground").channel_id // (($run.channels // [])[0] // ""));
+  def thread_ts($run):
+    (meta($run; "thread_ts") // meta($run; "persona_foreground").thread_ts // "");
+  def same_thread($left; $right):
+    ((channel_id($left) // "") != "")
+    and ((thread_ts($left) // "") != "")
+    and (channel_id($left) == channel_id($right))
+    and (thread_ts($left) == thread_ts($right));
+  def failure_text($run):
+    ((($run.error // "") | tostring) + " " + ((meta($run; "persona_foreground").error // "") | tostring) + " " + (($run.summary // "") | tostring))
+    | ascii_downcase;
+  def provider_transient_failure($run):
+    (failure_text($run)) as $text
+    | (($text | contains("eof")) and (($text | contains("openrouter")) or ($text | contains("chat/completions"))))
+      or ($text | contains("unexpected eof"))
+      or ($text | contains("connection reset by peer"));
+  def recovery_run($run; $runs):
+    [
+      $runs[]
+      | select(
+          same_thread($run; .)
+          and ((epoch(.timestamp)) > (epoch($run.timestamp)))
+          and (run_failed(.) | not)
+        )
+    ]
+    | sort_by(epoch(.timestamp))
+    | first // null;
+  def recovered_provider_failure($run; $runs):
+    run_failed($run)
+    and provider_transient_failure($run)
+    and ((recovery_run($run; $runs)) != null);
   # task #285 follow-up (driver 2h sweep 2026-05-21 15:00): a no-action
   # run that is actually a delegate_worker call with a non-empty
   # worker_requests list does NOT belong in the narrative
@@ -229,7 +265,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         noAction: ($runs | map(select(is_no_action(.))) | length)
       },
       red: {
-        failures: ($runs | map(select(.status != "ok" and (retry_scheduled_failure(.) | not) and (fresh_pending_run(.) | not)) | brief(.))),
+        failures: ($runs | map(select(run_failed(.) and (retry_scheduled_failure(.) | not) and (fresh_pending_run(.) | not) and (recovered_provider_failure(.; $runs) | not)) | brief(.))),
         invalidPersonaJSON: ($runs | map(select(((.summary // "") + " " + (.error // "")) | test("not valid persona JSON|invalid persona JSON"; "i")) | brief(.))),
         placeholderSummaries: ($runs | map(select(((.summary // "") | test("short reason for the shadow decision|placeholder"; "i")) or ((.summary // "") | test("\\bTODO\\b"))) | brief(.)))
       },
@@ -239,6 +275,20 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
         ),
         freshPendingRuns: (
           $runs | map(select(fresh_pending_run(.)) | brief(.))
+        ),
+        recoveredProviderFailures: (
+          $runs
+          | map(
+              select(recovered_provider_failure(.; $runs))
+              | (recovery_run(.; $runs)) as $recovery
+              | brief(.) + {
+                  error: ((.error // "") | tostring),
+                  threadTs: thread_ts(.),
+                  recoveredByRunId: ($recovery.id // null),
+                  recoveredAt: ($recovery.timestamp // null),
+                  recoverySummary: (($recovery.summary // "") | gsub("\n"; " ") | .[0:240])
+                }
+            )
         ),
         handledByOtherNoAction: (
           $runs
@@ -270,7 +320,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
       review: {
         dynamicContextIssue: (
           $runs
-          | map(select(is_no_action(.) and dynamic_context_issue(.)) | brief(.))
+          | map(select(is_no_action(.) and (recovered_provider_failure(.; $runs) | not) and dynamic_context_issue(.)) | brief(.))
         ),
         # task #285 follow-up #3: review buckets exclude runs where the
         # summary already names another agent / teammate as the handler;
@@ -285,6 +335,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
           $runs
           | map(
               select(is_delegate_no_visible_action(.))
+              | select(recovered_provider_failure(.; $runs) | not)
               | select(delegate_delivery_status(.) != "delegate_started_pending_worker_audit")
               | brief(.) + {
                   workerRequests: ((meta(.; "persona_foreground").worker_requests // []) | map(. | tostring | .[0:200])),
@@ -298,6 +349,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
             select(
               is_no_action(.)
               and (dynamic_context_issue(.) | not)
+              and (recovered_provider_failure(.; $runs) | not)
               and input_chars(.) >= $high_context
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (directed_to_active_agent(.) | not)
@@ -312,6 +364,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
             select(
               is_no_action(.)
               and (dynamic_context_issue(.) | not)
+              and (recovered_provider_failure(.; $runs) | not)
               and external_links(.) > 0
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (directed_to_active_agent(.) | not)
@@ -326,6 +379,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
             select(
               is_no_action(.)
               and (dynamic_context_issue(.) | not)
+              and (recovered_provider_failure(.; $runs) | not)
               and ((meta(.; "persona_foreground").confidence // 1) < $low_confidence)
               and (is_delegate_started_pending_worker_audit(.) | not)
               and (directed_to_active_agent(.) | not)
@@ -348,6 +402,7 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
               select(
                 is_no_action(.)
                 and (dynamic_context_issue(.) | not)
+                and (recovered_provider_failure(.; $runs) | not)
                 # bucket precedence: a real delegate_worker call belongs
                 # in delegateNoVisibleAction, not narrative mismatch.
                 and (is_delegate_no_visible_action(.) | not)
@@ -404,7 +459,7 @@ jq -r '
   "totals: runs=\(.totals.runs) failed=\(.totals.failed) mutations=\(.totals.mutations) no_action=\(.totals.noAction)",
   "red: failures=\(.red.failures | length) invalid_persona_json=\(.red.invalidPersonaJSON | length) placeholder_summaries=\(.red.placeholderSummaries | length)",
   "review: dynamic_context_issue=\(.review.dynamicContextIssue | length) high_context_no_action=\(.review.highContextNoAction | length) link_context_no_action=\(.review.linkContextNoAction | length) low_confidence_no_action=\(.review.lowConfidenceNoAction | length) summary_intent_action_mismatch=\(.review.summaryIntentActionMismatch | length) delegate_no_visible_action=\(.review.delegateNoVisibleAction | length)",
-  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) fresh_pending=\(.info.freshPendingRuns | length) directed_to_active_agent_no_action=\(.info.directedToActiveAgentNoAction | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length) delegate_started_pending_worker_audit=\(.info.delegateStartedPendingWorkerAudit | length)"
+  "info: retry_scheduled_failures=\(.info.retryScheduledFailures | length) fresh_pending=\(.info.freshPendingRuns | length) recovered_provider_failures=\(.info.recoveredProviderFailures | length) directed_to_active_agent_no_action=\(.info.directedToActiveAgentNoAction | length) handled_by_other_no_action=\(.info.handledByOtherNoAction | length) delegate_started_pending_worker_audit=\(.info.delegateStartedPendingWorkerAudit | length)"
 ' <"${tmpdir}/quality.json"
 
 if jq -e '((.review.dynamicContextIssue | length) + (.review.highContextNoAction | length) + (.review.linkContextNoAction | length) + (.review.lowConfidenceNoAction | length) + (.review.summaryIntentActionMismatch | length) + (.review.delegateNoVisibleAction | length)) > 0' <"${tmpdir}/quality.json" >/dev/null; then
