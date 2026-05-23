@@ -500,6 +500,7 @@ func TestTriageQualityRunIsHandledByOtherMatch(t *testing.T) {
 		{"en_being_investigated", "The admin 404 issue is already being investigated and resolved by the developer in the thread; no further action needed.", "being investigated and resolved", false},
 		{"en_assistant_complied", "The assistant has already complied and closed the PR; the situation is fully handled.", "already complied", false},
 		{"en_active_agent", "The thread already has an active agent investigating the session slowness.", "active agent", false},
+		{"en_directive_to_worker_agents", "This is a directive to worker agents codex-3720 and claude-1286 to confirm the prod client version; Oneesama should stay silent.", "directive to worker agents", false},
 		{"en_active_codex_agent", "The message is a directive to the active codex-3720 agent in a thread about web UI implementation; Oneesama should stay silent to avoid interference.", "active codex", false},
 		{"en_already_handles", "codex-3720 consistently acknowledges and already handles these deploy commands.", "already handles", false},
 		{"en_already_active", "U0ALY77RMJL is already active and has opened a session to handle it.", "already active", false},

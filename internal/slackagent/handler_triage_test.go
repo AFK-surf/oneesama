@@ -1236,72 +1236,87 @@ func TestTriageAuditDemotesRecoveredProviderFailure(t *testing.T) {
 	timeNow = func() time.Time { return now }
 	t.Cleanup(func() { timeNow = previousClock })
 
-	errText := `call oneesama Pi model: Post "https://openrouter.ai/api/v1/chat/completions": EOF`
-	failed := SlackTriageContext{
-		ID:        1779504725086007,
-		Timestamp: now.Add(-8 * time.Minute).Format(time.RFC3339Nano),
-		Status:    "failed",
-		Channels:  []string{"C0B1F6E7A07"},
-		Summary:   "Pi-first foreground triage pending for 1 Slack message(s) in C0B1F6E7A07",
-		Error:     errText,
-		Failures:  1,
-		Metadata: map[string]any{
-			"channel_id": "C0B1F6E7A07",
-			"thread_ts":  "1779504417.305049",
-			"persona_foreground": map[string]any{
-				"channel_id":  "C0B1F6E7A07",
-				"thread_ts":   "1779504417.305049",
-				"source":      "triage",
-				"success":     false,
-				"shadow_only": true,
-				"error":       errText,
-			},
+	for _, tc := range []struct {
+		name    string
+		errText string
+	}{
+		{
+			name:    "openrouter_eof",
+			errText: `call oneesama Pi model: Post "https://openrouter.ai/api/v1/chat/completions": EOF`,
 		},
-	}
-	recovered := SlackTriageContext{
-		ID:        1779504981042008,
-		Timestamp: now.Add(-4 * time.Minute).Format(time.RFC3339Nano),
-		Status:    "ok",
-		Channels:  []string{"C0B1F6E7A07"},
-		Summary:   "The request was already fully handled by Oneesama in the thread.",
-		Metadata: map[string]any{
-			"channel_id": "C0B1F6E7A07",
-			"thread_ts":  "1779504417.305049",
-			"persona_foreground": map[string]any{
-				"channel_id": "C0B1F6E7A07",
-				"thread_ts":  "1779504417.305049",
-				"source":     "triage",
-				"success":    true,
-				"decision":   persona.DecisionStaySilent,
-				"reason":     "The request was already fully handled by Oneesama in the thread.",
-			},
+		{
+			name:    "malformed_pi_decision_json",
+			errText: `decode oneesama Pi decision JSON: unexpected end of JSON input`,
 		},
-	}
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failed := SlackTriageContext{
+				ID:        1779504725086007,
+				Timestamp: now.Add(-8 * time.Minute).Format(time.RFC3339Nano),
+				Status:    "failed",
+				Channels:  []string{"C0B1F6E7A07"},
+				Summary:   "Pi-first foreground triage pending for 1 Slack message(s) in C0B1F6E7A07",
+				Error:     tc.errText,
+				Failures:  1,
+				Metadata: map[string]any{
+					"channel_id": "C0B1F6E7A07",
+					"thread_ts":  "1779504417.305049",
+					"persona_foreground": map[string]any{
+						"channel_id":  "C0B1F6E7A07",
+						"thread_ts":   "1779504417.305049",
+						"source":      "triage",
+						"success":     false,
+						"shadow_only": true,
+						"error":       tc.errText,
+					},
+				},
+			}
+			recovered := SlackTriageContext{
+				ID:        1779504981042008,
+				Timestamp: now.Add(-4 * time.Minute).Format(time.RFC3339Nano),
+				Status:    "ok",
+				Channels:  []string{"C0B1F6E7A07"},
+				Summary:   "The request was already fully handled by Oneesama in the thread.",
+				Metadata: map[string]any{
+					"channel_id": "C0B1F6E7A07",
+					"thread_ts":  "1779504417.305049",
+					"persona_foreground": map[string]any{
+						"channel_id": "C0B1F6E7A07",
+						"thread_ts":  "1779504417.305049",
+						"source":     "triage",
+						"success":    true,
+						"decision":   persona.DecisionStaySilent,
+						"reason":     "The request was already fully handled by Oneesama in the thread.",
+					},
+				},
+			}
 
-	report := buildSlackTriageAuditReport([]SlackTriageContext{failed, recovered}, 2*time.Hour)
-	if report.InfoBuckets.RecoveredProviderFailureCount != 1 {
-		t.Fatalf("RecoveredProviderFailureCount = %d, want 1", report.InfoBuckets.RecoveredProviderFailureCount)
-	}
-	if len(report.InfoBuckets.RecoveredProviderFailureSamples) != 1 {
-		t.Fatalf("RecoveredProviderFailureSamples = %#v, want one sample", report.InfoBuckets.RecoveredProviderFailureSamples)
-	}
-	sample := report.InfoBuckets.RecoveredProviderFailureSamples[0]
-	if sample.RunID != failed.ID || sample.RecoveredByRunID != recovered.ID || sample.ThreadTS != "1779504417.305049" {
-		t.Fatalf("RecoveredProviderFailure sample = %#v, want failed->recovered same thread", sample)
-	}
-	if report.PersonaQuality.Failures != 0 || report.PersonaQuality.RecoveredProviderFailures != 1 {
-		t.Fatalf("PersonaQuality = %#v, want recovered provider failure not red failure", report.PersonaQuality)
-	}
-	if len(report.FailureSamples) != 0 {
-		t.Fatalf("FailureSamples = %#v, want recovered provider failure hidden from red samples", report.FailureSamples)
-	}
-	if hasAuditFlag(report.Flags, "real_outcome_failures") {
-		t.Fatalf("flags = %#v, recovered provider failure should not flag real_outcome_failures", report.Flags)
-	}
-	report.PersonaRuntime = SlackTriagePersonaRuntime{ForegroundEnabled: true, Provider: persona.ProviderPi, Mode: persona.ModeLive, Ready: true, Healthy: true}
-	report.Flags = buildSlackTriageAuditFlags(report)
-	if hasAuditFlag(report.Flags, "persona_foreground_failures") {
-		t.Fatalf("flags = %#v, recovered provider failure should not flag persona foreground failures", report.Flags)
+			report := buildSlackTriageAuditReport([]SlackTriageContext{failed, recovered}, 2*time.Hour)
+			if report.InfoBuckets.RecoveredProviderFailureCount != 1 {
+				t.Fatalf("RecoveredProviderFailureCount = %d, want 1", report.InfoBuckets.RecoveredProviderFailureCount)
+			}
+			if len(report.InfoBuckets.RecoveredProviderFailureSamples) != 1 {
+				t.Fatalf("RecoveredProviderFailureSamples = %#v, want one sample", report.InfoBuckets.RecoveredProviderFailureSamples)
+			}
+			sample := report.InfoBuckets.RecoveredProviderFailureSamples[0]
+			if sample.RunID != failed.ID || sample.RecoveredByRunID != recovered.ID || sample.ThreadTS != "1779504417.305049" {
+				t.Fatalf("RecoveredProviderFailure sample = %#v, want failed->recovered same thread", sample)
+			}
+			if report.PersonaQuality.Failures != 0 || report.PersonaQuality.RecoveredProviderFailures != 1 {
+				t.Fatalf("PersonaQuality = %#v, want recovered provider failure not red failure", report.PersonaQuality)
+			}
+			if len(report.FailureSamples) != 0 {
+				t.Fatalf("FailureSamples = %#v, want recovered provider failure hidden from red samples", report.FailureSamples)
+			}
+			if hasAuditFlag(report.Flags, "real_outcome_failures") {
+				t.Fatalf("flags = %#v, recovered provider failure should not flag real_outcome_failures", report.Flags)
+			}
+			report.PersonaRuntime = SlackTriagePersonaRuntime{ForegroundEnabled: true, Provider: persona.ProviderPi, Mode: persona.ModeLive, Ready: true, Healthy: true}
+			report.Flags = buildSlackTriageAuditFlags(report)
+			if hasAuditFlag(report.Flags, "persona_foreground_failures") {
+				t.Fatalf("flags = %#v, recovered provider failure should not flag persona foreground failures", report.Flags)
+			}
+		})
 	}
 }
 

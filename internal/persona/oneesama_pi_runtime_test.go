@@ -97,6 +97,64 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	}
 }
 
+func TestOneesamaPIRuntimeRetriesMalformedDecisionJSONOnce(t *testing.T) {
+	var calls int
+	var repairRequest oneesamaPIChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var seen oneesamaPIChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&seen); err != nil {
+			t.Fatalf("decode chat request: %v", err)
+		}
+		if calls == 1 {
+			_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {
+				Message oneesamaPIChatMessage `json:"message"`
+			}{{
+				Message: oneesamaPIChatMessage{Role: "assistant", Content: `{"runtime":"oneesama-pi","decision":`},
+			}}})
+			return
+		}
+		repairRequest = seen
+		_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {
+			Message oneesamaPIChatMessage `json:"message"`
+		}{{
+			Message: oneesamaPIChatMessage{Role: "assistant", Content: `{"runtime":"oneesama-pi","decision":"delegate_worker","worker_requests":[{"kind":"codex","prompt":"inspect the source and return evidence-backed summary"}],"confidence":0.8,"reason":"repaired JSON"}`},
+		}}})
+	}))
+	defer server.Close()
+
+	runtime, err := NewOneesamaPIRuntime(OneesamaPIConfig{
+		Provider: ProviderOneesamaPi,
+		Mode:     ModeLive,
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+		Timeout:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewOneesamaPIRuntime: %v", err)
+	}
+	resp, err := runtime.Decide(context.Background(), Request{
+		ID:    "req-malformed-json",
+		Mode:  ModeLive,
+		Event: Event{Kind: "slack_triage", Text: "查一下这个链接后给结论"},
+		Safety: SafetyConstraints{
+			AllowWorkerRequest: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want one repair retry after malformed JSON", calls)
+	}
+	if len(repairRequest.Messages) != 3 || !strings.Contains(repairRequest.Messages[2].Content, "not valid JSON") {
+		t.Fatalf("repair request messages = %#v, want bounded JSON repair prompt", repairRequest.Messages)
+	}
+	if resp.Decision != DecisionDelegateWorker || len(resp.WorkerRequests) != 1 {
+		t.Fatalf("response = %#v, want repaired delegate_worker decision", resp)
+	}
+}
+
 func TestOneesamaPIRuntimeSafetyDowngradesDisallowedReply(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {

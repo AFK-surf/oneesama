@@ -92,65 +92,35 @@ func NewOneesamaPIRuntime(cfg OneesamaPIConfig) (*OneesamaPIRuntime, error) {
 func (r *OneesamaPIRuntime) Decide(ctx context.Context, req Request) (Response, error) {
 	start := time.Now()
 	req.Mode = stringOrDefault(req.Mode, r.mode)
-	payload, err := json.Marshal(oneesamaPIChatRequest{
-		Model: r.model,
-		Messages: []oneesamaPIChatMessage{
-			{Role: "system", Content: oneesamaPISystemPrompt(req)},
-			{Role: "user", Content: mustMarshalPersonaRequest(req)},
-		},
-		Temperature: 0.2,
-		ResponseFormat: map[string]string{
-			"type": "json_object",
-		},
-	})
-	if err != nil {
-		r.record(start, err)
-		return Response{}, fmt.Errorf("marshal oneesama Pi request: %w", err)
+	baseMessages := []oneesamaPIChatMessage{
+		{Role: "system", Content: oneesamaPISystemPrompt(req)},
+		{Role: "user", Content: mustMarshalPersonaRequest(req)},
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, r.baseURL+"/chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		r.record(start, err)
-		return Response{}, err
+	var lastDecodeErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		messages := append([]oneesamaPIChatMessage(nil), baseMessages...)
+		if attempt > 0 {
+			messages = append(messages, oneesamaPIChatMessage{Role: "user", Content: oneesamaPIDecisionJSONRepairPrompt})
+		}
+		content, err := r.callChatCompletion(ctx, messages)
+		if err != nil {
+			r.record(start, err)
+			return Response{}, err
+		}
+		decoded, err := decodeOneesamaPIResponse(content)
+		if err == nil {
+			decoded = normalizeOneesamaPIResponse(req, decoded, r)
+			r.record(start, nil)
+			return decoded, nil
+		}
+		lastDecodeErr = err
+		if !oneesamaPIDecisionJSONRetryable(err, content) || attempt == 1 {
+			break
+		}
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+r.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/AFK-surf/oneesama")
-	httpReq.Header.Set("X-Title", "Oneesama")
-	resp, err := r.client.Do(httpReq)
-	if err != nil {
-		r.record(start, err)
-		return Response{}, fmt.Errorf("call oneesama Pi model: %w", err)
-	}
-	defer resp.Body.Close()
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if readErr != nil {
-		r.record(start, readErr)
-		return Response{}, fmt.Errorf("read oneesama Pi response: %w", readErr)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err := fmt.Errorf("oneesama Pi model returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
-		r.record(start, err)
-		return Response{}, err
-	}
-	var completion oneesamaPIChatResponse
-	if err := json.Unmarshal(body, &completion); err != nil {
-		r.record(start, err)
-		return Response{}, fmt.Errorf("decode oneesama Pi response envelope: %w", err)
-	}
-	if len(completion.Choices) == 0 {
-		err := fmt.Errorf("oneesama Pi response contained no choices")
-		r.record(start, err)
-		return Response{}, err
-	}
-	content := strings.TrimSpace(completion.Choices[0].Message.Content)
-	decoded, err := decodeOneesamaPIResponse(content)
-	if err != nil {
-		r.record(start, err)
-		return Response{}, fmt.Errorf("decode oneesama Pi decision JSON: %w", err)
-	}
-	decoded = normalizeOneesamaPIResponse(req, decoded, r)
-	r.record(start, nil)
-	return decoded, nil
+	err := fmt.Errorf("decode oneesama Pi decision JSON: %w", lastDecodeErr)
+	r.record(start, err)
+	return Response{}, err
 }
 
 func decodeOneesamaPIResponse(content string) (Response, error) {
@@ -171,6 +141,64 @@ func decodeOneesamaPIResponse(content string) (Response, error) {
 		}
 	}
 	return decoded, nil
+}
+
+const oneesamaPIDecisionJSONRepairPrompt = `Your previous response was not valid JSON for the required Oneesama Pi decision schema. Retry once now.
+
+Return only one complete JSON object. Do not include Markdown fences, prose, tool-call protocol text, or partial/truncated JSON.`
+
+func oneesamaPIDecisionJSONRetryable(err error, content string) bool {
+	if err == nil {
+		return false
+	}
+	if strings.TrimSpace(content) == "" {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "unexpected end of json input") ||
+		strings.Contains(text, "unexpected eof")
+}
+
+func (r *OneesamaPIRuntime) callChatCompletion(ctx context.Context, messages []oneesamaPIChatMessage) (string, error) {
+	payload, err := json.Marshal(oneesamaPIChatRequest{
+		Model:       r.model,
+		Messages:    messages,
+		Temperature: 0.2,
+		ResponseFormat: map[string]string{
+			"type": "json_object",
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal oneesama Pi request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, r.baseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+r.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/AFK-surf/oneesama")
+	httpReq.Header.Set("X-Title", "Oneesama")
+	resp, err := r.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("call oneesama Pi model: %w", err)
+	}
+	defer resp.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if readErr != nil {
+		return "", fmt.Errorf("read oneesama Pi response: %w", readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("oneesama Pi model returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	var completion oneesamaPIChatResponse
+	if err := json.Unmarshal(body, &completion); err != nil {
+		return "", fmt.Errorf("decode oneesama Pi response envelope: %w", err)
+	}
+	if len(completion.Choices) == 0 {
+		return "", fmt.Errorf("oneesama Pi response contained no choices")
+	}
+	return strings.TrimSpace(completion.Choices[0].Message.Content), nil
 }
 
 func (r *OneesamaPIRuntime) Status(context.Context) Status {

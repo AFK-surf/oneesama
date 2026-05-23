@@ -702,7 +702,7 @@ func TestRunFixtureBenchmarkReportsExpectedOutcomes(t *testing.T) {
 			}},
 		}
 		switch {
-		case strings.Contains(rootText, "Johnson8053"):
+		case strings.Contains(rootText, "Johnson8053"), strings.Contains(rootText, "部署顺序"):
 			result.Persona.Decision = persona.DecisionDelegateWorker
 			result.FinalDecision = "would_delegate_worker"
 			result.WouldDelegateWorkers = []slackagent.SlackTriageDryRunWorker{{
@@ -737,10 +737,10 @@ func TestRunFixtureBenchmarkReportsExpectedOutcomes(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("decode report: %v\n%s", err, stdout.String())
 	}
-	if report.Mode != "fixture" || report.ThreadsSeen != 9 || report.ThreadsReplayed != 9 {
-		t.Fatalf("mode/threads = %s/%d/%d, want fixture 9/9", report.Mode, report.ThreadsSeen, report.ThreadsReplayed)
+	if report.Mode != "fixture" || report.ThreadsSeen != 10 || report.ThreadsReplayed != 10 {
+		t.Fatalf("mode/threads = %s/%d/%d, want fixture 10/10", report.Mode, report.ThreadsSeen, report.ThreadsReplayed)
 	}
-	if report.Summary.FixtureFailures != 0 || report.Summary.FixturePasses != 9 {
+	if report.Summary.FixtureFailures != 0 || report.Summary.FixturePasses != 10 {
 		t.Fatalf("fixture pass/fail = %d/%d, rows=%#v stderr=%s", report.Summary.FixturePasses, report.Summary.FixtureFailures, report.Rows, stderr.String())
 	}
 	for _, want := range []string{
