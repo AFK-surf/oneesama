@@ -228,6 +228,8 @@ func (s *Service) applySlackPersonaForegroundDispositions(result SlackPersonaSha
 	var next []SlackTriageToolCall
 	result, next = applyPersonaSecretaryLookupDisposition(result, request)
 	toolCalls = append(toolCalls, next...)
+	result, next = applyPersonaMediaLookupDisposition(result, request, messages)
+	toolCalls = append(toolCalls, next...)
 	result, next = applyPersonaCompletedDelegationDisposition(result)
 	toolCalls = append(toolCalls, next...)
 	result, next = applyPersonaAmbientDelegationDisposition(result, messages, s.botUserID)
@@ -614,6 +616,46 @@ func applyPersonaSecretaryLookupDisposition(result SlackPersonaShadowResult, req
 	}}
 }
 
+func applyPersonaMediaLookupDisposition(result SlackPersonaShadowResult, request persona.Request, messages []SlackInboundMessage) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionStaySilent || len(result.workerRecords) > 0 {
+		return result, nil
+	}
+	if personaRequestIsWorkerReturn(request) || !slackPersonaRequestNeedsMediaLookup(request, messages) {
+		return result, nil
+	}
+	context := map[string]any{
+		"delegation_scope":          "secretary_lookup",
+		"secretary_lookup_type":     "media_identification_lookup",
+		"triage_digest":             personaRequestContextText(request.Context, "triage_digest"),
+		"slack_thread_context":      personaRequestContextText(request.Context, "slack_thread_context"),
+		"workspace_memory_evidence": personaRequestMemoryEvidence(request, 5),
+	}
+	for key, value := range personaDelegatedWorkerSlackContext(request.Anchor.ChannelID, request.Anchor.ThreadTS, messages) {
+		context[key] = value
+	}
+	worker := persona.WorkerRequest{
+		ID:      "secretary-media-lookup",
+		Kind:    "codex",
+		Prompt:  buildMediaLookupWorkerPrompt(request),
+		Context: context,
+	}
+	result.Decision = persona.DecisionDelegateWorker
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "media identification question requires bounded secretary lookup before silence"))
+	result.workerRecords = []persona.WorkerRequest{worker}
+	result.WorkerRequests = personaWorkerRequestSummaries(result.workerRecords)
+	if result.Confidence < 0.55 {
+		result.Confidence = 0.55
+	}
+	return result, []SlackTriageToolCall{{
+		Tool:    "persona_runtime",
+		Action:  "secretary_media_lookup_auto_delegate",
+		Args:    marshalTriageArgs("persona", worker.ID, true),
+		Success: true,
+		Brief:   "Stay-silent media identification question auto-delegated to secretary lookup",
+		Result:  "file/image context",
+	}}
+}
+
 func applyPersonaCannedRefusalDisposition(result SlackPersonaShadowResult) (SlackPersonaShadowResult, []SlackTriageToolCall) {
 	if !result.Success || result.ShadowOnly || strings.TrimSpace(result.Decision) != persona.DecisionReply || strings.TrimSpace(result.VisibleText) == "" {
 		return result, nil
@@ -708,6 +750,18 @@ func applyPersonaProductLinkSynthesisDisposition(result SlackPersonaShadowResult
 	if !ok {
 		return result, nil
 	}
+	result = applySlackPersonaVisibleReplyAction(result, action)
+	return result, []SlackTriageToolCall{{
+		Tool:    "persona_runtime",
+		Action:  "product_link_synthesized_visible_reply",
+		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+		Success: true,
+		Brief:   "Product-adjacent link converted to source-backed visible reply",
+		Result:  "fetched_link_context",
+	}}
+}
+
+func applySlackPersonaVisibleReplyAction(result SlackPersonaShadowResult, action SlackTriageDecisionAction) SlackPersonaShadowResult {
 	result.Decision = persona.DecisionReply
 	result.VisibleText = strings.TrimSpace(action.Message)
 	result.EvidenceAnchors = normalizeSlackVisibleEvidenceAnchors(action.EvidenceAnchors)
@@ -719,14 +773,7 @@ func applyPersonaProductLinkSynthesisDisposition(result SlackPersonaShadowResult
 	if result.Confidence < action.Confidence {
 		result.Confidence = action.Confidence
 	}
-	return result, []SlackTriageToolCall{{
-		Tool:    "persona_runtime",
-		Action:  "product_link_synthesized_visible_reply",
-		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
-		Success: true,
-		Brief:   "Product-adjacent link converted to source-backed visible reply",
-		Result:  "fetched_link_context",
-	}}
+	return result
 }
 
 func applyPersonaPositiveStatusSummaryReactionDisposition(result SlackPersonaShadowResult, request persona.Request, messages []SlackInboundMessage) (SlackPersonaShadowResult, []SlackTriageToolCall) {
@@ -943,6 +990,18 @@ func slackPersonaRequestNeedsSecretaryLookup(request persona.Request) bool {
 	return slackTextContainsSecretaryLookupQuestion(text)
 }
 
+func slackPersonaRequestNeedsMediaLookup(request persona.Request, messages []SlackInboundMessage) bool {
+	if !slackMessagesHaveReadableMedia(messages) {
+		return false
+	}
+	text := strings.Join([]string{
+		request.Event.Text,
+		personaRequestContextText(request.Context, "triage_digest"),
+		personaRequestContextText(request.Context, "slack_thread_context"),
+	}, "\n")
+	return slackTextContainsSecretaryLookupQuestion(text)
+}
+
 func slackPersonaRequestNeedsProductLinkCommentary(request persona.Request) bool {
 	text := strings.Join([]string{
 		request.Event.Text,
@@ -984,11 +1043,23 @@ func slackTextContainsSecretaryLookupQuestion(text string) bool {
 	}
 	markers := []string{
 		"这是谁", "是谁", "这是什么", "这是啥", "什么鬼", "啥意思", "什么情况", "靠不靠谱", "靠谱吗", "真假", "谁知道", "有人知道",
+		"干啥", "干嘛", "做什么", "做啥", "是干啥", "是干嘛",
 		"who is", "what is this", "what's this", "what does this mean", "anyone know", "is this real", "is this legit",
 	}
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {
 			return true
+		}
+	}
+	return false
+}
+
+func slackMessagesHaveReadableMedia(messages []SlackInboundMessage) bool {
+	for _, message := range normalizeSlackInboundMessages(messages) {
+		for _, file := range message.Files {
+			if strings.TrimSpace(firstNonEmpty(file.ID, file.Name, file.Title, file.Permalink, file.URL, file.URLPrivate, file.ImageURL)) != "" {
+				return true
+			}
 		}
 	}
 	return false
@@ -1011,6 +1082,27 @@ func buildSecretaryLookupWorkerPrompt(request persona.Request) string {
 	}
 	if external := strings.TrimSpace(personaRequestContextText(request.Context, "external_link_context")); external != "" {
 		parts = append(parts, "\nFetched external link context:\n"+external)
+	}
+	if memory := personaRequestMemoryEvidence(request, 5); memory != "" {
+		parts = append(parts, "\nWorkspace Memory/person evidence:\n"+memory)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func buildMediaLookupWorkerPrompt(request persona.Request) string {
+	parts := []string{
+		"Bounded Oneesama secretary media lookup. Inspect the Slack thread and attached file/image evidence, then answer only if the media evidence is concrete enough.",
+		"Use available read-only tools such as slack_api fetch/read methods, slack.fetchImage, slack.fetchFile, person_memory, and memory_search when needed.",
+		"Do not answer from filename or thumbnail vibes alone. If the question asks what a screenshot/image/file is, fetch and inspect the content first.",
+		"Only return a Slack-visible answer when you have concrete evidence. Include 2-3 short evidence anchors from the image/file/thread or workspace Memory/person records.",
+		`Return only JSON matching {"visible_text":"Slack-visible answer","evidence_anchors":[{"kind":"fetched_link|workspace_memory|person_memory|slack_thread|file|image|worker_result|explicit_user_command","source_ref":"stable source ref or Slack file_id","quote":"short quoted source fact"}],"reason":"private audit reason"}.`,
+		`If evidence is insufficient, return {"visible_text":"","evidence_anchors":[],"reason":"insufficient_evidence"} instead of guessing.`,
+	}
+	if digest := strings.TrimSpace(personaRequestContextText(request.Context, "triage_digest")); digest != "" {
+		parts = append(parts, "\nTriage digest:\n"+digest)
+	}
+	if thread := strings.TrimSpace(personaRequestContextText(request.Context, "slack_thread_context")); thread != "" {
+		parts = append(parts, "\nSlack thread context:\n"+thread)
 	}
 	if memory := personaRequestMemoryEvidence(request, 5); memory != "" {
 		parts = append(parts, "\nWorkspace Memory/person evidence:\n"+memory)

@@ -1786,6 +1786,57 @@ func TestSecretaryLookupWorkerPromptCarriesMemoryEvidenceAndFollowupInstruction(
 	}
 }
 
+func TestMediaLookupDispositionDelegatesVagueImageQuestion(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C_TRIAGE",
+		UserID:    "U_PENG",
+		Text:      "这货是干啥的，",
+		TS:        "700.000",
+		Files: []SlackFile{{
+			ID:       "F_IMG",
+			Name:     "screenshot.png",
+			Mimetype: "image/png",
+		}},
+	}}
+	req := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_TRIAGE",
+		ThreadTS:  "700.000",
+		Messages:  messages,
+		Digest:    "#meeting-avatar: 这货是干啥的， [image screenshot.png]",
+		RelatedMemory: []SlackRelatedMemoryRecord{{
+			Kind:       "team_fact",
+			SourcePath: "memory/team/facts/media.md",
+			Content:    "Image identification questions should be delegated to secretary_lookup with Slack file evidence.",
+			Score:      0.8,
+		}},
+	})
+	result, calls := applyPersonaMediaLookupDisposition(SlackPersonaShadowResult{
+		Success:    true,
+		Runtime:    persona.ProviderPi,
+		Decision:   persona.DecisionStaySilent,
+		Reason:     "needs image inspection",
+		Confidence: 0.4,
+	}, req, messages)
+
+	if len(calls) != 1 || result.Decision != persona.DecisionDelegateWorker || len(result.workerRecords) != 1 {
+		t.Fatalf("result=%#v calls=%#v, want one media lookup worker", result, calls)
+	}
+	worker := result.workerRecords[0]
+	if got := stringFromAny(worker.Context["session_kind"]); got != "" {
+		t.Fatalf("session_kind should be assigned when starting worker, got %q", got)
+	}
+	if got := stringFromAny(worker.Context["delegation_scope"]); got != "secretary_lookup" {
+		t.Fatalf("delegation_scope = %q, want secretary_lookup", got)
+	}
+	if !strings.Contains(worker.Prompt, "slack.fetchImage") || !strings.Contains(worker.Prompt, "Workspace Memory/person evidence") {
+		t.Fatalf("media worker prompt missing fetch/memory guidance:\n%s", worker.Prompt)
+	}
+	if _, ok := worker.Context["slack_image_files"]; !ok {
+		t.Fatalf("worker context = %#v, want slack_image_files from attached image", worker.Context)
+	}
+}
+
 func TestStartPersonaDelegatedSecretaryLookupWorkerEnrichesPiWorkerRequest(t *testing.T) {
 	messages := []SlackInboundMessage{{
 		TeamID:    "T123",

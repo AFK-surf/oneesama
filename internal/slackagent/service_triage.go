@@ -92,6 +92,10 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	messages = normalizeSlackInboundMessages(messages)
 	workspaceID := firstNonEmpty(firstMessageTeamID(messages), "workspace")
 	threadTS := firstNonEmpty(lastMessageThreadTS(messages), "channel-root")
+	var ignoredMessageBotReplyCount int
+	if options.IgnoreExistingBotReply {
+		messages, ignoredMessageBotReplyCount = filterSlackTriageBotInboundMessages(messages, []string{s.botUserID})
+	}
 	sessionID := fmt.Sprintf("triage:%s:%d", channelID, timeNow().UnixMilli())
 	threadContexts := s.fetchSlackTriageThreadContexts(ctx, channelID, messages)
 	var ignoredBotReplyCount int
@@ -113,8 +117,9 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	auditMetadata = mergeStringAnyMaps(auditMetadata, slackWorkspacePolicyMetadataMap(workspacePolicyStatus))
 	if options.IgnoreExistingBotReply {
 		auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
-			"ignore_existing_bot_reply":        true,
-			"ignored_existing_bot_reply_count": ignoredBotReplyCount,
+			"ignore_existing_bot_reply":          true,
+			"ignored_existing_bot_reply_count":   ignoredBotReplyCount + ignoredMessageBotReplyCount,
+			"ignored_existing_bot_message_count": ignoredMessageBotReplyCount,
 		})
 	}
 	auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{

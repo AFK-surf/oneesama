@@ -405,6 +405,83 @@ func TestRunLiveBenchmarkHonorsAbsoluteWindowAndWritesDetail(t *testing.T) {
 	}
 }
 
+func TestRunLiveBenchmarkUsesNameMapCacheWithoutSlackNameAPIs(t *testing.T) {
+	slackMux := http.NewServeMux()
+	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				{"ts": "1779450000.000100", "channel": "C1", "user": "U_PENG", "text": "缓存名字应该直接可读"},
+			},
+		})
+	})
+	slackMux.HandleFunc("/users.list", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("users.list should not be called when cache covers needed user IDs")
+	})
+	slackMux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("users.conversations should not be called when cache covers needed channel IDs")
+	})
+	slackServer := httptest.NewServer(slackMux)
+	defer slackServer.Close()
+	previousSlackURL := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = slackServer.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previousSlackURL })
+
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:        true,
+				ChannelID:     "C1",
+				ThreadTS:      "1779450000.000100",
+				MessageCount:  1,
+				FinalDecision: "would_stay_silent",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionStaySilent,
+					Success:  true,
+				},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+
+	dir := t.TempDir()
+	detailPath := dir + "/detail.json"
+	cachePath := dir + "/slack_name_map.json"
+	writeFile(t, cachePath, `{
+	  "schema": "oneesama.slack_name_map_cache.v1",
+	  "nameMap": {
+	    "users": {"U_PENG": "Peng Xiao"},
+	    "channels": {"C1": "meeting-avatar"}
+	  }
+	}`)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--token", "xoxb-test",
+		"--channel", "C1",
+		"--detail-output", detailPath,
+		"--name-map-cache", cachePath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	data, err := os.ReadFile(detailPath)
+	if err != nil {
+		t.Fatalf("read detail: %v", err)
+	}
+	var detail benchmarkDetail
+	if err := json.Unmarshal(data, &detail); err != nil {
+		t.Fatalf("decode detail: %v\n%s", err, string(data))
+	}
+	if detail.NameMap.Users["U_PENG"] != "Peng Xiao" || detail.NameMap.Channels["C1"] != "meeting-avatar" {
+		t.Fatalf("name map = %#v, want cache values", detail.NameMap)
+	}
+}
+
 func TestRunLiveBenchmarkAttachesHistoricalWorkerResultsFromInput(t *testing.T) {
 	slackMux := http.NewServeMux()
 	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {

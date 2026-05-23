@@ -39,6 +39,8 @@ var (
 
 const benchmarkNameResolutionTimeout = 25 * time.Second
 
+const benchmarkSlackNameCacheRelPath = "cache/slack_name_map.json"
+
 type benchmarkReport struct {
 	GeneratedAt      string                                    `json:"generatedAt"`
 	VariantID        string                                    `json:"variantId"`
@@ -58,6 +60,7 @@ type benchmarkReport struct {
 	VariantSummaries []benchmarkVariantSummary                 `json:"variantSummaries,omitempty"`
 	Judge            benchmarkJudgeConfig                      `json:"judge,omitempty"`
 	GoldInputs       []string                                  `json:"goldInputs,omitempty"`
+	Runtime          map[string]any                            `json:"runtime,omitempty"`
 }
 
 type benchmarkSummary struct {
@@ -169,12 +172,22 @@ type benchmarkDetail struct {
 	SlackAgentURL string               `json:"slackAgentUrl"`
 	Mode          string               `json:"mode"`
 	NameMap       benchmarkNameMap     `json:"nameMap"`
+	Runtime       map[string]any       `json:"runtime,omitempty"`
 	Rows          []benchmarkDetailRow `json:"rows"`
 }
 
 type benchmarkNameMap struct {
 	Users    map[string]string `json:"users,omitempty"`
 	Channels map[string]string `json:"channels,omitempty"`
+}
+
+type benchmarkNameMapCache struct {
+	Schema    string            `json:"schema"`
+	UpdatedAt string            `json:"updatedAt"`
+	NameMap   benchmarkNameMap  `json:"nameMap"`
+	Users     map[string]string `json:"users,omitempty"`
+	Channels  map[string]string `json:"channels,omitempty"`
+	Metadata  map[string]any    `json:"metadata,omitempty"`
 }
 
 type benchmarkDetailRow struct {
@@ -313,6 +326,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		serveReview       bool
 		reviewListen      string
 		reviewOutput      string
+		nameMapCachePath  string
 		judgeURL          string
 		judgeModel        string
 		judgeAPIKey       string
@@ -343,6 +357,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs.BoolVar(&serveReview, "serve-review", false, "Start a temporary local review UI after the dry-run completes. Serves embedded review.html, detail.json, summary.json, and accepts human-review POSTs.")
 	fs.StringVar(&reviewListen, "review-listen", "127.0.0.1:0", "Listen address for --serve-review.")
 	fs.StringVar(&reviewOutput, "review-output", "", "Path to save human review JSON submitted by --serve-review. Defaults next to --detail-output or the current directory.")
+	fs.StringVar(&nameMapCachePath, "name-map-cache", "", "Workspace-level Slack name map cache path. Defaults to ONEESAMA_TRIAGE_BENCHMARK_NAME_MAP_CACHE or {ONEESAMA_SLACK_WORKSPACE_DIR}/cache/slack_name_map.json.")
 	fs.StringVar(&judgeURL, "judge-url", firstNonEmpty(os.Getenv("ONEESAMA_TRIAGE_BENCHMARK_JUDGE_URL"), os.Getenv("OPENAI_BASE_URL")), "Optional OpenAI-compatible chat completions URL or base URL for LLM judge.")
 	fs.StringVar(&judgeModel, "judge-model", os.Getenv("ONEESAMA_TRIAGE_BENCHMARK_JUDGE_MODEL"), "Optional judge model. When set, each replay row receives an LLM judge signal.")
 	fs.StringVar(&judgeAPIKey, "judge-api-key", firstNonEmpty(os.Getenv("ONEESAMA_TRIAGE_BENCHMARK_JUDGE_API_KEY"), os.Getenv("ONEESAMA_OPENAI_API_KEY"), os.Getenv("MAB_OPENAI_API_KEY"), os.Getenv("OPENAI_API_KEY")), "Optional judge API key. Defaults to ONEESAMA_TRIAGE_BENCHMARK_JUDGE_API_KEY / OpenAI envs.")
@@ -426,6 +441,9 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	collectDetail := strings.TrimSpace(detailPath) != "" || serveReview
 	client := &http.Client{Timeout: dryRunTimeout}
+	runtime := fetchBenchmarkRuntimeMetadata(ctx, report.SlackAgentURL)
+	report.Runtime = runtime
+	detail.Runtime = runtime
 	if mode == "fixture" {
 		selectedFixturePaths := fixturePaths
 		if maxTotalThreads > 0 && len(selectedFixturePaths) > maxTotalThreads {
@@ -549,8 +567,9 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	report.VariantSummaries = buildVariantSummaries(variants, report.Rows)
 	if collectDetail {
 		attachHistoricalWorkerResults(ctx, &detail, workerJobsInput, stderr)
+		nameMapCachePath = resolveBenchmarkNameMapCachePath(nameMapCachePath)
 		nameCtx, nameCancel := context.WithTimeout(ctx, benchmarkNameResolutionTimeout)
-		detail.NameMap = resolveSlackNames(nameCtx, token, detail.Rows, stderr)
+		detail.NameMap = resolveSlackNamesWithCache(nameCtx, token, detail.Rows, nameMapCachePath, stderr)
 		if nameCtx.Err() != nil {
 			fmt.Fprintf(stderr, "oneesama-triage-benchmark: slack name resolution stopped after %s: %v\n", benchmarkNameResolutionTimeout, nameCtx.Err())
 		}
@@ -2436,6 +2455,53 @@ func truncateBenchmarkText(value string, maxRunes int) string {
 	return strings.TrimSpace(string([]rune(trimmed)[:maxRunes])) + "\n\n[truncated]"
 }
 
+func fetchBenchmarkRuntimeMetadata(ctx context.Context, baseURL string) map[string]any {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	client := &http.Client{Timeout: 3 * time.Second}
+	out := map[string]any{}
+	if health := fetchBenchmarkJSONMap(ctx, client, baseURL+"/healthz"); len(health) > 0 {
+		out["healthz"] = health
+	}
+	if status := fetchBenchmarkJSONMap(ctx, client, baseURL+"/slack/status"); len(status) > 0 {
+		out["slack_status"] = status
+		if personaStatus, ok := status["persona_runtime"].(map[string]any); ok {
+			out["persona_runtime"] = personaStatus
+		}
+		if agentRunner, ok := status["agent_runner"].(map[string]any); ok {
+			out["agent_runner"] = agentRunner
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func fetchBenchmarkJSONMap(ctx context.Context, client *http.Client, url string) map[string]any {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil
+	}
+	return out
+}
+
 func benchmarkGoldReplaySummary(rows []benchmarkRow, gold benchmarkGoldStore) benchmarkSummary {
 	summary := newBenchmarkSummary()
 	for _, row := range rows {
@@ -2445,11 +2511,68 @@ func benchmarkGoldReplaySummary(rows []benchmarkRow, gold benchmarkGoldStore) be
 	return summary
 }
 
-func resolveSlackNames(ctx context.Context, token string, rows []benchmarkDetailRow, stderr io.Writer) benchmarkNameMap {
+func resolveBenchmarkNameMapCachePath(raw string) string {
+	if value := strings.TrimSpace(raw); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(os.Getenv("ONEESAMA_TRIAGE_BENCHMARK_NAME_MAP_CACHE")); value != "" {
+		return value
+	}
+	if workspace := strings.TrimSpace(firstNonEmpty(os.Getenv("ONEESAMA_SLACK_WORKSPACE_DIR"), os.Getenv("MAB_SLACK_WORKSPACE_DIR"))); workspace != "" {
+		return filepath.Join(workspace, benchmarkSlackNameCacheRelPath)
+	}
+	return filepath.Join("runtime", "cache", "slack_name_map.json")
+}
+
+func resolveSlackNamesWithCache(ctx context.Context, token string, rows []benchmarkDetailRow, cachePath string, stderr io.Writer) benchmarkNameMap {
 	out := benchmarkNameMap{
 		Users:    map[string]string{},
 		Channels: map[string]string{},
 	}
+	channelIDs, userIDs := collectSlackNameIDs(rows)
+	if cached := loadBenchmarkNameMapCache(cachePath, stderr); cached != nil {
+		mergeBenchmarkNameMap(out, *cached)
+	}
+	mergeBenchmarkSlackChannelCaches(out.Channels, cachePath, stderr)
+
+	missingChannels := missingStringSet(channelIDs, out.Channels)
+	missingUsers := missingStringSet(userIDs, out.Users)
+	if strings.TrimSpace(token) != "" {
+		client := &http.Client{Timeout: 8 * time.Second}
+		if len(missingChannels) > 0 {
+			channels, err := slackagent.ListBackfillJoinedChannels(ctx, token)
+			if err != nil {
+				fmt.Fprintf(stderr, "oneesama-triage-benchmark: resolve slack channels: %v\n", err)
+			}
+			for _, ch := range channels {
+				if _, needed := missingChannels[strings.TrimSpace(ch.ID)]; needed && strings.TrimSpace(ch.Name) != "" {
+					out.Channels[strings.TrimSpace(ch.ID)] = strings.TrimSpace(ch.Name)
+				}
+			}
+			missingChannels = missingStringSet(channelIDs, out.Channels)
+			for id := range missingChannels {
+				if name := fetchSlackChannelName(ctx, client, token, id); name != "" {
+					out.Channels[id] = name
+				}
+			}
+		}
+		if len(missingUsers) > 0 {
+			if err := fetchSlackUserNames(ctx, client, token, missingUsers, out.Users); err != nil {
+				fmt.Fprintf(stderr, "oneesama-triage-benchmark: resolve slack users.list: %v\n", err)
+			}
+			missingUsers = missingStringSet(userIDs, out.Users)
+			for id := range missingUsers {
+				if name := fetchSlackUserName(ctx, client, token, id); name != "" {
+					out.Users[id] = name
+				}
+			}
+		}
+	}
+	saveBenchmarkNameMapCache(cachePath, out, stderr)
+	return out
+}
+
+func collectSlackNameIDs(rows []benchmarkDetailRow) (map[string]struct{}, map[string]struct{}) {
 	channelIDs := map[string]struct{}{}
 	userIDs := map[string]struct{}{}
 	for _, row := range rows {
@@ -2512,38 +2635,161 @@ func resolveSlackNames(ctx context.Context, token string, rows []benchmarkDetail
 			}
 		}
 	}
-	if strings.TrimSpace(token) == "" {
-		return out
+	return channelIDs, userIDs
+}
+
+func loadBenchmarkNameMapCache(cachePath string, stderr io.Writer) *benchmarkNameMap {
+	cachePath = strings.TrimSpace(cachePath)
+	if cachePath == "" {
+		return nil
 	}
-	channels, err := slackagent.ListBackfillJoinedChannels(ctx, token)
+	raw, err := os.ReadFile(cachePath)
 	if err != nil {
-		fmt.Fprintf(stderr, "oneesama-triage-benchmark: resolve slack channels: %v\n", err)
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "oneesama-triage-benchmark: read name map cache %s: %v\n", cachePath, err)
+		}
+		return nil
 	}
-	for _, ch := range channels {
-		if strings.TrimSpace(ch.ID) != "" && strings.TrimSpace(ch.Name) != "" {
-			out.Channels[ch.ID] = ch.Name
+	var cache benchmarkNameMapCache
+	if err := json.Unmarshal(raw, &cache); err != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-benchmark: decode name map cache %s: %v\n", cachePath, err)
+		return nil
+	}
+	out := benchmarkNameMap{Users: map[string]string{}, Channels: map[string]string{}}
+	mergeBenchmarkNameMap(out, cache.NameMap)
+	mergeStringMap(out.Users, cache.Users)
+	mergeStringMap(out.Channels, cache.Channels)
+	return &out
+}
+
+func saveBenchmarkNameMapCache(cachePath string, nameMap benchmarkNameMap, stderr io.Writer) {
+	cachePath = strings.TrimSpace(cachePath)
+	if cachePath == "" {
+		return
+	}
+	payload := benchmarkNameMapCache{
+		Schema:    "oneesama.slack_name_map_cache.v1",
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		NameMap: benchmarkNameMap{
+			Users:    copyStringMap(nameMap.Users),
+			Channels: copyStringMap(nameMap.Channels),
+		},
+		Users:    copyStringMap(nameMap.Users),
+		Channels: copyStringMap(nameMap.Channels),
+		Metadata: map[string]any{
+			"source": "oneesama-triage-benchmark",
+		},
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-benchmark: encode name map cache: %v\n", err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-benchmark: create name map cache dir %s: %v\n", filepath.Dir(cachePath), err)
+		return
+	}
+	if err := os.WriteFile(cachePath, data, 0o644); err != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-benchmark: write name map cache %s: %v\n", cachePath, err)
+	}
+}
+
+func mergeBenchmarkNameMap(dst benchmarkNameMap, src benchmarkNameMap) {
+	mergeStringMap(dst.Users, src.Users)
+	mergeStringMap(dst.Channels, src.Channels)
+}
+
+func mergeStringMap(dst map[string]string, src map[string]string) {
+	for key, value := range src {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			dst[key] = value
 		}
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
-	for id := range channelIDs {
-		if _, ok := out.Channels[id]; ok {
+}
+
+func copyStringMap(src map[string]string) map[string]string {
+	out := make(map[string]string, len(src))
+	mergeStringMap(out, src)
+	return out
+}
+
+func missingStringSet(ids map[string]struct{}, known map[string]string) map[string]struct{} {
+	missing := map[string]struct{}{}
+	for id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
 			continue
 		}
-		if name := fetchSlackChannelName(ctx, client, token, id); name != "" {
-			out.Channels[id] = name
+		if strings.TrimSpace(known[id]) == "" {
+			missing[id] = struct{}{}
 		}
 	}
-	if len(userIDs) > 0 {
-		if err := fetchSlackUserNames(ctx, client, token, userIDs, out.Users); err != nil {
-			fmt.Fprintf(stderr, "oneesama-triage-benchmark: resolve slack users.list: %v\n", err)
+	return missing
+}
+
+func mergeBenchmarkSlackChannelCaches(channels map[string]string, cachePath string, stderr io.Writer) {
+	seen := map[string]struct{}{}
+	for _, candidate := range benchmarkSlackChannelCacheCandidates(cachePath) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
 		}
-		for id := range userIDs {
-			if _, ok := out.Users[id]; ok {
-				continue
-			}
-			if name := fetchSlackUserName(ctx, client, token, id); name != "" {
-				out.Users[id] = name
-			}
+		cleaned := filepath.Clean(candidate)
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		mergeStringMap(channels, readBenchmarkSlackChannelCollection(cleaned, stderr))
+	}
+}
+
+func benchmarkSlackChannelCacheCandidates(cachePath string) []string {
+	var candidates []string
+	if workspace := strings.TrimSpace(firstNonEmpty(os.Getenv("ONEESAMA_SLACK_WORKSPACE_DIR"), os.Getenv("MAB_SLACK_WORKSPACE_DIR"))); workspace != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(workspace), "live-state", "slack_channels.json"))
+	}
+	if cachePath = strings.TrimSpace(cachePath); cachePath != "" {
+		cacheDir := filepath.Dir(cachePath)
+		workspaceDir := filepath.Dir(cacheDir)
+		runtimeDir := filepath.Dir(workspaceDir)
+		candidates = append(candidates,
+			filepath.Join(workspaceDir, "live-state", "slack_channels.json"),
+			filepath.Join(runtimeDir, "live-state", "slack_channels.json"),
+		)
+	}
+	candidates = append(candidates, filepath.Join("runtime", "live-state", "slack_channels.json"))
+	return candidates
+}
+
+func readBenchmarkSlackChannelCollection(filePath string, stderr io.Writer) map[string]string {
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "oneesama-triage-benchmark: read slack channel cache %s: %v\n", filePath, err)
+		}
+		return nil
+	}
+	var doc struct {
+		Items []struct {
+			ID    string `json:"id"`
+			Value struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"value"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		fmt.Fprintf(stderr, "oneesama-triage-benchmark: decode slack channel cache %s: %v\n", filePath, err)
+		return nil
+	}
+	out := map[string]string{}
+	for _, item := range doc.Items {
+		id := strings.TrimSpace(firstNonEmpty(item.Value.ID, item.ID))
+		name := strings.TrimSpace(item.Value.Name)
+		if id != "" && name != "" {
+			out[id] = name
 		}
 	}
 	return out

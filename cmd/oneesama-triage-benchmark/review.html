@@ -338,6 +338,22 @@ const els = {
   filterChannel: document.getElementById("filter-channel"),
 };
 
+function runtimeSummary(detail) {
+  const runtime = (detail && detail.runtime) || {};
+  const persona = runtime.persona_runtime || {};
+  const runner = runtime.agent_runner || {};
+  const health = runtime.healthz || {};
+  const parts = [];
+  if (health.version) parts.push("version " + health.version);
+  if (persona.provider || persona.version || persona.mode) {
+    parts.push("Pi " + [persona.provider, persona.version, persona.mode].filter(Boolean).join(" / "));
+  }
+  if (runner.model || runner.model_provider) {
+    parts.push("worker " + [runner.model_provider, runner.model].filter(Boolean).join(" / "));
+  }
+  return parts.join(" · ");
+}
+
 function el(tag, props, ...children) {
   const node = document.createElement(tag);
   if (props) {
@@ -1078,6 +1094,10 @@ function loadDetail(detail) {
   state.expectedNotes = {};
   state.userNames = (detail.nameMap && detail.nameMap.users) || {};
   state.channelNames = (detail.nameMap && detail.nameMap.channels) || {};
+  const runtime = runtimeSummary(detail);
+  if (runtime) {
+    els.dropZone.textContent = "Loaded " + detail.rows.length + " cases · " + runtime;
+  }
   populateChannelFilter();
   renderAll();
 }

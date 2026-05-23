@@ -19,6 +19,23 @@ func (s *Service) DryRunSlackTriage(ctx context.Context, channelID string, messa
 	result := callPersonaShadow(callCtx, s.personaRuntime, "triage_dry_run", request)
 	disposition := s.applySlackPersonaForegroundDispositions(result, request, prepared.Messages)
 	result = disposition.Result
+	if action, ok := slackTriageSharedLinkSynthesisAction(
+		prepared.ChannelID,
+		prepared.ThreadTS,
+		prepared.Messages,
+		prepared.ExternalLinks,
+		personaDynamicContextTextFromRequest(request, "workspace_triage_policy"),
+	); ok && strings.TrimSpace(result.Decision) == persona.DecisionStaySilent && slackVisibleReplyAllowListVerdictForAction(action).Allowed {
+		result = applySlackPersonaVisibleReplyAction(result, action)
+		disposition.ToolCalls = append(disposition.ToolCalls, SlackTriageToolCall{
+			Tool:    "persona_runtime",
+			Action:  "dry_run_link_synthesis_fallback",
+			Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+			Success: true,
+			Brief:   "Dry-run link synthesis fallback converted silent result to visible reply",
+			Result:  "fetched_link_context",
+		})
+	}
 
 	actionsBeforeGate := slackPersonaForegroundActions(prepared.ChannelID, prepared.ThreadTS, result, request)
 	actionsAfterGate := requireSlackTriageVisibleReplyApproval(actionsBeforeGate)
@@ -76,6 +93,10 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 	workspaceID := firstNonEmpty(firstMessageTeamID(messages), "workspace")
 	threadTS := firstNonEmpty(lastMessageThreadTS(messages), "channel-root")
 	foregroundChain := s.slackTriageForegroundChain()
+	var ignoredMessageBotReplyCount int
+	if options.IgnoreExistingBotReply {
+		messages, ignoredMessageBotReplyCount = filterSlackTriageBotInboundMessages(messages, []string{s.botUserID})
+	}
 	if strings.TrimSpace(digest) == "" {
 		digest = renderSlackActivityDigest(channelID, messages)
 	}
@@ -99,8 +120,9 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 	auditMetadata = mergeStringAnyMaps(auditMetadata, slackWorkspacePolicyMetadataMap(workspacePolicyStatus))
 	if options.IgnoreExistingBotReply {
 		auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
-			"ignore_existing_bot_reply":        true,
-			"ignored_existing_bot_reply_count": ignoredBotReplyCount,
+			"ignore_existing_bot_reply":          true,
+			"ignored_existing_bot_reply_count":   ignoredBotReplyCount + ignoredMessageBotReplyCount,
+			"ignored_existing_bot_message_count": ignoredMessageBotReplyCount,
 		})
 	}
 	auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
