@@ -2196,6 +2196,34 @@ func historicalJobSlackTarget(job agentrunner.Job) (string, string) {
 		contextString(slack, "thread_ts", "threadTs", "thread"),
 		contextString(job.Context, "thread_ts", "threadTs", "thread"),
 	)
+	if channelID != "" && threadTS != "" {
+		return channelID, threadTS
+	}
+	if parsedChannel, parsedThread := parseHistoricalTriageRequestID(firstNonEmpty(
+		contextString(contextMap(job.Context, "persona"), "request_id", "requestId"),
+		contextString(job.Context, "request_id", "requestId", "sessionId", "session_id"),
+		contextString(contextMap(job.Context, "worker_context"), "request_id", "requestId", "sessionId", "session_id"),
+	)); parsedChannel != "" && parsedThread != "" {
+		if channelID == "" {
+			channelID = parsedChannel
+		}
+		if threadTS == "" {
+			threadTS = parsedThread
+		}
+	}
+	return channelID, threadTS
+}
+
+func parseHistoricalTriageRequestID(value string) (string, string) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 3 || parts[0] != "triage" {
+		return "", ""
+	}
+	channelID := strings.TrimSpace(parts[1])
+	threadTS := strings.TrimSpace(parts[2])
+	if channelID == "" || threadTS == "" {
+		return "", ""
+	}
 	return channelID, threadTS
 }
 

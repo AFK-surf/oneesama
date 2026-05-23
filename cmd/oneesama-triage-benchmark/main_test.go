@@ -418,9 +418,8 @@ func TestRunLiveBenchmarkAttachesHistoricalWorkerResultsFromInput(t *testing.T) 
 					"source":           "persona_delegate_worker",
 					"session_kind":     agentrunner.SessionKindSecretaryLookup,
 					"delegation_scope": "secretary_lookup",
-					"slack": map[string]any{
-						"channel_id": "C1",
-						"thread_ts":  "1779450000.000100",
+					"persona": map[string]any{
+						"request_id": "triage:C1:1779450000.000100",
 					},
 				},
 				Result: `{"visible_text":"根据产品页，这是一个 Oneesama triage benchmark 工具。","evidence_anchors":[{"kind":"fetched_link","sourceRef":"https://example.com/product","quote":"product page says benchmark","confidence":0.9}]}`,
