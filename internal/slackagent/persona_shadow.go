@@ -240,6 +240,8 @@ func (s *Service) applySlackPersonaForegroundDispositions(result SlackPersonaSha
 	toolCalls = append(toolCalls, next...)
 	result, next = applyPersonaProductLinkSynthesisDisposition(result, request, messages)
 	toolCalls = append(toolCalls, next...)
+	result, next = applyPersonaPositiveStatusSummaryReactionDisposition(result, request, messages)
+	toolCalls = append(toolCalls, next...)
 	result, next = s.applyPersonaSecretaryDelegationPolicy(result)
 	toolCalls = append(toolCalls, next...)
 	result, next = applyPersonaProductLinkReactionDisposition(result, request)
@@ -725,6 +727,81 @@ func applyPersonaProductLinkSynthesisDisposition(result SlackPersonaShadowResult
 		Brief:   "Product-adjacent link converted to source-backed visible reply",
 		Result:  "fetched_link_context",
 	}}
+}
+
+func applyPersonaPositiveStatusSummaryReactionDisposition(result SlackPersonaShadowResult, request persona.Request, messages []SlackInboundMessage) (SlackPersonaShadowResult, []SlackTriageToolCall) {
+	if !result.Success || result.ShadowOnly || personaRequestIsWorkerReturn(request) || strings.TrimSpace(result.Decision) != persona.DecisionStaySilent || len(result.workerRecords) > 0 {
+		return result, nil
+	}
+	if !slackMessagesLookLikePositiveStatusSummary(messages) {
+		return result, nil
+	}
+	channelID := firstNonEmpty(strings.TrimSpace(request.Anchor.ChannelID), firstMessageChannelID(messages))
+	threadTS := firstNonEmpty(strings.TrimSpace(request.Anchor.ThreadTS), lastMessageThreadTS(messages))
+	messageTS := lastMessageTS(messages)
+	result.Decision = persona.DecisionReact
+	result.Reactions = []string{"tada"}
+	result.reactionRecords = []persona.ReactionIntent{{
+		Emoji:      "tada",
+		ChannelID:  channelID,
+		MessageTS:  messageTS,
+		Reason:     "light congratulations for a shipped-status summary",
+		Confidence: 0.82,
+	}}
+	result.Confidence = maxFloat64(result.Confidence, 0.82)
+	result.Reason = strings.TrimSpace(firstNonEmpty(result.Reason, "positive shipped-status summary merits a lightweight congratulations reaction"))
+	return result, []SlackTriageToolCall{{
+		Tool:    "persona_runtime",
+		Action:  "positive_status_summary_reaction",
+		Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+		Success: true,
+		Brief:   "Positive status summary converted to lightweight reaction",
+		Result:  "status_summary:" + channelID + ":" + threadTS,
+	}}
+}
+
+func slackMessagesLookLikePositiveStatusSummary(messages []SlackInboundMessage) bool {
+	text := strings.TrimSpace(joinSlackMessageTexts(messages))
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	hasSummaryMarker := slackVisibleTextContainsAny(lower, []string{
+		"过去 24 小时概况",
+		"过去24小时概况",
+		"24 小时概况",
+		"24小时概况",
+		"daily wrap",
+		"daily summary",
+		"status summary",
+		"ship summary",
+		"shipping summary",
+	})
+	if !hasSummaryMarker {
+		return false
+	}
+	return slackVisibleTextContainsAny(lower, []string{
+		"合并",
+		"修复",
+		"已修",
+		"已同步",
+		"已发布",
+		"上线",
+		"发布",
+		"merged",
+		"fixed",
+		"shipped",
+		"released",
+		"green",
+	})
+}
+
+func lastMessageTS(messages []SlackInboundMessage) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	last := messages[len(messages)-1]
+	return firstNonEmpty(strings.TrimSpace(last.TS), strings.TrimSpace(last.EventTS), strings.TrimSpace(last.ThreadTS))
 }
 
 func applyPersonaProductLinkReactionDisposition(result SlackPersonaShadowResult, request persona.Request) (SlackPersonaShadowResult, []SlackTriageToolCall) {

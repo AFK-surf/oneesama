@@ -68,6 +68,9 @@ func firstSlackVisibleFetchedLinkEvidenceContext(contexts []SlackExternalLinkCon
 		if slackExternalLinkContextLooksBoilerplate(context) {
 			continue
 		}
+		if slackExternalLinkContextLooksLikeReaderFailure(context) {
+			continue
+		}
 		if strings.TrimSpace(context.Title) == "" && strings.TrimSpace(context.Excerpt) == "" {
 			continue
 		}
@@ -181,6 +184,9 @@ func firstSynthesisEligibleExternalLink(contexts []SlackExternalLinkContext, exp
 		if slackExternalLinkContextLooksBoilerplate(context) {
 			continue
 		}
+		if slackExternalLinkContextLooksLikeReaderFailure(context) {
+			continue
+		}
 		if title == "" && len([]rune(excerpt)) < slackSharedLinkSynthesisExcerptMin {
 			continue
 		}
@@ -207,6 +213,29 @@ func slackExternalLinkContextLooksBoilerplate(context SlackExternalLinkContext) 
 		"mcp registry new integrate external tools",
 		"automate any workflow packages host and manage packages",
 		"sign in to github",
+	} {
+		if strings.Contains(excerpt, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func slackExternalLinkContextLooksLikeReaderFailure(context SlackExternalLinkContext) bool {
+	title := strings.ToLower(strings.TrimSpace(context.Title))
+	excerpt := strings.ToLower(strings.Join(strings.Fields(context.Excerpt), " "))
+	if strings.Contains(title, "not found") || strings.Contains(title, "404") || strings.Contains(title, "log in") || strings.Contains(title, "login") {
+		return true
+	}
+	for _, marker := range []string{
+		"not found",
+		"404",
+		"page not found",
+		"log in to",
+		"sign up",
+		"don't have an account",
+		"up or down to navigate enter to select escape to close",
+		"search powered by",
 	} {
 		if strings.Contains(excerpt, marker) {
 			return true

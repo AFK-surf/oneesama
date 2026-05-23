@@ -80,6 +80,17 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if !strings.Contains(systemPrompt, `"evidence_anchors"`) || !strings.Contains(systemPrompt, "fetched_link|workspace_memory|person_memory") {
 		t.Fatalf("system prompt missing evidence_anchors output schema:\n%s", systemPrompt)
 	}
+	for _, marker := range []string{
+		"error page, login wall, search UI",
+		"Search powered by",
+		"Do not narrate your reading process",
+		"我粗读了一下",
+		"核心信息是",
+	} {
+		if !strings.Contains(systemPrompt, marker) {
+			t.Fatalf("system prompt missing chrome/narration guard marker %q:\n%s", marker, systemPrompt)
+		}
+	}
 	for _, forbidden := range []string{"[[", "telegram-pi", "Linger"} {
 		if strings.Contains(systemPrompt, forbidden) {
 			t.Fatalf("system prompt contains old/private marker %q:\n%s", forbidden, systemPrompt)

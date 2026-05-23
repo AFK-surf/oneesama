@@ -1645,6 +1645,38 @@ func TestExplicitSmokeCommandDispositionConvertsSilentToAck(t *testing.T) {
 	}
 }
 
+func TestPositiveStatusSummaryDispositionConvertsSilentToReaction(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C_STATUS",
+		UserID:    "U_STATUS_BOT",
+		Text:      "过去 24 小时概况：合并多项权限与 Willow 集成、对话/权限界面重构与若干 UX/后端修复；Linear 报告 5 条 issue 已同步。",
+		TS:        "1779447920.433539",
+		ThreadTS:  "1779447920.433539",
+	}}
+	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_STATUS",
+		ThreadTS:  "1779447920.433539",
+		Messages:  messages,
+		Digest:    "#status: 过去 24 小时概况：合并多项权限与 Willow 集成、对话/权限界面重构与若干 UX/后端修复；Linear 报告 5 条 issue 已同步。",
+	})
+	result, calls := applyPersonaPositiveStatusSummaryReactionDisposition(SlackPersonaShadowResult{
+		Success:    true,
+		Decision:   persona.DecisionStaySilent,
+		Confidence: 0.41,
+	}, request, messages)
+
+	if result.Decision != persona.DecisionReact {
+		t.Fatalf("decision = %q, want react", result.Decision)
+	}
+	if len(result.reactionRecords) != 1 || result.reactionRecords[0].Emoji != "tada" || result.reactionRecords[0].MessageTS != "1779447920.433539" {
+		t.Fatalf("reactionRecords=%#v, want tada on status message", result.reactionRecords)
+	}
+	if len(calls) != 1 || calls[0].Action != "positive_status_summary_reaction" {
+		t.Fatalf("tool calls=%#v, want status summary marker", calls)
+	}
+}
+
 func hasTriageToolCall(calls []SlackTriageToolCall, tool string, action string) bool {
 	for _, call := range calls {
 		if call.Tool == tool && call.Action == action && call.Success {

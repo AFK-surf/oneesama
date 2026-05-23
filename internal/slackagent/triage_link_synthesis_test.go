@@ -111,6 +111,53 @@ func TestSharedLinkSynthesisRejectsGitHubChromeBoilerplate(t *testing.T) {
 	}
 }
 
+func TestSharedLinkSynthesisRejectsReaderFailureChrome(t *testing.T) {
+	t.Parallel()
+
+	cases := []SlackExternalLinkContext{
+		{
+			URL:     "https://deno.com/blog/claw-patrol",
+			Title:   "Not Found | Deno",
+			Excerpt: "⌘K Up or down to navigate Enter to select Escape to close Search powered by Orama New! Introducing Deno Sandbox",
+			Source:  "reader",
+		},
+		{
+			URL:     "https://linear.app/example",
+			Title:   "Log in to Linear",
+			Excerpt: "Don't have an account? Sign up or learn more about Linear.",
+			Source:  "reader",
+		},
+	}
+	for _, context := range cases {
+		if _, ok := firstSynthesisEligibleExternalLink([]SlackExternalLinkContext{context}, true); ok {
+			t.Fatalf("context=%#v should not trigger deterministic link synthesis", context)
+		}
+	}
+}
+
+func TestSharedLinkSynthesisReplyAvoidsReadingProcessNarration(t *testing.T) {
+	t.Parallel()
+
+	action, ok := slackTriageSharedLinkSynthesisAction("C123", "100.000", []SlackInboundMessage{{
+		ChannelID: "C123",
+		Text:      "看看这个产品链接，给我一句有证据的评论：https://example.com/product",
+		TS:        "100.000",
+	}}, []SlackExternalLinkContext{{
+		URL:     "https://example.com/product",
+		Title:   "Example Product",
+		Excerpt: "A concrete product page excerpt about the feature and launch timing.",
+		Source:  "reader",
+	}}, "")
+	if !ok || strings.TrimSpace(action.Message) == "" {
+		t.Fatalf("action=%#v ok=%v, want explicit short-context link synthesis", action, ok)
+	}
+	for _, marker := range []string{"我粗读了一下", "核心信息是", "我的初步判断", "讨论引子", "如果继续聊"} {
+		if strings.Contains(action.Message, marker) {
+			t.Fatalf("message %q contains narration marker %q", action.Message, marker)
+		}
+	}
+}
+
 func TestSharedLinkSynthesisAllowsShortContextForExplicitAsk(t *testing.T) {
 	t.Parallel()
 

@@ -106,6 +106,15 @@
   .pi-meta span { font-family: ui-monospace, monospace; }
 
   .action-item { background: var(--panel2); border-radius: 4px; padding: 8px 10px; margin-bottom: 5px; border-left: 3px solid var(--bot); }
+  .final-reply-section {
+    background: rgba(255, 176, 32, 0.08);
+    border: 1px solid rgba(255, 176, 32, 0.25);
+    border-radius: 8px;
+    padding: 10px;
+  }
+  .final-reply-section h3 { color: var(--bot); }
+  .final-reply-section .action-item { border-left-color: var(--bot); background: rgba(255, 176, 32, 0.08); }
+  .final-reply-section .muted-note { color: var(--text-dim); }
   .action-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; flex-wrap: wrap; }
   .action-type { font-weight: 600; font-size: 11px; color: var(--bot); font-family: ui-monospace, monospace; }
   .action-confidence { color: var(--text-dim); font-size: 10px; }
@@ -551,8 +560,8 @@ function renderPiBlock(dryRun) {
   return block;
 }
 
-function renderActions(actions, label) {
-  const wrap = el("div", { class: "section" });
+function renderActions(actions, label, opts = {}) {
+  const wrap = el("div", { class: "section" + (opts.prominent ? " final-reply-section" : "") });
   wrap.appendChild(el("h3", { text: label }));
   if (!Array.isArray(actions) || actions.length === 0) {
     wrap.appendChild(el("div", { class: "muted-note", text: "(none — bot would not act)" }));
@@ -844,12 +853,12 @@ function renderCase(row, idx) {
     piSection.appendChild(renderPiBlock(row.dryRun));
     card.appendChild(piSection);
 
-    card.appendChild(renderActions(row.dryRun.actionsBeforeGate || [], "Would-do actions (before approval gate)"));
+    card.appendChild(renderActions(row.dryRun.actionsBeforeGate || [], "Bot 最终会发到 thread 的文案候选 (full text)", { prominent: true }));
 
     const before = row.dryRun.actionsBeforeGate || [];
     const after = row.dryRun.actionsAfterGate || [];
     if (after.length !== before.length || (before.length > 0 && after.length === 0)) {
-      card.appendChild(renderActions(after, "After approval gate"));
+      card.appendChild(renderActions(after, "After safety / approval gate"));
     }
 
     card.appendChild(renderVerdicts(row.dryRun.visibleReplyVerdicts || []));

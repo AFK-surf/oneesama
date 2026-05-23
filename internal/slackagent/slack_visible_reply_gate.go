@@ -56,6 +56,9 @@ func slackVisibleReplyQualityBlockReason(text string) string {
 	if slackVisibleReplyIsSelfDecisionMeta(lower) {
 		return "self_decision_meta"
 	}
+	if slackVisibleReplyIsReadingProcessNarration(lower) {
+		return "reading_process_narration"
+	}
 	return ""
 }
 
@@ -90,8 +93,12 @@ func slackVisibleReplyAllowListVerdictForAction(action SlackTriageDecisionAction
 func slackVisibleReplyHasAllowListEvidenceAnchor(anchors []SlackVisibleEvidenceAnchor, message string) bool {
 	for _, anchor := range normalizeSlackVisibleEvidenceAnchors(anchors) {
 		switch strings.TrimSpace(anchor.Kind) {
-		case slackVisibleEvidenceKindFetchedLink,
-			slackVisibleEvidenceKindWorkspaceMemory,
+		case slackVisibleEvidenceKindFetchedLink:
+			if slackVisibleEvidenceAnchorLooksLikeReaderFailure(anchor) {
+				continue
+			}
+			return true
+		case slackVisibleEvidenceKindWorkspaceMemory,
 			slackVisibleEvidenceKindPersonMemory,
 			slackVisibleEvidenceKindFile,
 			slackVisibleEvidenceKindImage,
@@ -105,6 +112,28 @@ func slackVisibleReplyHasAllowListEvidenceAnchor(anchors []SlackVisibleEvidenceA
 		}
 	}
 	return false
+}
+
+func slackVisibleEvidenceAnchorLooksLikeReaderFailure(anchor SlackVisibleEvidenceAnchor) bool {
+	return slackExternalLinkContextLooksLikeReaderFailure(SlackExternalLinkContext{
+		URL:     strings.TrimSpace(anchor.SourceRef),
+		Title:   strings.TrimSpace(anchor.Quote),
+		Excerpt: strings.TrimSpace(anchor.Quote),
+	})
+}
+
+func slackVisibleReplyIsReadingProcessNarration(lower string) bool {
+	return slackVisibleTextContainsAny(lower, []string{
+		"我粗读了一下",
+		"核心信息是",
+		"我的初步判断",
+		"这类内容适合作为讨论引子",
+		"如果继续聊",
+		"i skimmed",
+		"core signal",
+		"my initial take",
+		"discussion prompt",
+	})
 }
 
 func slackVisibleReplyLooksLikeRoutingHandoff(text string) bool {
