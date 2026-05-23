@@ -71,6 +71,9 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if !strings.Contains(systemPrompt, "External URL identity/fact lookup is bounded secretary work") || !strings.Contains(systemPrompt, "不认识 / 不知道") {
 		t.Fatalf("system prompt missing old-slackd secretary lookup guard:\n%s", systemPrompt)
 	}
+	if !strings.Contains(systemPrompt, "Oneesama/Cueboard/Bridge/Willow runtime") || !strings.Contains(systemPrompt, "delegation_scope=oneesama_system") {
+		t.Fatalf("system prompt missing Oneesama system compatibility delegation guard:\n%s", systemPrompt)
+	}
 	if !strings.Contains(systemPrompt, "A visible reply must have concrete evidence") || !strings.Contains(systemPrompt, "typed evidence_anchors") {
 		t.Fatalf("system prompt missing typed evidence-anchor reply quality guard:\n%s", systemPrompt)
 	}
