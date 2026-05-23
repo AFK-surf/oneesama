@@ -1723,6 +1723,76 @@ func TestPositiveStatusSummaryDispositionConvertsSilentToReaction(t *testing.T) 
 	}
 }
 
+func TestPositiveStatusSummaryDispositionPreservesHandledSilence(t *testing.T) {
+	messages := []SlackInboundMessage{{
+		TeamID:    "T123",
+		ChannelID: "C_STATUS",
+		UserID:    "U_STATUS_BOT",
+		Text:      "Bridge Staging staging-v1.2.17-beta.795 is released. PASS conclusion posted with release/build details and screenshots.",
+		TS:        "1779450072.599829",
+		ThreadTS:  "1779450072.599829",
+	}}
+	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_STATUS",
+		ThreadTS:  "1779450072.599829",
+		Messages:  messages,
+		Digest:    "#status: " + messages[0].Text,
+	})
+	result, calls := applyPersonaPositiveStatusSummaryReactionDisposition(SlackPersonaShadowResult{
+		Success:    true,
+		Decision:   persona.DecisionStaySilent,
+		Confidence: 0.95,
+		Reason:     "The thread is fully handled by another worker; no open human request remains.",
+	}, request, messages)
+
+	if result.Decision != persona.DecisionStaySilent {
+		t.Fatalf("decision = %q, want handled silence preserved", result.Decision)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("tool calls=%#v, want no reaction on handled worker thread", calls)
+	}
+}
+
+func TestProductLinkReactionDispositionPreservesFullyHandledThread(t *testing.T) {
+	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
+		ChannelID: "C_STATUS",
+		ThreadTS:  "1779445997.412279",
+		Messages: []SlackInboundMessage{{
+			ChannelID: "C_STATUS",
+			Text:      "Bridge Staging staging-v1.2.17-beta.794 is released. <https://github.com/AFK-surf/cueboard/releases/tag/staging-v1.2.17-beta.794>",
+			TS:        "1779445997.412279",
+			ThreadTS:  "1779445997.412279",
+		}},
+		Digest: "Bridge Staging staging-v1.2.17-beta.794 is released.",
+		ExternalLinks: []SlackExternalLinkContext{{
+			URL:     "https://github.com/AFK-surf/cueboard/releases/tag/staging-v1.2.17-beta.794",
+			Title:   "Build software better, together",
+			Excerpt: "GitHub navigation chrome",
+		}},
+		WorkspaceTriagePolicy: "Reply to source-backed product-adjacent articles in this workspace.",
+	})
+	result, calls := applyPersonaProductLinkReactionDisposition(SlackPersonaShadowResult{
+		Success:    true,
+		Decision:   persona.DecisionReact,
+		Confidence: 0.95,
+		Reason:     "The thread is fully handled; the worker already posted PASS and there is no open human request.",
+		reactionRecords: []persona.ReactionIntent{{
+			Emoji:     "tada",
+			MessageTS: "1779450079.850319",
+		}},
+	}, request)
+
+	if result.Decision != persona.DecisionReact {
+		t.Fatalf("decision = %q, want reaction result preserved without worker upgrade", result.Decision)
+	}
+	if len(result.workerRecords) != 0 {
+		t.Fatalf("workerRecords=%#v, want no secretary lookup upgrade", result.workerRecords)
+	}
+	if len(calls) != 1 || calls[0].Action != "product_link_reaction_preserved_already_handled" {
+		t.Fatalf("tool calls=%#v, want handled product-link guard", calls)
+	}
+}
+
 func hasTriageToolCall(calls []SlackTriageToolCall, tool string, action string) bool {
 	for _, call := range calls {
 		if call.Tool == tool && call.Action == action && call.Success {

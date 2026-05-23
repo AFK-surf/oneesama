@@ -380,6 +380,10 @@ func personaCompletedDelegationMarker(result SlackPersonaShadowResult) string {
 		"no action needed",
 		"nothing for me to add",
 		"nothing to add",
+		"fully handled",
+		"already completed",
+		"completed workflow thread",
+		"no open human request",
 		"already determined this thread is handled",
 		"无需进一步处理",
 		"无需进一步动作",
@@ -797,6 +801,9 @@ func applySlackPersonaVisibleReplyAction(result SlackPersonaShadowResult, action
 
 func applyPersonaPositiveStatusSummaryReactionDisposition(result SlackPersonaShadowResult, request persona.Request, messages []SlackInboundMessage) (SlackPersonaShadowResult, []SlackTriageToolCall) {
 	if !result.Success || result.ShadowOnly || personaRequestIsWorkerReturn(request) || strings.TrimSpace(result.Decision) != persona.DecisionStaySilent || len(result.workerRecords) > 0 {
+		return result, nil
+	}
+	if personaCompletedDelegationMarker(result) != "" {
 		return result, nil
 	}
 	if !slackMessagesLookLikePositiveStatusSummary(messages) {
