@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/slackagent"
 )
 
@@ -175,15 +176,37 @@ type benchmarkNameMap struct {
 }
 
 type benchmarkDetailRow struct {
-	VariantID       string                              `json:"variantId"`
-	CaseID          string                              `json:"caseId,omitempty"`
-	CaseDescription string                              `json:"caseDescription,omitempty"`
-	FixtureLabel    string                              `json:"fixtureLabel,omitempty"`
-	ChannelID       string                              `json:"channelId"`
-	ThreadTS        string                              `json:"threadTs"`
-	Messages        []slackagent.SlackInboundMessage    `json:"messages"`
-	DryRun          *slackagent.SlackTriageDryRunResult `json:"dryRun,omitempty"`
-	Error           string                              `json:"error,omitempty"`
+	VariantID               string                              `json:"variantId"`
+	CaseID                  string                              `json:"caseId,omitempty"`
+	CaseDescription         string                              `json:"caseDescription,omitempty"`
+	FixtureLabel            string                              `json:"fixtureLabel,omitempty"`
+	ChannelID               string                              `json:"channelId"`
+	ThreadTS                string                              `json:"threadTs"`
+	Messages                []slackagent.SlackInboundMessage    `json:"messages"`
+	DryRun                  *slackagent.SlackTriageDryRunResult `json:"dryRun,omitempty"`
+	HistoricalWorkerResults []benchmarkHistoricalWorkerResult   `json:"historicalWorkerResults,omitempty"`
+	Error                   string                              `json:"error,omitempty"`
+}
+
+type benchmarkHistoricalWorkerResult struct {
+	JobID              string                                  `json:"jobId"`
+	Provider           string                                  `json:"provider,omitempty"`
+	Status             string                                  `json:"status"`
+	FailureCode        string                                  `json:"failureCode,omitempty"`
+	CreatedAt          string                                  `json:"createdAt,omitempty"`
+	UpdatedAt          string                                  `json:"updatedAt,omitempty"`
+	SessionKind        string                                  `json:"sessionKind,omitempty"`
+	DelegationScope    string                                  `json:"delegationScope,omitempty"`
+	TaskPreview        string                                  `json:"taskPreview,omitempty"`
+	Result             string                                  `json:"result,omitempty"`
+	Error              string                                  `json:"error,omitempty"`
+	Envelope           agentrunner.WorkerResultEnvelope        `json:"envelope"`
+	VisibleText        string                                  `json:"visibleText,omitempty"`
+	VisibleGateAllowed bool                                    `json:"visibleGateAllowed"`
+	VisibleGateReason  string                                  `json:"visibleGateReason,omitempty"`
+	EvidenceAnchors    []slackagent.SlackVisibleEvidenceAnchor `json:"evidenceAnchors,omitempty"`
+	WouldPost          bool                                    `json:"wouldPost"`
+	WouldPostReason    string                                  `json:"wouldPostReason,omitempty"`
 }
 
 type benchmarkFixtureExpected struct {
@@ -276,6 +299,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		maxTotalThreads   int
 		outputPath        string
 		detailPath        string
+		workerJobsInput   string
 		format            string
 		variantID         string
 		timeout           time.Duration
@@ -308,6 +332,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs.IntVar(&maxTotalThreads, "max-threads", 24, "Max total root threads to dry-run across all channels. Use 0 to disable the global cap.")
 	fs.StringVar(&outputPath, "output", "", "Optional JSON report path. Use '-' or omit for stdout JSON.")
 	fs.StringVar(&detailPath, "detail-output", "", "Optional JSON path for full per-row detail (messages + dry-run result). Required by the human review UI.")
+	fs.StringVar(&workerJobsInput, "worker-jobs-input", defaultWorkerJobsInput(), "Optional agent_runner_jobs.json path. When present, detail rows include historical delegated worker results for matching Slack threads.")
 	fs.StringVar(&format, "format", "json", "Output format: json or markdown.")
 	fs.StringVar(&variantID, "variant-id", "current", "Variant/config id recorded in the report.")
 	fs.DurationVar(&timeout, "timeout", 10*time.Minute, "Overall benchmark timeout.")
@@ -521,6 +546,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	report.VariantSummaries = buildVariantSummaries(variants, report.Rows)
 	if collectDetail {
+		attachHistoricalWorkerResults(ctx, &detail, workerJobsInput, stderr)
 		detail.NameMap = resolveSlackNames(ctx, token, detail.Rows, stderr)
 	}
 
@@ -2053,6 +2079,328 @@ func defaultReviewOutputPath() string {
 	return "oneesama-triage-human-review-" + stamp + ".json"
 }
 
+func defaultWorkerJobsInput() string {
+	if path := strings.TrimSpace(os.Getenv("ONEESAMA_AGENT_RUNNER_JOBS_PATH")); path != "" {
+		return path
+	}
+	for _, env := range []string{
+		"ONEESAMA_STATE_DATA_DIR",
+		"ONEESAMA_PERSISTENCE_DATA_DIR",
+		"ONEESAMA_DATA_DIR",
+		"MAB_DATA_DIR",
+	} {
+		if dir := strings.TrimSpace(os.Getenv(env)); dir != "" {
+			return filepath.Join(dir, "agent_runner_jobs.json")
+		}
+	}
+	return ""
+}
+
+func attachHistoricalWorkerResults(ctx context.Context, detail *benchmarkDetail, path string, stderr io.Writer) {
+	if detail == nil || len(detail.Rows) == 0 {
+		return
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	jobs, err := readHistoricalWorkerJobs(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "oneesama-triage-benchmark: read historical worker jobs: %v\n", err)
+		}
+		return
+	}
+	byThread := make(map[string][]benchmarkHistoricalWorkerResult)
+	for _, job := range jobs {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if !historicalJobIsPersonaDelegate(job) {
+			continue
+		}
+		channelID, threadTS := historicalJobSlackTarget(job)
+		if channelID == "" || threadTS == "" {
+			continue
+		}
+		key := benchmarkThreadKey(channelID, threadTS)
+		byThread[key] = append(byThread[key], buildHistoricalWorkerResult(job))
+	}
+	for key := range byThread {
+		sort.SliceStable(byThread[key], func(i, j int) bool {
+			return historicalWorkerResultSortTime(byThread[key][i]).After(historicalWorkerResultSortTime(byThread[key][j]))
+		})
+		if len(byThread[key]) > 8 {
+			byThread[key] = byThread[key][:8]
+		}
+	}
+	for i := range detail.Rows {
+		key := benchmarkThreadKey(detail.Rows[i].ChannelID, detail.Rows[i].ThreadTS)
+		if results := byThread[key]; len(results) > 0 {
+			detail.Rows[i].HistoricalWorkerResults = append([]benchmarkHistoricalWorkerResult(nil), results...)
+		}
+	}
+}
+
+func readHistoricalWorkerJobs(path string) ([]agentrunner.Job, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	if trimmed[0] == '[' {
+		var jobs []agentrunner.Job
+		if err := json.Unmarshal(trimmed, &jobs); err != nil {
+			return nil, err
+		}
+		return jobs, nil
+	}
+	var collection struct {
+		Items []struct {
+			ID    string          `json:"id"`
+			Value agentrunner.Job `json:"value"`
+		} `json:"items"`
+		Jobs []agentrunner.Job `json:"jobs"`
+	}
+	if err := json.Unmarshal(trimmed, &collection); err != nil {
+		return nil, err
+	}
+	jobs := make([]agentrunner.Job, 0, len(collection.Items)+len(collection.Jobs))
+	for _, item := range collection.Items {
+		job := item.Value
+		if strings.TrimSpace(job.ID) == "" {
+			job.ID = strings.TrimSpace(item.ID)
+		}
+		jobs = append(jobs, job)
+	}
+	jobs = append(jobs, collection.Jobs...)
+	return jobs, nil
+}
+
+func historicalJobIsPersonaDelegate(job agentrunner.Job) bool {
+	return strings.EqualFold(contextString(job.Context, "source"), "persona_delegate_worker")
+}
+
+func historicalJobSlackTarget(job agentrunner.Job) (string, string) {
+	slack := contextMap(job.Context, "slack")
+	channelID := firstNonEmpty(
+		contextString(slack, "channel_id", "channelId", "channel"),
+		contextString(job.Context, "channel_id", "channelId", "channel"),
+	)
+	threadTS := firstNonEmpty(
+		contextString(slack, "thread_ts", "threadTs", "thread"),
+		contextString(job.Context, "thread_ts", "threadTs", "thread"),
+	)
+	return channelID, threadTS
+}
+
+func buildHistoricalWorkerResult(job agentrunner.Job) benchmarkHistoricalWorkerResult {
+	envelope := agentrunner.NewWorkerResultEnvelope(job)
+	sessionKind := agentrunner.NormalizeSessionKind(firstNonEmpty(
+		contextString(job.Context, "session_kind", "sessionKind"),
+		contextString(contextMap(job.Context, "worker_context"), "session_kind", "sessionKind"),
+	))
+	scope := firstNonEmpty(
+		contextString(job.Context, "delegation_scope", "delegationScope"),
+		contextString(contextMap(job.Context, "worker_context"), "delegation_scope", "delegationScope"),
+	)
+	result := benchmarkHistoricalWorkerResult{
+		JobID:           strings.TrimSpace(job.ID),
+		Provider:        strings.TrimSpace(job.Provider),
+		Status:          string(job.Status),
+		FailureCode:     string(job.FailureCode),
+		CreatedAt:       strings.TrimSpace(job.CreatedAt),
+		UpdatedAt:       strings.TrimSpace(job.UpdatedAt),
+		SessionKind:     sessionKind,
+		DelegationScope: scope,
+		TaskPreview:     truncateBenchmarkText(job.Task, 900),
+		Result:          truncateBenchmarkText(job.Result, 8000),
+		Error:           truncateBenchmarkText(job.Error, 1400),
+		Envelope:        envelope,
+	}
+	if job.Status != agentrunner.StatusCompleted {
+		result.VisibleGateReason = "worker_status_" + firstNonEmpty(string(job.Status), "unknown")
+		result.WouldPostReason = result.VisibleGateReason
+		return result
+	}
+	completedText := agentrunner.WorkerResultEnvelopeCompletedText(envelope)
+	if sessionKind == agentrunner.SessionKindSecretaryLookup || strings.EqualFold(scope, "secretary_lookup") {
+		visibleText, anchors := parseHistoricalSecretaryLookupResult(completedText)
+		result.VisibleText = visibleText
+		result.EvidenceAnchors = anchors
+		verdict := slackagent.EvaluateSlackVisibleReplyCandidate(slackagent.SlackVisibleReplyCandidate{
+			Message:         visibleText,
+			EvidenceAnchors: anchors,
+		})
+		result.VisibleGateAllowed = verdict.Allowed
+		result.VisibleGateReason = verdict.Reason
+		result.EvidenceAnchors = verdict.EvidenceAnchors
+		result.WouldPost = verdict.Allowed
+		if verdict.Allowed {
+			result.WouldPostReason = "secretary_lookup_visible_reply_allowed"
+		} else {
+			result.WouldPostReason = "secretary_lookup_visible_reply_blocked:" + firstNonEmpty(verdict.Reason, "unknown")
+		}
+		return result
+	}
+	result.VisibleText = completedText
+	result.VisibleGateAllowed = true
+	result.VisibleGateReason = "normal_worker_result_not_allowlist_gated"
+	result.WouldPost = strings.TrimSpace(completedText) != ""
+	if result.WouldPost {
+		result.WouldPostReason = "normal_worker_result_posted_directly_after_formatting"
+	} else {
+		result.WouldPostReason = "empty_completed_worker_result"
+	}
+	return result
+}
+
+func parseHistoricalSecretaryLookupResult(text string) (string, []slackagent.SlackVisibleEvidenceAnchor) {
+	var mapped map[string]any
+	if err := json.Unmarshal([]byte(stripBenchmarkJSONFence(text)), &mapped); err != nil {
+		return "", nil
+	}
+	visibleText := firstNonEmpty(
+		anyString(mapped["visible_text"]),
+		anyString(mapped["visibleText"]),
+		anyString(mapped["message"]),
+		anyString(mapped["text"]),
+		anyString(mapped["summary"]),
+	)
+	anchors := evidenceAnchorsFromBenchmarkAny(firstNonEmptyAny(
+		mapped["evidence_anchors"],
+		mapped["evidenceAnchors"],
+		mapped["evidence"],
+	))
+	return visibleText, anchors
+}
+
+func evidenceAnchorsFromBenchmarkAny(value any) []slackagent.SlackVisibleEvidenceAnchor {
+	if value == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case []slackagent.SlackVisibleEvidenceAnchor:
+		return typed
+	case slackagent.SlackVisibleEvidenceAnchor:
+		return []slackagent.SlackVisibleEvidenceAnchor{typed}
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var anchors []slackagent.SlackVisibleEvidenceAnchor
+	if err := json.Unmarshal(data, &anchors); err == nil {
+		return anchors
+	}
+	var anchor slackagent.SlackVisibleEvidenceAnchor
+	if err := json.Unmarshal(data, &anchor); err == nil {
+		return []slackagent.SlackVisibleEvidenceAnchor{anchor}
+	}
+	return nil
+}
+
+func stripBenchmarkJSONFence(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```json")
+		trimmed = strings.TrimPrefix(trimmed, "```JSON")
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimSuffix(trimmed, "```")
+	}
+	return strings.TrimSpace(trimmed)
+}
+
+func benchmarkThreadKey(channelID string, threadTS string) string {
+	return strings.TrimSpace(channelID) + "\x00" + strings.TrimSpace(threadTS)
+}
+
+func historicalWorkerResultSortTime(result benchmarkHistoricalWorkerResult) time.Time {
+	for _, value := range []string{result.UpdatedAt, result.CreatedAt} {
+		if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value)); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func contextString(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := anyString(values[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func contextMap(values map[string]any, key string) map[string]any {
+	if values == nil {
+		return nil
+	}
+	switch typed := values[key].(type) {
+	case map[string]any:
+		return typed
+	case map[string]string:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			out[k] = v
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func firstNonEmptyAny(values ...any) any {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case nil:
+			continue
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return value
+			}
+		case []any:
+			if len(typed) > 0 {
+				return value
+			}
+		case []map[string]any:
+			if len(typed) > 0 {
+				return value
+			}
+		default:
+			return value
+		}
+	}
+	return nil
+}
+
+func anyString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	case json.Number:
+		return strings.TrimSpace(typed.String())
+	default:
+		return ""
+	}
+}
+
+func truncateBenchmarkText(value string, maxRunes int) string {
+	trimmed := strings.TrimSpace(value)
+	if maxRunes <= 0 || len([]rune(trimmed)) <= maxRunes {
+		return trimmed
+	}
+	return strings.TrimSpace(string([]rune(trimmed)[:maxRunes])) + "\n\n[truncated]"
+}
+
 func benchmarkGoldReplaySummary(rows []benchmarkRow, gold benchmarkGoldStore) benchmarkSummary {
 	summary := newBenchmarkSummary()
 	for _, row := range rows {
@@ -2114,6 +2462,19 @@ func resolveSlackNames(ctx context.Context, token string, rows []benchmarkDetail
 		for _, worker := range row.DryRun.WouldDelegateWorkers {
 			collectSlackIDsFromText(worker.PromptPreview, userIDs, channelIDs)
 			collectSlackIDsFromText(worker.DelegationScope, userIDs, channelIDs)
+		}
+		for _, result := range row.HistoricalWorkerResults {
+			collectSlackIDsFromText(result.TaskPreview, userIDs, channelIDs)
+			collectSlackIDsFromText(result.Result, userIDs, channelIDs)
+			collectSlackIDsFromText(result.Error, userIDs, channelIDs)
+			collectSlackIDsFromText(result.VisibleText, userIDs, channelIDs)
+			collectSlackIDsFromText(result.Envelope.Summary, userIDs, channelIDs)
+			collectSlackIDsFromText(result.Envelope.Result, userIDs, channelIDs)
+			collectSlackIDsFromText(result.Envelope.Error, userIDs, channelIDs)
+			for _, anchor := range result.EvidenceAnchors {
+				collectSlackIDsFromText(anchor.SourceRef, userIDs, channelIDs)
+				collectSlackIDsFromText(anchor.Quote, userIDs, channelIDs)
+			}
 		}
 	}
 	if strings.TrimSpace(token) == "" {

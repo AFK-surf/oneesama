@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/persona"
 	"github.com/AFK-surf/oneesama/internal/slackagent"
 )
@@ -322,6 +323,146 @@ func TestRunLiveBenchmarkHonorsAbsoluteWindowAndWritesDetail(t *testing.T) {
 	}
 	if detail.NameMap.Users["U_PENG"] != "Peng Xiao" || detail.NameMap.Channels["C1"] != "meeting-avatar" {
 		t.Fatalf("name map = %#v, want friendly user/channel names", detail.NameMap)
+	}
+}
+
+func TestRunLiveBenchmarkAttachesHistoricalWorkerResultsFromInput(t *testing.T) {
+	slackMux := http.NewServeMux()
+	slackMux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"messages": []map[string]any{
+				{"ts": "1779450000.000100", "channel": "C1", "user": "U_PENG", "text": "查一下这个产品链接是谁在做"},
+			},
+		})
+	})
+	slackMux.HandleFunc("/users.conversations", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"channels": []map[string]any{
+				{"id": "C1", "name": "meeting-avatar", "is_member": true},
+			},
+		})
+	})
+	slackMux.HandleFunc("/users.list", func(w http.ResponseWriter, r *http.Request) {
+		writeBenchmarkJSON(t, w, map[string]any{
+			"ok": true,
+			"members": []map[string]any{
+				{"id": "U_PENG", "name": "peng-xiao", "profile": map[string]any{"display_name": "Peng Xiao"}},
+			},
+		})
+	})
+	slackServer := httptest.NewServer(slackMux)
+	defer slackServer.Close()
+	previousSlackURL := slackagent.SlackBackfillLiveBaseURL
+	slackagent.SlackBackfillLiveBaseURL = slackServer.URL
+	t.Cleanup(func() { slackagent.SlackBackfillLiveBaseURL = previousSlackURL })
+
+	triageMux := http.NewServeMux()
+	triageMux.HandleFunc("/slack/triage/run", func(w http.ResponseWriter, r *http.Request) {
+		var request triageRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode dry-run request: %v", err)
+		}
+		writeBenchmarkJSON(t, w, triageRunResponse{
+			OK: true,
+			DryRun: slackagent.SlackTriageDryRunResult{
+				DryRun:        true,
+				ChannelID:     request.ChannelID,
+				ThreadTS:      request.Messages[0].ThreadTS,
+				MessageCount:  len(request.Messages),
+				FinalDecision: "would_delegate_worker",
+				Persona: slackagent.SlackPersonaShadowResult{
+					Decision: persona.DecisionDelegateWorker,
+					Success:  true,
+				},
+				WouldDelegateWorkers: []slackagent.SlackTriageDryRunWorker{{
+					ID:              "secretary_lookup",
+					SessionKind:     agentrunner.SessionKindSecretaryLookup,
+					DelegationScope: "secretary_lookup",
+					PromptPreview:   "查一下产品链接",
+					WouldStart:      true,
+				}},
+			},
+		})
+	})
+	triageServer := httptest.NewServer(triageMux)
+	defer triageServer.Close()
+
+	dir := t.TempDir()
+	detailPath := dir + "/detail.json"
+	jobsPath := dir + "/agent_runner_jobs.json"
+	jobs := struct {
+		Schema     string `json:"schema"`
+		Collection string `json:"collection"`
+		Items      []struct {
+			ID    string          `json:"id"`
+			Value agentrunner.Job `json:"value"`
+		} `json:"items"`
+	}{
+		Schema:     "oneesama.collection.v1",
+		Collection: "agent_runner_jobs",
+		Items: []struct {
+			ID    string          `json:"id"`
+			Value agentrunner.Job `json:"value"`
+		}{{
+			ID: "job_hist",
+			Value: agentrunner.Job{
+				ID:        "job_hist",
+				Provider:  "codex",
+				Status:    agentrunner.StatusCompleted,
+				Task:      "lookup product",
+				CreatedAt: "2026-05-22T10:00:00Z",
+				UpdatedAt: "2026-05-22T10:01:00Z",
+				Context: map[string]any{
+					"source":           "persona_delegate_worker",
+					"session_kind":     agentrunner.SessionKindSecretaryLookup,
+					"delegation_scope": "secretary_lookup",
+					"slack": map[string]any{
+						"channel_id": "C1",
+						"thread_ts":  "1779450000.000100",
+					},
+				},
+				Result: `{"visible_text":"根据产品页，这是一个 Oneesama triage benchmark 工具。","evidence_anchors":[{"kind":"fetched_link","sourceRef":"https://example.com/product","quote":"product page says benchmark","confidence":0.9}]}`,
+			},
+		}},
+	}
+	data, err := json.Marshal(jobs)
+	if err != nil {
+		t.Fatalf("marshal jobs: %v", err)
+	}
+	if err := os.WriteFile(jobsPath, data, 0o644); err != nil {
+		t.Fatalf("write jobs: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--slack-url", triageServer.URL,
+		"--token", "xoxb-test",
+		"--channel", "C1",
+		"--detail-output", detailPath,
+		"--worker-jobs-input", jobsPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	data, err = os.ReadFile(detailPath)
+	if err != nil {
+		t.Fatalf("read detail: %v", err)
+	}
+	var detail benchmarkDetail
+	if err := json.Unmarshal(data, &detail); err != nil {
+		t.Fatalf("decode detail: %v\n%s", err, string(data))
+	}
+	if len(detail.Rows) != 1 || len(detail.Rows[0].HistoricalWorkerResults) != 1 {
+		t.Fatalf("historical results = %#v, want one attached result", detail.Rows)
+	}
+	got := detail.Rows[0].HistoricalWorkerResults[0]
+	if got.JobID != "job_hist" || got.Status != "completed" || !got.VisibleGateAllowed || !got.WouldPost {
+		t.Fatalf("historical result = %#v, want completed allowed post", got)
+	}
+	if !strings.Contains(got.VisibleText, "Oneesama triage benchmark") || len(got.EvidenceAnchors) != 1 {
+		t.Fatalf("visible/evidence = %q %#v", got.VisibleText, got.EvidenceAnchors)
 	}
 }
 

@@ -132,6 +132,29 @@
     white-space: pre-wrap; word-break: break-word; font-size: 12px; font-family: ui-monospace, monospace;
     max-height: 180px; overflow: auto;
   }
+  .historical-worker {
+    background: var(--panel2); border-radius: 5px; padding: 10px 12px; margin-bottom: 8px;
+    border-left: 3px solid var(--accent);
+  }
+  .historical-worker.blocked { border-left-color: var(--warn); }
+  .historical-worker.failed { border-left-color: var(--bad); }
+  .historical-head { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .historical-meta { color: var(--text-dim); font-size: 11px; font-family: ui-monospace, monospace; }
+  .historical-text {
+    background: var(--bg); padding: 8px; border-radius: 4px; margin-top: 5px;
+    white-space: pre-wrap; word-break: break-word; font-size: 13px;
+  }
+  .historical-raw {
+    background: var(--bg); padding: 8px; border-radius: 4px; margin-top: 5px;
+    white-space: pre-wrap; word-break: break-word; font-size: 11px; color: var(--text-dim);
+    max-height: 220px; overflow: auto; font-family: ui-monospace, monospace;
+  }
+  .anchor-list { display: grid; gap: 4px; margin-top: 6px; }
+  .anchor-chip {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 5px 7px;
+    color: var(--text-dim); font-size: 11px;
+  }
+  .anchor-chip strong { color: var(--text); font-family: ui-monospace, monospace; }
 
   .toolcall-item {
     font-size: 11px; padding: 4px 8px; background: var(--panel2); border-radius: 3px;
@@ -597,6 +620,92 @@ function renderWorkers(workers) {
   return wrap;
 }
 
+function renderHistoricalWorkerResults(results, row) {
+  const wrap = el("div", { class: "section" });
+  wrap.appendChild(el("h3", { text: "Historical real worker results" }));
+  wrap.appendChild(el("div", { class: "muted-note", text: "生产路径：worker 结果只经过格式化 / visible gate，不会再让 Oneesama 主 agent 润色一遍。" }));
+  const wouldDelegate = row && row.dryRun && Array.isArray(row.dryRun.wouldDelegateWorkers) && row.dryRun.wouldDelegateWorkers.length > 0;
+  if (!Array.isArray(results) || results.length === 0) {
+    wrap.appendChild(el("div", {
+      class: "muted-note",
+      text: wouldDelegate
+        ? "Dry-run would delegate, but no matching production worker result was found for this Slack thread."
+        : "(none)"
+    }));
+    return wrap;
+  }
+  for (const r of results) {
+    const failed = r.status && r.status !== "completed";
+    const blocked = !failed && !r.wouldPost;
+    const item = el("div", { class: "historical-worker" + (failed ? " failed" : (blocked ? " blocked" : "")) });
+    const head = el("div", { class: "historical-head" });
+    head.appendChild(el("span", { class: "badge " + (r.status === "completed" ? "reply" : "error"), text: r.status || "unknown" }));
+    if (r.wouldPost) {
+      head.appendChild(el("span", { class: "badge reply", text: "would post" }));
+    } else {
+      head.appendChild(el("span", { class: "badge muted", text: "would not post" }));
+    }
+    if (r.visibleGateReason) head.appendChild(el("span", { class: "historical-meta", text: "gate: " + r.visibleGateReason }));
+    if (r.wouldPostReason) head.appendChild(el("span", { class: "historical-meta", text: r.wouldPostReason }));
+    item.appendChild(head);
+
+    const meta = [];
+    if (r.jobId) meta.push("job " + r.jobId);
+    if (r.provider) meta.push("provider " + r.provider);
+    if (r.sessionKind) meta.push("kind " + r.sessionKind);
+    if (r.delegationScope) meta.push("scope " + r.delegationScope);
+    if (r.updatedAt || r.createdAt) meta.push("time " + (r.updatedAt || r.createdAt));
+    if (meta.length > 0) item.appendChild(el("div", { class: "historical-meta", text: meta.join(" · ") }));
+
+    if (r.taskPreview) {
+      const task = el("div", { class: "worker-prompt" });
+      task.appendChild(renderTextWithMentions("Task: " + r.taskPreview));
+      item.appendChild(task);
+    }
+    if (r.visibleText) {
+      const vt = el("div", { class: "historical-text" });
+      vt.appendChild(renderTextWithMentions(r.visibleText));
+      item.appendChild(vt);
+    }
+    if (Array.isArray(r.evidenceAnchors) && r.evidenceAnchors.length > 0) {
+      const anchors = el("div", { class: "anchor-list" });
+      for (const a of r.evidenceAnchors) {
+        const chip = el("div", { class: "anchor-chip" });
+        chip.appendChild(el("strong", { text: a.kind || "anchor" }));
+        const bits = [];
+        if (a.sourceRef) bits.push("src: " + a.sourceRef);
+        if (typeof a.confidence === "number") bits.push("conf " + a.confidence.toFixed(2));
+        if (a.freshness) bits.push(a.freshness);
+        if (bits.length > 0) chip.appendChild(document.createTextNode(" · " + bits.join(" · ")));
+        if (a.quote) {
+          chip.appendChild(el("div"));
+          chip.lastChild.appendChild(renderTextWithMentions(a.quote));
+        }
+        anchors.appendChild(chip);
+      }
+      item.appendChild(anchors);
+    }
+    if (!r.visibleText && r.result) {
+      const raw = el("div", { class: "historical-raw" });
+      raw.appendChild(renderTextWithMentions(r.result));
+      item.appendChild(raw);
+    }
+    if (r.error) {
+      const err = el("div", { class: "historical-raw" });
+      err.appendChild(renderTextWithMentions(r.error));
+      item.appendChild(err);
+    }
+    if (r.envelope && (r.envelope.summary || r.envelope.truncated)) {
+      const env = [];
+      if (r.envelope.summary) env.push("summary: " + r.envelope.summary);
+      if (r.envelope.truncated) env.push("result truncated");
+      item.appendChild(el("div", { class: "historical-meta", text: env.join(" · ") }));
+    }
+    wrap.appendChild(item);
+  }
+  return wrap;
+}
+
 function renderToolCalls(toolCalls) {
   const wrap = el("div", { class: "section" });
   wrap.appendChild(el("h3", { text: "Dry-run side-effect trace" }));
@@ -695,6 +804,7 @@ function renderCase(row, idx) {
 
     card.appendChild(renderVerdicts(row.dryRun.visibleReplyVerdicts || []));
     card.appendChild(renderWorkers(row.dryRun.wouldDelegateWorkers || []));
+    card.appendChild(renderHistoricalWorkerResults(row.historicalWorkerResults || [], row));
 
     if (Array.isArray(row.dryRun.wouldMemoryWrites) && row.dryRun.wouldMemoryWrites.length > 0) {
       const memWrap = el("div", { class: "section" });
