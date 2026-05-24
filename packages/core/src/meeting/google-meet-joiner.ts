@@ -10,6 +10,7 @@ import { enableMeetCaptions, installMeetCaptionCapture } from "./caption-capture
 import { waitForMeetAdmission } from "./meet-admission.ts";
 import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
 import { createMeetingRecorder, listShareableApplications } from "./meeting-recorder.ts";
+import { createWebRTCAudioCaptureSink } from "./webrtc-audio-capture.ts";
 import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-prompts.ts";
 import { buildScreenShareInitScript } from "./screen-share-init-builder.ts";
 import {
@@ -360,11 +361,12 @@ async function normalizeScreenShareImageUrl(value = ""): Promise<string> {
   const filePath = /^file:\/\//i.test(raw) ? fileURLToPath(raw) : pathResolve(raw);
   const bytes = await readFile(filePath);
   const lower = filePath.toLowerCase();
-  const mime = lower.endsWith(".jpg") || lower.endsWith(".jpeg")
-    ? "image/jpeg"
-    : lower.endsWith(".webp")
-      ? "image/webp"
-      : "image/png";
+  const mime =
+    lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+      ? "image/jpeg"
+      : lower.endsWith(".webp")
+        ? "image/webp"
+        : "image/png";
   return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
@@ -1542,9 +1544,11 @@ async function evaluateWorkerResultBridgeState(page) {
 }
 
 async function evaluateWindowState(page, key: string) {
-  return await withTimeout(page.evaluate((name) => window[name] || null, key), 2500, null).catch(
-    () => null,
-  );
+  return await withTimeout(
+    page.evaluate((name) => window[name] || null, key),
+    2500,
+    null,
+  ).catch(() => null);
 }
 
 async function evaluateLocalDialogState(page) {
@@ -2351,9 +2355,37 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     stopActiveMacWindowCapture(reason);
     previous.diagnostics?.record("stop", { reason });
     try {
+      const browserStop = previous.page?.isClosed?.()
+        ? { ok: true, skipped: true, reason: "page_already_closed" }
+        : await previous.page
+            ?.evaluate(async (stopReason) => {
+              const client = window.MAB_REALTIME_CLIENT;
+              if (typeof client?.stopMeetAudioCapture !== "function") {
+                return { ok: true, skipped: true, reason: "realtime_audio_capture_missing" };
+              }
+              return await client.stopMeetAudioCapture(stopReason);
+            }, reason)
+            .catch((error) => ({ ok: false, error: String(error?.message || error) }));
+      previous.diagnostics?.record("realtime_audio_capture_browser_stop", { browserStop });
+    } catch (error) {
+      previous.diagnostics?.record("realtime_audio_capture_stop_error", {
+        error: String(error?.message || error),
+      });
+    }
+    try {
       await previous.recorder?.stop();
     } catch (error) {
       previous.diagnostics?.record("recorder_stop_error", {
+        error: String(error?.message || error),
+      });
+    }
+    try {
+      const finalized = previous.realtimeAudioCapture
+        ? await previous.realtimeAudioCapture.finalize()
+        : null;
+      previous.diagnostics?.record("realtime_audio_capture_finalize", { finalized });
+    } catch (error) {
+      previous.diagnostics?.record("realtime_audio_capture_finalize_error", {
         error: String(error?.message || error),
       });
     }
@@ -2406,6 +2438,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const recorder = createMeetingRecorder({
       backend: input.meetAudioBackend || config.meetAudioBackend,
     });
+    const realtimeAudioCapture =
+      recordMeeting && installRealtimeBridge && input.forwardMeetAudioToRealtime !== false
+        ? createWebRTCAudioCaptureSink({ sessionId, artifactsDir })
+        : null;
     const browserUserDataDirInput = input.browserUserDataDir || config.browserUserDataDir || "";
     const meetProfileMode = normalizeMeetProfileMode(
       input.meetProfileMode || config.meetProfileMode,
@@ -2534,6 +2570,12 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       browser = await playwright.chromium.launch(browserLaunchOptions);
       context = await browser.newContext(contextOptions);
     }
+    const realtimeAudioCaptureExpose = realtimeAudioCapture
+      ? await realtimeAudioCapture.exposeTo(context)
+      : null;
+    if (realtimeAudioCaptureExpose) {
+      diagnostics.record("realtime_audio_capture_expose", realtimeAudioCaptureExpose);
+    }
     active = {
       sessionId,
       browser,
@@ -2546,6 +2588,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       diagnostics,
       artifactsDir,
       recorder: recordMeeting ? recorder : null,
+      realtimeAudioCapture,
       captionCapture: null,
     };
     const browserRecord = await rememberActiveBrowser(browser, sessionId, meetUrl);
@@ -2624,6 +2667,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
           includeParticipantAudio: Boolean(input.includeParticipantAudio),
           forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
+          captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
           fallbackToLocalMic: Boolean(input.realtimeFallbackToLocalMic),
           workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,
           workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,
@@ -2936,6 +2980,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       diagnosticsPath: diagnostics.jsonPath,
       artifactsDir,
       recorder: recordMeeting ? recorder.status() : null,
+      realtimeAudioCapture: realtimeAudioCapture?.status() || null,
       captions: compactCaptionState(captions),
       screenshots: diagnostics.screenshots,
       buttonInventories: diagnostics.buttonInventories,
@@ -3259,7 +3304,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const update = await startScreenShare({
       ...input,
       title: input.title || `Share ${app.applicationName || app.name || "application"}`,
-      subtitle: input.subtitle || `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+      subtitle:
+        input.subtitle ||
+        `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
       imagePath: capture.output || framePath,
       framePath: capture.output || framePath,
       preview: input.preview,
@@ -3378,7 +3425,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       {
         ...input,
         title,
-        subtitle: input.subtitle || `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+        subtitle:
+          input.subtitle ||
+          `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
       },
       1,
     );
@@ -3395,7 +3444,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           mode: "synthetic",
           title,
           subtitle:
-            input.subtitle || `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+            input.subtitle ||
+            `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
           imagePath: firstFrame.capture.output,
           waitMs: input.waitMs || 2500,
         });
@@ -3665,8 +3715,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       stage,
       syntheticController,
       present,
-      note:
-        "video_stage_tab_opened; synthetic Meet screen-share stream was requested",
+      note: "video_stage_tab_opened; synthetic Meet screen-share stream was requested",
     };
   }
 
@@ -3708,6 +3757,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
             avatarReady: active.avatarReady || null,
             avatarAudio: active.avatarAudio || null,
             recorder: active.recorder?.status() || null,
+            realtimeAudioCapture: active.realtimeAudioCapture?.status() || null,
             captions: compactCaptionState(active.captions) || null,
             fixtureState: active.fixtureState || null,
             realtimeBridge: active.realtimeBridge || null,

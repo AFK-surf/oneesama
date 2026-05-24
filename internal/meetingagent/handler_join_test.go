@@ -434,6 +434,44 @@ func TestJoinStopIncludesRecordedAudioArtifactWhenRunnerCapturedIt(t *testing.T)
 	}
 }
 
+func TestAudioPathFromStopRuntimePrefersRealtimeCapture(t *testing.T) {
+	artifactsDir := t.TempDir()
+	realtimeRaw := filepath.Join(artifactsDir, "audio.wav")
+	if err := os.WriteFile(realtimeRaw, []byte("realtime wav"), 0o644); err != nil {
+		t.Fatalf("write realtime audio: %v", err)
+	}
+	legacyDir := t.TempDir()
+	legacyRaw := filepath.Join(legacyDir, "audio.wav")
+	if err := os.WriteFile(legacyRaw, []byte("legacy wav"), 0o644); err != nil {
+		t.Fatalf("write legacy audio: %v", err)
+	}
+	originalTranscode := transcodeMeetingAudioToMP3
+	transcodeMeetingAudioToMP3 = func(_ context.Context, inputPath, outputPath string) error {
+		if inputPath != realtimeRaw {
+			t.Fatalf("transcode input = %q, want realtime capture %q", inputPath, realtimeRaw)
+		}
+		return os.WriteFile(outputPath, []byte("mp3"), 0o644)
+	}
+	t.Cleanup(func() { transcodeMeetingAudioToMP3 = originalTranscode })
+
+	got := audioPathFromStopRuntime(context.Background(), map[string]any{
+		"beforeStop": map[string]any{
+			"active": map[string]any{
+				"artifactsDir": artifactsDir,
+				"realtimeAudioCapture": map[string]any{
+					"audioPath": realtimeRaw,
+				},
+				"recorder": map[string]any{
+					"audioPath": legacyRaw,
+				},
+			},
+		},
+	})
+	if !strings.HasSuffix(got, "audio.mp3") {
+		t.Fatalf("audioPathFromStopRuntime() = %q, want finalized realtime audio.mp3", got)
+	}
+}
+
 func TestJoinStopOmitsSilentRecordedAudioArtifact(t *testing.T) {
 	artifactsDir := t.TempDir()
 	rawAudio := filepath.Join(artifactsDir, "audio.wav")

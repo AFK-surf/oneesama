@@ -183,6 +183,18 @@ func audioPathFromStopRuntime(ctx context.Context, runtime any) string {
 	}
 	beforeStop := mapFromAny(fields["beforeStop"])
 	active := mapFromAny(beforeStop["active"])
+	if realtimePath := existingRuntimePath(stringFromMap(mapFromAny(active["realtimeAudioCapture"]), "audioPath")); realtimePath != "" {
+		if artifactsDir := stringFromMap(active, "artifactsDir"); artifactsDir != "" {
+			if finalPath := finalizeMeetingAudioArtifact(ctx, resolveRuntimeDir(artifactsDir), 0); finalPath != "" {
+				if path := usableMeetingAudioArtifactPath(ctx, finalPath); path != "" {
+					return path
+				}
+			}
+		}
+		if path := usableMeetingAudioArtifactPath(ctx, realtimePath); path != "" {
+			return path
+		}
+	}
 	if recorderPath := existingRuntimePath(stringFromMap(mapFromAny(active["recorder"]), "audioPath")); recorderPath != "" {
 		if artifactsDir := stringFromMap(active, "artifactsDir"); artifactsDir != "" {
 			if finalPath := finalizeMeetingAudioArtifact(ctx, resolveRuntimeDir(artifactsDir), 0); finalPath != "" {

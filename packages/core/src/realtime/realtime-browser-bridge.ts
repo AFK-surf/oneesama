@@ -58,6 +58,8 @@
     workerStatusUrl: string;
     includeParticipantAudio: boolean;
     forwardMeetAudioToRealtime: boolean;
+    captureMeetAudioForTranscript?: boolean;
+    meetAudioCaptureChunkMs?: number;
     fallbackToLocalMic: boolean;
     instructions: string;
     tools: RealtimeToolLike[];
@@ -88,6 +90,8 @@
     workerStatusUrl: "/worker/status",
     includeParticipantAudio: false,
     forwardMeetAudioToRealtime: true,
+    captureMeetAudioForTranscript: false,
+    meetAudioCaptureChunkMs: 5000,
     fallbackToLocalMic: false,
     instructions: "",
     tools: [],
@@ -180,6 +184,19 @@
       meetAudioSourcesActive: 0,
       meetAudioTrackStates: [],
       lastMeetAudioTrackId: "",
+      meetAudioCapture: {
+        enabled: Boolean(config.captureMeetAudioForTranscript),
+        supported: false,
+        sinkAvailable: false,
+        recording: false,
+        startedAt: "",
+        stoppedAt: "",
+        mimeType: "",
+        chunks: 0,
+        bytes: 0,
+        lastChunkAt: "",
+        errors: [],
+      },
       duplicateMeetAudioSendersMuted: 0,
       participantAudioTracksDiscovered: 0,
       participantAudioTracksAdded: 0,
@@ -249,6 +266,10 @@
   let routingAudioContext = null;
   let routingInputGate = null;
   let routingDestination = null;
+  let meetAudioRecorder = null;
+  let meetAudioRecorderStopResolve = null;
+  let meetAudioCaptureUploadChain = Promise.resolve();
+  let meetAudioCaptureSequence = 0;
   let routingSilenceSource = null;
   let routingAudioResumeListenersInstalled = false;
   let silentMeetAudioTrack = null;
@@ -468,7 +489,9 @@
     state.contextHealth.lastCompactReason = reason;
     state.contextHealth.lastCompactBeforeItems = beforeItems;
     state.contextHealth.lastCompactAfterItems = afterItems;
-    state.contextHealth.lastSummaryChars = String((nextHistory[0] as any)?.content?.[0]?.text || "").length;
+    state.contextHealth.lastSummaryChars = String(
+      (nextHistory[0] as any)?.content?.[0]?.text || "",
+    ).length;
     state.contextHealth.itemsCount = afterItems;
     state.contextHealth.tokenEstimate = estimateHistoryTokens(nextHistory);
     recordTimeline("realtime_context_compact", {
@@ -502,14 +525,16 @@
     return { ok: true, skipped: true, reason: "below_threshold" };
   }
 
-  function pushSessionContext(input: {
-    text?: string;
-    signature?: string;
-    reason?: string;
-    kind?: string;
-    value?: unknown;
-    force?: boolean;
-  } = {}) {
+  function pushSessionContext(
+    input: {
+      text?: string;
+      signature?: string;
+      reason?: string;
+      kind?: string;
+      value?: unknown;
+      force?: boolean;
+    } = {},
+  ) {
     const lifecycle = contextLifecycleConfig();
     const signature = String(input.signature || input.text || input.reason || "").slice(0, 800);
     const nowMs = Date.now();
@@ -810,10 +835,13 @@
 
   function scheduleRealtimeInputGateOpen(reason = "", delayMs = 1200) {
     if (realtimeInputGateReopenTimer) window.clearTimeout(realtimeInputGateReopenTimer);
-    realtimeInputGateReopenTimer = window.setTimeout(() => {
-      realtimeInputGateReopenTimer = 0;
-      setRealtimeInputGate(true, reason || "delayed-open");
-    }, Math.max(0, delayMs));
+    realtimeInputGateReopenTimer = window.setTimeout(
+      () => {
+        realtimeInputGateReopenTimer = 0;
+        setRealtimeInputGate(true, reason || "delayed-open");
+      },
+      Math.max(0, delayMs),
+    );
     recordTimeline("realtime_input_gate_open_scheduled", { reason, delayMs });
     updateFeedback();
   }
@@ -836,6 +864,189 @@
     return true;
   }
 
+  function updateMeetAudioCaptureState(patch: Record<string, unknown> = {}) {
+    state.connection.meetAudioCapture = {
+      ...(state.connection.meetAudioCapture || {}),
+      ...patch,
+    } as typeof state.connection.meetAudioCapture;
+    updateFeedback();
+  }
+
+  function meetAudioCaptureSinkAvailable() {
+    return (
+      typeof window.__meetingAvatarMeetAudioCaptureChunk === "function" &&
+      typeof window.__meetingAvatarMeetAudioCaptureEvent === "function"
+    );
+  }
+
+  function supportedMeetAudioCaptureMimeType() {
+    if (typeof MediaRecorder !== "function") return "";
+    for (const mimeType of ["audio/webm;codecs=opus", "audio/webm"]) {
+      try {
+        if (MediaRecorder.isTypeSupported?.(mimeType)) return mimeType;
+      } catch {
+        // Keep trying the next candidate.
+      }
+    }
+    return "";
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = String(reader.result || "");
+        resolve(result.includes(",") ? result.slice(result.indexOf(",") + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error || new Error("audio_chunk_read_failed"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function rememberMeetAudioCaptureError(stage, error) {
+    const entry = {
+      ts: new Date().toISOString(),
+      stage,
+      error: String((error && error.message) || error).slice(0, 400),
+    };
+    updateMeetAudioCaptureState({
+      errors: [...(state.connection.meetAudioCapture?.errors || []), entry].slice(-20),
+    });
+    recordTimeline("meet_audio_capture_error", entry);
+  }
+
+  function uploadMeetAudioBlob(blob) {
+    if (!blob?.size) return meetAudioCaptureUploadChain;
+    meetAudioCaptureSequence += 1;
+    const sequence = meetAudioCaptureSequence;
+    meetAudioCaptureUploadChain = meetAudioCaptureUploadChain
+      .then(async () => {
+        const base64 = await blobToBase64(blob);
+        const payload = {
+          sessionId: state.sessionId,
+          sequence,
+          mimeType: blob.type || state.connection.meetAudioCapture?.mimeType || "",
+          bytes: blob.size,
+          base64,
+        };
+        const result = (await window.__meetingAvatarMeetAudioCaptureChunk(payload)) as {
+          ok?: boolean;
+          error?: string;
+          reason?: string;
+          chunks?: number;
+          bytes?: number;
+        };
+        if (!result?.ok) throw new Error(result?.error || result?.reason || "audio_chunk_rejected");
+        updateMeetAudioCaptureState({
+          chunks: result.chunks || sequence,
+          bytes: result.bytes || (state.connection.meetAudioCapture?.bytes || 0) + blob.size,
+          lastChunkAt: new Date().toISOString(),
+        });
+      })
+      .catch((error) => {
+        rememberMeetAudioCaptureError("chunk_upload", error);
+      });
+    return meetAudioCaptureUploadChain;
+  }
+
+  async function emitMeetAudioCaptureEvent(type, detail = {}) {
+    if (!meetAudioCaptureSinkAvailable()) return { ok: false, error: "capture_sink_unavailable" };
+    return await window.__meetingAvatarMeetAudioCaptureEvent({
+      sessionId: state.sessionId,
+      type,
+      ...detail,
+    });
+  }
+
+  function maybeStartMeetAudioCapture(reason = "meet-audio-forwarded") {
+    if (!config.captureMeetAudioForTranscript)
+      return { ok: true, skipped: true, reason: "disabled" };
+    const mimeType = supportedMeetAudioCaptureMimeType();
+    const sinkAvailable = meetAudioCaptureSinkAvailable();
+    updateMeetAudioCaptureState({
+      enabled: true,
+      supported: Boolean(mimeType),
+      sinkAvailable,
+      mimeType: state.connection.meetAudioCapture?.mimeType || mimeType,
+    });
+    if (!sinkAvailable) return { ok: false, error: "capture_sink_unavailable" };
+    if (!mimeType) return { ok: false, error: "media_recorder_audio_webm_unsupported" };
+    if (meetAudioRecorder?.state === "recording") return { ok: true, recording: true };
+    if (!routingDestination) return { ok: false, error: "routing_destination_missing" };
+    const tracks = routingDestination.stream?.getAudioTracks?.() || [];
+    if (!tracks.length) return { ok: false, error: "routing_stream_has_no_audio_track" };
+    try {
+      meetAudioRecorder = new MediaRecorder(routingDestination.stream, { mimeType });
+      meetAudioRecorder.addEventListener("dataavailable", (event) => {
+        uploadMeetAudioBlob(event.data);
+      });
+      meetAudioRecorder.addEventListener("start", () => {
+        const startedAt = new Date().toISOString();
+        updateMeetAudioCaptureState({
+          recording: true,
+          startedAt,
+          stoppedAt: "",
+          mimeType,
+        });
+        emitMeetAudioCaptureEvent("started", { mimeType }).catch((error) =>
+          rememberMeetAudioCaptureError("event_start", error),
+        );
+        recordTimeline("meet_audio_capture_started", { reason, mimeType });
+      });
+      meetAudioRecorder.addEventListener("stop", () => {
+        meetAudioCaptureUploadChain
+          .then(() => emitMeetAudioCaptureEvent("stopped", { mimeType }))
+          .catch((error) => rememberMeetAudioCaptureError("event_stop", error))
+          .finally(() => {
+            updateMeetAudioCaptureState({
+              recording: false,
+              stoppedAt: new Date().toISOString(),
+            });
+            const resolve = meetAudioRecorderStopResolve;
+            meetAudioRecorderStopResolve = null;
+            if (resolve) resolve(state.connection.meetAudioCapture);
+          });
+      });
+      meetAudioRecorder.addEventListener("error", (event) => {
+        rememberMeetAudioCaptureError("media_recorder", event.error || "media_recorder_error");
+      });
+      meetAudioRecorder.start(Number(config.meetAudioCaptureChunkMs || 5000) || 5000);
+      return { ok: true, started: true, mimeType };
+    } catch (error) {
+      rememberMeetAudioCaptureError("start", error);
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  }
+
+  function stopMeetAudioCapture(reason = "manual_stop") {
+    if (!meetAudioRecorder || meetAudioRecorder.state === "inactive") {
+      updateMeetAudioCaptureState({ recording: false });
+      return Promise.resolve({
+        ok: true,
+        stopped: false,
+        state: state.connection.meetAudioCapture,
+      });
+    }
+    return new Promise((resolve) => {
+      meetAudioRecorderStopResolve = (captureState) =>
+        resolve({ ok: true, stopped: true, reason, state: captureState });
+      try {
+        meetAudioRecorder.requestData?.();
+        meetAudioRecorder.stop();
+      } catch (error) {
+        meetAudioRecorderStopResolve = null;
+        rememberMeetAudioCaptureError("stop", error);
+        resolve({
+          ok: false,
+          stopped: false,
+          reason,
+          error: String((error && error.message) || error),
+          state: state.connection.meetAudioCapture,
+        });
+      }
+    });
+  }
+
   function forwardMeetAudioTrackToRealtime(track, detail = {}) {
     if (!track || track.kind !== "audio") return false;
     if (!state.connection.meetAudioForwardingEnabled) return false;
@@ -856,16 +1067,14 @@
       state.connection.meetAudioSourcesActive = routedMeetAudioSources.filter(
         (entry) => entry.track?.readyState === "live",
       ).length;
-      state.connection.meetAudioTrackStates = routedMeetAudioSources
-        .slice(-10)
-        .map((entry) => ({
-          trackId: entry.track?.id || "",
-          readyState: entry.track?.readyState || "",
-          enabled: entry.track?.enabled !== false,
-          muted: entry.track?.muted === true,
-          source: entry.detail?.source || "",
-          label: entry.detail?.label || entry.track?.label || "",
-        }));
+      state.connection.meetAudioTrackStates = routedMeetAudioSources.slice(-10).map((entry) => ({
+        trackId: entry.track?.id || "",
+        readyState: entry.track?.readyState || "",
+        enabled: entry.track?.enabled !== false,
+        muted: entry.track?.muted === true,
+        source: entry.detail?.source || "",
+        label: entry.detail?.label || entry.track?.label || "",
+      }));
       state.connection.meetAudioTracksForwarded += 1;
       state.connection.lastMeetAudioTrackId = track.id;
       recordTimeline("meet_audio_track_forwarded", {
@@ -877,10 +1086,12 @@
       if (!realtimeAudioSender) {
         pendingMeetAudioTracks.push(track);
         recordTimeline("meet_audio_track_pending", { trackId: track.id });
+        maybeStartMeetAudioCapture("meet-audio-pending");
         updateFeedback();
         return true;
       }
       replaceRealtimeInputWithRoutingMix("meet-audio-forwarded");
+      maybeStartMeetAudioCapture("meet-audio-forwarded");
       updateFeedback();
       return true;
     } catch (error) {
@@ -2520,7 +2731,8 @@
     if (name === "present_video_stage")
       return postJson(localServiceUrl("/screen-share/video"), args);
     if (name === "stop_video_stage") return postJson(localServiceUrl("/screen-share/stop"), args);
-    if (name === "list_shareable_apps") return postJson(localServiceUrl("/screen-share/apps"), args);
+    if (name === "list_shareable_apps")
+      return postJson(localServiceUrl("/screen-share/apps"), args);
     if (name === "present_app_share") return postJson(localServiceUrl("/screen-share/app"), args);
     if (name === "read_meet_chat") return readMeetChat(args);
     if (name === "meet_participants" || name === "active_speaker")
@@ -3190,7 +3402,9 @@
       return false;
     }
     const envelope = job.resultEnvelope || job.result_envelope || {};
-    const action = String(envelope.action || "").trim().toLowerCase();
+    const action = String(envelope.action || "")
+      .trim()
+      .toLowerCase();
     if (action === "none" || action === "no_action") {
       return true;
     }
@@ -3308,6 +3522,7 @@
     resetHistory: compactRealtimeHistory,
     discoverParticipantAudioStreams,
     registerParticipantAudioStream,
+    stopMeetAudioCapture,
     injectWorkerResult,
     sendWorkerResult: injectWorkerResult,
   };

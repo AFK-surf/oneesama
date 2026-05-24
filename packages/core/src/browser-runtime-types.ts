@@ -178,6 +178,7 @@ export interface RealtimeClient {
     stream: MediaStream | null | undefined,
     options?: unknown,
   ): unknown;
+  stopMeetAudioCapture?(reason?: string): Promise<unknown>;
   injectWorkerResult?(payload: unknown): unknown;
   sendWorkerResult?(payload: unknown): unknown;
   sendRealtimeEvent?(payload: unknown): unknown;
@@ -273,6 +274,8 @@ declare global {
     __meetingAvatarBotInjected?: boolean;
     __meetingAvatarLocalDialogInjected?: boolean;
     __meetingAvatarRealtimeBridge?: boolean;
+    __meetingAvatarMeetAudioCaptureChunk?: (payload: unknown) => Promise<unknown>;
+    __meetingAvatarMeetAudioCaptureEvent?: (payload: unknown) => Promise<unknown>;
     __meetingAvatarWorkerResultBridge?: boolean;
     __meetingAvatarRealtimePeerConnectionHook?: boolean | ((pc: RTCPeerConnection) => void);
     __mabOnCaptionCapture?: (event: CaptionEvent) => void;
