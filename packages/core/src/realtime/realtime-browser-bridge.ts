@@ -177,6 +177,8 @@
       meetAudioForwardingEnabled: config.forwardMeetAudioToRealtime !== false,
       meetAudioContextState: "",
       meetAudioTracksForwarded: 0,
+      meetAudioSourcesActive: 0,
+      meetAudioTrackStates: [],
       lastMeetAudioTrackId: "",
       duplicateMeetAudioSendersMuted: 0,
       participantAudioTracksDiscovered: 0,
@@ -261,6 +263,7 @@
   let meetChatPollTimer = null;
   const pendingMeetAudioTracks = [];
   const routedMeetAudioTrackIds = new Set();
+  const routedMeetAudioSources = [];
   const LOCAL_AVATAR_TOOLS = new Set([
     "set_avatar_expression",
     "set_avatar_action",
@@ -845,11 +848,32 @@
       const stream = new MediaStream([track]);
       const source = routingAudioContext.createMediaStreamSource(stream);
       source.connect(routingInputGate);
+      routedMeetAudioSources.push({
+        track,
+        stream,
+        source,
+        detail,
+        addedAt: new Date().toISOString(),
+      });
+      state.connection.meetAudioSourcesActive = routedMeetAudioSources.filter(
+        (entry) => entry.track?.readyState === "live",
+      ).length;
+      state.connection.meetAudioTrackStates = routedMeetAudioSources
+        .slice(-10)
+        .map((entry) => ({
+          trackId: entry.track?.id || "",
+          readyState: entry.track?.readyState || "",
+          enabled: entry.track?.enabled !== false,
+          muted: entry.track?.muted === true,
+          source: entry.detail?.source || "",
+          label: entry.detail?.label || entry.track?.label || "",
+        }));
       state.connection.meetAudioTracksForwarded += 1;
       state.connection.lastMeetAudioTrackId = track.id;
       recordTimeline("meet_audio_track_forwarded", {
         trackId: track.id,
         label: track.label || "",
+        sourcesRetained: routedMeetAudioSources.length,
         ...detail,
       });
       if (!realtimeAudioSender) {
