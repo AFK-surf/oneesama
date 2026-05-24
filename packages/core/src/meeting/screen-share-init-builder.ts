@@ -67,7 +67,6 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
     let frame = 0;
     let video = null;
     let image = null;
-
     function clampDimension(value, fallback, min, max) {
       const parsed = Number.parseInt(String(value ?? ""), 10);
       if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -133,7 +132,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       if (image) return image;
       image = document.createElement("img");
       image.crossOrigin = "anonymous";
-      if (/\\.(?:mjpg|mwebp)(?:[?#]|$)|[?&](?:mjpeg|stream)=1(?:&|$)|multipart/i.test(state.imageUrl)) {
+      if (/\\.mjpg(?:[?#]|$)|[?&](?:mjpeg|stream)=1(?:&|$)|multipart/i.test(state.imageUrl)) {
         state.imageReady = true;
       }
       image.src = state.imageUrl;

@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <webp/encode.h>
 
-#define ONEESAMA_WEBP_MAX_DIMENSION 1440
+#define ONEESAMA_WEBP_MAX_DIMENSION 2160
 
 size_t oneesama_webp_encode_bgra_fast(
   const uint8_t *bgra,

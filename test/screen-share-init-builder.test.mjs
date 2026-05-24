@@ -5,10 +5,10 @@ import { buildScreenShareInitScript } from "../packages/core/src/meeting/screen-
 
 test("screen-share init script supports local multipart frame streams", () => {
   const script = buildScreenShareInitScript({
-    imageUrl: "http://127.0.0.1:12345/screen-share/test.mwebp",
+    imageUrl: "http://127.0.0.1:12345/screen-share/test.mjpg",
   });
 
-  assert.match(script, /mwebp/);
+  assert.match(script, /mjpg/);
   assert.match(script, /state\.imageReady = true/);
   assert.ok(
     script.indexOf('image.crossOrigin = "anonymous"') < script.indexOf("image.src = state.imageUrl"),
