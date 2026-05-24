@@ -18,6 +18,8 @@ const (
 	heartbeatSurfaceStatusBlocked      = "blocked"
 	heartbeatSurfaceStatusFailed       = "failed"
 
+	heartbeatSurfaceBlockNotPubliclyAllowed = "heartbeat_followup_not_publicly_allowed"
+
 	heartbeatSourceKindDM      = "dm"
 	heartbeatSourceKindThread  = "thread"
 	heartbeatSourceKindChannel = "channel"
@@ -190,6 +192,9 @@ func heartbeatFollowupClosesAfterBlockedSurface(followup SlackHeartbeatFollowup,
 	if heartbeatFollowupIsMeetingActionItem(&followup) && blockReason == "meeting_action_followup_not_user_visible" {
 		return true
 	}
+	if blockReason == heartbeatSurfaceBlockNotPubliclyAllowed {
+		return true
+	}
 	return heartbeatFollowupClosesAfterSurface(followup) && blockReason == "thread_has_newer_activity"
 }
 
@@ -214,6 +219,32 @@ func heartbeatFollowupIsMeetingActionItem(followup *SlackHeartbeatFollowup) bool
 	}
 	sourceRef := strings.TrimSpace(followup.SourceRef)
 	return strings.HasPrefix(sourceRef, "meeting:") && strings.Contains(sourceRef, ":action:")
+}
+
+func heartbeatDeliveredSurfaceIsPublic(surface string) bool {
+	switch normalizeHeartbeatSurfaceName(surface) {
+	case heartbeatSurfaceThread, heartbeatSurfaceChannel:
+		return true
+	default:
+		return false
+	}
+}
+
+func heartbeatFollowupAllowedOnPublicSurface(followup *SlackHeartbeatFollowup) bool {
+	if followup == nil {
+		return false
+	}
+	if boolFromAny(followup.Metadata["user_visible"], false) ||
+		boolFromAny(followup.Metadata["public_thread_surface"], false) ||
+		boolFromAny(followup.Metadata["allow_public_heartbeat_surface"], false) {
+		return true
+	}
+	switch strings.TrimSpace(followup.Kind) {
+	case slackDelayedNoReplyFollowupKind:
+		return true
+	default:
+		return false
+	}
 }
 
 type heartbeatDeliveryPlan struct {
@@ -273,6 +304,10 @@ func (s *Service) planHeartbeatDelivery(ctx context.Context, requested string, f
 	}
 	if heartbeatFollowupIsMeetingActionItem(followup) && plan.DeliveredSurface != "" {
 		heartbeatBlockOrFallbackToDM(&plan, "meeting_action_followup_not_user_visible", false)
+		return plan, nil
+	}
+	if heartbeatDeliveredSurfaceIsPublic(plan.DeliveredSurface) && !heartbeatFollowupAllowedOnPublicSurface(followup) {
+		heartbeatBlockOrFallbackToDM(&plan, heartbeatSurfaceBlockNotPubliclyAllowed, false)
 		return plan, nil
 	}
 

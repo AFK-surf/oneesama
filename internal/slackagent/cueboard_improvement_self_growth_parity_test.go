@@ -141,6 +141,48 @@ func TestCueboardParityScannerFeedbackEntersSelfGrowthQueue(t *testing.T) {
 	}
 }
 
+func TestSelfGrowthFollowupDoesNotSurfacePublicHeartbeat(t *testing.T) {
+	poster := &recordingPoster{}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{WorkspaceDir: t.TempDir()},
+		Poster:      poster,
+	})
+
+	service.maybeRecordThreadImprovementSignals(
+		context.Background(),
+		"C123", "123.456", "123.456", "sess-progress-noise",
+		"triage 回复太吵了，应该大多时候静默，不要刷屏",
+		"",
+		"",
+	)
+	followups, err := service.followups.ListFollowups(context.Background(), "open", 10)
+	if err != nil {
+		t.Fatalf("ListFollowups: %v", err)
+	}
+	if len(followups) != 1 || followups[0].Kind != heartbeatFollowupKindSelfImprovement {
+		t.Fatalf("followups = %#v, want self-improvement followup", followups)
+	}
+
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: followups[0].ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	if len(poster.Calls()) != 0 {
+		t.Fatalf("poster calls = %#v, self-growth followup must not post to user thread", poster.Calls())
+	}
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != heartbeatSurfaceBlockNotPubliclyAllowed {
+		t.Fatalf("response = %#v, want %s", response, heartbeatSurfaceBlockNotPubliclyAllowed)
+	}
+	updated, err := service.followups.GetFollowup(context.Background(), followups[0].ID)
+	if err != nil {
+		t.Fatalf("GetFollowup: %v", err)
+	}
+	if updated == nil || updated.Status != "done" || updated.Metadata["resolution"] != heartbeatSurfaceBlockNotPubliclyAllowed {
+		t.Fatalf("updated = %#v, want closed as non-public self-growth followup", updated)
+	}
+}
+
 func TestSelectImprovementSignalSummaryPrefersSubstantiveFeedback(t *testing.T) {
 	summary := selectImprovementSignalSummary(
 		"test",

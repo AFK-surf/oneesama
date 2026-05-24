@@ -83,7 +83,7 @@ func TestFollowupCreateStatusAndSurface(t *testing.T) {
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
 		Poster:      poster,
 	})
-	body := `{"channel_id":"C123","thread_ts":"123.456","title":"Follow up owner","summary":"Ask owner for update","recommendation_type":"reply","outbound_action_type":"dm"}`
+	body := `{"channel_id":"C123","thread_ts":"123.456","title":"Follow up owner","summary":"Ask owner for update","recommendation_type":"reply","outbound_action_type":"dm","metadata":{"allow_public_heartbeat_surface":true}}`
 	create := postInternalJSON(t, router, "/slack/followups/create", body)
 	if create.Code != http.StatusOK {
 		t.Fatalf("create status = %d, want 200: %s", create.Code, create.Body.String())
