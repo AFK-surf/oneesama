@@ -245,6 +245,14 @@ func TestHandleJoinLifecycle(t *testing.T) {
 		!strings.Contains(stopResponse.Body.String(), `"Ship the real join flow."`) {
 		t.Fatalf("body = %s, want post-meeting artifact from flushed captions", stopResponse.Body.String())
 	}
+
+	cleanStatusResponse := performMeetingRequest(router, http.MethodGet, "/join/status", "")
+	if cleanStatusResponse.Code != http.StatusOK {
+		t.Fatalf("clean status code = %d, want 200", cleanStatusResponse.Code)
+	}
+	if strings.Contains(cleanStatusResponse.Body.String(), `"active"`) {
+		t.Fatalf("body = %s, want stopped session not exposed as active", cleanStatusResponse.Body.String())
+	}
 }
 
 func TestHandleJoinRejectsArtifactsDirOutsideRoot(t *testing.T) {

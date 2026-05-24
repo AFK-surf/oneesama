@@ -176,6 +176,21 @@ check_live_env_conflicts() {
   check_env_alias_conflict "state SQLite path" ONEESAMA_STATE_SQLITE_PATH ONEESAMA_PERSISTENCE_SQLITE_PATH MAB_STATE_SQLITE_PATH
 }
 
+sanitize_live_env() {
+  if [[ "$subcommand" != "meeting-agent" ]]; then
+    return 0
+  fi
+  if [[ -n "${ONEESAMA_DISABLE_EMPTY_ROOM_AUTO_STOP:-}" || -n "${MAB_DISABLE_EMPTY_ROOM_AUTO_STOP:-}" ]]; then
+    if is_true "${ONEESAMA_ALLOW_DISABLE_EMPTY_ROOM_AUTO_STOP:-0}"; then
+      log "warn: empty-room auto-stop is disabled by explicit override"
+    else
+      unset ONEESAMA_DISABLE_EMPTY_ROOM_AUTO_STOP
+      unset MAB_DISABLE_EMPTY_ROOM_AUTO_STOP
+      log "ok: cleared empty-room auto-stop disable flags for live meeting-agent"
+    fi
+  fi
+}
+
 normalize_bool() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
@@ -414,6 +429,7 @@ for env_file in "${env_files[@]}"; do
   source_exported "$env_file"
 done
 
+sanitize_live_env
 check_live_env_conflicts
 preflight_env
 

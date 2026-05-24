@@ -384,10 +384,7 @@ func (s *Service) resolveJoinSession(ctx context.Context, sessionID string) (*Se
 			return &session, nil
 		}
 	}
-	if len(sessions) == 0 {
-		return nil, nil
-	}
-	return &sessions[0], nil
+	return nil, nil
 }
 
 func isTerminalSessionStatus(status string) bool {
