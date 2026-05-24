@@ -126,6 +126,20 @@ func slackVisibleReplyAllowListCanaryFixtures() []slackVisibleReplyAllowListCana
 			ExpectedReason: slackVisibleReplyAllowReasonMissingEvidenceAnchor,
 		},
 		{
+			Name: "thread_only_status_claim_blocks",
+			Action: SlackTriageDecisionAction{
+				Type:    slackActionTypeThreadReply,
+				Message: "PR #2035 已部署到 staging (c44d5d6)。<@U09KNU8QD1V> 可以确认这个修复是否包含在内。",
+				EvidenceAnchors: []SlackVisibleEvidenceAnchor{{
+					Kind:      slackVisibleEvidenceKindSlackThread,
+					SourceRef: "slack://channel/C09KVPBMLJ3/thread/1779609962.709059",
+					Quote:     "这修了吗 + image.png",
+				}},
+			},
+			ExpectedAllow:  false,
+			ExpectedReason: slackVisibleReplyAllowReasonBoundaryMismatch,
+		},
+		{
 			Name: "handled_by_other_blocks",
 			Action: SlackTriageDecisionAction{
 				Type:    slackActionTypeThreadReply,

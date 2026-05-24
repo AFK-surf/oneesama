@@ -68,6 +68,11 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	if !strings.Contains(systemPrompt, "Do not infer negative product support/status from missing evidence") {
 		t.Fatalf("system prompt missing missing-evidence product-claim guard:\n%s", systemPrompt)
 	}
+	if !strings.Contains(systemPrompt, "Do not infer deploy/build/CI/release/staging/production/PR status from chat history") ||
+		!strings.Contains(systemPrompt, "deploy c44d5d6 staging") ||
+		!strings.Contains(systemPrompt, "only reply if you add actionable substance beyond repeating who to ask") {
+		t.Fatalf("system prompt missing deploy/status evidence and deflection guard:\n%s", systemPrompt)
+	}
 	if !strings.Contains(systemPrompt, "External URL identity/fact lookup is bounded secretary work") || !strings.Contains(systemPrompt, "不认识 / 不知道") {
 		t.Fatalf("system prompt missing old-slackd secretary lookup guard:\n%s", systemPrompt)
 	}

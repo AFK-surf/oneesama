@@ -57,6 +57,39 @@ func TestPosterSanitizesVisibleTextAndBlocks(t *testing.T) {
 	}
 }
 
+func TestPosterRendersBareSlackIDsAsMentions(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &captured); err != nil {
+			t.Fatalf("decode request: %v\n%s", err, string(raw))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "ts": "123.456"})
+	}))
+	defer server.Close()
+
+	poster := NewPoster(PosterConfig{BotToken: "xoxb-test", Endpoint: server.URL, Client: server.Client()})
+	result := poster.PostMessage(context.Background(), PostMessageInput{
+		Channel: "C123",
+		Text:    "请 @U09KNU8QD1V 看 #2035，不要改已有 <@U09KY0GE28K>。",
+		Blocks: []map[string]any{{
+			"type": "section",
+			"text": map[string]any{"type": "mrkdwn", "text": "同步到 @C09KVPBMLJ3 和 @G09ABCDEF12"},
+		}},
+	})
+	if !result.OK {
+		t.Fatalf("PostMessage = %#v, want ok", result)
+	}
+	if got := stringFromAny(captured["text"]); got != "请 <@U09KNU8QD1V> 看 #2035，不要改已有 <@U09KY0GE28K>。" {
+		t.Fatalf("payload text = %q, want Slack mention rendering", got)
+	}
+	encoded, _ := json.Marshal(captured["blocks"])
+	if got := string(encoded); !strings.Contains(got, `#C09KVPBMLJ3`) || !strings.Contains(got, `#G09ABCDEF12`) || strings.Contains(got, `@C09KVPBMLJ3`) {
+		t.Fatalf("payload blocks did not render channel mentions: %s", got)
+	}
+}
+
 func TestSlackAPIToolPostMessageSanitizesVisibleMarkers(t *testing.T) {
 	var captured url.Values
 	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
