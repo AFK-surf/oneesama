@@ -238,6 +238,66 @@ for await (const _line of rl) {
 	}
 }
 
+func TestSessionNoCloseTimeoutKeepsSessionUsableAndSkipsLateResponse(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	const script = `import readline from "node:readline";
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
+for await (const line of rl) {
+  const request = JSON.parse(line);
+  if (request.method === "join.session.status") {
+    setTimeout(() => {
+      console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { ok: true, late_status: true } }));
+    }, 50);
+    continue;
+  }
+  if (request.method === "runner.ping") {
+    setTimeout(() => {
+      console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { ok: true, pong: true } }));
+    }, 80);
+  }
+}`
+	if err := os.WriteFile(filepath.Join(srcDir, "index.ts"), []byte(script), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	session, err := NewSession(SessionConfig{
+		ID:      "session_status_timeout",
+		Dir:     dir,
+		Command: "node",
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	err = session.CallWithTimeoutNoClose(context.Background(), 10*time.Millisecond, "join.session.status", nil, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("status timeout error = %v, want context deadline exceeded", err)
+	}
+
+	var result struct {
+		OK   bool `json:"ok"`
+		Pong bool `json:"pong"`
+	}
+	if err := session.CallWithTimeout(context.Background(), time.Second, "runner.ping", nil, &result); err != nil {
+		t.Fatalf("runner.ping after status timeout error = %v", err)
+	}
+	if !result.OK || !result.Pong {
+		t.Fatalf("runner.ping result = %+v, want fresh ping response", result)
+	}
+}
+
 func TestSessionCallSkipsStdoutLogLines(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {

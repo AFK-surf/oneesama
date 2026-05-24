@@ -32,12 +32,13 @@ type Session struct {
 	stdin   io.WriteCloser
 	stderr  *limitedBuffer
 
-	mu        sync.Mutex
-	closeOnce sync.Once
-	closed    atomic.Bool
-	responses chan rpcResponse
-	readErr   chan error
-	waitDone  chan error
+	mu         sync.Mutex
+	closeOnce  sync.Once
+	closed     atomic.Bool
+	requestSeq atomic.Uint64
+	responses  chan rpcResponse
+	readErr    chan error
+	waitDone   chan error
 }
 
 type rpcRequest struct {
@@ -111,6 +112,27 @@ func (s *Session) CallWithTimeout(
 	params any,
 	target any,
 ) error {
+	return s.callWithTimeout(ctx, timeout, method, params, target, true)
+}
+
+func (s *Session) CallWithTimeoutNoClose(
+	ctx context.Context,
+	timeout time.Duration,
+	method string,
+	params any,
+	target any,
+) error {
+	return s.callWithTimeout(ctx, timeout, method, params, target, false)
+}
+
+func (s *Session) callWithTimeout(
+	ctx context.Context,
+	timeout time.Duration,
+	method string,
+	params any,
+	target any,
+	closeOnTimeout bool,
+) error {
 	callTimeout := timeout
 	if callTimeout <= 0 {
 		callTimeout = s.timeout
@@ -118,9 +140,10 @@ func (s *Session) CallWithTimeout(
 	callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 
+	requestID := fmt.Sprintf("%d", s.requestSeq.Add(1))
 	payload, err := json.Marshal(rpcRequest{
 		JSONRPC: "2.0",
-		ID:      "1",
+		ID:      requestID,
 		Method:  method,
 		Params:  params,
 	})
@@ -138,32 +161,43 @@ func (s *Session) CallWithTimeout(
 		return fmt.Errorf("write meet-runner %s request: %w", method, err)
 	}
 
-	select {
-	case response := <-s.responses:
-		if response.Error != nil {
-			return fmt.Errorf("meet-runner %s failed: %s", method, response.Error.Message)
-		}
-		if target == nil {
+	for {
+		select {
+		case response := <-s.responses:
+			if response.ID != requestID {
+				continue
+			}
+			if response.Error != nil {
+				return fmt.Errorf("meet-runner %s failed: %s", method, response.Error.Message)
+			}
+			if target == nil {
+				return nil
+			}
+			if err := json.Unmarshal(response.Result, target); err != nil {
+				return fmt.Errorf("decode meet-runner %s result: %w", method, err)
+			}
 			return nil
+		case err := <-s.readErr:
+			if err == nil {
+				return fmt.Errorf("meet-runner %s closed without response", method)
+			}
+			return fmt.Errorf("meet-runner %s stream failed: %w (%s)", method, err, strings.TrimSpace(s.stderr.String()))
+		case <-callCtx.Done():
+			if !closeOnTimeout {
+				if stderr := strings.TrimSpace(s.stderr.String()); stderr != "" {
+					return fmt.Errorf("meet-runner %s timed out after %s: %w (%s)", method, callTimeout, callCtx.Err(), stderr)
+				}
+				return fmt.Errorf("meet-runner %s timed out after %s: %w", method, callTimeout, callCtx.Err())
+			}
+			closeErr := s.Close()
+			if closeErr != nil {
+				return fmt.Errorf("meet-runner %s canceled: %w", method, closeErr)
+			}
+			if stderr := strings.TrimSpace(s.stderr.String()); stderr != "" {
+				return fmt.Errorf("meet-runner %s timed out after %s: %w (%s)", method, callTimeout, callCtx.Err(), stderr)
+			}
+			return fmt.Errorf("meet-runner %s timed out after %s: %w", method, callTimeout, callCtx.Err())
 		}
-		if err := json.Unmarshal(response.Result, target); err != nil {
-			return fmt.Errorf("decode meet-runner %s result: %w", method, err)
-		}
-		return nil
-	case err := <-s.readErr:
-		if err == nil {
-			return fmt.Errorf("meet-runner %s closed without response", method)
-		}
-		return fmt.Errorf("meet-runner %s stream failed: %w (%s)", method, err, strings.TrimSpace(s.stderr.String()))
-	case <-callCtx.Done():
-		closeErr := s.Close()
-		if closeErr != nil {
-			return fmt.Errorf("meet-runner %s canceled: %w", method, closeErr)
-		}
-		if stderr := strings.TrimSpace(s.stderr.String()); stderr != "" {
-			return fmt.Errorf("meet-runner %s timed out after %s: %w (%s)", method, callTimeout, callCtx.Err(), stderr)
-		}
-		return fmt.Errorf("meet-runner %s timed out after %s: %w", method, callTimeout, callCtx.Err())
 	}
 }
 

@@ -84,7 +84,7 @@ func (m *Manager) StatusSession(ctx context.Context, input StatusSessionInput) (
 		return StatusSessionResult{}, err
 	}
 	var result StatusSessionResult
-	if err := worker.CallWithTimeout(ctx, statusSnapshotTimeout, "join.session.status", input, &result); err != nil {
+	if err := worker.CallWithTimeoutNoClose(ctx, statusSnapshotTimeout, "join.session.status", input, &result); err != nil {
 		return StatusSessionResult{}, err
 	}
 	if strings.TrimSpace(input.SessionID) != "" && result.Session == nil {
