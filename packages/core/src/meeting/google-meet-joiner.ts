@@ -39,6 +39,7 @@ type BrowserContext = import("playwright").BrowserContext;
 
 const DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH = 2560;
 const DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT = 1440;
+const DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS = 25;
 const MAX_SYNTHETIC_SCREEN_SHARE_WIDTH = 3840;
 const MAX_SYNTHETIC_SCREEN_SHARE_HEIGHT = 2160;
 
@@ -2751,7 +2752,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           subtitle: input.screenShareSubtitle || "Agent screen share",
           width: input.screenShareWidth || DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,
           height: input.screenShareHeight || DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
-          fps: input.screenShareFps || 15,
+          fps: input.screenShareFps || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
         }),
       });
     }
@@ -3372,8 +3373,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
 
   function startMacWindowCaptureLoop(app: any, input: AppShareInput, firstFrame: number) {
     stopActiveMacWindowCapture("replace_window_capture");
-    const fps = Math.max(0.2, Math.min(2, Number(input.fps || 1) || 1));
-    const intervalMs = Math.max(500, Math.round(1000 / fps));
+    const fps = Math.max(
+      1,
+      Math.min(30, positiveInteger(input.fps ?? input.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS),
+    );
+    const intervalMs = Math.max(16, Math.round(1000 / fps));
     let frame = firstFrame;
     let busy = false;
     const tick = async () => {
@@ -3515,6 +3519,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           title,
           imagePath: firstFrame.capture.output,
           waitMs: input.waitMs || 2500,
+          fps: shareInput.fps || shareInput.screenShareFps || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
         });
     const loop = startMacWindowCaptureLoop(app, shareInput, 1);
     const result = {
@@ -3593,7 +3598,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           height:
             positiveInteger(bridgeInput.height ?? bridgeInput.screenShareHeight) ||
             DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
-          fps: positiveInteger(bridgeInput.fps ?? bridgeInput.screenShareFps) || 15,
+          fps: positiveInteger(bridgeInput.fps ?? bridgeInput.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
           preview: Boolean(bridgeInput.preview),
         },
       )

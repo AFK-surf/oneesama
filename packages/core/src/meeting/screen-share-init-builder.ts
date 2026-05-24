@@ -20,7 +20,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
     enabled: options.enabled !== false,
     width: Number.parseInt(String(options.width ?? options.screenShareWidth ?? 2560), 10),
     height: Number.parseInt(String(options.height ?? options.screenShareHeight ?? 1440), 10),
-    fps: Number.parseInt(String(options.fps ?? options.screenShareFps ?? 15), 10),
+    fps: Number.parseInt(String(options.fps ?? options.screenShareFps ?? 25), 10),
     mode: options.mode || "synthetic",
     title: options.title || "Meeting Avatar Bot",
     subtitle: options.subtitle || "Shared agent workspace",
