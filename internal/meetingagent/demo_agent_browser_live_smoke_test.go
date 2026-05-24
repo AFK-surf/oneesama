@@ -82,8 +82,8 @@ func TestLiveDemoAgentBrowserBridgeCanChangeSharedContent(t *testing.T) {
 	if !start.OK || start.Observation == nil || !strings.Contains(start.Observation.Summary, "Oneesama Snake POC") {
 		t.Fatalf("start = %#v, want visible Snake observation", start)
 	}
-	if start.Presentation == nil || start.Presentation.Source != "screen_share_app" {
-		t.Fatalf("presentation = %#v, want app/window share", start.Presentation)
+	if start.Presentation == nil || start.Presentation.Source != "screen_share_present" {
+		t.Fatalf("presentation = %#v, want synthetic share", start.Presentation)
 	}
 
 	control, err := bridge.Control(context.Background(), RealtimeDemoSurfaceControlRequest{
@@ -104,8 +104,8 @@ func TestLiveDemoAgentBrowserBridgeCanChangeSharedContent(t *testing.T) {
 	if !strings.Contains(control.ObservationContext, "score: 0") || !strings.Contains(control.ObservationContext, "score: 1") {
 		t.Fatalf("observation context = %q, want before/after shared content", control.ObservationContext)
 	}
-	if len(share.startCalls) != 1 || len(share.appCalls) != 1 || len(share.presentCalls) != 0 {
-		t.Fatalf("share calls start=%d app=%d present=%d, want same shared window reused", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
+	if len(share.startCalls) != 1 || len(share.appCalls) != 0 || len(share.presentCalls) != 1 {
+		t.Fatalf("share calls start=%d app=%d present=%d, want same synthetic shared surface reused", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
 	}
 }
 
@@ -184,8 +184,8 @@ func TestLiveDemoAgentBrowserReadOnlyGitHubScenario(t *testing.T) {
 	if !strings.Contains(capture.ObservationContext, "openai-node") {
 		t.Fatalf("observation context = %q, want real-page context retained", capture.ObservationContext)
 	}
-	if len(share.startCalls) != 1 || len(share.appCalls) != 1 || len(share.presentCalls) != 0 {
-		t.Fatalf("share calls start=%d app=%d present=%d, want same shared window reused", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
+	if len(share.startCalls) != 1 || len(share.appCalls) != 0 || len(share.presentCalls) != 1 {
+		t.Fatalf("share calls start=%d app=%d present=%d, want same synthetic shared surface reused", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
 	}
 }
 
@@ -418,8 +418,8 @@ func TestLiveDemoAgentBrowserTaskToSnakeWorkflowScenario(t *testing.T) {
 	if _, ok := lifecycle.ActiveSession(); ok {
 		t.Fatalf("active session still present after workflow cancel")
 	}
-	if len(share.startCalls) != 1 || len(share.appCalls) != 1 || len(share.presentCalls) != 0 || len(share.stopCalls) != 1 {
-		t.Fatalf("share calls start=%d app=%d present=%d stop=%d, want one shared browser surface reused then stopped", len(share.startCalls), len(share.appCalls), len(share.presentCalls), len(share.stopCalls))
+	if len(share.startCalls) != 1 || len(share.appCalls) != 0 || len(share.presentCalls) != 1 || len(share.stopCalls) != 1 {
+		t.Fatalf("share calls start=%d app=%d present=%d stop=%d, want one synthetic shared surface reused then stopped", len(share.startCalls), len(share.appCalls), len(share.presentCalls), len(share.stopCalls))
 	}
 }
 

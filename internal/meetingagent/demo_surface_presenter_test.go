@@ -58,7 +58,7 @@ func (f *fakeDemoSurfaceShareClient) StopScreenShare(_ context.Context, input Sc
 	return meetrunner.ScreenShareResult{"ok": true, "op": "stop", "stopped": true}, f.stopErr
 }
 
-func TestDemoSurfacePresenterUsesAppShareForWorkspaceProcess(t *testing.T) {
+func TestDemoSurfacePresenterUsesSyntheticShareForWorkspaceProcessByDefault(t *testing.T) {
 	share := &fakeDemoSurfaceShareClient{}
 	presenter := DemoSurfacePresenter{Share: share}
 
@@ -73,15 +73,43 @@ func TestDemoSurfacePresenterUsesAppShareForWorkspaceProcess(t *testing.T) {
 		t.Fatalf("Present() error = %v", err)
 	}
 
+	if result.Status != DemoSurfacePresentationPresenting || result.Source != "screen_share_present" {
+		t.Fatalf("result = %#v, want synthetic presenting", result)
+	}
+	if len(share.startCalls) != 1 || len(share.presentCalls) != 1 || len(share.appCalls) != 0 {
+		t.Fatalf("calls start=%d present=%d app=%d, want start+present only", len(share.startCalls), len(share.presentCalls), len(share.appCalls))
+	}
+	start := share.startCalls[0]
+	if start.SessionID != "meet_session" || start.Title != "Dashboard walkthrough" || start.Subtitle != "KWWK demo" || start.Mode != defaultDemoSurfaceStartMode || start.WaitMs != 250 {
+		t.Fatalf("start call = %#v", start)
+	}
+	present := share.presentCalls[0]
+	if present.Mode != defaultDemoSurfaceStartMode || present.SessionID != "meet_session" || present.Title != "Dashboard walkthrough" {
+		t.Fatalf("present call = %#v", present)
+	}
+}
+
+func TestDemoSurfacePresenterUsesAppShareForExplicitAppTarget(t *testing.T) {
+	share := &fakeDemoSurfaceShareClient{}
+	presenter := DemoSurfacePresenter{Share: share}
+
+	result, err := presenter.Present(context.Background(), DemoSurfacePresentRequest{
+		MeetingSessionID: "meet_session",
+		DemoSession:      DemoWorkspaceSession{ID: "demo_session", ProcessID: 4242},
+		Title:            "Dashboard walkthrough",
+		Subtitle:         "KWWK demo",
+		ProcessID:        4242,
+		WaitMs:           250,
+	})
+	if err != nil {
+		t.Fatalf("Present() error = %v", err)
+	}
+
 	if result.Status != DemoSurfacePresentationPresenting || result.Source != "screen_share_app" {
 		t.Fatalf("result = %#v, want app presenting", result)
 	}
 	if len(share.startCalls) != 1 || len(share.appCalls) != 1 || len(share.presentCalls) != 0 {
 		t.Fatalf("calls start=%d app=%d present=%d, want start+app only", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
-	}
-	start := share.startCalls[0]
-	if start.SessionID != "meet_session" || start.Title != "Dashboard walkthrough" || start.Subtitle != "KWWK demo" || start.Mode != defaultDemoSurfaceStartMode || start.WaitMs != 250 {
-		t.Fatalf("start call = %#v", start)
 	}
 	app := share.appCalls[0]
 	if app.ProcessID != 4242 || app.Mode != defaultDemoSurfaceAppShareMode || app.SessionID != "meet_session" || app.Title != "Dashboard walkthrough" {

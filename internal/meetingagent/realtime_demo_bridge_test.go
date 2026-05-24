@@ -50,8 +50,8 @@ func TestRealtimeDemoBridgeStartPublishesObservationContext(t *testing.T) {
 	if !result.OK || result.Status != realtimeDemoBridgeStatusStarted || result.SessionID != "demo_bridge" {
 		t.Fatalf("result = %#v, want started demo_bridge", result)
 	}
-	if result.Presentation == nil || result.Presentation.Source != "screen_share_app" {
-		t.Fatalf("presentation = %#v, want app share", result.Presentation)
+	if result.Presentation == nil || result.Presentation.Source != "screen_share_present" {
+		t.Fatalf("presentation = %#v, want synthetic share", result.Presentation)
 	}
 	if result.Observation == nil || result.Observation.Summary != "The demo dashboard is visible and ready." {
 		t.Fatalf("observation = %#v", result.Observation)
@@ -166,8 +166,8 @@ func TestRealtimeDemoBridgeControlUpdatesActiveSharedSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if start.Presentation == nil || start.Presentation.Source != "screen_share_app" {
-		t.Fatalf("presentation = %#v, want shared app/window", start.Presentation)
+	if start.Presentation == nil || start.Presentation.Source != "screen_share_present" {
+		t.Fatalf("presentation = %#v, want synthetic share", start.Presentation)
 	}
 	control, err := bridge.Control(context.Background(), RealtimeDemoSurfaceControlRequest{
 		MeetingSessionID: "meet_session",
@@ -184,8 +184,8 @@ func TestRealtimeDemoBridgeControlUpdatesActiveSharedSurface(t *testing.T) {
 	if control.Observation.Kind != demoObservationKindStep || !strings.Contains(control.Observation.Summary, "score: 1") {
 		t.Fatalf("control observation = %#v, want post-click shared content", control.Observation)
 	}
-	if len(share.startCalls) != 1 || len(share.appCalls) != 1 || len(share.presentCalls) != 0 {
-		t.Fatalf("share calls start=%d app=%d present=%d, want one initial shared window reused for control", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
+	if len(share.startCalls) != 1 || len(share.appCalls) != 0 || len(share.presentCalls) != 1 {
+		t.Fatalf("share calls start=%d app=%d present=%d, want one initial synthetic surface reused for control", len(share.startCalls), len(share.appCalls), len(share.presentCalls))
 	}
 	requests := client.Requests()
 	if len(requests) != 2 || requests[0].Kind != DemoActionOpenURL || requests[1].Kind != DemoActionClick || requests[1].Text != "Start snake" {

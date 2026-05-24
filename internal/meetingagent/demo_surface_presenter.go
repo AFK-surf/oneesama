@@ -186,7 +186,7 @@ func screenShareResultFailureError(reason string, result meetrunner.ScreenShareR
 }
 
 func (req DemoSurfacePresentRequest) appShareRequest(base ScreenShareRequest) (AppShareRequest, bool) {
-	processID := firstNonZero(req.ProcessID, req.DemoSession.ProcessID)
+	processID := req.ProcessID
 	bundleID := strings.TrimSpace(req.BundleIdentifier)
 	appName := strings.TrimSpace(req.ApplicationName)
 	if processID == 0 && bundleID == "" && appName == "" {
