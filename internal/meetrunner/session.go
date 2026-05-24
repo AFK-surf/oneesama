@@ -246,8 +246,8 @@ func (s *Session) readLoop(stdout io.Reader) {
 		}
 		var response rpcResponse
 		if err := json.Unmarshal([]byte(trimmed), &response); err != nil {
-			s.readErr <- fmt.Errorf("decode response: %w", err)
-			return
+			_, _ = s.stderr.Write([]byte("[meet-runner stdout malformed jsonrpc-like] " + trimmed + "\n"))
+			continue
 		}
 		s.responses <- response
 	}
