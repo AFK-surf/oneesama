@@ -143,6 +143,13 @@ test("enableMeetCaptions still configures the selected language when captions ar
   );
 });
 
+test("local Meet speaker detection drops the bot client's own caption label", () => {
+  assert.equal(__captionCaptureTestInternals.isLocalMeetCaptionSpeaker("You"), true);
+  assert.equal(__captionCaptureTestInternals.isLocalMeetCaptionSpeaker("You (me)"), true);
+  assert.equal(__captionCaptureTestInternals.isLocalMeetCaptionSpeaker("我"), true);
+  assert.equal(__captionCaptureTestInternals.isLocalMeetCaptionSpeaker("Peng Xiao"), false);
+});
+
 test("enableMeetCaptions falls back to the legacy settings menu when the inline caption button is unavailable", async () => {
   const page = fakeCaptionSettingsPage(
     captionsAlreadyOnProbe(),

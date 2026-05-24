@@ -299,14 +299,14 @@ func captionsFromStopRuntime(runtime any) []postmeeting.TranscriptSegmentInput {
 	beforeStop := mapFromAny(fields["beforeStop"])
 	active := mapFromAny(beforeStop["active"])
 	captions := mapFromAny(active["captions"])
-	if segments := captionSegmentsFromAny(captions["tail"]); len(segments) > 0 {
-		return segments
-	}
 	paths := mapFromAny(captions["paths"])
 	if path := stringFromMap(paths, "json"); path != "" {
 		if segments := captionSegmentsFromFile(path); len(segments) > 0 {
 			return segments
 		}
+	}
+	if segments := captionSegmentsFromAny(captions["tail"]); len(segments) > 0 {
+		return segments
 	}
 	if segments := captionSegmentsFromAny(captions["latest"]); len(segments) > 0 {
 		return segments
@@ -355,6 +355,9 @@ func normalizedTranscriptSegments(segments []postmeeting.TranscriptSegmentInput)
 		if segment.Text == "" {
 			continue
 		}
+		if isLocalMeetCaptionSpeaker(firstNonEmpty(segment.Speaker, segment.User, segment.Name)) {
+			continue
+		}
 		if strings.TrimSpace(segment.Source) == "" {
 			segment.Source = "google_meet_caption"
 		}
@@ -364,6 +367,18 @@ func normalizedTranscriptSegments(segments []postmeeting.TranscriptSegmentInput)
 		normalized = append(normalized, segment)
 	}
 	return normalized
+}
+
+func isLocalMeetCaptionSpeaker(value string) bool {
+	normalized := strings.TrimSpace(value)
+	normalized = strings.TrimSuffix(strings.TrimSuffix(normalized, ":"), "：")
+	normalized = strings.TrimSpace(strings.ToLower(normalized))
+	switch normalized {
+	case "you", "me", "myself", "我", "你", "您", "自己", "本人":
+		return true
+	default:
+		return strings.HasPrefix(normalized, "you (") && strings.HasSuffix(normalized, ")")
+	}
 }
 
 func resolveRuntimeFile(path string) string {

@@ -14,7 +14,7 @@ const (
 	joinSetupActionsBlockID   = "oneesama_join_actions"
 	joinSetupPlainActionID    = "oneesama_join_without_realtime"
 	joinSetupRealtimeActionID = "oneesama_join_with_realtime"
-	defaultCaptionLanguage    = "English"
+	defaultCaptionLanguage    = "Chinese (Simplified)"
 )
 
 type joinSetupActionValue struct {

@@ -502,7 +502,7 @@ func TestJoinStopReadsRuntimeCaptionAndAudioPathsFromMeetRunnerDir(t *testing.T)
 	t.Cleanup(func() {
 		_ = os.RemoveAll(filepath.Join("meet-runner", "runtime", "meeting-artifacts", "runner-session_join_runner_paths"))
 	})
-	if err := os.WriteFile(filepath.Join(artifactsDir, "captions.json"), []byte(`{"ok":true,"captions":[{"speaker":"Peng","text":"Runtime captions should become transcript text.","source":"google-meet-caption-dom"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(artifactsDir, "captions.json"), []byte(`{"ok":true,"captions":[{"speaker":"You","text":"Local bot self-caption should be ignored.","source":"google-meet-caption-dom"},{"speaker":"Peng","text":"Runtime captions should become transcript text.","source":"google-meet-caption-dom"}]}`), 0o644); err != nil {
 		t.Fatalf("write captions: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(artifactsDir, "audio.wav"), []byte("wav"), 0o644); err != nil {
@@ -524,6 +524,11 @@ func TestJoinStopReadsRuntimeCaptionAndAudioPathsFromMeetRunnerDir(t *testing.T)
 					"recorder":     map[string]any{"audioPath": "runtime/meeting-artifacts/runner-session_join_runner_paths/audio.wav"},
 					"captions": map[string]any{
 						"count": 1,
+						"tail": []map[string]any{{
+							"speaker": "Peng",
+							"text":    "Tail captions should not win over the flushed caption artifact.",
+							"source":  "google-meet-caption-dom",
+						}},
 						"paths": map[string]any{"json": "runtime/meeting-artifacts/runner-session_join_runner_paths/captions.json"},
 					},
 				},
@@ -540,7 +545,9 @@ func TestJoinStopReadsRuntimeCaptionAndAudioPathsFromMeetRunnerDir(t *testing.T)
 	if stopResponse.Code != http.StatusOK {
 		t.Fatalf("stop code = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
 	}
-	if strings.Contains(stopResponse.Body.String(), "no transcript captured") || !strings.Contains(stopResponse.Body.String(), "Runtime captions should become transcript text.") {
+	if strings.Contains(stopResponse.Body.String(), "no transcript captured") ||
+		!strings.Contains(stopResponse.Body.String(), "Runtime captions should become transcript text.") ||
+		strings.Contains(stopResponse.Body.String(), "Local bot self-caption") {
 		t.Fatalf("body = %s, want post-meeting result from runner captions path", stopResponse.Body.String())
 	}
 	waitMeetdWebhook(t, webhooks, "meeting.processing")
@@ -550,6 +557,32 @@ func TestJoinStopReadsRuntimeCaptionAndAudioPathsFromMeetRunnerDir(t *testing.T)
 	}
 	if !strings.HasSuffix(result.Artifacts.AudioPath, "audio.mp3") || !strings.HasSuffix(result.Artifacts.TranscriptPath, "transcript.txt") {
 		t.Fatalf("artifacts = %+v, want transcript.txt and audio.mp3", result.Artifacts)
+	}
+}
+
+func TestCaptionsFromStopRuntimePrefersFlushedCaptionFileOverTail(t *testing.T) {
+	t.Parallel()
+
+	captionsPath := filepath.Join(t.TempDir(), "captions.json")
+	if err := os.WriteFile(captionsPath, []byte(`{"ok":true,"captions":[{"speaker":"You","text":"Bot self-caption should be ignored."},{"speaker":"Peng","text":"Full flushed caption wins."}]}`), 0o644); err != nil {
+		t.Fatalf("write captions: %v", err)
+	}
+
+	segments := captionsFromStopRuntime(map[string]any{
+		"beforeStop": map[string]any{
+			"active": map[string]any{
+				"captions": map[string]any{
+					"tail": []map[string]any{{
+						"speaker": "Peng",
+						"text":    "Tail captions should not win.",
+					}},
+					"paths": map[string]any{"json": captionsPath},
+				},
+			},
+		},
+	})
+	if len(segments) != 1 || segments[0].Speaker != "Peng" || segments[0].Text != "Full flushed caption wins." {
+		t.Fatalf("segments = %#v, want full captions file with local speaker filtered", segments)
 	}
 }
 

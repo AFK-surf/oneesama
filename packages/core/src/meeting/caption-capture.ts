@@ -56,6 +56,17 @@ function normalizeCaptionText(text: unknown): string {
     .trim();
 }
 
+function isLocalMeetCaptionSpeaker(speaker: unknown): boolean {
+  const normalized = normalizeCaptionText(speaker)
+    .toLowerCase()
+    .replace(/[：:]\s*$/, "");
+  if (!normalized) return false;
+  if (["you", "me", "myself", "我", "你", "您", "自己", "本人"].includes(normalized)) {
+    return true;
+  }
+  return /^you\s*\(.+\)$/.test(normalized);
+}
+
 function compactCaptionEvent(event: CaptionEvent): CaptionEvent {
   return {
     ts: event.ts,
@@ -519,6 +530,7 @@ async function inspectCaptionSettingsPanel(page: import("playwright").Page) {
 
 export const __captionCaptureTestInternals = {
   clickCaptionLanguageOption,
+  isLocalMeetCaptionSpeaker,
   liveCaptionsRadioSelected,
   translatedCaptionsEnabled,
 };
@@ -636,6 +648,14 @@ export async function installMeetCaptionCapture(
       speaker: normalizeCaptionText(rawEvent?.speaker || "unknown") || "unknown",
     });
     if (!event.text) return;
+    if (isLocalMeetCaptionSpeaker(event.speaker)) {
+      diagnostics?.record("caption_event_dropped_local_speaker", {
+        speaker: event.speaker,
+        text: event.text.slice(0, 240),
+        streamId: event.streamId,
+      });
+      return;
+    }
     captions.push(event);
     diagnostics?.record("caption_event", {
       speaker: event.speaker,
@@ -665,6 +685,12 @@ export async function installMeetCaptionCapture(
         /等\s*\d+\s*人/.test(normalized) ||
         /与\s*\d+\s*位?其他/.test(normalized)
       );
+    }
+    function localMeetSpeaker(text: string): boolean {
+      const normalized = normalize(text).toLowerCase().replace(/[：:]\s*$/, "");
+      if (!normalized) return false;
+      if (["you", "me", "myself", "我", "你", "您", "自己", "本人"].includes(normalized)) return true;
+      return /^you\s*\(.+\)$/.test(normalized);
     }
     function visible(el: Element): boolean {
       if (!(el instanceof HTMLElement)) return false;
@@ -845,6 +871,7 @@ export async function installMeetCaptionCapture(
               .map((badge) => badge.textContent || ""),
           );
           if (!speaker) continue;
+          if (localMeetSpeaker(speaker)) continue;
           const candidates = Array.from(child.querySelectorAll<HTMLElement>("div, span"))
             .filter(visible)
             .filter((el) => !el.matches(speakerBadge) && !el.closest(speakerBadge) && !el.querySelector(speakerBadge))
@@ -871,6 +898,7 @@ export async function installMeetCaptionCapture(
         if (!emittedForContainer) {
           const fallback = fallbackCaption(container);
           if (!fallback) continue;
+          if (localMeetSpeaker(fallback.speaker)) continue;
           const signature = `${fallback.speaker}\n${fallback.text}`;
           if (signature === lastFallbackSignature) continue;
           lastFallbackSignature = signature;
