@@ -228,6 +228,7 @@ func (s *Session) Close() error {
 
 func (s *Session) readLoop(stdout io.Reader) {
 	scanner := bufio.NewScanner(stdout)
+	scanner.Split(scanLinesOrCarriageReturns)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxRPCMessageBytes)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -251,4 +252,23 @@ func (s *Session) readLoop(stdout io.Reader) {
 		return
 	}
 	s.readErr <- nil
+}
+
+func scanLinesOrCarriageReturns(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	for i, b := range data {
+		if b == '\n' || b == '\r' {
+			advance = i + 1
+			if b == '\r' && len(data) > i+1 && data[i+1] == '\n' {
+				advance++
+			}
+			return advance, data[:i], nil
+		}
+	}
+	if len(data) >= maxRPCMessageBytes {
+		return maxRPCMessageBytes, data[:maxRPCMessageBytes], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }

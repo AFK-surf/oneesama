@@ -346,3 +346,54 @@ for await (const line of rl) {
 		t.Fatalf("stderr = %q, want skipped stdout log captured", stderr)
 	}
 }
+
+func TestSessionCallSkipsCarriageReturnProgressLogs(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	const script = `import readline from "node:readline";
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
+for await (const line of rl) {
+  const request = JSON.parse(line);
+  for (let i = 0; i < 200; i += 1) {
+    process.stdout.write("[meeting-recorder] ffmpeg progress frame=" + i + "\r");
+  }
+  console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { ok: true, progress_logs_skipped: true } }));
+}`
+	if err := os.WriteFile(filepath.Join(srcDir, "index.ts"), []byte(script), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	session, err := NewSession(SessionConfig{
+		ID:      "session_stdout_progress_log",
+		Dir:     dir,
+		Command: "node",
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	var result struct {
+		OK                  bool `json:"ok"`
+		ProgressLogsSkipped bool `json:"progress_logs_skipped"`
+	}
+	if err := session.Call(context.Background(), "runner.ping", nil, &result); err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if !result.OK || !result.ProgressLogsSkipped {
+		t.Fatalf("result = %+v, want JSON-RPC response after carriage-return progress logs", result)
+	}
+	if stderr := session.stderr.String(); !strings.Contains(stderr, "[meet-runner stdout] [meeting-recorder] ffmpeg progress") {
+		t.Fatalf("stderr = %q, want skipped progress log captured", stderr)
+	}
+}
