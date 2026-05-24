@@ -76,6 +76,26 @@ func backingScaleFactor(for frame: CGRect) -> CGFloat {
 
 @available(macOS 12.3, *)
 func writePixelBufferPNG(_ pixelBuffer: CVPixelBuffer, outputURL: URL) throws {
+  try writePixelBufferImage(pixelBuffer, outputURL: outputURL, type: UTType.png, properties: nil)
+}
+
+@available(macOS 12.3, *)
+func writePixelBufferJPEG(_ pixelBuffer: CVPixelBuffer, outputURL: URL) throws {
+  try writePixelBufferImage(
+    pixelBuffer,
+    outputURL: outputURL,
+    type: UTType.jpeg,
+    properties: [kCGImageDestinationLossyCompressionQuality as String: 0.82] as CFDictionary
+  )
+}
+
+@available(macOS 12.3, *)
+func writePixelBufferImage(
+  _ pixelBuffer: CVPixelBuffer,
+  outputURL: URL,
+  type: UTType,
+  properties: CFDictionary?
+) throws {
   let context = CIContext(options: nil)
   let image = CIImage(cvPixelBuffer: pixelBuffer)
   guard let cgImage = context.createCGImage(image, from: image.extent) else {
@@ -83,15 +103,15 @@ func writePixelBufferPNG(_ pixelBuffer: CVPixelBuffer, outputURL: URL) throws {
   }
   guard let destination = CGImageDestinationCreateWithURL(
     outputURL as CFURL,
-    UTType.png.identifier as CFString,
+    type.identifier as CFString,
     1,
     nil
   ) else {
-    throw ToolError("create_png_destination_failed")
+    throw ToolError("create_image_destination_failed")
   }
-  CGImageDestinationAddImage(destination, cgImage, nil)
+  CGImageDestinationAddImage(destination, cgImage, properties)
   guard CGImageDestinationFinalize(destination) else {
-    throw ToolError("write_png_failed")
+    throw ToolError("write_image_failed")
   }
 }
 
@@ -141,7 +161,11 @@ final class StreamingOutput: NSObject, SCStreamOutput {
       let temporaryURL = outputURL.deletingLastPathComponent().appendingPathComponent(
         ".\(outputURL.lastPathComponent).tmp"
       )
-      try writePixelBufferPNG(pixelBuffer, outputURL: temporaryURL)
+      if outputURL.pathExtension.lowercased() == "jpg" || outputURL.pathExtension.lowercased() == "jpeg" {
+        try writePixelBufferJPEG(pixelBuffer, outputURL: temporaryURL)
+      } else {
+        try writePixelBufferPNG(pixelBuffer, outputURL: temporaryURL)
+      }
       if FileManager.default.fileExists(atPath: outputURL.path) {
         try FileManager.default.removeItem(at: outputURL)
       }

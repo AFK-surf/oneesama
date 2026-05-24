@@ -3349,7 +3349,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const captureDir = pathJoin(active?.artifactsDir || config.dataDir, "screen-share-capture");
     const appPart = safeFilePart(app.applicationName || app.name || app.title || "app");
     const windowPart = safeFilePart(app.windowId || app.windowID || app.processId || "window");
-    return pathJoin(captureDir, `${appPart}-${windowPart}-latest.png`);
+    return pathJoin(captureDir, `${appPart}-${windowPart}-latest.jpg`);
   }
 
   async function captureMacWindowToSynthetic(app: any, input: AppShareInput, frame: number) {
