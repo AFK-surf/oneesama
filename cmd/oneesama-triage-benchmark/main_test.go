@@ -63,7 +63,7 @@ func TestRunLiveBenchmarkReplaysThreadsThroughDryRunEndpoint(t *testing.T) {
 						Score:   0.7,
 					}},
 				},
-				FinalDecision: "would_request_reply_approval",
+				FinalDecision: "would_post_reply",
 				Persona: slackagent.SlackPersonaShadowResult{
 					Decision: persona.DecisionReply,
 					Success:  true,
@@ -97,10 +97,10 @@ func TestRunLiveBenchmarkReplaysThreadsThroughDryRunEndpoint(t *testing.T) {
 		t.Fatalf("report threads = %d rows=%d, want 1/1", report.ThreadsReplayed, len(report.Rows))
 	}
 	row := report.Rows[0]
-	if row.FinalDecision != "would_request_reply_approval" || row.PersonaDecision != persona.DecisionReply || !row.VisibleReplyAllowed {
-		t.Fatalf("row = %#v, want reply approval dry-run", row)
+	if row.FinalDecision != "would_post_reply" || row.PersonaDecision != persona.DecisionReply || !row.VisibleReplyAllowed {
+		t.Fatalf("row = %#v, want direct reply dry-run", row)
 	}
-	if report.Summary.ByFinalDecision["would_request_reply_approval"] != 1 ||
+	if report.Summary.ByFinalDecision["would_post_reply"] != 1 ||
 		report.Summary.ByVisibleReplyReason["allowed"] != 1 ||
 		report.Summary.ByPipelineSmell["high_gate_block_rate"] != 1 {
 		t.Fatalf("summary = %#v, want decision/reason/smell counts", report.Summary)
@@ -851,7 +851,7 @@ func TestRunFixtureBenchmarkReportsExpectedOutcomes(t *testing.T) {
 				Success:  true,
 			},
 			FinalDecision:      "would_stay_silent",
-			SideEffectsBlocked: []string{"slack_post", "approval_card", "worker_start"},
+			SideEffectsBlocked: []string{"slack_post", "worker_start"},
 			VisibleReplyVerdicts: []slackagent.SlackTriageDryRunVisibleReplyVerdict{{
 				Allowed: false,
 				Reason:  "missing_evidence_anchor",
@@ -868,7 +868,7 @@ func TestRunFixtureBenchmarkReportsExpectedOutcomes(t *testing.T) {
 			}}
 		case strings.Contains(rootText, "产品链接"), strings.Contains(rootText, "smoke"):
 			result.Persona.Decision = persona.DecisionReply
-			result.FinalDecision = "would_request_reply_approval"
+			result.FinalDecision = "would_post_reply"
 			result.VisibleReplyVerdicts = []slackagent.SlackTriageDryRunVisibleReplyVerdict{{
 				Allowed: true,
 				Reason:  "allowed",

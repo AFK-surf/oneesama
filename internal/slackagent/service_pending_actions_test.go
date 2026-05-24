@@ -248,7 +248,7 @@ func TestSlackVisibleReplyQualitySamplesIncludeBlockedGateRuns(t *testing.T) {
 }
 
 func TestVisibleReplyQualityGateDropsInternalMetaReplies(t *testing.T) {
-	actions := requireSlackTriageVisibleReplyApproval([]SlackTriageDecisionAction{{
+	actions := slackTriageVisibleReplyActionsAfterGate([]SlackTriageDecisionAction{{
 		Type:      slackActionTypeThreadReply,
 		Title:     "Review triage reply",
 		Message:   "根据 persona 分析，persona 已判定 Oneesama 不应在此线程插话，我无可见输出。",
@@ -277,7 +277,7 @@ func TestVisibleReplyAllowListBlocksNoAnchorPoliteReplies(t *testing.T) {
 	if verdict.Allowed || verdict.Reason != slackVisibleReplyAllowReasonMissingEvidenceAnchor {
 		t.Fatalf("verdict = %#v, want missing evidence anchor", verdict)
 	}
-	if actions := requireSlackTriageVisibleReplyApproval([]SlackTriageDecisionAction{action}); len(actions) != 0 {
+	if actions := slackTriageVisibleReplyActionsAfterGate([]SlackTriageDecisionAction{action}); len(actions) != 0 {
 		t.Fatalf("actions = %#v, want polite no-anchor reply blocked", actions)
 	}
 }
@@ -298,9 +298,9 @@ func TestVisibleReplyAllowListAllowsFetchedLinkAnchor(t *testing.T) {
 		}},
 	}
 
-	actions := requireSlackTriageVisibleReplyApproval([]SlackTriageDecisionAction{action})
-	if len(actions) != 1 || !actions[0].RequiresConfirmation || len(actions[0].EvidenceAnchors) != 1 {
-		t.Fatalf("actions = %#v, want allowed reply with evidence anchor and approval", actions)
+	actions := slackTriageVisibleReplyActionsAfterGate([]SlackTriageDecisionAction{action})
+	if len(actions) != 1 || actions[0].RequiresConfirmation || len(actions[0].EvidenceAnchors) != 1 {
+		t.Fatalf("actions = %#v, want allowed direct reply with evidence anchor", actions)
 	}
 	if actions[0].EvidenceAnchors[0].ConfidenceSource != "source_derived:fetched_link" {
 		t.Fatalf("anchor = %#v", actions[0].EvidenceAnchors[0])

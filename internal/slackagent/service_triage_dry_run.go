@@ -38,11 +38,11 @@ func (s *Service) DryRunSlackTriage(ctx context.Context, channelID string, messa
 	}
 
 	actionsBeforeGate := slackPersonaForegroundActions(prepared.ChannelID, prepared.ThreadTS, result, request)
-	actionsAfterGate := requireSlackTriageVisibleReplyApproval(actionsBeforeGate)
+	actionsAfterGate := slackTriageVisibleReplyActionsAfterGate(actionsBeforeGate)
 	verdicts := slackTriageDryRunVisibleReplyVerdicts(actionsBeforeGate)
 	workers := slackTriageDryRunWorkers(result, request)
 	toolCalls := append([]SlackTriageToolCall(nil), disposition.ToolCalls...)
-	toolCalls = append(toolCalls, slackTriageDryRunApprovalToolCalls(actionsBeforeGate, actionsAfterGate)...)
+	toolCalls = append(toolCalls, slackTriageDryRunVisibleReplyToolCalls(actionsBeforeGate, actionsAfterGate)...)
 	toolCalls = append(toolCalls, slackTriageDryRunWorkerToolCalls(workers)...)
 
 	return SlackTriageDryRunResult{
@@ -63,8 +63,6 @@ func (s *Service) DryRunSlackTriage(ctx context.Context, channelID string, messa
 		ToolCalls:            toolCalls,
 		SideEffectsBlocked: []string{
 			"slack_post",
-			"approval_card",
-			"pending_action",
 			"reaction",
 			"worker_start",
 			"memory_write",
@@ -212,7 +210,7 @@ func slackTriageDryRunWorkers(result SlackPersonaShadowResult, request persona.R
 	return workers
 }
 
-func slackTriageDryRunApprovalToolCalls(before []SlackTriageDecisionAction, after []SlackTriageDecisionAction) []SlackTriageToolCall {
+func slackTriageDryRunVisibleReplyToolCalls(before []SlackTriageDecisionAction, after []SlackTriageDecisionAction) []SlackTriageToolCall {
 	afterReplyCount := 0
 	for _, action := range after {
 		if strings.TrimSpace(action.Type) == slackActionTypeThreadReply {
@@ -236,10 +234,10 @@ func slackTriageDryRunApprovalToolCalls(before []SlackTriageDecisionAction, afte
 		if verdict.Allowed && afterReplyCount > 0 {
 			calls = append(calls, SlackTriageToolCall{
 				Tool:    "slack_api",
-				Action:  "dry_run_approval_card_blocked",
-				Args:    marshalTriageArgs("slack-triage-visible-reply-approval", "", true),
+				Action:  "dry_run_thread_reply_blocked",
+				Args:    marshalTriageArgs("chat.postMessage", "", true),
 				Success: true,
-				Brief:   "Dry-run would create Peng approval card in live mode",
+				Brief:   "Dry-run would post Slack thread reply in live mode",
 				Result:  "side_effect_blocked",
 			})
 		}
@@ -268,7 +266,7 @@ func slackTriageDryRunFinalDecision(result SlackPersonaShadowResult, actions []S
 	}
 	for _, action := range actions {
 		if strings.TrimSpace(action.Type) == slackActionTypeThreadReply {
-			return "would_request_reply_approval"
+			return "would_post_reply"
 		}
 		if strings.TrimSpace(action.Type) == "add_reaction" {
 			return "would_react"

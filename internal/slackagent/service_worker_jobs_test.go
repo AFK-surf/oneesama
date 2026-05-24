@@ -336,16 +336,16 @@ func TestAgentRunnerUpdateReturnsPersonaDelegateResultToPiBeforeApproval(t *test
 
 	calls := poster.Calls()
 	if len(calls) != 1 {
-		t.Fatalf("poster calls = %#v, want one pilot DM approval card and no public thread post", calls)
+		t.Fatalf("poster calls = %#v, want one public thread post", calls)
 	}
-	if calls[0].Channel != "D_PENG" || calls[0].ThreadTS != "" || !strings.Contains(calls[0].DedupKey, "pilot_dm:") {
-		t.Fatalf("post call = %#v, want pilot DM approval card", calls[0])
+	if calls[0].Channel != "C123" || calls[0].ThreadTS != "177.123" || strings.Contains(calls[0].DedupKey, "pilot_dm:") {
+		t.Fatalf("post call = %#v, want direct public thread reply", calls[0])
 	}
 	if strings.Contains(calls[0].Text, "HN profile 注册于 2024-09、karma 33。") {
-		t.Fatalf("approval card text = %q, leaked raw worker wording instead of Pi second-pass rewrite", calls[0].Text)
+		t.Fatalf("posted text = %q, leaked raw worker wording instead of Pi second-pass rewrite", calls[0].Text)
 	}
-	if !strings.Contains(calls[0].Text, "基本可以判断") || !strings.Contains(calls[0].Text, "待确认回复") {
-		t.Fatalf("approval card text = %q, want Pi-rewritten approval UI", calls[0].Text)
+	if !strings.Contains(calls[0].Text, "基本可以判断") || strings.Contains(calls[0].Text, "待确认回复") {
+		t.Fatalf("posted text = %q, want direct Pi-rewritten reply", calls[0].Text)
 	}
 	if len(runtime.requests) != 1 {
 		t.Fatalf("persona requests = %d, want one worker-result second pass", len(runtime.requests))
@@ -361,11 +361,8 @@ func TestAgentRunnerUpdateReturnsPersonaDelegateResultToPiBeforeApproval(t *test
 	if err != nil {
 		t.Fatalf("ListPendingActions: %v", err)
 	}
-	if len(pending) != 1 || pending[0].ActionType != slackActionTypeThreadReply || pending[0].ChannelID != "C123" || pending[0].ThreadTS != "177.123" {
-		t.Fatalf("pending actions = %#v, want one original-thread reply approval", pending)
-	}
-	if got := stringFromAny(pending[0].Params["approvalDecision"]); got != "pending" {
-		t.Fatalf("approvalDecision = %q, want pending", got)
+	if len(pending) != 0 {
+		t.Fatalf("pending actions = %#v, want no original-thread reply approval", pending)
 	}
 	assertReactionCalls(t, reactions.Calls(), []reactionCall{
 		{Method: "remove", Channel: "C123", Timestamp: "177.111", Name: slackReactionEyes},

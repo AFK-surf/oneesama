@@ -359,16 +359,16 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 
 	poster.WaitForCalls(t, 1)
 	calls := poster.Calls()
-	if calls[0].Channel != "D_PENG" || calls[0].ThreadTS != "" {
-		t.Fatalf("post call = %#v, want pilot DM approval card", calls[0])
+	if calls[0].Channel != "C_TRIAGE" || calls[0].ThreadTS != "200.000" {
+		t.Fatalf("post call = %#v, want direct thread reply", calls[0])
 	}
-	if got := calls[0].Text; !strings.Contains(got, "Pi 读完后") || !strings.Contains(got, "Pending action") || strings.Contains(got, "codex visible reply") {
-		t.Fatalf("posted text = %q, want Pi approval card and no Codex visible reply", got)
+	if got := calls[0].Text; !strings.Contains(got, "Pi 读完后") || strings.Contains(got, "Pending action") || strings.Contains(got, "codex visible reply") {
+		t.Fatalf("posted text = %q, want direct Pi reply and no Codex visible reply", got)
 	}
 
 	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
-	if updated.Mutations != 0 || updated.Failures != 0 {
-		t.Fatalf("updated mutations/failures = %d/%d, want no public mutation; run=%#v", updated.Mutations, updated.Failures, updated)
+	if updated.Mutations != 1 || updated.Failures != 0 {
+		t.Fatalf("updated mutations/failures = %d/%d, want one public reply mutation; run=%#v", updated.Mutations, updated.Failures, updated)
 	}
 	if updated.Metadata["persona_dynamic_context_expected"] != true {
 		t.Fatalf("metadata = %#v, want persona_dynamic_context_expected", updated.Metadata)
@@ -386,24 +386,24 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 		t.Fatalf("actions = %#v, want one persona action", updated.Actions)
 	}
 	var sawForeground bool
-	var sawApproval bool
+	var sawThreadReply bool
 	for _, call := range updated.ToolCalls {
 		if call.Tool == "persona_runtime" && call.Action == "foreground_triage" && call.Success && call.Result == persona.DecisionReply {
 			sawForeground = true
 		}
-		if call.Tool == "slack_api" && call.Action == "persona_reply_pending_dm_approval" && call.Success {
-			sawApproval = true
+		if call.Tool == "slack_api" && call.Action == "post_thread_reply" && call.Success {
+			sawThreadReply = true
 		}
 	}
-	if !sawForeground || !sawApproval {
-		t.Fatalf("tool calls = %#v, want persona foreground + pilot approval DM", updated.ToolCalls)
+	if !sawForeground || !sawThreadReply {
+		t.Fatalf("tool calls = %#v, want persona foreground + direct thread reply", updated.ToolCalls)
 	}
 	pending, err := service.triage.ListPendingActions(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("ListPendingActions: %v", err)
 	}
-	if len(pending) != 1 || pending[0].ActionType != slackActionTypeThreadReply || pending[0].Status != PendingActionStatusPending {
-		t.Fatalf("pending actions = %#v, want one pending thread reply", pending)
+	if len(pending) != 0 {
+		t.Fatalf("pending actions = %#v, want no pending thread reply", pending)
 	}
 	if updated.Metadata["persona_foreground_queued"] != false {
 		t.Fatalf("metadata = %#v, want foreground queue cleared", updated.Metadata)
@@ -591,8 +591,8 @@ func TestSlackTriageCodexOnlyDoesNotCallPersonaRuntime(t *testing.T) {
 		t.Fatalf("started = %#v, want Codex finalization", started)
 	}
 	poster.WaitForCalls(t, 1)
-	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "codex visible reply") {
-		t.Fatalf("poster calls = %#v, want Codex approval card in pilot DM", calls)
+	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "C_TRIAGE" || calls[0].ThreadTS != "200.000" || !strings.Contains(calls[0].Text, "codex visible reply") {
+		t.Fatalf("poster calls = %#v, want direct Codex thread reply", calls)
 	}
 	runtime.mu.Lock()
 	requests := len(runtime.requests)
@@ -702,12 +702,12 @@ func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleR
 		t.Fatalf("StartSlackTriage: %v", err)
 	}
 	poster.WaitForCalls(t, 1)
-	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "我查了下") || strings.Contains(calls[0].Text, "Google 这轮发布") {
-		t.Fatalf("poster calls = %#v, want Pi-owned approval card, not raw Codex candidate", calls)
+	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "C_TRIAGE" || calls[0].ThreadTS != "200.000" || !strings.Contains(calls[0].Text, "我查了下") || strings.Contains(calls[0].Text, "Google 这轮发布") {
+		t.Fatalf("poster calls = %#v, want direct Pi-owned reply, not raw Codex candidate", calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Finalization.Run.ID)
-	if updated.Mutations != 0 || updated.Failures != 0 {
-		t.Fatalf("updated mutations/failures = %d/%d, want no public mutation", updated.Mutations, updated.Failures)
+	if updated.Mutations != 1 || updated.Failures != 0 {
+		t.Fatalf("updated mutations/failures = %d/%d, want one public reply mutation", updated.Mutations, updated.Failures)
 	}
 	if len(updated.Actions) != 1 || updated.Actions[0].Brief != "Review reply" {
 		t.Fatalf("actions = %#v, want Pi persona action recorded", updated.Actions)
@@ -865,8 +865,8 @@ func TestSlackTriagePiFirstLiveSkipsPrePiRunnerAndPostsPersonaReply(t *testing.T
 	if runner.startCount != 0 {
 		t.Fatalf("runner.startCount after Pi reply = %d, want no StartTask", runner.startCount)
 	}
-	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "Pi-first 直接评价") {
-		t.Fatalf("poster calls = %#v, want Pi-first approval card", calls)
+	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "C_TRIAGE" || calls[0].ThreadTS != "220.000" || !strings.Contains(calls[0].Text, "Pi-first 直接评价") {
+		t.Fatalf("poster calls = %#v, want direct Pi-first thread reply", calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
 	if updated.Metadata["foreground_chain"] != slackTriageForegroundChainPiFirstLive {
@@ -2393,8 +2393,8 @@ func TestSlackTriagePiFirstLiveBlocksExternalProjectDebugDelegation(t *testing.T
 		t.Fatalf("runner.startCount = %d, want no project-code worker", runner.startCount)
 	}
 	calls := poster.Calls()
-	if len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "项目 owner") || !strings.Contains(calls[0].Text, "不直接下场查 repo") {
-		t.Fatalf("poster calls = %#v, want secretary routing approval card", calls)
+	if len(calls) != 1 || calls[0].Channel != "C_TRIAGE" || calls[0].ThreadTS != "222.000" || !strings.Contains(calls[0].Text, "项目 owner") || !strings.Contains(calls[0].Text, "不直接下场查 repo") {
+		t.Fatalf("poster calls = %#v, want direct secretary routing reply", calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
 	if updated.Metadata["pi_first_decision"] != persona.DecisionReply {

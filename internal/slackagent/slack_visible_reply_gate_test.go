@@ -29,7 +29,7 @@ func TestVisibleReplyQualityGateDropsFrameworkProtocolLeaks(t *testing.T) {
 	if verdict := slackVisibleReplyAllowListVerdictForAction(action); verdict.Allowed || verdict.Reason != slackVisibleReplyAllowReasonInternalMeta {
 		t.Fatalf("verdict = %#v, want internal-meta block despite anchor", verdict)
 	}
-	if actions := requireSlackTriageVisibleReplyApproval([]SlackTriageDecisionAction{action}); len(actions) != 0 {
+	if actions := slackTriageVisibleReplyActionsAfterGate([]SlackTriageDecisionAction{action}); len(actions) != 0 {
 		t.Fatalf("actions = %#v, want framework protocol leak dropped", actions)
 	}
 }

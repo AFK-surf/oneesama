@@ -45,7 +45,7 @@ func (s *Service) finalizeSlackTriageJob(ctx context.Context, job agentrunner.Jo
 	actions = filterSlackTriageActionsForMessages(actions, messages, s.botUserID)
 	personaDecision := decision
 	personaDecision.Actions = append([]SlackTriageDecisionAction(nil), actions...)
-	actions = requireSlackTriageVisibleReplyApproval(actions)
+	actions = slackTriageVisibleReplyActionsAfterGate(actions)
 	decision.Actions = actions
 	if !ok {
 		actions = nil

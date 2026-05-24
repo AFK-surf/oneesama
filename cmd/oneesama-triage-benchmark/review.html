@@ -874,7 +874,7 @@ function renderCase(row, idx) {
     const before = row.dryRun.actionsBeforeGate || [];
     const after = row.dryRun.actionsAfterGate || [];
     if (after.length !== before.length || (before.length > 0 && after.length === 0)) {
-      card.appendChild(renderActions(after, "After safety / approval gate"));
+      card.appendChild(renderActions(after, "After safety gate"));
     }
 
     card.appendChild(renderVerdicts(row.dryRun.visibleReplyVerdicts || []));

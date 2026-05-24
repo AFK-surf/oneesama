@@ -857,21 +857,21 @@ Caveat: It won't fix system architecture for ya, so you still need BRAIN as mast
 	poster.WaitForCalls(t, 1)
 	calls := poster.Calls()
 	if len(calls) != 1 {
-		t.Fatalf("poster calls = %d, want 1 approval card", len(calls))
+		t.Fatalf("poster calls = %d, want 1 direct thread reply", len(calls))
 	}
 	call := calls[0]
-	if call.Channel != "D_PENG" || call.ThreadTS != "" || !strings.Contains(call.Text, "这条 X") {
-		t.Fatalf("post call = %#v, want approval card in pilot DM", call)
+	if call.Channel != "C123" || call.ThreadTS != "1778767510.917049" || !strings.Contains(call.Text, "这条 X") {
+		t.Fatalf("post call = %#v, want direct thread reply", call)
 	}
-	if len(call.Blocks) == 0 || !strings.Contains(call.Text, "待确认回复") || !strings.Contains(call.DedupKey, "pilot_dm:") {
-		t.Fatalf("post call = %#v, want pending action card", call)
+	if len(call.Blocks) == 0 || strings.Contains(call.Text, "待确认回复") || strings.Contains(call.DedupKey, "pilot_dm:") {
+		t.Fatalf("post call = %#v, want public reply blocks without approval card", call)
 	}
 	status, err := service.TriageStatus(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("TriageStatus: %v", err)
 	}
-	if len(status.PendingActions) != 1 || status.PendingActions[0].ActionType != slackActionTypeThreadReply {
-		t.Fatalf("pending actions = %#v, want one read-only reply pending action", status.PendingActions)
+	if len(status.PendingActions) != 0 {
+		t.Fatalf("pending actions = %#v, want no read-only reply pending action", status.PendingActions)
 	}
 }
 

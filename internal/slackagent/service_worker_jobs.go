@@ -97,7 +97,7 @@ func (s *Service) handlePersonaDelegatedWorkerResult(ctx context.Context, job ag
 	result := callPersonaShadow(callCtx, s.personaRuntime, "worker_return", request)
 	disposition := s.applySlackPersonaForegroundDispositions(result, request, messages)
 	result = disposition.Result
-	actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(ref.ChannelID, ref.ThreadTS, result, request))
+	actions := slackTriageVisibleReplyActionsAfterGate(slackPersonaForegroundActions(ref.ChannelID, ref.ThreadTS, result, request))
 	toolCalls := []SlackTriageToolCall{personaDelegatedWorkerReturnToolCall(job, result)}
 	toolCalls = append(toolCalls, disposition.ToolCalls...)
 	directToolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, ref.ChannelID, ref.ThreadTS, runID, actions, slackTriageDirectActionOptions{

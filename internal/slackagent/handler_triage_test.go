@@ -145,8 +145,8 @@ func TestHandleTriageRunDryRunBlocksSideEffects(t *testing.T) {
 	if !payload.OK || !payload.DryRun.DryRun {
 		t.Fatalf("payload = %#v, want dry_run result", payload)
 	}
-	if payload.Status != "would_request_reply_approval" {
-		t.Fatalf("status = %q, want would_request_reply_approval", payload.Status)
+	if payload.Status != "would_post_reply" {
+		t.Fatalf("status = %q, want would_post_reply", payload.Status)
 	}
 	if len(payload.DryRun.ActionsBeforeGate) != 1 || len(payload.DryRun.ActionsAfterGate) != 1 {
 		t.Fatalf("actions before/after = %d/%d, want 1/1", len(payload.DryRun.ActionsBeforeGate), len(payload.DryRun.ActionsAfterGate))
@@ -154,8 +154,8 @@ func TestHandleTriageRunDryRunBlocksSideEffects(t *testing.T) {
 	if len(payload.DryRun.VisibleReplyVerdicts) != 1 || !payload.DryRun.VisibleReplyVerdicts[0].Allowed {
 		t.Fatalf("visible verdicts = %#v, want allowed reply verdict", payload.DryRun.VisibleReplyVerdicts)
 	}
-	if !stringSliceContains(payload.DryRun.SideEffectsBlocked, "approval_card") || !stringSliceContains(payload.DryRun.SideEffectsBlocked, "slack_post") {
-		t.Fatalf("side effects = %#v, want approval_card + slack_post blocked", payload.DryRun.SideEffectsBlocked)
+	if stringSliceContains(payload.DryRun.SideEffectsBlocked, "approval_card") || !stringSliceContains(payload.DryRun.SideEffectsBlocked, "slack_post") {
+		t.Fatalf("side effects = %#v, want slack_post blocked and no approval_card", payload.DryRun.SideEffectsBlocked)
 	}
 }
 

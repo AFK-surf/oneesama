@@ -167,7 +167,7 @@ func (s *Service) queueSlackTriagePersonaForeground(ctx context.Context, workspa
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
 		disposition := s.applySlackPersonaForegroundDispositions(result, request, messages)
 		result = disposition.Result
-		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result, request))
+		actions := slackTriageVisibleReplyActionsAfterGate(slackPersonaForegroundActions(channelID, threadTS, result, request))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreBotReply,
@@ -201,7 +201,7 @@ func (s *Service) queueSlackTriagePersonaForegroundRequest(ctx context.Context, 
 		result := callPersonaShadow(callCtx, s.personaRuntime, "triage", request)
 		disposition := s.applySlackPersonaForegroundDispositions(result, request, messages)
 		result = disposition.Result
-		actions := requireSlackTriageVisibleReplyApproval(slackPersonaForegroundActions(channelID, threadTS, result, request))
+		actions := slackTriageVisibleReplyActionsAfterGate(slackPersonaForegroundActions(channelID, threadTS, result, request))
 		toolCalls, failures, mutations := s.executeSlackTriageDirectActionsWithOptions(ctx, workspaceID, channelID, threadTS, runID, actions, slackTriageDirectActionOptions{
 			SnapshotMessages:       messages,
 			IgnoreExistingBotReply: ignoreExistingBotReply,

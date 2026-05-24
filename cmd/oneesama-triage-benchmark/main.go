@@ -1,7 +1,7 @@
 // Command oneesama-triage-benchmark replays recent Slack threads through
 // Oneesama's live triage dry-run path. It is read-only: Slack fetching is
 // via conversations.history/replies and the triage call uses dry_run=true,
-// so posting, worker starts, reactions, memory writes, and approval cards
+// so posting, worker starts, reactions, and memory writes
 // are blocked by the service.
 package main
 

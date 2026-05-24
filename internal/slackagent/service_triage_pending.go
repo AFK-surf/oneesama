@@ -88,7 +88,7 @@ func (s *Service) insertSlackTriagePendingActions(ctx context.Context, workspace
 	return pending
 }
 
-func requireSlackTriageVisibleReplyApproval(actions []SlackTriageDecisionAction) []SlackTriageDecisionAction {
+func slackTriageVisibleReplyActionsAfterGate(actions []SlackTriageDecisionAction) []SlackTriageDecisionAction {
 	if len(actions) == 0 {
 		return actions
 	}
@@ -100,8 +100,8 @@ func requireSlackTriageVisibleReplyApproval(actions []SlackTriageDecisionAction)
 				continue
 			}
 			action.Type = slackActionTypeThreadReply
-			action.RequiresConfirmation = true
-			action.Title = firstNonEmpty(strings.TrimSpace(action.Title), "Review triage reply")
+			action.RequiresConfirmation = false
+			action.Title = firstNonEmpty(strings.TrimSpace(action.Title), "Triage reply")
 			action.EvidenceAnchors = verdict.EvidenceAnchors
 		}
 		out = append(out, action)
