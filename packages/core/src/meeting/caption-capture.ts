@@ -696,6 +696,7 @@ export async function installMeetCaptionCapture(
       if (!normalized) return true;
       if (normalized.length <= 2) return true;
       if (/^(language|english|closed_caption|live captions|format_size|font size|circle|font color|settings|open caption settings|groups)$/i.test(normalized)) return true;
+      if (/^chinese,\s*(cantonese|mandarin)\s*\((simplified|traditional)\)$/i.test(normalized)) return true;
       if (/^(gemini|take notes with gemini|pen_spark|adaptive_audio_mic|domain_disabled)$/i.test(normalized)) return true;
       if (/^(press down arrow|external participants joined|your audio is merged with nearby devices)/i.test(normalized)) return true;
       if (/^(meeting tools|more options|leave call|turn on microphone|turn off microphone|turn on camera|turn off camera)$/i.test(normalized)) return true;
@@ -800,6 +801,22 @@ export async function installMeetCaptionCapture(
       return true;
     }
 
+    function shouldForwardToRealtimeBridge(event: CaptionEvent): boolean {
+      if (typeof window.MAB_REALTIME_CLIENT?.sendRealtimeEvent !== "function") return false;
+      const text = normalize(event?.text || "");
+      if (!text || captionUiText(text) || aggregateLabel(text)) return false;
+      const speaker = normalize(event?.speaker || "");
+      const botName = normalize(
+        (window.MAB_REALTIME_BRIDGE_CONFIG?.botName as string | undefined) ||
+          window.MAB_LOCAL_DIALOG_CONFIG?.botName ||
+          "",
+      );
+      if (speaker && botName && (speaker === botName || speaker.includes(botName) || botName.includes(speaker))) {
+        return false;
+      }
+      return true;
+    }
+
     function forwardToLocalDialog(event: CaptionEvent): void {
       if (!shouldForwardToLocalDialog(event)) return;
       const payload: LocalDialogInput = {
@@ -817,6 +834,55 @@ export async function installMeetCaptionCapture(
         state.errors.push(message.slice(0, 300));
         if (state.errors.length > 20) state.errors.splice(0, state.errors.length - 20);
       });
+    }
+
+    function forwardToRealtimeBridge(event: CaptionEvent): void {
+      if (!shouldForwardToRealtimeBridge(event)) return;
+      const runtime = ((window as any).__MAB_REALTIME_CAPTION_FALLBACK ||= {
+        pending: {},
+        recent: {},
+      });
+      const streamId = normalize(event.streamId || "") || "caption";
+      if (runtime.pending[streamId]) window.clearTimeout(runtime.pending[streamId]);
+      runtime.pending[streamId] = window.setTimeout(() => {
+        delete runtime.pending[streamId];
+        const text = normalize(event.text || "");
+        const speaker = normalize(event.speaker || "") || "someone";
+        if (!text || captionUiText(text) || aggregateLabel(text)) return;
+        const signature = `${speaker}\n${text}`;
+        const now = Date.now();
+        if (now - Number(runtime.recent[signature] || 0) < 8000) return;
+        runtime.recent[signature] = now;
+        for (const [key, ts] of Object.entries(runtime.recent)) {
+          if (now - Number(ts || 0) > 30000) delete runtime.recent[key];
+        }
+        const client = window.MAB_REALTIME_CLIENT;
+        if (typeof client?.sendRealtimeEvent !== "function") return;
+        client.sendRealtimeEvent({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: `Meet speech from ${speaker}: ${text}`,
+              },
+            ],
+          },
+        });
+        client.sendRealtimeEvent({
+          type: "response.create",
+          response: {
+            instructions:
+              "Reply to the user's latest spoken Meet caption naturally and concisely in Chinese. Do not mention captions, transcription, or fallback routing unless asked.",
+          },
+        });
+        const bridge = window.MAB_REALTIME_BRIDGE as Record<string, any> | null | undefined;
+        if (bridge) {
+          bridge.responsesRequested = Number(bridge.responsesRequested || 0) + 1;
+        }
+      }, 650);
     }
 
     if (window.__MAB_CAPTION_CAPTURE_INSTALLED) {
@@ -866,6 +932,7 @@ export async function installMeetCaptionCapture(
           if (state.captions.length > 100) state.captions.splice(0, state.captions.length - 100);
           window.__mabOnCaptionCapture(event);
           forwardToLocalDialog(event);
+          forwardToRealtimeBridge(event);
           emittedForContainer = true;
         }
         if (!emittedForContainer) {
@@ -891,6 +958,7 @@ export async function installMeetCaptionCapture(
           if (state.captions.length > 100) state.captions.splice(0, state.captions.length - 100);
           window.__mabOnCaptionCapture(event);
           forwardToLocalDialog(event);
+          forwardToRealtimeBridge(event);
         }
       }
     }
