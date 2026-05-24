@@ -92,6 +92,7 @@
     "smoke:cutover-evidence": "tsx src/cli.ts cutover-evidence-smoke",
     "smoke:realtime-sdp": "tsx src/cli.ts realtime-sdp-smoke",
     "smoke:realtime-live-tool": "tsx src/cli.ts realtime-live-tool-smoke",
+    "smoke:realtime-live-routing": "tsx src/cli.ts realtime-live-routing-smoke",
     "smoke:realtime": "tsx src/cli.ts realtime-smoke",
     "smoke:slack": "tsx src/cli.ts slack-smoke"
   },

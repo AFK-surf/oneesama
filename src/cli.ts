@@ -132,6 +132,7 @@ Commands:
   realtime-session-update-smoke Verify Realtime session.update registers instructions and tools
   realtime-worker-tool-smoke Verify Realtime worker tool calls reach Meeting Agent
   realtime-live-tool-smoke Verify real Realtime data channel can trigger worker tools when an OpenAI-compatible key is set
+  realtime-live-routing-smoke Verify real Realtime routes visual requests to app/browser/generation tools
   avatar-state-smoke Verify Realtime avatar mood/action tools reach the avatar runtime
   avatar-visual-smoke Verify avatar mouth/action visual snapshots and state gates
   avatar-vrm-smoke Verify experimental Three.js/VRM avatar render pixels and state controls
@@ -7904,6 +7905,280 @@ async function realtimeLiveToolSmoke() {
   }
 }
 
+async function realtimeLiveRoutingSmoke() {
+  const config = getRuntimeConfig();
+  const shouldRunLive = shouldRunOptionalSmoke(
+    "MAB_RUN_REALTIME_LIVE_ROUTING",
+    "MAB_REQUIRE_REALTIME_LIVE_ROUTING",
+  );
+  if (!config.openaiApiKey || !shouldRunLive) {
+    const skipped = {
+      ok: true,
+      skipped: true,
+      reason: config.openaiApiKey
+        ? "MAB_RUN_REALTIME_LIVE_ROUTING not enabled"
+        : "MAB_OPENAI_API_KEY/OPENAI_API_KEY missing",
+      note: "Set MAB_RUN_REALTIME_LIVE_ROUTING=1 to run this optional smoke. Set MAB_REQUIRE_REALTIME_LIVE_ROUTING=1 to make it mandatory.",
+    };
+    if (process.env.MAB_REQUIRE_REALTIME_LIVE_ROUTING === "1") {
+      assertSmoke(
+        false,
+        "MAB_OPENAI_API_KEY or OPENAI_API_KEY is required when MAB_REQUIRE_REALTIME_LIVE_ROUTING=1",
+        skipped,
+      );
+    }
+    console.log(JSON.stringify(skipped, null, 2));
+    return;
+  }
+
+  const { chromium } = await import("playwright");
+  const dataDir = await mkdtemp(pathJoin(tmpdir(), "meeting-avatar-bot-realtime-live-routing-"));
+  const env = {
+    MAB_MEETING_PORT: "18894",
+    MAB_MEETING_AGENT_URL: "http://127.0.0.1:18894",
+    MAB_BROWSER_HEADLESS: "true",
+    MAB_AGENT_RUNNER: "dry-run",
+    MAB_DRY_RUN_AGENT: "1",
+    MAB_DATA_DIR: dataDir,
+  };
+  const meeting = startService("apps/meeting-agent/src/index.js", env);
+  const executablePath =
+    config.chromiumExecutablePath && existsSync(config.chromiumExecutablePath)
+      ? config.chromiumExecutablePath
+      : undefined;
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath,
+    args: [
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
+      "--autoplay-policy=no-user-gesture-required",
+    ],
+  });
+
+  const visualToolNames = [
+    "share_existing_app_window",
+    "open_shared_browser_surface",
+    "create_shared_workspace",
+    "stop_video_stage",
+    "stop_shared_browser_surface",
+    "list_shareable_windows",
+  ];
+  const visualTools = visualToolNames.map((name) => {
+    const tool = realtimeToolSchemas.find((entry) => entry.name === name);
+    assertSmoke(tool, `Realtime visual routing tool schema missing: ${name}`, visualToolNames);
+    return tool;
+  });
+  const cases = [
+    {
+      id: "existing_app_pencil",
+      text: "用 Pencil 演示当前画面",
+      expectedTools: ["share_existing_app_window"],
+    },
+    {
+      id: "ambiguous_app_editor",
+      text: "用编辑器演示当前画面",
+      expectedTools: ["list_shareable_windows"],
+    },
+    {
+      id: "browser_url",
+      text: "打开 https://example.com 给我看",
+      expectedTools: ["open_shared_browser_surface"],
+    },
+    {
+      id: "generate_snake",
+      text: "做一个贪吃蛇，然后给我看",
+      expectedTools: ["create_shared_workspace"],
+    },
+    {
+      id: "create_dashboard",
+      text: "做一个 Q3 metrics dashboard",
+      expectedTools: ["create_shared_workspace"],
+    },
+    {
+      id: "stop_share",
+      text: "停止分享",
+      expectedTools: ["stop_video_stage", "stop_shared_browser_surface"],
+    },
+    {
+      id: "stop_when_idle_negative",
+      text: "现在没有共享时停止分享",
+      expectedTools: ["stop_video_stage", "stop_shared_browser_surface"],
+      forbiddenTools: [
+        "share_existing_app_window",
+        "open_shared_browser_surface",
+        "create_shared_workspace",
+      ],
+    },
+  ];
+  const results: unknown[] = [];
+
+  try {
+    await waitForServiceHealth(meeting, "http://127.0.0.1:18894/healthz", 20_000);
+    for (const testCase of cases) {
+      const context = await browser.newContext({ permissions: ["microphone", "camera"] });
+      await context.addInitScript({
+        content: `
+          (() => {
+            if (typeof globalThis.__name !== "function") {
+              Object.defineProperty(globalThis, "__name", {
+                value: (fn) => fn,
+                configurable: true,
+              });
+            }
+          })();
+        `,
+      });
+      await context.addInitScript({
+        content: buildAvatarInitScript({
+          botName: "Realtime Visual Routing Bot",
+          disableLive2D: true,
+        }),
+      });
+      await context.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "webrtc",
+          agentRuntime: config.openaiRealtimeAgentRuntime,
+          autoConnect: true,
+          simulateRemoteAudio: false,
+          tokenUrl: "http://127.0.0.1:18894/realtime/client-secret",
+          sdpUrl: config.openaiRealtimeSdpUrl,
+          instructions: buildRealtimeInstructions({
+            botName: "Realtime Visual Routing Bot",
+          }),
+          tools: visualTools,
+          session: { tool_choice: "auto" },
+          sendSessionUpdateOnConnect: true,
+          dryRunLocalTools: true,
+        }),
+      });
+      const page = await context.newPage();
+      try {
+        await page.goto("http://127.0.0.1:18894/healthz");
+        await page.waitForFunction(
+          () =>
+            window.MAB_AVATAR_READY?.ok === true &&
+            (
+              window.MAB_REALTIME_BRIDGE as
+                | { connection?: { dataChannelOpen?: boolean } }
+                | null
+                | undefined
+            )?.connection?.dataChannelOpen === true,
+          null,
+          { timeout: 35_000 },
+        );
+
+        await page.evaluate(
+          ({ text, tools }) => {
+            window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
+              type: "conversation.item.create",
+              item: {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text }],
+              },
+            });
+            window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
+              type: "response.create",
+              response: {
+                tools,
+                tool_choice: "auto",
+              },
+            });
+          },
+          { text: testCase.text, tools: visualTools },
+        );
+
+        await page.waitForFunction(
+          () => {
+            const bridge = window.MAB_REALTIME_BRIDGE as
+              | {
+                  meetTools?: { calls?: unknown[]; errors?: unknown[] };
+                  workspaceTools?: { calls?: unknown[]; errors?: unknown[] };
+                  errors?: unknown[];
+                }
+              | null
+              | undefined;
+            return Boolean(
+              (bridge?.meetTools?.calls?.length || 0) +
+                (bridge?.workspaceTools?.calls?.length || 0) >
+                0 ||
+                (bridge?.meetTools?.errors?.length || 0) > 0 ||
+                (bridge?.workspaceTools?.errors?.length || 0) > 0 ||
+                (bridge?.errors?.length || 0) > 0,
+            );
+          },
+          null,
+          { timeout: 45_000 },
+        );
+
+        const result = (await page.evaluate(() => ({
+          bridge: window.MAB_REALTIME_BRIDGE,
+          avatar: window.MAB_AVATAR_READY,
+        }))) as {
+          bridge?: RealtimeBridgeSnapshot & {
+            meetTools?: { calls?: Array<{ name?: string; [key: string]: unknown }>; errors?: unknown[] };
+            workspaceTools?: {
+              calls?: Array<{ name?: string; [key: string]: unknown }>;
+              errors?: unknown[];
+            };
+            errors?: unknown[];
+          };
+          avatar?: unknown;
+        };
+        const calls = [
+          ...(result.bridge?.meetTools?.calls || []),
+          ...(result.bridge?.workspaceTools?.calls || []),
+        ];
+        const actualTools = calls.map((call) => call.name).filter(Boolean);
+        assertSmoke(
+          actualTools.length > 0,
+          `Realtime routing case ${testCase.id} did not call a visual tool`,
+          result.bridge,
+        );
+        const forbiddenTools = "forbiddenTools" in testCase ? testCase.forbiddenTools : [];
+        assertSmoke(
+          !actualTools.some((tool) => forbiddenTools.includes(String(tool || ""))),
+          `Realtime routing case ${testCase.id} called forbidden surface creation tool`,
+          { text: testCase.text, actualTools, forbiddenTools, calls, bridge: result.bridge },
+        );
+        assertSmoke(
+          testCase.expectedTools.includes(String(actualTools[0] || "")),
+          `Realtime routing case ${testCase.id} called ${actualTools[0]}, expected ${testCase.expectedTools.join(" or ")}`,
+          { text: testCase.text, actualTools, calls, bridge: result.bridge },
+        );
+        results.push({
+          id: testCase.id,
+          text: testCase.text,
+          expectedTools: testCase.expectedTools,
+          actualTools,
+          firstCall: calls[0],
+        });
+      } catch (error) {
+        const snapshot = await page
+          .evaluate(() => ({
+            bridge: window.MAB_REALTIME_BRIDGE,
+            avatar: window.MAB_AVATAR_READY,
+          }))
+          .catch(() => ({}));
+        assertSmoke(false, `Realtime routing case ${testCase.id} failed`, {
+          error: String((error && error.message) || error),
+          text: testCase.text,
+          snapshot,
+        });
+      } finally {
+        await context.close();
+      }
+    }
+
+    console.log(JSON.stringify({ ok: true, cases: results }, null, 2));
+  } finally {
+    await browser.close();
+    meeting.child.kill("SIGTERM");
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}
+
 async function avatarStateSmoke() {
   const { chromium } = await import("playwright");
   const config = getRuntimeConfig();
@@ -11389,6 +11664,8 @@ if (command === "doctor") {
   await realtimeWorkerToolSmoke();
 } else if (command === "realtime-live-tool-smoke") {
   await realtimeLiveToolSmoke();
+} else if (command === "realtime-live-routing-smoke") {
+  await realtimeLiveRoutingSmoke();
 } else if (command === "avatar-state-smoke") {
   await avatarStateSmoke();
 } else if (command === "avatar-visual-smoke") {

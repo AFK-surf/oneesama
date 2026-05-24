@@ -88,7 +88,7 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			"date":     now.Format("2006-01-02"),
 			"time":     now.Format("15:04:05"),
 		})
-	case "start_demo_surface":
+	case "start_demo_surface", "open_shared_browser_surface":
 		var input RealtimeDemoSurfaceStartRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -103,7 +103,7 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, result)
-	case "start_demo_execution":
+	case "start_demo_execution", "create_shared_workspace":
 		var input RealtimeDemoExecutionStartRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -118,7 +118,7 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, result)
-	case "control_demo_surface":
+	case "control_demo_surface", "control_shared_browser_surface":
 		var input RealtimeDemoSurfaceControlRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -133,7 +133,7 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, result)
-	case "cancel_demo_surface":
+	case "cancel_demo_surface", "stop_shared_browser_surface":
 		var input RealtimeDemoSurfaceCancelRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{

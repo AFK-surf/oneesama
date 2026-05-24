@@ -68,6 +68,7 @@
     sendSessionUpdateOnConnect: boolean;
     autoRespondToWorkerToolCalls: boolean;
     autoRespondToMeetToolCalls: boolean;
+    dryRunLocalTools?: boolean;
     observeMeetChat: boolean;
     botName: string;
     simulateRemoteAudio?: boolean;
@@ -300,6 +301,10 @@
     "send_meet_chat",
     "present_video_stage",
     "stop_video_stage",
+    "list_shareable_windows",
+    "share_existing_app_window",
+    "list_shareable_apps",
+    "present_app_share",
     "read_meet_chat",
     "meet_participants",
     "active_speaker",
@@ -316,6 +321,10 @@
     "notion_search",
     "github_search",
     "fetch_url",
+    "open_shared_browser_surface",
+    "create_shared_workspace",
+    "control_shared_browser_surface",
+    "stop_shared_browser_surface",
     "start_demo_surface",
     "start_demo_execution",
     "control_demo_surface",
@@ -2798,37 +2807,54 @@
   }
 
   async function runLocalMeetTool(name, args = {}) {
+    if (config.dryRunLocalTools) return { ok: true, dryRun: true, tool: name, arguments: args };
     if (name === "send_meet_chat") return sendMeetChat(args);
     if (name === "present_video_stage")
       return postJson(localServiceUrl("/screen-share/video"), args);
     if (name === "stop_video_stage") return postJson(localServiceUrl("/screen-share/stop"), args);
-    if (name === "list_shareable_apps")
+    if (name === "list_shareable_windows" || name === "list_shareable_apps")
       return postJson(localServiceUrl("/screen-share/apps"), args);
-    if (name === "present_app_share") return postJson(localServiceUrl("/screen-share/app"), args);
+    if (name === "share_existing_app_window" || name === "present_app_share")
+      return postJson(localServiceUrl("/screen-share/app"), args);
     if (name === "read_meet_chat") return readMeetChat(args);
     if (name === "meet_participants" || name === "active_speaker")
       return readMeetingAwarenessTool(name);
     throw new Error(`unsupported local meet tool: ${name}`);
   }
 
+  function normalizeWorkspaceToolName(name: string) {
+    if (name === "open_shared_browser_surface") return "start_demo_surface";
+    if (name === "create_shared_workspace") return "start_demo_execution";
+    if (name === "control_shared_browser_surface") return "control_demo_surface";
+    if (name === "stop_shared_browser_surface") return "cancel_demo_surface";
+    return name;
+  }
+
   async function runLocalWorkspaceTool(name, args = {}) {
     if (!LOCAL_WORKSPACE_TOOLS.has(name))
       throw new Error(`unsupported local workspace tool: ${name}`);
-    if (name === "start_demo_execution") {
+    if (config.dryRunLocalTools) return { ok: true, dryRun: true, tool: name, arguments: args };
+    if (name === "create_shared_workspace" || name === "start_demo_execution") {
       updateAvatarHudStatus("writing_code", "Writing code", {
         mood: "thinking",
         action: "think",
         holdMs: 30000,
       });
-    } else if (name === "start_demo_surface" || name === "control_demo_surface") {
+    } else if (
+      name === "open_shared_browser_surface" ||
+      name === "start_demo_surface" ||
+      name === "control_shared_browser_surface" ||
+      name === "control_demo_surface"
+    ) {
       updateAvatarHudStatus("opening_preview", "Opening preview", {
         mood: "thinking",
         action: "lean_forward",
         holdMs: 15000,
       });
     }
-    const result = await postJson(localServiceUrl(`/tools/${encodeURIComponent(name)}`), args);
-    if (name === "start_demo_execution") {
+    const backendName = normalizeWorkspaceToolName(name);
+    const result = await postJson(localServiceUrl(`/tools/${encodeURIComponent(backendName)}`), args);
+    if (name === "create_shared_workspace" || name === "start_demo_execution") {
       const status = (result as { status?: string; ok?: boolean; error?: string })?.status || "";
       if ((result as { ok?: boolean })?.ok === false) {
         updateAvatarHudStatus("blocked", "Blocked", { mood: "sad", action: "shrug" });

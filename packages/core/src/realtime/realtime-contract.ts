@@ -127,27 +127,48 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "start_demo_surface",
+    name: "list_shareable_windows",
     description:
-      "Start a bot-owned synthetic Computer Use demo surface for show-and-tell work. Use when the user asks to share screen, show the screen, open a page, demonstrate something visually, or inspect a UI while continuing the meeting conversation. This uses the bot-owned synthetic share path; do not ask the user to choose or confirm a local app/window.",
+      "List existing macOS applications/windows that the meeting avatar can share through the native app-share path. Use when the user asks to share a generic category like editor/browser/window/app/design tool, or when a named app has multiple possible matches.",
     parameters: {
       type: "object",
       properties: {
-        url: { type: "string", description: "HTTP(S) URL to open in the bot-owned demo workspace." },
-        goal: {
-          type: "string",
-          description: "Short user-facing goal for the demo, e.g. 'show the dashboard trend'.",
-        },
-        instruction: {
-          type: "string",
-          description: "Internal instruction for the Computer Use adapter. Do not include secrets.",
-        },
-        title: { type: "string", description: "Visible title for the shared demo surface." },
-        subtitle: { type: "string", description: "Visible subtitle for the shared demo surface." },
         session_id: { type: "string", description: "Current meeting session id when known." },
-        demo_session_id: {
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "share_existing_app_window",
+    description:
+      "Share a specific existing macOS app/window in the current Meet using the native app-share path. Use immediately when the user names a concrete app/window title such as Pencil, VS Code, Chrome, Notion, Terminal, or Activity Monitor. If the user only says a generic category like editor/browser/window/app/design tool, call list_shareable_windows first instead of guessing. Do not use browser/workspace tools for existing app/window requests.",
+    parameters: {
+      type: "object",
+      properties: {
+        applicationName: {
           type: "string",
-          description: "Optional stable demo session id for audit/reuse.",
+          description:
+            "Spoken app name to share, e.g. Pencil, Notion, Chrome, Terminal, Activity Monitor.",
+        },
+        bundleIdentifier: {
+          type: "string",
+          description: "Optional macOS bundle identifier when known.",
+        },
+        windowTitle: {
+          type: "string",
+          description: "Optional visible window title when the app has multiple windows.",
+        },
+        processId: {
+          type: "integer",
+          description: "Optional process id from list_shareable_windows.",
+        },
+        session_id: { type: "string", description: "Current meeting session id when known." },
+        title: { type: "string", description: "Visible share title." },
+        subtitle: { type: "string", description: "Visible share subtitle." },
+        mode: {
+          type: "string",
+          description: "Native app-share mode. Usually omit; the service defaults to native.",
         },
       },
       required: [],
@@ -155,9 +176,37 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "start_demo_execution",
+    name: "open_shared_browser_surface",
     description:
-      "Start an end-to-end demo execution: use this when the user asks you to directly do a task and show/share/demo the result, e.g. '做一个贪吃蛇，然后给我看/分享屏幕'. This starts the visual demo surface and a code-capable worker; do not answer with a plan instead.",
+      "Share a bot-owned browser/synthetic surface for a URL, web page, or generated visual workspace. Use for explicit URL/page/browser-surface requests. Do not use for named local macOS app/window requests.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "HTTP(S) URL to open in the bot-owned workspace." },
+        goal: {
+          type: "string",
+          description: "Short user-facing goal for the shared surface, e.g. 'show the dashboard trend'.",
+        },
+        instruction: {
+          type: "string",
+          description: "Internal instruction for the Computer Use adapter. Do not include secrets.",
+        },
+        title: { type: "string", description: "Visible title for the shared surface." },
+        subtitle: { type: "string", description: "Visible subtitle for the shared surface." },
+        session_id: { type: "string", description: "Current meeting session id when known." },
+        demo_session_id: {
+          type: "string",
+          description: "Optional stable shared-surface session id for audit/reuse.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "create_shared_workspace",
+    description:
+      "Generate/build a new artifact or code result, then present the result on the shared browser surface. Use only when the user asks you to create, build, implement, or generate something new and show the result. Never use this for showing an existing app/window.",
     parameters: {
       type: "object",
       properties: {
@@ -171,9 +220,9 @@ export const realtimeToolSchemas = [
         },
         demo_url: {
           type: "string",
-          description: "Optional initial URL to show on the demo surface while the worker starts.",
+          description: "Optional initial URL to show on the shared surface while the worker starts.",
         },
-        title: { type: "string", description: "Visible title for the shared demo surface." },
+        title: { type: "string", description: "Visible title for the shared surface." },
         issue_id: {
           type: "string",
           description: "Optional fixture or external issue id. External writes still require approval.",
@@ -186,7 +235,7 @@ export const realtimeToolSchemas = [
         session_id: { type: "string", description: "Current meeting session id when known." },
         demo_session_id: {
           type: "string",
-          description: "Optional stable demo session id for audit/reuse.",
+          description: "Optional stable shared-surface session id for audit/reuse.",
         },
         user_instruction: {
           type: "string",
@@ -198,9 +247,9 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "control_demo_surface",
+    name: "control_shared_browser_surface",
     description:
-      "Continue controlling the active bot-owned demo surface. Use after start_demo_surface to change the shared content, observe/capture the page, scroll, highlight, click approved UI, or type approved text without restarting the meeting share.",
+      "Continue controlling the active shared browser/synthetic surface. Use after open_shared_browser_surface to change the shared content, observe/capture the page, scroll, highlight, click approved UI, or type approved text without restarting the meeting share.",
     parameters: {
       type: "object",
       properties: {
@@ -211,7 +260,7 @@ export const realtimeToolSchemas = [
         },
         url: {
           type: "string",
-          description: "HTTP(S) URL to open in the active demo browser when action is open_url.",
+          description: "HTTP(S) URL to open in the active shared browser when action is open_url.",
         },
         instruction: {
           type: "string",
@@ -230,7 +279,7 @@ export const realtimeToolSchemas = [
         session_id: { type: "string", description: "Current meeting session id when known." },
         demo_session_id: {
           type: "string",
-          description: "Active demo session id. Omit to use the active demo surface.",
+          description: "Active shared-surface session id. Omit to use the active shared surface.",
         },
       },
       required: ["action"],
@@ -238,15 +287,15 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "cancel_demo_surface",
-    description: "Cancel and stop the active bot-owned Computer Use demo surface.",
+    name: "stop_shared_browser_surface",
+    description: "Cancel and stop the active bot-owned browser/synthetic share surface.",
     parameters: {
       type: "object",
       properties: {
         session_id: { type: "string", description: "Current meeting session id when known." },
         demo_session_id: {
           type: "string",
-          description: "Demo session id to cancel. Omit to cancel the active demo session.",
+          description: "Shared-surface session id to cancel. Omit to cancel the active shared surface.",
         },
         reason: { type: "string", description: "Short cancellation reason." },
       },
@@ -942,7 +991,7 @@ export function buildRealtimeInstructions({
     "Do not proactively offer capabilities the user has not asked for. Avoid phrases like “I can also help with...” unless the user asks what you can do.",
     "When asked what you can do, describe capabilities in user-facing terms: listen and respond in the meeting, understand who is speaking, read meeting chat or shared links, help with workspace lookup, summarize, plan, research, and follow up.",
     "When the user asks you to do complex work, use the appropriate internal action. Only say a one-line transition if the user needs visible confirmation, and do not narrate the internal mechanism.",
-    "For progress, intent, or in-flight status, prefer the visual channel: update avatar mood/action/status HUD or demo surface state instead of speaking. Speech is for answers, user-facing questions, and blockers.",
+    "For progress, intent, or in-flight status, prefer the visual channel: update avatar mood/action/status HUD or shared-surface state instead of speaking. Speech is for answers, user-facing questions, and blockers.",
     "Identity contract: live speaker identity is provided by runtime context or identity lookup. If active speaker context marks someone as current_user, treat first-person wording like “我/我的/我是谁” as that identity. If identity is uncertain, ask a short clarification instead of guessing.",
     "Addressing contract: use the resolved profile's preferred spoken name. Treat aliases and honorifics as recognition hints, not as names to say aloud; if an English name is present, prefer it over a role-like nickname.",
     "Project context: AFK AI, Inc. builds oneesama as a meeting avatar and workspace automation framework.",
@@ -951,9 +1000,11 @@ export function buildRealtimeInstructions({
     "For identity questions, resolve the current speaker identity first. Do not answer from stale defaults.",
     "For personal task questions, resolve the current user profile first and use its workspace identifiers.",
     "For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
-    "For screen share / share screen / 给我看 / 演示 requests, use the bot-owned synthetic demo surface or video stage. Do not ask the user to choose a local app/window, and do not say browser or meeting-client confirmation is required.",
+    "Screen-share routing: if the user names a concrete existing app/window (for example Pencil, VS Code, Chrome, Notion, Terminal, Activity Monitor) and asks to show/share/present/演示 it, share that existing app/window. If the user only gives a category like editor/browser/window/app/design tool, list shareable windows first instead of guessing. Do not create a new workspace and do not invent a URL for the app name.",
+    "Browser-surface routing: use the bot-owned browser/synthetic surface for explicit URLs, web pages, video stages, or generated browser/workspace artifacts.",
+    "Generation routing: create a shared workspace only when the user asks you to create, implement, build, or generate something new and then show the result.",
     "If the user says to stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",
-    "For requests like “做一个贪吃蛇，然后给我看/分享屏幕/演示”, call start_demo_execution when the demo surface is available. The realtime avatar only confirms start/failure/completion briefly; execution happens in the background and the demo surface carries progress.",
+    "Examples: “用 Pencil 演示”, “共享 VS Code 屏幕”, “给我看 Notion” => share the existing app/window. “用编辑器演示” => list shareable windows first. “做一个贪吃蛇然后给我看”, “生成一个 dashboard 页面” => create a shared workspace and present the result.",
     "Ignore obvious self-echo: captions or transcript snippets attributed to “You” are usually your own prior speech, and your own prior speech may be duplicated inside another speaker's caption. Do not answer, apologize for, or diagnose that echo unless the user explicitly asks for debugging.",
     "If a long-running result is not ready, say you are handling it and will report back automatically. Never pretend it is complete before the result arrives.",
     "When live meeting participants or speaker context is injected, use it as conversation context. Do not recite detection sources, confidence values, or raw context fields unless the user asks for debugging.",

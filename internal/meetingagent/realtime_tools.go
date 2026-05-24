@@ -51,7 +51,7 @@ func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
 	out := make([]realtimeToolSchema, 0, len(definitions))
 	for _, definition := range definitions {
 		switch definition.Name {
-		case "start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface":
+		case "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface":
 			continue
 		default:
 			out = append(out, definition)
@@ -91,40 +91,53 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"muted":    boolSchema(true),
 		})),
 		realtimeTool("stop_video_stage", "Stop the current Google Meet video-stage/screen-share presentation. Use immediately when the user says 停止分享 / stop sharing / 关掉分享 / stop video stage.", objectSchema(nil, map[string]realtimeJSONSchema{})),
-		realtimeTool("start_demo_surface", "Start a bot-owned synthetic Computer Use demo surface for show-and-tell work. Use when the user asks to share screen, show the screen, open a page, demonstrate something visually, or inspect a UI while continuing the meeting conversation. This uses the bot-owned synthetic share path; do not ask the user to choose or confirm a local app/window.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"url":             stringSchema("HTTP(S) URL to open in the bot-owned demo workspace."),
-			"goal":            stringSchema("Short user-facing goal for the demo, e.g. 'show the dashboard trend'."),
-			"instruction":     stringSchema("Internal instruction for the Computer Use adapter. Do not include secrets."),
-			"title":           stringSchema("Visible title for the shared demo surface."),
-			"subtitle":        stringSchema("Visible subtitle for the shared demo surface."),
-			"session_id":      stringSchema("Current meeting session id when known."),
-			"demo_session_id": stringSchema("Optional stable demo session id for audit/reuse."),
+		realtimeTool("list_shareable_windows", "List existing macOS applications/windows that the meeting avatar can share through the native app-share path. Use when the user asks to share a generic category like editor/browser/window/app/design tool, or when a named app has multiple possible matches.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"session_id": stringSchema("Current meeting session id when known."),
 		})),
-		realtimeTool("start_demo_execution", "Start an end-to-end demo execution: use this when the user asks you to directly do a task and show/share/demo the result, e.g. '做一个贪吃蛇，然后给我看/分享屏幕'. This starts the visual demo surface and a code-capable worker; do not answer with a plan instead.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
+		realtimeTool("share_existing_app_window", "Share a specific existing macOS app/window in the current Meet using the native app-share path. Use immediately when the user names a concrete app/window title such as Pencil, VS Code, Chrome, Notion, Terminal, or Activity Monitor. If the user only says a generic category like editor/browser/window/app/design tool, call list_shareable_windows first instead of guessing. Do not use browser/workspace tools for existing app/window requests.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"applicationName":  stringSchema("Spoken app name to share, e.g. Pencil, Notion, Chrome, Terminal, Activity Monitor."),
+			"bundleIdentifier": stringSchema("Optional macOS bundle identifier when known."),
+			"windowTitle":      stringSchema("Optional visible window title when the app has multiple windows."),
+			"processId":        integerSchema("Optional process id from list_shareable_windows.", nil),
+			"session_id":       stringSchema("Current meeting session id when known."),
+			"title":            stringSchema("Visible share title."),
+			"subtitle":         stringSchema("Visible share subtitle."),
+			"mode":             stringSchema("Native app-share mode. Usually omit; the service defaults to native."),
+		})),
+		realtimeTool("open_shared_browser_surface", "Share a bot-owned browser/synthetic surface for a URL, web page, or generated visual workspace. Use for explicit URL/page/browser-surface requests. Do not use for named local macOS app/window requests.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"url":             stringSchema("HTTP(S) URL to open in the bot-owned workspace."),
+			"goal":            stringSchema("Short user-facing goal for the shared surface, e.g. 'show the dashboard trend'."),
+			"instruction":     stringSchema("Internal instruction for the Computer Use adapter. Do not include secrets."),
+			"title":           stringSchema("Visible title for the shared surface."),
+			"subtitle":        stringSchema("Visible subtitle for the shared surface."),
+			"session_id":      stringSchema("Current meeting session id when known."),
+			"demo_session_id": stringSchema("Optional stable shared-surface session id for audit/reuse."),
+		})),
+		realtimeTool("create_shared_workspace", "Generate/build a new artifact or code result, then present the result on the shared browser surface. Use only when the user asks you to create, build, implement, or generate something new and show the result. Never use this for showing an existing app/window.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
 			"task":                stringSchema("The exact user task to execute, preserving wording such as no-planning or show-the-work constraints."),
 			"task_url":            stringSchema("Optional Linear/task/GitHub URL that identifies the work item."),
-			"demo_url":            stringSchema("Optional initial URL to show on the demo surface while the worker starts."),
-			"title":               stringSchema("Visible title for the shared demo surface."),
+			"demo_url":            stringSchema("Optional initial URL to show on the shared surface while the worker starts."),
+			"title":               stringSchema("Visible title for the shared surface."),
 			"issue_id":            stringSchema("Optional fixture or external issue id. External writes still require approval."),
 			"issue_url":           stringSchema("Optional fixture or external issue URL. External writes still require approval."),
 			"request_issue_close": boolSchema(false),
 			"session_id":          stringSchema("Current meeting session id when known."),
-			"demo_session_id":     stringSchema("Optional stable demo session id for audit/reuse."),
+			"demo_session_id":     stringSchema("Optional stable shared-surface session id for audit/reuse."),
 			"user_instruction":    stringSchema("Additional user constraints, e.g. concise, don't narrate, show progress visually."),
 		})),
-		realtimeTool("control_demo_surface", "Continue controlling the active bot-owned demo surface. Use after start_demo_surface to change the shared content, observe/capture the page, scroll, highlight, click approved UI, or type approved text without restarting the meeting share.", objectSchema([]string{"action"}, map[string]realtimeJSONSchema{
+		realtimeTool("control_shared_browser_surface", "Continue controlling the active shared browser/synthetic surface. Use after open_shared_browser_surface to change the shared content, observe/capture the page, scroll, highlight, click approved UI, or type approved text without restarting the meeting share.", objectSchema([]string{"action"}, map[string]realtimeJSONSchema{
 			"action":          enumStringSchema("capture", "open_url", "capture", "scroll", "highlight", "click", "type"),
-			"url":             stringSchema("HTTP(S) URL to open in the active demo browser when action is open_url."),
+			"url":             stringSchema("HTTP(S) URL to open in the active shared browser when action is open_url."),
 			"instruction":     stringSchema("Short internal instruction for this step. Do not include secrets."),
 			"direction":       enumStringSchema("down", "down", "up", "left", "right"),
 			"amount":          integerSchema("Scroll amount in pixels when action is scroll.", float64(500)),
 			"text":            stringSchema("Visible text/ref to highlight or click, or text to type when action is type."),
 			"session_id":      stringSchema("Current meeting session id when known."),
-			"demo_session_id": stringSchema("Active demo session id. Omit to use the active demo surface."),
+			"demo_session_id": stringSchema("Active shared-surface session id. Omit to use the active shared surface."),
 		})),
-		realtimeTool("cancel_demo_surface", "Cancel and stop the active bot-owned Computer Use demo surface.", objectSchema(nil, map[string]realtimeJSONSchema{
+		realtimeTool("stop_shared_browser_surface", "Cancel and stop the active bot-owned browser/synthetic share surface.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"session_id":      stringSchema("Current meeting session id when known."),
-			"demo_session_id": stringSchema("Demo session id to cancel. Omit to cancel the active demo session."),
+			"demo_session_id": stringSchema("Shared-surface session id to cancel. Omit to cancel the active shared surface."),
 			"reason":          stringSchema("Short cancellation reason."),
 		})),
 		realtimeTool("read_meet_chat", "Read recent visible Google Meet chat messages and links from the current meeting.", objectSchema(nil, map[string]realtimeJSONSchema{

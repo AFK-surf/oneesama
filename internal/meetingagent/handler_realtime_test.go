@@ -81,11 +81,11 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 		t.Fatalf("instructions leaked identity/mechanism details: %q", instructions)
 	}
 	tools := body["tools"].([]any)
-	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "update_avatar_state", "resolve_speaker_identity") {
+	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "share_existing_app_window", "update_avatar_state", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
 	}
-	if toolNamesInclude(tools, "list_shareable_apps", "present_app_share") {
-		t.Fatalf("tools = %#v, realtime foreground must not expose app/window share tools", body["tools"])
+	if toolNamesInclude(tools, "list_shareable_apps", "present_app_share", "start_demo_surface", "start_demo_execution") {
+		t.Fatalf("tools = %#v, realtime foreground must not expose legacy/ambiguous screen-share tools", body["tools"])
 	}
 	updateAvatarState := toolByName(tools, "update_avatar_state")
 	updateParams := updateAvatarState["parameters"].(map[string]any)
@@ -95,11 +95,11 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 		updateProperties["status_text"] == nil {
 		t.Fatalf("update_avatar_state schema = %#v, want visual status HUD fields", updateAvatarState)
 	}
-	if toolNamesInclude(tools, "start_demo_surface", "start_demo_execution", "cancel_demo_surface") {
+	if toolNamesInclude(tools, "open_shared_browser_surface", "create_shared_workspace", "stop_shared_browser_surface") {
 		t.Fatalf("tools = %#v, demo surface tools must stay hidden when default-off", body["tools"])
 	}
 	sessionTools := session["tools"].([]any)
-	if toolNamesInclude(sessionTools, "start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface") {
+	if toolNamesInclude(sessionTools, "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface") {
 		t.Fatalf("session tools = %#v, demo surface tools must stay hidden when default-off", sessionTools)
 	}
 	demoSurface := body["demoSurface"].(map[string]any)
@@ -210,7 +210,7 @@ func TestRealtimeClientSecretStripsClientRequestedDemoToolsWhenDefaultOff(t *tes
 	decodeRealtimeBody(t, response.Body.String(), &body)
 	session := body["session"].(map[string]any)
 	tools := session["tools"].([]any)
-	if toolNamesInclude(tools, "start_demo_surface", "start_demo_execution", "cancel_demo_surface", "control_demo_surface") {
+	if toolNamesInclude(tools, "open_shared_browser_surface", "create_shared_workspace", "stop_shared_browser_surface", "control_shared_browser_surface") {
 		t.Fatalf("session tools = %#v, demo tools must be server-gated off", tools)
 	}
 }
@@ -530,7 +530,7 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	})
 
 	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
-	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface") {
+	if !toolNamesInclude(configBody["tools"].([]any), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "share_existing_app_window") {
 		t.Fatalf("tools = %#v, want demo surface tools when flag enabled", configBody["tools"])
 	}
 	demoSurface := configBody["demoSurface"].(map[string]any)
@@ -619,17 +619,19 @@ func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
 	})
 
 	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
-	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_execution") {
+	if !toolNamesInclude(configBody["tools"].([]any), "create_shared_workspace") {
 		t.Fatalf("tools = %#v, want demo execution tool when demo surface enabled", configBody["tools"])
 	}
 	if !strings.Contains(stringFromAny(configBody["instructions"]), "做一个贪吃蛇") ||
-		!strings.Contains(stringFromAny(configBody["instructions"]), "start_demo_execution") {
-		t.Fatalf("instructions = %q, want semantic demo-execution example", stringFromAny(configBody["instructions"]))
+		!strings.Contains(stringFromAny(configBody["instructions"]), "create a shared workspace") ||
+		!strings.Contains(stringFromAny(configBody["instructions"]), "共享 VS Code 屏幕") ||
+		!strings.Contains(stringFromAny(configBody["instructions"]), "用编辑器演示") {
+		t.Fatalf("instructions = %q, want semantic shared-workspace routing examples", stringFromAny(configBody["instructions"]))
 	}
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"install_screen_share_bridge":true}`, http.StatusOK)
 
-	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_execution", `{"session_id":"meet_session","demo_session_id":"snake_demo","task":"做一个贪吃蛇，然后给我看屏幕，不要先讲规划","task_url":"https://example.test/tasks/snake","demo_url":"https://example.test/tasks/snake","issue_id":"MOCK-1","request_issue_close":true,"user_instruction":"短一点，进度走屏幕"}`, http.StatusOK)
+	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/create_shared_workspace", `{"session_id":"meet_session","demo_session_id":"snake_demo","task":"做一个贪吃蛇，然后给我看屏幕，不要先讲规划","task_url":"https://example.test/tasks/snake","demo_url":"https://example.test/tasks/snake","issue_id":"MOCK-1","request_issue_close":true,"user_instruction":"短一点，进度走屏幕"}`, http.StatusOK)
 	if startBody["ok"] != true || stringFromAny(startBody["status"]) != realtimeDemoExecutionStatusStarted {
 		t.Fatalf("start body = %#v, want started demo execution", startBody)
 	}

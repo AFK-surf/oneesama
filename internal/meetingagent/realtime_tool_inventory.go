@@ -50,22 +50,32 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Gate:  "active_meeting_session",
 		Notes: "presentation stop control over existing screen-share bridge",
 	},
-	"start_demo_surface": {
+	"list_shareable_windows": {
+		Class: RealtimeToolClassStableForeground,
+		Gate:  "active_meeting_session",
+		Notes: "read-only native app/window inventory for disambiguating existing-app share requests",
+	},
+	"share_existing_app_window": {
+		Class: RealtimeToolClassStableForeground,
+		Gate:  "active_meeting_session",
+		Notes: "native macOS app/window share boundary; use for named app/window requests",
+	},
+	"open_shared_browser_surface": {
 		Class: RealtimeToolClassOptionalForeground,
 		Gate:  "demo_surface_enabled",
-		Notes: "bot-owned Browser/CU surface; hidden when demo surface bridge is disabled",
+		Notes: "bot-owned Browser/CU surface for URLs or generated browser workspaces; hidden when demo surface bridge is disabled",
 	},
-	"start_demo_execution": {
+	"create_shared_workspace": {
 		Class: RealtimeToolClassOptionalForeground,
 		Gate:  "demo_surface_enabled_and_worker_runner",
-		Notes: "end-to-end do-and-show execution boundary; starts visual surface plus code-capable worker with external-write approval gate",
+		Notes: "end-to-end build-and-show boundary; starts visual surface plus code-capable worker with external-write approval gate",
 	},
-	"control_demo_surface": {
+	"control_shared_browser_surface": {
 		Class: RealtimeToolClassOptionalForeground,
 		Gate:  "demo_surface_enabled_and_policy",
 		Notes: "single stable Browser/CU control boundary; active click/type requires policy approval",
 	},
-	"cancel_demo_surface": {
+	"stop_shared_browser_surface": {
 		Class: RealtimeToolClassOptionalForeground,
 		Gate:  "demo_surface_enabled",
 		Notes: "stops active bot-owned Browser/CU surface",
