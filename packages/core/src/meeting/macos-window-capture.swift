@@ -159,7 +159,7 @@ func captureWindow(args: [String: String]) async throws {
     withIntermediateDirectories: true
   )
 
-  let scaleFactor = backingScaleFactor(for: window.frame)
+  let scaleFactor = max(2, backingScaleFactor(for: window.frame))
   let width = max(320, Int((window.frame.width * scaleFactor).rounded()))
   let height = max(180, Int((window.frame.height * scaleFactor).rounded()))
   let filter = SCContentFilter(desktopIndependentWindow: window)

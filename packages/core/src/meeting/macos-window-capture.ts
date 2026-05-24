@@ -178,7 +178,7 @@ export async function captureMacOSWindowFrame(input: {
   if (!windowId) throw new Error("windowId is required");
   const outputPath = resolve(input.outputPath);
   await mkdir(dirname(outputPath), { recursive: true });
-  const backend = String(process.env.ONEESAMA_MACOS_WINDOW_CAPTURE_BACKEND || "screencapture")
+  const backend = String(process.env.ONEESAMA_MACOS_WINDOW_CAPTURE_BACKEND || "screencapturekit")
     .trim()
     .toLowerCase();
   if (backend !== "screencapturekit") {
