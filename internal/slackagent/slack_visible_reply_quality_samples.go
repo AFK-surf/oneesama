@@ -91,6 +91,7 @@ func slackVisibleReplyQualitySampleFromAction(action SlackPendingAction) *SlackV
 		FinalOutcome:           firstNonEmpty(strings.TrimSpace(stringFromAny(action.Params["finalOutcome"])), strings.TrimSpace(action.Result)),
 		DecisionUserID:         strings.TrimSpace(action.ConfirmedBy),
 		Source:                 firstNonEmpty(strings.TrimSpace(stringFromAny(action.Params["source"])), "pending_action"),
+		BlockReason:            strings.TrimSpace(stringFromAny(action.Params["blockReason"])),
 		AnchorConfidenceSource: firstNonEmpty(strings.TrimSpace(stringFromAny(action.Params["anchorConfidenceSource"])), slackVisibleEvidenceAnchorConfidenceSummary(anchors)),
 		EvidenceAnchors:        anchors,
 		CreatedAt:              strings.TrimSpace(action.CreatedAt),

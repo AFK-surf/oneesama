@@ -42,6 +42,11 @@ func (h *Handler) handleMeetdCreateMeeting(c *gin.Context) {
 	}
 	id, err := h.service.ScheduleMeetdMeeting(c.Request.Context(), brief)
 	if err != nil {
+		var invalidArtifactsDir InvalidArtifactsDirError
+		if errors.As(err, &invalidArtifactsDir) {
+			meetdJSONError(c, http.StatusBadRequest, "invalid artifacts_dir: "+err.Error())
+			return
+		}
 		meetdJSONError(c, http.StatusInternalServerError, "schedule meeting: "+err.Error())
 		return
 	}

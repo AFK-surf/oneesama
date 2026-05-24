@@ -20,6 +20,11 @@ import {
   type RealtimeCurrentUser,
   realtimeToolSchemas,
 } from "../realtime/realtime-contract.ts";
+import {
+  normalizeSpeakerDisplayName,
+  resolveSpeakerIdentity,
+  type SpeakerIdentityResolution,
+} from "../realtime/speaker-identity.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -211,19 +216,6 @@ interface MeetSpeakerSignal {
   rawLabel?: string;
   text?: string;
   identity?: SpeakerIdentityResolution | null;
-}
-
-interface SpeakerIdentityResolution {
-  resolved: boolean;
-  role: "current_user" | "external" | "unknown";
-  isCurrentUser: boolean;
-  canonicalName: string;
-  preferredName: string;
-  confidence: "low" | "medium" | "high";
-  resolver: "workspace_current_user" | "unresolved";
-  matchedAlias?: string;
-  displayName: string;
-  evidence: string[];
 }
 
 interface MeetingAwarenessState {
@@ -1492,11 +1484,7 @@ async function clickMeetJoinButton(
 }
 
 async function evaluateAvatarReady(page) {
-  return await withTimeout(
-    page.evaluate(() => window.MAB_AVATAR_READY || null),
-    2500,
-    null,
-  ).catch(() => null);
+  return await evaluateWindowState(page, "MAB_AVATAR_READY");
 }
 
 async function startAvatarRenderer(page, diagnostics: Diagnostics | null = null) {
@@ -1519,35 +1507,25 @@ async function startAvatarRenderer(page, diagnostics: Diagnostics | null = null)
 }
 
 async function evaluateAvatarAudio(page) {
-  return await withTimeout(
-    page.evaluate(() => window.MAB_AVATAR_AUDIO || null),
-    2500,
-    null,
-  ).catch(() => null);
+  return await evaluateWindowState(page, "MAB_AVATAR_AUDIO");
 }
 
 async function evaluateFixtureState(page) {
-  return await withTimeout(
-    page.evaluate(() => window.__MAB_MEET_FIXTURE || null),
-    2500,
-    null,
-  ).catch(() => null);
+  return await evaluateWindowState(page, "__MAB_MEET_FIXTURE");
 }
 
 async function evaluateRealtimeBridgeState(page) {
-  return await withTimeout(
-    page.evaluate(() => window.MAB_REALTIME_BRIDGE || null),
-    2500,
-    null,
-  ).catch(() => null);
+  return await evaluateWindowState(page, "MAB_REALTIME_BRIDGE");
 }
 
 async function evaluateWorkerResultBridgeState(page) {
-  return await withTimeout(
-    page.evaluate(() => window.MAB_WORKER_RESULT_BRIDGE || null),
-    2500,
-    null,
-  ).catch(() => null);
+  return await evaluateWindowState(page, "MAB_WORKER_RESULT_BRIDGE");
+}
+
+async function evaluateWindowState(page, key: string) {
+  return await withTimeout(page.evaluate((name) => window[name] || null, key), 2500, null).catch(
+    () => null,
+  );
 }
 
 async function evaluateLocalDialogState(page) {
@@ -1575,11 +1553,7 @@ async function evaluateLocalDialogState(page) {
 }
 
 async function evaluateScreenShareState(page) {
-  return await withTimeout(
-    page.evaluate(() => window.MAB_SCREEN_SHARE || null),
-    2500,
-    null,
-  ).catch(() => null);
+  return await evaluateWindowState(page, "MAB_SCREEN_SHARE");
 }
 
 function compactCaptionState(captions) {
@@ -1594,56 +1568,13 @@ function compactCaptionState(captions) {
   };
 }
 
-function normalizeMeetingPersonName(value: unknown): string {
-  let text = String(value || "")
-    .replace(/\s+/g, " ")
-    .replace(/^You$/i, "You")
-    .trim();
-  if (!text) return "";
-  text = text
-    .replace(
-      /\s*\((?:you|me|host|presenting|speaking|muted|muted microphone|microphone off)\)\s*$/i,
-      "",
-    )
-    .replace(/\s+(?:is )?(?:speaking|talking|presenting)$/i, "")
-    .replace(/\s+(?:muted|microphone off|camera off)$/i, "")
-    .replace(/'s (?:video|screen|presentation)$/i, "")
-    .replace(/(?:的视频|正在发言|正在讲话|正在演示|已静音|麦克风已关闭)$/g, "")
-    .trim();
-  const blacklist = [
-    "leave call",
-    "leave meeting",
-    "turn off microphone",
-    "turn on microphone",
-    "turn off camera",
-    "turn on camera",
-    "raise hand",
-    "more options",
-    "present now",
-    "share screen",
-    "people",
-    "chat",
-    "activities",
-    "host controls",
-    "settings",
-    "unknown",
-  ];
-  const lowered = text.toLowerCase();
-  if (blacklist.includes(lowered)) return "";
-  if (/^(press down arrow|external participants joined|your audio is merged)/i.test(text)) {
-    return "";
-  }
-  if (text.length > 80 || text.split(" ").length > 8) return "";
-  return text;
-}
-
 function captionEventTimeMs(event: any): number {
   const parsed = Date.parse(String(event?.ts || event?.timestamp || ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function captionSpeakerSignal(event: any): MeetSpeakerSignal | null {
-  const name = normalizeMeetingPersonName(event?.speaker);
+  const name = normalizeSpeakerDisplayName(event?.speaker);
   if (!name) return null;
   return {
     name,
@@ -1652,82 +1583,6 @@ function captionSpeakerSignal(event: any): MeetSpeakerSignal | null {
     observedAt: String(event?.ts || event?.timestamp || nowIso()),
     text: String(event?.text || "").slice(0, 240),
   };
-}
-
-function normalizeIdentityAlias(value: unknown): string {
-  return normalizeMeetingPersonName(value)
-    .toLowerCase()
-    .replace(/[·・]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function splitIdentityAliases(value: unknown): string[] {
-  const parts = Array.isArray(value) ? value : String(value || "").split(",");
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const part of parts) {
-    const text = normalizeMeetingPersonName(part);
-    if (!text) continue;
-    const key = normalizeIdentityAlias(text);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(text);
-  }
-  return out;
-}
-
-function currentUserAliasList(currentUser?: RealtimeCurrentUser | null): string[] {
-  if (!currentUser) return [];
-  return splitIdentityAliases([
-    currentUser.name,
-    currentUser.englishName || currentUser.english,
-    ...(Array.isArray(currentUser.aliases)
-      ? currentUser.aliases
-      : splitIdentityAliases(currentUser.aliases)),
-  ]);
-}
-
-function resolveSpeakerIdentity(
-  displayName: unknown,
-  currentUser?: RealtimeCurrentUser | null,
-): SpeakerIdentityResolution | null {
-  const rawDisplayName = normalizeMeetingPersonName(displayName);
-  const normalizedName = normalizeIdentityAlias(displayName);
-  if (!normalizedName) return null;
-  const aliases = currentUserAliasList(currentUser);
-  for (const alias of currentUserAliasList(currentUser)) {
-    if (normalizeIdentityAlias(alias) === normalizedName) {
-      const canonicalName = currentUser?.name || currentUser?.englishName || currentUser?.english || alias;
-      return {
-        resolved: true,
-        role: "current_user",
-        isCurrentUser: true,
-        canonicalName,
-        preferredName: preferredCurrentUserAddress(aliases, canonicalName),
-        confidence: "high",
-        resolver: "workspace_current_user",
-        matchedAlias: alias,
-        displayName: rawDisplayName,
-        evidence: [`exact_alias:${alias}`],
-      };
-    }
-  }
-  return {
-    resolved: false,
-    role: "external",
-    isCurrentUser: false,
-    canonicalName: rawDisplayName,
-    preferredName: rawDisplayName,
-    confidence: "low",
-    resolver: "unresolved",
-    displayName: rawDisplayName,
-    evidence: ["fallback:display_name"],
-  };
-}
-
-function preferredCurrentUserAddress(aliases: string[], fallback: string): string {
-  return aliases.find((alias) => /[\u4e00-\u9fff]/.test(alias)) || fallback;
 }
 
 export function buildMeetingAwarenessState({
@@ -1745,7 +1600,7 @@ export function buildMeetingAwarenessState({
 } = {}): MeetingAwarenessState {
   const participantMap = new Map<string, MeetParticipantSignal>();
   const addParticipant = (candidate: Partial<MeetParticipantSignal> | null | undefined) => {
-    const name = normalizeMeetingPersonName(candidate?.name);
+    const name = normalizeSpeakerDisplayName(candidate?.name);
     if (!name) return;
     const key = name.toLowerCase();
     const existing = participantMap.get(key);
@@ -1834,7 +1689,9 @@ export function meetingAwarenessContextText(awareness: MeetingAwarenessState | n
   if (!awareness?.ok) return "";
   const displayName = (entry?: { name?: string; identity?: SpeakerIdentityResolution | null }) =>
     entry?.identity?.preferredName || entry?.identity?.canonicalName || entry?.name || "";
-  const names = awareness.participants.map((participant) => displayName(participant)).filter(Boolean);
+  const names = awareness.participants
+    .map((participant) => displayName(participant))
+    .filter(Boolean);
   const speaker = displayName(awareness.activeSpeaker || undefined) || "暂时不确定";
   const lines = [
     "会议实时状态更新：",
@@ -1893,7 +1750,13 @@ async function publishMeetingAwarenessToPage(
             kind: "meetingAwareness",
             value: state,
           });
-          return { ok: true, stored: true, pushed: result?.ok === true, channel: result?.channel || "", result };
+          return {
+            ok: true,
+            stored: true,
+            pushed: result?.ok === true,
+            channel: result?.channel || "",
+            result,
+          };
         }
         if (typeof client?.sendRealtimeEvent !== "function") {
           return { ok: true, stored: true, pushed: false, reason: "realtime_client_missing" };
@@ -1908,7 +1771,12 @@ async function publishMeetingAwarenessToPage(
         });
         return { ok: true, stored: true, pushed: true, channel };
       },
-      { state: awareness, text: contextText, push: pushContext, signature: meetingAwarenessSignature(awareness) },
+      {
+        state: awareness,
+        text: contextText,
+        push: pushContext,
+        signature: meetingAwarenessSignature(awareness),
+      },
     ),
     2500,
     { ok: false, error: "meeting_awareness_publish_timeout" },
@@ -3121,7 +2989,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     } else {
       await publishMeetingAwarenessToPage(active.page, meetingAwareness, false).catch(() => {});
     }
-    logMeetingAwarenessDebug("runtime_state_refresh", meetingAwareness, active.meetingAwarenessPush);
+    logMeetingAwarenessDebug(
+      "runtime_state_refresh",
+      meetingAwareness,
+      active.meetingAwarenessPush,
+    );
     if (active.diagnostics) {
       active.diagnostics.record("runtime_state_refresh", {
         meetPage,
@@ -3302,15 +3174,27 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
 
   function matchesShareableApp(app, input: AppShareInput) {
     const processId = Number(input.processId || input.pid || 0) || 0;
-    const bundle = String(input.bundleIdentifier || input.bundleId || "").trim().toLowerCase();
+    const bundle = String(input.bundleIdentifier || input.bundleId || "")
+      .trim()
+      .toLowerCase();
     const name = String(input.applicationName || input.appName || input.name || "")
       .trim()
       .toLowerCase();
     if (processId && Number(app.processId || 0) === processId) return true;
-    if (bundle && String(app.bundleIdentifier || "").trim().toLowerCase() === bundle) return true;
+    if (
+      bundle &&
+      String(app.bundleIdentifier || "")
+        .trim()
+        .toLowerCase() === bundle
+    )
+      return true;
     if (!name) return false;
     return [app.applicationName, app.name, app.title]
-      .map((value) => String(value || "").trim().toLowerCase())
+      .map((value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase(),
+      )
       .some((candidate) => candidate === name || candidate.includes(name));
   }
 
@@ -3345,7 +3229,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       capture: {
         mode,
         appPixelsAutomaticallySelected: false,
-        reason: "Meet/Chrome owns the native app-window picker; the app candidate is selected for user-visible intent and diagnostics, not forced by the bot.",
+        reason:
+          "Meet/Chrome owns the native app-window picker; the app candidate is selected for user-visible intent and diagnostics, not forced by the bot.",
       },
       note: "app_share_requested; choose the matching app/window in the Meet picker if Chrome asks.",
     };

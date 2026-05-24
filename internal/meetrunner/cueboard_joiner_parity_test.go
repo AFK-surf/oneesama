@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/AFK-surf/oneesama/internal/processutil"
 )
 
 func TestCueboardParityRunnerCommandUsesNodeEntrypoint(t *testing.T) {
@@ -44,7 +46,7 @@ func TestCueboardParityPrepareCommandSetsProcessGroupOnUnix(t *testing.T) {
 	t.Parallel()
 
 	command := exec.Command("node", "src/index.ts")
-	prepareCommand(command)
+	processutil.PrepareGroup(command)
 	if command.SysProcAttr == nil || !command.SysProcAttr.Setpgid {
 		t.Fatalf("SysProcAttr = %#v, want process group isolation", command.SysProcAttr)
 	}
@@ -53,8 +55,8 @@ func TestCueboardParityPrepareCommandSetsProcessGroupOnUnix(t *testing.T) {
 func TestCueboardParityTerminateCommandNilIsNoop(t *testing.T) {
 	t.Parallel()
 
-	if err := terminateCommand(nil); err != nil {
-		t.Fatalf("terminateCommand(nil) error = %v", err)
+	if err := processutil.KillGroup("meet-runner", nil); err != nil {
+		t.Fatalf("KillGroup(nil) error = %v", err)
 	}
 }
 

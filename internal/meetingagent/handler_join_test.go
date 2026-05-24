@@ -2,18 +2,17 @@ package meetingagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/AFK-surf/oneesama/internal/httpserver"
-	"github.com/AFK-surf/oneesama/internal/internalauth"
 	"github.com/AFK-surf/oneesama/internal/meetrunner"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 	"github.com/gin-gonic/gin"
@@ -201,11 +200,7 @@ func TestHandleJoinLifecycle(t *testing.T) {
 
 	router := newJoinTestRouter(t)
 
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_test","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"collect_fixture_state":true,"capture_captions":true,"caption_language":"English","record_meeting":true,"install_realtime_bridge":true,"realtime_bridge_mode":"webrtc","auto_connect_realtime":true,"send_realtime_session_update":true,"forward_meet_audio_to_realtime":true,"install_local_dialog_bridge":true,"install_worker_result_bridge":true,"install_screen_share_bridge":true,"auto_start_screen_share":true}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_test","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"collect_fixture_state":true,"capture_captions":true,"caption_language":"English","record_meeting":true,"install_realtime_bridge":true,"realtime_bridge_mode":"webrtc","auto_connect_realtime":true,"send_realtime_session_update":true,"forward_meet_audio_to_realtime":true,"install_local_dialog_bridge":true,"install_worker_result_bridge":true,"install_screen_share_bridge":true,"auto_start_screen_share":true}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, want 200", joinResponse.Code)
 	}
@@ -228,10 +223,7 @@ func TestHandleJoinLifecycle(t *testing.T) {
 		t.Fatalf("body = %s, want explicit bridge flags in join plan", joinResponse.Body.String())
 	}
 
-	statusRequest := httptest.NewRequest(http.MethodGet, "/join/status?session_id=session_join_test", nil)
-	statusRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	statusResponse := httptest.NewRecorder()
-	router.ServeHTTP(statusResponse, statusRequest)
+	statusResponse := performMeetingRequest(router, http.MethodGet, "/join/status?session_id=session_join_test", "")
 	if statusResponse.Code != http.StatusOK {
 		t.Fatalf("status code = %d, want 200", statusResponse.Code)
 	}
@@ -242,11 +234,7 @@ func TestHandleJoinLifecycle(t *testing.T) {
 		t.Fatalf("body = %s, want meet-runner runtime status", statusResponse.Body.String())
 	}
 
-	stopRequest := httptest.NewRequest(http.MethodPost, "/join/stop", strings.NewReader(`{"session_id":"session_join_test","reason":"done"}`))
-	stopRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	stopRequest.Header.Set("Content-Type", "application/json")
-	stopResponse := httptest.NewRecorder()
-	router.ServeHTTP(stopResponse, stopRequest)
+	stopResponse := performMeetingRequest(router, http.MethodPost, "/join/stop", `{"session_id":"session_join_test","reason":"done"}`)
 	if stopResponse.Code != http.StatusOK {
 		t.Fatalf("stop code = %d, want 200", stopResponse.Code)
 	}
@@ -259,23 +247,33 @@ func TestHandleJoinLifecycle(t *testing.T) {
 	}
 }
 
+func TestHandleJoinRejectsArtifactsDirOutsideRoot(t *testing.T) {
+	t.Parallel()
+
+	router := newJoinTestRouter(t)
+	outsideDir := t.TempDir()
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{
+		"session_id":"session_join_outside_artifacts",
+		"meeting_url":"https://meet.google.com/abc-defg-hij",
+		"dry_run":true,
+		"record_meeting":true,
+		"artifacts_dir":`+quoteJSONString(t, outsideDir)+`
+	}`)
+	if joinResponse.Code != http.StatusBadRequest {
+		t.Fatalf("join status = %d body=%s, want 400", joinResponse.Code, joinResponse.Body.String())
+	}
+}
+
 func TestJoinStatusMarksPersistedSessionStaleWhenRunnerSessionMissing(t *testing.T) {
 	t.Parallel()
 
 	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", fakeMissingStatusMeetRunner{})
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_stale","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_stale","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
 	}
 
-	statusRequest := httptest.NewRequest(http.MethodGet, "/join/status?session_id=session_join_stale", nil)
-	statusRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	statusResponse := httptest.NewRecorder()
-	router.ServeHTTP(statusResponse, statusRequest)
+	statusResponse := performMeetingRequest(router, http.MethodGet, "/join/status?session_id=session_join_stale", "")
 	if statusResponse.Code != http.StatusOK {
 		t.Fatalf("status code = %d, body = %s", statusResponse.Code, statusResponse.Body.String())
 	}
@@ -294,19 +292,12 @@ func TestJoinStatusFinalizesStaleSessionWhenRunnerPipeCloses(t *testing.T) {
 	webhooks := make(chan MeetdWebhookPayload, 4)
 	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
 	router := newJoinTestRouterWithWebhookAndRunner(t, webhookURL, "secret", &fakeClosedPipeStatusMeetRunner{})
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_pipe_closed","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_pipe_closed","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
 	}
 
-	statusRequest := httptest.NewRequest(http.MethodGet, "/join/status?session_id=session_join_pipe_closed", nil)
-	statusRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	statusResponse := httptest.NewRecorder()
-	router.ServeHTTP(statusResponse, statusRequest)
+	statusResponse := performMeetingRequest(router, http.MethodGet, "/join/status?session_id=session_join_pipe_closed", "")
 	if statusResponse.Code != http.StatusOK {
 		t.Fatalf("status code = %d, body = %s", statusResponse.Code, statusResponse.Body.String())
 	}
@@ -333,20 +324,12 @@ func TestJoinStopProcessesCaptionsAndSendsSlackWebhook(t *testing.T) {
 	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
 	router := newJoinTestRouterWithWebhook(t, webhookURL, "secret")
 
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_webhook","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_webhook","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, want 200", joinResponse.Code)
 	}
 
-	stopRequest := httptest.NewRequest(http.MethodPost, "/join/stop", strings.NewReader(`{"session_id":"session_join_webhook","reason":"done"}`))
-	stopRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	stopRequest.Header.Set("Content-Type", "application/json")
-	stopResponse := httptest.NewRecorder()
-	router.ServeHTTP(stopResponse, stopRequest)
+	stopResponse := performMeetingRequest(router, http.MethodPost, "/join/stop", `{"session_id":"session_join_webhook","reason":"done"}`)
 	if stopResponse.Code != http.StatusOK {
 		t.Fatalf("stop code = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
 	}
@@ -370,25 +353,17 @@ func TestJoinStopFixtureTranscriptSendsSlackCanvasWebhook(t *testing.T) {
 	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
 	router := newJoinTestRouterWithWebhookAndRunner(t, webhookURL, "secret", fakeEmptyCaptionMeetRunner{})
 
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_fixture","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_fixture","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
 	}
 
 	stopBody := `{
 		"session_id":"session_join_fixture",
-		"reason":"dogfood_fixture",
-		"fixture_transcript":"Peng: Decision: ship the synthetic transcript harness.\nAlice: Action item: Alice will send the launch notes by Friday."
-	}`
-	stopRequest := httptest.NewRequest(http.MethodPost, "/join/stop", strings.NewReader(stopBody))
-	stopRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	stopRequest.Header.Set("Content-Type", "application/json")
-	stopResponse := httptest.NewRecorder()
-	router.ServeHTTP(stopResponse, stopRequest)
+			"reason":"dogfood_fixture",
+			"fixture_transcript":"Peng: Decision: ship the synthetic transcript harness.\nAlice: Action item: Alice will send the launch notes by Friday."
+		}`
+	stopResponse := performMeetingRequest(router, http.MethodPost, "/join/stop", stopBody)
 	if stopResponse.Code != http.StatusOK {
 		t.Fatalf("stop code = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
 	}
@@ -440,20 +415,12 @@ func TestJoinStopIncludesRecordedAudioArtifactWhenRunnerCapturedIt(t *testing.T)
 		},
 	})
 
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_audio","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"record_meeting":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_audio","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"record_meeting":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
 	}
 
-	stopRequest := httptest.NewRequest(http.MethodPost, "/join/stop", strings.NewReader(`{"session_id":"session_join_audio","reason":"done"}`))
-	stopRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	stopRequest.Header.Set("Content-Type", "application/json")
-	stopResponse := httptest.NewRecorder()
-	router.ServeHTTP(stopResponse, stopRequest)
+	stopResponse := performMeetingRequest(router, http.MethodPost, "/join/stop", `{"session_id":"session_join_audio","reason":"done"}`)
 	if stopResponse.Code != http.StatusOK {
 		t.Fatalf("stop code = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
 	}
@@ -506,20 +473,12 @@ func TestJoinStopOmitsSilentRecordedAudioArtifact(t *testing.T) {
 		},
 	})
 
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_silent_audio","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"record_meeting":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_silent_audio","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"record_meeting":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
 	}
 
-	stopRequest := httptest.NewRequest(http.MethodPost, "/join/stop", strings.NewReader(`{"session_id":"session_join_silent_audio","reason":"done"}`))
-	stopRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	stopRequest.Header.Set("Content-Type", "application/json")
-	stopResponse := httptest.NewRecorder()
-	router.ServeHTTP(stopResponse, stopRequest)
+	stopResponse := performMeetingRequest(router, http.MethodPost, "/join/stop", `{"session_id":"session_join_silent_audio","reason":"done"}`)
 	if stopResponse.Code != http.StatusOK {
 		t.Fatalf("stop code = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
 	}
@@ -572,20 +531,12 @@ func TestJoinStopReadsRuntimeCaptionAndAudioPathsFromMeetRunnerDir(t *testing.T)
 		},
 	})
 
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_runner_paths","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"record_meeting":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_runner_paths","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"record_meeting":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
 	}
 
-	stopRequest := httptest.NewRequest(http.MethodPost, "/join/stop", strings.NewReader(`{"session_id":"session_join_runner_paths","reason":"done"}`))
-	stopRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	stopRequest.Header.Set("Content-Type", "application/json")
-	stopResponse := httptest.NewRecorder()
-	router.ServeHTTP(stopResponse, stopRequest)
+	stopResponse := performMeetingRequest(router, http.MethodPost, "/join/stop", `{"session_id":"session_join_runner_paths","reason":"done"}`)
 	if stopResponse.Code != http.StatusOK {
 		t.Fatalf("stop code = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
 	}
@@ -637,20 +588,12 @@ func TestJoinStopFallsBackToMeetPageCaptionTextHead(t *testing.T) {
 		},
 	})
 
-	joinRequest := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_join_texthead_fallback","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`))
-	joinRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	joinRequest.Header.Set("Content-Type", "application/json")
-	joinResponse := httptest.NewRecorder()
-	router.ServeHTTP(joinResponse, joinRequest)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_texthead_fallback","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"capture_captions":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
 	}
 
-	stopRequest := httptest.NewRequest(http.MethodPost, "/join/stop", strings.NewReader(`{"session_id":"session_join_texthead_fallback","reason":"done"}`))
-	stopRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	stopRequest.Header.Set("Content-Type", "application/json")
-	stopResponse := httptest.NewRecorder()
-	router.ServeHTTP(stopResponse, stopRequest)
+	stopResponse := performMeetingRequest(router, http.MethodPost, "/join/stop", `{"session_id":"session_join_texthead_fallback","reason":"done"}`)
 	if stopResponse.Code != http.StatusOK {
 		t.Fatalf("stop code = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
 	}
@@ -702,6 +645,15 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func quoteJSONString(t *testing.T, value string) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON string: %v", err)
+	}
+	return string(raw)
 }
 
 func containsActionDescription(values []MeetdActionItem, target string) bool {

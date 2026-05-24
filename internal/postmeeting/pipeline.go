@@ -3,10 +3,12 @@ package postmeeting
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +30,17 @@ type Summarizer interface {
 
 type transcriptCalibrator interface {
 	Calibrate(ctx context.Context, captionTranscript, asrTranscript string) (string, error)
+}
+
+type InvalidArtifactIDError struct {
+	ID string
+}
+
+func (e InvalidArtifactIDError) Error() string {
+	if strings.TrimSpace(e.ID) == "" {
+		return "artifact id is required"
+	}
+	return fmt.Sprintf("invalid artifact id %q", e.ID)
 }
 
 func WithASRProvider(provider ASRProvider) PipelineOption {
@@ -60,7 +73,10 @@ func (p *Pipeline) RootDir() string {
 }
 
 func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (PostProcessResult, error) {
-	artifactID := firstNonEmpty(input.ArtifactID, input.ID, "meeting-"+uuid.NewString()[:8])
+	artifactID, err := postProcessArtifactID(input)
+	if err != nil {
+		return PostProcessResult{}, err
+	}
 	dir := filepath.Join(firstNonEmpty(input.RootDir, p.rootDir), artifactID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return PostProcessResult{}, fmt.Errorf("create artifact dir: %w", err)
@@ -74,31 +90,44 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 	audioChunks := discoverASRAudioChunks(input, dir)
 	transcriptProvider := "caption"
 	summaryInput := input
-	if asrTranscript, err := p.transcribeAudio(ctx, input, dir, participants); err == nil && firstNonEmpty(asrTranscript.Text) != "" {
+	warnings := make([]PostProcessWarning, 0, 3)
+	if asrTranscript, err := p.transcribeAudio(ctx, input, dir, participants, audioChunks); err != nil {
+		if isContextDone(ctx, err) {
+			return PostProcessResult{}, err
+		}
+		warnings = append(warnings, postProcessWarning("asr_failed", "ASR transcription failed; using live captions fallback.", err))
+	} else if firstNonEmpty(asrTranscript.Text) != "" {
 		if len(asrTranscript.AudioChunks) > 0 {
 			audioChunks = asrTranscript.AudioChunks
 		}
 		summaryInput.ASRTranscriptText = firstNonEmpty(asrTranscript.Text)
 		summaryInput.ASRProvider = asrTranscript.Provider
-		if calibrated := p.calibrateTranscript(ctx, segments, asrTranscript); calibrated != "" {
+		if calibrated, warning, err := p.calibrateTranscript(ctx, segments, asrTranscript); err != nil {
+			return PostProcessResult{}, err
+		} else if calibrated != "" {
 			segments = transcriptSegmentsFromText(calibrated, "calibrated")
 			transcriptProvider = "calibrated"
 			summaryInput.TranscriptText = renderTranscriptText(segments)
-		} else if len(segments) == 0 {
-			segments = asrTranscript.Segments
-			if len(segments) == 0 {
-				segments = transcriptSegmentsFromText(asrTranscript.Text, "asr")
+		} else {
+			if warning != nil {
+				warnings = append(warnings, *warning)
 			}
-			transcriptProvider = "asr"
-			if provider := firstNonEmpty(asrTranscript.Provider); provider != "" {
-				transcriptProvider = "asr:" + provider
+			var transcriptText string
+			segments, transcriptProvider, transcriptText = applyASRTranscriptFallback(segments, asrTranscript, transcriptProvider)
+			if transcriptText != "" {
+				summaryInput.TranscriptText = transcriptText
 			}
-			summaryInput.TranscriptText = renderTranscriptText(segments)
 		}
 	}
 	participants = participantList(input, segments)
 	transcriptText := joinSegmentText(segments)
-	summary := p.summarize(ctx, summaryInput, segments, participants)
+	summary, warning, err := p.summarize(ctx, summaryInput, segments, participants)
+	if err != nil {
+		return PostProcessResult{}, err
+	}
+	if warning != nil {
+		warnings = append(warnings, *warning)
+	}
 
 	files := ArtifactFiles{
 		Transcript:     filepath.Join(dir, "transcript.json"),
@@ -157,6 +186,7 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 	manifest.Summary.Highlights = summary.Highlights
 	manifest.Summary.Decisions = summary.Decisions
 	manifest.Summary.ActionItems = summary.ActionItems
+	manifest.Warnings = warnings
 
 	if err := writeJSONFile(files.Transcript, transcript); err != nil {
 		return PostProcessResult{}, err
@@ -180,17 +210,59 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 		Transcript: transcript,
 		Summary:    summary,
 		Chat:       chat,
+		Warnings:   warnings,
 	}, nil
 }
 
-func (p *Pipeline) transcribeAudio(ctx context.Context, input PostProcessInput, artifactDir string, participants []string) (ASRTranscript, error) {
+func postProcessArtifactID(input PostProcessInput) (string, error) {
+	if strings.TrimSpace(input.ArtifactID) != "" {
+		return input.ArtifactID, validateArtifactID(input.ArtifactID)
+	}
+	if strings.TrimSpace(input.ID) != "" {
+		return input.ID, validateArtifactID(input.ID)
+	}
+	return "meeting-" + uuid.NewString()[:8], nil
+}
+
+func validateArtifactID(id string) error {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" || trimmed != id {
+		return InvalidArtifactIDError{ID: id}
+	}
+	if trimmed == "." || trimmed == ".." {
+		return InvalidArtifactIDError{ID: id}
+	}
+	if strings.ContainsAny(trimmed, `/\`) {
+		return InvalidArtifactIDError{ID: id}
+	}
+	if filepath.Clean(trimmed) != trimmed {
+		return InvalidArtifactIDError{ID: id}
+	}
+	return nil
+}
+
+func applyASRTranscriptFallback(segments []NormalizedSegment, asrTranscript ASRTranscript, provider string) ([]NormalizedSegment, string, string) {
+	if len(segments) != 0 {
+		return segments, provider, ""
+	}
+	segments = asrTranscript.Segments
+	if len(segments) == 0 {
+		segments = transcriptSegmentsFromText(asrTranscript.Text, "asr")
+	}
+	provider = "asr"
+	if asrProvider := firstNonEmpty(asrTranscript.Provider); asrProvider != "" {
+		provider = "asr:" + asrProvider
+	}
+	return segments, provider, renderTranscriptText(segments)
+}
+
+func (p *Pipeline) transcribeAudio(ctx context.Context, input PostProcessInput, artifactDir string, participants []string, chunks []string) (ASRTranscript, error) {
 	if p.asr == nil {
 		return ASRTranscript{}, nil
 	}
 	if input.SkipASR {
 		return ASRTranscript{}, nil
 	}
-	chunks := discoverASRAudioChunks(input, artifactDir)
 	if firstNonEmpty(input.AudioPath) == "" && len(chunks) == 0 {
 		return ASRTranscript{}, nil
 	}
@@ -209,30 +281,73 @@ func (p *Pipeline) transcribeAudio(ctx context.Context, input PostProcessInput, 
 	return transcript, nil
 }
 
-func (p *Pipeline) calibrateTranscript(ctx context.Context, captionSegments []NormalizedSegment, asrTranscript ASRTranscript) string {
+func (p *Pipeline) calibrateTranscript(ctx context.Context, captionSegments []NormalizedSegment, asrTranscript ASRTranscript) (string, *PostProcessWarning, error) {
 	calibrator, ok := p.summarizer.(transcriptCalibrator)
 	if !ok || firstNonEmpty(asrTranscript.Text) == "" || len(captionSegments) == 0 {
-		return ""
+		return "", nil, nil
 	}
 	calibrated, err := calibrator.Calibrate(ctx, renderTranscriptText(captionSegments), asrTranscript.Text)
 	if err != nil {
-		return ""
+		if isContextDone(ctx, err) {
+			return "", nil, err
+		}
+		warning := postProcessWarning("calibration_failed", "Transcript calibration failed; using the best available transcript.", err)
+		return "", &warning, nil
 	}
-	return firstNonEmpty(calibrated)
+	return firstNonEmpty(calibrated), nil, nil
 }
 
-func (p *Pipeline) summarize(ctx context.Context, input PostProcessInput, segments []NormalizedSegment, participants []string) Summary {
+func (p *Pipeline) summarize(ctx context.Context, input PostProcessInput, segments []NormalizedSegment, participants []string) (Summary, *PostProcessWarning, error) {
 	if p.summarizer != nil {
 		if summary, err := p.summarizer.Summarize(ctx, input, segments, participants); err == nil {
-			return summary
+			return summary, nil, nil
+		} else {
+			if isContextDone(ctx, err) {
+				return Summary{}, nil, err
+			}
+			warning := postProcessWarning("summary_failed", "LLM summary failed; using deterministic fallback summary.", err)
+			return buildFallbackSummary(input, segments, participants), &warning, nil
 		}
 	}
-	return buildFallbackSummary(input, segments, participants)
+	return buildFallbackSummary(input, segments, participants), nil, nil
+}
+
+func isContextDone(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		(ctx != nil && ctx.Err() != nil)
+}
+
+func postProcessWarning(code, message string, err error) PostProcessWarning {
+	return PostProcessWarning{
+		Code:    code,
+		Message: message,
+		Detail:  truncatePostProcessWarningDetail(err),
+	}
+}
+
+func truncatePostProcessWarningDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	detail := strings.TrimSpace(err.Error())
+	if detail == "" {
+		return ""
+	}
+	const limit = 512
+	runes := []rune(detail)
+	if len(runes) <= limit {
+		return detail
+	}
+	return string(runes[:limit]) + "..."
 }
 
 func (p *Pipeline) GetArtifact(id string) (*ArtifactManifest, error) {
 	if firstNonEmpty(id) == "" {
 		return nil, nil
+	}
+	if err := validateArtifactID(id); err != nil {
+		return nil, err
 	}
 	path := filepath.Join(p.rootDir, id, "manifest.json")
 	raw, err := os.ReadFile(path)
@@ -254,7 +369,14 @@ func (p *Pipeline) GetArtifactChat(id string) (*ChatArtifact, error) {
 	if err != nil || manifest == nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(manifest.Files.Chat)
+	chatPath, err := p.artifactFilePath(id, manifest.Files.Chat)
+	if err != nil {
+		return nil, err
+	}
+	if chatPath == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(chatPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -266,6 +388,42 @@ func (p *Pipeline) GetArtifactChat(id string) (*ChatArtifact, error) {
 		return nil, fmt.Errorf("decode artifact chat: %w", err)
 	}
 	return &chat, nil
+}
+
+func (p *Pipeline) artifactFilePath(id string, path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+	artifactDir := filepath.Join(p.rootDir, id)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(artifactDir, path)
+	}
+	cleanPath, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact file path: %w", err)
+	}
+	cleanDir, err := filepath.Abs(filepath.Clean(artifactDir))
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact dir: %w", err)
+	}
+	if !pathWithinDir(cleanDir, cleanPath) {
+		return "", fmt.Errorf("artifact file path escapes artifact directory")
+	}
+	if realDir, err := filepath.EvalSymlinks(cleanDir); err == nil {
+		if realPath, err := filepath.EvalSymlinks(cleanPath); err == nil && !pathWithinDir(realDir, realPath) {
+			return "", fmt.Errorf("artifact file path escapes artifact directory")
+		}
+	}
+	return cleanPath, nil
+}
+
+func pathWithinDir(dir string, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 func (p *Pipeline) ListArtifacts() ([]ArtifactManifest, error) {

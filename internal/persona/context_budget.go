@@ -1,6 +1,9 @@
 package persona
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // HarnessContextBudget records an approximate request budget split by cache
 // locality. It is intentionally estimate-only: the goal is drift detection and
@@ -11,6 +14,7 @@ type HarnessContextBudget struct {
 	WorkerResultChars   int `json:"workerResultChars"`
 	MemoryEvidenceChars int `json:"memoryEvidenceChars"`
 	EventContextChars   int `json:"eventContextChars"`
+	MetadataChars       int `json:"metadataChars"`
 	TotalChars          int `json:"totalChars"`
 
 	StableTokens         int `json:"stableTokens"`
@@ -18,6 +22,7 @@ type HarnessContextBudget struct {
 	WorkerResultTokens   int `json:"workerResultTokens"`
 	MemoryEvidenceTokens int `json:"memoryEvidenceTokens"`
 	EventContextTokens   int `json:"eventContextTokens"`
+	MetadataTokens       int `json:"metadataTokens"`
 	TotalTokens          int `json:"totalTokens"`
 }
 
@@ -50,12 +55,17 @@ func RequestHarnessContextBudget(req Request) HarnessContextBudget {
 	for _, record := range req.Memory.Items {
 		budget.MemoryEvidenceChars += lenRunes(record.Kind) + lenRunes(record.Text) + lenRunes(record.SourceRef)
 	}
-	budget.TotalChars = budget.StableChars + budget.DynamicChars + budget.WorkerResultChars + budget.MemoryEvidenceChars + budget.EventContextChars
+	budget.MetadataChars += lenJSONRunes(req.Metadata)
+	for _, env := range req.DynamicContext {
+		budget.MetadataChars += lenJSONRunes(env.Metadata)
+	}
+	budget.TotalChars = budget.StableChars + budget.DynamicChars + budget.WorkerResultChars + budget.MemoryEvidenceChars + budget.EventContextChars + budget.MetadataChars
 	budget.StableTokens = EstimateHarnessTokensFromChars(budget.StableChars)
 	budget.DynamicTokens = EstimateHarnessTokensFromChars(budget.DynamicChars)
 	budget.WorkerResultTokens = EstimateHarnessTokensFromChars(budget.WorkerResultChars)
 	budget.MemoryEvidenceTokens = EstimateHarnessTokensFromChars(budget.MemoryEvidenceChars)
 	budget.EventContextTokens = EstimateHarnessTokensFromChars(budget.EventContextChars)
+	budget.MetadataTokens = EstimateHarnessTokensFromChars(budget.MetadataChars)
 	budget.TotalTokens = EstimateHarnessTokensFromChars(budget.TotalChars)
 	return budget
 }
@@ -78,4 +88,15 @@ func contextBudgetLooksLikeWorkerResult(value string) bool {
 
 func lenRunes(value string) int {
 	return len([]rune(strings.TrimSpace(value)))
+}
+
+func lenJSONRunes(value any) int {
+	if value == nil {
+		return 0
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return 0
+	}
+	return lenRunes(string(payload))
 }

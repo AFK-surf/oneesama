@@ -4,12 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/AFK-surf/oneesama/internal/internalauth"
 )
 
 func TestMeetdCreateGetListAndCancelMeeting(t *testing.T) {
@@ -19,11 +16,7 @@ func TestMeetdCreateGetListAndCancelMeeting(t *testing.T) {
 	start := time.Now().UTC().Truncate(time.Second)
 	body := fmt.Sprintf(`{"event_id":"test-event","meet_url":"https://meet.google.com/test","title":"Test Meeting","start_at":%q,"end_at":%q}`, start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339))
 
-	createResponse := httptest.NewRecorder()
-	createRequest := httptest.NewRequest(http.MethodPost, "/meetings", strings.NewReader(body))
-	createRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	createRequest.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(createResponse, createRequest)
+	createResponse := performMeetingRequest(router, http.MethodPost, "/meetings", body)
 	if createResponse.Code != http.StatusOK {
 		t.Fatalf("create status = %d, body = %s", createResponse.Code, createResponse.Body.String())
 	}
@@ -37,10 +30,7 @@ func TestMeetdCreateGetListAndCancelMeeting(t *testing.T) {
 		t.Fatal("meeting_id = 0, want non-zero")
 	}
 
-	getResponse := httptest.NewRecorder()
-	getRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/meetings/%d", createBody.MeetingID), nil)
-	getRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(getResponse, getRequest)
+	getResponse := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", createBody.MeetingID), "")
 	if getResponse.Code != http.StatusOK {
 		t.Fatalf("get status = %d, body = %s", getResponse.Code, getResponse.Body.String())
 	}
@@ -48,31 +38,43 @@ func TestMeetdCreateGetListAndCancelMeeting(t *testing.T) {
 		t.Fatalf("get body = %s, want title and pending status", getResponse.Body.String())
 	}
 
-	listResponse := httptest.NewRecorder()
-	listRequest := httptest.NewRequest(http.MethodGet, "/meetings?status=pending", nil)
-	listRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(listResponse, listRequest)
+	listResponse := performMeetingRequest(router, http.MethodGet, "/meetings?status=pending", "")
 	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"meetings"`) || !strings.Contains(listResponse.Body.String(), `"test-event"`) {
 		t.Fatalf("list body = %s, want test-event", listResponse.Body.String())
 	}
 
-	cancelResponse := httptest.NewRecorder()
-	cancelRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/meetings/%d/cancel", createBody.MeetingID), nil)
-	cancelRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(cancelResponse, cancelRequest)
+	cancelResponse := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/cancel", createBody.MeetingID), "")
 	if cancelResponse.Code != http.StatusOK || !strings.Contains(cancelResponse.Body.String(), `"status":"cancelled"`) {
 		t.Fatalf("cancel body = %s, want cancelled", cancelResponse.Body.String())
 	}
 
-	conflictResponse := httptest.NewRecorder()
-	conflictRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/meetings/%d/cancel", createBody.MeetingID), nil)
-	conflictRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(conflictResponse, conflictRequest)
+	conflictResponse := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/cancel", createBody.MeetingID), "")
 	if conflictResponse.Code != http.StatusConflict {
 		t.Fatalf("conflict status = %d, want 409", conflictResponse.Code)
 	}
 	if strings.TrimSpace(conflictResponse.Body.String()) != `{"error":"cannot cancel meeting in \"cancelled\" state"}` {
 		t.Fatalf("conflict body = %s, want cueboard conflict error", conflictResponse.Body.String())
+	}
+}
+
+func TestMeetdCreateRejectsArtifactsDirOutsideRoot(t *testing.T) {
+	t.Parallel()
+
+	router := newTestRouter(t)
+	start := time.Now().UTC().Truncate(time.Second)
+	outsideDir := t.TempDir()
+	body := fmt.Sprintf(`{
+		"event_id":"outside-artifacts",
+		"meet_url":"https://meet.google.com/test",
+		"title":"Outside Artifacts",
+		"start_at":%q,
+		"end_at":%q,
+		"artifacts_dir":%s
+	}`, start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339), quoteJSONString(t, outsideDir))
+
+	createResponse := performMeetingRequest(router, http.MethodPost, "/meetings", body)
+	if createResponse.Code != http.StatusBadRequest {
+		t.Fatalf("create status = %d body=%s, want 400", createResponse.Code, createResponse.Body.String())
 	}
 }
 
@@ -110,11 +112,7 @@ func TestMeetdCreateValidationErrorsMatchCueboard(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			response := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodPost, "/meetings", strings.NewReader(tc.body))
-			request.Header.Set(internalauth.HeaderName, "secret-key")
-			request.Header.Set("Content-Type", "application/json")
-			router.ServeHTTP(response, request)
+			response := performMeetingRequest(router, http.MethodPost, "/meetings", tc.body)
 			if response.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400", response.Code)
 			}
@@ -129,10 +127,7 @@ func TestMeetdGetMissingMeetingMatchesCueboard(t *testing.T) {
 	t.Parallel()
 
 	router := newTestRouter(t)
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/meetings/999", nil)
-	request.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(response, request)
+	response := performMeetingRequest(router, http.MethodGet, "/meetings/999", "")
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", response.Code)
 	}
@@ -159,10 +154,7 @@ func TestMeetdCaptionsMatchCueboardShape(t *testing.T) {
 	}`, start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339), start.Add(10*time.Second).Format(time.RFC3339), start.Add(20*time.Second).Format(time.RFC3339))
 	meetingID := createMeetdMeetingForTest(t, router, body)
 
-	liveResponse := httptest.NewRecorder()
-	liveRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/meetings/%d/captions?limit=1", meetingID), nil)
-	liveRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(liveResponse, liveRequest)
+	liveResponse := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d/captions?limit=1", meetingID), "")
 	if liveResponse.Code != http.StatusOK {
 		t.Fatalf("live captions status = %d, body = %s", liveResponse.Code, liveResponse.Body.String())
 	}
@@ -173,10 +165,7 @@ func TestMeetdCaptionsMatchCueboardShape(t *testing.T) {
 		t.Fatalf("live captions body = %s, want relative timestamp and speaker", liveResponse.Body.String())
 	}
 
-	allResponse := httptest.NewRecorder()
-	allRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/meetings/%d/captions?source=all", meetingID), nil)
-	allRequest.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(allResponse, allRequest)
+	allResponse := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d/captions?source=all", meetingID), "")
 	if allResponse.Code != http.StatusOK {
 		t.Fatalf("all captions status = %d, body = %s", allResponse.Code, allResponse.Body.String())
 	}
@@ -208,10 +197,7 @@ func TestMeetdCaptionSeedsPreferCueboardInputAliases(t *testing.T) {
 	}`, start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339), start.Add(10*time.Second).Format(time.RFC3339), start.Add(20*time.Second).Format(time.RFC3339))
 	meetingID := createMeetdMeetingForTest(t, router, body)
 
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/meetings/%d/captions", meetingID), nil)
-	request.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(response, request)
+	response := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d/captions", meetingID), "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("caption status = %d, body = %s", response.Code, response.Body.String())
 	}
@@ -234,10 +220,7 @@ func TestMeetdCaptionsRejectInvalidSource(t *testing.T) {
 	body := fmt.Sprintf(`{"event_id":"bad-caption-source","meet_url":"https://meet.google.com/caption-bad","title":"Bad Caption Source","start_at":%q,"end_at":%q}`, start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339))
 	meetingID := createMeetdMeetingForTest(t, router, body)
 
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/meetings/%d/captions?source=bad", meetingID), nil)
-	request.Header.Set(internalauth.HeaderName, "secret-key")
-	router.ServeHTTP(response, request)
+	response := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d/captions?source=bad", meetingID), "")
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", response.Code)
 	}
@@ -254,11 +237,7 @@ func TestMeetdChatFailsClosedWithoutActiveJoiner(t *testing.T) {
 	body := fmt.Sprintf(`{"event_id":"chat-event","meet_url":"https://meet.google.com/chat","title":"Chat Meeting","start_at":%q,"end_at":%q}`, start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339))
 	meetingID := createMeetdMeetingForTest(t, router, body)
 
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/meetings/%d/chat", meetingID), strings.NewReader(`{"text":"hello"}`))
-	request.Header.Set(internalauth.HeaderName, "secret-key")
-	request.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(response, request)
+	response := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/chat", meetingID), `{"text":"hello"}`)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", response.Code)
 	}
@@ -269,11 +248,7 @@ func TestMeetdChatFailsClosedWithoutActiveJoiner(t *testing.T) {
 
 func createMeetdMeetingForTest(t *testing.T, router http.Handler, body string) int64 {
 	t.Helper()
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/meetings", strings.NewReader(body))
-	request.Header.Set(internalauth.HeaderName, "secret-key")
-	request.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(response, request)
+	response := performMeetingRequest(router, http.MethodPost, "/meetings", body)
 	if response.Code != http.StatusOK {
 		t.Fatalf("create status = %d, body = %s", response.Code, response.Body.String())
 	}

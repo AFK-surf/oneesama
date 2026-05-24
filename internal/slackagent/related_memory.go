@@ -45,6 +45,13 @@ type SlackRelatedMemoryRecord struct {
 }
 
 func (s *Service) SearchRelatedMemory(query string, options SlackRelatedMemorySearchOptions) SlackRelatedMemorySearchResult {
+	return s.SearchRelatedMemoryContext(context.Background(), query, options)
+}
+
+func (s *Service) SearchRelatedMemoryContext(ctx context.Context, query string, options SlackRelatedMemorySearchOptions) SlackRelatedMemorySearchResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	query = strings.TrimSpace(query)
 	limit := options.Limit
 	if limit <= 0 {
@@ -63,9 +70,9 @@ func (s *Service) SearchRelatedMemory(query string, options SlackRelatedMemorySe
 	}
 	var records []SlackRelatedMemoryRecord
 	records = append(records, relatedMemoryWorkspaceRecords(s.workspaceDir, tokens, now)...)
-	records = append(records, s.relatedMemoryFeedbackRecords(tokens, limit)...)
+	records = append(records, s.relatedMemoryFeedbackRecords(ctx, tokens, limit)...)
 	records = append(records, relatedMemoryTriageProjectionRecords(s.workspaceDir, tokens)...)
-	records = append(records, s.relatedMemoryProviderRecords(context.Background(), query, tokens, limit, now)...)
+	records = append(records, s.relatedMemoryProviderRecords(ctx, query, tokens, limit, now)...)
 	records = dedupeRelatedMemoryRecords(records)
 	sort.SliceStable(records, func(i, j int) bool {
 		if records[i].Score == records[j].Score {
@@ -104,7 +111,11 @@ func (s *Service) relatedMemoryProviderRecords(ctx context.Context, query string
 }
 
 func (s *Service) searchSlackTriageRelatedMemory(query string, limit int) SlackRelatedMemorySearchResult {
-	result := s.SearchRelatedMemory(query, SlackRelatedMemorySearchOptions{Limit: limit})
+	return s.searchSlackTriageRelatedMemoryContext(context.Background(), query, limit)
+}
+
+func (s *Service) searchSlackTriageRelatedMemoryContext(ctx context.Context, query string, limit int) SlackRelatedMemorySearchResult {
+	result := s.SearchRelatedMemoryContext(ctx, query, SlackRelatedMemorySearchOptions{Limit: limit})
 	result.Results = credibleBackfillRelatedMemory(result.Results, limit)
 	if len(result.Results) == 0 {
 		result.Status = "no_relevant_memory"
@@ -155,11 +166,14 @@ func relatedMemoryWorkspaceRecords(workspaceDir string, tokens []string, now tim
 	return records
 }
 
-func (s *Service) relatedMemoryFeedbackRecords(tokens []string, limit int) []SlackRelatedMemoryRecord {
+func (s *Service) relatedMemoryFeedbackRecords(ctx context.Context, tokens []string, limit int) []SlackRelatedMemoryRecord {
 	if s == nil || s.feedback == nil {
 		return nil
 	}
-	entries, err := s.feedback.ListEntries(context.Background(), maxInt(limit*2, relatedMemoryDefaultLimit))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	entries, err := s.feedback.ListEntries(ctx, maxInt(limit*2, relatedMemoryDefaultLimit))
 	if err != nil {
 		return nil
 	}

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/AFK-surf/oneesama/internal/internalauth"
-	"github.com/AFK-surf/oneesama/pkg/contract"
 	"github.com/AFK-surf/oneesama/pkg/version"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -14,6 +13,14 @@ import (
 
 type RouteRegistrar interface {
 	RegisterRoutes(rg *gin.RouterGroup)
+}
+
+type healthResponse struct {
+	OK              bool   `json:"ok"`
+	Service         string `json:"service"`
+	Version         string `json:"version,omitempty"`
+	BundleVersion   string `json:"bundle_version,omitempty"`
+	AgentSDKVersion string `json:"agent_sdk_version,omitempty"`
 }
 
 func New(serviceName string, logger *slog.Logger, allowedOrigins []string, registrars ...RouteRegistrar) *gin.Engine {
@@ -29,7 +36,7 @@ func New(serviceName string, logger *slog.Logger, allowedOrigins []string, regis
 	}))
 
 	router.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, contract.HealthResponse{
+		c.JSON(http.StatusOK, healthResponse{
 			OK:              true,
 			Service:         serviceName,
 			Version:         version.Version,

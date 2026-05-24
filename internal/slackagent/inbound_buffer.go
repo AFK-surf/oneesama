@@ -117,6 +117,17 @@ func normalizeSlackInboundMessage(message SlackInboundMessage) SlackInboundMessa
 	return message
 }
 
+func normalizeObservedChannelType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "", "channel", "public_channel":
+		return "public_channel"
+	case "group", "private_channel":
+		return "private_channel"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
 func (b *slackInboundBuffer) Drain(channelID string) []SlackInboundMessage {
 	if b == nil {
 		return nil

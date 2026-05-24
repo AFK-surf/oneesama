@@ -6,7 +6,7 @@
 // Why this exists:
 //   - A single binary keeps deployment (`scripts/oneesama-live.sh`) simple
 //     and ensures both services link the same revisions of internal packages.
-//   - The shared httpserver / config / observability scaffolding is
+//   - The shared httpserver / config / logging scaffolding is
 //     identical, so we collapsed the per-service mains into one.
 //
 // See docs/architecture.md for the runtime layout and the corresponding
@@ -25,7 +25,6 @@ import (
 
 	"github.com/AFK-surf/oneesama/internal/httpserver"
 	"github.com/AFK-surf/oneesama/internal/meetingagent"
-	"github.com/AFK-surf/oneesama/internal/observability"
 	"github.com/AFK-surf/oneesama/internal/slackagent"
 	"github.com/AFK-surf/oneesama/internal/slackstartup"
 	"github.com/AFK-surf/oneesama/pkg/config"
@@ -49,7 +48,7 @@ func run(args []string, stderr io.Writer) int {
 		return 1
 	}
 
-	logger := observability.InitLogger(cfg.Logging.Level, cfg.Logging.Format).With("service", "oneesama")
+	logger := initLogger(cfg.Logging.Level, cfg.Logging.Format).With("service", "oneesama")
 	logger.Info("config loaded", "config", config.RedactForLogging(cfg))
 
 	if len(args) < 1 {
@@ -89,6 +88,32 @@ func run(args []string, stderr io.Writer) int {
 	}
 
 	return 0
+}
+
+func initLogger(level string, format string) *slog.Logger {
+	programLevel := new(slog.LevelVar)
+	programLevel.Set(parseLogLevel(level))
+
+	options := &slog.HandlerOptions{Level: programLevel}
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "text":
+		return slog.New(slog.NewTextHandler(os.Stdout, options))
+	default:
+		return slog.New(slog.NewJSONHandler(os.Stdout, options))
+	}
+}
+
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func isSlackValidateMode(args []string) bool {

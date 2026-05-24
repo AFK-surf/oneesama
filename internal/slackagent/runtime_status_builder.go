@@ -254,4 +254,3 @@ func (s *Service) executeHeartbeatLogTool(ctx context.Context, limit int, includ
 	}
 	return out
 }
-

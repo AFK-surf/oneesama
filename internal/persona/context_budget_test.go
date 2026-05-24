@@ -27,7 +27,9 @@ func TestRequestHarnessContextBudgetSplitsStableDynamicWorkerAndMemory(t *testin
 			Summary: "1 related memory",
 			Items:   []MemoryRecord{{Kind: "fact", Text: "Oneesama is workspace-specific"}},
 		},
+		Metadata: map[string]any{"debug": "audit context"},
 	}
+	req.DynamicContext[0].Metadata = map[string]any{"source": "workspace config"}
 
 	budget := RequestHarnessContextBudget(req)
 	if budget.StableChars <= 0 || budget.StableTokens <= 0 {
@@ -45,7 +47,10 @@ func TestRequestHarnessContextBudgetSplitsStableDynamicWorkerAndMemory(t *testin
 	if budget.EventContextChars <= 0 || budget.EventContextTokens <= 0 {
 		t.Fatalf("budget = %#v, want event/context budget", budget)
 	}
-	wantTotal := budget.StableChars + budget.DynamicChars + budget.WorkerResultChars + budget.MemoryEvidenceChars + budget.EventContextChars
+	if budget.MetadataChars <= 0 || budget.MetadataTokens <= 0 {
+		t.Fatalf("budget = %#v, want metadata budget", budget)
+	}
+	wantTotal := budget.StableChars + budget.DynamicChars + budget.WorkerResultChars + budget.MemoryEvidenceChars + budget.EventContextChars + budget.MetadataChars
 	if budget.TotalChars != wantTotal {
 		t.Fatalf("totalChars = %d, want %d (%#v)", budget.TotalChars, wantTotal, budget)
 	}

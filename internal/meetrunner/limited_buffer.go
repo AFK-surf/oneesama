@@ -18,21 +18,23 @@ func newLimitedBuffer(maxBytes int) *limitedBuffer {
 }
 
 func (b *limitedBuffer) Write(payload []byte) (int, error) {
+	written := len(payload)
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.written += len(payload)
+	b.written += written
 	remaining := b.maxBytes - b.buffer.Len()
 	if remaining <= 0 {
 		b.truncated = true
-		return len(payload), nil
+		return written, nil
 	}
 	if len(payload) > remaining {
 		payload = payload[:remaining]
 		b.truncated = true
 	}
 	_, err := b.buffer.Write(payload)
-	return len(payload), err
+	return written, err
 }
 
 func (b *limitedBuffer) String() string {

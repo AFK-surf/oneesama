@@ -22,25 +22,15 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&seen); err != nil {
 			t.Fatalf("decode chat request: %v", err)
 		}
-		_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {
-			Message oneesamaPIChatMessage `json:"message"`
-		}{{
-			Message: oneesamaPIChatMessage{Role: "assistant", Content: `{"runtime":"oneesama-pi","decision":"reply","visible_text":"这条可以结合 workspace Memory 轻量评价。","evidence_anchors":[{"kind":"workspace_memory","source_ref":"memory/team.md:7","quote":"workspace Memory 支持这条判断"}],"confidence":0.82,"reason":"source-backed workspace policy"}`},
-		}}})
+		writeOneesamaPITestResponse(w, `{"runtime":"oneesama-pi","decision":"reply","visible_text":"这条可以结合 workspace Memory 轻量评价。","evidence_anchors":[{"kind":"workspace_memory","source_ref":"memory/team.md:7","quote":"workspace Memory 支持这条判断"}],"confidence":0.82,"reason":"source-backed workspace policy"}`)
 	}))
 	defer server.Close()
 
-	runtime, err := NewOneesamaPIRuntime(OneesamaPIConfig{
-		Provider: ProviderOneesamaPi,
-		Mode:     ModeLive,
-		BaseURL:  server.URL,
-		APIKey:   "test-key",
-		Model:    "test-model",
-		Timeout:  time.Second,
+	runtime := newOneesamaPIRuntimeForTest(t, OneesamaPIConfig{
+		Mode:    ModeLive,
+		BaseURL: server.URL,
+		Model:   "test-model",
 	})
-	if err != nil {
-		t.Fatalf("NewOneesamaPIRuntime: %v", err)
-	}
 	resp, err := runtime.Decide(context.Background(), Request{
 		ID:    "req-oneesama",
 		Mode:  ModeLive,
@@ -59,29 +49,18 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 		t.Fatalf("seen = %#v, want model + system/user messages", seen)
 	}
 	systemPrompt := seen.Messages[0].Content
-	if !strings.Contains(systemPrompt, "Oneesama's own Slack foreground Pi agent") {
-		t.Fatalf("system prompt did not establish Oneesama foreground boundary:\n%s", seen.Messages[0].Content)
-	}
-	if !strings.Contains(systemPrompt, "Never post visible self-limitations") {
-		t.Fatalf("system prompt missing media/tool self-limitation guard:\n%s", systemPrompt)
-	}
-	if !strings.Contains(systemPrompt, "Do not infer negative product support/status from missing evidence") {
-		t.Fatalf("system prompt missing missing-evidence product-claim guard:\n%s", systemPrompt)
-	}
-	if !strings.Contains(systemPrompt, "External URL identity/fact lookup is bounded secretary work") || !strings.Contains(systemPrompt, "不认识 / 不知道") {
-		t.Fatalf("system prompt missing old-slackd secretary lookup guard:\n%s", systemPrompt)
-	}
-	if !strings.Contains(systemPrompt, "A visible reply must have concrete evidence") || !strings.Contains(systemPrompt, "typed evidence_anchors") {
-		t.Fatalf("system prompt missing typed evidence-anchor reply quality guard:\n%s", systemPrompt)
-	}
-	if !strings.Contains(systemPrompt, `"evidence_anchors"`) || !strings.Contains(systemPrompt, "fetched_link|workspace_memory|person_memory") {
-		t.Fatalf("system prompt missing evidence_anchors output schema:\n%s", systemPrompt)
-	}
-	for _, forbidden := range []string{"[[", "telegram-pi", "Linger"} {
-		if strings.Contains(systemPrompt, forbidden) {
-			t.Fatalf("system prompt contains old/private marker %q:\n%s", forbidden, systemPrompt)
-		}
-	}
+	assertContainsAll(t, systemPrompt,
+		"Oneesama's own Slack foreground Pi agent",
+		"Never post visible self-limitations",
+		"Do not infer negative product support/status from missing evidence",
+		"External URL identity/fact lookup is bounded secretary work",
+		"不认识 / 不知道",
+		"A visible reply must have concrete evidence",
+		"typed evidence_anchors",
+		`"evidence_anchors"`,
+		"fetched_link|workspace_memory|person_memory",
+	)
+	assertContainsNone(t, systemPrompt, "[[", "telegram-pi", "Linger")
 	if !strings.Contains(seen.Messages[1].Content, "产品相邻链接") {
 		t.Fatalf("user request missing persona payload:\n%s", seen.Messages[1].Content)
 	}
@@ -99,24 +78,14 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 
 func TestOneesamaPIRuntimeSafetyDowngradesDisallowedReply(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {
-			Message oneesamaPIChatMessage `json:"message"`
-		}{{
-			Message: oneesamaPIChatMessage{Role: "assistant", Content: `{"runtime":"oneesama-pi","decision":"reply","visible_text":"should not post"}`},
-		}}})
+		writeOneesamaPITestResponse(w, `{"runtime":"oneesama-pi","decision":"reply","visible_text":"should not post"}`)
 	}))
 	defer server.Close()
 
-	runtime, err := NewOneesamaPIRuntime(OneesamaPIConfig{
-		Provider: ProviderOneesamaPi,
-		Mode:     ModeLive,
-		BaseURL:  server.URL,
-		APIKey:   "test-key",
-		Timeout:  time.Second,
+	runtime := newOneesamaPIRuntimeForTest(t, OneesamaPIConfig{
+		Mode:    ModeLive,
+		BaseURL: server.URL,
 	})
-	if err != nil {
-		t.Fatalf("NewOneesamaPIRuntime: %v", err)
-	}
 	resp, err := runtime.Decide(context.Background(), Request{
 		ID:     "req-no-visible",
 		Mode:   ModeLive,
@@ -131,12 +100,163 @@ func TestOneesamaPIRuntimeSafetyDowngradesDisallowedReply(t *testing.T) {
 	}
 }
 
+func TestOneesamaPIRuntimeSanitizesRemoteErrorAndRejectsOversizedBody(t *testing.T) {
+	runtime := newOneesamaPIRuntimeForTest(t, OneesamaPIConfig{
+		Client: personaHTTPClient(func(req *http.Request) (*http.Response, error) {
+			return personaTestResponse(http.StatusTooManyRequests, `{"error":{"code":"rate_limited","message":"token=secret-token Bearer secret-bearer"}}`), nil
+		}),
+	})
+	_, err := runtime.Decide(context.Background(), Request{ID: "req-pi-error"})
+	if err == nil {
+		t.Fatal("Decide() error = nil, want remote error")
+	}
+	assertContainsNone(t, err.Error(), "secret-token", "secret-bearer")
+	status := runtime.Status(context.Background())
+	assertContainsNone(t, status.LastError, "secret-token", "secret-bearer")
+	if !strings.Contains(status.LastError, "[redacted]") {
+		t.Fatalf("Status().LastError = %q, want redacted error", status.LastError)
+	}
+
+	runtime.client = personaHTTPClient(func(req *http.Request) (*http.Response, error) {
+		return personaTestResponse(http.StatusOK, strings.Repeat("x", int(maxOneesamaPIResponseBytes)+1)), nil
+	})
+	_, err = runtime.Decide(context.Background(), Request{ID: "req-pi-large"})
+	if err == nil {
+		t.Fatal("Decide() oversized body error = nil")
+	}
+	if !strings.Contains(err.Error(), "persona response body exceeds") {
+		t.Fatalf("Decide() oversized body error = %v, want size limit error", err)
+	}
+}
+
+func TestOneesamaPIRuntimeCustomClientContextDeadline(t *testing.T) {
+	runPersonaDeadlineCases(t, "req-pi", func(t *testing.T, tt personaDeadlineCase, parentCtx context.Context) {
+		runtime := newOneesamaPIRuntimeForTest(t, OneesamaPIConfig{
+			Timeout: tt.timeout,
+			Client: personaHTTPClient(func(req *http.Request) (*http.Response, error) {
+				assertRequestDeadlineWithin(t, req, tt.wantWithin)
+				return oneesamaPITestResponse(`{"runtime":"oneesama-pi","decision":"stay_silent"}`), nil
+			}),
+		})
+		if _, err := runtime.Decide(parentCtx, Request{ID: tt.requestID}); err != nil {
+			t.Fatalf("Decide() error = %v", err)
+		}
+	})
+}
+
+func TestOneesamaPIRuntimeRejectsOversizedRequestBudget(t *testing.T) {
+	runtime := newOneesamaPIRuntimeForTest(t, OneesamaPIConfig{
+		Client: personaHTTPClient(func(req *http.Request) (*http.Response, error) {
+			t.Fatal("unexpected HTTP request for oversized persona context")
+			return nil, nil
+		}),
+	})
+	_, err := runtime.Decide(context.Background(), Request{
+		ID: "req-pi-budget",
+		DynamicContext: []DynamicContextEnvelope{{
+			Kind:    "huge_context",
+			Content: strings.Repeat("x", maxOneesamaPIRequestChars+1),
+		}},
+	})
+	if err == nil {
+		t.Fatal("Decide() error = nil, want budget error")
+	}
+	if !strings.Contains(err.Error(), "oneesama Pi request context budget exceeds") {
+		t.Fatalf("Decide() error = %v, want budget error", err)
+	}
+}
+
+func TestOneesamaPIRuntimeOmitsInternalMetadataFromModelRequest(t *testing.T) {
+	var seen oneesamaPIChatRequest
+	runtime := newOneesamaPIRuntimeForTest(t, OneesamaPIConfig{
+		Client: personaHTTPClient(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&seen); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			return oneesamaPITestResponse(`{"runtime":"oneesama-pi","decision":"stay_silent"}`), nil
+		}),
+	})
+	if _, err := runtime.Decide(context.Background(), Request{
+		ID:    "req-pi-metadata",
+		Event: Event{Kind: "slack_triage", Text: "metadata should stay internal"},
+		DynamicContext: []DynamicContextEnvelope{{
+			Kind:     "workspace_policy",
+			Content:  "reply with evidence",
+			Metadata: map[string]any{"internal_debug": "do not send"},
+		}},
+		Metadata: map[string]any{"audit_only": "do not send"},
+	}); err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if len(seen.Messages) != 2 {
+		t.Fatalf("seen messages = %#v, want system/user", seen.Messages)
+	}
+	userPayload := seen.Messages[1].Content
+	assertContainsNone(t, userPayload, "audit_only", "internal_debug", "do not send")
+	assertContainsAll(t, userPayload, "metadata should stay internal", "reply with evidence")
+}
+
+func newOneesamaPIRuntimeForTest(t *testing.T, config OneesamaPIConfig) *OneesamaPIRuntime {
+	t.Helper()
+	if config.Provider == "" {
+		config.Provider = ProviderOneesamaPi
+	}
+	if config.Mode == "" {
+		config.Mode = ModeShadow
+	}
+	if config.BaseURL == "" {
+		config.BaseURL = "https://pi.example"
+	}
+	if config.APIKey == "" {
+		config.APIKey = "test-key"
+	}
+	if config.Timeout == 0 {
+		config.Timeout = time.Second
+	}
+	runtime, err := NewOneesamaPIRuntime(config)
+	if err != nil {
+		t.Fatalf("NewOneesamaPIRuntime() error = %v", err)
+	}
+	return runtime
+}
+
+func oneesamaPITestResponse(content string) *http.Response {
+	return personaTestResponse(http.StatusOK, oneesamaPITestResponseBody(content))
+}
+
+func writeOneesamaPITestResponse(w http.ResponseWriter, content string) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(oneesamaPITestResponseBody(content)))
+}
+
+func oneesamaPITestResponseBody(content string) string {
+	raw, _ := json.Marshal(oneesamaPIChatResponse{Choices: []struct {
+		Message oneesamaPIChatMessage `json:"message"`
+	}{{Message: oneesamaPIChatMessage{Role: "assistant", Content: content}}}})
+	return string(raw)
+}
+
+func assertContainsAll(t *testing.T, body string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func assertContainsNone(t *testing.T, body string, forbidden ...string) {
+	t.Helper()
+	for _, item := range forbidden {
+		if strings.Contains(body, item) {
+			t.Fatalf("body contains forbidden %q:\n%s", item, body)
+		}
+	}
+}
+
 func TestOneesamaPIRuntimePreservesActionFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {
-			Message oneesamaPIChatMessage `json:"message"`
-		}{{
-			Message: oneesamaPIChatMessage{Role: "assistant", Content: `{
+		writeOneesamaPITestResponse(w, `{
 				"runtime":"oneesama-pi",
 				"decision":"delegate_worker",
 				"worker_requests":[{"id":"inspect","kind":"codex","prompt":"inspect linked source before replying"}],
@@ -146,21 +266,14 @@ func TestOneesamaPIRuntimePreservesActionFields(t *testing.T) {
 				"evidence_anchors":[{"kind":"workspace_memory","source_ref":"memory.md:7","quote":"workspace-aware commentary"}],
 				"confidence":0.62,
 				"reason":"needs source inspection"
-			}`},
-		}}})
+			}`)
 	}))
 	defer server.Close()
 
-	runtime, err := NewOneesamaPIRuntime(OneesamaPIConfig{
-		Provider: ProviderOneesamaPi,
-		Mode:     ModeLive,
-		BaseURL:  server.URL,
-		APIKey:   "test-key",
-		Timeout:  time.Second,
+	runtime := newOneesamaPIRuntimeForTest(t, OneesamaPIConfig{
+		Mode:    ModeLive,
+		BaseURL: server.URL,
 	})
-	if err != nil {
-		t.Fatalf("NewOneesamaPIRuntime: %v", err)
-	}
 	resp, err := runtime.Decide(context.Background(), Request{
 		ID:    "req-action-fields",
 		Mode:  ModeLive,

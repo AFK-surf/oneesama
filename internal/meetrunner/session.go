@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/AFK-surf/oneesama/internal/processutil"
 )
 
 const maxRPCMessageBytes = 1 << 20
@@ -64,7 +66,7 @@ func NewSession(cfg SessionConfig) (*Session, error) {
 	}
 	command := exec.Command(commandPath, commandArgs...)
 	command.Dir = cfg.Dir
-	prepareCommand(command)
+	processutil.PrepareGroup(command)
 
 	stdin, err := command.StdinPipe()
 	if err != nil {
@@ -182,7 +184,7 @@ func (s *Session) Close() error {
 			}
 		case <-timer.C:
 			if s.command.Process != nil {
-				closeErr = terminateCommand(s.command)
+				closeErr = processutil.KillGroup("meet-runner", s.command)
 			}
 			<-s.waitDone
 		}

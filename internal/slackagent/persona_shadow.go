@@ -2009,7 +2009,7 @@ func (s *Service) persistPersonaForegroundMemoryWrites(ctx context.Context, resu
 		if text == "" {
 			continue
 		}
-		contradiction := s.personaMemoryWriteContradictionVerdict(record)
+		contradiction := s.personaMemoryWriteContradictionVerdict(ctx, record)
 		if contradiction.Outcome == slackMemoryScopeOutcomeContradictionReview {
 			body, redactions := renderPersonaMemoryWriteContradictionReview(result, record, contradiction)
 			out.Redactions += redactions
@@ -2065,7 +2065,7 @@ func (s *Service) persistPersonaForegroundMemoryWrites(ctx context.Context, resu
 	return out
 }
 
-func (s *Service) personaMemoryWriteContradictionVerdict(record persona.MemoryWrite) SlackMemoryScopeCanaryResult {
+func (s *Service) personaMemoryWriteContradictionVerdict(ctx context.Context, record persona.MemoryWrite) SlackMemoryScopeCanaryResult {
 	if s == nil || !slackMemoryWriteIsIdentityFact(record) || !slackMemoryWriteIsWorkerScoped(record) {
 		return SlackMemoryScopeCanaryResult{
 			CaseID:  slackMemoryScopeCanaryContradictionCase,
@@ -2075,7 +2075,7 @@ func (s *Service) personaMemoryWriteContradictionVerdict(record persona.MemoryWr
 		}
 	}
 	query := personaMemoryWriteContradictionQuery(record)
-	related := s.SearchRelatedMemory(query, SlackRelatedMemorySearchOptions{Limit: 12})
+	related := s.SearchRelatedMemoryContext(ctx, query, SlackRelatedMemorySearchOptions{Limit: 12})
 	return evaluateSlackMemoryContradictionCanary(related.Results, record)
 }
 

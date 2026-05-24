@@ -86,22 +86,14 @@ func (s *Service) runCreateCanvasPendingAction(ctx context.Context, action Slack
 		return response
 	}
 	channel := firstNonEmpty(stringFromAny(action.Params["channel"]), action.ChannelID)
-	publisher, err := s.getCanvasPublisher()
-	if err != nil || publisher == nil {
-		response := AvatarCommandResponse{
-			OK:           false,
-			ResponseType: "ephemeral",
-			Text:         "create_canvas failed: canvas publisher unavailable.",
-		}
-		s.postPendingCanvasResult(ctx, action, interaction.ResponseURL, response, "create_canvas")
-		return response
-	}
-	manifest, err := publisher.Publish(ctx, CanvasPublishInput{
+	manifest, err := s.PublishCanvas(ctx, CanvasPublishInput{
 		Title:            title,
 		SummaryMarkdown:  markdown,
 		Channel:          channel,
 		ThreadTS:         action.ThreadTS,
 		DedupKey:         canvasPendingActionDedupKey(action),
+		WorkspaceID:      "workspace",
+		SnapshotTS:       pendingActionFreshnessSnapshotTS(action),
 		ForceSlackCanvas: true,
 	})
 	if err != nil {
@@ -109,6 +101,16 @@ func (s *Service) runCreateCanvasPendingAction(ctx context.Context, action Slack
 			OK:           false,
 			ResponseType: "ephemeral",
 			Text:         fmt.Sprintf("create_canvas failed: %s", err.Error()),
+		}
+		s.postPendingCanvasResult(ctx, action, interaction.ResponseURL, response, "create_canvas")
+		return response
+	}
+	if manifest.Blocked {
+		response := AvatarCommandResponse{
+			OK:              false,
+			ResponseType:    "ephemeral",
+			Text:            fmt.Sprintf("create_canvas blocked: %s", firstNonEmpty(manifest.BlockReason, "blocked")),
+			ReplaceOriginal: true,
 		}
 		s.postPendingCanvasResult(ctx, action, interaction.ResponseURL, response, "create_canvas")
 		return response
@@ -164,17 +166,7 @@ func (s *Service) runEditCanvasPendingAction(ctx context.Context, action SlackPe
 		s.postPendingCanvasResult(ctx, action, interaction.ResponseURL, response, "edit_canvas")
 		return response
 	}
-	publisher, err := s.getCanvasPublisher()
-	if err != nil || publisher == nil {
-		response := AvatarCommandResponse{
-			OK:           false,
-			ResponseType: "ephemeral",
-			Text:         "edit_canvas failed: canvas publisher unavailable.",
-		}
-		s.postPendingCanvasResult(ctx, action, interaction.ResponseURL, response, "edit_canvas")
-		return response
-	}
-	manifest, err := publisher.Publish(ctx, CanvasPublishInput{
+	manifest, err := s.PublishCanvas(ctx, CanvasPublishInput{
 		Title:            firstNonEmpty(stringFromAny(action.Params["title"]), "Canvas edit"),
 		SummaryMarkdown:  markdown,
 		Channel:          firstNonEmpty(stringFromAny(action.Params["channel"]), action.ChannelID),
@@ -184,12 +176,24 @@ func (s *Service) runEditCanvasPendingAction(ctx context.Context, action SlackPe
 		SectionID:        sectionID,
 		ForceSlackCanvas: true,
 		DedupKey:         canvasPendingActionDedupKey(action),
+		WorkspaceID:      "workspace",
+		SnapshotTS:       pendingActionFreshnessSnapshotTS(action),
 	})
 	if err != nil {
 		response := AvatarCommandResponse{
 			OK:           false,
 			ResponseType: "ephemeral",
 			Text:         fmt.Sprintf("edit_canvas failed: %s", err.Error()),
+		}
+		s.postPendingCanvasResult(ctx, action, interaction.ResponseURL, response, "edit_canvas")
+		return response
+	}
+	if manifest.Blocked {
+		response := AvatarCommandResponse{
+			OK:              false,
+			ResponseType:    "ephemeral",
+			Text:            fmt.Sprintf("edit_canvas blocked: %s", firstNonEmpty(manifest.BlockReason, "blocked")),
+			ReplaceOriginal: true,
 		}
 		s.postPendingCanvasResult(ctx, action, interaction.ResponseURL, response, "edit_canvas")
 		return response
@@ -237,13 +241,15 @@ func (s *Service) postPendingCanvasResult(ctx context.Context, action SlackPendi
 	if text == "" {
 		text = fmt.Sprintf("Pending %s action %d finished.", kind, action.ID)
 	}
-	post := s.PostMessage(ctx, PostMessageInput{
-		Channel:  action.ChannelID,
-		ThreadTS: action.ThreadTS,
-		Text:     text,
-		Blocks:   response.Blocks,
-		DedupKey: fmt.Sprintf("slack-pending-%s-result:%d", kind, action.ID),
-	})
+	post := s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourcePendingCanvasResult,
+		Surface:   slackPublicNotificationSurfaceStatusCard,
+		ChannelID: action.ChannelID,
+		ThreadTS:  action.ThreadTS,
+		Text:      text,
+		Blocks:    response.Blocks,
+		DedupKey:  fmt.Sprintf("slack-pending-%s-result:%d", kind, action.ID),
+	}).Post
 	if !post.OK {
 		s.logger.Warn(
 			"slack pending canvas result post failed",

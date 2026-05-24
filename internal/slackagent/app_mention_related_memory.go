@@ -1,6 +1,7 @@
 package slackagent
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,15 +10,22 @@ import (
 const appMentionRelatedMemorySupplementLimit = 1600
 
 func (s *Service) searchAppMentionRelatedMemory(mention *SlackAppMentionContext, channelName, userName string, limit int) SlackRelatedMemorySearchResult {
+	return s.searchAppMentionRelatedMemoryContext(context.Background(), mention, channelName, userName, limit)
+}
+
+func (s *Service) searchAppMentionRelatedMemoryContext(ctx context.Context, mention *SlackAppMentionContext, channelName, userName string, limit int) SlackRelatedMemorySearchResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	baseQuery := appMentionBaseRelatedMemoryQuery(mention, channelName, userName)
 	if limit <= 0 {
 		limit = relatedMemoryDefaultLimit
 	}
-	combined := s.SearchRelatedMemory(baseQuery, SlackRelatedMemorySearchOptions{Limit: limit})
+	combined := s.SearchRelatedMemoryContext(ctx, baseQuery, SlackRelatedMemorySearchOptions{Limit: limit})
 	queries := []string{baseQuery}
 	for _, query := range appMentionSupplementalRelatedMemoryQueries(mention) {
 		queries = append(queries, query)
-		next := s.SearchRelatedMemory(query, SlackRelatedMemorySearchOptions{Limit: limit})
+		next := s.SearchRelatedMemoryContext(ctx, query, SlackRelatedMemorySearchOptions{Limit: limit})
 		combined.Results = append(combined.Results, tagAppMentionSupplementalRelatedMemory(next.Results)...)
 	}
 	combined.Query = strings.TrimSpace(strings.Join(compactUniqueStrings(queries), "\n\n"))

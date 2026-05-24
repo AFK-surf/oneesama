@@ -26,7 +26,7 @@ func (h *Handler) handleMeetdRedeliverMeeting(c *gin.Context) {
 		return
 	}
 	if meeting == nil {
-		if err := h.service.RedeliverJoinSessionBySyntheticMeetingID(c.Request.Context(), meetingID); err != nil {
+		if err := h.service.RedeliverJoinSessionBySyntheticMeetingID(context.WithoutCancel(c.Request.Context()), meetingID); err != nil {
 			switch {
 			case errors.Is(err, errJoinSessionNotFound):
 				meetdJSONError(c, http.StatusNotFound, "meeting not found")
@@ -45,7 +45,7 @@ func (h *Handler) handleMeetdRedeliverMeeting(c *gin.Context) {
 		return
 	}
 	if meetdMeetingIsSyntheticJoin(*meeting) {
-		if err := h.redeliverSyntheticJoinMeeting(c.Request.Context(), *meeting); err != nil {
+		if err := h.redeliverSyntheticJoinMeeting(context.WithoutCancel(c.Request.Context()), *meeting); err != nil {
 			switch {
 			case errors.Is(err, errJoinSessionNotFound):
 				meetdJSONError(c, http.StatusNotFound, "meeting not found")
@@ -69,7 +69,7 @@ func (h *Handler) handleMeetdRedeliverMeeting(c *gin.Context) {
 	}
 	result.ForceDelivery = true
 	populateMeetdResultArtifacts(result, *meeting)
-	if err := h.service.meetdWebhook(c.Request.Context(), *meeting, *result); err != nil {
+	if err := h.service.meetdWebhook(context.WithoutCancel(c.Request.Context()), *meeting, *result); err != nil {
 		meetdJSONError(c, http.StatusInternalServerError, "redeliver webhook: "+err.Error())
 		return
 	}

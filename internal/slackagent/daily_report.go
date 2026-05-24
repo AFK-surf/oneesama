@@ -335,11 +335,13 @@ func (s *Service) RunDailyReport(ctx context.Context, request SlackDailyReportRu
 	}
 	postCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	post := s.poster.PostMessage(postCtx, PostMessageInput{
-		Channel:  channelID,
-		Text:     report.Text,
-		DedupKey: "daily-report:" + recordID,
-	})
+	post := s.deliverSlackPublicNotification(postCtx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourceDailyReport,
+		Surface:   slackPublicNotificationSurfaceDailyReport,
+		ChannelID: channelID,
+		Text:      report.Text,
+		DedupKey:  "daily-report:" + recordID,
+	}).Post
 	response.Post = &post
 	if !post.OK {
 		s.recordDailyReportPost(timeNow().UTC(), channelID, fmt.Errorf("post daily report: %s", firstNonEmpty(post.Error, post.Detail, "slack_post_failed")))

@@ -1,7 +1,6 @@
 package slackagent
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/httpserver"
+	"github.com/AFK-surf/oneesama/internal/internalauth"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 	"github.com/gin-gonic/gin"
 )
@@ -37,9 +37,7 @@ func TestHandleStatus(t *testing.T) {
 		},
 	})
 
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/slack/status", nil)
-	router.ServeHTTP(response, request)
+	response := performSlackRequest(router, http.MethodGet, "/slack/status", "", nil)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", response.Code)
@@ -80,9 +78,7 @@ func TestHandleStatusReportsAgentRunnerFailureCodes(t *testing.T) {
 		},
 	})
 
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/slack/status", nil)
-	router.ServeHTTP(response, request)
+	response := performSlackRequest(router, http.MethodGet, "/slack/status", "", nil)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", response.Code)
@@ -96,23 +92,99 @@ func TestHandleStatusReportsAgentRunnerFailureCodes(t *testing.T) {
 	}
 }
 
-func TestHandlePostMessageUsesPoster(t *testing.T) {
+func TestHandlePostMessagePurposePolicy(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantStatus   int
+		wantBody     []string
+		wantNoPost   bool
+		wantChannel  string
+		wantThreadTS string
+	}{
+		{
+			name:        "legacy dm allowed",
+			body:        `{"channel":"D123","text":"hello from go"}`,
+			wantStatus:  http.StatusOK,
+			wantBody:    []string{`"mock":true`},
+			wantChannel: "D123",
+		},
+		{
+			name:       "legacy public channel rejected",
+			body:       `{"channel":"C123","text":"hello from go"}`,
+			wantStatus: http.StatusBadRequest,
+			wantBody:   []string{"requires purpose"},
+			wantNoPost: true,
+		},
+		{
+			name:        "public channel notice does not require thread",
+			body:        `{"purpose":"public_channel_notice","channel":"C123","text":"channel notice"}`,
+			wantStatus:  http.StatusOK,
+			wantBody:    []string{`"purpose":"public_channel_notice"`},
+			wantChannel: "C123",
+		},
+		{
+			name:        "operator notice bypasses public reply gate",
+			body:        `{"purpose":"operator_notice","channel":"D123","text":"operator note"}`,
+			wantStatus:  http.StatusOK,
+			wantBody:    []string{`"escape_hatch":true`},
+			wantChannel: "D123",
+		},
+		{
+			name:       "manual override requires bypass reason",
+			body:       `{"purpose":"manual_override","channel":"C123","text":"force post"}`,
+			wantStatus: http.StatusBadRequest,
+			wantNoPost: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+			router := newTestRouter(t, Config{
+				Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+				Poster:      poster,
+			})
+
+			response := postSlackJSON(router, "/slack/post-message", tt.body)
+
+			assertStatus(t, response, tt.wantStatus)
+			assertBodyContains(t, response, tt.wantBody...)
+			if tt.wantNoPost {
+				if calls := poster.Calls(); len(calls) != 0 {
+					t.Fatalf("poster calls = %#v, want none", calls)
+				}
+				return
+			}
+			poster.WaitForCalls(t, 1)
+			calls := poster.Calls()
+			if len(calls) != 1 || calls[0].Channel != tt.wantChannel || calls[0].ThreadTS != tt.wantThreadTS {
+				t.Fatalf("poster calls = %#v, want channel=%q thread=%q", calls, tt.wantChannel, tt.wantThreadTS)
+			}
+		})
+	}
+}
+
+func TestHandlePostMessagePublicThreadReplyUsesPublicReplyGate(t *testing.T) {
+	snapshotTS, _, restore := installNewerHumanReplyFixture(t, "看一下这个", "我已经答了，不要重复发。")
+	defer restore()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	router := newTestRouter(t, Config{
-		Poster: NewPoster(PosterConfig{Mock: true, BotToken: "x"}),
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken:  "xoxb-test",
+			BotUserID: "U_BOT",
+		},
+		Poster: poster,
 	})
 
-	body := `{"channel":"C123","text":"hello from go"}`
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/slack/post-message", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	request.RemoteAddr = "127.0.0.1:4040"
-	router.ServeHTTP(response, request)
+	body := `{"purpose":"public_thread_reply","channel":"C123","thread_ts":"` + snapshotTS + `","snapshot_ts":"` + snapshotTS + `","text":"这条本来准备发到公开 thread。"}`
+	response := postSlackJSON(router, "/slack/post-message", body)
 
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", response.Code)
-	}
-	if !strings.Contains(response.Body.String(), `"mock":true`) {
-		t.Fatalf("body = %s, want mock poster result", response.Body.String())
+	assertStatus(t, response, http.StatusOK)
+	assertBodyContains(t, response, `"blocked":true`, "thread_has_newer_activity")
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want public stale post suppressed", calls)
 	}
 }
 
@@ -125,30 +197,15 @@ func TestHandleCanvasPublishAndList(t *testing.T) {
 	})
 
 	publishBody := `{"artifact_id":"artifact_1","title":"Daily sync","summary_markdown":"# summary\n"}`
-	publishResponse := httptest.NewRecorder()
-	publishRequest := httptest.NewRequest(http.MethodPost, "/canvas/publish", strings.NewReader(publishBody))
-	publishRequest.Header.Set("Content-Type", "application/json")
-	publishRequest.RemoteAddr = "127.0.0.1:4040"
-	router.ServeHTTP(publishResponse, publishRequest)
+	publishResponse := postSlackJSON(router, "/canvas/publish", publishBody)
 
-	if publishResponse.Code != http.StatusOK {
-		t.Fatalf("publish status = %d, want 200", publishResponse.Code)
-	}
-	if !strings.Contains(publishResponse.Body.String(), `"surface":"file"`) {
-		t.Fatalf("publish body = %s, want file manifest", publishResponse.Body.String())
-	}
+	assertStatus(t, publishResponse, http.StatusOK)
+	assertBodyContains(t, publishResponse, `"surface":"file"`)
 
-	listResponse := httptest.NewRecorder()
-	listRequest := httptest.NewRequest(http.MethodGet, "/canvas/published", nil)
-	listRequest.RemoteAddr = "127.0.0.1:4040"
-	router.ServeHTTP(listResponse, listRequest)
+	listResponse := performSlackRequest(router, http.MethodGet, "/canvas/published", "", nil)
 
-	if listResponse.Code != http.StatusOK {
-		t.Fatalf("list status = %d, want 200", listResponse.Code)
-	}
-	if !strings.Contains(listResponse.Body.String(), `"artifact_id":"artifact_1"`) {
-		t.Fatalf("list body = %s, want artifact manifest", listResponse.Body.String())
-	}
+	assertStatus(t, listResponse, http.StatusOK)
+	assertBodyContains(t, listResponse, `"artifact_id":"artifact_1"`)
 }
 
 func TestHandleAvatarCommandRejectsInvalidSignature(t *testing.T) {
@@ -156,25 +213,58 @@ func TestHandleAvatarCommandRejectsInvalidSignature(t *testing.T) {
 		Slack: appconfig.SlackConfig{SigningSecret: "secret"},
 	})
 
-	form := url.Values{
-		"text":       {"status"},
-		"channel_id": {"C123"},
-		"thread_ts":  {"123.456"},
-	}
-	body := form.Encode()
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("X-Slack-Request-Timestamp", timestamp)
-	request.Header.Set("X-Slack-Signature", "v0=bad")
-	router.ServeHTTP(response, request)
+	payload := signDefaultAvatarCommand(t, "status")
+	payload.signature = "v0=bad"
+	response := performSignedAvatarCommand(router, payload)
 
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", response.Code)
 	}
 	if !strings.Contains(response.Body.String(), "signature_mismatch") {
 		t.Fatalf("body = %s, want signature mismatch reason", response.Body.String())
+	}
+}
+
+func TestSlackRoutesRejectOversizedBodies(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		path    string
+		body    string
+		headers map[string]string
+	}{
+		{
+			name:   "signed slack route before signature",
+			config: Config{Slack: appconfig.SlackConfig{SigningSecret: "secret"}},
+			path:   "/slack/events",
+			body:   strings.Repeat("x", slackSignedRequestBodyLimit+1),
+			headers: map[string]string{
+				"X-Slack-Request-Timestamp": strconv.FormatInt(time.Now().Unix(), 10),
+				"X-Slack-Signature":         "v0=bad",
+			},
+		},
+		{
+			name:   "internal tool route",
+			config: Config{Slack: appconfig.SlackConfig{InternalAuthKey: "secret-key"}},
+			path:   "/tools/call",
+			body:   `{"tool":"` + strings.Repeat("x", slackInternalJSONBodyLimit+1) + `"}`,
+			headers: map[string]string{
+				internalauth.HeaderName: "secret-key",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := newTestRouter(t, tt.config)
+			headers := map[string]string{"Content-Type": "application/json"}
+			for key, value := range tt.headers {
+				headers[key] = value
+			}
+			response := performSlackRequest(router, http.MethodPost, tt.path, tt.body, headers)
+
+			assertStatus(t, response, http.StatusRequestEntityTooLarge)
+			assertBodyContains(t, response, "request body too large")
+		})
 	}
 }
 
@@ -192,32 +282,14 @@ func TestHandleAvatarCommandDoesNotExposeScheduleSurface(t *testing.T) {
 		}),
 	})
 
-	form := url.Values{
-		"text":       {"schedule list"},
-		"channel_id": {"C123"},
-		"thread_ts":  {"123.456"},
-	}
-	body := form.Encode()
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	signature := SignSlackRequestBody("secret", timestamp, body)
+	payload := signDefaultAvatarCommand(t, "schedule list")
+	response := performSignedAvatarCommand(router, payload)
 
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", bytes.NewBufferString(body))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("X-Slack-Request-Timestamp", timestamp)
-	request.Header.Set("X-Slack-Signature", signature)
-	router.ServeHTTP(response, request)
+	assertStatus(t, response, http.StatusOK)
 
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", response.Code)
-	}
-
-	var payload AvatarCommandResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if payload.OK || payload.Text != "I don't understand that command.\n\n"+avatarCommandUsage() {
-		t.Fatalf("payload = %#v, want schedule hidden from user command surface", payload)
+	decoded := decodeAvatarCommandResponse(t, response)
+	if decoded.OK || decoded.Text != "I don't understand that command.\n\n"+avatarCommandUsage() {
+		t.Fatalf("payload = %#v, want schedule hidden from user command surface", decoded)
 	}
 }
 
@@ -235,28 +307,11 @@ func TestHandleAvatarCommandHidesWorkerDebugCommands(t *testing.T) {
 		`delegate --session meet_go_123 --mode code --write true "Summarize route wiring"`,
 		"jobs --session meet_go_123",
 	} {
-		payload := signAvatarCommand(t, "secret", url.Values{
-			"text":       {text},
-			"team_id":    {"T123"},
-			"channel_id": {"C123"},
-			"thread_ts":  {"123.456"},
-			"user_id":    {"U123"},
-			"user_name":  {"peng"},
-		})
-		response := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", bytes.NewBufferString(payload.body))
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
-		request.Header.Set("X-Slack-Signature", payload.signature)
-		router.ServeHTTP(response, request)
+		payload := signDefaultAvatarCommand(t, text)
+		response := performSignedAvatarCommand(router, payload)
 
-		if response.Code != http.StatusOK {
-			t.Fatalf("%s status = %d, want 200", text, response.Code)
-		}
-		var decoded AvatarCommandResponse
-		if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
-			t.Fatalf("decode %s response: %v", text, err)
-		}
+		assertStatus(t, response, http.StatusOK)
+		decoded := decodeAvatarCommandResponse(t, response)
 		if decoded.OK || !strings.Contains(decoded.Text, "I don't understand that command.") {
 			t.Fatalf("%s payload = %#v, want hidden debug command", text, decoded)
 		}
@@ -276,28 +331,11 @@ func TestHandleAvatarCommandNaturalTextStartsWorkInternally(t *testing.T) {
 		},
 	})
 
-	payload := signAvatarCommand(t, "secret", url.Values{
-		"text":       {"Summarize route wiring"},
-		"team_id":    {"T123"},
-		"channel_id": {"C123"},
-		"thread_ts":  {"123.456"},
-		"user_id":    {"U123"},
-		"user_name":  {"peng"},
-	})
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", bytes.NewBufferString(payload.body))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
-	request.Header.Set("X-Slack-Signature", payload.signature)
-	router.ServeHTTP(response, request)
+	payload := signDefaultAvatarCommand(t, "Summarize route wiring")
+	response := performSignedAvatarCommand(router, payload)
 
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", response.Code)
-	}
-	var decoded AvatarCommandResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	assertStatus(t, response, http.StatusOK)
+	decoded := decodeAvatarCommandResponse(t, response)
 	jobMap, ok := decoded.Metadata["job"].(map[string]any)
 	if !decoded.OK || !ok {
 		t.Fatalf("payload = %#v, want internal task metadata", decoded)
@@ -323,10 +361,59 @@ func newTestRouter(t *testing.T, cfg Config) http.Handler {
 	return httpserver.New("slack-agent", logger, []string{"*"}, handler)
 }
 
+func performSlackRequest(router http.Handler, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	var requestBody io.Reader
+	if body != "" {
+		requestBody = strings.NewReader(body)
+	}
+	request := httptest.NewRequest(method, path, requestBody)
+	request.RemoteAddr = "127.0.0.1:4040"
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func postSlackJSON(router http.Handler, path, body string) *httptest.ResponseRecorder {
+	return performSlackRequest(router, http.MethodPost, path, body, map[string]string{
+		"Content-Type": "application/json",
+	})
+}
+
+func assertStatus(t *testing.T, response *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if response.Code != want {
+		t.Fatalf("status = %d body=%s, want %d", response.Code, response.Body.String(), want)
+	}
+}
+
+func assertBodyContains(t *testing.T, response *httptest.ResponseRecorder, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("body = %s, want %s", response.Body.String(), want)
+		}
+	}
+}
+
 type signedAvatarCommand struct {
 	body      string
 	timestamp string
 	signature string
+}
+
+func signDefaultAvatarCommand(t *testing.T, text string) signedAvatarCommand {
+	t.Helper()
+	return signAvatarCommand(t, "secret", url.Values{
+		"text":       {text},
+		"team_id":    {"T123"},
+		"channel_id": {"C123"},
+		"thread_ts":  {"123.456"},
+		"user_id":    {"U123"},
+		"user_name":  {"peng"},
+	})
 }
 
 func signAvatarCommand(t *testing.T, secret string, form url.Values) signedAvatarCommand {
@@ -339,4 +426,21 @@ func signAvatarCommand(t *testing.T, secret string, form url.Values) signedAvata
 		timestamp: timestamp,
 		signature: SignSlackRequestBody(secret, timestamp, body),
 	}
+}
+
+func performSignedAvatarCommand(router http.Handler, payload signedAvatarCommand) *httptest.ResponseRecorder {
+	return performSlackRequest(router, http.MethodPost, "/slack/commands/avatar", payload.body, map[string]string{
+		"Content-Type":              "application/x-www-form-urlencoded",
+		"X-Slack-Request-Timestamp": payload.timestamp,
+		"X-Slack-Signature":         payload.signature,
+	})
+}
+
+func decodeAvatarCommandResponse(t *testing.T, response *httptest.ResponseRecorder) AvatarCommandResponse {
+	t.Helper()
+	var decoded AvatarCommandResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return decoded
 }

@@ -163,11 +163,38 @@ func (s *Service) PostMessage(ctx context.Context, input PostMessageInput) PostM
 }
 
 func (s *Service) PublishCanvas(ctx context.Context, input CanvasPublishInput) (PublishedCanvasManifest, error) {
+	if delivery := s.canvasPublicNotificationPreflight(ctx, input); delivery.Blocked {
+		return PublishedCanvasManifest{
+			ID:          firstNonEmpty(input.ID, input.ArtifactID, input.Artifact.ID),
+			Provider:    normalizeCanvasProvider(s.canvasConfig.Provider),
+			Surface:     slackPublicReplySurfaceCanvasNotification,
+			ArtifactID:  firstNonEmpty(input.ArtifactID, input.Artifact.ID),
+			OK:          false,
+			Destination: strings.TrimSpace(input.Destination),
+			Blocked:     true,
+			BlockReason: delivery.BlockReason,
+			BlockedTS:   delivery.BlockedTS,
+		}, nil
+	}
 	publisher, err := s.getCanvasPublisher()
 	if err != nil {
 		return PublishedCanvasManifest{}, err
 	}
-	return publisher.Publish(ctx, input)
+	publishInput := input
+	if s.canvasPublishNeedsControlledSlackPost(input) {
+		publishInput.SuppressSlackPost = true
+	}
+	manifest, err := publisher.Publish(ctx, publishInput)
+	if err != nil {
+		return PublishedCanvasManifest{}, err
+	}
+	if publishInput.SuppressSlackPost {
+		manifest = s.deliverCanvasPublicSlackPost(ctx, input, manifest)
+		if err := persistPublishedCanvasManifest(manifest); err != nil {
+			return PublishedCanvasManifest{}, err
+		}
+	}
+	return manifest, nil
 }
 
 func (s *Service) ListPublishedCanvas() ([]PublishedCanvasManifest, error) {
@@ -193,6 +220,97 @@ func (s *Service) getCanvasPublisher() (CanvasPublisherService, error) {
 	}
 	s.canvasPublisher = publisher
 	return s.canvasPublisher, nil
+}
+
+func (s *Service) canvasPublicNotificationPreflight(ctx context.Context, input CanvasPublishInput) slackPublicThreadReplyDeliveryResult {
+	if strings.TrimSpace(input.Channel) == "" || strings.TrimSpace(input.ThreadTS) == "" || strings.TrimSpace(input.SnapshotTS) == "" {
+		return slackPublicThreadReplyDeliveryResult{}
+	}
+	message := firstNonEmpty(input.NotificationText, input.SummaryMarkdown, input.Title, "canvas publication")
+	return s.deliverSlackPublicThreadReply(ctx, s.canvasPublicNotificationDelivery(input, message, input.DedupKey, true))
+}
+
+func (s *Service) canvasPublishNeedsControlledSlackPost(input CanvasPublishInput) bool {
+	channel := strings.TrimSpace(input.Channel)
+	if channel == "" {
+		return false
+	}
+	provider := normalizeCanvasProvider(s.canvasConfig.Provider)
+	if provider == "slack-thread" {
+		return true
+	}
+	if provider == "slack-canvas" || input.ForceSlackCanvas {
+		return strings.TrimSpace(input.NotificationText) != ""
+	}
+	return false
+}
+
+func (s *Service) deliverCanvasPublicSlackPost(ctx context.Context, input CanvasPublishInput, manifest PublishedCanvasManifest) PublishedCanvasManifest {
+	if manifest.Blocked || !manifest.OK {
+		return manifest
+	}
+	channel := strings.TrimSpace(input.Channel)
+	if channel == "" {
+		return manifest
+	}
+	artifactID := firstNonEmpty(input.ArtifactID, input.Artifact.ID, manifest.ArtifactID, manifest.ID)
+	dedupKey := firstNonEmpty(input.DedupKey, defaultCanvasDedupKey(artifactID, channel, input.ThreadTS))
+	message := strings.TrimSpace(input.NotificationText)
+	if message != "" && manifest.Canvas != nil {
+		message = strings.ReplaceAll(message, "{{canvas_link}}", slackCanvasMarkdownLink(*manifest.Canvas))
+	}
+	if message == "" {
+		markdown, err := renderCanvasMarkdown(input)
+		if err != nil {
+			manifest.OK = false
+			manifest.Slack = &PostMessageResult{OK: false, Error: "render_canvas_notification_failed", Detail: err.Error()}
+			return manifest
+		}
+		message = truncateSlackText(markdown)
+	}
+	delivery := s.deliverSlackPublicThreadReply(ctx, s.canvasPublicNotificationDelivery(input, message, dedupKey, false))
+	if delivery.Blocked {
+		manifest.OK = false
+		manifest.Blocked = true
+		manifest.BlockReason = delivery.BlockReason
+		manifest.BlockedTS = delivery.BlockedTS
+		manifest.Slack = &delivery.Post
+		return manifest
+	}
+	manifest.Slack = &delivery.Post
+	manifest.OK = manifest.OK && delivery.Post.OK
+	if delivery.Post.Mock {
+		manifest.Surface = "mock-slack-thread"
+	} else if strings.TrimSpace(input.NotificationText) == "" {
+		manifest.Surface = "slack-thread"
+	}
+	return manifest
+}
+
+func (s *Service) canvasPublicNotificationDelivery(input CanvasPublishInput, message string, dedupKey string, freshnessOnly bool) slackPublicThreadReplyDelivery {
+	delivery := slackPublicThreadReplyDelivery{
+		Source:        slackPublicReplySourceCanvasNotification,
+		SurfaceKind:   slackPublicReplySurfaceCanvasNotification,
+		WorkspaceID:   input.WorkspaceID,
+		ChannelID:     input.Channel,
+		ThreadTS:      input.ThreadTS,
+		Message:       message,
+		FallbackText:  message,
+		DedupKey:      dedupKey,
+		SnapshotTS:    input.SnapshotTS,
+		FreshnessOnly: freshnessOnly,
+	}
+	if s.canvasConfig.Poster != nil {
+		delivery.Poster = s.canvasConfig.Poster
+	}
+	return delivery
+}
+
+func persistPublishedCanvasManifest(manifest PublishedCanvasManifest) error {
+	if strings.TrimSpace(manifest.ManifestPath) == "" {
+		return nil
+	}
+	return writeJSONFile(manifest.ManifestPath, manifest)
 }
 
 func (s *Service) posterMode() string {

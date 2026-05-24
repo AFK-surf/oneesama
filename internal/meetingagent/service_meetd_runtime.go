@@ -34,16 +34,50 @@ type MeetdRuntimeAction struct {
 }
 
 func (s *Service) StartMeetdRuntime(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.meetdRuntimeMu.Lock()
+	defer s.meetdRuntimeMu.Unlock()
 	if s.meetdRuntimeDone != nil {
 		return
 	}
 	runtimeCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	s.meetdRuntimeCancel = cancel
-	s.meetdRuntimeDone = make(chan struct{})
+	s.meetdRuntimeDone = done
 	go func() {
-		defer close(s.meetdRuntimeDone)
+		defer close(done)
 		s.runMeetdRuntime(runtimeCtx)
 	}()
+}
+
+func (s *Service) StopMeetdRuntime(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.meetdRuntimeMu.Lock()
+	cancel := s.meetdRuntimeCancel
+	done := s.meetdRuntimeDone
+	if cancel == nil || done == nil {
+		s.meetdRuntimeMu.Unlock()
+		return nil
+	}
+	cancel()
+	s.meetdRuntimeMu.Unlock()
+
+	select {
+	case <-done:
+		s.meetdRuntimeMu.Lock()
+		if s.meetdRuntimeDone == done {
+			s.meetdRuntimeCancel = nil
+			s.meetdRuntimeDone = nil
+		}
+		s.meetdRuntimeMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Service) runMeetdRuntime(ctx context.Context) {

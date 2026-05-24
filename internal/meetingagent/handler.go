@@ -2,6 +2,7 @@ package meetingagent
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/AFK-surf/oneesama/internal/httputil"
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,22 @@ type Handler struct {
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+func (h *Handler) handleDemoSurfaceTrail(c *gin.Context) {
+	sessionID := strings.TrimSpace(c.Param("id"))
+	trail, ok := h.service.DemoSurfaceTrail(sessionID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{
+			"ok":    false,
+			"error": "demo_surface_session_not_found",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":    true,
+		"trail": trail,
+	})
 }
 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {

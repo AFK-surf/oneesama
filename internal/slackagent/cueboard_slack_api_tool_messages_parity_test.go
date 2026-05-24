@@ -64,8 +64,10 @@ func TestCueboardParitySlackAPIToolPostMessageAllowsAssistantChannelPostsWithout
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"method": "chat.postMessage",
 		"params": map[string]any{
-			"channel": "C123",
-			"text":    "scheduled diary ready",
+			"purpose":   "status_update",
+			"channel":   "C123",
+			"text":      "scheduled diary ready",
+			"dedup_key": "status-update:C123:1774520000",
 		},
 	})
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 const staleJoinFailureMessage = "meet-runner session became unavailable before the meeting result was finalized"
 
 func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord, stop meetrunner.StopSessionResult, fixtureCaptions []postmeeting.TranscriptSegmentInput) (*postmeeting.PostProcessResult, string) {
+	ctx = context.WithoutCancel(ctx)
 	slackChannel, slackThread := joinSlackRef(session)
 	captions := captionsFromStopRuntime(stop.Runtime)
 	if len(captions) == 0 {
@@ -89,6 +90,7 @@ func (s *Service) finalizeStoppedJoin(ctx context.Context, session SessionRecord
 }
 
 func (s *Service) finalizeStaleJoin(ctx context.Context, session SessionRecord, cause error) *SessionRecord {
+	ctx = context.WithoutCancel(ctx)
 	updated := s.markJoinSessionStale(ctx, session, cause)
 	if updated == nil {
 		updated = &session

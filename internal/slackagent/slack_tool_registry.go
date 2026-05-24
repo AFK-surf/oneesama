@@ -152,16 +152,15 @@ func (s *Service) ExecuteSlackTool(ctx context.Context, request SlackToolCallReq
 	if spec, ok := slackToolSpecByName(name); ok && spec.Status == "product_excluded" {
 		return slackToolError(name, "product_excluded"), nil
 	}
-
 	switch name {
 	case "slack_api":
 		return s.executeSlackAPITool(ctx, request.Role, args)
 	case "read_doc":
 		return s.executeReadDocTool(args), nil
 	case "memory_search":
-		return slackToolOK(name, s.SearchLocalMemory(firstNonEmpty(stringFromAny(args["query"]), stringFromAny(args["q"])), intFromAny(args["limit"]))), nil
+		return slackToolOK(name, s.SearchLocalMemoryContext(ctx, firstNonEmpty(stringFromAny(args["query"]), stringFromAny(args["q"])), intFromAny(args["limit"]))), nil
 	case "memory_get":
-		return s.executeMemoryGetTool(args), nil
+		return s.executeMemoryGetTool(ctx, args), nil
 	case "memory_write":
 		return s.executeMemoryWriteTool(ctx, args), nil
 	case "person_memory":
@@ -252,7 +251,10 @@ func (s *Service) executeSlackAPITool(ctx context.Context, role string, args map
 		token:        s.botToken,
 		workspaceDir: s.workspaceDir,
 		activeThread: s.isActiveMentionThread,
-		customEmoji:  s.workspaceCustomEmojiSnapshot,
+		publicReplyDelivery: func(ctx context.Context, input slackPublicThreadReplyDelivery) slackPublicThreadReplyDeliveryResult {
+			return s.deliverSlackPublicThreadReply(ctx, input)
+		},
+		customEmoji: s.workspaceCustomEmojiSnapshot,
 	}
 	params, _ := args["params"].(map[string]any)
 	if params == nil {
@@ -278,10 +280,10 @@ func (s *Service) executeReadDocTool(args map[string]any) SlackToolCallResponse 
 	return slackToolOK("read_doc", map[string]any{"path": filepath.ToSlash(relPath), "root": root, "content": truncateSlackContextText(string(raw), 8000)})
 }
 
-func (s *Service) executeMemoryGetTool(args map[string]any) SlackToolCallResponse {
+func (s *Service) executeMemoryGetTool(ctx context.Context, args map[string]any) SlackToolCallResponse {
 	relPath := strings.TrimSpace(firstNonEmpty(stringFromAny(args["path"]), stringFromAny(args["key"])))
 	if relPath == "" {
-		return slackToolOK("memory_get", s.MemorySummary())
+		return slackToolOK("memory_get", s.MemorySummaryContext(ctx))
 	}
 	if !isAllowedMemoryPath(relPath) {
 		return slackToolError("memory_get", "path_not_allowed")
@@ -482,13 +484,15 @@ func (s *Service) createSuggestedPendingAction(ctx context.Context, request *sla
 		Reason:               stringFromAny(args["reason"]),
 		RequiresConfirmation: true,
 	}
-	post := s.PostMessage(ctx, PostMessageInput{
-		Channel:  request.Channel,
-		ThreadTS: request.ThreadTS,
-		Text:     buildSlackTriageActionText(action, *record),
-		Blocks:   buildSlackTriageActionBlocks(action, *record),
-		DedupKey: fmt.Sprintf("slack-suggest-action:%s:%s:%s:%d", request.Channel, request.ThreadTS, request.ActionType, record.ID),
-	})
+	post := s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourceSuggestActionCard,
+		Surface:   slackPublicNotificationSurfaceApprovalCard,
+		ChannelID: request.Channel,
+		ThreadTS:  request.ThreadTS,
+		Text:      buildSlackTriageActionText(action, *record),
+		Blocks:    buildSlackTriageActionBlocks(action, *record),
+		DedupKey:  fmt.Sprintf("slack-suggest-action:%s:%s:%s:%d", request.Channel, request.ThreadTS, request.ActionType, record.ID),
+	}).Post
 	if post.OK {
 		cardTS := firstNonEmpty(post.TS, post.ThreadTS)
 		if err := s.triage.SetPendingActionCardTS(ctx, record.ID, cardTS); err != nil {

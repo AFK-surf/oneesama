@@ -2,6 +2,7 @@ package meetingagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,7 +34,7 @@ func TestMeetdArtifactDownloadMatchesCueboard(t *testing.T) {
 		t.Fatalf("set artifacts dir: %v", err)
 	}
 
-	transcript := performMeetdRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d/artifacts/transcript", meetingID), "")
+	transcript := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d/artifacts/transcript", meetingID), "")
 	if transcript.Code != http.StatusOK {
 		t.Fatalf("transcript status = %d, body = %s", transcript.Code, transcript.Body.String())
 	}
@@ -44,7 +45,7 @@ func TestMeetdArtifactDownloadMatchesCueboard(t *testing.T) {
 		t.Fatalf("transcript body = %q", transcript.Body.String())
 	}
 
-	audio := performMeetdRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d/artifacts/audio", meetingID), "")
+	audio := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d/artifacts/audio", meetingID), "")
 	if audio.Code != http.StatusOK || audio.Header().Get("Content-Type") != "audio/mpeg" {
 		t.Fatalf("audio status/header = %d %q", audio.Code, audio.Header().Get("Content-Type"))
 	}
@@ -74,7 +75,7 @@ func TestMeetdRedeliverForcesStoredResult(t *testing.T) {
 		t.Fatalf("set summary: %v", err)
 	}
 
-	response := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
+	response := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
 	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"status":"redelivered"}` {
 		t.Fatalf("redeliver response = %d %s", response.Code, response.Body.String())
 	}
@@ -85,7 +86,7 @@ func TestMeetdRedeliverForcesStoredResult(t *testing.T) {
 		t.Fatalf("captured artifacts = %+v, want transcript path", captured.Artifacts)
 	}
 
-	get := performMeetdRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
+	get := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"result"`) || !strings.Contains(get.Body.String(), `"Done."`) {
 		t.Fatalf("get body = %s, want stored result", get.Body.String())
 	}
@@ -136,7 +137,7 @@ func TestMeetdRedeliverSyntheticJoinSessionReprocessesDirectJoin(t *testing.T) {
 	}
 
 	meetingID := syntheticMeetingID(sessionID)
-	response := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
+	response := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
 	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"status":"redelivered"}` {
 		t.Fatalf("redeliver response = %d %s", response.Code, response.Body.String())
 	}
@@ -149,7 +150,7 @@ func TestMeetdRedeliverSyntheticJoinSessionReprocessesDirectJoin(t *testing.T) {
 	if capturedResult.Artifacts.TranscriptPath == "" || capturedResult.Artifacts.CaptionsCount == 0 {
 		t.Fatalf("captured artifacts = %+v, want transcript and caption count", capturedResult.Artifacts)
 	}
-	get := performMeetdRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
+	get := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"result"`) || !strings.Contains(get.Body.String(), "第一版字幕很差") {
 		t.Fatalf("get body = %s, want stored redelivered summary", get.Body.String())
 	}
@@ -160,29 +161,9 @@ func TestPostProcessInputFromJoinRedeliverySkipsASRForDoneSessions(t *testing.T)
 
 	service, _ := newMeetdOpsTestRouter(t, nil)
 	sessionID := "session_done_redeliver_skip_asr"
-	if _, err := service.PostProcessMeeting(context.Background(), postmeeting.PostProcessInput{
-		ArtifactID: "join-" + sessionID,
-		MeetingID:  meetingIDString(syntheticMeetingID(sessionID)),
-		SessionID:  sessionID,
-		Title:      "Done Redeliver",
-		MeetURL:    "https://meet.google.com/done-redeliver",
-		Captions: []postmeeting.TranscriptSegmentInput{{
-			Speaker: "Peng Xiao",
-			Text:    "已经有字幕的 redelivery 不应该重新跑 ASR。",
-			Source:  "google_meet_caption",
-		}},
-		Source: "join-stop",
-	}); err != nil {
-		t.Fatalf("seed postprocess artifact: %v", err)
-	}
-	session := SessionRecord{
-		ID:         sessionID,
-		MeetingID:  sessionID,
-		MeetingURL: "https://meet.google.com/done-redeliver",
-		Status:     "done",
-		Title:      "Done Redeliver",
-	}
-	meeting := syntheticMeetdMeeting(session, "C123", "111.222")
+	seedJoinPostProcess(t, service, sessionID, "Done Redeliver", "https://meet.google.com/done-redeliver", "已经有字幕的 redelivery 不应该重新跑 ASR。")
+	session := doneJoinRedeliverySession(sessionID, "Done Redeliver", "https://meet.google.com/done-redeliver", nil)
+	meeting := syntheticJoinMeeting(session)
 
 	input, err := service.postProcessInputFromJoinSessionRedelivery(context.Background(), session, meeting)
 	if err != nil {
@@ -190,6 +171,214 @@ func TestPostProcessInputFromJoinRedeliverySkipsASRForDoneSessions(t *testing.T)
 	}
 	if !input.SkipASR {
 		t.Fatalf("SkipASR = false, want true for join redelivery with captured captions")
+	}
+}
+
+func TestPostProcessInputFromJoinRedeliveryRejectsInvalidArtifacts(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newMeetdOpsTestRouter(t, nil)
+	artifactDir := joinRedeliveryArtifactDir(t, service, "session_corrupt_manifest_redeliver")
+	if err := os.WriteFile(filepath.Join(artifactDir, "manifest.json"), []byte(`{"schema":`), 0o644); err != nil {
+		t.Fatalf("write corrupt manifest: %v", err)
+	}
+	assertJoinRedeliveryError(t, service, "session_corrupt_manifest_redeliver", "Corrupt Manifest", nil, "load join artifact manifest", "decode artifact manifest")
+
+	artifactDir = joinRedeliveryArtifactDir(t, service, "session_redeliver_transcript_escape")
+	outsideTranscript := filepath.Join(t.TempDir(), "transcript.json")
+	writeFile(t, outsideTranscript, `{
+		"schema":"oneesama.meeting-transcript.v1",
+		"id":"join-session_redeliver_transcript_escape",
+		"provider":"caption",
+		"ok":true,
+		"segments":[{"speaker":"Peng","text":"outside transcript should not be read"}]
+	}`)
+	writeJoinManifest(t, artifactDir, "session_redeliver_transcript_escape", map[string]string{"transcript": outsideTranscript})
+	assertJoinRedeliveryError(t, service, "session_redeliver_transcript_escape", "Transcript Escape", nil, "resolve join transcript artifact", "escapes configured artifacts root")
+
+	artifactDir = joinRedeliveryArtifactDir(t, service, "session_corrupt_transcript_redeliver")
+	transcriptPath := filepath.Join(artifactDir, "transcript.json")
+	writeFile(t, transcriptPath, `{"schema":`)
+	writeJoinManifest(t, artifactDir, "session_corrupt_transcript_redeliver", map[string]string{"transcript": transcriptPath})
+	captionsPath := filepath.Join(service.pipeline.RootDir(), "fallback-captions.json")
+	writeFile(t, captionsPath, `{"captions":[{"speaker":"Peng","text":"fallback should not mask corrupt transcript"}]}`)
+	assertJoinRedeliveryError(t, service, "session_corrupt_transcript_redeliver", "Corrupt Transcript", map[string]any{"captions_path": captionsPath}, "decode transcript artifact")
+}
+
+func assertJoinRedeliveryError(t *testing.T, service *Service, sessionID string, title string, metadata map[string]any, parts ...string) {
+	t.Helper()
+	session := doneJoinRedeliverySession(sessionID, title, "https://meet.google.com/"+sessionID, metadata)
+	_, err := service.postProcessInputFromJoinSessionRedelivery(context.Background(), session, syntheticJoinMeeting(session))
+	assertErrorContains(t, err, parts...)
+}
+
+func assertErrorContains(t *testing.T, err error, parts ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error = nil, want contextual error")
+	}
+	for _, part := range parts {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("error = %v, want context containing %q", err, part)
+		}
+	}
+}
+
+func joinRedeliveryArtifactDir(t *testing.T, service *Service, sessionID string) string {
+	t.Helper()
+	artifactDir := filepath.Join(service.pipeline.RootDir(), "join-"+sessionID)
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("create artifact dir: %v", err)
+	}
+	return artifactDir
+}
+
+func writeJoinManifest(t *testing.T, artifactDir string, sessionID string, files map[string]string) {
+	t.Helper()
+	content, err := json.Marshal(map[string]any{
+		"schema": "oneesama.meeting-artifact.v1",
+		"id":     "join-" + sessionID,
+		"files":  files,
+	})
+	if err != nil {
+		t.Fatalf("marshal join manifest: %v", err)
+	}
+	writeFile(t, filepath.Join(artifactDir, "manifest.json"), string(content))
+}
+
+func doneJoinRedeliverySession(sessionID string, title string, meetURL string, metadata map[string]any) SessionRecord {
+	return joinSessionRecord(sessionID, title, meetURL, "done", metadata)
+}
+
+func stoppedJoinSession(sessionID string, title string, meetURL string) SessionRecord {
+	return joinSessionRecord(sessionID, title, meetURL, "stopped", slackThreadMetadata(nil))
+}
+
+func staleJoinSession(sessionID string, title string, meetURL string, metadata map[string]any) SessionRecord {
+	session := joinSessionRecord(sessionID, title, meetURL, "stale", metadata)
+	now := time.Now().UTC()
+	session.StartedAt = now.Add(-10 * time.Minute).Format(time.RFC3339Nano)
+	session.EndedAt = now.Add(-5 * time.Minute).Format(time.RFC3339Nano)
+	return session
+}
+
+func joinSessionRecord(sessionID string, title string, meetURL string, status string, metadata map[string]any) SessionRecord {
+	return SessionRecord{
+		ID:         sessionID,
+		MeetingID:  sessionID,
+		MeetingURL: meetURL,
+		Status:     status,
+		Title:      title,
+		Metadata:   metadata,
+	}
+}
+
+func slackThreadMetadata(extra map[string]any) map[string]any {
+	metadata := map[string]any{
+		"slack_channel_id": "C123",
+		"slack_thread_ts":  "111.222",
+	}
+	for key, value := range extra {
+		metadata[key] = value
+	}
+	return metadata
+}
+
+func syntheticJoinMeeting(session SessionRecord) MeetdMeetingRecord {
+	return syntheticMeetdMeeting(session, "C123", "111.222")
+}
+
+func seedJoinPostProcess(t *testing.T, service *Service, sessionID string, title string, meetURL string, text string) {
+	t.Helper()
+	if _, err := service.PostProcessMeeting(context.Background(), postmeeting.PostProcessInput{
+		ArtifactID: "join-" + sessionID,
+		MeetingID:  meetingIDString(syntheticMeetingID(sessionID)),
+		SessionID:  sessionID,
+		Title:      title,
+		MeetURL:    meetURL,
+		Captions: []postmeeting.TranscriptSegmentInput{{
+			Speaker: "Peng",
+			Text:    text,
+			Source:  "fixture",
+		}},
+		Source: "join-stop",
+	}); err != nil {
+		t.Fatalf("seed postprocess artifact: %v", err)
+	}
+}
+
+func upsertJoinSession(t *testing.T, service *Service, session SessionRecord) {
+	t.Helper()
+	if _, err := service.UpsertSession(context.Background(), SessionUpsertInput{
+		ID:         session.ID,
+		MeetingID:  session.MeetingID,
+		MeetingURL: session.MeetingURL,
+		Status:     session.Status,
+		Title:      session.Title,
+		StartedAt:  session.StartedAt,
+		EndedAt:    session.EndedAt,
+		Metadata:   session.Metadata,
+	}); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+}
+
+func cancelledContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}
+
+func TestRedeliverJoinSessionSurvivesRequestContextCancel(t *testing.T) {
+	t.Parallel()
+
+	var captured []MeetdMeetingResult
+	service, _ := newMeetdOpsTestRouter(t, func(_ context.Context, _ MeetdMeetingRecord, result MeetdMeetingResult) error {
+		captured = append(captured, result)
+		return nil
+	})
+	sessionID := "session_redeliver_cancel"
+	seedJoinPostProcess(t, service, sessionID, "Redeliver Cancel", "", "Redelivery should survive request cancellation.")
+	upsertJoinSession(t, service, doneJoinRedeliverySession(sessionID, "Redeliver Cancel", "https://meet.google.com/redeliver-cancel", map[string]any{
+		"slack_channel_id": "C123",
+		"slack_thread_ts":  "111.222",
+	}))
+	if err := service.RedeliverJoinSession(cancelledContext(), sessionID); err != nil {
+		t.Fatalf("RedeliverJoinSession() error = %v", err)
+	}
+	if len(captured) == 0 || captured[len(captured)-1].Status != "done" {
+		t.Fatalf("captured webhook results = %#v, want done result", captured)
+	}
+}
+
+func TestJoinStopFinalizationSurvivesRequestContextCancel(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newMeetdOpsTestRouter(t, nil)
+	session := stoppedJoinSession("session_stop_cancel_finalization", "Stop Cancel", "https://meet.google.com/stop-cancel")
+	result, warning := service.finalizeStoppedJoin(cancelledContext(), session, meetrunner.StopSessionResult{
+		OK: true,
+		Session: meetrunner.RunnerSession{
+			ID:     session.ID,
+			Status: "stopped",
+		},
+	}, []postmeeting.TranscriptSegmentInput{{
+		Speaker: "Peng",
+		Text:    "Decision: finalization should survive client disconnect.",
+		Source:  "fixture",
+	}})
+	if warning != "" || result == nil {
+		t.Fatalf("finalizeStoppedJoin() result=%#v warning=%q, want successful result", result, warning)
+	}
+	if result.Artifact.ID != "join-"+session.ID {
+		t.Fatalf("artifact id = %q, want join session artifact", result.Artifact.ID)
+	}
+	meeting, err := service.GetMeetdMeeting(context.Background(), syntheticMeetingID(session.ID))
+	if err != nil {
+		t.Fatalf("GetMeetdMeeting() error = %v", err)
+	}
+	if meeting == nil || meeting.Status != "done" || meeting.ArtifactsDir == "" {
+		t.Fatalf("meeting = %+v, want done meeting with artifacts dir", meeting)
 	}
 }
 
@@ -208,40 +397,18 @@ func TestMeetdRedeliverStaleSyntheticJoinSessionFromCapturedArtifacts(t *testing
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(artifactDir) })
 	writeFile(t, filepath.Join(artifactDir, "captions.json"), `{"ok":true,"captions":[{"speaker":"Peng Xiao","text":"Stale runner artifacts still need post-meeting delivery.","source":"google-meet-caption-dom"}]}`)
-	if _, err := service.UpsertSession(context.Background(), SessionUpsertInput{
-		ID:         sessionID,
-		MeetingID:  sessionID,
-		MeetingURL: "https://meet.google.com/stale-redeliver",
-		Status:     "stale",
-		Title:      "Stale Redeliver",
-		StartedAt:  time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339Nano),
-		EndedAt:    time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano),
-		Metadata: map[string]any{
-			"slack_channel_id": "C123",
-			"slack_thread_ts":  "111.222",
-			"stale_reason":     "meet_runner_session_unavailable",
-		},
-	}); err != nil {
-		t.Fatalf("upsert session: %v", err)
-	}
+	session := staleJoinSession(sessionID, "Stale Redeliver", "https://meet.google.com/stale-redeliver", slackThreadMetadata(map[string]any{
+		"stale_reason": "meet_runner_session_unavailable",
+	}))
+	upsertJoinSession(t, service, session)
 	meetingID := syntheticMeetingID(sessionID)
-	if _, err := service.upsertSyntheticMeetdMeeting(context.Background(), syntheticMeetdMeeting(SessionRecord{
-		ID:         sessionID,
-		MeetingID:  sessionID,
-		MeetingURL: "https://meet.google.com/stale-redeliver",
-		Status:     "stale",
-		Title:      "Stale Redeliver",
-		StartedAt:  time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339Nano),
-		EndedAt:    time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano),
-		Metadata: map[string]any{
-			"slack_channel_id": "C123",
-			"slack_thread_ts":  "111.222",
-		},
-	}, "C123", "111.222"), "failed", staleJoinFailureMessage, ""); err != nil {
+	meetingSession := session
+	meetingSession.Metadata = slackThreadMetadata(nil)
+	if _, err := service.upsertSyntheticMeetdMeeting(context.Background(), syntheticMeetdMeeting(meetingSession, "C123", "111.222"), "failed", staleJoinFailureMessage, ""); err != nil {
 		t.Fatalf("seed synthetic meeting: %v", err)
 	}
 
-	response := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
+	response := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
 	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"status":"redelivered"}` {
 		t.Fatalf("redeliver stale synthetic meeting = %d %s", response.Code, response.Body.String())
 	}
@@ -255,7 +422,7 @@ func TestMeetdRedeliverStaleSyntheticJoinSessionFromCapturedArtifacts(t *testing
 	if recovered.Status != "done" || !boolField(recovered.Metadata, "stale_recovered_from_redelivery") {
 		t.Fatalf("recovered session = %+v, want done with redelivery recovery metadata", recovered)
 	}
-	get := performMeetdRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
+	get := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"result"`) || !strings.Contains(get.Body.String(), "Stale runner artifacts") {
 		t.Fatalf("get body = %s, want stored redelivered summary", get.Body.String())
 	}
@@ -269,31 +436,9 @@ func TestFinalizeStoppedJoinRegistersSyntheticMeetdMeeting(t *testing.T) {
 		capturedResult = result
 		return nil
 	})
-	session := SessionRecord{
-		ID:         "session_finalize_redeliver",
-		MeetingID:  "session_finalize_redeliver",
-		MeetingURL: "https://meet.google.com/finalize-redeliver",
-		Status:     "stopped",
-		Title:      "Finalize Redeliver",
-		StartedAt:  time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339Nano),
-		EndedAt:    time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano),
-		Metadata: map[string]any{
-			"slack_channel_id": "C123",
-			"slack_thread_ts":  "111.222",
-		},
-	}
-	if _, err := service.UpsertSession(context.Background(), SessionUpsertInput{
-		ID:         session.ID,
-		MeetingID:  session.MeetingID,
-		MeetingURL: session.MeetingURL,
-		Status:     session.Status,
-		Title:      session.Title,
-		StartedAt:  session.StartedAt,
-		EndedAt:    session.EndedAt,
-		Metadata:   session.Metadata,
-	}); err != nil {
-		t.Fatalf("upsert session: %v", err)
-	}
+	session := staleJoinSession("session_finalize_redeliver", "Finalize Redeliver", "https://meet.google.com/finalize-redeliver", slackThreadMetadata(nil))
+	session.Status = "stopped"
+	upsertJoinSession(t, service, session)
 	result, warning := service.finalizeStoppedJoin(context.Background(), session, meetrunner.StopSessionResult{OK: true}, []postmeeting.TranscriptSegmentInput{{
 		Speaker: "Peng Xiao",
 		Text:    "结束入会后应该自动注册 redeliver 记录。",
@@ -303,7 +448,7 @@ func TestFinalizeStoppedJoinRegistersSyntheticMeetdMeeting(t *testing.T) {
 	}
 
 	meetingID := syntheticMeetingID(session.ID)
-	get := performMeetdRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
+	get := performMeetingRequest(router, http.MethodGet, fmt.Sprintf("/meetings/%d", meetingID), "")
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"status":"done"`) || !strings.Contains(get.Body.String(), `"result"`) {
 		t.Fatalf("get synthetic meeting = %d %s, want done result", get.Code, get.Body.String())
 	}
@@ -313,7 +458,7 @@ func TestFinalizeStoppedJoinRegistersSyntheticMeetdMeeting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set stale summary: %v", err)
 	}
-	redeliver := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
+	redeliver := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
 	if redeliver.Code != http.StatusOK || strings.TrimSpace(redeliver.Body.String()) != `{"status":"redelivered"}` {
 		t.Fatalf("redeliver synthetic meeting = %d %s", redeliver.Code, redeliver.Body.String())
 	}
@@ -372,14 +517,14 @@ func TestMeetdRedeliverErrorsMatchCueboard(t *testing.T) {
 
 	_, noSenderRouter := newMeetdOpsTestRouter(t, nil)
 	meetingID := createMeetdMeetingForTest(t, noSenderRouter, meetdCreateBody(t, "missing-sender"))
-	missingSender := performMeetdRequest(noSenderRouter, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
+	missingSender := performMeetingRequest(noSenderRouter, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", meetingID), "")
 	if missingSender.Code != http.StatusNotImplemented || strings.TrimSpace(missingSender.Body.String()) != `{"error":"webhook sender not configured"}` {
 		t.Fatalf("missing sender response = %d %s", missingSender.Code, missingSender.Body.String())
 	}
 
 	_, router := newMeetdOpsTestRouter(t, func(context.Context, MeetdMeetingRecord, MeetdMeetingResult) error { return nil })
 	pendingID := createMeetdMeetingForTest(t, router, meetdCreateBody(t, "redeliver-pending"))
-	pending := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", pendingID), "")
+	pending := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/redeliver", pendingID), "")
 	if pending.Code != http.StatusConflict {
 		t.Fatalf("pending status = %d, want 409", pending.Code)
 	}
@@ -397,7 +542,7 @@ func TestMeetdResummarizeProcessingRulesMatchCueboard(t *testing.T) {
 	if _, err := service.UpdateMeetdMeetingState(context.Background(), meetingID, "processing", "", time.Now().UTC()); err != nil {
 		t.Fatalf("mark fresh processing: %v", err)
 	}
-	fresh := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/resummarize", meetingID), "")
+	fresh := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/resummarize", meetingID), "")
 	if fresh.Code != http.StatusConflict || !strings.Contains(fresh.Body.String(), "still actively processing") {
 		t.Fatalf("fresh response = %d %s", fresh.Code, fresh.Body.String())
 	}
@@ -406,13 +551,13 @@ func TestMeetdResummarizeProcessingRulesMatchCueboard(t *testing.T) {
 	if _, err := service.UpdateMeetdMeetingState(context.Background(), meetingID, "processing", "", stale); err != nil {
 		t.Fatalf("mark stale processing: %v", err)
 	}
-	staleResponse := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/resummarize", meetingID), "")
+	staleResponse := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/resummarize", meetingID), "")
 	if staleResponse.Code != http.StatusOK || strings.TrimSpace(staleResponse.Body.String()) != `{"status":"resummarizing"}` {
 		t.Fatalf("stale response = %d %s", staleResponse.Code, staleResponse.Body.String())
 	}
 
 	pendingID := createMeetdMeetingForTest(t, router, meetdCreateBody(t, "resummarize-pending"))
-	pending := performMeetdRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/resummarize", pendingID), "")
+	pending := performMeetingRequest(router, http.MethodPost, fmt.Sprintf("/meetings/%d/resummarize", pendingID), "")
 	want := fmt.Sprintf(`{"error":"meeting %d is in \"pending\" state, cannot resummarize"}`, pendingID)
 	if pending.Code != http.StatusConflict || strings.TrimSpace(pending.Body.String()) != want {
 		t.Fatalf("pending response = %d %s, want %s", pending.Code, pending.Body.String(), want)
@@ -447,7 +592,7 @@ func meetdCreateBody(t *testing.T, eventID string) string {
 	)
 }
 
-func performMeetdRequest(router http.Handler, method, path, body string) *httptest.ResponseRecorder {
+func performMeetingRequest(router http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	response := httptest.NewRecorder()
 	requestBody := strings.NewReader(body)
 	request := httptest.NewRequest(method, path, requestBody)

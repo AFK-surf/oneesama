@@ -476,35 +476,17 @@ func TestRealtimeDemoSurfaceToolsUseBridge(t *testing.T) {
 	}
 	router := newRealtimeTestRouterWithDemoBridge(t, appconfig.OpenAIConfig{}, bridge)
 
-	start := httptest.NewRecorder()
-	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","url":"https://example.test/demo","goal":"show it"}`))
-	if start.Code != http.StatusOK {
-		t.Fatalf("start status = %d: %s", start.Code, start.Body.String())
-	}
-	var startBody map[string]any
-	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","url":"https://example.test/demo","goal":"show it"}`, http.StatusOK)
 	if startBody["ok"] != true || startBody["session_id"] != "demo_tool" || !strings.Contains(stringFromAny(startBody["observation_context"]), "Demo page opened") {
 		t.Fatalf("start body = %#v, want demo observation", startBody)
 	}
 
-	control := httptest.NewRecorder()
-	router.ServeHTTP(control, realtimeRequest(http.MethodPost, "/tools/control_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","action":"click","text":"Start snake"}`))
-	if control.Code != http.StatusOK {
-		t.Fatalf("control status = %d: %s", control.Code, control.Body.String())
-	}
-	var controlBody map[string]any
-	decodeRealtimeBody(t, control.Body.String(), &controlBody)
+	controlBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","action":"click","text":"Start snake"}`, http.StatusOK)
 	if controlBody["ok"] != true || stringFromAny(controlBody["status"]) != realtimeDemoBridgeStatusUpdated || !strings.Contains(stringFromAny(controlBody["observation_context"]), "already shared browser window") {
 		t.Fatalf("control body = %#v, want updated demo observation", controlBody)
 	}
 
-	cancel := httptest.NewRecorder()
-	router.ServeHTTP(cancel, realtimeRequest(http.MethodPost, "/tools/cancel_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","reason":"done"}`))
-	if cancel.Code != http.StatusOK {
-		t.Fatalf("cancel status = %d: %s", cancel.Code, cancel.Body.String())
-	}
-	var cancelBody map[string]any
-	decodeRealtimeBody(t, cancel.Body.String(), &cancelBody)
+	cancelBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/cancel_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","reason":"done"}`, http.StatusOK)
 	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
 		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
 	}
@@ -515,13 +497,7 @@ func TestRealtimeDemoSurfaceToolsDefaultOff(t *testing.T) {
 	t.Parallel()
 
 	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{})
-	start := httptest.NewRecorder()
-	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_off","url":"https://example.test/demo","goal":"show it"}`))
-	if start.Code != http.StatusServiceUnavailable {
-		t.Fatalf("start status = %d, want 503: %s", start.Code, start.Body.String())
-	}
-	var startBody map[string]any
-	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_off","url":"https://example.test/demo","goal":"show it"}`, http.StatusServiceUnavailable)
 	if startBody["ok"] != false || startBody["error"] != errRealtimeDemoBridgeUnavailable.Error() {
 		t.Fatalf("start body = %#v, want demo bridge unavailable", startBody)
 	}
@@ -550,13 +526,7 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 		},
 	})
 
-	configResponse := httptest.NewRecorder()
-	router.ServeHTTP(configResponse, realtimeRequest(http.MethodGet, "/realtime/config", ""))
-	if configResponse.Code != http.StatusOK {
-		t.Fatalf("config status = %d: %s", configResponse.Code, configResponse.Body.String())
-	}
-	var configBody map[string]any
-	decodeRealtimeBody(t, configResponse.Body.String(), &configBody)
+	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
 	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface") {
 		t.Fatalf("tools = %#v, want demo surface tools when flag enabled", configBody["tools"])
 	}
@@ -565,19 +535,9 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 		t.Fatalf("demoSurface = %#v, want enabled configured status", demoSurface)
 	}
 
-	join := httptest.NewRecorder()
-	router.ServeHTTP(join, realtimeRequest(http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`))
-	if join.Code != http.StatusOK {
-		t.Fatalf("join status = %d: %s", join.Code, join.Body.String())
-	}
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
 
-	start := httptest.NewRecorder()
-	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","url":"https://example.test/demo","goal":"show it"}`))
-	if start.Code != http.StatusOK {
-		t.Fatalf("start status = %d: %s", start.Code, start.Body.String())
-	}
-	var startBody map[string]any
-	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","url":"https://example.test/demo","goal":"show it"}`, http.StatusOK)
 	if startBody["ok"] != true || startBody["session_id"] != "demo_flag" {
 		t.Fatalf("start body = %#v, want successful demo session", startBody)
 	}
@@ -585,24 +545,12 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 		t.Fatalf("start body = %#v, want observation context from fake demo loop", startBody)
 	}
 
-	cancel := httptest.NewRecorder()
-	router.ServeHTTP(cancel, realtimeRequest(http.MethodPost, "/tools/cancel_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","reason":"done"}`))
-	if cancel.Code != http.StatusOK {
-		t.Fatalf("cancel status = %d: %s", cancel.Code, cancel.Body.String())
-	}
-	var cancelBody map[string]any
-	decodeRealtimeBody(t, cancel.Body.String(), &cancelBody)
+	cancelBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/cancel_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","reason":"done"}`, http.StatusOK)
 	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
 		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
 	}
 
-	postCancelConfig := httptest.NewRecorder()
-	router.ServeHTTP(postCancelConfig, realtimeRequest(http.MethodGet, "/realtime/config", ""))
-	if postCancelConfig.Code != http.StatusOK {
-		t.Fatalf("post-cancel config status = %d: %s", postCancelConfig.Code, postCancelConfig.Body.String())
-	}
-	var postCancelBody map[string]any
-	decodeRealtimeBody(t, postCancelConfig.Body.String(), &postCancelBody)
+	postCancelBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
 	status := postCancelBody["demoSurface"].(map[string]any)
 	recent := status["recentSessions"].([]any)
 	if len(recent) != 1 {
@@ -667,13 +615,7 @@ func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
 		},
 	})
 
-	configResponse := httptest.NewRecorder()
-	router.ServeHTTP(configResponse, realtimeRequest(http.MethodGet, "/realtime/config", ""))
-	if configResponse.Code != http.StatusOK {
-		t.Fatalf("config status = %d: %s", configResponse.Code, configResponse.Body.String())
-	}
-	var configBody map[string]any
-	decodeRealtimeBody(t, configResponse.Body.String(), &configBody)
+	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
 	if !toolNamesInclude(configBody["tools"].([]any), "start_demo_execution") {
 		t.Fatalf("tools = %#v, want demo execution tool when demo surface enabled", configBody["tools"])
 	}
@@ -682,19 +624,9 @@ func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
 		t.Fatalf("instructions = %q, want semantic demo-execution example", stringFromAny(configBody["instructions"]))
 	}
 
-	join := httptest.NewRecorder()
-	router.ServeHTTP(join, realtimeRequest(http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"install_screen_share_bridge":true}`))
-	if join.Code != http.StatusOK {
-		t.Fatalf("join status = %d: %s", join.Code, join.Body.String())
-	}
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"install_screen_share_bridge":true}`, http.StatusOK)
 
-	start := httptest.NewRecorder()
-	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_execution", `{"session_id":"meet_session","demo_session_id":"snake_demo","task":"做一个贪吃蛇，然后给我看屏幕，不要先讲规划","task_url":"https://example.test/tasks/snake","demo_url":"https://example.test/tasks/snake","issue_id":"MOCK-1","request_issue_close":true,"user_instruction":"短一点，进度走屏幕"}`))
-	if start.Code != http.StatusOK {
-		t.Fatalf("start status = %d: %s", start.Code, start.Body.String())
-	}
-	var startBody map[string]any
-	decodeRealtimeBody(t, start.Body.String(), &startBody)
+	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_execution", `{"session_id":"meet_session","demo_session_id":"snake_demo","task":"做一个贪吃蛇，然后给我看屏幕，不要先讲规划","task_url":"https://example.test/tasks/snake","demo_url":"https://example.test/tasks/snake","issue_id":"MOCK-1","request_issue_close":true,"user_instruction":"短一点，进度走屏幕"}`, http.StatusOK)
 	if startBody["ok"] != true || stringFromAny(startBody["status"]) != realtimeDemoExecutionStatusStarted {
 		t.Fatalf("start body = %#v, want started demo execution", startBody)
 	}
@@ -1072,6 +1004,24 @@ func realtimeRequest(method string, path string, body string) *http.Request {
 	request.Header.Set(internalauth.HeaderName, "secret-key")
 	request.Header.Set("Content-Type", "application/json")
 	return request
+}
+
+func performRealtimeRequest(t *testing.T, router http.Handler, method string, path string, body string, wantStatus int) *httptest.ResponseRecorder {
+	t.Helper()
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, realtimeRequest(method, path, body))
+	if response.Code != wantStatus {
+		t.Fatalf("%s %s status = %d, want %d: %s", method, path, response.Code, wantStatus, response.Body.String())
+	}
+	return response
+}
+
+func performRealtimeJSON(t *testing.T, router http.Handler, method string, path string, body string, wantStatus int) map[string]any {
+	t.Helper()
+	response := performRealtimeRequest(t, router, method, path, body, wantStatus)
+	var payload map[string]any
+	decodeRealtimeBody(t, response.Body.String(), &payload)
+	return payload
 }
 
 func decodeRealtimeBody(t *testing.T, body string, target any) {

@@ -247,8 +247,8 @@ type fakeMemoryProvider struct {
 	records []SlackRelatedMemoryRecord
 }
 
-func (p *fakeMemoryProvider) Name() string      { return p.name }
-func (p *fakeMemoryProvider) Available() bool   { return true }
+func (p *fakeMemoryProvider) Name() string    { return p.name }
+func (p *fakeMemoryProvider) Available() bool { return true }
 func (p *fakeMemoryProvider) Initialize(context.Context, SlackMemoryProviderInit) error {
 	return nil
 }

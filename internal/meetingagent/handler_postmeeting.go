@@ -1,6 +1,7 @@
 package meetingagent
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/AFK-surf/oneesama/internal/httputil"
@@ -17,6 +18,11 @@ func (h *Handler) handlePostProcess(c *gin.Context) {
 
 	result, err := h.service.PostProcessMeeting(c.Request.Context(), request)
 	if err != nil {
+		var invalidID postmeeting.InvalidArtifactIDError
+		if errors.As(err, &invalidID) {
+			httputil.AbortWithError(c, httputil.InvalidRequestError("invalid artifact id", gin.H{"reason": err.Error()}))
+			return
+		}
 		httputil.AbortWithError(c, httputil.InternalServerError("post-process failed", gin.H{"reason": err.Error()}))
 		return
 	}
@@ -39,6 +45,11 @@ func (h *Handler) handleListArtifacts(c *gin.Context) {
 func (h *Handler) handleGetArtifact(c *gin.Context) {
 	artifact, err := h.service.GetArtifact(c.Query("id"))
 	if err != nil {
+		var invalidID postmeeting.InvalidArtifactIDError
+		if errors.As(err, &invalidID) {
+			httputil.AbortWithError(c, httputil.InvalidRequestError("invalid artifact id", gin.H{"reason": err.Error()}))
+			return
+		}
 		httputil.AbortWithError(c, httputil.InternalServerError("read artifact failed", gin.H{"reason": err.Error()}))
 		return
 	}
@@ -52,6 +63,11 @@ func (h *Handler) handleGetArtifact(c *gin.Context) {
 func (h *Handler) handleGetArtifactChat(c *gin.Context) {
 	chat, err := h.service.GetArtifactChat(c.Query("id"))
 	if err != nil {
+		var invalidID postmeeting.InvalidArtifactIDError
+		if errors.As(err, &invalidID) {
+			httputil.AbortWithError(c, httputil.InvalidRequestError("invalid artifact id", gin.H{"reason": err.Error()}))
+			return
+		}
 		httputil.AbortWithError(c, httputil.InternalServerError("read artifact chat failed", gin.H{"reason": err.Error()}))
 		return
 	}

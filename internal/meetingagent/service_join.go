@@ -21,7 +21,10 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 		return JoinGoogleMeetResponse{}, err
 	}
 	sessionID := strings.TrimSpace(firstNonEmpty(input.SessionID, input.MeetingID))
-	artifactsDir := strings.TrimSpace(input.ArtifactsDir)
+	artifactsDir, err := s.artifactsDirUnderRoot(input.ArtifactsDir)
+	if err != nil {
+		return JoinGoogleMeetResponse{}, err
+	}
 	if artifactsDir == "" && input.RecordMeeting && sessionID != "" {
 		artifactsDir = defaultJoinArtifactsDir(s.pipeline.RootDir(), sessionID)
 	}
@@ -199,7 +202,7 @@ func (s *Service) StopJoin(ctx context.Context, input StopJoinRequest) (StopJoin
 		return StopJoinResponse{}, err
 	}
 
-	postMeeting, postMeetingWarning := s.finalizeStoppedJoin(ctx, saved, stop, fixtureCaptionsFromStopRequest(input))
+	postMeeting, postMeetingWarning := s.finalizeStoppedJoin(context.WithoutCancel(ctx), saved, stop, fixtureCaptionsFromStopRequest(input))
 	return StopJoinResponse{
 		OK:                 stop.OK,
 		Stopped:            true,

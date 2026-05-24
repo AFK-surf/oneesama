@@ -240,7 +240,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	}
 	workspaceDir = firstNonEmpty(strings.TrimSpace(workspaceDir), strings.TrimSpace(os.Getenv("ONEESAMA_SLACK_WORKSPACE_DIR")), strings.TrimSpace(os.Getenv("MAB_SLACK_WORKSPACE_DIR")))
 	if workspaceDir != "" {
-		candidates = enrichBackfillRelatedMemory(candidates, workspaceDir, persistenceDir, persistenceSQLite, persistenceProvider)
+		candidates = enrichBackfillRelatedMemory(context.Background(), candidates, workspaceDir, persistenceDir, persistenceSQLite, persistenceProvider)
 	}
 	personaShadowResults, personaShadowErr := runPersonaShadowReplay(
 		candidates,
@@ -409,7 +409,10 @@ func runPersonaShadowReplay(candidates []slackagent.SlackBackfillCandidate, prov
 	return slackagent.ShadowPersonaBackfillCandidates(ctx, runtime, candidates), nil
 }
 
-func enrichBackfillRelatedMemory(candidates []slackagent.SlackBackfillCandidate, workspaceDir string, persistenceDir string, persistenceSQLite string, persistenceProvider string) []slackagent.SlackBackfillCandidate {
+func enrichBackfillRelatedMemory(ctx context.Context, candidates []slackagent.SlackBackfillCandidate, workspaceDir string, persistenceDir string, persistenceSQLite string, persistenceProvider string) []slackagent.SlackBackfillCandidate {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	workspaceDir = strings.TrimSpace(workspaceDir)
 	if workspaceDir == "" || len(candidates) == 0 {
 		return candidates
@@ -426,7 +429,7 @@ func enrichBackfillRelatedMemory(candidates []slackagent.SlackBackfillCandidate,
 		},
 	})
 	return slackagent.EnrichBackfillCandidatesWithRelatedMemory(candidates, func(query string) slackagent.SlackRelatedMemorySearchResult {
-		return service.SearchRelatedMemory(query, slackagent.SlackRelatedMemorySearchOptions{Limit: 5})
+		return service.SearchRelatedMemoryContext(ctx, query, slackagent.SlackRelatedMemorySearchOptions{Limit: 5})
 	}, 3)
 }
 

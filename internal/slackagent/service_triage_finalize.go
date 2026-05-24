@@ -204,18 +204,18 @@ func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context
 		effectiveChannel := firstNonEmpty(action.ChannelID, channelID)
 		effectiveThread := firstNonEmpty(action.ThreadTS, threadTS)
 		snapshotTS := slackTriageSnapshotLatestTS(messages, effectiveChannel, effectiveThread)
-		if newer, newerTS, reason := s.slackTriageThreadHasNewerBlockingActivity(ctx, effectiveChannel, effectiveThread, snapshotTS, options.IgnoreExistingBotReply); newer {
-			calls = append(calls, SlackTriageToolCall{
-				Tool:    "slack_api",
-				Action:  "post_thread_reply",
-				Args:    marshalTriageArgs("conversations.replies", newerTS, true),
-				Success: true,
-				Brief:   firstNonEmpty(action.Title, "skipped stale thread reply"),
-				Result:  reason,
-			})
-			continue
-		}
 		if slackTriageDirectReactionAction(action) {
+			if newer, newerTS, reason := s.slackTriageThreadHasNewerBlockingActivity(ctx, effectiveChannel, effectiveThread, snapshotTS, options.IgnoreExistingBotReply); newer {
+				calls = append(calls, SlackTriageToolCall{
+					Tool:    "slack_api",
+					Action:  "add_reaction",
+					Args:    marshalTriageArgs("conversations.replies", newerTS, true),
+					Success: true,
+					Brief:   firstNonEmpty(action.Title, "skipped stale reaction"),
+					Result:  reason,
+				})
+				continue
+			}
 			emoji := normalizeSlackReactionName(firstNonEmpty(action.Emoji, action.Message, action.Title))
 			reactionTS := firstNonEmpty(strings.TrimSpace(action.MessageTS), snapshotTS, effectiveThread)
 			if emoji == "" || reactionTS == "" || effectiveChannel == "" {
@@ -269,13 +269,31 @@ func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context
 			calls = append(calls, call)
 			continue
 		}
-		result := s.PostMessage(ctx, PostMessageInput{
-			Channel:  effectiveChannel,
-			ThreadTS: effectiveThread,
-			Text:     markdownToSlackFallbackText(action.Message),
-			Blocks:   buildSlackThreadReplyBlocks(action.Message, "", nil),
-			DedupKey: fmt.Sprintf("slack-triage-direct:%d:%s:%s", runID, effectiveChannel, firstNonEmpty(effectiveThread, "root")),
+		delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
+			Source:                 slackPublicReplySourceTriageDirect,
+			SurfaceKind:            slackPublicReplySurfaceThreadReply,
+			WorkspaceID:            workspaceID,
+			ChannelID:              effectiveChannel,
+			ThreadTS:               effectiveThread,
+			Message:                action.Message,
+			Blocks:                 buildSlackThreadReplyBlocks(action.Message, "", nil),
+			DedupKey:               fmt.Sprintf("slack-triage-direct:%d:%s:%s", runID, effectiveChannel, firstNonEmpty(effectiveThread, "root")),
+			SnapshotTS:             snapshotTS,
+			IgnoreExistingBotReply: options.IgnoreExistingBotReply,
+			LedgerSummary:          "Triage replied: " + firstNonEmpty(action.Title, firstLine(action.Message)),
 		})
+		result := delivery.Post
+		if delivery.Blocked {
+			calls = append(calls, SlackTriageToolCall{
+				Tool:    "slack_api",
+				Action:  "post_thread_reply",
+				Args:    marshalTriageArgs("conversations.replies", delivery.BlockedTS, true),
+				Success: true,
+				Brief:   firstNonEmpty(action.Title, "skipped stale thread reply"),
+				Result:  delivery.BlockReason,
+			})
+			continue
+		}
 		call := SlackTriageToolCall{
 			Tool:    "slack_api",
 			Action:  "post_thread_reply",
@@ -286,8 +304,6 @@ func (s *Service) executeSlackTriageDirectActionsWithOptions(ctx context.Context
 		}
 		if !result.OK {
 			failures++
-		} else if err := s.cognition.RecordOutbound(ctx, workspaceID, effectiveChannel, effectiveThread, "Triage replied: "+firstNonEmpty(action.Title, firstLine(action.Message))); err != nil {
-			s.logger.Warn("slack thread ledger direct reply record failed", "error", err)
 		}
 		mutations++
 		calls = append(calls, call)

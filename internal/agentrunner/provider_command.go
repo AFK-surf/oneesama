@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/AFK-surf/oneesama/internal/processutil"
 )
 
 type commandProvider struct {
@@ -36,7 +38,7 @@ func (p commandProvider) Run(ctx context.Context, input StartInput) (RunResult, 
 	}
 
 	command := exec.CommandContext(ctx, p.bin, p.argsBuilder(input)...)
-	prepareCommand(command)
+	processutil.PrepareGroup(command)
 	stdout := newLimitedBuffer(maxCommandOutputBytes)
 	stderr := newLimitedBuffer(maxCommandOutputBytes)
 	command.Stdout = stdout
@@ -76,7 +78,7 @@ func runCommand(ctx context.Context, command *exec.Cmd) error {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		if err := terminateCommand(command); err != nil {
+		if err := processutil.KillGroup("agent-runner", command); err != nil {
 			return fmt.Errorf("terminate command: %w", err)
 		}
 		return <-done

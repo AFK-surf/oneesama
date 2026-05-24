@@ -47,6 +47,10 @@ func (s *Service) ScheduleMeetdMeeting(ctx context.Context, brief MeetdMeetingBr
 			}
 		}
 	}
+	artifactsDir, err := s.artifactsDirUnderRoot(brief.ArtifactsDir)
+	if err != nil {
+		return 0, err
+	}
 
 	id := nextMeetdMeetingID(meetings)
 	eventID := brief.EventID
@@ -64,7 +68,7 @@ func (s *Service) ScheduleMeetdMeeting(ctx context.Context, brief MeetdMeetingBr
 		Status:          firstNonEmpty(brief.Status, "pending"),
 		Attendees:       append([]string(nil), brief.Attendees...),
 		ErrorMessage:    brief.Error,
-		ArtifactsDir:    brief.ArtifactsDir,
+		ArtifactsDir:    artifactsDir,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}

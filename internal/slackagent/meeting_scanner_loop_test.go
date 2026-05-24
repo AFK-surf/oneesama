@@ -146,6 +146,9 @@ func TestMeetingScannerPostsDedupedApprovalCard(t *testing.T) {
 	if calls[0].Channel != "COPS" || calls[0].ThreadTS != "" {
 		t.Fatalf("anchor post = %#v, want root approval channel message", calls[0])
 	}
+	if calls[0].DedupKey != "slack-meeting-approval-anchor:evt-join" {
+		t.Fatalf("anchor dedup key = %q, want meeting approval anchor contract", calls[0].DedupKey)
+	}
 	if !strings.Contains(calls[0].Text, "Upcoming meeting: *Design review*") || !strings.Contains(calls[0].Text, "https://meet.google.com/yuf-wnes-yqt") {
 		t.Fatalf("anchor text = %q, want meeting approval anchor", calls[0].Text)
 	}

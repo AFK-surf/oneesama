@@ -174,11 +174,14 @@ func (s *Service) finishJoinSetupInteraction(ctx context.Context, command Avatar
 	)
 	if strings.TrimSpace(responseURL) == "" {
 		if command.ChannelID != "" {
-			_ = s.PostMessage(ctx, PostMessageInput{
-				Channel:  command.ChannelID,
-				ThreadTS: command.ThreadTS,
-				Text:     response.Text,
-				Blocks:   response.Blocks,
+			_ = s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+				Source:    slackPublicNotificationSourceJoinSetupStatus,
+				Surface:   slackPublicNotificationSurfaceStatusCard,
+				ChannelID: command.ChannelID,
+				ThreadTS:  command.ThreadTS,
+				Text:      response.Text,
+				Blocks:    response.Blocks,
+				DedupKey:  "join-setup:fallback:" + cardID,
 			})
 		}
 		return
@@ -192,18 +195,21 @@ func (s *Service) postJoinSetupThreadStatus(ctx context.Context, command AvatarC
 	if strings.TrimSpace(command.ChannelID) == "" || strings.TrimSpace(command.ThreadTS) == "" || strings.TrimSpace(text) == "" {
 		return
 	}
-	result := s.PostMessage(ctx, PostMessageInput{
-		Channel:  command.ChannelID,
-		ThreadTS: command.ThreadTS,
-		Text:     text,
-		DedupKey: strings.Join([]string{
-			"join-setup",
-			strings.TrimSpace(stage),
-			strings.TrimSpace(command.ChannelID),
-			strings.TrimSpace(command.ThreadTS),
-			strings.TrimSpace(parsed.MeetURL),
-		}, ":"),
-	})
+	dedupKey := strings.Join([]string{
+		"join-setup",
+		strings.TrimSpace(stage),
+		strings.TrimSpace(command.ChannelID),
+		strings.TrimSpace(command.ThreadTS),
+		strings.TrimSpace(parsed.MeetURL),
+	}, ":")
+	result := s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourceJoinSetupStatus,
+		Surface:   slackPublicNotificationSurfaceStatusCard,
+		ChannelID: command.ChannelID,
+		ThreadTS:  command.ThreadTS,
+		Text:      text,
+		DedupKey:  dedupKey,
+	}).Post
 	if !result.OK {
 		s.logger.Warn("slack join setup thread status post failed", "stage", stage, "channel", command.ChannelID, "thread_ts", command.ThreadTS, "error", result.Error, "detail", result.Detail)
 	}

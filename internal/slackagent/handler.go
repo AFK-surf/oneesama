@@ -1,6 +1,11 @@
 package slackagent
 
-import "github.com/gin-gonic/gin"
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+)
 
 type Handler struct {
 	service *Service
@@ -8,6 +13,29 @@ type Handler struct {
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+func (h *Handler) handleStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, h.service.Status())
+}
+
+func (h *Handler) handleHeartbeatContext(c *gin.Context) {
+	contextText, err := h.service.BuildHeartbeatContext(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "context": contextText})
+}
+
+func (h *Handler) handleMemorySearch(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	ctx := c.Request.Context()
+	c.JSON(http.StatusOK, gin.H{
+		"ok":      true,
+		"summary": h.service.MemorySummaryContext(ctx),
+		"results": h.service.SearchLocalMemoryContext(ctx, c.Query("q"), limit),
+	})
 }
 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
@@ -62,7 +90,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	internal.POST("/tools/call", h.handleSlackToolCall)
 	internal.GET("/canvas/published", h.handleListPublishedCanvas)
 	internal.POST("/canvas/publish", h.handlePublishCanvas)
-	internal.POST("/post-meeting/publish", h.handlePostMeetingPublish)
+	internal.POST("/post-meeting/publish", h.handlePublishCanvas)
 
 	webhooks := rg.Group("/webhooks")
 	webhooks.POST("/meeting-result", h.handleMeetingWebhook)

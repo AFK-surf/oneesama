@@ -25,6 +25,7 @@ type slackAPITool struct {
 	httpTransport         http.RoundTripper
 	messageTargets        map[string]slackAPIMessageTarget
 	latestTargetByChannel map[string]slackAPIMessageTarget
+	publicReplyDelivery   func(context.Context, slackPublicThreadReplyDelivery) slackPublicThreadReplyDeliveryResult
 	customEmoji           func() []string
 }
 
@@ -58,8 +59,14 @@ func (t *slackAPITool) Execute(ctx context.Context, args map[string]any) (slackA
 	}
 	switch resolvedAction {
 	case "post_message":
-		return t.actionPostMessage(ctx, params)
+		if reason := t.validatePostMessageContract(resolvedAction, params); reason != "" {
+			return slackAPIToolResult{Success: false, Text: reason}, nil
+		}
+		return t.actionPostMessageWithAction(ctx, params, resolvedAction)
 	case "post_thread_reply":
+		if reason := t.validatePostMessageContract(resolvedAction, params); reason != "" {
+			return slackAPIToolResult{Success: false, Text: reason}, nil
+		}
 		return t.actionPostThreadReply(ctx, params)
 	case "fetch_thread":
 		return t.actionFetchThread(ctx, params)
@@ -91,6 +98,10 @@ func (t *slackAPITool) Execute(ctx context.Context, args map[string]any) (slackA
 }
 
 func (t *slackAPITool) actionPostMessage(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
+	return t.actionPostMessageWithAction(ctx, params, "post_message")
+}
+
+func (t *slackAPITool) actionPostMessageWithAction(ctx context.Context, params map[string]any, action string) (slackAPIToolResult, error) {
 	channel := strings.TrimSpace(stringFromAny(params["channel"]))
 	threadTS := strings.TrimSpace(stringFromAny(params["thread_ts"]))
 	text := strings.TrimSpace(sanitizeSlackVisibleText(stringFromAny(params["text"])))
@@ -106,6 +117,11 @@ func (t *slackAPITool) actionPostMessage(ctx context.Context, params map[string]
 				slackPostMessageRetrySnippet(params) + ". " +
 				"If you are replying to the current @mention thread, do NOT call slack_api; just output your reply text directly and the system will deliver it automatically.",
 		}, nil
+	}
+
+	purpose := slackAPIPostMessagePurpose(action, params)
+	if postMessagePurposeUsesPublicReplyHelper(purpose) {
+		return t.actionPostMessageViaPublicReplyDelivery(ctx, params, channel, threadTS, text, purpose)
 	}
 
 	apiURL := strings.TrimRight(strings.TrimSpace(t.apiURL), "/")
@@ -177,7 +193,105 @@ func (t *slackAPITool) actionPostThreadReply(ctx context.Context, params map[str
 	}
 	params = cloneStringAnyMap(params)
 	params["thread_ts"] = threadTS
-	return t.actionPostMessage(ctx, params)
+	params["purpose"] = postMessagePurposePublicThreadReply
+	return t.actionPostMessageWithAction(ctx, params, "post_thread_reply")
+}
+
+func (t *slackAPITool) actionPostMessageViaPublicReplyDelivery(ctx context.Context, params map[string]any, channel string, threadTS string, text string, purpose string) (slackAPIToolResult, error) {
+	if t.publicReplyDelivery == nil {
+		return slackAPIToolResult{Success: false, Text: "Public Slack posts from slack_api require the service delivery gate. Retry through the foreground delivery path instead of direct chat.postMessage."}, nil
+	}
+	blocks, blockCount, err := safeSlackBlockMaps(params["blocks"])
+	if err != nil {
+		return slackAPIToolResult{Success: false, Text: "Failed to post blocks: " + err.Error()}, nil
+	}
+	delivery := t.publicReplyDelivery(ctx, slackPublicThreadReplyDelivery{
+		Source:        slackPublicReplySourceSlackAPITool,
+		SurfaceKind:   postMessagePublicSurfaceKind(purpose, stringFromAny(params["surface_kind"])),
+		WorkspaceID:   stringFromAny(params["workspace_id"]),
+		ChannelID:     channel,
+		ThreadTS:      threadTS,
+		FallbackText:  text,
+		Blocks:        blocks,
+		DedupKey:      stringFromAny(params["dedup_key"]),
+		SnapshotTS:    stringFromAny(params["snapshot_ts"]),
+		LedgerSummary: stringFromAny(params["ledger_summary"]),
+	})
+	if delivery.Blocked {
+		return slackAPIToolResult{Success: false, Text: "Public Slack post blocked: " + firstNonEmpty(delivery.BlockReason, "blocked")}, nil
+	}
+	if !delivery.Post.OK {
+		return slackAPIToolResult{Success: false, Text: "Failed to post chat.postMessage: " + firstNonEmpty(delivery.Post.Error, delivery.Post.Detail, "post_failed")}, nil
+	}
+	return slackAPIToolResult{Success: true, Text: fmt.Sprintf("Message posted (ts: %s, %d blocks)", delivery.Post.TS, blockCount)}, nil
+}
+
+func (t *slackAPITool) validatePostMessageContract(action string, params map[string]any) string {
+	purpose := slackAPIPostMessagePurpose(action, params)
+	if strings.TrimSpace(stringFromAny(params["purpose"])) != "" && purpose == "" {
+		return "Invalid Slack post purpose. Use one of: public_thread_reply, public_channel_notice, operator_notice, status, status_update, control_plane, manual_override, meeting_notification."
+	}
+	if action == "post_thread_reply" {
+		if purpose != postMessagePurposePublicThreadReply {
+			return "slack.postThreadReply always uses purpose=public_thread_reply; use chat.postMessage with an explicit escape purpose for non-reply notifications"
+		}
+		return ""
+	}
+	channel := strings.TrimSpace(stringFromAny(params["channel"]))
+	if strings.HasPrefix(channel, "D") && purpose == "" {
+		return ""
+	}
+	if purpose == "" {
+		return "Slack chat.postMessage requires an explicit purpose. Use purpose=public_channel_notice for public channel notices, purpose=public_thread_reply for public thread replies, or an escape purpose such as operator_notice/status/control_plane/meeting_notification. If this is the current @mention thread, output your reply text directly."
+	}
+	if purpose == postMessagePurposeManualOverride && strings.TrimSpace(stringFromAny(params["bypass_reason"])) == "" {
+		return "manual_override Slack posts require bypass_reason"
+	}
+	if purpose == postMessagePurposePublicThreadReply && strings.TrimSpace(firstNonEmpty(stringFromAny(params["thread_ts"]), stringFromAny(params["ts"]))) == "" {
+		return "public_thread_reply Slack posts require thread_ts"
+	}
+	if purpose == postMessagePurposePublicChannelNotice && strings.TrimSpace(stringFromAny(params["thread_ts"])) != "" {
+		return "public_channel_notice Slack posts must not include thread_ts; use public_thread_reply for thread replies"
+	}
+	if slackAPIPostMessagePurposeRequiresDedup(purpose) && !strings.HasPrefix(channel, "D") && strings.TrimSpace(stringFromAny(params["dedup_key"])) == "" {
+		return purpose + " Slack posts to public channels require dedup_key"
+	}
+	return ""
+}
+
+func slackAPIPostMessagePurpose(action string, params map[string]any) string {
+	if action == "post_thread_reply" && strings.TrimSpace(stringFromAny(params["purpose"])) == "" {
+		return postMessagePurposePublicThreadReply
+	}
+	return normalizePostMessagePurpose(stringFromAny(params["purpose"]))
+}
+
+func slackAPIPostMessagePurposeRequiresDedup(purpose string) bool {
+	switch purpose {
+	case postMessagePurposeOperatorNotice,
+		postMessagePurposeStatus,
+		postMessagePurposeStatusUpdate,
+		postMessagePurposeControlPlane,
+		postMessagePurposeMeetingNotification:
+		return true
+	default:
+		return false
+	}
+}
+
+func safeSlackBlockMaps(raw any) ([]map[string]any, int, error) {
+	if raw == nil {
+		return nil, 0, nil
+	}
+	blocksJSON, count, err := encodeSafeBlocks(raw)
+	if err != nil || count == 0 {
+		return nil, count, err
+	}
+	var blocks []map[string]any
+	if err := json.Unmarshal([]byte(blocksJSON), &blocks); err != nil {
+		return nil, 0, err
+	}
+	return blocks, count, nil
 }
 
 func (t *slackAPITool) actionFetchThread(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {
@@ -201,6 +315,15 @@ func (t *slackAPITool) actionFetchThread(ctx context.Context, params map[string]
 		"threadTS": threadTS,
 		"messages": body.Messages,
 	})
+}
+
+func normalizedFetchThreadParams(params map[string]any) (string, string) {
+	channel := strings.TrimSpace(stringFromContext(params, "channel"))
+	threadTS := strings.TrimSpace(stringFromContext(params, "thread_ts"))
+	if threadTS == "" {
+		threadTS = strings.TrimSpace(stringFromContext(params, "ts"))
+	}
+	return channel, threadTS
 }
 
 func (t *slackAPITool) actionFetchChannelHistory(ctx context.Context, params map[string]any) (slackAPIToolResult, error) {

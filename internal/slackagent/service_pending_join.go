@@ -94,13 +94,15 @@ func (s *Service) postPendingJoinMeetingResult(ctx context.Context, action Slack
 	if text == "" {
 		text = fmt.Sprintf("Pending action %d finished.", action.ID)
 	}
-	post := s.PostMessage(ctx, PostMessageInput{
-		Channel:  action.ChannelID,
-		ThreadTS: action.ThreadTS,
-		Text:     text,
-		Blocks:   response.Blocks,
-		DedupKey: fmt.Sprintf("slack-pending-join-result:%d", action.ID),
-	})
+	post := s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourcePendingJoinResult,
+		Surface:   slackPublicNotificationSurfaceStatusCard,
+		ChannelID: action.ChannelID,
+		ThreadTS:  action.ThreadTS,
+		Text:      text,
+		Blocks:    response.Blocks,
+		DedupKey:  fmt.Sprintf("slack-pending-join-result:%d", action.ID),
+	}).Post
 	if !post.OK {
 		s.logger.Warn("slack pending join result post failed", "pending_action_id", action.ID, "error", post.Error, "detail", post.Detail)
 	}

@@ -6,8 +6,15 @@ import (
 )
 
 func (s *Service) MemorySummary() SlackMemorySummary {
+	return s.MemorySummaryContext(context.Background())
+}
+
+func (s *Service) MemorySummaryContext(ctx context.Context) SlackMemorySummary {
 	if s == nil {
 		return SlackMemorySummary{}
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	summary := SlackMemorySummary{}
 	if s.localMemory != nil {
@@ -19,7 +26,7 @@ func (s *Service) MemorySummary() SlackMemorySummary {
 		summary.WorkspaceTriageContexts = len(workspaceTriageContextsForMemory(s.workspaceDir))
 	}
 	if s.feedback != nil {
-		count, err := s.feedback.CountEntries(context.Background())
+		count, err := s.feedback.CountEntries(ctx)
 		if err == nil {
 			summary.FeedbackEntries = count
 		}
@@ -52,12 +59,22 @@ func (s *Service) syncMemoryProvidersTurn(ctx context.Context, turn SlackMemoryP
 	if turn.Metadata == nil {
 		turn.Metadata = map[string]any{}
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.memoryProviders.SyncTurn(ctx, turn)
 }
 
 func (s *Service) SearchLocalMemory(query string, limit int) []SlackMemoryResult {
+	return s.SearchLocalMemoryContext(context.Background(), query, limit)
+}
+
+func (s *Service) SearchLocalMemoryContext(ctx context.Context, query string, limit int) []SlackMemoryResult {
 	if s == nil {
 		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	keywords := memoryKeywords(query)
 	if len(keywords) == 0 {
@@ -71,7 +88,7 @@ func (s *Service) SearchLocalMemory(query string, limit int) []SlackMemoryResult
 		results = append(results, s.localMemory.Search(query, limit)...)
 	}
 	if s.feedback != nil {
-		results = append(results, s.feedback.SearchResults(context.Background(), keywords, limit)...)
+		results = append(results, s.feedback.SearchResults(ctx, keywords, limit)...)
 	}
 	results = append(results, workspaceMemoryFileSearchResults(s.workspaceDir, keywords, limit)...)
 	results = append(results, workspaceTriageMemoryResults(s.workspaceDir, keywords, limit)...)
@@ -81,15 +98,22 @@ func (s *Service) SearchLocalMemory(query string, limit int) []SlackMemoryResult
 }
 
 func (s *Service) buildLocalSlackMemoryContext(query string, limit int) SlackMemoryAgentContext {
+	return s.buildLocalSlackMemoryContextContext(context.Background(), query, limit)
+}
+
+func (s *Service) buildLocalSlackMemoryContextContext(ctx context.Context, query string, limit int) SlackMemoryAgentContext {
 	if s == nil {
 		return SlackMemoryAgentContext{Enabled: false}
 	}
-	results := s.SearchLocalMemory(query, limit)
-	summary := s.MemorySummary()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	results := s.SearchLocalMemoryContext(ctx, query, limit)
+	summary := s.MemorySummaryContext(ctx)
 	enabled := (s.localMemory != nil && s.localMemory.enabled) || summary.WorkspaceFileCount > 0 || summary.WorkspaceTriageContexts > 0 || summary.FeedbackEntries > 0
 	recentFeedback := ""
 	if s.feedback != nil {
-		recentFeedback = s.feedback.RecentMarkdown(context.Background(), 20)
+		recentFeedback = s.feedback.RecentMarkdown(ctx, 20)
 	}
 	return SlackMemoryAgentContext{
 		Enabled:        enabled,

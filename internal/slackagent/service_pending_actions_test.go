@@ -127,6 +127,77 @@ func TestPendingActionConfirmedPostThreadReplyPublishesOriginalThread(t *testing
 	}
 }
 
+func TestPendingActionConfirmedPostThreadReplyBlocksNewerThreadActivity(t *testing.T) {
+	now := time.Date(2026, time.May, 24, 10, 0, 0, 0, time.UTC)
+	previousClock := timeNow
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	rootTS := formatSlackTimestamp(now.Add(-time.Minute))
+	newerTS := formatSlackTimestamp(now.Add(time.Second))
+	restore := installSlackRepliesFixture(t, []SlackMessage{
+		{TS: rootTS, User: "U_ASKER", Text: "看看这个链接"},
+		{TS: newerTS, User: "U_HUMAN", Text: "我已经补了结论，先别再发。"},
+	})
+	defer restore()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken:  "xoxb-test",
+			BotUserID: "U_BOT",
+		},
+		Poster: poster,
+	})
+	record, err := service.triage.InsertPendingAction(context.Background(), SlackPendingAction{
+		ChannelID:  "C123",
+		ThreadTS:   rootTS,
+		ActionType: slackActionTypeThreadReply,
+		Params: map[string]any{
+			"title":             "Review triage reply",
+			"message":           "这条可以发，但确认前要重新看 thread 是否已被接住。",
+			"approvalDecision":  "pending",
+			"proposedReplyText": "这条可以发，但确认前要重新看 thread 是否已被接住。",
+		},
+		Status: PendingActionStatusPending,
+	})
+	if err != nil {
+		t.Fatalf("InsertPendingAction: %v", err)
+	}
+
+	response := service.HandlePendingActionInteraction(context.Background(), SlackPendingActionInteraction{
+		ID:        record.ID,
+		Status:    "confirmed",
+		UserID:    "U_PENG",
+		ChannelID: "D_PENG",
+	})
+
+	if !response.OK || !response.ReplaceOriginal || !strings.Contains(response.Text, "thread_has_newer_activity") {
+		t.Fatalf("response = %#v, want blocked freshness response", response)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want stale approved reply suppressed", got)
+	}
+	updated, err := service.triage.ListPendingActions(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListPendingActions: %v", err)
+	}
+	if len(updated) != 1 || updated[0].Result != "blocked:thread_has_newer_activity" {
+		t.Fatalf("pending action = %#v, want blocked freshness result", updated)
+	}
+	sample, ok := mapFromAny(updated[0].Params["replyQualitySample"])
+	if !ok ||
+		stringFromAny(sample["approvalDecision"]) != "blocked" ||
+		stringFromAny(sample["blockReason"]) != "thread_has_newer_activity" ||
+		stringFromAny(sample["finalOutcome"]) != "blocked:thread_has_newer_activity" {
+		t.Fatalf("reply quality sample = %#v, want blocked freshness sample", updated[0].Params["replyQualitySample"])
+	}
+	if got := stringFromAny(updated[0].Params["blockedByThreadTS"]); got != newerTS {
+		t.Fatalf("blockedByThreadTS = %q, want %q", got, newerTS)
+	}
+}
+
 func TestPendingActionDismissedPostThreadReplyShowsSilencedState(t *testing.T) {
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}})
 	record, err := service.triage.InsertPendingAction(context.Background(), SlackPendingAction{

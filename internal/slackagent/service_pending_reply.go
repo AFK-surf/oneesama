@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func (s *Service) executePostThreadReplyPendingAction(ctx context.Context, action SlackPendingAction, interaction SlackPendingActionInteraction) AvatarCommandResponse {
@@ -27,13 +28,38 @@ func (s *Service) executePostThreadReplyPendingAction(ctx context.Context, actio
 			},
 		}
 	}
-	post := s.PostMessage(ctx, PostMessageInput{
-		Channel:  channelID,
-		ThreadTS: threadTS,
-		Text:     markdownToSlackFallbackText(message),
-		Blocks:   buildSlackThreadReplyBlocks(message, "", nil),
-		DedupKey: fmt.Sprintf("pending-action-post-thread-reply:%d", action.ID),
+	snapshotTS := pendingActionFreshnessSnapshotTS(action)
+	delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
+		Source:        slackPublicReplySourcePendingApproval,
+		SurfaceKind:   slackPublicReplySurfaceThreadReply,
+		WorkspaceID:   "workspace",
+		ChannelID:     channelID,
+		ThreadTS:      threadTS,
+		Message:       message,
+		Blocks:        buildSlackThreadReplyBlocks(message, "", nil),
+		DedupKey:      fmt.Sprintf("pending-action-post-thread-reply:%d", action.ID),
+		SnapshotTS:    snapshotTS,
+		LedgerSummary: "Confirmed triage reply: " + firstNonEmpty(stringFromAny(action.Params["title"]), firstLine(message)),
 	})
+	if delivery.Blocked {
+		result := "blocked:" + delivery.BlockReason
+		s.updatePostThreadReplyPendingBlockedResult(ctx, action.ID, result, delivery.BlockReason, delivery.BlockedTS)
+		return AvatarCommandResponse{
+			OK:              true,
+			ResponseType:    "ephemeral",
+			Text:            "post_thread_reply blocked: " + delivery.BlockReason,
+			Blocks:          buildPendingActionResolvedBlocks(action, interaction, "blocked"),
+			ReplaceOriginal: true,
+			Metadata: map[string]any{
+				"pending_action": action,
+				"interaction":    interaction,
+				"execution":      "blocked",
+				"reason":         delivery.BlockReason,
+				"newer_ts":       delivery.BlockedTS,
+			},
+		}
+	}
+	post := delivery.Post
 	if !post.OK {
 		reason := firstNonEmpty(post.Error, post.Detail, "post_failed")
 		s.updatePostThreadReplyPendingResult(ctx, action.ID, "post_failed:"+reason)
@@ -52,9 +78,6 @@ func (s *Service) executePostThreadReplyPendingAction(ctx context.Context, actio
 		}
 	}
 	s.updatePostThreadReplyPendingResult(ctx, action.ID, "posted:"+firstNonEmpty(post.TS, post.ThreadTS))
-	if err := s.cognition.RecordOutbound(ctx, "workspace", channelID, threadTS, "Confirmed triage reply: "+firstNonEmpty(stringFromAny(action.Params["title"]), firstLine(message))); err != nil {
-		s.logger.Warn("slack pending reply outbound record failed", "pending_action_id", action.ID, "error", err)
-	}
 	return AvatarCommandResponse{
 		OK:              true,
 		ResponseType:    "ephemeral",
@@ -67,6 +90,25 @@ func (s *Service) executePostThreadReplyPendingAction(ctx context.Context, actio
 			"execution":      "posted",
 			"post":           post,
 		},
+	}
+}
+
+func (s *Service) updatePostThreadReplyPendingBlockedResult(ctx context.Context, id int64, result string, blockReason string, newerTS string) {
+	if s == nil || s.triage == nil || id == 0 {
+		return
+	}
+	if _, err := s.triage.UpdatePendingAction(ctx, id, func(action *SlackPendingAction) {
+		action.Result = result
+		if action.Params == nil {
+			action.Params = make(map[string]any)
+		}
+		action.Params["approvalDecision"] = "blocked"
+		action.Params["blockReason"] = blockReason
+		action.Params["blockedByThreadTS"] = newerTS
+		action.Params["finalOutcome"] = result
+		recordSlackVisibleReplyQualitySampleParams(action)
+	}); err != nil {
+		s.logger.Warn("slack pending reply blocked result update failed", "pending_action_id", id, "error", err)
 	}
 }
 
@@ -84,4 +126,19 @@ func (s *Service) updatePostThreadReplyPendingResult(ctx context.Context, id int
 	}); err != nil {
 		s.logger.Warn("slack pending reply result update failed", "pending_action_id", id, "error", err)
 	}
+}
+
+func pendingActionFreshnessSnapshotTS(action SlackPendingAction) string {
+	if snapshot := strings.TrimSpace(stringFromAny(action.Params["freshnessSnapshotTS"])); snapshot != "" {
+		return snapshot
+	}
+	createdAt := strings.TrimSpace(action.CreatedAt)
+	if createdAt == "" {
+		return ""
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		return ""
+	}
+	return formatSlackTimestamp(parsed)
 }

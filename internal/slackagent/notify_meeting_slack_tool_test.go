@@ -118,6 +118,9 @@ func TestNotifyMeetingSlackUsesStoredThreadIgnoringModelArgs(t *testing.T) {
 	if poster.lastInput.ThreadTS != "100.000" {
 		t.Errorf("posted ThreadTS = %q, want 100.000 (from stored record)", poster.lastInput.ThreadTS)
 	}
+	if poster.lastInput.DedupKey != "notify-meeting-slack:42" {
+		t.Errorf("posted DedupKey = %q, want notify-meeting-slack:42", poster.lastInput.DedupKey)
+	}
 }
 
 func TestNotifyMeetingSlackAcceptsMatchingModelConfirmation(t *testing.T) {

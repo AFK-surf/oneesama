@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -57,7 +56,10 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []SummaryLLMMessag
 		return SummaryLLMResponse{}, fmt.Errorf("summary llm request: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readProviderResponseBody(resp.Body)
+	if err != nil {
+		return SummaryLLMResponse{}, fmt.Errorf("read summary llm response body: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return SummaryLLMResponse{}, fmt.Errorf("summary llm failed (%d): %s", resp.StatusCode, string(respBody))
 	}

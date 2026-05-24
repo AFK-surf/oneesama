@@ -71,6 +71,11 @@ export function getRuntimeConfig(env = process.env) {
     dryRunCodex: (env.MAB_DRY_RUN_CODEX || "") === "1",
     agentCommand: env.MAB_AGENT_COMMAND || "",
     agentHttpUrl: env.MAB_AGENT_HTTP_URL || "",
+    agentRunnerTimeoutMs: Number.parseInt(env.MAB_AGENT_RUNNER_TIMEOUT_MS || "120000", 10),
+    agentRunnerOutputMaxBytes: Number.parseInt(
+      env.MAB_AGENT_RUNNER_OUTPUT_MAX_BYTES || "262144",
+      10,
+    ),
     codexBin: env.MAB_CODEX_BIN || "codex",
     codexModel: env.MAB_CODEX_MODEL || "gpt-5.5",
     codexSandbox: env.MAB_CODEX_SANDBOX || "",
@@ -133,7 +138,9 @@ export function getRuntimeConfig(env = process.env) {
     currentUserLinear: env.MAB_CURRENT_USER_LINEAR || "",
     currentUserGithub: env.MAB_CURRENT_USER_GITHUB || "",
     currentUserRole: env.MAB_CURRENT_USER_ROLE || "",
-    currentUserAliases: splitList(env.MAB_CURRENT_USER_ALIASES || env.ONEESAMA_CURRENT_USER_ALIASES),
+    currentUserAliases: splitList(
+      env.MAB_CURRENT_USER_ALIASES || env.ONEESAMA_CURRENT_USER_ALIASES,
+    ),
     browserHeadless: (env.MAB_BROWSER_HEADLESS || "false") === "true",
     screenshotDir: env.MAB_SCREENSHOT_DIR || "/tmp/meeting-avatar-bot",
     playwrightModulePath: env.MAB_PLAYWRIGHT_MODULE || "",

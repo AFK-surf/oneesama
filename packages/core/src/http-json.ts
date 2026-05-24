@@ -29,11 +29,40 @@ export interface JsonHttpServerOptions {
   name: string;
   port: number;
   routes: Record<string, JsonHttpHandler>;
+  maxBodyBytes?: number;
 }
 
-async function readBody(req: IncomingMessage): Promise<{ body: JsonHttpBody; rawBody: string }> {
+const defaultMaxBodyBytes = 10 * 1024 * 1024;
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type,x-slack-request-timestamp,x-slack-signature",
+  "access-control-allow-private-network": "true",
+};
+
+class RequestBodyTooLargeError extends Error {
+  constructor(
+    readonly maxBodyBytes: number,
+    readonly receivedBytes: number,
+  ) {
+    super(`request body exceeded ${maxBodyBytes} bytes`);
+  }
+}
+
+async function readBody(
+  req: IncomingMessage,
+  maxBodyBytes: number,
+): Promise<{ body: JsonHttpBody; rawBody: string }> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let receivedBytes = 0;
+  for await (const chunk of req) {
+    const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    receivedBytes += payload.length;
+    if (maxBodyBytes > 0 && receivedBytes > maxBodyBytes) {
+      throw new RequestBodyTooLargeError(maxBodyBytes, receivedBytes);
+    }
+    chunks.push(payload);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw.trim()) return { body: {}, rawBody: raw };
   const contentType = String(req.headers["content-type"] || "");
@@ -56,10 +85,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": payload.length,
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,x-slack-request-timestamp,x-slack-signature",
-    "access-control-allow-private-network": "true",
+    ...corsHeaders,
   });
   res.end(payload);
 }
@@ -74,22 +100,21 @@ function sendRaw(
   res.writeHead(status, {
     "content-type": contentType,
     "content-length": payload.length,
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,x-slack-request-timestamp,x-slack-signature",
-    "access-control-allow-private-network": "true",
+    ...corsHeaders,
   });
   res.end(payload);
 }
 
-export function createJsonServer({ name, port, routes }: JsonHttpServerOptions) {
+export function createJsonServer({
+  name,
+  port,
+  routes,
+  maxBodyBytes = defaultMaxBodyBytes,
+}: JsonHttpServerOptions) {
   const server = http.createServer(async (req, res) => {
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
-        "access-control-allow-origin": "*",
-        "access-control-allow-methods": "GET,POST,OPTIONS",
-        "access-control-allow-headers": "content-type,x-slack-request-timestamp,x-slack-signature",
-        "access-control-allow-private-network": "true",
+        ...corsHeaders,
       });
       res.end();
       return;
@@ -106,7 +131,7 @@ export function createJsonServer({ name, port, routes }: JsonHttpServerOptions) 
       return;
     }
     try {
-      const { body, rawBody } = await readBody(req);
+      const { body, rawBody } = await readBody(req, maxBodyBytes);
       const result = (await handler({ req, url, body, rawBody })) as
         | (Record<string, unknown> & {
             raw?: Buffer | string;
@@ -121,6 +146,15 @@ export function createJsonServer({ name, port, routes }: JsonHttpServerOptions) 
       }
       sendJson(res, result?.status || 200, result?.body ?? result ?? { ok: true });
     } catch (error) {
+      if (error instanceof RequestBodyTooLargeError) {
+        sendJson(res, 413, {
+          ok: false,
+          error: "request_body_too_large",
+          maxBodyBytes: error.maxBodyBytes,
+          receivedBytes: error.receivedBytes,
+        });
+        return;
+      }
       const err = error as { message?: string };
       sendJson(res, 500, {
         ok: false,

@@ -42,7 +42,16 @@ func newTestOperatorFallback(pilotUserID, debugChannelID string, posterOK bool) 
 		PilotUserID:    pilotUserID,
 		DebugChannelID: debugChannelID,
 		Poster:         poster,
-		DM:             dm,
+		PublicNotice: func(ctx context.Context, input slackPublicNotificationDelivery) slackPublicNotificationDeliveryResult {
+			return slackPublicNotificationDeliveryResult{Post: poster.PostMessage(ctx, PostMessageInput{
+				Channel:  input.ChannelID,
+				ThreadTS: input.ThreadTS,
+				Text:     input.Text,
+				Blocks:   input.Blocks,
+				DedupKey: input.DedupKey,
+			})}
+		},
+		DM: dm,
 	}
 	return fallback, poster
 }

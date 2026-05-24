@@ -87,81 +87,81 @@ func TestWorkerResultCanvasInputReusesExistingCanvasFile(t *testing.T) {
 	}
 }
 
-func TestSlackWorkerResultTextSilentOnInternalGatewayLeak(t *testing.T) {
-	job := agentrunner.Job{
-		Status: agentrunner.StatusCompleted,
-		Result: "我试着 curl http://127.0.0.1:8780/slack/tools/call，但是 connection refused，所以拿不到资料。",
-	}
-	if got := slackWorkerResultText(job); got != "" {
-		t.Fatalf("slackWorkerResultText() = %q, want empty string (silent) when result leaks internal gateway", got)
-	}
-}
-
-func TestSlackWorkerResultTextSilentOnTransitionalAnnouncement(t *testing.T) {
-	job := agentrunner.Job{
-		Status: agentrunner.StatusCompleted,
-		Result: `"卡片"和"notch"在这里应该是指 app 里的 UI 通知组件。让我找找相关的 notification/通知实现代码。`,
-	}
-	if got := slackWorkerResultText(job); got != "" {
-		t.Fatalf("slackWorkerResultText() = %q, want empty string (silent) for transitional announcement", got)
-	}
-}
-
-func TestSlackWorkerResultTextSilentOnUnverifiableSecretaryLookupSpeculation(t *testing.T) {
-	job := agentrunner.Job{
-		Status: agentrunner.StatusCompleted,
-		Result: strings.Join([]string{
-			"从 Cue 共享链接只拿到 `# Bridge\\nLoading shared chat…`，实际聊天内容没加载出来，所以没法直接看到那次对话的细节。",
-			"但结合 repo 和 memory 证据，可以拼出概况：压缩视频慢很可能是在找工具。",
-		}, "\n"),
-		Context: map[string]any{
-			"source":       "persona_delegate_worker",
-			"session_kind": agentrunner.SessionKindSecretaryLookup,
-		},
-	}
-	if got := slackWorkerResultText(job); got != "" {
-		t.Fatalf("slackWorkerResultText() = %q, want empty string (silent) for unverifiable secretary speculation", got)
-	}
-}
-
-func TestSlackWorkerResultTextKeepsVerifiedSecretaryLookupJSONAnswer(t *testing.T) {
+func TestSlackWorkerResultTextFiltersAndKeepsExpectedVisibleText(t *testing.T) {
 	const answer = "Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33，历史发帖集中在 affine/bridge。"
-	job := agentrunner.Job{
-		Status: agentrunner.StatusCompleted,
-		Result: `{
-			"visible_text":"Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33，历史发帖集中在 affine/bridge。",
-			"evidence_anchors":[{"kind":"fetched_link","source_ref":"https://news.ycombinator.com/user?id=Johnson8053","quote":"created 2024-09 / karma 33"}]
-		}`,
-		Context: map[string]any{
-			"source":       "persona_delegate_worker",
-			"session_kind": agentrunner.SessionKindSecretaryLookup,
+	const normalAnswer = "我看完了，这个线程主要是在讨论 Canvas parity。"
+	tests := []struct {
+		name string
+		job  agentrunner.Job
+		want string
+	}{
+		{
+			name: "silent on internal gateway leak",
+			job:  completedSlackWorkerJob("我试着 curl http://127.0.0.1:8780/slack/tools/call，但是 connection refused，所以拿不到资料。"),
+		},
+		{
+			name: "silent on transitional announcement",
+			job:  completedSlackWorkerJob(`"卡片"和"notch"在这里应该是指 app 里的 UI 通知组件。让我找找相关的 notification/通知实现代码。`),
+		},
+		{
+			name: "silent on unverifiable secretary speculation",
+			job: withSecretaryLookupContext(completedSlackWorkerJob(strings.Join([]string{
+				"从 Cue 共享链接只拿到 `# Bridge\\nLoading shared chat…`，实际聊天内容没加载出来，所以没法直接看到那次对话的细节。",
+				"但结合 repo 和 memory 证据，可以拼出概况：压缩视频慢很可能是在找工具。",
+			}, "\n"))),
+		},
+		{
+			name: "keeps verified secretary JSON answer",
+			job: withSecretaryLookupContext(completedSlackWorkerJob(`{
+				"visible_text":"Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33，历史发帖集中在 affine/bridge。",
+				"evidence_anchors":[{"kind":"fetched_link","source_ref":"https://news.ycombinator.com/user?id=Johnson8053","quote":"created 2024-09 / karma 33"}]
+			}`)),
+			want: answer,
+		},
+		{
+			name: "silent on secretary lookup without evidence anchors",
+			job:  withSecretaryLookupContext(completedSlackWorkerJob("Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33。")),
+		},
+		{
+			name: "keeps normal worker answer",
+			job:  completedSlackWorkerJob(normalAnswer),
+			want: normalAnswer,
 		},
 	}
-	if got := slackWorkerResultText(job); got != answer {
-		t.Fatalf("slackWorkerResultText() = %q, want verified answer %q", got, answer)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := slackWorkerResultText(tt.job); got != tt.want {
+				t.Fatalf("slackWorkerResultText() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestSlackWorkerResultTextSilentOnSecretaryLookupWithoutEvidenceAnchors(t *testing.T) {
-	job := agentrunner.Job{
-		Status: agentrunner.StatusCompleted,
-		Result: "Johnson8053 是队友 HN 小号。证据：HN profile 注册于 2024-09、karma 33。",
-		Context: map[string]any{
-			"source":       "persona_delegate_worker",
-			"session_kind": agentrunner.SessionKindSecretaryLookup,
-		},
+func completedSlackWorkerJob(result string) agentrunner.Job {
+	return agentrunner.Job{Status: agentrunner.StatusCompleted, Result: result}
+}
+
+func withSecretaryLookupContext(job agentrunner.Job) agentrunner.Job {
+	job.Context = map[string]any{
+		"source":       "persona_delegate_worker",
+		"session_kind": agentrunner.SessionKindSecretaryLookup,
 	}
-	if got := slackWorkerResultText(job); got != "" {
-		t.Fatalf("slackWorkerResultText() = %q, want silent for secretary_lookup without typed evidence anchors", got)
+	return job
+}
+
+func slackWorkerContext(channelID string, threadTS string) map[string]any {
+	return map[string]any{
+		"source": "slack-agent",
+		"slack":  map[string]any{"channelId": channelID, "threadTs": threadTS},
 	}
 }
 
-func TestSlackWorkerResultTextKeepsNormalWorkerAnswer(t *testing.T) {
-	const answer = "我看完了，这个线程主要是在讨论 Canvas parity。"
-	got := slackWorkerResultText(agentrunner.Job{Status: agentrunner.StatusCompleted, Result: answer})
-	if got != answer {
-		t.Fatalf("slackWorkerResultText() = %q, want unchanged answer %q", got, answer)
-	}
+func slackWorkerToolRequestResult(payload string) string {
+	return strings.Join([]string{
+		"<oneesama_tool_request>",
+		payload,
+		"</oneesama_tool_request>",
+	}, "\n")
 }
 
 func TestSlackWorkerResultTextUsesBoundedEnvelope(t *testing.T) {
@@ -184,16 +184,53 @@ func TestSlackWorkerPostFailsClosedWithoutVisibleFallback(t *testing.T) {
 		FailureCode: agentrunner.FailureTimeout,
 		Result:      "partial raw scratch: opened 200 files and started reading logs",
 		Error:       "job timed out",
-		Context: map[string]any{
-			"source": "slack-agent",
-			"slack":  map[string]any{"channelId": "C123", "threadTs": "177.123"},
-		},
+		Context:     slackWorkerContext("C123", "177.123"),
 	})
 	if delivered {
 		t.Fatal("postSlackWorkerResult delivered timeout worker, want fail-closed silence")
 	}
 	if calls := poster.Calls(); len(calls) != 0 {
 		t.Fatalf("poster calls = %#v, want no user-visible fallback", calls)
+	}
+}
+
+func TestSlackWorkerPostSkipsWhenThreadHasNewerHumanActivity(t *testing.T) {
+	snapshotTS, _, restore := installNewerHumanReplyFixture(t, "帮我查一下这个链接", "我刚刚已经回答了，这条不用再补。")
+	defer restore()
+
+	provider := &simpleRecordingMemoryProvider{name: "turn_fake", available: true}
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{
+			BotToken:  "xoxb-test",
+			BotUserID: "U_BOT",
+		},
+		MemoryProviders: []SlackMemoryProvider{provider},
+		Poster:          poster,
+	})
+
+	delivered := service.postSlackWorkerResult(context.Background(), agentrunner.Job{
+		ID:     "job_stale_worker",
+		Status: agentrunner.StatusCompleted,
+		Result: "我查完了：这条链接主要是在讲一个产品更新。",
+		Context: map[string]any{
+			"source": "persona_delegate_worker",
+			"slack": map[string]any{
+				"channel_id":            "C123",
+				"thread_ts":             snapshotTS,
+				"freshness_snapshot_ts": snapshotTS,
+			},
+		},
+	})
+
+	if delivered {
+		t.Fatal("postSlackWorkerResult delivered stale worker result, want suppressed")
+	}
+	if calls := poster.Calls(); len(calls) != 0 {
+		t.Fatalf("poster calls = %#v, want no stale worker post", calls)
+	}
+	if len(provider.turns) != 0 {
+		t.Fatalf("memory turns = %#v, want no user-visible worker turn sync", provider.turns)
 	}
 }
 
@@ -304,15 +341,8 @@ func TestSlackWorkerToolRequestStartsContinuationWithDispatcherEvidence(t *testi
 		Status:   agentrunner.StatusCompleted,
 		Mode:     "analysis",
 		Task:     "Bridge tool-loop parity 是怎么回事？",
-		Result: strings.Join([]string{
-			"<oneesama_tool_request>",
-			`{"calls":[{"tool":"memory_search","args":{"query":"Bridge native tool loop localhost curl","limit":3}}],"reason":"need old/new tool-loop evidence"}`,
-			"</oneesama_tool_request>",
-		}, "\n"),
-		Context: map[string]any{
-			"source": "slack-agent",
-			"slack":  map[string]any{"channelId": "C123", "threadTs": "177.123"},
-		},
+		Result:   slackWorkerToolRequestResult(`{"calls":[{"tool":"memory_search","args":{"query":"Bridge native tool loop localhost curl","limit":3}}],"reason":"need old/new tool-loop evidence"}`),
+		Context:  slackWorkerContext("C123", "177.123"),
 	})
 
 	if got := len(poster.Calls()); got != 0 {
@@ -344,11 +374,7 @@ func TestSlackWorkerToolBridgeFailureClearsStatusAndWarnsReaction(t *testing.T) 
 		Status:   agentrunner.StatusCompleted,
 		Mode:     "analysis",
 		Task:     "Need a tool call.",
-		Result: strings.Join([]string{
-			"<oneesama_tool_request>",
-			`{"calls":[{"tool":"memory_search","args":{"query":"Bridge native tool loop","limit":3}}],"reason":"need evidence"}`,
-			"</oneesama_tool_request>",
-		}, "\n"),
+		Result:   slackWorkerToolRequestResult(`{"calls":[{"tool":"memory_search","args":{"query":"Bridge native tool loop","limit":3}}],"reason":"need evidence"}`),
 		Context: map[string]any{
 			"source":                      "slack-agent",
 			slackWorkerToolLoopContextKey: slackWorkerToolLoopMax,
@@ -371,17 +397,17 @@ func TestSlackWorkerToolBridgeFailureClearsStatusAndWarnsReaction(t *testing.T) 
 }
 
 func TestSlackWorkerToolRequestRejectsUnsafeSlackPost(t *testing.T) {
-	request, ok := parseSlackWorkerToolBridgeRequest(strings.Join([]string{
-		"<oneesama_tool_request>",
-		`{"calls":[{"tool":"slack_api","args":{"method":"chat.postMessage","params":{"channel":"C123","text":"hi"}}}]}`,
-		"</oneesama_tool_request>",
-	}, "\n"))
-	if !ok {
-		t.Fatal("expected tool bridge request to parse")
-	}
-	evidence := NewService(Config{}).executeSlackWorkerToolBridgeRequest(context.Background(), request, nil)
-	if len(evidence) != 1 || evidence[0].OK || !strings.Contains(evidence[0].Error, "not available") {
-		t.Fatalf("evidence = %#v, want rejected unsafe Slack post", evidence)
+	for _, method := range []string{"chat.postMessage", "slack.postThreadReply"} {
+		t.Run(method, func(t *testing.T) {
+			request, ok := parseSlackWorkerToolBridgeRequest(slackWorkerToolRequestResult(`{"calls":[{"tool":"slack_api","args":{"method":"` + method + `","params":{"channel":"C123","thread_ts":"177.123","text":"hi"}}}]}`))
+			if !ok {
+				t.Fatal("expected tool bridge request to parse")
+			}
+			evidence := NewService(Config{}).executeSlackWorkerToolBridgeRequest(context.Background(), request, nil)
+			if len(evidence) != 1 || evidence[0].OK || !strings.Contains(evidence[0].Error, "not available") {
+				t.Fatalf("evidence = %#v, want rejected unsafe Slack post", evidence)
+			}
+		})
 	}
 }
 

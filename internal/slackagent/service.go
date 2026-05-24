@@ -337,6 +337,9 @@ func NewService(cfg Config) *Service {
 			service.logger.Warn("slack inbound buffer flush failed", "channel", channelID, "error", err)
 		}
 	}
+	if service.operatorFallback != nil {
+		service.operatorFallback.PublicNotice = service.deliverSlackPublicNotification
+	}
 	service.loadScannerCursors(context.Background())
 	if service.workspaceDir != "" {
 		result := EnsureWorkspaceFiles(EnsureWorkspaceFilesOptions{WorkspaceDir: service.workspaceDir})

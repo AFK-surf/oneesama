@@ -19,6 +19,8 @@ type canvasPublishRequest struct {
 	Channel          string         `json:"channel"`
 	ThreadTS         string         `json:"thread_ts"`
 	DedupKey         string         `json:"dedup_key"`
+	WorkspaceID      string         `json:"workspace_id"`
+	SnapshotTS       string         `json:"snapshot_ts"`
 	CanvasID         string         `json:"canvas_id"`
 	Operation        string         `json:"operation"`
 	SectionID        string         `json:"section_id"`
@@ -56,6 +58,8 @@ func (h *Handler) handlePublishCanvas(c *gin.Context) {
 		Channel:          request.Channel,
 		ThreadTS:         request.ThreadTS,
 		DedupKey:         request.DedupKey,
+		WorkspaceID:      request.WorkspaceID,
+		SnapshotTS:       request.SnapshotTS,
 		CanvasID:         request.CanvasID,
 		Operation:        request.Operation,
 		SectionID:        request.SectionID,

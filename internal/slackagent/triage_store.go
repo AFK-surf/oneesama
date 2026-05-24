@@ -70,6 +70,14 @@ func (s *slackTriageStore) RecordRun(ctx context.Context, run SlackTriageContext
 	return &run, nil
 }
 
+func (s *slackTriageStore) SaveTriageRun(run SlackTriageContext) error {
+	if s == nil {
+		return nil
+	}
+	_, err := s.RecordRun(context.Background(), run)
+	return err
+}
+
 func (s *slackTriageStore) UpdateRun(ctx context.Context, run SlackTriageContext) (*SlackTriageContext, error) {
 	if s == nil || s.runs == nil {
 		return nil, nil
@@ -146,6 +154,13 @@ func (s *slackTriageStore) ListRuns(ctx context.Context, limit int) ([]SlackTria
 		runs[i], runs[j] = runs[j], runs[i]
 	}
 	return runs, nil
+}
+
+func (s *slackTriageStore) ListTriageContexts(limit int) ([]SlackTriageContext, error) {
+	if s == nil {
+		return nil, nil
+	}
+	return s.ListRuns(context.Background(), limit)
 }
 
 func (s *slackTriageStore) InsertPendingAction(ctx context.Context, action SlackPendingAction) (*SlackPendingAction, error) {

@@ -1,11 +1,9 @@
 package persona
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -16,8 +14,9 @@ import (
 )
 
 const (
-	defaultOneesamaPIBaseURL = "https://openrouter.ai/api/v1"
-	defaultOneesamaPIModel   = "deepseek/deepseek-v4-pro"
+	defaultOneesamaPIBaseURL  = "https://openrouter.ai/api/v1"
+	defaultOneesamaPIModel    = "deepseek/deepseek-v4-pro"
+	maxOneesamaPIRequestChars = 120_000
 )
 
 type OneesamaPIConfig struct {
@@ -40,6 +39,7 @@ type OneesamaPIRuntime struct {
 	model         string
 	shadowOnly    bool
 	client        *http.Client
+	timeout       time.Duration
 	requests      int
 	lastRequestAt time.Time
 	lastLatency   time.Duration
@@ -70,12 +70,12 @@ func NewOneesamaPIRuntime(cfg OneesamaPIConfig) (*OneesamaPIRuntime, error) {
 		os.Getenv("PI_MODEL"),
 		defaultOneesamaPIModel,
 	))
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
 	client := cfg.Client
 	if client == nil {
-		timeout := cfg.Timeout
-		if timeout <= 0 {
-			timeout = 90 * time.Second
-		}
 		client = httputil.NewHTTPClient(timeout)
 	}
 	return &OneesamaPIRuntime{
@@ -86,17 +86,25 @@ func NewOneesamaPIRuntime(cfg OneesamaPIConfig) (*OneesamaPIRuntime, error) {
 		model:      model,
 		shadowOnly: cfg.ShadowOnly || !strings.EqualFold(cfg.Mode, ModeLive),
 		client:     client,
+		timeout:    timeout,
 	}, nil
 }
 
 func (r *OneesamaPIRuntime) Decide(ctx context.Context, req Request) (Response, error) {
 	start := time.Now()
+	ctx, cancel := personaRequestContext(ctx, r.timeout)
+	defer cancel()
 	req.Mode = stringOrDefault(req.Mode, r.mode)
+	modelReq, err := prepareOneesamaPIRequest(req)
+	if err != nil {
+		r.record(start, err)
+		return Response{}, err
+	}
 	payload, err := json.Marshal(oneesamaPIChatRequest{
 		Model: r.model,
 		Messages: []oneesamaPIChatMessage{
-			{Role: "system", Content: oneesamaPISystemPrompt(req)},
-			{Role: "user", Content: mustMarshalPersonaRequest(req)},
+			{Role: "system", Content: oneesamaPISystemPrompt(modelReq)},
+			{Role: "user", Content: mustMarshalPersonaRequest(modelReq)},
 		},
 		Temperature: 0.2,
 		ResponseFormat: map[string]string{
@@ -107,28 +115,14 @@ func (r *OneesamaPIRuntime) Decide(ctx context.Context, req Request) (Response, 
 		r.record(start, err)
 		return Response{}, fmt.Errorf("marshal oneesama Pi request: %w", err)
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, r.baseURL+"/chat/completions", bytes.NewReader(payload))
+	body, err := doPersonaHTTP(ctx, r.client, http.MethodPost, r.baseURL+"/chat/completions", payload, map[string]string{
+		"Authorization": "Bearer " + r.apiKey,
+		"Content-Type":  "application/json",
+		"HTTP-Referer":  "https://github.com/AFK-surf/oneesama",
+		"X-Title":       "Oneesama",
+	}, maxOneesamaPIResponseBytes, "oneesama Pi model")
 	if err != nil {
-		r.record(start, err)
-		return Response{}, err
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+r.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/AFK-surf/oneesama")
-	httpReq.Header.Set("X-Title", "Oneesama")
-	resp, err := r.client.Do(httpReq)
-	if err != nil {
-		r.record(start, err)
-		return Response{}, fmt.Errorf("call oneesama Pi model: %w", err)
-	}
-	defer resp.Body.Close()
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if readErr != nil {
-		r.record(start, readErr)
-		return Response{}, fmt.Errorf("read oneesama Pi response: %w", readErr)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err := fmt.Errorf("oneesama Pi model returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		err = oneesamaPIHTTPError(err)
 		r.record(start, err)
 		return Response{}, err
 	}
@@ -151,6 +145,33 @@ func (r *OneesamaPIRuntime) Decide(ctx context.Context, req Request) (Response, 
 	decoded = normalizeOneesamaPIResponse(req, decoded, r)
 	r.record(start, nil)
 	return decoded, nil
+}
+
+func oneesamaPIHTTPError(err error) error {
+	return personaHTTPCallError(err, "call oneesama Pi model", "read oneesama Pi response")
+}
+
+func prepareOneesamaPIRequest(req Request) (Request, error) {
+	modelReq := req
+	modelReq.Metadata = nil
+	if len(modelReq.DynamicContext) > 0 {
+		modelReq.DynamicContext = append([]DynamicContextEnvelope(nil), modelReq.DynamicContext...)
+		for i := range modelReq.DynamicContext {
+			modelReq.DynamicContext[i].Metadata = nil
+		}
+	}
+	budget := RequestHarnessContextBudget(modelReq)
+	if budget.TotalChars > maxOneesamaPIRequestChars {
+		return Request{}, fmt.Errorf("oneesama Pi request context budget exceeds %d chars: total=%d dynamic=%d worker_result=%d memory_evidence=%d event_context=%d",
+			maxOneesamaPIRequestChars,
+			budget.TotalChars,
+			budget.DynamicChars,
+			budget.WorkerResultChars,
+			budget.MemoryEvidenceChars,
+			budget.EventContextChars,
+		)
+	}
+	return modelReq, nil
 }
 
 func decodeOneesamaPIResponse(content string) (Response, error) {
@@ -185,7 +206,7 @@ func (r *OneesamaPIRuntime) Status(context.Context) Status {
 		Version:       "oneesama-pi-openai-compatible-v1",
 		LastRequestAt: formatTime(r.lastRequestAt),
 		LastLatencyMS: r.lastLatency.Milliseconds(),
-		LastError:     r.lastError,
+		LastError:     sanitizePersonaRuntimeErrorText(r.lastError),
 		StateSummary: map[string]any{
 			"requests": r.requests,
 			"model":    r.model,
@@ -346,14 +367,18 @@ func oneesamaPIVisibleTextNarratesMediaLimitation(text string) bool {
 	if trimmed == "" {
 		return false
 	}
-	zhMedia := []string{"视频", "文件", "图片", "截图", "附件", "素材"}
-	zhLimitations := []string{"看不了", "看不到", "没法看", "无法查看", "不能查看", "无法读取", "不能读取", "打不开", "无法打开", "不能打开", "无法播放", "不能播放"}
-	if containsAny(trimmed, zhMedia) && containsAny(trimmed, zhLimitations) {
+	if containsAny(trimmed, oneesamaPIZHMediaWords) && containsAny(trimmed, oneesamaPIZHMediaLimitationWords) {
 		return true
 	}
 	lower := strings.ToLower(trimmed)
-	enMedia := []string{"video", "file", "image", "screenshot", "attachment", "media"}
-	enLimitations := []string{
+	return containsAny(lower, oneesamaPIENMediaWords) && containsAny(lower, oneesamaPIENMediaLimitationWords)
+}
+
+var (
+	oneesamaPIZHMediaWords           = []string{"视频", "文件", "图片", "截图", "附件", "素材"}
+	oneesamaPIZHMediaLimitationWords = []string{"看不了", "看不到", "没法看", "无法查看", "不能查看", "无法读取", "不能读取", "打不开", "无法打开", "不能打开", "无法播放", "不能播放"}
+	oneesamaPIENMediaWords           = []string{"video", "file", "image", "screenshot", "attachment", "media"}
+	oneesamaPIENMediaLimitationWords = []string{
 		"can't view", "cannot view", "unable to view",
 		"can't watch", "cannot watch", "unable to watch",
 		"can't read", "cannot read", "unable to read",
@@ -361,8 +386,7 @@ func oneesamaPIVisibleTextNarratesMediaLimitation(text string) bool {
 		"can't access", "cannot access", "unable to access",
 		"do not have access to", "don't have access to",
 	}
-	return containsAny(lower, enMedia) && containsAny(lower, enLimitations)
-}
+)
 
 func containsAny(text string, needles []string) bool {
 	for _, needle := range needles {

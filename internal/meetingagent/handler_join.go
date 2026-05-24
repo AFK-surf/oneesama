@@ -1,6 +1,7 @@
 package meetingagent
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/AFK-surf/oneesama/internal/httputil"
@@ -15,6 +16,11 @@ func (h *Handler) handleJoinGoogleMeet(c *gin.Context) {
 	}
 	result, err := h.service.JoinGoogleMeet(c.Request.Context(), request)
 	if err != nil {
+		var invalidArtifactsDir InvalidArtifactsDirError
+		if errors.As(err, &invalidArtifactsDir) {
+			httputil.AbortWithError(c, httputil.InvalidRequestError("invalid join body", gin.H{"reason": err.Error()}))
+			return
+		}
 		h.service.logger.Warn("join google meet failed", "meeting_url", request.MeetingURL, "session_id", request.SessionID, "error", err)
 		httputil.AbortWithError(c, httputil.InternalServerError("join google meet failed", gin.H{"reason": err.Error()}))
 		return

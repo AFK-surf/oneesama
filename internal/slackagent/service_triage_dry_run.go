@@ -114,7 +114,7 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
 	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest)
-	relatedMemory := s.searchSlackTriageRelatedMemory(memoryQuery, 5)
+	relatedMemory := s.searchSlackTriageRelatedMemoryContext(ctx, memoryQuery, 5)
 	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
 		ChannelID:              channelID,
 		ThreadTS:               threadTS,

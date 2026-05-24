@@ -389,7 +389,7 @@ func TestCueboardParityMemoryGetWriteUsesLiveWorkspace(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(workspaceDir, "memory", "team", "decisions.md")); err != nil {
 		t.Fatalf("live workspace memory file not written: %v", err)
 	}
-	getResult := service.executeMemoryGetTool(map[string]any{"path": "memory/team/decisions.md"})
+	getResult := service.executeMemoryGetTool(context.Background(), map[string]any{"path": "memory/team/decisions.md"})
 	resultMap, _ := getResult.Result.(map[string]any)
 	if !getResult.OK || !strings.Contains(stringFromAny(resultMap["content"]), "live workspace memory") {
 		t.Fatalf("get result = %#v, want live workspace content", getResult)

@@ -87,21 +87,19 @@ func (s *Service) recordAppMentionMultimodalMemory(ctx context.Context, mention 
 		}
 		return ""
 	}
-	if s.memoryProviders != nil {
-		s.memoryProviders.OnMemoryWrite(ctx, SlackMemoryProviderWriteEvent{
-			Action:  "write",
-			Target:  "multimodal_memory_candidate",
-			Path:    rel,
-			Content: body,
-			Source:  "memory_provider:" + multimodalMemoryProviderName,
-			Metadata: map[string]any{
-				"origin":     origin,
-				"channel_id": mention.ChannelID,
-				"thread_ts":  mention.ThreadTS,
-				"files":      len(mention.Files),
-			},
-		})
-	}
+	s.notifyMemoryProvidersWrite(ctx, SlackMemoryProviderWriteEvent{
+		Action:  "write",
+		Target:  "multimodal_memory_candidate",
+		Path:    rel,
+		Content: body,
+		Source:  "memory_provider:" + multimodalMemoryProviderName,
+		Metadata: map[string]any{
+			"origin":     origin,
+			"channel_id": mention.ChannelID,
+			"thread_ts":  mention.ThreadTS,
+			"files":      len(mention.Files),
+		},
+	})
 	return rel
 }
 

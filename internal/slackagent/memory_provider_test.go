@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,8 +16,12 @@ type simpleRecordingMemoryProvider struct {
 	available  bool
 	init       SlackMemoryProviderInit
 	searches   []SlackMemoryProviderSearchRequest
+	searchErrs []error
+	searchErr  error
 	writes     []SlackMemoryProviderWriteEvent
+	writeErr   error
 	turns      []SlackMemoryProviderTurn
+	turnErr    error
 	searchHits []SlackRelatedMemoryRecord
 }
 
@@ -34,19 +39,23 @@ func (p *simpleRecordingMemoryProvider) Initialize(_ context.Context, init Slack
 	return nil
 }
 
-func (p *simpleRecordingMemoryProvider) Search(_ context.Context, request SlackMemoryProviderSearchRequest) (SlackMemoryProviderSearchResult, error) {
+func (p *simpleRecordingMemoryProvider) Search(ctx context.Context, request SlackMemoryProviderSearchRequest) (SlackMemoryProviderSearchResult, error) {
 	p.searches = append(p.searches, request)
+	p.searchErrs = append(p.searchErrs, ctx.Err())
+	if p.searchErr != nil {
+		return SlackMemoryProviderSearchResult{}, p.searchErr
+	}
 	return SlackMemoryProviderSearchResult{Provider: p.name, Status: "ok", Records: p.searchHits}, nil
 }
 
 func (p *simpleRecordingMemoryProvider) OnMemoryWrite(_ context.Context, event SlackMemoryProviderWriteEvent) error {
 	p.writes = append(p.writes, event)
-	return nil
+	return p.writeErr
 }
 
 func (p *simpleRecordingMemoryProvider) SyncTurn(_ context.Context, turn SlackMemoryProviderTurn) error {
 	p.turns = append(p.turns, turn)
-	return nil
+	return p.turnErr
 }
 
 func TestSearchRelatedMemoryMergesExternalProviderRecords(t *testing.T) {
@@ -86,6 +95,36 @@ func TestSearchRelatedMemoryMergesExternalProviderRecords(t *testing.T) {
 	}
 	if !memoryProviderStatusIncludes(service.MemorySummary().Providers, "semantic_fake", true) {
 		t.Fatalf("memory summary providers = %#v, want semantic_fake", service.MemorySummary().Providers)
+	}
+}
+
+func TestSearchRelatedMemoryContextPassesCallerContextToProviders(t *testing.T) {
+	t.Parallel()
+
+	provider := &simpleRecordingMemoryProvider{
+		name:      "semantic_fake",
+		available: true,
+		searchHits: []SlackRelatedMemoryRecord{{
+			Kind:    "semantic_memory",
+			Source:  "semantic://ctx",
+			Content: "Context propagation canary memory.",
+			Score:   0.99,
+		}},
+	}
+	service := NewService(Config{
+		Slack:           appconfig.SlackConfig{WorkspaceDir: t.TempDir()},
+		MemoryProviders: []SlackMemoryProvider{provider},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = service.SearchRelatedMemoryContext(ctx, "context propagation canary", SlackRelatedMemorySearchOptions{Limit: 3})
+
+	if len(provider.searchErrs) != 1 {
+		t.Fatalf("provider search contexts = %#v, want one", provider.searchErrs)
+	}
+	if provider.searchErrs[0] != context.Canceled {
+		t.Fatalf("provider ctx err = %v, want context.Canceled", provider.searchErrs[0])
 	}
 }
 
@@ -144,6 +183,74 @@ func TestMemoryProviderManagerSyncTurn(t *testing.T) {
 	}
 }
 
+func TestMemoryProviderManagerSearchIsolatesProviderErrorAndContinues(t *testing.T) {
+	t.Parallel()
+
+	failingErr := errors.New("semantic backend down")
+	failing := &simpleRecordingMemoryProvider{name: "semantic_failing", available: true, searchErr: failingErr}
+	healthy := &simpleRecordingMemoryProvider{
+		name:      "semantic_healthy",
+		available: true,
+		searchHits: []SlackRelatedMemoryRecord{{
+			Kind:    "semantic_memory",
+			Source:  "semantic://healthy",
+			Content: "Healthy provider result should still be available.",
+			Score:   0.9,
+		}},
+	}
+	manager := newSlackMemoryProviderManager(nil, SlackMemoryProviderInit{}, failing, healthy)
+
+	records := manager.Search(context.Background(), SlackMemoryProviderSearchRequest{Query: "healthy", Tokens: []string{"healthy"}, Limit: 5})
+
+	if len(records) != 1 || records[0].Source != "semantic://healthy" {
+		t.Fatalf("records = %#v, want healthy provider result", records)
+	}
+	if len(failing.searches) != 1 || len(healthy.searches) != 1 {
+		t.Fatalf("search calls failing=%d healthy=%d, want both called", len(failing.searches), len(healthy.searches))
+	}
+	if got := memoryProviderStatusLastError(manager.Status(), "semantic_failing"); got != failingErr.Error() {
+		t.Fatalf("failing provider last error = %q, want %q", got, failingErr.Error())
+	}
+}
+
+func TestMemoryProviderManagerWriteIsolatesProviderErrorAndContinues(t *testing.T) {
+	t.Parallel()
+
+	failingErr := errors.New("write mirror failed")
+	failing := &simpleRecordingMemoryProvider{name: "mirror_failing", available: true, writeErr: failingErr}
+	healthy := &simpleRecordingMemoryProvider{name: "mirror_healthy", available: true}
+	manager := newSlackMemoryProviderManager(nil, SlackMemoryProviderInit{}, failing, healthy)
+	event := SlackMemoryProviderWriteEvent{Action: "write", Target: "workspace", Path: "memory/notes.md", Content: "hello"}
+
+	manager.OnMemoryWrite(context.Background(), event)
+
+	if len(failing.writes) != 1 || len(healthy.writes) != 1 {
+		t.Fatalf("write calls failing=%d healthy=%d, want both called", len(failing.writes), len(healthy.writes))
+	}
+	if got := memoryProviderStatusLastError(manager.Status(), "mirror_failing"); got != failingErr.Error() {
+		t.Fatalf("failing provider last error = %q, want %q", got, failingErr.Error())
+	}
+}
+
+func TestMemoryProviderManagerSyncTurnIsolatesProviderErrorAndContinues(t *testing.T) {
+	t.Parallel()
+
+	failingErr := errors.New("sync failed")
+	failing := &simpleRecordingMemoryProvider{name: "turn_failing", available: true, turnErr: failingErr}
+	healthy := &simpleRecordingMemoryProvider{name: "turn_healthy", available: true}
+	manager := newSlackMemoryProviderManager(nil, SlackMemoryProviderInit{}, failing, healthy)
+	turn := SlackMemoryProviderTurn{SessionID: "session_sync", UserContent: "user", AssistantContent: "assistant"}
+
+	manager.SyncTurn(context.Background(), turn)
+
+	if len(failing.turns) != 1 || len(healthy.turns) != 1 {
+		t.Fatalf("turn calls failing=%d healthy=%d, want both called", len(failing.turns), len(healthy.turns))
+	}
+	if got := memoryProviderStatusLastError(manager.Status(), "turn_failing"); got != failingErr.Error() {
+		t.Fatalf("failing provider last error = %q, want %q", got, failingErr.Error())
+	}
+}
+
 func memoryProviderStatusIncludes(items []SlackMemoryProviderStatus, name string, initialized bool) bool {
 	for _, item := range items {
 		if item.Name == name && item.Initialized == initialized {
@@ -151,4 +258,13 @@ func memoryProviderStatusIncludes(items []SlackMemoryProviderStatus, name string
 		}
 	}
 	return false
+}
+
+func memoryProviderStatusLastError(items []SlackMemoryProviderStatus, name string) string {
+	for _, item := range items {
+		if item.Name == name {
+			return item.LastError
+		}
+	}
+	return ""
 }

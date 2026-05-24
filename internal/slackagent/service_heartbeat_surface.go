@@ -68,26 +68,44 @@ func (s *Service) surfaceOneFollowup(ctx context.Context, followup SlackHeartbea
 		return s.followups.RecordSurface(ctx, heartbeatSurfaceFromPlan(followup, plan, heartbeatSurfaceStatusFailed, "", err.Error()))
 	}
 	if plan.DeliveredSurface == "" {
-		surface, err := s.followups.RecordSurface(ctx, heartbeatSurfaceFromPlan(followup, plan, heartbeatSurfaceStatusBlocked, plan.BlockReason, ""))
-		if err == nil && heartbeatFollowupClosesAfterBlockedSurface(followup, plan.BlockReason) {
-			followup.Status = "done"
-			if followup.Metadata == nil {
-				followup.Metadata = map[string]any{}
-			}
-			followup.Metadata["resolution"] = plan.BlockReason
-			_, _ = s.followups.UpdateFollowup(ctx, followup)
-		}
-		return surface, err
+		return s.recordBlockedHeartbeatSurface(ctx, followup, plan, plan.BlockReason)
 	}
-	surfaceSummary, relatedMemory := s.enrichDelayedNoReplySurfaceSummary(followup)
+	surfaceSummary, relatedMemory := s.enrichDelayedNoReplySurfaceSummary(ctx, followup)
 	message := buildHeartbeatSurfaceMessage(followup.Title, surfaceSummary)
-	post := s.poster.PostMessage(ctx, PostMessageInput{
-		Channel:  plan.ChannelID,
-		ThreadTS: heartbeatPostThreadTS(plan),
-		Text:     message.FallbackText,
-		Blocks:   message.Blocks,
-		DedupKey: fmt.Sprintf("heartbeat:%d:%s:%s", followup.ID, plan.ChannelID, plan.ThreadTS),
-	})
+	dedupKey := fmt.Sprintf("heartbeat:%d:%s:%s", followup.ID, plan.ChannelID, plan.ThreadTS)
+	post := PostMessageResult{}
+	if plan.DeliveredSurface == heartbeatSurfaceThread || plan.DeliveredSurface == heartbeatSurfaceChannel {
+		surfaceKind := slackPublicReplySurfaceChannelNotice
+		ledgerSummary := ""
+		if plan.DeliveredSurface == heartbeatSurfaceThread {
+			surfaceKind = slackPublicReplySurfaceThreadReply
+			ledgerSummary = message.LedgerText
+		}
+		delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
+			Source:        slackPublicReplySourceHeartbeatFollowup,
+			SurfaceKind:   surfaceKind,
+			WorkspaceID:   "workspace",
+			ChannelID:     plan.ChannelID,
+			ThreadTS:      heartbeatPostThreadTS(plan),
+			FallbackText:  message.FallbackText,
+			Blocks:        message.Blocks,
+			DedupKey:      dedupKey,
+			SnapshotTS:    heartbeatDeliveryFreshnessSnapshotTS(followup),
+			LedgerSummary: ledgerSummary,
+		})
+		if delivery.Blocked {
+			return s.recordBlockedHeartbeatSurface(ctx, followup, plan, delivery.BlockReason)
+		}
+		post = delivery.Post
+	} else {
+		post = s.poster.PostMessage(ctx, PostMessageInput{
+			Channel:  plan.ChannelID,
+			ThreadTS: heartbeatPostThreadTS(plan),
+			Text:     message.FallbackText,
+			Blocks:   message.Blocks,
+			DedupKey: dedupKey,
+		})
+	}
 	status := heartbeatSurfaceStatusSent
 	if plan.BlockReason != "" && plan.DeliveredSurface == heartbeatSurfaceDM {
 		status = heartbeatSurfaceStatusFallbackSent
@@ -119,14 +137,24 @@ func (s *Service) surfaceOneFollowup(ctx context.Context, followup SlackHeartbea
 			followup.Metadata["resolution"] = "surfaced_once"
 		}
 		_, _ = s.followups.UpdateFollowup(ctx, followup)
-		if plan.DeliveredSurface == heartbeatSurfaceThread && plan.ChannelID != "" && plan.ThreadTS != "" && s.cognition != nil {
-			_ = s.cognition.RecordOutbound(ctx, "workspace", plan.ChannelID, plan.ThreadTS, message.LedgerText)
-		}
 	}
 	return surface, nil
 }
 
-func (s *Service) enrichDelayedNoReplySurfaceSummary(followup SlackHeartbeatFollowup) (string, []SlackRelatedMemoryRecord) {
+func (s *Service) recordBlockedHeartbeatSurface(ctx context.Context, followup SlackHeartbeatFollowup, plan heartbeatDeliveryPlan, reason string) (*SlackHeartbeatSurface, error) {
+	surface, err := s.followups.RecordSurface(ctx, heartbeatSurfaceFromPlan(followup, plan, heartbeatSurfaceStatusBlocked, reason, ""))
+	if err == nil && heartbeatFollowupClosesAfterBlockedSurface(followup, reason) {
+		followup.Status = "done"
+		if followup.Metadata == nil {
+			followup.Metadata = map[string]any{}
+		}
+		followup.Metadata["resolution"] = reason
+		_, _ = s.followups.UpdateFollowup(ctx, followup)
+	}
+	return surface, err
+}
+
+func (s *Service) enrichDelayedNoReplySurfaceSummary(ctx context.Context, followup SlackHeartbeatFollowup) (string, []SlackRelatedMemoryRecord) {
 	summary := strings.TrimSpace(followup.Summary)
 	if !strings.EqualFold(followup.Kind, slackDelayedNoReplyFollowupKind) {
 		return summary, nil
@@ -138,7 +166,7 @@ func (s *Service) enrichDelayedNoReplySurfaceSummary(followup SlackHeartbeatFoll
 		strings.TrimSpace(followup.ChannelID),
 		strings.TrimSpace(followup.ThreadTS),
 	}, "\n")
-	result := s.searchSlackTriageRelatedMemory(query, 3)
+	result := s.searchSlackTriageRelatedMemoryContext(ctx, query, 3)
 	if len(result.Results) == 0 {
 		return summary, nil
 	}
@@ -376,6 +404,20 @@ func heartbeatPostThreadTS(plan heartbeatDeliveryPlan) string {
 		return plan.ThreadTS
 	}
 	return ""
+}
+
+func heartbeatDeliveryFreshnessSnapshotTS(followup SlackHeartbeatFollowup) string {
+	reference := parseHeartbeatTime(followup.LastSurfacedAt)
+	if updated := parseHeartbeatTime(followup.UpdatedAt); updated != nil && (reference == nil || updated.After(reference.UTC())) {
+		reference = updated
+	}
+	if created := parseHeartbeatTime(followup.CreatedAt); created != nil && (reference == nil || created.After(reference.UTC())) {
+		reference = created
+	}
+	if reference == nil {
+		return ""
+	}
+	return formatSlackTimestamp(reference.UTC())
 }
 
 func heartbeatSurfaceText(followup SlackHeartbeatFollowup) string {

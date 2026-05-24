@@ -75,6 +75,7 @@ type benchmarkRow struct {
 	MessageCount         int                    `json:"messageCount"`
 	PersonaDecision      string                 `json:"personaDecision,omitempty"`
 	FinalDecision        string                 `json:"finalDecision,omitempty"`
+	GateDecision         string                 `json:"gateDecision,omitempty"`
 	VisibleReplyAllowed  bool                   `json:"visibleReplyAllowed"`
 	VisibleReplyReasons  []string               `json:"visibleReplyReasons,omitempty"`
 	WorkerRequests       int                    `json:"workerRequests"`
@@ -132,6 +133,12 @@ type benchmarkFixture struct {
 	Thread      slackagent.SlackTriageReplayThread    `json:"thread"`
 	Candidate   slackagent.SlackVisibleReplyCandidate `json:"candidate,omitempty"`
 	Expected    benchmarkFixtureExpected              `json:"expected,omitempty"`
+}
+
+func recordBenchmarkRow(report *benchmarkReport, row benchmarkRow) {
+	report.Rows = append(report.Rows, row)
+	report.ThreadsReplayed++
+	recordRow(&report.Summary, row)
 }
 
 type benchmarkFixtureExpected struct {
@@ -272,9 +279,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				fixture, readErr := readBenchmarkFixture(path)
 				if readErr != nil {
 					row := benchmarkRow{VariantID: variant.VariantID, CaseID: strings.TrimSpace(path), Error: readErr.Error()}
-					report.Rows = append(report.Rows, row)
-					report.ThreadsReplayed++
-					recordRow(&report.Summary, row)
+					recordBenchmarkRow(&report, row)
 					continue
 				}
 				row := dryRunThread(ctx, client, report.SlackAgentURL, variant.VariantID, fixture.Thread)
@@ -283,9 +288,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				}
 				applyFixtureResult(&row, fixture)
 				applyBenchmarkJudge(ctx, client, judgeOpts, &judgeBudget, &row, fixture.Thread, &fixture)
-				report.Rows = append(report.Rows, row)
-				report.ThreadsReplayed++
-				recordRow(&report.Summary, row)
+				recordBenchmarkRow(&report, row)
 			}
 		}
 	} else {
@@ -349,9 +352,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			for _, thread := range replayThreads {
 				row := dryRunThread(ctx, client, report.SlackAgentURL, variant.VariantID, thread)
 				applyBenchmarkJudge(ctx, client, judgeOpts, &judgeBudget, &row, thread, nil)
-				report.Rows = append(report.Rows, row)
-				report.ThreadsReplayed++
-				recordRow(&report.Summary, row)
+				recordBenchmarkRow(&report, row)
 			}
 		}
 	}
@@ -779,6 +780,7 @@ func dryRunThread(ctx context.Context, client *http.Client, baseURL string, vari
 	row.PersonaDecision = out.DryRun.Persona.Decision
 	row.WorkerRequests = len(out.DryRun.WouldDelegateWorkers)
 	row.PipelineSmellSignals = append([]string(nil), out.DryRun.PipelineSmellSignals...)
+	row.GateDecision = benchmarkGateDecision(out.DryRun)
 	for _, verdict := range out.DryRun.VisibleReplyVerdicts {
 		if verdict.Allowed {
 			row.VisibleReplyAllowed = true
@@ -787,6 +789,28 @@ func dryRunThread(ctx context.Context, client *http.Client, baseURL string, vari
 	}
 	row.VisibleReplyReasons = uniqueStrings(row.VisibleReplyReasons)
 	return row
+}
+
+func benchmarkGateDecision(dryRun slackagent.SlackTriageDryRunResult) string {
+	if len(dryRun.VisibleReplyVerdicts) == 0 {
+		return "no_visible_reply_candidate"
+	}
+	allowed := false
+	for _, verdict := range dryRun.VisibleReplyVerdicts {
+		if verdict.Allowed {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "visible_reply_blocked"
+	}
+	for _, action := range dryRun.ActionsAfterGate {
+		if strings.TrimSpace(action.Type) == "post_thread_reply" {
+			return "visible_reply_requires_approval"
+		}
+	}
+	return "visible_reply_allowed_no_delivery"
 }
 
 func expandFixturePaths(inputs []string) ([]string, error) {
@@ -870,6 +894,10 @@ func evaluateCandidateFixture(variantID string, fixture benchmarkFixture) benchm
 	if strings.TrimSpace(verdict.Reason) != "" {
 		reasons = []string{verdict.Reason}
 	}
+	gateDecision := "visible_reply_blocked"
+	if verdict.Allowed {
+		gateDecision = "visible_reply_allowed_no_delivery"
+	}
 	return benchmarkRow{
 		VariantID:           variantID,
 		ChannelID:           fixture.Thread.ChannelID,
@@ -877,6 +905,7 @@ func evaluateCandidateFixture(variantID string, fixture benchmarkFixture) benchm
 		MessageCount:        len(fixture.Thread.Messages),
 		PersonaDecision:     "fixture_candidate",
 		FinalDecision:       "candidate_visible_reply_gate",
+		GateDecision:        gateDecision,
 		VisibleReplyAllowed: verdict.Allowed,
 		VisibleReplyReasons: reasons,
 	}
@@ -961,12 +990,7 @@ func normalizeFixtureLabel(label string) string {
 	label = strings.ToLower(strings.TrimSpace(label))
 	label = strings.ReplaceAll(label, "-", "_")
 	label = strings.ReplaceAll(label, " ", "_")
-	switch label {
-	case "must_block", "must_allow", "should_delegate", "freely_silent":
-		return label
-	default:
-		return label
-	}
+	return label
 }
 
 func recordRow(summary *benchmarkSummary, row benchmarkRow) {
@@ -1141,66 +1165,75 @@ func renderMarkdownReport(report benchmarkReport) string {
 	}
 
 	fmt.Fprintf(&b, "## Replay Rows\n\n")
-	fmt.Fprintf(&b, "| Variant | Case | Channel | Thread | Msgs | Label | Result | Failure layer | Persona | Final | Gate reasons | Workers | Judge | Smells | Error |\n")
-	fmt.Fprintf(&b, "|---|---|---|---|---:|---|---|---|---|---|---|---:|---|---|---|\n")
+	fmt.Fprintf(&b, "| Variant | Case | Channel | Thread | Msgs | Label | Result | Failure layer | Persona | Final | Gate | Gate reasons | Workers | Judge | Error |\n")
+	fmt.Fprintf(&b, "|---|---|---|---|---:|---|---|---|---|---|---|---|---:|---|---|\n")
 	for _, row := range report.Rows {
-		reasons := "—"
-		if len(row.VisibleReplyReasons) > 0 {
-			reasons = strings.Join(row.VisibleReplyReasons, ", ")
-		}
-		smells := "—"
-		if len(row.PipelineSmellSignals) > 0 {
-			smells = strings.Join(row.PipelineSmellSignals, ", ")
-		}
 		errText := "—"
 		if strings.TrimSpace(row.Error) != "" {
 			errText = row.Error
 		}
-		fixtureResult := "—"
-		if row.FixturePassed != nil {
-			if *row.FixturePassed {
-				fixtureResult = "pass"
-			} else {
-				fixtureResult = "fail"
-			}
-			if row.FixtureReason != "" {
-				fixtureResult += ":" + row.FixtureReason
-			}
+		reasons := "—"
+		if len(row.VisibleReplyReasons) > 0 {
+			reasons = strings.Join(row.VisibleReplyReasons, ", ")
 		}
-		layer := firstNonEmpty(row.FixtureFailureLayer, "—")
-		if row.FixtureFailureDetail != "" && layer != "—" {
-			layer += ":" + row.FixtureFailureDetail
-		}
-		judgeCell := "—"
-		if row.Judge != nil {
-			judgeCell = fmt.Sprintf("%s %.2f", row.Judge.Verdict, row.Judge.Score)
-			if len(row.Judge.Flags) > 0 {
-				judgeCell += " " + strings.Join(row.Judge.Flags, ",")
-			}
-		} else if row.JudgeSkipped {
-			judgeCell = "skipped"
-		} else if row.JudgeError != "" {
-			judgeCell = "error:" + row.JudgeError
-		}
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %d | `%s` | `%s` | `%s` | `%s` | `%s` | %s | %d | `%s` | %s | %s |\n",
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %d | `%s` | `%s` | `%s` | `%s` | `%s` | `%s` | %s | %d | `%s` | %s |\n",
 			escapeMarkdownCell(firstNonEmpty(row.VariantID, "current")),
 			escapeMarkdownCell(firstNonEmpty(row.CaseID, "—")),
 			escapeMarkdownCell(row.ChannelID),
 			escapeMarkdownCell(row.ThreadTS),
 			row.MessageCount,
 			escapeMarkdownCell(firstNonEmpty(row.FixtureLabel, "—")),
-			escapeMarkdownCell(fixtureResult),
-			escapeMarkdownCell(layer),
+			escapeMarkdownCell(formatFixtureResultCell(row)),
+			escapeMarkdownCell(formatFixtureFailureLayerCell(row)),
 			escapeMarkdownCell(firstNonEmpty(row.PersonaDecision, "unknown")),
 			escapeMarkdownCell(firstNonEmpty(row.FinalDecision, "unknown")),
+			escapeMarkdownCell(firstNonEmpty(row.GateDecision, "unknown")),
 			escapeMarkdownCell(reasons),
 			row.WorkerRequests,
-			escapeMarkdownCell(judgeCell),
-			escapeMarkdownCell(smells),
+			escapeMarkdownCell(formatJudgeCell(row)),
 			escapeMarkdownCell(errText),
 		)
 	}
 	return b.String()
+}
+
+func formatFixtureResultCell(row benchmarkRow) string {
+	if row.FixturePassed == nil {
+		return "—"
+	}
+	result := "fail"
+	if *row.FixturePassed {
+		result = "pass"
+	}
+	if row.FixtureReason != "" {
+		result += ":" + row.FixtureReason
+	}
+	return result
+}
+
+func formatFixtureFailureLayerCell(row benchmarkRow) string {
+	layer := firstNonEmpty(row.FixtureFailureLayer, "—")
+	if row.FixtureFailureDetail != "" && layer != "—" {
+		layer += ":" + row.FixtureFailureDetail
+	}
+	return layer
+}
+
+func formatJudgeCell(row benchmarkRow) string {
+	if row.Judge != nil {
+		cell := fmt.Sprintf("%s %.2f", row.Judge.Verdict, row.Judge.Score)
+		if len(row.Judge.Flags) > 0 {
+			cell += " " + strings.Join(row.Judge.Flags, ",")
+		}
+		return cell
+	}
+	if row.JudgeSkipped {
+		return "skipped"
+	}
+	if row.JudgeError != "" {
+		return "error:" + row.JudgeError
+	}
+	return "—"
 }
 
 func appendCountTable(b *strings.Builder, title string, counts map[string]int) {

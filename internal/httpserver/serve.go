@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+type ManagedServer struct {
+	Server   *http.Server
+	Shutdown func(context.Context) error
+}
+
 func Serve(logger *slog.Logger, managed *ManagedServer) error {
 	if managed == nil || managed.Server == nil {
 		return errors.New("managed server is required")

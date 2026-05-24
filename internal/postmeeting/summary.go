@@ -54,6 +54,16 @@ func renderSummaryMarkdown(summary Summary, artifact ArtifactManifest) string {
 	if len(summary.Participants) > 0 {
 		lines = append(lines, fmt.Sprintf("- Participants: %s", strings.Join(summary.Participants, ", ")))
 	}
+	if len(artifact.Warnings) > 0 {
+		lines = append(lines, "", "## Processing Warnings")
+		for _, warning := range artifact.Warnings {
+			line := "- " + firstNonEmpty(warning.Message, warning.Code)
+			if warning.Code != "" {
+				line += " (`" + warning.Code + "`)"
+			}
+			lines = append(lines, line)
+		}
+	}
 
 	lines = append(lines, "", "## Highlights")
 	if len(summary.Highlights) == 0 {

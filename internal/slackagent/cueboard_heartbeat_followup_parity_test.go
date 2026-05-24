@@ -408,6 +408,56 @@ func TestCueboardParitySurfaceFollowupBlocksWhenThreadHasNewerActivity(t *testin
 	}
 }
 
+func TestCueboardParitySurfaceFollowupBlocksWhenSlackReplyFixtureHasNewerActivityAtDelivery(t *testing.T) {
+	now := time.Date(2026, 3, 24, 11, 0, 0, 0, time.UTC)
+	rootTS := formatSlackTimestamp(now.Add(-30 * time.Minute))
+	newerTS := formatSlackTimestamp(now.Add(5 * time.Minute))
+	restore := installSlackRepliesFixture(t, []SlackMessage{
+		{TS: rootTS, User: "U_ASKER", Text: "晚点提醒一下这个 thread。"},
+		{TS: newerTS, User: "U_HUMAN", Text: "我已经处理好了。"},
+	})
+	defer restore()
+
+	previousClock := timeNow
+	timeNow = func() time.Time { return now }
+	t.Cleanup(func() { timeNow = previousClock })
+
+	poster := &recordingPoster{}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			BotToken:  "xoxb-test",
+			BotUserID: "U_BOT",
+		},
+		Poster: poster,
+	})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{
+		Title:      "Thread already moved at delivery",
+		ChannelID:  "C123",
+		ThreadTS:   rootTS,
+		SourceKind: "thread",
+		Priority:   "normal",
+		CreatedAt:  now.Format(time.RFC3339Nano),
+		UpdatedAt:  now.Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	if got := len(poster.Calls()); got != 0 {
+		t.Fatalf("poster calls = %d, want none", got)
+	}
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != "thread_has_newer_activity" {
+		t.Fatalf("response = %#v, want delivery gate thread_has_newer_activity", response)
+	}
+	if response.Skipped[0].Status != "blocked" {
+		t.Fatalf("skipped surface = %#v, want blocked status", response.Skipped[0])
+	}
+}
+
 func TestCueboardParitySurfaceFollowupBlocksWhenAnyWorkspaceLedgerUpdated(t *testing.T) {
 	now := time.Date(2026, 3, 24, 11, 0, 0, 0, time.UTC)
 	createdAt := now.Add(-30 * time.Minute)

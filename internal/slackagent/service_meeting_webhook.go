@@ -56,13 +56,15 @@ func (s *Service) handleMeetingWebhookJoined(ctx context.Context, payload Normal
 	}
 
 	text, blocks := buildMeetingJoinedPost(payload)
-	post := s.poster.PostMessage(ctx, PostMessageInput{
-		Channel:  ref.ChannelID,
-		ThreadTS: ref.ThreadTS,
-		Text:     text,
-		Blocks:   blocks,
-		DedupKey: meetingWebhookDedupKey(payload.MeetingID, "joined", ref),
-	})
+	post := s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourceMeetingWebhook,
+		Surface:   slackPublicNotificationSurfaceMeetingNotice,
+		ChannelID: ref.ChannelID,
+		ThreadTS:  ref.ThreadTS,
+		Text:      text,
+		Blocks:    blocks,
+		DedupKey:  meetingWebhookDedupKey(payload.MeetingID, "joined", ref),
+	}).Post
 	status := s.scheduleAssistantThreadStatus(ctx, AssistantThreadRef{
 		ChannelID: ref.ChannelID,
 		ThreadTS:  firstNonEmpty(ref.ThreadTS, post.ThreadTS, post.TS),
@@ -128,12 +130,14 @@ func (s *Service) handleMeetingWebhookResult(ctx context.Context, payload Normal
 func (s *Service) postMeetingFailureResult(ctx context.Context, payload NormalizedMeetingWebhookPayload, ref MeetingSlackRef) MeetingWebhookResponse {
 	var post *PostMessageResult
 	if ref.ChannelID != "" {
-		result := s.poster.PostMessage(ctx, PostMessageInput{
-			Channel:  ref.ChannelID,
-			ThreadTS: ref.ThreadTS,
-			Text:     buildMeetingFailurePost(payload),
-			DedupKey: meetingWebhookDedupKey(payload.MeetingID, "failed", ref),
-		})
+		result := s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+			Source:    slackPublicNotificationSourceMeetingWebhook,
+			Surface:   slackPublicNotificationSurfaceMeetingNotice,
+			ChannelID: ref.ChannelID,
+			ThreadTS:  ref.ThreadTS,
+			Text:      buildMeetingFailurePost(payload),
+			DedupKey:  meetingWebhookDedupKey(payload.MeetingID, "failed", ref),
+		}).Post
 		post = &result
 	}
 	delivery, err := s.meetingWebhooks.ConfirmResult(ctx, payload.MeetingID)
@@ -166,17 +170,13 @@ func (s *Service) postMeetingSummaryResult(ctx context.Context, payload Normaliz
 }
 
 func (s *Service) publishMeetingSummary(ctx context.Context, payload NormalizedMeetingWebhookPayload, ref MeetingSlackRef) (PublishedCanvasManifest, error) {
-	publisher, err := s.getCanvasPublisher()
-	if err != nil {
-		return PublishedCanvasManifest{}, err
-	}
 	artifacts, err := s.uploadMeetingArtifactFiles(ctx, payload.Artifacts, ref)
 	if err != nil {
 		return PublishedCanvasManifest{}, err
 	}
 	payload.Artifacts = artifacts
 	title := firstNonEmpty(normalizeMeetingSummary(payload.Summary, payload.Title).Title, payload.Title, "Meeting summary")
-	return publisher.Publish(ctx, CanvasPublishInput{
+	return s.PublishCanvas(ctx, CanvasPublishInput{
 		Artifact:         meetingCanvasArtifact(payload),
 		ArtifactID:       fmt.Sprintf("meeting-%d", payload.MeetingID),
 		Title:            title,
@@ -184,6 +184,7 @@ func (s *Service) publishMeetingSummary(ctx context.Context, payload NormalizedM
 		NotificationText: buildMeetingResultNotification(payload),
 		Channel:          ref.ChannelID,
 		ThreadTS:         ref.ThreadTS,
+		SnapshotTS:       formatSlackTimestamp(timeNow().UTC()),
 		Destination:      "meeting-webhook",
 		DedupKey:         meetingWebhookDedupKey(payload.MeetingID, "summary", ref),
 		ForceSlackCanvas: true,

@@ -22,7 +22,26 @@ const (
 	meetingScannerRequestTimeout     = 10 * time.Second
 	meetingScannerMaxResponseBytes   = 1 << 20
 	meetingScannerDedupePrefix       = "meeting_calendar:"
+	meetingApprovalLeadTime          = time.Minute
 )
+
+func meetingScannerLookahead(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	return meetingApprovalLeadTime + interval + 15*time.Second
+}
+
+func shouldSuggestMeetingApprovalAt(now time.Time, start time.Time, interval time.Duration) bool {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	untilStart := start.Sub(now)
+	if untilStart > meetingApprovalLeadTime {
+		return false
+	}
+	return untilStart >= -(interval + 15*time.Second)
+}
 
 type meetingScannerConfig struct {
 	Enabled         bool
@@ -312,11 +331,13 @@ func (s *Service) suggestCalendarMeetingApproval(ctx context.Context, event meet
 	if s.threadCases != nil && s.threadCases.IsActive(ctx, channelID, dedupeThreadTS) {
 		return false, nil
 	}
-	anchor := s.PostMessage(ctx, PostMessageInput{
-		Channel:  channelID,
-		Text:     formatMeetingApprovalAnchorText(brief),
-		DedupKey: "slack-meeting-approval-anchor:" + strings.TrimSpace(event.ID),
-	})
+	anchor := s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourceMeetingApproval,
+		Surface:   slackPublicNotificationSurfaceApprovalAnchor,
+		ChannelID: channelID,
+		Text:      formatMeetingApprovalAnchorText(brief),
+		DedupKey:  "slack-meeting-approval-anchor:" + strings.TrimSpace(event.ID),
+	}).Post
 	if !anchor.OK {
 		return false, fmt.Errorf("post meeting approval anchor: %s", firstNonEmpty(anchor.Error, anchor.Detail, "unknown_error"))
 	}

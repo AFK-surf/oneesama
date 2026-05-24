@@ -88,6 +88,18 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 		return false
 	}
 	dedupKey := fmt.Sprintf("slack-worker-result:%s:%s:%s", job.ID, ref.ChannelID, firstNonEmpty(ref.ThreadTS, "root"))
+	snapshotTS := slackWorkerFreshnessSnapshotTS(job, ref)
+	if delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
+		Source:        slackPublicReplySourceWorkerFreshnessProbe,
+		SurfaceKind:   slackPublicReplySurfaceThreadReply,
+		ChannelID:     ref.ChannelID,
+		ThreadTS:      ref.ThreadTS,
+		Message:       text,
+		SnapshotTS:    snapshotTS,
+		FreshnessOnly: true,
+	}); delivery.Blocked {
+		return false
+	}
 	if shouldPublishWorkerResultAsCanvas(job, text) {
 		manifest, err := s.PublishCanvas(ctx, workerResultCanvasInput(job, ref, text, dedupKey))
 		if err == nil && manifest.OK {
@@ -100,21 +112,40 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 			s.logger.Warn("slack worker canvas publish failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "surface", manifest.Surface)
 		}
 	}
-	postInput := PostMessageInput{
-		Channel:  ref.ChannelID,
-		ThreadTS: ref.ThreadTS,
-		Text:     markdownToSlackFallbackText(text),
-		Blocks:   buildSlackThreadReplyBlocks(text, "", nil),
-		DedupKey: dedupKey,
+	delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
+		Source:        slackPublicReplySourceWorkerResult,
+		SurfaceKind:   slackPublicReplySurfaceThreadReply,
+		WorkspaceID:   "workspace",
+		ChannelID:     ref.ChannelID,
+		ThreadTS:      ref.ThreadTS,
+		Message:       text,
+		Blocks:        buildSlackThreadReplyBlocks(text, "", nil),
+		DedupKey:      dedupKey,
+		SnapshotTS:    snapshotTS,
+		LedgerSummary: "worker_result: " + firstTextLine(text),
+	})
+	result := delivery.Post
+	if delivery.Blocked {
+		return false
 	}
-	result := s.PostMessage(ctx, postInput)
 	if !result.OK {
 		s.logger.Warn("slack worker result post failed", "job_id", job.ID, "channel", ref.ChannelID, "thread_ts", ref.ThreadTS, "error", result.Error, "detail", result.Detail)
 		return false
 	}
-	s.recordSlackOutboundLedger(ctx, "workspace", postInput, result, "worker_result: "+firstTextLine(text))
 	s.syncSlackWorkerMemoryTurn(ctx, job, ref, text, "thread_reply")
 	return true
+}
+
+func slackWorkerFreshnessSnapshotTS(job agentrunner.Job, ref AssistantThreadRef) string {
+	slack, _ := mapFromAny(job.Context["slack"])
+	return firstNonEmpty(
+		stringFromAny(slack["freshnessSnapshotTS"]),
+		stringFromAny(slack["freshness_snapshot_ts"]),
+		stringFromAny(slack["snapshotTS"]),
+		stringFromAny(slack["snapshot_ts"]),
+		ref.ReactionTS,
+		ref.ThreadTS,
+	)
 }
 
 func (s *Service) syncSlackWorkerMemoryTurn(ctx context.Context, job agentrunner.Job, ref AssistantThreadRef, assistantText string, delivery string) {
@@ -192,6 +223,8 @@ func workerResultCanvasInput(job agentrunner.Job, ref AssistantThreadRef, text s
 		Channel:          ref.ChannelID,
 		ThreadTS:         ref.ThreadTS,
 		DedupKey:         "slack-worker-canvas:" + dedupKey,
+		WorkspaceID:      "workspace",
+		SnapshotTS:       slackWorkerFreshnessSnapshotTS(job, ref),
 		NotificationText: workerResultCanvasNotification(title, revision),
 		ForceSlackCanvas: true,
 	}

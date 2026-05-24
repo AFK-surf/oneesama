@@ -195,8 +195,8 @@ func (s *Service) buildAgentRunnerContext(ctx context.Context, input AvatarComma
 			context["slackAssistantPrompt"] = input.RichThreadContext.Prompt
 		}
 		query := appMentionBaseRelatedMemoryQuery(input.RichThreadContext, input.ChannelName, input.UserName)
-		context["localSlackMemory"] = s.buildLocalSlackMemoryContext(query, 5)
-		relatedMemory := s.searchAppMentionRelatedMemory(input.RichThreadContext, input.ChannelName, input.UserName, 5)
+		context["localSlackMemory"] = s.buildLocalSlackMemoryContextContext(ctx, query, 5)
+		relatedMemory := s.searchAppMentionRelatedMemoryContext(ctx, input.RichThreadContext, input.ChannelName, input.UserName, 5)
 		context["relatedMemory"] = relatedMemory
 		if evidence := formatSlackRelatedMemoryEvidence(relatedMemory.Results, 5); evidence != "" {
 			context["relatedMemoryEvidence"] = evidence

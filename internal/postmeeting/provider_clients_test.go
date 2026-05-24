@@ -3,9 +3,10 @@ package postmeeting
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,9 +16,7 @@ func TestOpenAIASRProviderPostsAudioToTranscriptionsEndpoint(t *testing.T) {
 	t.Parallel()
 
 	audioPath := filepath.Join(t.TempDir(), "audio.mp3")
-	if err := os.WriteFile(audioPath, []byte("fake mp3"), 0o644); err != nil {
-		t.Fatalf("write audio: %v", err)
-	}
+	writeTestFile(t, audioPath, "fake mp3")
 	var sawModel, sawLanguage, sawFile bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/audio/transcriptions" {
@@ -90,4 +89,63 @@ func TestOpenAIChatClientPostsSummaryMessages(t *testing.T) {
 	if !strings.Contains(response.Content, `"title":"OK"`) {
 		t.Fatalf("response = %#v", response)
 	}
+}
+
+func TestOpenAIChatClientRejectsOversizedResponseBody(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(strings.Repeat("x", maxProviderResponseBodyBytes+1)))
+	}))
+	defer server.Close()
+
+	client := &OpenAIChatClient{APIKey: "test-key", BaseURL: server.URL + "/v1", Model: "summary-model"}
+	_, err := client.Chat(context.Background(), []SummaryLLMMessage{{Role: "user", Content: "u"}})
+	if err == nil {
+		t.Fatal("Chat() error = nil, want oversized response error")
+	}
+	if !strings.Contains(err.Error(), "provider response body exceeds") {
+		t.Fatalf("Chat() error = %v, want provider response body exceeds", err)
+	}
+}
+
+func TestDefaultProviderHTTPClientHasTimeout(t *testing.T) {
+	t.Parallel()
+
+	client := httpClient(nil)
+	if client == nil || client.Timeout <= 0 {
+		t.Fatalf("httpClient(nil) = %#v, want client with timeout", client)
+	}
+}
+
+func TestGeminiASRProviderGenerateRedactsAPIKeyFromRequestError(t *testing.T) {
+	t.Parallel()
+
+	const apiKey = "secret-gemini-key"
+	provider := &GeminiASRProvider{
+		APIKey:      apiKey,
+		Model:       "gemini-test",
+		GenerateURL: "https://gemini.invalid/v1beta/models/%s:generateContent",
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, &url.Error{Op: req.Method, URL: req.URL.String(), Err: errors.New("dial blocked")}
+		})},
+	}
+
+	_, err := provider.generateTranscript(context.Background(), "file://audio", "audio/mpeg", "transcribe")
+	if err == nil {
+		t.Fatal("generateTranscript() error = nil, want request error")
+	}
+	if strings.Contains(err.Error(), apiKey) {
+		t.Fatalf("generateTranscript() error leaked api key: %v", err)
+	}
+	if !strings.Contains(err.Error(), "gemini generate request") || !strings.Contains(err.Error(), "dial blocked") {
+		t.Fatalf("generateTranscript() error = %v, want sanitized request context", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

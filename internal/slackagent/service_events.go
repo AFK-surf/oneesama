@@ -199,7 +199,7 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 					Text:     "Got it — finishing the earlier mention in this thread, will reply once that lands.",
 					DedupKey: slackEventDedupKey(envelope.EventID, event) + ":queued_ack",
 				}
-				go s.dispatchEventPost(context.WithoutCancel(ctx), ackInput)
+				go s.dispatchEventQueuedAck(context.WithoutCancel(ctx), mentionWorkspaceID, ackInput, firstNonEmpty(event.TS, event.EventTS))
 			}
 			s.logger.Info(
 				"slack mention coalesced into running worker",
@@ -328,7 +328,7 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 	}
 	workspaceID := firstNonEmpty(envelope.TeamID, "workspace")
 	ledgerSummary := slackEventReplyLedgerSummary(mode, postText)
-	go s.dispatchEventReplyWithLedger(context.WithoutCancel(ctx), workspaceID, postInput, ledgerSummary)
+	go s.dispatchEventReplyWithLedger(context.WithoutCancel(ctx), workspaceID, postInput, ledgerSummary, firstNonEmpty(event.TS, event.EventTS))
 	return response
 }
 
@@ -480,33 +480,79 @@ func (s *Service) endMentionThreadCase(ctx context.Context, workspaceID, channel
 	}
 }
 
-func (s *Service) dispatchEventPost(ctx context.Context, input PostMessageInput) {
-	result := s.PostMessage(ctx, input)
-	if result.OK {
+func (s *Service) dispatchEventQueuedAck(ctx context.Context, workspaceID string, input PostMessageInput, snapshotTS string) {
+	delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
+		Source:       slackPublicReplySourceEventQueuedAck,
+		SurfaceKind:  slackPublicReplySurfaceThreadReply,
+		WorkspaceID:  workspaceID,
+		ChannelID:    input.Channel,
+		ThreadTS:     input.ThreadTS,
+		FallbackText: input.Text,
+		Blocks:       input.Blocks,
+		DedupKey:     input.DedupKey,
+		SnapshotTS:   snapshotTS,
+	})
+	if delivery.Blocked {
+		s.logger.Info(
+			"slack events queued ack suppressed",
+			"channel", input.Channel,
+			"thread_ts", input.ThreadTS,
+			"dedup_key", input.DedupKey,
+			"reason", delivery.BlockReason,
+			"blocked_ts", delivery.BlockedTS,
+		)
+		return
+	}
+	if delivery.Post.OK {
 		return
 	}
 	s.logger.Warn(
-		"slack events post dispatch failed",
+		"slack events queued ack dispatch failed",
 		"channel", input.Channel,
 		"thread_ts", input.ThreadTS,
 		"dedup_key", input.DedupKey,
-		"error", result.Error,
-		"detail", result.Detail,
-		"status", result.Status,
+		"error", delivery.Post.Error,
+		"detail", delivery.Post.Detail,
+		"status", delivery.Post.Status,
 	)
-	s.notifyOperatorPostFailure(ctx, input, result)
+	s.notifyOperatorPostFailure(ctx, input, delivery.Post)
 }
 
-// dispatchEventReplyWithLedger is the durable-reply variant of
-// dispatchEventPost: it records the outbound into the cognition ledger on
-// success so the assistant's thread history stays consistent. Transient
-// surfaces (queued-ack on coalesced mentions, thinking status, operator
-// fallback notifications) continue to use dispatchEventPost without a
-// ledger write to keep the ledger focused on user-visible answer posts.
-func (s *Service) dispatchEventReplyWithLedger(ctx context.Context, workspaceID string, input PostMessageInput, ledgerSummary string) {
-	result := s.PostMessage(ctx, input)
+// dispatchEventReplyWithLedger records successful durable event replies into
+// the cognition ledger so the assistant's thread history stays consistent.
+// Transient status surfaces intentionally skip ledger writes.
+func (s *Service) dispatchEventReplyWithLedger(ctx context.Context, workspaceID string, input PostMessageInput, ledgerSummary string, snapshotTS string) {
+	surfaceKind := slackPublicReplySurfaceChannelNotice
+	if strings.TrimSpace(input.ThreadTS) != "" {
+		surfaceKind = slackPublicReplySurfaceThreadReply
+	}
+	delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
+		Source:        slackPublicReplySourceEventReply,
+		SurfaceKind:   surfaceKind,
+		WorkspaceID:   workspaceID,
+		ChannelID:     input.Channel,
+		ThreadTS:      input.ThreadTS,
+		FallbackText:  input.Text,
+		Blocks:        input.Blocks,
+		DedupKey:      input.DedupKey,
+		SnapshotTS:    snapshotTS,
+		LedgerSummary: ledgerSummary,
+	})
+	if delivery.Blocked {
+		if s.logger != nil {
+			s.logger.Info(
+				"slack event reply dispatch blocked",
+				"channel", input.Channel,
+				"thread_ts", input.ThreadTS,
+				"dedup_key", input.DedupKey,
+				"reason", delivery.BlockReason,
+				"blocked_ts", delivery.BlockedTS,
+			)
+		}
+		return
+	}
+	result := delivery.Post
 	if result.OK {
-		s.recordSlackOutboundLedger(ctx, workspaceID, input, result, ledgerSummary)
 		return
 	}
 	s.logger.Warn(

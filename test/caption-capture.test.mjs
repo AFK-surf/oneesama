@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { __captionCaptureTestInternals, enableMeetCaptions } from "../packages/core/src/meeting/caption-capture.ts";
+import {
+  __captionCaptureTestInternals,
+  enableMeetCaptions,
+} from "../packages/core/src/meeting/caption-capture.ts";
 
 function fakeCaptionSettingsPage(
   directProbe,
@@ -19,11 +22,18 @@ function fakeCaptionSettingsPage(
   const page = {
     clicks,
     filters,
-    keyboard: { async press(key) { clicks.push({ selector: "keyboard", key }); } },
+    keyboard: {
+      async press(key) {
+        clicks.push({ selector: "keyboard", key });
+      },
+    },
     async evaluate(fn, arg) {
       if (typeof arg === "number") return true;
       const source = String(fn);
-      if (source.includes('querySelectorAll("button, [role=button]")') || source.includes('querySelectorAll<HTMLElement>("button, [role=button]")')) {
+      if (
+        source.includes('querySelectorAll("button, [role=button]")') ||
+        source.includes('querySelectorAll<HTMLElement>("button, [role=button]")')
+      ) {
         return directProbe;
       }
       if (source.includes("targetPattern=/^(Live captions|") && source.includes("triggerClick")) {
@@ -60,12 +70,13 @@ function fakeCaptionSettingsPage(
           return chain;
         },
         async waitFor() {},
-        async isVisible() {
-          return visibleSelectors.includes(selector);
-        },
         async click() {
           if (failSelectors.includes(selector)) throw new Error(`forced failure for ${selector}`);
-          if (String(selector).includes("caption settings") || String(selector).includes("More options") || String(selector).includes('[role="tab"]')) {
+          if (
+            String(selector).includes("caption settings") ||
+            String(selector).includes("More options") ||
+            String(selector).includes('[role="tab"]')
+          ) {
             dialogOpen = true;
           }
           if (String(selector).includes("Close")) dialogOpen = false;
@@ -86,13 +97,17 @@ function fakeCaptionSettingsPage(
   return page;
 }
 
-test("enableMeetCaptions still configures the selected language when captions are already on", async () => {
-  const page = fakeCaptionSettingsPage({
+function captionsAlreadyOnProbe() {
+  return {
     ok: true,
     alreadyOn: true,
     candidateIndex: 0,
     candidates: [{ index: 0, aria: "Turn off captions", text: "", visible: true }],
-  });
+  };
+}
+
+test("enableMeetCaptions still configures the selected language when captions are already on", async () => {
+  const page = fakeCaptionSettingsPage(captionsAlreadyOnProbe());
 
   const records = [];
   const result = await enableMeetCaptions(page, {
@@ -103,70 +118,91 @@ test("enableMeetCaptions still configures the selected language when captions ar
   assert.equal(result.ok, true);
   assert.equal(result.alreadyOn, true);
   assert.equal(result.path, "inline");
-  assert.ok(page.clicks.some((click) => click.selector === "dom-meeting-language-option" && String(click.pattern).includes("Chinese, Mandarin")));
-  assert.deepEqual(records.find((record) => record.type === "caption_settings_live_radio_selected")?.detail, { attempt: 1, selected: true });
+  assert.ok(
+    page.clicks.some(
+      (click) =>
+        click.selector === "dom-meeting-language-option" &&
+        String(click.pattern).includes("Chinese, Mandarin"),
+    ),
+  );
+  assert.deepEqual(
+    records.find((record) => record.type === "caption_settings_live_radio_selected")?.detail,
+    { attempt: 1, selected: true },
+  );
   assert.ok(page.clicks.some((click) => String(click.selector).includes("caption settings")));
   assert.ok(page.clicks.some((click) => click.selector === "dom-meeting-language-combobox"));
-  assert.ok(!page.clicks.some((click) => click.selector === 'button[aria-label="More options"], button[aria-label="更多选项"]'));
-  assert.ok(!page.clicks.some((click) => click.selector === "text=/Live captions|实时字幕/i"), "already-on path must not toggle captions off");
+  assert.ok(
+    !page.clicks.some(
+      (click) =>
+        click.selector === 'button[aria-label="More options"], button[aria-label="更多选项"]',
+    ),
+  );
+  assert.ok(
+    !page.clicks.some((click) => click.selector === "text=/Live captions|实时字幕/i"),
+    "already-on path must not toggle captions off",
+  );
 });
 
 test("enableMeetCaptions falls back to the legacy settings menu when the inline caption button is unavailable", async () => {
-  const page = fakeCaptionSettingsPage({
-    ok: true,
-    alreadyOn: true,
-    candidateIndex: 0,
-    candidates: [{ index: 0, aria: "Turn off captions", text: "", visible: true }],
-  }, {
-    failSelectors: [
-      [
-        'button[aria-label*="Open caption settings" i]',
-        '[role="button"][aria-label*="Open caption settings" i]',
-        'button[aria-label*="caption settings" i]',
-        '[role="button"][aria-label*="caption settings" i]',
-        'button[aria-label*="字幕设置" i]',
-        '[role="button"][aria-label*="字幕设置" i]',
-        'button[aria-label*="字幕設定" i]',
-        '[role="button"][aria-label*="字幕設定" i]',
-      ].join(", "),
-    ],
-  });
+  const page = fakeCaptionSettingsPage(
+    captionsAlreadyOnProbe(),
+    {
+      failSelectors: [
+        [
+          'button[aria-label*="Open caption settings" i]',
+          '[role="button"][aria-label*="Open caption settings" i]',
+          'button[aria-label*="caption settings" i]',
+          '[role="button"][aria-label*="caption settings" i]',
+          'button[aria-label*="字幕设置" i]',
+          '[role="button"][aria-label*="字幕设置" i]',
+          'button[aria-label*="字幕設定" i]',
+          '[role="button"][aria-label*="字幕設定" i]',
+        ].join(", "),
+      ],
+    },
+  );
 
   const result = await enableMeetCaptions(page, { captionLanguage: "Chinese (Simplified)" });
 
   assert.equal(result.ok, true);
   assert.equal(result.path, "legacy");
-  assert.ok(page.clicks.some((click) => click.selector === 'button[aria-label="More options"], button[aria-label="更多选项"]'));
+  assert.ok(
+    page.clicks.some(
+      (click) =>
+        click.selector === 'button[aria-label="More options"], button[aria-label="更多选项"]',
+    ),
+  );
 });
 
 test("enableMeetCaptions falls back to DOM click when the language combobox refuses a normal click", async () => {
-  const page = fakeCaptionSettingsPage({
-    ok: true,
-    alreadyOn: true,
-    candidateIndex: 0,
-    candidates: [{ index: 0, aria: "Turn off captions", text: "", visible: true }],
-  }, {
-    domMeetingLanguageClick: false,
-    failSelectors: [
-      "xpath=(//*[self::div or self::span or self::label][contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'language of the meeting') or contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'meeting language') or contains(normalize-space(.), '会议语言') or contains(normalize-space(.), '會議語言')]/following::*[@role='combobox'][1])[1]",
-    ],
-  });
+  const page = fakeCaptionSettingsPage(
+    captionsAlreadyOnProbe(),
+    {
+      domMeetingLanguageClick: false,
+      failSelectors: [
+        "xpath=(//*[self::div or self::span or self::label][contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'language of the meeting') or contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'meeting language') or contains(normalize-space(.), '会议语言') or contains(normalize-space(.), '會議語言')]/following::*[@role='combobox'][1])[1]",
+      ],
+    },
+  );
 
   const result = await enableMeetCaptions(page, { captionLanguage: "Chinese (Simplified)" });
 
   assert.equal(result.ok, true);
-  assert.ok(page.clicks.some((click) => click.selector.includes("following::*[@role='combobox'][1]") && click.action === "evaluate"));
+  assert.ok(
+    page.clicks.some(
+      (click) =>
+        click.selector.includes("following::*[@role='combobox'][1]") && click.action === "evaluate",
+    ),
+  );
 });
 
 test("enableMeetCaptions refuses translated captions mode when a meeting language was requested", async () => {
-  const page = fakeCaptionSettingsPage({
-    ok: true,
-    alreadyOn: true,
-    candidateIndex: 0,
-    candidates: [{ index: 0, aria: "Turn off captions", text: "", visible: true }],
-  }, {
-    translatedSelected: true,
-  });
+  const page = fakeCaptionSettingsPage(
+    captionsAlreadyOnProbe(),
+    {
+      translatedSelected: true,
+    },
+  );
 
   const result = await enableMeetCaptions(page, { captionLanguage: "Chinese (Simplified)" });
 
@@ -220,8 +256,33 @@ class MockElement {
   }
 }
 
+function mockOption(text, top) {
+  return new MockElement("div", { role: "option" }, text, [], { top });
+}
+
+function mockCombobox(text, controls, top) {
+  return new MockElement(
+    "div",
+    { role: "combobox", "aria-expanded": "true", "aria-controls": controls },
+    text,
+    [],
+    { top },
+  );
+}
+
+function mockRadio(id, checked = false) {
+  return new MockElement("input", { id, type: "radio", ...(checked ? { checked } : {}) }, "");
+}
+
+function mockLabel(target, text) {
+  return new MockElement("label", { for: target }, text);
+}
+
 function queryAll(nodes, selector, includeSelf = true) {
-  const selectors = selector.split(",").map((part) => part.trim()).filter(Boolean);
+  const selectors = selector
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
   const out = [];
   const visit = (node) => {
     if (includeSelf && selectors.some((part) => matchesSelector(node, part))) out.push(node);
@@ -240,7 +301,8 @@ function matchesSelector(node, selector) {
   if (selector === '[role="option"]') return role === "option";
   if (selector === "label") return node.tagName.toLowerCase() === "label";
   if (selector === "[role='radio']" || selector === '[role="radio"]') return role === "radio";
-  if (selector === 'input[type="radio"]') return node.tagName.toLowerCase() === "input" && node.getAttribute("type") === "radio";
+  if (selector === 'input[type="radio"]')
+    return node.tagName.toLowerCase() === "input" && node.getAttribute("type") === "radio";
   return false;
 }
 
@@ -277,8 +339,12 @@ function mockDomPage(root) {
     },
     locator(selector) {
       return {
-        filter() { return this; },
-        first() { return this; },
+        filter() {
+          return this;
+        },
+        first() {
+          return this;
+        },
         async waitFor() {},
         async scrollIntoViewIfNeeded() {},
         async click() {
@@ -293,26 +359,32 @@ function mockDomPage(root) {
 }
 
 test("clickCaptionLanguageOption scopes Chinese to the expanded meeting-language listbox", async () => {
-  const sourceChinese = new MockElement("div", { role: "option" }, "Chinese, Mandarin (Simplified)", [], { top: 300 });
-  const translationChinese = new MockElement("div", { role: "option" }, "Chinese (Simplified)", [], { top: 520 });
+  const sourceChinese = mockOption("Chinese, Mandarin (Simplified)", 300);
+  const translationChinese = mockOption("Chinese (Simplified)", 520);
   const root = new MockElement("div", {}, "", [
-    new MockElement("div", { role: "combobox", "aria-expanded": "true", "aria-controls": "meeting-list" }, "Language of the meeting language English", [], { top: 193 }),
-    new MockElement("div", { id: "meeting-list", role: "listbox" }, "", [sourceChinese, new MockElement("div", { role: "option" }, "English", [], { top: 540 })]),
-    new MockElement("div", { role: "combobox", "aria-expanded": "true", "aria-controls": "translation-list" }, "Your preferred language Afrikaans", [], { top: 513 }),
+    mockCombobox("Language of the meeting language English", "meeting-list", 193),
+    new MockElement("div", { id: "meeting-list", role: "listbox" }, "", [
+      sourceChinese,
+      mockOption("English", 540),
+    ]),
+    mockCombobox("Your preferred language Afrikaans", "translation-list", 513),
     new MockElement("div", { id: "translation-list", role: "listbox" }, "", [translationChinese]),
   ]);
 
-  await __captionCaptureTestInternals.clickCaptionLanguageOption(mockDomPage(root), "Chinese (Simplified)");
+  await __captionCaptureTestInternals.clickCaptionLanguageOption(
+    mockDomPage(root),
+    "Chinese (Simplified)",
+  );
 
   assert.equal(sourceChinese.clicked, true);
   assert.equal(translationChinese.clicked, false);
 });
 
 test("translatedCaptionsEnabled uses checked state instead of visible label text", async () => {
-  const radio = new MockElement("input", { id: "translated-radio", type: "radio" }, "");
+  const radio = mockRadio("translated-radio");
   const root = new MockElement("div", {}, "", [
     new MockElement("div", { role: "dialog" }, "", [
-      new MockElement("label", { for: "translated-radio" }, "Translated captions"),
+      mockLabel("translated-radio", "Translated captions"),
       radio,
     ]),
   ]);
@@ -324,14 +396,17 @@ test("translatedCaptionsEnabled uses checked state instead of visible label text
 });
 
 test("liveCaptionsRadioSelected ignores inline label text and reads the dialog radio", async () => {
-  const liveRadio = new MockElement("input", { id: "live-radio", type: "radio", checked: true }, "");
+  const liveRadio = mockRadio("live-radio", true);
   const root = new MockElement("div", {}, "", [
     new MockElement("span", {}, "Live captions"),
     new MockElement("div", { role: "dialog" }, "", [
-      new MockElement("label", { for: "live-radio" }, "Live captions"),
+      mockLabel("live-radio", "Live captions"),
       liveRadio,
     ]),
   ]);
 
-  assert.equal(await __captionCaptureTestInternals.liveCaptionsRadioSelected(mockDomPage(root)), true);
+  assert.equal(
+    await __captionCaptureTestInternals.liveCaptionsRadioSelected(mockDomPage(root)),
+    true,
+  );
 });

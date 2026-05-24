@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -140,7 +141,10 @@ func (p *OpenAIASRProvider) Transcribe(ctx context.Context, request ASRRequest) 
 		return ASRTranscript{}, fmt.Errorf("openai asr request: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readProviderResponseBody(resp.Body)
+	if err != nil {
+		return ASRTranscript{}, fmt.Errorf("read openai asr response body: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ASRTranscript{}, fmt.Errorf("openai asr failed (%d): %s", resp.StatusCode, string(respBody))
 	}
@@ -216,7 +220,9 @@ func (p *GeminiASRProvider) Transcribe(ctx context.Context, request ASRRequest) 
 		return ASRTranscript{}, err
 	}
 	defer func() {
-		_ = p.deleteFile(context.Background(), fileName)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = p.deleteFile(cleanupCtx, fileName)
 	}()
 	text, err := p.generateTranscript(ctx, fileURI, mimeTypeForAudio(audioPath), buildGeminiASRPrompt(request.Participants))
 	if err != nil {
@@ -242,32 +248,21 @@ func (p *GeminiASRProvider) uploadFile(ctx context.Context, audioPath string) (s
 	}
 	pr, pw := io.Pipe()
 	writer := multipart.NewWriter(pw)
-	var writeErr error
+	errCh := make(chan error, 1)
 	go func() {
-		defer pw.Close()
-		defer writer.Close()
-		metaPart, err := writer.CreatePart(map[string][]string{
-			"Content-Disposition": {"form-data; name=\"metadata\""},
-			"Content-Type":        {"application/json"},
-		})
-		if err != nil {
-			writeErr = err
-			return
-		}
-		_ = json.NewEncoder(metaPart).Encode(map[string]any{"file": map[string]string{"display_name": filepath.Base(audioPath)}})
-		filePart, err := writer.CreatePart(map[string][]string{
-			"Content-Disposition": {fmt.Sprintf("form-data; name=\"file\"; filename=\"%s\"", filepath.Base(audioPath))},
-			"Content-Type":        {mimeTypeForAudio(audioPath)},
-		})
-		if err != nil {
-			writeErr = err
-			return
-		}
-		_, writeErr = io.Copy(filePart, file)
+		errCh <- writeGeminiUploadBody(pw, writer, audioPath)
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, firstNonEmpty(p.UploadURL, defaultGeminiUploadURL)+"?key="+firstNonEmpty(p.APIKey), pr)
+	endpoint, err := providerURLWithAPIKey(firstNonEmpty(p.UploadURL, defaultGeminiUploadURL), p.APIKey)
 	if err != nil {
+		_ = pr.CloseWithError(err)
+		<-errCh
+		return "", "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, pr)
+	if err != nil {
+		_ = pr.CloseWithError(err)
+		<-errCh
 		return "", "", err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -276,13 +271,18 @@ func (p *GeminiASRProvider) uploadFile(ctx context.Context, audioPath string) (s
 	req.Header.Set("X-Goog-Upload-Header-Content-Type", mimeTypeForAudio(audioPath))
 	resp, err := httpClient(p.HTTPClient).Do(req)
 	if err != nil {
-		return "", "", fmt.Errorf("gemini upload request: %w", err)
+		_ = pr.CloseWithError(err)
+		<-errCh
+		return "", "", providerRequestError("gemini upload", err)
 	}
 	defer resp.Body.Close()
-	if writeErr != nil {
+	if writeErr := <-errCh; writeErr != nil {
 		return "", "", fmt.Errorf("gemini upload body: %w", writeErr)
 	}
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readProviderResponseBody(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("read gemini upload response body: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", "", fmt.Errorf("gemini upload failed (%d): %s", resp.StatusCode, string(respBody))
 	}
@@ -298,8 +298,52 @@ func (p *GeminiASRProvider) uploadFile(ctx context.Context, audioPath string) (s
 	return uploadResp.File.URI, uploadResp.File.Name, nil
 }
 
+func writeGeminiUploadBody(pw *io.PipeWriter, writer *multipart.Writer, audioPath string) error {
+	var err error
+	defer func() {
+		if closeErr := writer.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		_ = pw.Close()
+	}()
+
+	metaPart, err := writer.CreatePart(map[string][]string{
+		"Content-Disposition": {"form-data; name=\"metadata\""},
+		"Content-Type":        {"application/json"},
+	})
+	if err != nil {
+		return err
+	}
+	if err = json.NewEncoder(metaPart).Encode(map[string]any{"file": map[string]string{"display_name": filepath.Base(audioPath)}}); err != nil {
+		return err
+	}
+	file, err := os.Open(audioPath)
+	if err != nil {
+		return fmt.Errorf("open audio: %w", err)
+	}
+	defer file.Close()
+	filePart, err := writer.CreatePart(map[string][]string{
+		"Content-Disposition": {fmt.Sprintf("form-data; name=\"file\"; filename=\"%s\"", filepath.Base(audioPath))},
+		"Content-Type":        {mimeTypeForAudio(audioPath)},
+	})
+	if err != nil {
+		return err
+	}
+	if _, err = io.Copy(filePart, file); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (p *GeminiASRProvider) generateTranscript(ctx context.Context, fileURI, mimeType, prompt string) (string, error) {
-	endpoint := fmt.Sprintf(firstNonEmpty(p.GenerateURL, defaultGeminiGenURL), firstNonEmpty(p.Model, defaultGeminiASRModel)) + "?key=" + firstNonEmpty(p.APIKey)
+	endpoint, err := providerURLWithAPIKey(fmt.Sprintf(firstNonEmpty(p.GenerateURL, defaultGeminiGenURL), firstNonEmpty(p.Model, defaultGeminiASRModel)), p.APIKey)
+	if err != nil {
+		return "", err
+	}
 	body, err := json.Marshal(map[string]any{
 		"contents": []map[string]any{{
 			"role": "user",
@@ -319,10 +363,13 @@ func (p *GeminiASRProvider) generateTranscript(ctx context.Context, fileURI, mim
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient(p.HTTPClient).Do(req)
 	if err != nil {
-		return "", fmt.Errorf("gemini generate request: %w", err)
+		return "", providerRequestError("gemini generate", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readProviderResponseBody(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read gemini generate response body: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("gemini generate failed (%d): %s", resp.StatusCode, string(respBody))
 	}
@@ -337,18 +384,24 @@ func (p *GeminiASRProvider) deleteFile(ctx context.Context, fileName string) err
 	if firstNonEmpty(fileName) == "" {
 		return nil
 	}
-	endpoint := fmt.Sprintf(firstNonEmpty(p.DeleteURL, defaultGeminiDeleteURL), fileName) + "?key=" + firstNonEmpty(p.APIKey)
+	endpoint, err := providerURLWithAPIKey(fmt.Sprintf(firstNonEmpty(p.DeleteURL, defaultGeminiDeleteURL), fileName), p.APIKey)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
 	if err != nil {
 		return err
 	}
 	resp, err := httpClient(p.HTTPClient).Do(req)
 	if err != nil {
-		return err
+		return providerRequestError("gemini delete", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := readProviderResponseBody(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read gemini delete response body: %w", err)
+		}
 		return fmt.Errorf("delete gemini file failed (%d): %s", resp.StatusCode, string(body))
 	}
 	return nil
@@ -447,11 +500,4 @@ func mimeTypeForAudio(path string) string {
 	default:
 		return "application/octet-stream"
 	}
-}
-
-func httpClient(client *http.Client) *http.Client {
-	if client != nil {
-		return client
-	}
-	return http.DefaultClient
 }

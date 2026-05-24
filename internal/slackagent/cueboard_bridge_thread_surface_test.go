@@ -112,8 +112,9 @@ func TestCueboardParityLongWorkerResultPublishesCanvas(t *testing.T) {
 		!strings.Contains(input.NotificationText, "新版") {
 		t.Fatalf("notification = %q, want short revised Canvas notification", input.NotificationText)
 	}
-	if calls := poster.Calls(); len(calls) != 0 {
-		t.Fatalf("poster calls = %#v, want long draft routed through Canvas publisher only", calls)
+	calls := poster.Calls()
+	if len(calls) != 1 || calls[0].Channel != "C123" || calls[0].ThreadTS != "1778772007.043069" {
+		t.Fatalf("poster calls = %#v, want controlled Canvas notification through public delivery", calls)
 	}
 }
 

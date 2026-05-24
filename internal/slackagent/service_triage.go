@@ -145,8 +145,8 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
 	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest)
-	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemory(memoryQuery, 5), memoryQuery)
-	relatedMemory := s.searchSlackTriageRelatedMemory(memoryQuery, 5)
+	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemoryContext(ctx, memoryQuery, 5), memoryQuery)
+	relatedMemory := s.searchSlackTriageRelatedMemoryContext(ctx, memoryQuery, 5)
 	if piFirstLive {
 		request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
 			ChannelID:              channelID,

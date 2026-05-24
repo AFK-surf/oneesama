@@ -50,21 +50,24 @@ type CanvasPublisherConfig struct {
 }
 
 type CanvasPublishInput struct {
-	Artifact         CanvasArtifact
-	ArtifactID       string
-	ID               string
-	Title            string
-	SummaryMarkdown  string
-	SummaryPath      string
-	NotificationText string
-	Destination      string
-	Channel          string
-	ThreadTS         string
-	DedupKey         string
-	CanvasID         string
-	Operation        string
-	SectionID        string
-	ForceSlackCanvas bool
+	Artifact          CanvasArtifact
+	ArtifactID        string
+	ID                string
+	Title             string
+	SummaryMarkdown   string
+	SummaryPath       string
+	NotificationText  string
+	Destination       string
+	Channel           string
+	ThreadTS          string
+	DedupKey          string
+	WorkspaceID       string
+	SnapshotTS        string
+	SuppressSlackPost bool
+	CanvasID          string
+	Operation         string
+	SectionID         string
+	ForceSlackCanvas  bool
 }
 
 type PublishedCanvasManifest struct {
@@ -77,6 +80,9 @@ type PublishedCanvasManifest struct {
 	CreatedAt    string                `json:"created_at"`
 	OK           bool                  `json:"ok"`
 	Destination  string                `json:"destination"`
+	Blocked      bool                  `json:"blocked,omitempty"`
+	BlockReason  string                `json:"block_reason,omitempty"`
+	BlockedTS    string                `json:"blocked_ts,omitempty"`
 	Slack        *PostMessageResult    `json:"slack,omitempty"`
 	Canvas       *SlackCanvasAPIResult `json:"canvas,omitempty"`
 }
@@ -157,7 +163,7 @@ func (p *CanvasPublisher) Publish(ctx context.Context, input CanvasPublishInput)
 		result.Surface = "slack-canvas"
 		result.Canvas = &canvasResult
 		postChannel := firstNonEmpty(input.Channel, p.channel)
-		if canvasResult.OK && postChannel != "" && strings.TrimSpace(input.NotificationText) != "" {
+		if canvasResult.OK && postChannel != "" && strings.TrimSpace(input.NotificationText) != "" && !input.SuppressSlackPost {
 			postResult := p.poster.PostMessage(ctx, PostMessageInput{
 				Channel:  postChannel,
 				ThreadTS: firstNonEmpty(input.ThreadTS, p.threadTS),
@@ -167,7 +173,7 @@ func (p *CanvasPublisher) Publish(ctx context.Context, input CanvasPublishInput)
 			result.Slack = &postResult
 			result.OK = result.OK && postResult.OK
 		}
-	case p.provider == "slack-thread" || strings.TrimSpace(input.Channel) != "":
+	case !input.SuppressSlackPost && (p.provider == "slack-thread" || strings.TrimSpace(input.Channel) != ""):
 		postResult := p.poster.PostMessage(ctx, PostMessageInput{
 			Channel:  firstNonEmpty(input.Channel, p.channel),
 			ThreadTS: firstNonEmpty(input.ThreadTS, p.threadTS),

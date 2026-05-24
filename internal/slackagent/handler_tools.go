@@ -12,7 +12,11 @@ func (h *Handler) handleSlackToolsParity(c *gin.Context) {
 
 func (h *Handler) handleSlackToolCall(c *gin.Context) {
 	var request SlackToolCallRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
+	if err := bindLimitedJSON(c, slackInternalJSONBodyLimit, &request); err != nil {
+		if isRequestBodyTooLarge(err) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"ok": false, "error": "request body too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "invalid request body: " + err.Error()})
 		return
 	}

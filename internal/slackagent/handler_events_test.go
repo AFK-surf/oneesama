@@ -184,6 +184,59 @@ func TestHandleEventsAppMentionPostsAvatarResponse(t *testing.T) {
 	}
 }
 
+func TestHandleEventsAppMentionReplyBlocksWhenThreadUpdatedDuringProcessing(t *testing.T) {
+	now := time.Date(2026, time.May, 24, 10, 0, 0, 0, time.UTC)
+	rootTS := formatSlackTimestamp(now)
+	newerTS := formatSlackTimestamp(now.Add(time.Second))
+	restore := installSlackRepliesFixture(t, []SlackMessage{
+		{TS: rootTS, User: "U123", Text: "<@UBOT> help"},
+		{TS: newerTS, User: "U_HUMAN", Text: "我自己补充了，不用再回。"},
+	})
+	defer restore()
+
+	poster := &recordingPoster{callCh: make(chan struct{}, 4)}
+	router := newTestRouter(t, Config{
+		Slack: appconfig.SlackConfig{
+			SigningSecret: "secret",
+			BotToken:      "xoxb-test",
+			BotUserID:     "UBOT",
+		},
+		Poster: poster,
+		AgentRunner: appconfig.AgentRunnerConfig{
+			Provider: "codex",
+			DryRun:   true,
+		},
+	})
+
+	body := `{"type":"event_callback","event_id":"EvMentionStale","team_id":"T123","event":{"type":"app_mention","user":"U123","text":"<@UBOT> help","channel":"C123","ts":"` + rootTS + `"}}`
+	timestamp, signature := signedSlackJSONBody("secret", body)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Slack-Request-Timestamp", timestamp)
+	request.Header.Set("X-Slack-Signature", signature)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var payload SlackEventResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Posted == nil || !payload.Posted.Queued {
+		t.Fatalf("payload.Posted = %#v, want queued dispatch before async freshness block", payload.Posted)
+	}
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if got := len(poster.Calls()); got != 0 {
+			t.Fatalf("poster calls = %d, want stale app mention reply suppressed", got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestHandleEventsDedupesEventID(t *testing.T) {
 	poster := &recordingPoster{callCh: make(chan struct{}, 4)}
 	router := newTestRouter(t, Config{

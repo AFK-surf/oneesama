@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
@@ -64,7 +65,7 @@ func TestDispatchEventReplyWithLedgerRecordsOutboundOnSuccess(t *testing.T) {
 		ThreadTS: "1699999999.000001",
 		Text:     "Reply body",
 		DedupKey: "evt-1",
-	}, "app_mention: Reply body")
+	}, "app_mention: Reply body", "1699999999.000001")
 
 	if got := poster.calls; len(got) != 1 {
 		t.Fatalf("expected exactly 1 poster call, got %d", len(got))
@@ -96,7 +97,7 @@ func TestDispatchEventReplyWithLedgerSkipsOnFailure(t *testing.T) {
 		ThreadTS: "1699999999.000001",
 		Text:     "Reply body",
 		DedupKey: "evt-2",
-	}, "app_mention: Reply body")
+	}, "app_mention: Reply body", "1699999999.000001")
 
 	ledgers, err := svc.cognition.ListRecentThreadLedgersForWorkspace(ctx, "workspace", 5)
 	if err != nil {
@@ -104,6 +105,39 @@ func TestDispatchEventReplyWithLedgerSkipsOnFailure(t *testing.T) {
 	}
 	if len(ledgers) != 0 {
 		t.Fatalf("expected ledger to stay empty on failed post, got %d rows", len(ledgers))
+	}
+}
+
+func TestDispatchEventReplyWithLedgerBlocksNewerThreadActivity(t *testing.T) {
+	now := time.Date(2026, time.May, 24, 10, 0, 0, 0, time.UTC)
+	snapshotTS := formatSlackTimestamp(now)
+	newerTS := formatSlackTimestamp(now.Add(time.Second))
+	restore := installSlackRepliesFixture(t, []SlackMessage{
+		{TS: snapshotTS, User: "U_ASKER", Text: "你帮我回一下"},
+		{TS: newerTS, User: "U_HUMAN", Text: "我自己已经补充了。"},
+	})
+	defer restore()
+
+	svc, poster := newLedgerTestService(t, true)
+	svc.botToken = "xoxb-test"
+	svc.botUserID = "U_BOT"
+	ctx := context.Background()
+	svc.dispatchEventReplyWithLedger(ctx, "workspace", PostMessageInput{
+		Channel:  "C123",
+		ThreadTS: snapshotTS,
+		Text:     "Reply body",
+		DedupKey: "evt-stale",
+	}, "app_mention: Reply body", snapshotTS)
+
+	if len(poster.calls) != 0 {
+		t.Fatalf("poster calls = %#v, want stale event reply suppressed", poster.calls)
+	}
+	ledgers, err := svc.cognition.ListRecentThreadLedgersForWorkspace(ctx, "workspace", 5)
+	if err != nil {
+		t.Fatalf("ListRecent: %v", err)
+	}
+	if len(ledgers) != 0 {
+		t.Fatalf("expected ledger to stay empty on blocked post, got %d rows", len(ledgers))
 	}
 }
 

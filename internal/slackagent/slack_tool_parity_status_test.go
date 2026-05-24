@@ -213,6 +213,19 @@ func TestExecuteSlackToolProductExcludedRejectedAtGateway(t *testing.T) {
 	}
 }
 
+func TestExecuteSlackToolUnknownToolRemainsToolNotAvailable(t *testing.T) {
+	resp, err := (&Service{}).ExecuteSlackTool(context.Background(), SlackToolCallRequest{Tool: "definitely_unknown"})
+	if err != nil {
+		t.Fatalf("ExecuteSlackTool() error = %v", err)
+	}
+	if resp.OK {
+		t.Fatalf("response = %#v, want ok=false", resp)
+	}
+	if resp.Schema != "oneesama.slack-tool-result.v1" || resp.Tool != "definitely_unknown" || resp.Error != "tool_not_available" {
+		t.Fatalf("response = %#v, want stable unknown-tool error", resp)
+	}
+}
+
 func contains(slice []string, want string) bool {
 	for _, v := range slice {
 		if v == want {

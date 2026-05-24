@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
@@ -213,4 +214,16 @@ func installSlackRepliesFixture(t *testing.T, messages []SlackMessage) func() {
 		slackThreadFetchAPIBaseURL = previous
 		server.Close()
 	}
+}
+
+func installNewerHumanReplyFixture(t *testing.T, askerText string, humanText string) (string, string, func()) {
+	t.Helper()
+	now := time.Date(2026, time.May, 24, 10, 0, 0, 0, time.UTC)
+	snapshotTS := formatSlackTimestamp(now)
+	newerTS := formatSlackTimestamp(now.Add(time.Second))
+	restore := installSlackRepliesFixture(t, []SlackMessage{
+		{TS: snapshotTS, User: "U_ASKER", Text: askerText},
+		{TS: newerTS, User: "U_HUMAN", Text: humanText},
+	})
+	return snapshotTS, newerTS, restore
 }

@@ -2,6 +2,7 @@ package slackagent
 
 import (
 	"context"
+	"strconv"
 	"strings"
 )
 
@@ -78,11 +79,14 @@ func (s *Service) executeNotifyMeetingSlackTool(ctx context.Context, args map[st
 		return slackToolError(name, notifyMeetingSlackTargetMismatchReason+":thread")
 	}
 
-	result := s.poster.PostMessage(ctx, PostMessageInput{
-		Channel:  record.SlackChannelID,
-		ThreadTS: record.SlackThreadTS,
-		Text:     text,
-	})
+	result := s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourceMeetingWebhook,
+		Surface:   slackPublicNotificationSurfaceMeetingNotice,
+		ChannelID: record.SlackChannelID,
+		ThreadTS:  record.SlackThreadTS,
+		Text:      text,
+		DedupKey:  "notify-meeting-slack:" + strconv.FormatInt(record.RemoteMeetingID, 10),
+	}).Post
 	return slackToolOK(name, result)
 }
 

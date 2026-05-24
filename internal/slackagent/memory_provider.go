@@ -170,18 +170,13 @@ func (m *slackMemoryProviderManager) Search(ctx context.Context, request SlackMe
 	if m == nil {
 		return nil
 	}
-	m.mu.Lock()
-	providers := append([]slackMemoryProviderState(nil), m.provider...)
-	m.mu.Unlock()
+	ctx = memoryProviderContext(ctx)
 
 	var records []SlackRelatedMemoryRecord
-	for _, state := range providers {
-		if !state.available || !state.initialized || state.provider == nil {
-			continue
-		}
+	for _, state := range m.activeProvidersSnapshot() {
 		result, err := state.provider.Search(ctx, request)
 		if err != nil {
-			m.recordError(state.name, err)
+			m.recordProviderHookError(state, err)
 			continue
 		}
 		providerName := firstNonEmpty(strings.TrimSpace(result.Provider), state.name)
@@ -217,15 +212,10 @@ func (m *slackMemoryProviderManager) OnMemoryWrite(ctx context.Context, event Sl
 	if m == nil {
 		return
 	}
-	m.mu.Lock()
-	providers := append([]slackMemoryProviderState(nil), m.provider...)
-	m.mu.Unlock()
-	for _, state := range providers {
-		if !state.available || !state.initialized || state.provider == nil {
-			continue
-		}
+	ctx = memoryProviderContext(ctx)
+	for _, state := range m.activeProvidersSnapshot() {
 		if err := state.provider.OnMemoryWrite(ctx, event); err != nil {
-			m.recordError(state.name, err)
+			m.recordProviderHookError(state, err)
 		}
 	}
 }
@@ -237,15 +227,10 @@ func (m *slackMemoryProviderManager) SyncTurn(ctx context.Context, turn SlackMem
 	if strings.TrimSpace(turn.UserContent) == "" && strings.TrimSpace(turn.AssistantContent) == "" {
 		return
 	}
-	m.mu.Lock()
-	providers := append([]slackMemoryProviderState(nil), m.provider...)
-	m.mu.Unlock()
-	for _, state := range providers {
-		if !state.available || !state.initialized || state.provider == nil {
-			continue
-		}
+	ctx = memoryProviderContext(ctx)
+	for _, state := range m.activeProvidersSnapshot() {
 		if err := state.provider.SyncTurn(ctx, turn); err != nil {
-			m.recordError(state.name, err)
+			m.recordProviderHookError(state, err)
 		}
 	}
 }
@@ -281,6 +266,36 @@ func (m *slackMemoryProviderManager) recordError(name string, err error) {
 	}
 	m.mu.Unlock()
 	m.logWarn("memory provider hook failed", "provider", name, "error", err)
+}
+
+func (m *slackMemoryProviderManager) recordProviderHookError(state slackMemoryProviderState, err error) {
+	if m == nil || err == nil {
+		return
+	}
+	m.recordError(state.name, err)
+}
+
+func (m *slackMemoryProviderManager) activeProvidersSnapshot() []slackMemoryProviderState {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	providers := make([]slackMemoryProviderState, 0, len(m.provider))
+	for _, state := range m.provider {
+		if !state.available || !state.initialized || state.provider == nil {
+			continue
+		}
+		providers = append(providers, state)
+	}
+	return providers
+}
+
+func memoryProviderContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 func (m *slackMemoryProviderManager) logWarn(msg string, args ...any) {

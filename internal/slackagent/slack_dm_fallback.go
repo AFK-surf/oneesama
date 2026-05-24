@@ -146,6 +146,7 @@ type SlackOperatorFallback struct {
 	PilotUserID    string
 	DebugChannelID string
 	Poster         PosterService
+	PublicNotice   func(context.Context, slackPublicNotificationDelivery) slackPublicNotificationDeliveryResult
 	DM             *slackDMPoster
 }
 
@@ -222,11 +223,23 @@ func (f *SlackOperatorFallback) PostDebugChannel(ctx context.Context, text strin
 		result.OK = true
 		return result
 	}
-	post := f.Poster.PostMessage(ctx, PostMessageInput{
-		Channel:  channelID,
-		Text:     text,
-		DedupKey: "debug_channel:" + channelID + ":" + slackDMDedupKey(channelID, text),
+	dedupKey := "debug_channel:" + channelID + ":" + slackDMDedupKey(channelID, text)
+	if f.PublicNotice == nil {
+		result.Skipped = true
+		result.Reason = "public_notification_not_configured"
+		return result
+	}
+	delivery := f.PublicNotice(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourceOperatorDebug,
+		Surface:   slackPublicNotificationSurfaceOperatorNotice,
+		ChannelID: channelID,
+		Text:      text,
+		DedupKey:  dedupKey,
 	})
+	post := delivery.Post
+	if delivery.Blocked && post.Error == "" {
+		post = PostMessageResult{OK: false, Error: delivery.BlockReason}
+	}
 	result.Original = post
 	result.OK = post.OK
 	return result

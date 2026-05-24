@@ -125,20 +125,24 @@ func (s *Service) postSlackTriagePendingActionCard(ctx context.Context, action S
 		if err != nil {
 			return PostMessageResult{OK: false, Error: "open_pilot_dm_failed", Detail: err.Error()}
 		}
-		return s.PostMessage(ctx, PostMessageInput{
-			Channel:  channelID,
-			Text:     text,
-			Blocks:   blocks,
-			DedupKey: "pilot_dm:" + channelID + ":" + dedupKey,
-		})
+		return s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+			Source:    slackPublicNotificationSourceTriagePendingCard,
+			Surface:   slackPublicNotificationSurfaceApprovalCard,
+			ChannelID: channelID,
+			Text:      text,
+			Blocks:    blocks,
+			DedupKey:  "pilot_dm:" + channelID + ":" + dedupKey,
+		}).Post
 	}
-	return s.PostMessage(ctx, PostMessageInput{
-		Channel:  firstNonEmpty(action.ChannelID, record.ChannelID),
-		ThreadTS: firstNonEmpty(action.ThreadTS, record.ThreadTS),
-		Text:     text,
-		Blocks:   blocks,
-		DedupKey: dedupKey,
-	})
+	return s.deliverSlackPublicNotification(ctx, slackPublicNotificationDelivery{
+		Source:    slackPublicNotificationSourceTriagePendingCard,
+		Surface:   slackPublicNotificationSurfaceApprovalCard,
+		ChannelID: firstNonEmpty(action.ChannelID, record.ChannelID),
+		ThreadTS:  firstNonEmpty(action.ThreadTS, record.ThreadTS),
+		Text:      text,
+		Blocks:    blocks,
+		DedupKey:  dedupKey,
+	}).Post
 }
 
 func (s *Service) recordSlackTriageActionOutbound(ctx context.Context, workspaceID string, channelID string, threadTS string, action SlackTriageDecisionAction) {

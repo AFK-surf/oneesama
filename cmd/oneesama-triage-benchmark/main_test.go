@@ -55,11 +55,25 @@ func TestRunLiveBenchmarkReplaysThreadsThroughDryRunEndpoint(t *testing.T) {
 				Persona: slackagent.SlackPersonaShadowResult{
 					Decision: persona.DecisionReply,
 					Success:  true,
+					Reason:   "source-backed reply",
 				},
+				ActionsAfterGate: []slackagent.SlackTriageDecisionAction{{
+					Type: "post_thread_reply",
+				}},
 				VisibleReplyVerdicts: []slackagent.SlackTriageDryRunVisibleReplyVerdict{{
 					Allowed: true,
 					Reason:  "allowed",
+					EvidenceAnchors: []slackagent.SlackVisibleEvidenceAnchor{{
+						Kind:      "workspace_memory",
+						SourceRef: "memory/team.md:7",
+					}},
 				}},
+				SideEffectsBlocked: []string{"slack_post", "worker_start"},
+				ToolCalls: []slackagent.SlackTriageToolCall{{
+					Tool:   "slack_api",
+					Action: "dry_run_visible_reply_gate",
+				}},
+				ContextBudget:        map[string]int{"totalTokens": 321},
 				PipelineSmellSignals: []string{"high_gate_block_rate"},
 			},
 		})
@@ -87,6 +101,9 @@ func TestRunLiveBenchmarkReplaysThreadsThroughDryRunEndpoint(t *testing.T) {
 	row := report.Rows[0]
 	if row.FinalDecision != "would_request_reply_approval" || row.PersonaDecision != persona.DecisionReply || !row.VisibleReplyAllowed {
 		t.Fatalf("row = %#v, want reply approval dry-run", row)
+	}
+	if row.GateDecision != "visible_reply_requires_approval" {
+		t.Fatalf("row = %#v, want gate decision explanation", row)
 	}
 	if report.Summary.ByFinalDecision["would_request_reply_approval"] != 1 ||
 		report.Summary.ByVisibleReplyReason["allowed"] != 1 ||
@@ -254,7 +271,7 @@ func TestRunLiveBenchmarkCanRenderMarkdownTable(t *testing.T) {
 		"## Final Decisions",
 		"| `would_stay_silent` | 1 |",
 		"## Replay Rows",
-		"| `current` | `—` | `C1` | `1779450000.000100` | 1 | `—` | `—` | `—` | `stay_silent` | `would_stay_silent` |",
+		"| `current` | `—` | `C1` | `1779450000.000100` | 1 | `—` | `—` | `—` | `stay_silent` | `would_stay_silent` | `no_visible_reply_candidate` |",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("markdown = %s, want %q", out, want)

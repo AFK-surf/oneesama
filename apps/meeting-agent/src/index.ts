@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join, normalize, relative, resolve } from "node:path";
+import { fetchJson, type UpstreamError } from "../../../packages/core/src/http-fetch-json.js";
 import { createJsonServer } from "../../../packages/core/src/http-json.js";
 import { getRuntimeConfig } from "../../../packages/core/src/env.js";
 import { createPersistentSessionStore } from "../../../packages/core/src/session-store.js";
@@ -11,6 +12,7 @@ import {
   buildRealtimeSessionConfig,
   realtimeToolSchemas,
 } from "../../../packages/core/src/realtime/realtime-contract.js";
+import { resolveSpeakerIdentity } from "../../../packages/core/src/realtime/speaker-identity.js";
 import { createWorkerReportStore } from "../../../packages/core/src/realtime/worker-report-store.js";
 import { createTtsProvider } from "../../../packages/core/src/dialog/tts-provider.js";
 import { createMeetingArtifactPipeline } from "../../../packages/core/src/meeting/post-meeting-artifacts.js";
@@ -226,32 +228,6 @@ export interface MeetingAgentInput {
   error?: string;
   status?: string;
   [key: string]: unknown;
-}
-
-interface UpstreamError extends Error {
-  status?: number;
-  payload?: { error?: string; detail?: string; message?: string; [key: string]: unknown };
-}
-
-async function fetchJson<T = Record<string, unknown>>(
-  url: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const response = await fetch(url, options);
-  const text = await response.text();
-  let payload: unknown = {};
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    payload = { raw: text };
-  }
-  if (!response.ok) {
-    const error = new Error(`upstream_http_${response.status}`) as UpstreamError;
-    error.status = response.status;
-    error.payload = payload as UpstreamError["payload"];
-    throw error;
-  }
-  return payload as T;
 }
 
 function toolFailure(error: unknown, fallback = "workspace_tool_failed") {
@@ -680,6 +656,20 @@ async function handleWorkspaceTool(toolName: string, body: MeetingAgentInput = {
         role: currentUser.role,
       },
       answer_hint_zh: `当前和你说话的人是 ${currentUser.name}（英文账号 ${currentUser.englishName}）。他的 Linear 是 ${currentUser.linear}，GitHub 是 ${currentUser.github}。`,
+    };
+  }
+  if (toolName === "resolve_speaker_identity") {
+    const displayName = String(body.display_name || body.displayName || body.name || "").trim();
+    if (!displayName) return { status: 400, body: { ok: false, error: "display_name required" } };
+    const identity = resolveSpeakerIdentity(displayName, currentUser);
+    return {
+      ok: Boolean(identity),
+      display_name: displayName,
+      source: String(body.source || "unknown"),
+      identity,
+      answer_hint_zh: identity?.resolved
+        ? `当前说话者可按 ${identity.preferredName || identity.canonicalName} 理解。`
+        : "无法可靠匹配工作区身份；请简短确认对方是谁，不要猜测。",
     };
   }
   if (toolName === "search_team_members") return handleSearchTeamMembers(body);

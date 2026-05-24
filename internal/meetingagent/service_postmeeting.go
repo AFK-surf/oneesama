@@ -7,6 +7,7 @@ import (
 )
 
 func (s *Service) PostProcessMeeting(ctx context.Context, input postmeeting.PostProcessInput) (postmeeting.PostProcessResult, error) {
+	input.RootDir = ""
 	return s.pipeline.PostProcess(ctx, input)
 }
 

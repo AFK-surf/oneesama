@@ -78,6 +78,7 @@ type Service struct {
 	httpClient          *http.Client
 	demoBridge          *RealtimeDemoBridge
 	meetdWake           chan struct{}
+	meetdRuntimeMu      sync.Mutex
 	meetdRuntimeCancel  context.CancelFunc
 	meetdRuntimeDone    chan struct{}
 	backgroundMu        sync.Mutex
@@ -170,15 +171,11 @@ func NewService(cfg Config) *Service {
 }
 
 func (s *Service) Shutdown(ctx context.Context) error {
-	if s.meetdRuntimeCancel != nil {
-		s.meetdRuntimeCancel()
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if s.meetdRuntimeDone != nil {
-		select {
-		case <-s.meetdRuntimeDone:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+	if err := s.StopMeetdRuntime(ctx); err != nil {
+		return err
 	}
 	if stopped := s.stopActiveJoinSessionsForShutdown(ctx); stopped > 0 {
 		s.logger.Info("stopped active join sessions before shutdown", "count", stopped)

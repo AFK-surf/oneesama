@@ -44,6 +44,7 @@ func (s *Service) redeliverJoinSessionRecord(ctx context.Context, session Sessio
 	if !joinSessionCanRedeliver(session) {
 		return fmt.Errorf("%w: session %s is in %q state", errJoinSessionNotRedeliverable, session.ID, session.Status)
 	}
+	ctx = context.WithoutCancel(ctx)
 
 	slackChannel, slackThread := joinSlackRef(session)
 	meeting := syntheticMeetdMeeting(session, slackChannel, slackThread)
@@ -58,28 +59,12 @@ func (s *Service) redeliverJoinSessionRecord(ctx context.Context, session Sessio
 
 	input, err := s.postProcessInputFromJoinSessionRedelivery(ctx, session, meeting)
 	if err != nil {
-		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusFailed), err.Error(), ""); updateErr == nil && updated != nil {
-			meeting = *updated
-		}
-		_ = s.redeliverJoinSessionResult(ctx, meeting, MeetdMeetingResult{
-			MeetingID:     meetingIDString(meeting.ID),
-			Status:        joinSessionStatusString(joinSessionStatusFailed),
-			Error:         err.Error(),
-			ForceDelivery: true,
-		})
+		s.failRedeliveredJoinSession(ctx, meeting, err)
 		return err
 	}
 	result, err := s.PostProcessMeeting(ctx, input)
 	if err != nil {
-		if updated, updateErr := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusFailed), err.Error(), ""); updateErr == nil && updated != nil {
-			meeting = *updated
-		}
-		_ = s.redeliverJoinSessionResult(ctx, meeting, MeetdMeetingResult{
-			MeetingID:     meetingIDString(meeting.ID),
-			Status:        joinSessionStatusString(joinSessionStatusFailed),
-			Error:         err.Error(),
-			ForceDelivery: true,
-		})
+		s.failRedeliveredJoinSession(ctx, meeting, err)
 		return err
 	}
 	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, joinSessionStatusString(joinSessionStatusDone), "", result.Artifact.Dir); err == nil && updated != nil {
@@ -103,6 +88,20 @@ func (s *Service) redeliverJoinSessionRecord(ctx context.Context, session Sessio
 			TranscriptPath: firstNonEmpty(result.Artifact.Files.TranscriptText, result.Artifact.Files.Transcript),
 			AudioPath:      result.Artifact.Files.Audio,
 		},
+		ForceDelivery: true,
+	})
+}
+
+func (s *Service) failRedeliveredJoinSession(ctx context.Context, meeting MeetdMeetingRecord, cause error) {
+	reason := cause.Error()
+	status := joinSessionStatusString(joinSessionStatusFailed)
+	if updated, err := s.upsertSyntheticMeetdMeeting(ctx, meeting, status, reason, ""); err == nil && updated != nil {
+		meeting = *updated
+	}
+	_ = s.redeliverJoinSessionResult(ctx, meeting, MeetdMeetingResult{
+		MeetingID:     meetingIDString(meeting.ID),
+		Status:        status,
+		Error:         reason,
 		ForceDelivery: true,
 	})
 }
@@ -198,15 +197,27 @@ func joinSessionCanRedeliver(session SessionRecord) bool {
 
 func (s *Service) postProcessInputFromJoinSessionRedelivery(ctx context.Context, session SessionRecord, meeting MeetdMeetingRecord) (postmeeting.PostProcessInput, error) {
 	artifactID := "join-" + session.ID
-	manifest, _ := s.pipeline.GetArtifact(artifactID)
-	captions := joinRedeliveryCaptions(manifest)
+	manifest, err := s.pipeline.GetArtifact(artifactID)
+	if err != nil {
+		return postmeeting.PostProcessInput{}, fmt.Errorf("load join artifact manifest: %w", err)
+	}
+	captions, err := s.joinRedeliveryCaptions(artifactID, manifest)
+	if err != nil {
+		return postmeeting.PostProcessInput{}, err
+	}
 	if len(captions) == 0 {
-		captions = joinRedeliveryRawCaptions(session)
+		captions, err = s.joinRedeliveryRawCaptions(session)
+		if err != nil {
+			return postmeeting.PostProcessInput{}, err
+		}
 	}
 	if len(captions) == 0 {
 		return postmeeting.PostProcessInput{}, fmt.Errorf("no transcript captured")
 	}
-	audioPath := joinRedeliveryAudioPath(ctx, manifest, session)
+	audioPath, err := s.joinRedeliveryAudioPath(ctx, artifactID, manifest, session)
+	if err != nil {
+		return postmeeting.PostProcessInput{}, err
+	}
 	return postmeeting.PostProcessInput{
 		ArtifactID: artifactID,
 		MeetingID:  meetingIDString(meeting.ID),
@@ -220,25 +231,28 @@ func (s *Service) postProcessInputFromJoinSessionRedelivery(ctx context.Context,
 	}, nil
 }
 
-func joinRedeliveryCaptions(manifest *postmeeting.ArtifactManifest) []postmeeting.TranscriptSegmentInput {
+func (s *Service) joinRedeliveryCaptions(artifactID string, manifest *postmeeting.ArtifactManifest) ([]postmeeting.TranscriptSegmentInput, error) {
 	if manifest == nil {
-		return nil
+		return nil, nil
 	}
-	return transcriptSegmentsFromPostMeetingArtifact(manifest.Files.Transcript)
+	transcriptPath, err := s.artifactFileUnderArtifactDir(artifactID, manifest.Files.Transcript)
+	if err != nil {
+		return nil, fmt.Errorf("resolve join transcript artifact: %w", err)
+	}
+	if transcriptPath == "" {
+		return nil, nil
+	}
+	return transcriptSegmentsFromPostMeetingArtifact(transcriptPath)
 }
 
-func transcriptSegmentsFromPostMeetingArtifact(path string) []postmeeting.TranscriptSegmentInput {
-	path = resolveRuntimeFile(path)
-	if path == "" {
-		return nil
-	}
+func transcriptSegmentsFromPostMeetingArtifact(path string) ([]postmeeting.TranscriptSegmentInput, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read transcript artifact: %w", err)
 	}
 	var artifact postmeeting.TranscriptArtifact
 	if err := json.Unmarshal(raw, &artifact); err != nil {
-		return nil
+		return nil, fmt.Errorf("decode transcript artifact: %w", err)
 	}
 	segments := make([]postmeeting.TranscriptSegmentInput, 0, len(artifact.Segments))
 	for _, segment := range artifact.Segments {
@@ -250,40 +264,71 @@ func transcriptSegmentsFromPostMeetingArtifact(path string) []postmeeting.Transc
 			StreamID:  segment.StreamID,
 		})
 	}
-	return normalizedTranscriptSegments(segments)
+	return normalizedTranscriptSegments(segments), nil
 }
 
-func joinRedeliveryRawCaptions(session SessionRecord) []postmeeting.TranscriptSegmentInput {
-	candidates := append([]string{stringFromMap(session.Metadata, "captions_path")},
-		meetingArtifactCandidatePaths(session.ID, meetingCaptionsFilename)...)
-	for _, path := range candidates {
+func (s *Service) joinRedeliveryRawCaptions(session SessionRecord) ([]postmeeting.TranscriptSegmentInput, error) {
+	if metadataPath := stringFromMap(session.Metadata, "captions_path"); metadataPath != "" {
+		path, err := s.artifactFileUnderRoot(metadataPath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve redelivery captions path: %w", err)
+		}
 		if segments := captionSegmentsFromFile(path); len(segments) > 0 {
-			return segments
+			return segments, nil
 		}
 	}
-	return nil
+	candidates := meetingArtifactCandidatePaths(session.ID, meetingCaptionsFilename)
+	for _, path := range candidates {
+		if segments := captionSegmentsFromFile(path); len(segments) > 0 {
+			return segments, nil
+		}
+	}
+	return nil, nil
 }
 
-func joinRedeliveryAudioPath(ctx context.Context, manifest *postmeeting.ArtifactManifest, session SessionRecord) string {
+func (s *Service) joinRedeliveryAudioPath(ctx context.Context, artifactID string, manifest *postmeeting.ArtifactManifest, session SessionRecord) (string, error) {
 	if manifest != nil {
-		if path := usableMeetingAudioArtifactPath(ctx, manifest.Files.Audio); path != "" {
-			return finalizedJoinRedeliveryAudioPath(ctx, path)
+		if path, err := s.usableRedeliveryManifestAudioPath(ctx, artifactID, manifest.Files.Audio); err != nil {
+			return "", err
+		} else if path != "" {
+			return finalizedJoinRedeliveryAudioPath(ctx, path), nil
 		}
 		for _, chunk := range manifest.Files.AudioChunks {
-			if path := usableMeetingAudioArtifactPath(ctx, chunk); path != "" {
-				return path
+			if path, err := s.usableRedeliveryManifestAudioPath(ctx, artifactID, chunk); err != nil {
+				return "", err
+			} else if path != "" {
+				return path, nil
 			}
 		}
 	}
-	candidates := []string{stringFromMap(session.Metadata, "audio_path")}
-	candidates = append(candidates, meetingArtifactCandidatePaths(session.ID, finalMeetingAudioFilename)...)
+	if metadataPath := stringFromMap(session.Metadata, "audio_path"); metadataPath != "" {
+		path, err := s.artifactFileUnderRoot(metadataPath)
+		if err != nil {
+			return "", fmt.Errorf("resolve redelivery audio path: %w", err)
+		}
+		if audio := usableMeetingAudioArtifactPath(ctx, path); audio != "" {
+			return finalizedJoinRedeliveryAudioPath(ctx, audio), nil
+		}
+	}
+	candidates := meetingArtifactCandidatePaths(session.ID, finalMeetingAudioFilename)
 	candidates = append(candidates, meetingArtifactCandidatePaths(session.ID, rawMeetingAudioFilename)...)
 	for _, path := range candidates {
 		if audio := usableMeetingAudioArtifactPath(ctx, path); audio != "" {
-			return finalizedJoinRedeliveryAudioPath(ctx, audio)
+			return finalizedJoinRedeliveryAudioPath(ctx, audio), nil
 		}
 	}
-	return ""
+	return "", nil
+}
+
+func (s *Service) usableRedeliveryManifestAudioPath(ctx context.Context, artifactID string, path string) (string, error) {
+	path, err := s.artifactFileUnderArtifactDir(artifactID, path)
+	if err != nil {
+		return "", fmt.Errorf("resolve join audio artifact: %w", err)
+	}
+	if path == "" {
+		return "", nil
+	}
+	return usableMeetingAudioArtifactPath(ctx, path), nil
 }
 
 func finalizedJoinRedeliveryAudioPath(ctx context.Context, path string) string {

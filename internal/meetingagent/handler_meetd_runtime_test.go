@@ -95,7 +95,7 @@ func TestMeetdRuntimeTickClaimsReadyMeetingAndSendsJoinedWebhook(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	meetingID := createMeetdMeetingForTest(t, router, meetdCreateBodyAt(t, "runtime-ready", now))
 
-	response := performMeetdRequest(router, http.MethodPost, "/meetings/runtime/tick", fmt.Sprintf(`{"now":%q}`, now.Format(time.RFC3339)))
+	response := performMeetingRequest(router, http.MethodPost, "/meetings/runtime/tick", fmt.Sprintf(`{"now":%q}`, now.Format(time.RFC3339)))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"action":"join_claimed"`) {
 		t.Fatalf("tick response = %d %s", response.Code, response.Body.String())
 	}
@@ -123,7 +123,7 @@ func TestMeetdRuntimeTickCleansStaleAndCancelsMissedMeetings(t *testing.T) {
 		t.Fatalf("mark stale joining: %v", err)
 	}
 
-	response := performMeetdRequest(router, http.MethodPost, "/meetings/runtime/tick", fmt.Sprintf(`{"now":%q,"stale_ms":1000}`, now.Format(time.RFC3339)))
+	response := performMeetingRequest(router, http.MethodPost, "/meetings/runtime/tick", fmt.Sprintf(`{"now":%q,"stale_ms":1000}`, now.Format(time.RFC3339)))
 	if response.Code != http.StatusOK {
 		t.Fatalf("tick status = %d, body = %s", response.Code, response.Body.String())
 	}
