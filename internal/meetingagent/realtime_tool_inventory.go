@@ -50,16 +50,6 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Gate:  "active_meeting_session",
 		Notes: "presentation stop control over existing screen-share bridge",
 	},
-	"list_shareable_apps": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "host_shareable_app_inventory",
-		Notes: "read-only local app/window inventory for presentation selection",
-	},
-	"present_app_share": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "active_meeting_session",
-		Notes: "presentation control; browser/meeting client may still require confirmation",
-	},
 	"start_demo_surface": {
 		Class: RealtimeToolClassOptionalForeground,
 		Gate:  "demo_surface_enabled",

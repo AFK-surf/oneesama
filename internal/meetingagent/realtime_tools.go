@@ -84,21 +84,14 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 		realtimeTool("send_meet_chat", "Send a short visible message into the current Google Meet chat.", objectSchema([]string{"text"}, map[string]realtimeJSONSchema{
 			"text": stringSchema("The exact chat message to send to the current Meet."),
 		})),
-		realtimeTool("present_video_stage", "Open a controlled video/stage tab and make Google Meet share that stage. Use immediately when the user says 放视频 / 分享视频 / 播放视频 / share screen with a video / open video stage / present video. For non-direct video links, first resolve a playable file or URL in the background, then present the resulting video file or URL.", objectSchema(nil, map[string]realtimeJSONSchema{
+		realtimeTool("present_video_stage", "Open a controlled synthetic video/stage tab and make Google Meet share that stage. Use immediately when the user says 放视频 / 分享视频 / 播放视频 / share screen with a video / open video stage / present video. Do not ask the user to choose a local app/window. For non-direct video links, first resolve a playable file or URL in the background, then present the resulting video file or URL.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"videoUrl": stringSchema("Direct video URL, data URL, file URL, or local file path. Optional: without it, a placeholder stage is shared."),
 			"title":    stringSchema("Visible title on the shared stage."),
 			"subtitle": stringSchema("Visible subtitle on the shared stage."),
 			"muted":    boolSchema(true),
 		})),
 		realtimeTool("stop_video_stage", "Stop the current Google Meet video-stage/screen-share presentation. Use immediately when the user says 停止分享 / stop sharing / 关掉分享 / stop video stage.", objectSchema(nil, map[string]realtimeJSONSchema{})),
-		realtimeTool("list_shareable_apps", "List local applications that can be selected for an application/window share in the current meeting.", objectSchema(nil, map[string]realtimeJSONSchema{})),
-		realtimeTool("present_app_share", "Request sharing a specific local application/window into the current meeting. The browser or meeting client may still ask the user to confirm the exact window.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"processId":        integerSchema("Process id from list_shareable_apps.", nil),
-			"bundleIdentifier": stringSchema("Bundle identifier from list_shareable_apps."),
-			"applicationName":  stringSchema("Application name from list_shareable_apps."),
-			"mode":             enumStringSchema("native", "native", "synthetic"),
-		})),
-		realtimeTool("start_demo_surface", "Start a bot-owned Computer Use demo surface for show-and-tell work. Use when the user asks you to open a page, demonstrate something visually, or inspect a UI while continuing the meeting conversation.", objectSchema(nil, map[string]realtimeJSONSchema{
+		realtimeTool("start_demo_surface", "Start a bot-owned synthetic Computer Use demo surface for show-and-tell work. Use when the user asks to share screen, show the screen, open a page, demonstrate something visually, or inspect a UI while continuing the meeting conversation. This uses the bot-owned synthetic share path; do not ask the user to choose or confirm a local app/window.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"url":             stringSchema("HTTP(S) URL to open in the bot-owned demo workspace."),
 			"goal":            stringSchema("Short user-facing goal for the demo, e.g. 'show the dashboard trend'."),
 			"instruction":     stringSchema("Internal instruction for the Computer Use adapter. Do not include secrets."),

@@ -84,6 +84,9 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "update_avatar_state", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
 	}
+	if toolNamesInclude(tools, "list_shareable_apps", "present_app_share") {
+		t.Fatalf("tools = %#v, realtime foreground must not expose app/window share tools", body["tools"])
+	}
 	updateAvatarState := toolByName(tools, "update_avatar_state")
 	updateParams := updateAvatarState["parameters"].(map[string]any)
 	updateProperties := updateParams["properties"].(map[string]any)

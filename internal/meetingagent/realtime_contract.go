@@ -139,6 +139,7 @@ func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.Ope
 		"For identity questions, resolve the current speaker identity first. Do not answer from stale defaults.",
 		"For personal task questions, resolve the current user profile first and use its workspace identifiers.",
 		"For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
+		"For screen share / share screen / 给我看 / 演示 requests, use the bot-owned synthetic demo surface or video stage. Do not ask the user to choose a local app/window, and do not say browser or meeting-client confirmation is required.",
 		"If the user says stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",
 		"For requests like “做一个贪吃蛇，然后给我看/分享屏幕/演示”, call start_demo_execution when the demo surface is available. The realtime avatar only confirms start/failure/completion briefly; execution happens in the background and the demo surface carries progress.",
 		"Ignore obvious self-echo: captions or transcript snippets attributed to “You” are usually your own prior speech, and your own prior speech may be duplicated inside another speaker's caption. Do not answer, apologize for, or diagnose that echo unless the user explicitly asks for debugging.",

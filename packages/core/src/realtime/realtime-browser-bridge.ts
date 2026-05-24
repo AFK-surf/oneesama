@@ -279,8 +279,6 @@
     "send_meet_chat",
     "present_video_stage",
     "stop_video_stage",
-    "list_shareable_apps",
-    "present_app_share",
     "read_meet_chat",
     "meet_participants",
     "active_speaker",

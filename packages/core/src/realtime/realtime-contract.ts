@@ -98,7 +98,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "present_video_stage",
     description:
-      "Open a controlled video/stage tab and make Google Meet share that stage. Use immediately when the user says 放视频 / 分享视频 / 播放视频 / share screen with a video / open video stage / present video. For non-direct video links, first resolve a playable file or URL in the background, then present the resulting video file or URL.",
+      "Open a controlled synthetic video/stage tab and make Google Meet share that stage. Use immediately when the user says 放视频 / 分享视频 / 播放视频 / share screen with a video / open video stage / present video. Do not ask the user to choose a local app/window. For non-direct video links, first resolve a playable file or URL in the background, then present the resulting video file or URL.",
     parameters: {
       type: "object",
       properties: {
@@ -127,46 +127,9 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "list_shareable_apps",
-    description:
-      "List local applications that can be selected for an application/window share in the current meeting.",
-    parameters: {
-      type: "object",
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    type: "function",
-    name: "present_app_share",
-    description:
-      "Request sharing a specific local application/window into the current meeting. The browser or meeting client may still ask the user to confirm the exact window.",
-    parameters: {
-      type: "object",
-      properties: {
-        processId: { type: "integer", description: "Process id from list_shareable_apps." },
-        bundleIdentifier: {
-          type: "string",
-          description: "Bundle identifier from list_shareable_apps.",
-        },
-        applicationName: {
-          type: "string",
-          description: "Application name from list_shareable_apps.",
-        },
-        mode: {
-          type: "string",
-          enum: ["native", "synthetic"],
-          default: "native",
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    type: "function",
     name: "start_demo_surface",
     description:
-      "Start a bot-owned Computer Use demo surface for show-and-tell work. Use when the user asks you to open a page, demonstrate something visually, or inspect a UI while continuing the meeting conversation.",
+      "Start a bot-owned synthetic Computer Use demo surface for show-and-tell work. Use when the user asks to share screen, show the screen, open a page, demonstrate something visually, or inspect a UI while continuing the meeting conversation. This uses the bot-owned synthetic share path; do not ask the user to choose or confirm a local app/window.",
     parameters: {
       type: "object",
       properties: {
@@ -988,6 +951,7 @@ export function buildRealtimeInstructions({
     "For identity questions, resolve the current speaker identity first. Do not answer from stale defaults.",
     "For personal task questions, resolve the current user profile first and use its workspace identifiers.",
     "For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
+    "For screen share / share screen / 给我看 / 演示 requests, use the bot-owned synthetic demo surface or video stage. Do not ask the user to choose a local app/window, and do not say browser or meeting-client confirmation is required.",
     "If the user says to stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",
     "For requests like “做一个贪吃蛇，然后给我看/分享屏幕/演示”, call start_demo_execution when the demo surface is available. The realtime avatar only confirms start/failure/completion briefly; execution happens in the background and the demo surface carries progress.",
     "Ignore obvious self-echo: captions or transcript snippets attributed to “You” are usually your own prior speech, and your own prior speech may be duplicated inside another speaker's caption. Do not answer, apologize for, or diagnose that echo unless the user explicitly asks for debugging.",
