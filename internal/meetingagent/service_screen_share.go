@@ -91,6 +91,8 @@ func (s *Service) PresentAppShare(ctx context.Context, input AppShareRequest) (m
 			Mode:      firstNonEmpty(input.Mode, input.ScreenShareMode),
 			WaitMs:    input.WaitMs,
 		},
+		WindowID:         input.WindowID,
+		WindowTitle:      input.WindowTitle,
 		ProcessID:        firstNonZero(input.ProcessID, input.PID),
 		PID:              input.PID,
 		BundleIdentifier: firstNonEmpty(input.BundleIdentifier, input.BundleID),

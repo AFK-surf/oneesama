@@ -34,6 +34,8 @@ type ShareableAppsRequest struct {
 
 type AppShareRequest struct {
 	ScreenShareRequest
+	WindowID         int    `json:"windowId,omitempty"`
+	WindowTitle      string `json:"windowTitle,omitempty"`
 	ProcessID        int    `json:"processId,omitempty"`
 	PID              int    `json:"pid,omitempty"`
 	BundleIdentifier string `json:"bundleIdentifier,omitempty"`

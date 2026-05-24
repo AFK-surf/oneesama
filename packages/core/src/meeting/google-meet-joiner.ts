@@ -12,6 +12,11 @@ import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
 import { createMeetingRecorder, listShareableApplications } from "./meeting-recorder.ts";
 import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-prompts.ts";
 import { buildScreenShareInitScript } from "./screen-share-init-builder.ts";
+import {
+  captureMacOSWindowFrame,
+  listMacOSWindowCaptureTargets,
+  matchesMacOSWindowCaptureTarget,
+} from "./macos-window-capture.ts";
 import { buildRealtimeBrowserInitScript } from "../realtime/realtime-browser-init-builder.ts";
 import { buildWorkerResultInitScript } from "../realtime/worker-result-init-builder.ts";
 import {
@@ -60,6 +65,9 @@ interface ScreenShareBridgeInput extends VideoStageInput {
 }
 
 interface AppShareInput extends ScreenShareBridgeInput {
+  windowId?: number | string;
+  windowID?: number | string;
+  windowTitle?: string;
   processId?: number | string;
   pid?: number | string;
   bundleIdentifier?: string;
@@ -303,6 +311,15 @@ interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function safeFilePart(value: unknown, fallback = "item"): string {
+  return (
+    String(value || fallback)
+      .replace(/[^a-zA-Z0-9_.-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 96) || fallback
+  );
 }
 
 function assertMeetUrl(meetUrl: string, options: MeetUrlOptions = {}) {
@@ -2239,6 +2256,12 @@ async function openMeetPeoplePanelForAwareness(page: Page, diagnostics?: Diagnos
 export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   const config = getRuntimeConfig();
   let active = null;
+  let activeMacWindowCapture: null | {
+    timer: NodeJS.Timeout | null;
+    stopped: boolean;
+    window: unknown;
+    stop: (reason?: string) => void;
+  } = null;
   const activeBrowserPath = pathJoin(config.dataDir, "active-meet-browser.json");
 
   async function clearActiveBrowserRecord() {
@@ -2325,6 +2348,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     if (!active) return { ok: true, stopped: false, reason };
     const previous = active;
     active = null;
+    stopActiveMacWindowCapture(reason);
     previous.diagnostics?.record("stop", { reason });
     try {
       await previous.recorder?.stop();
@@ -3148,33 +3172,166 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   }
 
   async function listShareableApps() {
+    const errors: string[] = [];
+    let recappiApplications: any[] = [];
     try {
       const applications = await listShareableApplications();
-      active?.diagnostics?.record("shareable_apps_listed", {
-        count: applications.length,
-        source: "recappi_shareable_content",
-      });
-      await saveDiagnostics(active?.diagnostics).catch(() => {});
-      return {
-        ok: true,
-        source: "recappi_shareable_content",
-        count: applications.length,
-        applications,
-      };
+      recappiApplications = applications.map((app) => ({
+        ...app,
+        source: app.source || "recappi_shareable_content",
+      }));
     } catch (error) {
       const message = String(error?.message || error);
+      errors.push(`recappi_shareable_content: ${message}`);
       active?.diagnostics?.record("shareable_apps_list_error", { error: message });
+    }
+    let macOSApplications: any[] = [];
+    try {
+      const macOS = await listMacOSWindowCaptureTargets();
+      macOSApplications = macOS.applications || [];
+    } catch (error) {
+      const message = String(error?.message || error);
+      errors.push(`macos_screencapturekit: ${message}`);
+      active?.diagnostics?.record("macos_window_capture_list_error", { error: message });
+    }
+    const seen = new Set<string>();
+    const applications = [...macOSApplications, ...recappiApplications].filter((app) => {
+      const key = [
+        app.source || "",
+        app.windowId || app.windowID || "",
+        app.processId || app.pid || "",
+        app.bundleIdentifier || "",
+        app.applicationName || app.name || app.title || "",
+      ].join(":");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    active?.diagnostics?.record("shareable_apps_listed", {
+      count: applications.length,
+      source: macOSApplications.length ? "macos_screencapturekit" : "recappi_shareable_content",
+      errors,
+    });
+    await saveDiagnostics(active?.diagnostics).catch(() => {});
+    if (!applications.length && errors.length) {
       await saveDiagnostics(active?.diagnostics).catch(() => {});
       return {
         ok: false,
         error: "shareable_apps_unavailable",
-        detail: message,
-        source: "recappi_shareable_content",
+        detail: errors.join("; "),
+        source: "macos_screencapturekit",
       };
     }
+    return {
+      ok: true,
+      source: macOSApplications.length ? "macos_screencapturekit" : "recappi_shareable_content",
+      count: applications.length,
+      applications,
+      errors,
+    };
+  }
+
+  function stopActiveMacWindowCapture(reason = "replace_window_capture") {
+    if (!activeMacWindowCapture) return { ok: true, stopped: false, reason };
+    activeMacWindowCapture.stop(reason);
+    const window = activeMacWindowCapture.window;
+    activeMacWindowCapture = null;
+    active?.diagnostics?.record("macos_window_capture_stop", { reason, window });
+    return { ok: true, stopped: true, reason, window };
+  }
+
+  function macWindowFramePath(app: any, frame: number) {
+    const captureDir = pathJoin(active?.artifactsDir || config.dataDir, "screen-share-capture");
+    const appPart = safeFilePart(app.applicationName || app.name || app.title || "app");
+    const windowPart = safeFilePart(app.windowId || app.windowID || app.processId || "window");
+    return pathJoin(captureDir, `${appPart}-${windowPart}-${String(frame).padStart(4, "0")}.png`);
+  }
+
+  async function captureMacWindowToSynthetic(app: any, input: AppShareInput, frame: number) {
+    const windowId = Number(app.windowId || app.windowID || 0) || 0;
+    if (!windowId) throw new Error("macos_window_id_required");
+    const framePath = macWindowFramePath(app, frame);
+    const capture = await captureMacOSWindowFrame({
+      windowId,
+      outputPath: framePath,
+      timeoutMs: 2500,
+    });
+    const update = await startScreenShare({
+      ...input,
+      title: input.title || `Share ${app.applicationName || app.name || "application"}`,
+      subtitle: input.subtitle || `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+      imagePath: capture.output || framePath,
+      framePath: capture.output || framePath,
+      preview: input.preview,
+    });
+    return { capture, update, framePath };
+  }
+
+  function startMacWindowCaptureLoop(app: any, input: AppShareInput, firstFrame: number) {
+    stopActiveMacWindowCapture("replace_window_capture");
+    const fps = Math.max(0.2, Math.min(2, Number(input.fps || 1) || 1));
+    const intervalMs = Math.max(500, Math.round(1000 / fps));
+    let frame = firstFrame;
+    let busy = false;
+    const tick = async () => {
+      if (busy || !activeMacWindowCapture || activeMacWindowCapture.stopped) return;
+      busy = true;
+      frame += 1;
+      try {
+        const result = await captureMacWindowToSynthetic(app, input, frame);
+        active?.diagnostics?.record("macos_window_capture_frame", {
+          frame,
+          window: app,
+          output: result.capture.output,
+          updateOk: result.update?.ok,
+        });
+      } catch (error) {
+        active?.diagnostics?.record("macos_window_capture_frame_error", {
+          frame,
+          window: app,
+          error: String(error?.message || error),
+        });
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(tick, intervalMs);
+    activeMacWindowCapture = {
+      timer,
+      stopped: false,
+      window: app,
+      stop: () => {
+        if (timer) clearInterval(timer);
+        if (activeMacWindowCapture) activeMacWindowCapture.stopped = true;
+      },
+    };
+    active?.diagnostics?.record("macos_window_capture_loop_started", {
+      window: app,
+      intervalMs,
+      fps,
+    });
+    return {
+      ok: true,
+      source: "macos_screencapturekit",
+      intervalMs,
+      fps,
+      window: app,
+    };
   }
 
   function matchesShareableApp(app, input: AppShareInput) {
+    if (matchesMacOSWindowCaptureTarget(app, input)) return true;
+    const windowTitle = String(input.windowTitle || "")
+      .trim()
+      .toLowerCase();
+    if (
+      windowTitle &&
+      String(app.title || app.name || "")
+        .trim()
+        .toLowerCase()
+        .includes(windowTitle)
+    )
+      return true;
     const processId = Number(input.processId || input.pid || 0) || 0;
     const bundle = String(input.bundleIdentifier || input.bundleId || "")
       .trim()
@@ -3216,31 +3373,54 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       };
     }
     const title = input.title || `Share ${app.applicationName || app.name || "application"}`;
-    const mode = input.mode || input.screenShareMode || "native";
-    const present = await presentScreenShare({
-      ...input,
-      mode,
-      title,
-      subtitle: input.subtitle || "Application share requested",
-      waitMs: input.waitMs || 2500,
-    });
+    const firstFrame = await captureMacWindowToSynthetic(
+      app,
+      {
+        ...input,
+        title,
+        subtitle: input.subtitle || `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+      },
+      1,
+    );
+    await refreshActiveRuntimeState();
+    const present = active?.screenShare?.active
+      ? {
+          ok: true,
+          skipped: true,
+          reason: "synthetic_share_already_active",
+          screenShare: active.screenShare,
+        }
+      : await presentScreenShare({
+          ...input,
+          mode: "synthetic",
+          title,
+          subtitle:
+            input.subtitle || `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+          imagePath: firstFrame.capture.output,
+          waitMs: input.waitMs || 2500,
+        });
+    const loop = startMacWindowCaptureLoop(app, input, 1);
     const result = {
       ok: Boolean(present.ok),
       app,
       present,
       capture: {
-        mode,
-        appPixelsAutomaticallySelected: false,
-        reason:
-          "Meet/Chrome owns the native app-window picker; the app candidate is selected for user-visible intent and diagnostics, not forced by the bot.",
+        mode: "macos_window_to_synthetic",
+        source: "macos_screencapturekit",
+        backend: firstFrame.capture.captureBackend || "screencapturekit",
+        appPixelsAutomaticallySelected: true,
+        windowId: app.windowId || app.windowID || 0,
+        firstFrame: firstFrame.capture.output,
+        loop,
       },
-      note: "app_share_requested; choose the matching app/window in the Meet picker if Chrome asks.",
+      note: "app_share_started_via_synthetic_capture; Meet native picker was not used.",
     };
     active.diagnostics?.record("shareable_app_present_requested", {
       app,
-      mode,
+      mode: "macos_window_to_synthetic",
       ok: result.ok,
       present,
+      capture: result.capture,
     });
     await saveDiagnostics(active.diagnostics).catch(() => {});
     return result;
@@ -3492,6 +3672,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
 
   async function stopScreenShare() {
     if (!active?.page) return { ok: false, error: "no_active_join" };
+    const captureStop = stopActiveMacWindowCapture("screen_share_stop");
     const result = await active.page
       .evaluate(async () => {
         if (!window.MAB_SCREEN_SHARE_CONTROLLER?.stop) {
@@ -3500,7 +3681,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         return await window.MAB_SCREEN_SHARE_CONTROLLER.stop();
       })
       .catch((error) => ({ ok: false, error: String(error?.message || error) }));
-    active.diagnostics?.record("screen_share_stop_requested", result);
+    active.diagnostics?.record("screen_share_stop_requested", { ...result, captureStop });
     await refreshActiveRuntimeState();
     return {
       ...result,
