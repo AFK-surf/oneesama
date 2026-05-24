@@ -17,7 +17,7 @@ import {
   captureMacOSWindowFrame,
   listMacOSWindowCaptureTargets,
   matchesMacOSWindowCaptureTarget,
-  readPngDimensions,
+  readImageDimensions,
   startMacOSWindowCaptureStream,
 } from "./macos-window-capture.ts";
 import { buildRealtimeBrowserInitScript } from "../realtime/realtime-browser-init-builder.ts";
@@ -3483,7 +3483,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       frame += 1;
       try {
         const dimensions = syntheticShareDimensionsFromSource(input, {
-          ...readPngDimensions(outputPath),
+          ...readImageDimensions(outputPath),
           frame: app.frame,
         });
         const update = await startScreenShare({

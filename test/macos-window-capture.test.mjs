@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { matchesMacOSWindowCaptureTarget } from "../packages/core/src/meeting/macos-window-capture.ts";
+import {
+  matchesMacOSWindowCaptureTarget,
+  readImageDimensions,
+} from "../packages/core/src/meeting/macos-window-capture.ts";
 
 const safariWindow = {
   windowId: 101,
@@ -33,4 +39,34 @@ test("macOS window capture target matching rejects unrelated apps", () => {
     false,
   );
   assert.equal(matchesMacOSWindowCaptureTarget(safariWindow, { applicationName: "Code" }), false);
+});
+
+test("macOS window capture dimensions support PNG and JPEG frames", () => {
+  const dir = mkdtempSync(join(tmpdir(), "oneesama-macos-capture-test-"));
+  const pngPath = join(dir, "frame.png");
+  const png = Buffer.alloc(24);
+  Buffer.from("89504e470d0a1a0a", "hex").copy(png, 0);
+  png.writeUInt32BE(1920, 16);
+  png.writeUInt32BE(1280, 20);
+  writeFileSync(pngPath, png);
+
+  const jpegPath = join(dir, "frame.jpg");
+  const app0 = Buffer.alloc(14);
+  const sof0Payload = Buffer.alloc(15);
+  sof0Payload[0] = 8;
+  sof0Payload.writeUInt16BE(1720, 1);
+  sof0Payload.writeUInt16BE(2640, 3);
+  writeFileSync(
+    jpegPath,
+    Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+      app0,
+      Buffer.from([0xff, 0xc0, 0x00, 0x11]),
+      sof0Payload,
+      Buffer.from([0xff, 0xd9]),
+    ]),
+  );
+
+  assert.deepEqual(readImageDimensions(pngPath), { width: 1920, height: 1280 });
+  assert.deepEqual(readImageDimensions(jpegPath), { width: 2640, height: 1720 });
 });

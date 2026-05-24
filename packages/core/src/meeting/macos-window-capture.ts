@@ -64,19 +64,58 @@ export interface MacOSWindowCaptureFrameResult {
   detail?: string;
 }
 
-export function readPngDimensions(path: string): { width?: number; height?: number } {
+function jpegSofMarker(marker: number) {
+  return (
+    (marker >= 0xc0 && marker <= 0xc3) ||
+    (marker >= 0xc5 && marker <= 0xc7) ||
+    (marker >= 0xc9 && marker <= 0xcb) ||
+    (marker >= 0xcd && marker <= 0xcf)
+  );
+}
+
+export function readImageDimensions(path: string): { width?: number; height?: number } {
   let fd: number | null = null;
   try {
-    const header = Buffer.alloc(24);
+    const header = Buffer.alloc(64 * 1024);
     fd = openSync(path, "r");
     const bytes = readSync(fd, header, 0, header.length, 0);
     if (bytes < 24) return {};
     const pngSignature = "89504e470d0a1a0a";
-    if (header.subarray(0, 8).toString("hex") !== pngSignature) return {};
-    return {
-      width: header.readUInt32BE(16),
-      height: header.readUInt32BE(20),
-    };
+    if (header.subarray(0, 8).toString("hex") === pngSignature) {
+      return {
+        width: header.readUInt32BE(16),
+        height: header.readUInt32BE(20),
+      };
+    }
+
+    if (header[0] !== 0xff || header[1] !== 0xd8) return {};
+    let offset = 2;
+    while (offset + 4 < bytes) {
+      if (header[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      while (offset < bytes && header[offset] === 0xff) offset += 1;
+      if (offset >= bytes) return {};
+      const marker = header[offset];
+      offset += 1;
+      if (marker === 0xd8 || marker === 0x01) continue;
+      if (marker === 0xd9 || marker === 0xda) return {};
+      if (offset + 2 > bytes) return {};
+      const length = header.readUInt16BE(offset);
+      offset += 2;
+      if (length < 2) return {};
+      const payloadLength = length - 2;
+      if (offset + payloadLength > bytes) return {};
+      if (jpegSofMarker(marker) && payloadLength >= 6) {
+        return {
+          height: header.readUInt16BE(offset + 1),
+          width: header.readUInt16BE(offset + 3),
+        };
+      }
+      offset += payloadLength;
+    }
+    return {};
   } catch {
     return {};
   } finally {
@@ -84,7 +123,9 @@ export function readPngDimensions(path: string): { width?: number; height?: numb
   }
 }
 
-async function waitForPng(path: string, timeoutMs: number, child?: ChildProcess) {
+export const readPngDimensions = readImageDimensions;
+
+async function waitForImage(path: string, timeoutMs: number, child?: ChildProcess) {
   const started = Date.now();
   let lastExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
   child?.once("exit", (code, signal) => {
@@ -92,7 +133,7 @@ async function waitForPng(path: string, timeoutMs: number, child?: ChildProcess)
   });
   while (Date.now() - started < timeoutMs) {
     if (existsSync(path)) {
-      const dimensions = readPngDimensions(path);
+      const dimensions = readImageDimensions(path);
       if (dimensions.width && dimensions.height) return dimensions;
     }
     if (lastExit) {
@@ -205,7 +246,7 @@ export async function captureMacOSWindowFrame(input: {
       timeout: Math.max(1000, input.timeoutMs || 2500),
       maxBuffer: 1024 * 1024,
     });
-    const dimensions = readPngDimensions(outputPath);
+    const dimensions = readImageDimensions(outputPath);
     return {
       ok: true,
       source: "macos_screencapturekit",
@@ -224,7 +265,7 @@ export async function captureMacOSWindowFrame(input: {
     "--timeout-ms",
     String(input.timeoutMs || 2500),
   ]);
-  const dimensions = readPngDimensions(outputPath);
+  const dimensions = readImageDimensions(outputPath);
   return {
     ...result,
     width: dimensions.width || result.width,
@@ -271,7 +312,7 @@ export async function startMacOSWindowCaptureStream(input: {
     stderr += String(chunk || "");
     if (stderr.length > 4096) stderr = stderr.slice(-4096);
   });
-  const dimensions = await waitForPng(outputPath, Math.max(1000, input.timeoutMs || 2500), child)
+  const dimensions = await waitForImage(outputPath, Math.max(1000, input.timeoutMs || 2500), child)
     .catch((error) => {
       child.kill("SIGTERM");
       const detail = stderr.trim();
