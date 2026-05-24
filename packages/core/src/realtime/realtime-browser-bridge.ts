@@ -175,6 +175,7 @@
       realtimeInputPlaceholderAdded: false,
       realtimeInputGateOpen: true,
       meetAudioForwardingEnabled: config.forwardMeetAudioToRealtime !== false,
+      meetAudioContextState: "",
       meetAudioTracksForwarded: 0,
       lastMeetAudioTrackId: "",
       duplicateMeetAudioSendersMuted: 0,
@@ -247,6 +248,7 @@
   let routingInputGate = null;
   let routingDestination = null;
   let routingSilenceSource = null;
+  let routingAudioResumeListenersInstalled = false;
   let silentMeetAudioTrack = null;
   let realtimeInputGateReopenTimer = 0;
   let primaryMeetAudioSender = null;
@@ -739,6 +741,7 @@
     if (routingDestination) return routingDestination;
     const AudioContextImpl = window.AudioContext || window.webkitAudioContext;
     routingAudioContext = routingAudioContext || new AudioContextImpl({ sampleRate: 48000 });
+    state.connection.meetAudioContextState = routingAudioContext.state || "";
     routingInputGate = routingInputGate || routingAudioContext.createGain();
     routingInputGate.gain.value = 1;
     routingDestination = routingDestination || routingAudioContext.createMediaStreamDestination();
@@ -749,8 +752,42 @@
     routingSilenceSource.start();
     recordTimeline("meet_audio_routing_ready", {
       outputTrackId: routingDestination.stream.getAudioTracks()[0]?.id || "",
+      audioContextState: routingAudioContext.state || "",
     });
+    installMeetAudioResumeListeners();
+    resumeMeetAudioRoutingContext("routing-ready");
     return routingDestination;
+  }
+
+  function resumeMeetAudioRoutingContext(reason = "") {
+    if (!routingAudioContext) return;
+    state.connection.meetAudioContextState = routingAudioContext.state || "";
+    if (routingAudioContext.state !== "suspended") return;
+    routingAudioContext
+      .resume()
+      .then(() => {
+        state.connection.meetAudioContextState = routingAudioContext.state || "";
+        recordTimeline("meet_audio_context_resumed", {
+          reason,
+          state: routingAudioContext.state || "",
+        });
+        updateFeedback();
+      })
+      .catch((error) => {
+        recordTimeline("meet_audio_context_resume_failed", {
+          reason,
+          error: String((error && error.message) || error).slice(0, 240),
+        });
+      });
+  }
+
+  function installMeetAudioResumeListeners() {
+    if (routingAudioResumeListenersInstalled) return;
+    routingAudioResumeListenersInstalled = true;
+    const resume = () => resumeMeetAudioRoutingContext("user-gesture");
+    window.addEventListener("pointerdown", resume, { capture: true, passive: true });
+    window.addEventListener("keydown", resume, { capture: true });
+    window.addEventListener("click", resume, { capture: true, passive: true });
   }
 
   function setRealtimeInputGate(open, reason = "") {
