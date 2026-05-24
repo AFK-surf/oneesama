@@ -397,3 +397,52 @@ for await (const line of rl) {
 		t.Fatalf("stderr = %q, want skipped progress log captured", stderr)
 	}
 }
+
+func TestSessionCallSkipsNonRPCJSONStdoutLogs(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	const script = `import readline from "node:readline";
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
+for await (const line of rl) {
+  const request = JSON.parse(line);
+  console.log(JSON.stringify({ label: "runtime_state_refresh", observedAt: "now", activeSpeaker: { name: "Peng" } }));
+  console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { ok: true, json_logs_skipped: true } }));
+}`
+	if err := os.WriteFile(filepath.Join(srcDir, "index.ts"), []byte(script), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	session, err := NewSession(SessionConfig{
+		ID:      "session_stdout_json_log",
+		Dir:     dir,
+		Command: "node",
+		Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	var result struct {
+		OK              bool `json:"ok"`
+		JSONLogsSkipped bool `json:"json_logs_skipped"`
+	}
+	if err := session.Call(context.Background(), "runner.ping", nil, &result); err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if !result.OK || !result.JSONLogsSkipped {
+		t.Fatalf("result = %+v, want JSON-RPC response after non-RPC JSON log", result)
+	}
+	if stderr := session.stderr.String(); !strings.Contains(stderr, "[meet-runner stdout] {\"") {
+		t.Fatalf("stderr = %q, want skipped JSON stdout log captured", stderr)
+	}
+}

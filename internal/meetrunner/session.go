@@ -240,6 +240,10 @@ func (s *Session) readLoop(stdout io.Reader) {
 			_, _ = s.stderr.Write([]byte("[meet-runner stdout] " + trimmed + "\n"))
 			continue
 		}
+		if !looksLikeRPCResponse(trimmed) {
+			_, _ = s.stderr.Write([]byte("[meet-runner stdout] " + trimmed + "\n"))
+			continue
+		}
 		var response rpcResponse
 		if err := json.Unmarshal([]byte(trimmed), &response); err != nil {
 			s.readErr <- fmt.Errorf("decode response: %w", err)
@@ -252,6 +256,10 @@ func (s *Session) readLoop(stdout io.Reader) {
 		return
 	}
 	s.readErr <- nil
+}
+
+func looksLikeRPCResponse(line string) bool {
+	return strings.Contains(line, `"jsonrpc"`) && strings.Contains(line, `"id"`)
 }
 
 func scanLinesOrCarriageReturns(data []byte, atEOF bool) (advance int, token []byte, err error) {
