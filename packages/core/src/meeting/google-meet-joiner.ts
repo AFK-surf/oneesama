@@ -1,4 +1,6 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { createServer, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -420,6 +422,123 @@ async function normalizeScreenShareImageUrl(value = ""): Promise<string> {
         ? "image/webp"
         : "image/png";
   return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
+}
+
+interface LocalMjpegFrameServer {
+  url: string;
+  port: number;
+  token: string;
+  framePath: string;
+  stop: () => void;
+  clientCount: () => number;
+}
+
+async function startLocalMjpegFrameServer(input: {
+  framePath: string;
+  fps: number;
+}): Promise<LocalMjpegFrameServer> {
+  const framePath = pathResolve(input.framePath);
+  const fps = Math.max(1, Math.min(30, Number.parseInt(String(input.fps || 25), 10) || 25));
+  const token = randomUUID();
+  const boundary = `oneesama-${token.replace(/-/g, "")}`;
+  const clients = new Set<ServerResponse>();
+  let latestFrame: Buffer | null = null;
+  let latestSignature = "";
+  let busy = false;
+  let stopped = false;
+
+  const writeFrame = (res: ServerResponse, frame: Buffer) => {
+    if (res.destroyed || res.writableEnded) return;
+    try {
+      res.write(`--${boundary}\r\n`);
+      res.write("Content-Type: image/jpeg\r\n");
+      res.write(`Content-Length: ${frame.length}\r\n`);
+      res.write("Cache-Control: no-store\r\n\r\n");
+      res.write(frame);
+      res.write("\r\n");
+    } catch {
+      clients.delete(res);
+      res.destroy();
+    }
+  };
+
+  const server = createServer((req, res) => {
+    const url = new URL(req.url || "/", "http://127.0.0.1");
+    if (url.pathname !== `/screen-share/${token}.mjpg`) {
+      res.writeHead(404, {
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end("not found");
+      return;
+    }
+    req.socket.setNoDelay(true);
+    res.writeHead(200, {
+      "Content-Type": `multipart/x-mixed-replace; boundary=${boundary}`,
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+      Pragma: "no-cache",
+      Expires: "0",
+      Connection: "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+      "X-Content-Type-Options": "nosniff",
+    });
+    clients.add(res);
+    if (latestFrame) writeFrame(res, latestFrame);
+    req.on("close", () => {
+      clients.delete(res);
+    });
+  });
+
+  const tick = async () => {
+    if (busy || stopped || clients.size === 0) return;
+    busy = true;
+    try {
+      const info = await stat(framePath);
+      if (!info.size) return;
+      const signature = `${info.mtimeMs}:${info.size}`;
+      if (signature === latestSignature && latestFrame) return;
+      const frame = await readFile(framePath);
+      latestFrame = frame;
+      latestSignature = signature;
+      for (const client of clients) writeFrame(client, frame);
+    } catch {
+      // The capture helper may be in the middle of its atomic move; retry next tick.
+    } finally {
+      busy = false;
+    }
+  };
+
+  const timer = setInterval(tick, Math.max(16, Math.round(1000 / fps)));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  await tick();
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  return {
+    url: `http://127.0.0.1:${port}/screen-share/${token}.mjpg`,
+    port,
+    token,
+    framePath,
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+      for (const client of clients) {
+        try {
+          client.end();
+        } catch {
+          client.destroy();
+        }
+      }
+      clients.clear();
+      server.close();
+    },
+    clientCount: () => clients.size,
+  };
 }
 
 function buildVideoStageHtml(input: VideoStageInput = {}): string {
@@ -2317,6 +2436,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     stopped: boolean;
     window: unknown;
     stream?: { stop: () => void; processId?: number };
+    mjpeg?: LocalMjpegFrameServer;
     stop: (reason?: string) => void;
   } = null;
   const activeBrowserPath = pathJoin(config.dataDir, "active-meet-browser.json");
@@ -3475,80 +3595,83 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       return startMacWindowOneShotCaptureLoop(app, input, firstFrame, fallbackReason);
     }
 
-    let frame = firstFrame;
-    let busy = false;
-    const tick = async () => {
-      if (busy || !activeMacWindowCapture || activeMacWindowCapture.stopped) return;
-      busy = true;
-      frame += 1;
-      try {
-        const dimensions = syntheticShareDimensionsFromSource(input, {
-          ...readImageDimensions(outputPath),
-          frame: app.frame,
-        });
-        const update = await startScreenShare({
-          ...input,
-          title: input.title || `Share ${app.applicationName || app.name || "application"}`,
-          subtitle:
-            input.subtitle ||
-            `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
-          imagePath: outputPath,
-          framePath: outputPath,
-          width: dimensions.width,
-          height: dimensions.height,
-          preview: input.preview,
-        });
-        active?.diagnostics?.record("macos_window_capture_frame", {
-          backend: "screencapturekit_stream",
-          frame,
-          window: app,
-          output: outputPath,
-          sourceWidth: stream.width || null,
-          sourceHeight: stream.height || null,
-          width: dimensions.width,
-          height: dimensions.height,
-          updateOk: update?.ok,
-        });
-      } catch (error) {
-        active?.diagnostics?.record("macos_window_capture_frame_error", {
-          backend: "screencapturekit_stream",
-          frame,
-          window: app,
-          error: String(error?.message || error),
-        });
-      } finally {
-        busy = false;
-      }
-    };
-    const timer = setInterval(tick, intervalMs);
+    let mjpeg: LocalMjpegFrameServer;
+    try {
+      mjpeg = await startLocalMjpegFrameServer({ framePath: outputPath, fps });
+    } catch (error) {
+      stream.stop();
+      const fallbackReason = String(error?.message || error);
+      active?.diagnostics?.record("macos_window_capture_mjpeg_fallback", {
+        window: app,
+        output: outputPath,
+        error: fallbackReason,
+      });
+      return startMacWindowOneShotCaptureLoop(app, input, firstFrame, fallbackReason);
+    }
+    const dimensions = syntheticShareDimensionsFromSource(input, {
+      ...readImageDimensions(outputPath),
+      width: stream.width,
+      height: stream.height,
+      frame: app.frame,
+    });
+    const update = await startScreenShare({
+      ...input,
+      title: input.title || `Share ${app.applicationName || app.name || "application"}`,
+      subtitle:
+        input.subtitle ||
+        `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+      imageUrl: mjpeg.url,
+      width: dimensions.width,
+      height: dimensions.height,
+      preview: input.preview,
+    });
+    if (!update?.ok) {
+      mjpeg.stop();
+      stream.stop();
+      return startMacWindowOneShotCaptureLoop(
+        app,
+        input,
+        firstFrame,
+        String(update?.error || "mjpeg_screen_share_start_failed"),
+      );
+    }
     activeMacWindowCapture = {
-      timer,
+      timer: null,
       stopped: false,
       window: app,
       stream,
+      mjpeg,
       stop: () => {
-        if (timer) clearInterval(timer);
+        mjpeg.stop();
         stream.stop();
         if (activeMacWindowCapture) activeMacWindowCapture.stopped = true;
       },
     };
     active?.diagnostics?.record("macos_window_capture_loop_started", {
-      backend: "screencapturekit_stream",
+      backend: "screencapturekit_stream_mjpeg",
       window: app,
       intervalMs,
       fps,
+      frameTransport: "local_mjpeg",
+      frameUrl: mjpeg.url,
       processId: stream.processId || null,
-      width: input.width || null,
-      height: input.height || null,
+      output: outputPath,
+      sourceWidth: stream.width || null,
+      sourceHeight: stream.height || null,
+      width: dimensions.width,
+      height: dimensions.height,
+      updateOk: update.ok,
     });
     return {
       ok: true,
       source: "macos_screencapturekit",
-      backend: stream.captureBackend || "screencapturekit_stream",
+      backend: "screencapturekit_stream_mjpeg",
       intervalMs,
       fps,
       output: outputPath,
+      frameUrl: mjpeg.url,
       processId: stream.processId || null,
+      update,
       window: app,
     };
   }

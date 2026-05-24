@@ -132,8 +132,11 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       if (!state.imageUrl) return null;
       if (image) return image;
       image = document.createElement("img");
-      image.src = state.imageUrl;
       image.crossOrigin = "anonymous";
+      if (/\\.mjpg(?:[?#]|$)|[?&]mjpeg=1(?:&|$)|multipart/i.test(state.imageUrl)) {
+        state.imageReady = true;
+      }
+      image.src = state.imageUrl;
       image.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none";
       image.addEventListener("load", () => { state.imageReady = true; });
       image.addEventListener("error", () => {
