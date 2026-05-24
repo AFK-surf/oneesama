@@ -7,6 +7,7 @@ import {
   joinFailureMessage,
   recoverAcceptedJoinAfterError,
 } from "../meet-runner/src/join-result.ts";
+import { deriveRuntimeSessionStatus } from "../meet-runner/src/session-status.ts";
 
 test("meet-runner join result status treats admitted and in-meeting evidence as accepted", () => {
   assert.equal(deriveStartedStatus({ admission: { state: "admitted" } }), "joined");
@@ -52,4 +53,32 @@ test("meet-runner preserves real join failures without accepted runtime evidence
   );
   assert.equal(joinFailureMessage({ error: "cannot_join_meeting" }), "cannot_join_meeting");
   assert.equal(joinFailureMessage({}), "google meet join failed");
+});
+
+test("meet-runner runtime status detects kicked or removed meeting page", () => {
+  const state = {
+    id: "session_kicked",
+    meeting_url: "https://meet.google.com/abc-defg-hij",
+    status: "joined",
+    title: "Meet",
+    updated_at: "2026-05-25T00:00:00.000Z",
+    started: true,
+  };
+
+  assert.equal(
+    deriveRuntimeSessionStatus(state, {
+      meetPage: {
+        url: "https://workspace.google.com/products/meet/",
+        inMeeting: false,
+      },
+      captions: { count: 12 },
+    }),
+    "removed_from_meeting",
+  );
+  assert.equal(
+    deriveRuntimeSessionStatus(state, {
+      meetPage: { url: state.meeting_url, inMeeting: true },
+    }),
+    "joined",
+  );
 });

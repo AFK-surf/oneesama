@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildSync } from "esbuild";
 import { readBrowserInitSource } from "../browser-init-source.ts";
 import type { HiyoriAvatarConfig } from "../browser-runtime-types.ts";
 
@@ -59,6 +61,47 @@ function buildInlineLive2DDeps(depsDir) {
   ].join("\n");
 }
 
+let cachedInlineVRMDeps = "";
+
+function shouldInlineVRMDeps(config: AvatarInitScriptConfig) {
+  const renderer = String(config.avatarRenderer || "vrm").toLowerCase();
+  return renderer === "vrm" || renderer === "3d";
+}
+
+function buildInlineVRMDeps() {
+  if (cachedInlineVRMDeps) return cachedInlineVRMDeps;
+
+  const result = buildSync({
+    stdin: {
+      contents: [
+        "import * as THREE from 'three';",
+        "import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';",
+        "import { VRMLoaderPlugin, VRMUtils, VRMExpressionPresetName, VRMHumanBoneName } from '@pixiv/three-vrm';",
+        "window.MAB_AVATAR_THREE_VRM_DEPS = { THREE, GLTFLoader, VRMLoaderPlugin, VRMUtils, VRMExpressionPresetName, VRMHumanBoneName };",
+      ].join("\n"),
+      resolveDir: resolve(fileURLToPath(new URL("../../../..", import.meta.url))),
+      sourcefile: "mab-avatar-vrm-deps.js",
+      loader: "js",
+    },
+    bundle: true,
+    format: "iife",
+    globalName: "MABAvatarVRMDepsBundle",
+    logLevel: "silent",
+    minify: true,
+    platform: "browser",
+    target: "es2020",
+    write: false,
+  });
+
+  const bundle = result.outputFiles?.[0]?.text || "";
+  if (!bundle) throw new Error("build VRM dependency bundle produced no output");
+  cachedInlineVRMDeps = [
+    "window.MAB_AVATAR_INLINE_VRM_DEPS = true;",
+    bundle,
+  ].join("\n");
+  return cachedInlineVRMDeps;
+}
+
 export function buildAvatarInitScript(config: AvatarInitScriptConfig = {}) {
   const runtimeConfig = { ...config };
   const depsDir =
@@ -73,6 +116,7 @@ export function buildAvatarInitScript(config: AvatarInitScriptConfig = {}) {
   );
   return [
     buildInlineLive2DDeps(depsDir),
+    shouldInlineVRMDeps(runtimeConfig) ? buildInlineVRMDeps() : "",
     `window.MAB_AVATAR_CONFIG = ${JSON.stringify(runtimeConfig)};`,
     source,
   ]

@@ -35,3 +35,22 @@ test("avatar init script can defer heavy renderer startup until after join", () 
   assert.match(script, /MAB_AVATAR_START_RENDERER/);
   assert.match(script, /avatar renderer deferred until explicit start/);
 });
+
+test("avatar init script bundles VRM dependencies for Meet pages", () => {
+  const script = buildAvatarInitScript({
+    avatarRenderer: "vrm",
+  });
+
+  assert.match(script, /MAB_AVATAR_INLINE_VRM_DEPS/);
+  assert.match(script, /MAB_AVATAR_THREE_VRM_DEPS/);
+  assert.match(script, /VRMLoaderPlugin/);
+});
+
+test("avatar init script skips VRM dependency bundle for explicit Live2D renderer", () => {
+  const script = buildAvatarInitScript({
+    avatarRenderer: "live2d",
+  });
+
+  assert.doesNotMatch(script, /MAB_AVATAR_INLINE_VRM_DEPS/);
+  assert.doesNotMatch(script, /MABAvatarVRMDepsBundle/);
+});

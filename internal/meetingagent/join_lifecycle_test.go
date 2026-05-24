@@ -18,6 +18,7 @@ func TestJoinSessionLifecycleStatusSpecs(t *testing.T) {
 		{name: "stopped", status: "stopped", terminal: true, redeliverable: true},
 		{name: "done", status: "done", terminal: true, redeliverable: true},
 		{name: "failed", status: "failed", terminal: true, redeliverable: true},
+		{name: "removed from meeting", status: "removed_from_meeting", terminal: true, redeliverable: true},
 		{name: "stale", status: "stale", terminal: true, redeliverable: true},
 		{name: "canceled", status: "canceled", terminal: true},
 		{name: "cancelled", status: "cancelled", terminal: true},
@@ -64,6 +65,18 @@ func TestRuntimeMeetPageStatusUsesJoinLifecycleStatuses(t *testing.T) {
 			name:   "in meeting maps joined",
 			active: map[string]any{"meetPage": map[string]any{"inMeeting": true}},
 			want:   joinSessionStatusJoined,
+		},
+		{
+			name: "navigated away after kick maps removed even with stale captions",
+			active: map[string]any{
+				"meetPage": map[string]any{
+					"url":       "https://workspace.google.com/products/meet/",
+					"textHead":  "AI powered video calls",
+					"inMeeting": false,
+				},
+				"captions": map[string]any{"count": 42},
+			},
+			want: joinSessionStatusRemoved,
 		},
 		{
 			name:   "unknown page maps empty",

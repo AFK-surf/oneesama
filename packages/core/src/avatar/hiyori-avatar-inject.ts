@@ -10,15 +10,27 @@
     "https://gcore.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json",
     "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Hiyori/Hiyori.model3.json",
   ];
+  const DEFAULT_VRM_MODEL_URL =
+    "https://raw.githubusercontent.com/trinhtanphat/AMI-Chat-AI/main/public/models/3d/Sendagaya_Shibu.vrm";
+  const DEFAULT_THREE_MODULE_URL = "https://esm.sh/three@0.164.1";
+  const DEFAULT_GLTF_LOADER_MODULE_URL =
+    "https://esm.sh/three@0.164.1/examples/jsm/loaders/GLTFLoader.js";
+  const DEFAULT_THREE_VRM_MODULE_URL = "https://esm.sh/@pixiv/three-vrm@2.1.3?deps=three@0.164.1";
   const config = {
     modelUrl: DEFAULT_HIYORI_MODEL_URL,
     modelFallbackUrls: DEFAULT_HIYORI_MODEL_FALLBACK_URLS,
+    vrmModelUrl: DEFAULT_VRM_MODEL_URL,
+    vrmModelFallbackUrls: [],
+    threeModuleUrl: DEFAULT_THREE_MODULE_URL,
+    gltfLoaderModuleUrl: DEFAULT_GLTF_LOADER_MODULE_URL,
+    threeVrmModuleUrl: DEFAULT_THREE_VRM_MODULE_URL,
     canvasWidth: 1920,
     canvasHeight: 1080,
     captureFps: 30,
     botName: "Meeting Avatar Bot",
     background: "#f7f8fb",
     layout: "face",
+    avatarRenderer: "live2d",
     disableLive2D: false,
     deferRendererUntilExplicitStart: false,
     enableVisualTestHooks: false,
@@ -363,10 +375,19 @@
     ok: true,
     renderer: "initializing",
     live2dLoaded: false,
+    vrmLoaded: false,
     fallbackReason: "",
     modelUrl: config.modelUrl,
+    vrmModelUrl: config.vrmModelUrl,
     modelAttempts: [],
+    vrmModelAttempts: [],
+    vrmDependencySource: "",
+    vrmDependencyAttempts: [],
     live2dParameterFrames: 0,
+    vrmFrames: 0,
+    vrmSpeechFrames: 0,
+    vrmMouthLevel: 0,
+    vrmViseme: "closed",
   };
   window.MAB_AVATAR_RENDERER = rendererState;
 
@@ -397,8 +418,7 @@
   }
 
   async function loadLive2DDeps() {
-    if (window.PIXI && window.PIXI!.live2d && window.Live2DCubismCore)
-      return;
+    if (window.PIXI && window.PIXI!.live2d && window.Live2DCubismCore) return;
     await loadScript("https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js");
     await loadScript("https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js");
     await loadScript("https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js");
@@ -834,6 +854,320 @@
     avatarController.state.live2dParameterFrames += 1;
   }
 
+  function normalizeRenderer(value) {
+    const renderer = String(value || "live2d").toLowerCase();
+    if (renderer === "3d") return "vrm";
+    return ["live2d", "vrm", "fallback"].includes(renderer) ? renderer : "live2d";
+  }
+
+  async function loadThreeVRMDeps() {
+    const inline = window.MAB_AVATAR_THREE_VRM_DEPS;
+    if (
+      inline?.THREE &&
+      inline?.GLTFLoader &&
+      inline?.VRMLoaderPlugin
+    ) {
+      rendererState.vrmDependencySource = "inline_bundle";
+      return {
+        THREE: inline.THREE,
+        GLTFLoader: inline.GLTFLoader,
+        VRMLoaderPlugin: inline.VRMLoaderPlugin,
+        VRMUtils: inline.VRMUtils,
+        VRMExpressionPresetName: inline.VRMExpressionPresetName || {},
+        VRMHumanBoneName: inline.VRMHumanBoneName || {},
+      };
+    }
+
+    const urls = {
+      three: config.threeModuleUrl,
+      gltfLoader: config.gltfLoaderModuleUrl,
+      threeVrm: config.threeVrmModuleUrl,
+    };
+    rendererState.vrmDependencyAttempts.push({ source: "dynamic_import", urls, ok: false });
+    const attempt =
+      rendererState.vrmDependencyAttempts[rendererState.vrmDependencyAttempts.length - 1];
+    let three;
+    let gltfLoader;
+    let threeVrm;
+    try {
+      [three, gltfLoader, threeVrm] = await Promise.all([
+        import(urls.three),
+        import(urls.gltfLoader),
+        import(urls.threeVrm),
+      ]);
+    } catch (error) {
+      if (attempt) attempt.error = String(error?.message || error);
+      throw error;
+    }
+    if (attempt) attempt.ok = true;
+    rendererState.vrmDependencySource = "dynamic_import";
+    return {
+      THREE: three,
+      GLTFLoader: gltfLoader.GLTFLoader,
+      VRMLoaderPlugin: threeVrm.VRMLoaderPlugin,
+      VRMUtils: threeVrm.VRMUtils,
+      VRMExpressionPresetName: threeVrm.VRMExpressionPresetName || {},
+      VRMHumanBoneName: threeVrm.VRMHumanBoneName || {},
+    };
+  }
+
+  async function loadVRMModelWithFallback(loader) {
+    const urls = normalizeModelUrls(config.vrmModelUrl, config.vrmModelFallbackUrls);
+    let lastError = null;
+    for (const modelUrl of urls) {
+      try {
+        rendererState.vrmModelAttempts.push({ url: modelUrl, ok: false });
+        const gltf = await loader.loadAsync(modelUrl);
+        const vrm = gltf?.userData?.vrm;
+        if (!vrm) throw new Error("loaded GLTF did not contain VRM metadata");
+        const attempt = rendererState.vrmModelAttempts[rendererState.vrmModelAttempts.length - 1];
+        if (attempt) attempt.ok = true;
+        rendererState.vrmModelUrl = modelUrl;
+        return { vrm, modelUrl };
+      } catch (error) {
+        lastError = error;
+        const attempt = rendererState.vrmModelAttempts[rendererState.vrmModelAttempts.length - 1];
+        if (attempt) attempt.error = String(error?.message || error);
+        log("VRM model load failed; trying fallback", modelUrl, error?.message);
+      }
+    }
+    throw lastError || new Error("no VRM model URLs configured");
+  }
+
+  function setVRMExpression(vrm, names, value) {
+    const expressionManager = vrm?.expressionManager;
+    if (!expressionManager?.setValue) return;
+    for (const name of names.filter(Boolean)) {
+      try {
+        expressionManager.setValue(name, value);
+      } catch {
+        // VRM models vary in their expression presets; absent names are expected.
+      }
+    }
+  }
+
+  function vrmExpressionNames(presets, aliases) {
+    return [...presets, ...aliases].filter(Boolean);
+  }
+
+  function mouthExpressionGroups(VRMExpressionPresetName) {
+    return {
+      aa: vrmExpressionNames(
+        [VRMExpressionPresetName.Aa, VRMExpressionPresetName.aa],
+        ["aa", "A", "Mouth_A"],
+      ),
+      ih: vrmExpressionNames(
+        [VRMExpressionPresetName.Ih, VRMExpressionPresetName.ih],
+        ["ih", "I", "Mouth_I"],
+      ),
+      ou: vrmExpressionNames(
+        [VRMExpressionPresetName.Ou, VRMExpressionPresetName.ou],
+        ["ou", "U", "Mouth_U"],
+      ),
+      ee: vrmExpressionNames(
+        [VRMExpressionPresetName.Ee, VRMExpressionPresetName.ee],
+        ["ee", "E", "Mouth_E"],
+      ),
+      oh: vrmExpressionNames(
+        [VRMExpressionPresetName.Oh, VRMExpressionPresetName.oh],
+        ["oh", "O", "Mouth_O"],
+      ),
+    };
+  }
+
+  function applyVRMMouth(vrm, VRMExpressionPresetName, mouthLevel, elapsedSeconds) {
+    const groups = mouthExpressionGroups(VRMExpressionPresetName);
+    for (const names of Object.values(groups)) setVRMExpression(vrm, names, 0);
+    const mouth = clamp01(mouthLevel);
+    if (mouth <= 0.01) return { viseme: "closed", mouth };
+
+    const cycle = Math.floor(elapsedSeconds * 9.5) % 5;
+    const selected = ["aa", "ih", "ou", "ee", "oh"][cycle] || "aa";
+    const flutter = 0.78 + 0.22 * (0.5 + 0.5 * Math.sin(elapsedSeconds * 24));
+    const open = clamp01(mouth * flutter);
+    const weights = {
+      aa: selected === "aa" ? open : open * 0.3,
+      ih: selected === "ih" ? open * 0.72 : 0,
+      ou: selected === "ou" ? open * 0.68 : 0,
+      ee: selected === "ee" ? open * 0.62 : 0,
+      oh: selected === "oh" ? open * 0.74 : 0,
+    };
+    for (const [viseme, value] of Object.entries(weights)) {
+      setVRMExpression(vrm, groups[viseme], value);
+    }
+    return { viseme: selected, mouth: open };
+  }
+
+  function rotateBone(vrm, boneName, rotation) {
+    const node = vrm?.humanoid?.getNormalizedBoneNode?.(boneName);
+    if (!node) return;
+    node.rotation.x = rotation.x ?? node.rotation.x;
+    node.rotation.y = rotation.y ?? node.rotation.y;
+    node.rotation.z = rotation.z ?? node.rotation.z;
+  }
+
+  function applyAvatarStateToVRM(vrm, deps, delta, elapsedSeconds) {
+    vrm?.update?.(delta);
+    const { VRMExpressionPresetName, VRMHumanBoneName } = deps;
+    const state = avatarController.state;
+    const mood = state.mood;
+    const action = state.action;
+    const actionP = avatarController.getActionEnvelope();
+    const mouthLevel = window.MAB_AVATAR_AUDIO_BUS?.getMouthLevel?.() || 0;
+    const speak = action === "speak" ? actionP : 0;
+    const mouth = clamp01(Math.max(mouthLevel, speak * 0.9, mood === "surprised" ? 0.35 : 0));
+    const speech = applyVRMMouth(vrm, VRMExpressionPresetName, mouth, elapsedSeconds);
+    setVRMExpression(
+      vrm,
+      [VRMExpressionPresetName.Happy, VRMExpressionPresetName.happy, "happy"],
+      mood === "happy" || mood === "shy" ? 0.85 : 0,
+    );
+    setVRMExpression(
+      vrm,
+      [VRMExpressionPresetName.Surprised, VRMExpressionPresetName.surprised, "surprised"],
+      mood === "surprised" ? 0.75 : 0,
+    );
+    setVRMExpression(
+      vrm,
+      [VRMExpressionPresetName.Sad, VRMExpressionPresetName.sad, "sad"],
+      mood === "sad" ? 0.8 : 0,
+    );
+    setVRMExpression(
+      vrm,
+      [VRMExpressionPresetName.Relaxed, VRMExpressionPresetName.relaxed, "relaxed"],
+      mood === "thinking" ? 0.35 : 0,
+    );
+    vrm?.expressionManager?.update?.();
+
+    const wave = action === "wave" ? Math.sin(elapsedSeconds * 18) * actionP : 0;
+    const shake = action === "shake" ? Math.sin(elapsedSeconds * 16) * actionP : 0;
+    const nod = action === "nod" || action === "emphasize" ? actionP : 0;
+    const think = action === "think" ? actionP : 0;
+    const lean = action === "lean_forward" || action === "emphasize" ? actionP : 0;
+    const shrug = action === "shrug" ? actionP : 0;
+    const speechMotion = speech.mouth * (0.55 + 0.45 * Math.sin(elapsedSeconds * 18));
+    rotateBone(vrm, VRMHumanBoneName.Head || "head", {
+      x:
+        Math.sin(elapsedSeconds * 0.57 + 1.1) * 0.025 -
+        nod * 0.22 -
+        lean * 0.08 +
+        speechMotion * 0.035,
+      y: Math.sin(elapsedSeconds * 0.42) * 0.04 + shake * 0.2,
+      z: Math.sin(elapsedSeconds * 0.33 + 0.6) * 0.02 - think * 0.12,
+    });
+    rotateBone(vrm, VRMHumanBoneName.Spine || "spine", {
+      x: lean * 0.08 + speechMotion * 0.012,
+      y: shake * 0.04,
+      z: shrug * 0.04,
+    });
+    rotateBone(vrm, VRMHumanBoneName.Chest || "chest", {
+      x: lean * 0.16 + speechMotion * 0.025,
+      y: shake * 0.08,
+      z: shrug * 0.08,
+    });
+    rotateBone(vrm, VRMHumanBoneName.RightUpperArm || "rightUpperArm", {
+      x: -0.08 - wave * 0.55 - shrug * 0.18,
+      y: 0.05 + wave * 0.3,
+      z: -1.18 - wave * 0.25,
+    });
+    rotateBone(vrm, VRMHumanBoneName.LeftUpperArm || "leftUpperArm", {
+      x: -0.08 - think * 0.28 - shrug * 0.18,
+      y: -0.05,
+      z: 1.18,
+    });
+    rotateBone(vrm, VRMHumanBoneName.RightLowerArm || "rightLowerArm", {
+      x: -0.08,
+      y: 0,
+      z: -0.28 - wave * 0.2,
+    });
+    rotateBone(vrm, VRMHumanBoneName.LeftLowerArm || "leftLowerArm", {
+      x: -0.08,
+      y: 0,
+      z: 0.28 + think * 0.12,
+    });
+    rendererState.vrmMouthLevel = Number(speech.mouth.toFixed(4));
+    rendererState.vrmViseme = speech.viseme;
+    if (speech.mouth > 0.01)
+      rendererState.vrmSpeechFrames = (rendererState.vrmSpeechFrames || 0) + 1;
+    rendererState.vrmFrames += 1;
+  }
+
+  async function createVRMAvatarRenderer(canvas) {
+    const deps = await loadThreeVRMDeps();
+    const { THREE, GLTFLoader, VRMLoaderPlugin, VRMUtils } = deps;
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: false,
+      preserveDrawingBuffer: true,
+    });
+    renderer.setSize(config.canvasWidth, config.canvasHeight, false);
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(config.background);
+    const camera = new THREE.PerspectiveCamera(
+      config.layout === "presenter" ? 24 : 18,
+      config.canvasWidth / config.canvasHeight,
+      0.1,
+      100,
+    );
+    camera.position.set(0, config.layout === "presenter" ? 1.25 : 1.42, 3.1);
+    camera.lookAt(0, 1.25, 0);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.4);
+    keyLight.position.set(1.5, 2.4, 2.8);
+    scene.add(keyLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 1.25));
+
+    const loader = new GLTFLoader();
+    loader.register((parser) => new VRMLoaderPlugin(parser));
+    const { vrm, modelUrl } = await loadVRMModelWithFallback(loader);
+    VRMUtils?.removeUnnecessaryVertices?.(vrm.scene);
+    VRMUtils?.removeUnnecessaryJoints?.(vrm.scene);
+    VRMUtils?.rotateVRM0?.(vrm);
+    scene.add(vrm.scene);
+
+    const box = new THREE.Box3().setFromObject(vrm.scene);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+    const height = Math.max(0.1, size.y);
+    const targetHeight = config.layout === "presenter" ? 2.2 : 2.4;
+    const scale = targetHeight / height;
+    vrm.scene.scale.setScalar(scale);
+    const targetCenterX = config.layout === "presenter" ? 0.7 : 0;
+    const targetCenterY = config.layout === "presenter" ? 0 : 0.55;
+    vrm.scene.position.set(
+      targetCenterX - center.x * scale,
+      targetCenterY - center.y * scale,
+      -center.z * scale,
+    );
+
+    Object.assign(rendererState, {
+      renderer: "vrm",
+      vrmLoaded: true,
+      live2dLoaded: false,
+      fallbackReason: "",
+      vrmModelUrl: modelUrl,
+      layout: config.layout,
+    });
+    log("VRM avatar loaded", modelUrl);
+
+    const clock = new THREE.Clock();
+    const startedAt = performance.now();
+    function tick() {
+      const delta = clock.getDelta();
+      const elapsedSeconds = (performance.now() - startedAt) / 1000;
+      applyAvatarStateToVRM(vrm, deps, delta, elapsedSeconds);
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
   function createHiddenAvatarCanvas() {
     const canvas = document.createElement("canvas");
     canvas.width = config.canvasWidth;
@@ -846,10 +1180,27 @@
 
   async function createAvatarCanvas(existingCanvas = null) {
     const canvas = existingCanvas || createHiddenAvatarCanvas();
+    const requestedRenderer = normalizeRenderer(config.avatarRenderer);
     let live2dLoaded = false;
-    let fallbackReason = config.disableLive2D ? "disabled_by_config" : "";
+    let vrmLoaded = false;
+    let fallbackReason =
+      requestedRenderer === "fallback"
+        ? "fallback_requested"
+        : config.disableLive2D && requestedRenderer === "live2d"
+          ? "disabled_by_config"
+          : "";
 
-    if (!config.disableLive2D) {
+    if (requestedRenderer === "vrm") {
+      try {
+        await createVRMAvatarRenderer(canvas);
+        vrmLoaded = true;
+      } catch (error) {
+        fallbackReason = String(error?.message || error);
+        log("VRM load failed; using fallback canvas", error?.message);
+      }
+    }
+
+    if (!vrmLoaded && requestedRenderer === "live2d" && !config.disableLive2D) {
       try {
         await loadLive2DDeps();
         const app = new window.PIXI!.Application({
@@ -914,10 +1265,11 @@
       }
     }
 
-    if (!live2dLoaded) {
+    if (!live2dLoaded && !vrmLoaded) {
       Object.assign(rendererState, {
         renderer: "fallback",
         live2dLoaded: false,
+        vrmLoaded: false,
         fallbackReason: fallbackReason || "live2d_not_loaded",
       });
       const ctx = canvas.getContext("2d");
@@ -1149,8 +1501,7 @@
   }
 
   function installMediaDeviceOverride(videoTrack: MediaStreamTrack, audioTrack: MediaStreamTrack) {
-    const mediaDevicesAny = (navigator.mediaDevices ||
-      ({} as MediaDevices)) as MediaDevices & {
+    const mediaDevicesAny = (navigator.mediaDevices || ({} as MediaDevices)) as MediaDevices & {
       getUserMedia?: (constraints?: MediaStreamConstraints) => Promise<MediaStream>;
       enumerateDevices?: () => Promise<MediaDeviceInfo[]>;
     };
@@ -1210,7 +1561,7 @@
     installMediaDeviceOverride(videoTrack, audioTrack);
     window.MAB_AVATAR_READY = {
       ok: true,
-      mode: "hiyori-live2d-or-fallback",
+      mode: "avatar-renderer",
       videoTrackId: videoTrack.id,
       audioTrackId: audioTrack.id,
       audioRoute: window.MAB_AVATAR_AUDIO,
@@ -1218,8 +1569,10 @@
       renderer: window.MAB_AVATAR_RENDERER,
       rendererMode: window.MAB_AVATAR_RENDERER.renderer,
       live2dLoaded: window.MAB_AVATAR_RENDERER.live2dLoaded,
+      vrmLoaded: window.MAB_AVATAR_RENDERER.vrmLoaded,
       fallbackReason: window.MAB_AVATAR_RENDERER.fallbackReason,
       modelUrl: config.modelUrl,
+      vrmModelUrl: config.vrmModelUrl,
       rendererDeferred: Boolean(config.deferRendererUntilExplicitStart),
     };
     log("avatar fake media ready", window.MAB_AVATAR_READY);
@@ -1245,8 +1598,10 @@
           renderer: window.MAB_AVATAR_RENDERER,
           rendererMode: window.MAB_AVATAR_RENDERER.renderer,
           live2dLoaded: window.MAB_AVATAR_RENDERER.live2dLoaded,
+          vrmLoaded: window.MAB_AVATAR_RENDERER.vrmLoaded,
           fallbackReason: window.MAB_AVATAR_RENDERER.fallbackReason,
           modelUrl: config.modelUrl,
+          vrmModelUrl: config.vrmModelUrl,
           rendererDeferred: false,
           rendererStartedAt: new Date().toISOString(),
         });

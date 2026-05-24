@@ -284,6 +284,8 @@ interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   allowNonGoogleMeet?: boolean;
   realtimeInstructions?: string;
   avatarModelUrl?: string;
+  avatarRenderer?: string;
+  avatarVRMModelUrl?: string;
   avatarDepsDir?: string;
   avatarLayout?: string;
   disableLive2D?: boolean;
@@ -2784,6 +2786,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         content: buildAvatarInitScript({
           modelUrl: input.avatarModelUrl || config.avatarModelUrl,
           modelFallbackUrls: config.avatarModelFallbackUrls,
+          avatarRenderer: input.avatarRenderer || config.avatarRenderer,
+          vrmModelUrl: input.avatarVRMModelUrl || config.avatarVRMModelUrl,
+          vrmModelFallbackUrls: config.avatarVRMModelFallbackUrls,
           live2dDepsDir: input.avatarDepsDir || config.avatarDepsDir,
           layout: input.avatarLayout || config.avatarLayout,
           botName,
@@ -3405,7 +3410,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     }
     let macOSApplications: any[] = [];
     try {
-      const macOS = await listMacOSWindowCaptureTargets();
+      const macOS = await listMacOSWindowCaptureTargets({
+        keepProcessIds: [activeMacWindowCapture?.stream?.processId],
+      });
       macOSApplications = macOS.applications || [];
     } catch (error) {
       const message = String(error?.message || error);

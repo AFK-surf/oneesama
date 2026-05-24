@@ -29,6 +29,37 @@ function sessionView(state?: RunnerSessionState) {
   };
 }
 
+function pageLooksRemovedFromMeeting(meetPage: any): boolean {
+  if (!meetPage || typeof meetPage !== "object") return false;
+  if (
+    meetPage.inMeeting === true ||
+    meetPage.waitingForAdmit === true ||
+    meetPage.preJoin === true ||
+    meetPage.signIn === true ||
+    meetPage.cannotJoin === true
+  ) {
+    return false;
+  }
+  const url = String(meetPage.url || "").toLowerCase();
+  if (url && !url.includes("meet.google.com/")) return true;
+  const text = String(meetPage.textHead || "").toLowerCase();
+  return (
+    text.includes("left the meeting") ||
+    text.includes("return to home screen") ||
+    text.includes("you've been removed") ||
+    text.includes("you have been removed")
+  );
+}
+
+export function deriveRuntimeSessionStatus(state: RunnerSessionState, active: any): string {
+  const meetPage = active?.meetPage || null;
+  if (pageLooksRemovedFromMeeting(meetPage)) return "removed_from_meeting";
+  if (meetPage?.inMeeting === true) return "joined";
+  if (meetPage?.waitingForAdmit === true) return "waiting";
+  if (meetPage?.cannotJoin === true) return "failed";
+  return state.status;
+}
+
 export async function statusSession(
   params: StatusSessionParams,
   sessions: Map<string, RunnerSessionState>,
@@ -42,6 +73,14 @@ export async function statusSession(
     : activeSessionID
       ? sessions.get(activeSessionID)
       : sessions.values().next().value;
+  if (state && runtime?.active) {
+    const nextStatus = deriveRuntimeSessionStatus(state, runtime.active);
+    if (nextStatus && nextStatus !== state.status) {
+      state.status = nextStatus;
+      state.updated_at = new Date().toISOString();
+      sessions.set(state.id, state);
+    }
+  }
   return {
     ok: runtime?.ok !== false,
     active: runtime?.active || null,

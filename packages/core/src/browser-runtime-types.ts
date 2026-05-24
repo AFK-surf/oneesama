@@ -243,6 +243,12 @@ export interface PixiNamespace {
 export interface HiyoriAvatarConfig {
   modelUrl?: string;
   modelFallbackUrls?: string[];
+  avatarRenderer?: "live2d" | "vrm" | "3d" | "fallback" | string;
+  vrmModelUrl?: string;
+  vrmModelFallbackUrls?: string[];
+  threeModuleUrl?: string;
+  gltfLoaderModuleUrl?: string;
+  threeVrmModuleUrl?: string;
   deferRendererUntilExplicitStart?: boolean;
   modelBase?: string;
   width?: number;
@@ -290,6 +296,7 @@ declare global {
     MAB_AVATAR_CONTROLLER?: AvatarController;
     MAB_AVATAR_READY?: Record<string, unknown> | null;
     MAB_AVATAR_START_RENDERER?: (() => Promise<unknown>) | null;
+    MAB_AVATAR_THREE_VRM_DEPS?: Record<string, any> | null;
     MAB_AVATAR_RENDERER?:
       | (Record<string, unknown> & {
           renderer?: string;

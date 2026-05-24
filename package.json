@@ -76,6 +76,7 @@
     "smoke:realtime-worker-tool": "tsx src/cli.ts realtime-worker-tool-smoke",
     "smoke:avatar-state": "tsx src/cli.ts avatar-state-smoke",
     "smoke:avatar-visual": "tsx src/cli.ts avatar-visual-smoke",
+    "smoke:avatar-vrm": "tsx src/cli.ts avatar-vrm-smoke",
     "smoke:hiyori-live2d": "tsx src/cli.ts hiyori-live2d-smoke",
     "smoke:runtime-acceptance": "tsx src/cli.ts runtime-acceptance-smoke",
     "smoke:slack-results": "tsx src/cli.ts slack-result-smoke",
@@ -96,8 +97,11 @@
   },
   "dependencies": {
     "@openai/agents-realtime": "0.11.4",
+    "@pixiv/three-vrm": "^2.1.3",
     "better-sqlite3": "^12.9.0",
+    "esbuild": "^0.25.12",
     "playwright": "^1.58.2",
+    "three": "^0.164.1",
     "zod": "4.4.3"
   },
   "engines": {

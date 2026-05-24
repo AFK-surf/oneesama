@@ -12,6 +12,7 @@ const (
 	joinSessionStatusStopped   joinSessionStatus = "stopped"
 	joinSessionStatusDone      joinSessionStatus = "done"
 	joinSessionStatusFailed    joinSessionStatus = "failed"
+	joinSessionStatusRemoved   joinSessionStatus = "removed_from_meeting"
 	joinSessionStatusCanceled  joinSessionStatus = "canceled"
 	joinSessionStatusCancelled joinSessionStatus = "cancelled"
 	joinSessionStatusStale     joinSessionStatus = "stale"
@@ -34,6 +35,7 @@ var joinSessionStatusSpecs = map[joinSessionStatus]joinSessionStatusSpec{
 	joinSessionStatusStopped:   {Terminal: true, Redeliverable: true},
 	joinSessionStatusDone:      {Terminal: true, Redeliverable: true},
 	joinSessionStatusFailed:    {Terminal: true, Redeliverable: true},
+	joinSessionStatusRemoved:   {Terminal: true, Redeliverable: true},
 	joinSessionStatusCanceled:  {Terminal: true},
 	joinSessionStatusCancelled: {Terminal: true},
 	joinSessionStatusStale:     {Terminal: true, Redeliverable: true},

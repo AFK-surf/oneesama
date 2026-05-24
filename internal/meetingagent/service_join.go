@@ -324,6 +324,9 @@ func runtimeMeetPageStatus(active any) string {
 		return ""
 	}
 	meetPage, _ := fields["meetPage"].(map[string]any)
+	if runtimeRemovedFromMeeting(meetPage) {
+		return joinSessionStatusString(joinSessionStatusRemoved)
+	}
 	if runtimeJoinedEvidence(fields, meetPage, runtimeParticipantCount(meetPage)) {
 		return joinSessionStatusString(joinSessionStatusJoined)
 	}
@@ -334,6 +337,28 @@ func runtimeMeetPageStatus(active any) string {
 		return joinSessionStatusString(joinSessionStatusFailed)
 	}
 	return ""
+}
+
+func runtimeRemovedFromMeeting(meetPage map[string]any) bool {
+	if len(meetPage) == 0 {
+		return false
+	}
+	if boolField(meetPage, "inMeeting") ||
+		boolField(meetPage, "waitingForAdmit") ||
+		boolField(meetPage, "preJoin") ||
+		boolField(meetPage, "signIn") ||
+		boolField(meetPage, "cannotJoin") {
+		return false
+	}
+	url := strings.ToLower(stringFromMap(meetPage, "url"))
+	if url != "" && !strings.Contains(url, "meet.google.com/") {
+		return true
+	}
+	text := strings.ToLower(stringFromMap(meetPage, "textHead"))
+	return strings.Contains(text, "left the meeting") ||
+		strings.Contains(text, "return to home screen") ||
+		strings.Contains(text, "you've been removed") ||
+		strings.Contains(text, "you have been removed")
 }
 
 func boolField(values map[string]any, key string) bool {

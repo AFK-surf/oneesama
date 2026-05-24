@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   matchesMacOSWindowCaptureTarget,
+  macOSWindowCaptureHelperProcessFromPSLine,
   readImageDimensions,
 } from "../packages/core/src/meeting/macos-window-capture.ts";
 
@@ -82,4 +83,34 @@ test("macOS window capture dimensions support PNG, JPEG, and WebP frames", () =>
   assert.deepEqual(readImageDimensions(pngPath), { width: 1920, height: 1280 });
   assert.deepEqual(readImageDimensions(jpegPath), { width: 2640, height: 1720 });
   assert.deepEqual(readImageDimensions(webpPath), { width: 1365, height: 768 });
+});
+
+test("macOS window capture helper process parser only matches stream helpers", () => {
+  const helper = "/var/folders/tmp/oneesama-macos-window-capture-helper";
+
+  assert.deepEqual(
+    macOSWindowCaptureHelperProcessFromPSLine(
+      " 76957 /var/folders/tmp/oneesama-macos-window-capture-helper stream --window-id 73503 --output /tmp/Pencil-latest.jpg --fps 25",
+      helper,
+    ),
+    {
+      pid: 76957,
+      command:
+        "/var/folders/tmp/oneesama-macos-window-capture-helper stream --window-id 73503 --output /tmp/Pencil-latest.jpg --fps 25",
+    },
+  );
+  assert.equal(
+    macOSWindowCaptureHelperProcessFromPSLine(
+      " 82507 /var/folders/tmp/oneesama-macos-window-capture-helper list",
+      helper,
+    ),
+    null,
+  );
+  assert.equal(
+    macOSWindowCaptureHelperProcessFromPSLine(
+      " 90000 /usr/bin/grep oneesama-macos-window-capture-helper stream",
+      helper,
+    ),
+    null,
+  );
 });

@@ -134,6 +134,7 @@ Commands:
   realtime-live-tool-smoke Verify real Realtime data channel can trigger worker tools when an OpenAI-compatible key is set
   avatar-state-smoke Verify Realtime avatar mood/action tools reach the avatar runtime
   avatar-visual-smoke Verify avatar mouth/action visual snapshots and state gates
+  avatar-vrm-smoke Verify experimental Three.js/VRM avatar render pixels and state controls
   hiyori-live2d-smoke Verify true Hiyori Live2D render pixels when WebGL/CDN support is available
   runtime-acceptance-smoke Verify joined runtime combines avatar, participant audio, worker, and Realtime state
   slack-result-smoke Verify Slack polls completed Meeting Agent worker results once
@@ -416,7 +417,9 @@ async function doctor() {
       config.agentRunner !== "slack-agent-d" || Boolean(config.slackAgentDUrl),
       config.slackAgentDUrl || "not required unless MAB_AGENT_RUNNER=slack-agent-d",
     ],
+    ["Avatar renderer", Boolean(config.avatarRenderer), config.avatarRenderer || "missing"],
     ["Hiyori/model URL", Boolean(config.avatarModelUrl), config.avatarModelUrl || "missing"],
+    ["VRM/model URL", Boolean(config.avatarVRMModelUrl), config.avatarVRMModelUrl || "missing"],
     [
       "Playwright chromium cache",
       existsSync(`${process.env.HOME}/Library/Caches/ms-playwright`),
@@ -8233,6 +8236,123 @@ async function avatarVisualSmoke() {
   }
 }
 
+async function avatarVRMSmoke() {
+  const { chromium } = await import("playwright");
+  const config = getRuntimeConfig();
+  const executablePath =
+    config.chromiumExecutablePath && existsSync(config.chromiumExecutablePath)
+      ? config.chromiumExecutablePath
+      : undefined;
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath,
+    args: [
+      "--ignore-gpu-blocklist",
+      "--enable-unsafe-swiftshader",
+      "--use-angle=swiftshader",
+      "--use-gl=angle",
+      "--enable-webgl",
+    ],
+  });
+  try {
+    const context = await browser.newContext({ permissions: ["microphone", "camera"] });
+    await context.addInitScript({
+      content: buildAvatarInitScript({
+        botName: "VRM Avatar Smoke Bot",
+        avatarRenderer: "vrm",
+        enableVisualTestHooks: true,
+      }),
+    });
+    const page = await context.newPage();
+    await page.goto("about:blank");
+    await page.waitForFunction(
+      () =>
+        window.MAB_AVATAR_READY?.ok === true &&
+        window.MAB_AVATAR_RENDERER &&
+        window.MAB_AVATAR_VISUAL_TEST,
+      null,
+      { timeout: 60_000 },
+    );
+    await page.waitForFunction(
+      () =>
+        Number((window.MAB_AVATAR_RENDERER as Record<string, unknown> | null)?.vrmFrames || 0) > 10,
+      null,
+      { timeout: 20_000 },
+    );
+
+    const result = (await page.evaluate(`(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const visualTest = window.MAB_AVATAR_VISUAL_TEST;
+      const controller = window.MAB_AVATAR_CONTROLLER;
+      const neutral = visualTest.captureSourceSnapshot({ label: "vrm-neutral" });
+      controller?.updateState({
+        mood: "happy",
+        action: "speak",
+        intensity: 1.1,
+        actionHoldMs: 2600,
+      });
+      window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(true, { holdMs: 2200 });
+      await wait(650);
+      const expressive = visualTest.captureSourceSnapshot({ label: "vrm-happy-speak" });
+      return {
+        ready: window.MAB_AVATAR_READY,
+        renderer: window.MAB_AVATAR_RENDERER,
+        avatar: window.MAB_AVATAR_STATE,
+        snapshots: { neutral, expressive },
+      };
+    })()`)) as {
+      ready?: unknown;
+      renderer?: {
+        renderer?: string;
+        vrmLoaded?: boolean;
+        vrmFrames?: number;
+        vrmSpeechFrames?: number;
+        vrmMouthLevel?: number;
+        vrmViseme?: string;
+      };
+      avatar?: AvatarStateSnapshot | null;
+      snapshots?: { neutral?: AvatarVisualSnapshot; expressive?: AvatarVisualSnapshot };
+    };
+
+    assertSmoke(result.renderer?.renderer === "vrm", "VRM renderer did not activate", result);
+    assertSmoke(result.renderer?.vrmLoaded === true, "VRM model did not load", result.renderer);
+    assertSmoke((result.renderer?.vrmFrames || 0) > 10, "VRM render loop did not advance", result);
+    assertSmoke(
+      result.snapshots?.neutral?.ok === true && result.snapshots?.expressive?.ok === true,
+      "VRM source snapshots failed",
+      result.snapshots,
+    );
+    assertSmoke(
+      result.snapshots?.neutral?.face?.nonBackgroundRatio > 0.015,
+      "VRM neutral snapshot looks blank",
+      result.snapshots?.neutral,
+    );
+    assertSmoke(
+      result.snapshots?.neutral?.hash !== result.snapshots?.expressive?.hash,
+      "VRM state change did not alter pixels",
+      result.snapshots,
+    );
+    assertSmoke(
+      result.avatar?.mood === "happy" &&
+        result.avatar?.updates?.some(
+          (update) => update.kind === "action" && update.action === "speak",
+        ),
+      "VRM smoke did not route avatar controller state",
+      result.avatar,
+    );
+    assertSmoke(
+      (result.renderer?.vrmSpeechFrames || 0) > 0 &&
+        (result.renderer?.vrmMouthLevel || 0) > 0.05 &&
+        result.renderer?.vrmViseme !== "closed",
+      "VRM smoke did not drive lip sync from avatar audio",
+      result.renderer,
+    );
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  } finally {
+    await browser.close();
+  }
+}
+
 async function hiyoriLive2dSmoke() {
   const { chromium } = await import("playwright");
   const config = getRuntimeConfig();
@@ -11273,6 +11393,8 @@ if (command === "doctor") {
   await avatarStateSmoke();
 } else if (command === "avatar-visual-smoke") {
   await avatarVisualSmoke();
+} else if (command === "avatar-vrm-smoke") {
+  await avatarVRMSmoke();
 } else if (command === "hiyori-live2d-smoke") {
   await hiyoriLive2dSmoke();
 } else if (command === "runtime-acceptance-smoke") {

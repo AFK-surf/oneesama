@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -62,6 +62,11 @@ export interface MacOSWindowCaptureFrameResult {
   window?: MacOSWindowCaptureWindow;
   error?: string;
   detail?: string;
+}
+
+export interface MacOSWindowCaptureHelperProcess {
+  pid: number;
+  command: string;
 }
 
 function jpegSofMarker(marker: number) {
@@ -204,6 +209,60 @@ function helperBinaryPath() {
   );
 }
 
+export function macOSWindowCaptureHelperProcessFromPSLine(
+  line: string,
+  helperPath = helperBinaryPath(),
+): MacOSWindowCaptureHelperProcess | null {
+  const match = String(line || "").match(/^\s*(\d+)\s+(.+?)\s*$/);
+  if (!match) return null;
+  const pid = Number(match[1]);
+  const command = String(match[2] || "").trim();
+  if (!pid || !command) return null;
+  const helperName = basename(helperPath);
+  const isHelper =
+    command.startsWith(`${helperPath} `) ||
+    command === helperPath ||
+    command.includes(`/${helperName} `) ||
+    command === helperName;
+  if (!isHelper || !/\sstream(\s|$)/.test(command)) return null;
+  return { pid, command };
+}
+
+async function killOrphanedHelperStreams(options: {
+  keepProcessIds?: Array<number | null | undefined>;
+  settleMs?: number;
+} = {}) {
+  if (process.platform !== "darwin") return 0;
+  const keep = new Set(
+    (options.keepProcessIds || [])
+      .map((value) => Number(value || 0) || 0)
+      .filter(Boolean),
+  );
+  const { stdout } = await execFileAsync("/bin/ps", ["-axo", "pid=,command="], {
+    timeout: 3000,
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  const helperPath = helperBinaryPath();
+  const matches = String(stdout || "")
+    .split(/\r?\n/)
+    .map((line) => macOSWindowCaptureHelperProcessFromPSLine(line, helperPath))
+    .filter((entry): entry is MacOSWindowCaptureHelperProcess => Boolean(entry));
+  let killed = 0;
+  for (const entry of matches) {
+    if (keep.has(entry.pid) || entry.pid === process.pid) continue;
+    try {
+      process.kill(entry.pid, "SIGTERM");
+      killed += 1;
+    } catch {
+      // The process may already be gone; the next helper list is the source of truth.
+    }
+  }
+  if (killed > 0) {
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, options.settleMs ?? 150)));
+  }
+  return killed;
+}
+
 function helperWebPPrefix() {
   const override = String(process.env.ONEESAMA_WEBP_PREFIX || "").trim();
   if (override) return override;
@@ -294,7 +353,13 @@ export function matchesMacOSWindowCaptureTarget(
     .some((candidate) => candidate === name || candidate.includes(name));
 }
 
-export async function listMacOSWindowCaptureTargets(): Promise<MacOSWindowCaptureListResult> {
+export async function listMacOSWindowCaptureTargets(options: {
+  keepProcessIds?: Array<number | null | undefined>;
+  cleanupOrphanedStreams?: boolean;
+} = {}): Promise<MacOSWindowCaptureListResult> {
+  if (options.cleanupOrphanedStreams !== false) {
+    await killOrphanedHelperStreams({ keepProcessIds: options.keepProcessIds });
+  }
   const result = await runHelper<MacOSWindowCaptureListResult>(["list"]);
   const windows = Array.isArray(result.windows) ? result.windows : [];
   return {
