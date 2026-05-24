@@ -21,13 +21,14 @@ import (
 func TestScreenShareRoutesProxyToMeetRunner(t *testing.T) {
 	t.Parallel()
 
-	router := newScreenShareTestRouter(t, t.TempDir())
+	router, service := newScreenShareTestRouterWithService(t, t.TempDir())
 	join := screenShareRequest(http.MethodPost, "/join/google-meet", `{"session_id":"session_screen","meeting_url":"https://meet.google.com/abc-defg-hij","dry_run":true}`)
 	joinResponse := httptest.NewRecorder()
 	router.ServeHTTP(joinResponse, join)
 	if joinResponse.Code != http.StatusOK {
 		t.Fatalf("join = %d %s, want 200", joinResponse.Code, joinResponse.Body.String())
 	}
+	markSessionJoined(t, service, "session_screen")
 
 	start := screenShareRequest(http.MethodPost, "/screen-share/start", `{"title":"Deck","subtitle":"Demo","mode":"synthetic","preview":true}`)
 	startResponse := httptest.NewRecorder()
@@ -66,9 +67,10 @@ func TestScreenShareVideoLocalPathBecomesStageMediaURL(t *testing.T) {
 	if err := os.WriteFile(videoPath, []byte("fake video"), 0o600); err != nil {
 		t.Fatalf("write video: %v", err)
 	}
-	router := newScreenShareTestRouter(t, rootDir)
+	router, service := newScreenShareTestRouterWithService(t, rootDir)
 	join := screenShareRequest(http.MethodPost, "/join/google-meet", `{"session_id":"session_video","meeting_url":"https://meet.google.com/abc-defg-hij","dry_run":true}`)
 	router.ServeHTTP(httptest.NewRecorder(), join)
+	markSessionJoined(t, service, "session_video")
 
 	body := `{"path":` + strconv.Quote(videoPath) + `,"title":"Clip","muted":false}`
 	response := httptest.NewRecorder()
@@ -99,6 +101,12 @@ func TestStageMediaVideoServesAllowedFile(t *testing.T) {
 
 func newScreenShareTestRouter(t *testing.T, rootDir string) http.Handler {
 	t.Helper()
+	router, _ := newScreenShareTestRouterWithService(t, rootDir)
+	return router
+}
+
+func newScreenShareTestRouterWithService(t *testing.T, rootDir string) (http.Handler, *Service) {
+	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	service := NewService(Config{
@@ -108,7 +116,32 @@ func newScreenShareTestRouter(t *testing.T, rootDir string) http.Handler {
 		InternalAuthKey:  "secret-key",
 		MeetRunner:       fakeMeetRunner{},
 	})
-	return httpserver.New("meeting-agent", logger, []string{"*"}, NewHandler(service))
+	return httpserver.New("meeting-agent", logger, []string{"*"}, NewHandler(service)), service
+}
+
+func markSessionJoined(t *testing.T, service *Service, sessionID string) {
+	t.Helper()
+	session, err := service.GetSession(t.Context(), sessionID)
+	if err != nil {
+		t.Fatalf("get session %s: %v", sessionID, err)
+	}
+	if session == nil {
+		t.Fatalf("session %s not found", sessionID)
+	}
+	_, err = service.UpsertSession(t.Context(), SessionUpsertInput{
+		ID:               session.ID,
+		MeetingID:        session.MeetingID,
+		MeetingURL:       session.MeetingURL,
+		Status:           joinSessionStatusString(joinSessionStatusJoined),
+		Title:            session.Title,
+		ParticipantCount: session.ParticipantCount,
+		StartedAt:        session.StartedAt,
+		EndedAt:          session.EndedAt,
+		Metadata:         session.Metadata,
+	})
+	if err != nil {
+		t.Fatalf("mark session %s joined: %v", sessionID, err)
+	}
 }
 
 func screenShareRequest(method string, path string, body string) *http.Request {

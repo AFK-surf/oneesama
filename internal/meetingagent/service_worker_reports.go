@@ -143,6 +143,12 @@ func (s *Service) pollReadyWorkerReports(ctx context.Context, realtime bool, req
 		if !minTime.IsZero() && workerReportTime(report).Before(minTime) {
 			continue
 		}
+		if realtime && workerReportIsNoAction(report) {
+			if workerPollMarkDelivered(request) {
+				_, _ = s.markWorkerDelivered(ctx, report.ID, true, DeliveryMeta{Channel: "realtime_noop_suppressed"})
+			}
+			continue
+		}
 		ready = append(ready, report)
 	}
 	if workerPollMarkDelivered(request) {

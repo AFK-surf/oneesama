@@ -34,10 +34,12 @@ func (s *Service) StartJoinSetupInteraction(ctx context.Context, command AvatarC
 // (service_interaction_async.go) is the standard ack-first wrapper; do
 // not inline-call startJoinSetupInteraction here without first
 // establishing why the slow path is safe.
-func (s *Service) StartJoinSetupSocketInteraction(ctx context.Context, command AvatarCommandInput, responseURL string) {
+func (s *Service) StartJoinSetupSocketInteraction(ctx context.Context, command AvatarCommandInput, responseURL string) AvatarCommandResponse {
+	ack := s.joinSetupProgressResponse(command, responseURL, joinSetupSocketMode)
 	s.LaunchAsyncInteraction(ctx, "join_setup_socket", func(detached context.Context) {
 		_ = s.startJoinSetupInteraction(detached, command, responseURL, joinSetupSocketMode)
 	})
+	return ack
 }
 
 func (s *Service) StartJoinSetupCaptionSocketInteraction(ctx context.Context, response AvatarCommandResponse, responseURL string) {
@@ -52,30 +54,9 @@ func (s *Service) StartJoinSetupCaptionSocketInteraction(ctx context.Context, re
 }
 
 func (s *Service) startJoinSetupInteraction(ctx context.Context, command AvatarCommandInput, responseURL string, mode joinSetupInteractionMode) AvatarCommandResponse {
+	ack := s.joinSetupProgressResponse(command, responseURL, mode)
 	parsed := parseAvatarCommand(command.Text)
-	cardID := strings.Join([]string{
-		"join-card",
-		firstNonEmpty(strings.TrimSpace(command.ChannelID), "channel"),
-		firstNonEmpty(strings.TrimSpace(command.ThreadTS), "thread"),
-		sanitizeJoinSetupIDPart(parsed.MeetURL),
-	}, ":")
-	ack := AvatarCommandResponse{
-		OK:              true,
-		Text:            joinSetupInProgressText(parsed),
-		Blocks:          buildJoinSetupProgressBlocks(parsed),
-		ReplaceOriginal: true,
-		Metadata: map[string]any{
-			"join_setup": map[string]any{
-				"meeting_url":      parsed.MeetURL,
-				"caption_language": s.effectiveCaptionLanguage(parsed.CaptionLanguage),
-				"realtime":         parsed.RealtimeJoin,
-				"dry_run":          parsed.DryRunJoiner,
-				"status":           "joining",
-				"card_id":          cardID,
-				"update_transport": string(mode),
-			},
-		},
-	}
+	cardID := joinSetupProgressCardID(command, parsed)
 	s.logger.Info(
 		"slack join setup interaction started",
 		"card_id", cardID,
@@ -97,6 +78,37 @@ func (s *Service) startJoinSetupInteraction(ctx context.Context, command AvatarC
 	}
 	go s.finishJoinSetupInteraction(context.WithoutCancel(ctx), command, responseURL)
 	return ack
+}
+
+func (s *Service) joinSetupProgressResponse(command AvatarCommandInput, responseURL string, mode joinSetupInteractionMode) AvatarCommandResponse {
+	parsed := parseAvatarCommand(command.Text)
+	cardID := joinSetupProgressCardID(command, parsed)
+	return AvatarCommandResponse{
+		OK:              true,
+		Text:            joinSetupInProgressText(parsed),
+		Blocks:          buildJoinSetupProgressBlocks(parsed),
+		ReplaceOriginal: true,
+		Metadata: map[string]any{
+			"join_setup": map[string]any{
+				"meeting_url":      parsed.MeetURL,
+				"caption_language": s.effectiveCaptionLanguage(parsed.CaptionLanguage),
+				"realtime":         parsed.RealtimeJoin,
+				"dry_run":          parsed.DryRunJoiner,
+				"status":           "joining",
+				"card_id":          cardID,
+				"update_transport": string(mode),
+			},
+		},
+	}
+}
+
+func joinSetupProgressCardID(command AvatarCommandInput, parsed parsedAvatarCommand) string {
+	return strings.Join([]string{
+		"join-card",
+		firstNonEmpty(strings.TrimSpace(command.ChannelID), "channel"),
+		firstNonEmpty(strings.TrimSpace(command.ThreadTS), "thread"),
+		sanitizeJoinSetupIDPart(parsed.MeetURL),
+	}, ":")
 }
 
 func joinSetupInProgressText(parsed parsedAvatarCommand) string {

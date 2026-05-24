@@ -3126,6 +3126,34 @@
     ].join("\n");
   }
 
+  function isNoActionWorkerJob(job) {
+    if (!job || String(job.status || "").toLowerCase() !== "completed") {
+      return false;
+    }
+    const envelope = job.resultEnvelope || job.result_envelope || {};
+    const action = String(envelope.action || "").trim().toLowerCase();
+    if (action === "none" || action === "no_action") {
+      return true;
+    }
+    const text = [job.result, envelope.summary]
+      .filter(Boolean)
+      .map((value) => String(value).trim().toLowerCase())
+      .join("\n");
+    if (!text) {
+      return true;
+    }
+    return [
+      "no action needed",
+      "no action.",
+      "no action",
+      "nothing to do",
+      "无需",
+      "不需要执行",
+      "没有需要执行",
+      "无需助手介入",
+    ].some((phrase) => text.includes(phrase));
+  }
+
   function injectWorkerResult(job) {
     if (rememberInjectedWorkerJob(job.id)) {
       const duplicate = {
@@ -3137,6 +3165,18 @@
       state.workerResults.push(duplicate);
       state.workerResults = state.workerResults.slice(-50);
       return duplicate;
+    }
+    if (isNoActionWorkerJob(job)) {
+      const suppressed = {
+        ts: new Date().toISOString(),
+        jobId: job.id,
+        status: job.status,
+        suppressed: true,
+        reason: "no_action_result",
+      };
+      state.workerResults.push(suppressed);
+      state.workerResults = state.workerResults.slice(-50);
+      return suppressed;
     }
     const itemEvent = {
       type: "conversation.item.create",
