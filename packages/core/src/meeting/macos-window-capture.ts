@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -64,7 +64,7 @@ export interface MacOSWindowCaptureFrameResult {
   detail?: string;
 }
 
-function readPngDimensions(path: string): { width?: number; height?: number } {
+export function readPngDimensions(path: string): { width?: number; height?: number } {
   let fd: number | null = null;
   try {
     const header = Buffer.alloc(24);
@@ -82,6 +82,25 @@ function readPngDimensions(path: string): { width?: number; height?: number } {
   } finally {
     if (fd !== null) closeSync(fd);
   }
+}
+
+async function waitForPng(path: string, timeoutMs: number, child?: ChildProcess) {
+  const started = Date.now();
+  let lastExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+  child?.once("exit", (code, signal) => {
+    lastExit = { code, signal };
+  });
+  while (Date.now() - started < timeoutMs) {
+    if (existsSync(path)) {
+      const dimensions = readPngDimensions(path);
+      if (dimensions.width && dimensions.height) return dimensions;
+    }
+    if (lastExit) {
+      throw new Error(`macos_window_capture_stream_exited:${lastExit.code ?? lastExit.signal ?? "unknown"}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  throw new Error("macos_window_capture_stream_timeout");
 }
 
 function helperSourcePath() {
@@ -210,5 +229,64 @@ export async function captureMacOSWindowFrame(input: {
     ...result,
     width: dimensions.width || result.width,
     height: dimensions.height || result.height,
+  };
+}
+
+export async function startMacOSWindowCaptureStream(input: {
+  windowId: number | string;
+  outputPath: string;
+  fps?: number | string;
+  timeoutMs?: number;
+}): Promise<MacOSWindowCaptureFrameResult & { stop: () => void; processId?: number }> {
+  const windowId = String(input.windowId || "").trim();
+  if (!windowId) throw new Error("windowId is required");
+  const outputPath = resolve(input.outputPath);
+  await mkdir(dirname(outputPath), { recursive: true });
+  const backend = String(process.env.ONEESAMA_MACOS_WINDOW_CAPTURE_BACKEND || "screencapturekit")
+    .trim()
+    .toLowerCase();
+  if (backend !== "screencapturekit") {
+    throw new Error("macos_window_capture_stream_requires_screencapturekit");
+  }
+  const binary = await ensureHelperBinary();
+  const fps = Math.max(1, Math.min(30, Number.parseInt(String(input.fps ?? 25), 10) || 25));
+  const child = spawn(
+    binary,
+    [
+      "stream",
+      "--window-id",
+      windowId,
+      "--output",
+      outputPath,
+      "--fps",
+      String(fps),
+      "--timeout-ms",
+      String(input.timeoutMs || 2500),
+    ],
+    { stdio: ["ignore", "ignore", "pipe"] },
+  );
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    stderr += String(chunk || "");
+    if (stderr.length > 4096) stderr = stderr.slice(-4096);
+  });
+  const dimensions = await waitForPng(outputPath, Math.max(1000, input.timeoutMs || 2500), child)
+    .catch((error) => {
+      child.kill("SIGTERM");
+      const detail = stderr.trim();
+      throw new Error(detail ? `${error.message}: ${detail}` : error.message);
+    });
+  return {
+    ok: true,
+    source: "macos_screencapturekit",
+    captureBackend: "screencapturekit_stream",
+    output: outputPath,
+    width: dimensions.width,
+    height: dimensions.height,
+    processId: child.pid,
+    stop: () => {
+      if (!child.killed) child.kill("SIGTERM");
+    },
   };
 }

@@ -75,6 +75,27 @@ func backingScaleFactor(for frame: CGRect) -> CGFloat {
 }
 
 @available(macOS 12.3, *)
+func writePixelBufferPNG(_ pixelBuffer: CVPixelBuffer, outputURL: URL) throws {
+  let context = CIContext(options: nil)
+  let image = CIImage(cvPixelBuffer: pixelBuffer)
+  guard let cgImage = context.createCGImage(image, from: image.extent) else {
+    throw ToolError("create_cg_image_failed")
+  }
+  guard let destination = CGImageDestinationCreateWithURL(
+    outputURL as CFURL,
+    UTType.png.identifier as CFString,
+    1,
+    nil
+  ) else {
+    throw ToolError("create_png_destination_failed")
+  }
+  CGImageDestinationAddImage(destination, cgImage, nil)
+  guard CGImageDestinationFinalize(destination) else {
+    throw ToolError("write_png_failed")
+  }
+}
+
+@available(macOS 12.3, *)
 final class OneFrameOutput: NSObject, SCStreamOutput {
   let outputURL: URL
   let semaphore = DispatchSemaphore(value: 0)
@@ -90,28 +111,52 @@ final class OneFrameOutput: NSObject, SCStreamOutput {
       return
     }
     do {
-      let context = CIContext(options: nil)
-      let image = CIImage(cvPixelBuffer: pixelBuffer)
-      guard let cgImage = context.createCGImage(image, from: image.extent) else {
-        throw ToolError("create_cg_image_failed")
-      }
-      guard let destination = CGImageDestinationCreateWithURL(
-        outputURL as CFURL,
-        UTType.png.identifier as CFString,
-        1,
-        nil
-      ) else {
-        throw ToolError("create_png_destination_failed")
-      }
-      CGImageDestinationAddImage(destination, cgImage, nil)
-      guard CGImageDestinationFinalize(destination) else {
-        throw ToolError("write_png_failed")
-      }
+      try writePixelBufferPNG(pixelBuffer, outputURL: outputURL)
       result = .success(())
     } catch {
       result = .failure(error)
     }
     semaphore.signal()
+  }
+}
+
+@available(macOS 12.3, *)
+final class StreamingOutput: NSObject, SCStreamOutput {
+  let outputURL: URL
+  let ready = DispatchSemaphore(value: 0)
+  var frameCount = 0
+  var firstError: Error?
+  var firstFrameWritten = false
+
+  init(outputURL: URL) {
+    self.outputURL = outputURL
+  }
+
+  func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+    guard outputType == .screen else { return }
+    guard CMSampleBufferIsValid(sampleBuffer), let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+      return
+    }
+    do {
+      let temporaryURL = outputURL.deletingLastPathComponent().appendingPathComponent(
+        ".\(outputURL.lastPathComponent).tmp"
+      )
+      try writePixelBufferPNG(pixelBuffer, outputURL: temporaryURL)
+      if FileManager.default.fileExists(atPath: outputURL.path) {
+        try FileManager.default.removeItem(at: outputURL)
+      }
+      try FileManager.default.moveItem(at: temporaryURL, to: outputURL)
+      frameCount += 1
+      if !firstFrameWritten {
+        firstFrameWritten = true
+        ready.signal()
+      }
+    } catch {
+      if firstError == nil {
+        firstError = error
+        ready.signal()
+      }
+    }
   }
 }
 
@@ -201,6 +246,69 @@ func captureWindow(args: [String: String]) async throws {
   }
 }
 
+@available(macOS 12.3, *)
+func streamWindow(args: [String: String]) async throws {
+  guard let rawWindowID = args["window-id"] ?? args["windowId"], let windowID = UInt32(rawWindowID) else {
+    throw ToolError("window-id is required")
+  }
+  guard let output = args["output"], !output.isEmpty else {
+    throw ToolError("output is required")
+  }
+  let fps = max(1, min(30, Int(args["fps"] ?? "") ?? 25))
+  let timeoutMs = Int(args["timeout-ms"] ?? "") ?? 2500
+  let content = try await shareableContent()
+  guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+    throw ToolError("window_not_found")
+  }
+  let outputURL = URL(fileURLWithPath: output)
+  try FileManager.default.createDirectory(
+    at: outputURL.deletingLastPathComponent(),
+    withIntermediateDirectories: true
+  )
+
+  let scaleFactor = max(2, backingScaleFactor(for: window.frame))
+  let width = max(320, Int((window.frame.width * scaleFactor).rounded()))
+  let height = max(180, Int((window.frame.height * scaleFactor).rounded()))
+  let filter = SCContentFilter(desktopIndependentWindow: window)
+  let configuration = SCStreamConfiguration()
+  configuration.width = width
+  configuration.height = height
+  configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+  configuration.queueDepth = 5
+  configuration.scalesToFit = true
+  configuration.showsCursor = true
+
+  let outputSink = StreamingOutput(outputURL: outputURL)
+  let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+  try stream.addStreamOutput(outputSink, type: .screen, sampleHandlerQueue: DispatchQueue(label: "oneesama.window.stream"))
+  try await stream.startCapture()
+  let waitResult = outputSink.ready.wait(timeout: .now() + .milliseconds(timeoutMs))
+  if let error = outputSink.firstError {
+    try await stream.stopCapture()
+    throw error
+  }
+  if waitResult == .timedOut {
+    try await stream.stopCapture()
+    throw ToolError("frame_timeout")
+  }
+  try printJSON([
+    "ok": true,
+    "source": "macos_screencapturekit",
+    "window": windowPayload(window, index: 0),
+    "output": output,
+    "width": width,
+    "height": height,
+    "scaleFactor": scaleFactor,
+    "fps": fps,
+    "mode": "stream",
+  ])
+
+  while !Task.isCancelled {
+    try await Task.sleep(nanoseconds: 1_000_000_000)
+  }
+  try await stream.stopCapture()
+}
+
 @main
 struct Main {
   static func main() async {
@@ -214,11 +322,13 @@ struct Main {
           try await listWindows()
         case "capture":
           try await captureWindow(args: parsed)
+        case "stream":
+          try await streamWindow(args: parsed)
         default:
           try printJSON([
             "ok": false,
             "error": "usage",
-            "commands": ["list", "capture --window-id <id> --output <path>"],
+            "commands": ["list", "capture --window-id <id> --output <path>", "stream --window-id <id> --output <path>"],
           ])
           Foundation.exit(2)
         }
