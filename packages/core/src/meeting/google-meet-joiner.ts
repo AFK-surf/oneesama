@@ -37,6 +37,11 @@ const require = createRequire(import.meta.url);
 type Page = import("playwright").Page;
 type BrowserContext = import("playwright").BrowserContext;
 
+const DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH = 2560;
+const DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT = 1440;
+const MAX_SYNTHETIC_SCREEN_SHARE_WIDTH = 3840;
+const MAX_SYNTHETIC_SCREEN_SHARE_HEIGHT = 2160;
+
 interface MeetUrlOptions {
   allowNonGoogleMeet?: boolean;
 }
@@ -50,7 +55,10 @@ interface VideoStageInput {
   path?: string;
   muted?: boolean;
   width?: number | string;
+  screenShareWidth?: number | string;
   height?: number | string;
+  screenShareHeight?: number | string;
+  screenShareFps?: number | string;
 }
 
 interface ScreenShareBridgeInput extends VideoStageInput {
@@ -320,6 +328,47 @@ function safeFilePart(value: unknown, fallback = "item"): string {
       .replace(/[^a-zA-Z0-9_.-]+/g, "_")
       .replace(/^_+|_+$/g, "")
       .slice(0, 96) || fallback
+  );
+}
+
+function positiveInteger(value: unknown): number | null {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function fitDimensionsWithin(width: number, height: number, maxWidth: number, maxHeight: number) {
+  if (!width || !height) return { width: maxWidth, height: maxHeight };
+  const scale = Math.min(1, maxWidth / width, maxHeight / height);
+  return {
+    width: Math.max(320, Math.round(width * scale)),
+    height: Math.max(180, Math.round(height * scale)),
+  };
+}
+
+function syntheticShareDimensionsFromSource(
+  input: ScreenShareBridgeInput = {},
+  source: { width?: number; height?: number; frame?: { width?: number; height?: number } } = {},
+) {
+  const requestedWidth = positiveInteger(input.width ?? input.screenShareWidth);
+  const requestedHeight = positiveInteger(input.height ?? input.screenShareHeight);
+  const sourceWidth =
+    positiveInteger(source.width) ??
+    (positiveInteger(source.frame?.width) ? positiveInteger(source.frame?.width)! * 2 : null) ??
+    DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH;
+  const sourceHeight =
+    positiveInteger(source.height) ??
+    (positiveInteger(source.frame?.height) ? positiveInteger(source.frame?.height)! * 2 : null) ??
+    DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT;
+  const aspect = sourceWidth / Math.max(1, sourceHeight);
+  const width =
+    requestedWidth ?? (requestedHeight ? Math.round(requestedHeight * aspect) : sourceWidth);
+  const height =
+    requestedHeight ?? (requestedWidth ? Math.round(requestedWidth / aspect) : sourceHeight);
+  return fitDimensionsWithin(
+    width,
+    height,
+    MAX_SYNTHETIC_SCREEN_SHARE_WIDTH,
+    MAX_SYNTHETIC_SCREEN_SHARE_HEIGHT,
   );
 }
 
@@ -2700,8 +2749,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           mode: input.screenShareMode || "synthetic",
           title: input.screenShareTitle || "Meeting Avatar Bot",
           subtitle: input.screenShareSubtitle || "Agent screen share",
-          width: input.screenShareWidth || 1280,
-          height: input.screenShareHeight || 720,
+          width: input.screenShareWidth || DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,
+          height: input.screenShareHeight || DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
           fps: input.screenShareFps || 15,
         }),
       });
@@ -3301,6 +3350,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       outputPath: framePath,
       timeoutMs: 2500,
     });
+    const dimensions = syntheticShareDimensionsFromSource(input, {
+      width: capture.width,
+      height: capture.height,
+      frame: app.frame,
+    });
     const update = await startScreenShare({
       ...input,
       title: input.title || `Share ${app.applicationName || app.name || "application"}`,
@@ -3309,9 +3363,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
       imagePath: capture.output || framePath,
       framePath: capture.output || framePath,
+      width: dimensions.width,
+      height: dimensions.height,
       preview: input.preview,
     });
-    return { capture, update, framePath };
+    return { capture, update, framePath, dimensions };
   }
 
   function startMacWindowCaptureLoop(app: any, input: AppShareInput, firstFrame: number) {
@@ -3330,6 +3386,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           frame,
           window: app,
           output: result.capture.output,
+          sourceWidth: result.capture.width || null,
+          sourceHeight: result.capture.height || null,
+          width: result.dimensions.width,
+          height: result.dimensions.height,
           updateOk: result.update?.ok,
         });
       } catch (error) {
@@ -3356,6 +3416,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       window: app,
       intervalMs,
       fps,
+      width: input.width || null,
+      height: input.height || null,
     });
     return {
       ok: true,
@@ -3406,6 +3468,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
 
   async function presentAppShare(input: AppShareInput = {}) {
     if (!active?.page) return { ok: false, error: "no_active_join" };
+    await refreshActiveRuntimeState();
+    const beforePresentation = await getMeetPresentationState(active.page);
+    const replaceExistingShare = Boolean(
+      active?.screenShare?.active || beforePresentation.presenting,
+    );
     const listed = await listShareableApps();
     if (!listed.ok) return listed;
     const applications = Array.isArray(listed.applications) ? listed.applications : [];
@@ -3419,41 +3486,42 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         candidates: applications.slice(0, 20),
       };
     }
+    const previousCaptureStop = stopActiveMacWindowCapture("replace_window_capture");
     const title = input.title || `Share ${app.applicationName || app.name || "application"}`;
-    const firstFrame = await captureMacWindowToSynthetic(
-      app,
-      {
-        ...input,
-        title,
-        subtitle:
-          input.subtitle ||
-          `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
-      },
-      1,
-    );
+    const baseInput: AppShareInput = {
+      ...input,
+      title,
+      subtitle:
+        input.subtitle ||
+        `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+    };
+    const firstFrame = await captureMacWindowToSynthetic(app, baseInput, 1);
+    const shareInput: AppShareInput = {
+      ...baseInput,
+      width: firstFrame.dimensions.width,
+      height: firstFrame.dimensions.height,
+    };
     await refreshActiveRuntimeState();
-    const present = active?.screenShare?.active
+    const present = replaceExistingShare
       ? {
           ok: true,
-          skipped: true,
-          reason: "synthetic_share_already_active",
+          replaced: true,
+          reason: "synthetic_share_replaced_active",
           screenShare: active.screenShare,
         }
       : await presentScreenShare({
-          ...input,
+          ...shareInput,
           mode: "synthetic",
           title,
-          subtitle:
-            input.subtitle ||
-            `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
           imagePath: firstFrame.capture.output,
           waitMs: input.waitMs || 2500,
         });
-    const loop = startMacWindowCaptureLoop(app, input, 1);
+    const loop = startMacWindowCaptureLoop(app, shareInput, 1);
     const result = {
       ok: Boolean(present.ok),
       app,
       present,
+      beforePresentation,
       capture: {
         mode: "macos_window_to_synthetic",
         source: "macos_screencapturekit",
@@ -3461,6 +3529,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         appPixelsAutomaticallySelected: true,
         windowId: app.windowId || app.windowID || 0,
         firstFrame: firstFrame.capture.output,
+        sourceWidth: firstFrame.capture.width || null,
+        sourceHeight: firstFrame.capture.height || null,
+        width: firstFrame.dimensions.width,
+        height: firstFrame.dimensions.height,
+        previousCaptureStop,
         loop,
       },
       note: "app_share_started_via_synthetic_capture; Meet native picker was not used.",
@@ -3514,6 +3587,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           subtitle: bridgeInput.subtitle || "Agent screen share",
           videoUrl: bridgeInput.videoUrl || bridgeInput.url || bridgeInput.path || "",
           imageUrl,
+          width:
+            positiveInteger(bridgeInput.width ?? bridgeInput.screenShareWidth) ||
+            DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,
+          height:
+            positiveInteger(bridgeInput.height ?? bridgeInput.screenShareHeight) ||
+            DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
+          fps: positiveInteger(bridgeInput.fps ?? bridgeInput.screenShareFps) || 15,
           preview: Boolean(bridgeInput.preview),
         },
       )

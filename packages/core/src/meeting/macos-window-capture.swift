@@ -66,6 +66,14 @@ func windowPayload(_ window: SCWindow, index: Int) -> [String: Any] {
   ]
 }
 
+func backingScaleFactor(for frame: CGRect) -> CGFloat {
+  let center = CGPoint(x: frame.midX, y: frame.midY)
+  if let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) {
+    return max(1, screen.backingScaleFactor)
+  }
+  return max(1, NSScreen.main?.backingScaleFactor ?? 1)
+}
+
 @available(macOS 12.3, *)
 final class OneFrameOutput: NSObject, SCStreamOutput {
   let outputURL: URL
@@ -151,8 +159,9 @@ func captureWindow(args: [String: String]) async throws {
     withIntermediateDirectories: true
   )
 
-  let width = max(320, Int(window.frame.width.rounded()))
-  let height = max(180, Int(window.frame.height.rounded()))
+  let scaleFactor = backingScaleFactor(for: window.frame)
+  let width = max(320, Int((window.frame.width * scaleFactor).rounded()))
+  let height = max(180, Int((window.frame.height * scaleFactor).rounded()))
   let filter = SCContentFilter(desktopIndependentWindow: window)
   let configuration = SCStreamConfiguration()
   configuration.width = width
@@ -180,6 +189,7 @@ func captureWindow(args: [String: String]) async throws {
       "output": output,
       "width": width,
       "height": height,
+      "scaleFactor": scaleFactor,
     ])
   case .failure(let error):
     throw error

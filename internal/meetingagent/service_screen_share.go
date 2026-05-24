@@ -23,6 +23,9 @@ func (s *Service) StartScreenShare(ctx context.Context, input ScreenShareRequest
 		ImageURL:  input.ImageURL,
 		ImagePath: firstNonEmpty(input.ImagePath, input.FramePath),
 		FramePath: input.FramePath,
+		Width:     firstNonZero(input.Width, input.ScreenShareWidth),
+		Height:    firstNonZero(input.Height, input.ScreenShareHeight),
+		FPS:       firstNonZero(input.FPS, input.ScreenShareFPS),
 	})
 }
 
@@ -41,6 +44,9 @@ func (s *Service) PresentScreenShare(ctx context.Context, input ScreenShareReque
 		ImageURL:  input.ImageURL,
 		ImagePath: firstNonEmpty(input.ImagePath, input.FramePath),
 		FramePath: input.FramePath,
+		Width:     firstNonZero(input.Width, input.ScreenShareWidth),
+		Height:    firstNonZero(input.Height, input.ScreenShareHeight),
+		FPS:       firstNonZero(input.FPS, input.ScreenShareFPS),
 	})
 }
 
@@ -60,6 +66,9 @@ func (s *Service) PresentVideoStage(ctx context.Context, input VideoStageRequest
 			Subtitle:  firstNonEmpty(input.Subtitle, input.ScreenShareSubtitle, "Shared by Onee Sama"),
 			Mode:      firstNonEmpty(input.Mode, input.ScreenShareMode, "synthetic"),
 			WaitMs:    input.WaitMs,
+			Width:     firstNonZero(input.Width, input.ScreenShareWidth, 1280),
+			Height:    firstNonZero(input.Height, input.ScreenShareHeight, 720),
+			FPS:       firstNonZero(input.FPS, input.ScreenShareFPS),
 		},
 		VideoURL:   firstNonEmpty(input.VideoURL, input.URL, input.Path),
 		StageTitle: firstNonEmpty(input.StageTitle, "Meeting Avatar Bot"),
@@ -90,6 +99,9 @@ func (s *Service) PresentAppShare(ctx context.Context, input AppShareRequest) (m
 			Preview:   input.Preview,
 			Mode:      firstNonEmpty(input.Mode, input.ScreenShareMode),
 			WaitMs:    input.WaitMs,
+			Width:     firstNonZero(input.Width, input.ScreenShareWidth),
+			Height:    firstNonZero(input.Height, input.ScreenShareHeight),
+			FPS:       firstNonZero(input.FPS, input.ScreenShareFPS),
 		},
 		WindowID:         input.WindowID,
 		WindowTitle:      input.WindowTitle,

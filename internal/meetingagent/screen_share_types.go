@@ -13,19 +13,21 @@ type ScreenShareRequest struct {
 	ImageURL            string `json:"imageUrl,omitempty"`
 	ImagePath           string `json:"imagePath,omitempty"`
 	FramePath           string `json:"framePath,omitempty"`
+	Width               int    `json:"width,omitempty"`
+	ScreenShareWidth    int    `json:"screenShareWidth,omitempty"`
+	Height              int    `json:"height,omitempty"`
+	ScreenShareHeight   int    `json:"screenShareHeight,omitempty"`
+	FPS                 int    `json:"fps,omitempty"`
+	ScreenShareFPS      int    `json:"screenShareFps,omitempty"`
 }
 
 type VideoStageRequest struct {
 	ScreenShareRequest
-	VideoURL          string `json:"videoUrl,omitempty"`
-	URL               string `json:"url,omitempty"`
-	Path              string `json:"path,omitempty"`
-	StageTitle        string `json:"stageTitle,omitempty"`
-	Width             int    `json:"width,omitempty"`
-	ScreenShareWidth  int    `json:"screenShareWidth,omitempty"`
-	Height            int    `json:"height,omitempty"`
-	ScreenShareHeight int    `json:"screenShareHeight,omitempty"`
-	Muted             *bool  `json:"muted,omitempty"`
+	VideoURL   string `json:"videoUrl,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Path       string `json:"path,omitempty"`
+	StageTitle string `json:"stageTitle,omitempty"`
+	Muted      *bool  `json:"muted,omitempty"`
 }
 
 type ShareableAppsRequest struct {

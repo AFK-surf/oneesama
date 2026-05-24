@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -58,9 +58,30 @@ export interface MacOSWindowCaptureFrameResult {
   captureBackend?: string;
   width?: number;
   height?: number;
+  scaleFactor?: number;
   window?: MacOSWindowCaptureWindow;
   error?: string;
   detail?: string;
+}
+
+function readPngDimensions(path: string): { width?: number; height?: number } {
+  let fd: number | null = null;
+  try {
+    const header = Buffer.alloc(24);
+    fd = openSync(path, "r");
+    const bytes = readSync(fd, header, 0, header.length, 0);
+    if (bytes < 24) return {};
+    const pngSignature = "89504e470d0a1a0a";
+    if (header.subarray(0, 8).toString("hex") !== pngSignature) return {};
+    return {
+      width: header.readUInt32BE(16),
+      height: header.readUInt32BE(20),
+    };
+  } catch {
+    return {};
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
 }
 
 function helperSourcePath() {
@@ -165,14 +186,17 @@ export async function captureMacOSWindowFrame(input: {
       timeout: Math.max(1000, input.timeoutMs || 2500),
       maxBuffer: 1024 * 1024,
     });
+    const dimensions = readPngDimensions(outputPath);
     return {
       ok: true,
       source: "macos_screencapturekit",
       captureBackend: "screencapture_window",
       output: outputPath,
+      width: dimensions.width,
+      height: dimensions.height,
     };
   }
-  return await runHelper<MacOSWindowCaptureFrameResult>([
+  const result = await runHelper<MacOSWindowCaptureFrameResult>([
     "capture",
     "--window-id",
     windowId,
@@ -181,4 +205,10 @@ export async function captureMacOSWindowFrame(input: {
     "--timeout-ms",
     String(input.timeoutMs || 2500),
   ]);
+  const dimensions = readPngDimensions(outputPath);
+  return {
+    ...result,
+    width: dimensions.width || result.width,
+    height: dimensions.height || result.height,
+  };
 }

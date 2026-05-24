@@ -176,6 +176,9 @@ type ScreenShareInput struct {
 	ImageURL  string `json:"imageUrl,omitempty"`
 	ImagePath string `json:"imagePath,omitempty"`
 	FramePath string `json:"framePath,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	FPS       int    `json:"fps,omitempty"`
 }
 
 type VideoStageInput struct {

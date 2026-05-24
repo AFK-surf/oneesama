@@ -1,8 +1,11 @@
 interface ScreenShareInitOptions {
   enabled?: boolean;
   width?: number | string;
+  screenShareWidth?: number | string;
   height?: number | string;
+  screenShareHeight?: number | string;
   fps?: number | string;
+  screenShareFps?: number | string;
   mode?: string;
   title?: string;
   subtitle?: string;
@@ -15,9 +18,9 @@ interface ScreenShareInitOptions {
 export function buildScreenShareInitScript(options: ScreenShareInitOptions = {}) {
   const config = {
     enabled: options.enabled !== false,
-    width: Number.parseInt(String(options.width ?? 1280), 10),
-    height: Number.parseInt(String(options.height ?? 720), 10),
-    fps: Number.parseInt(String(options.fps ?? 15), 10),
+    width: Number.parseInt(String(options.width ?? options.screenShareWidth ?? 2560), 10),
+    height: Number.parseInt(String(options.height ?? options.screenShareHeight ?? 1440), 10),
+    fps: Number.parseInt(String(options.fps ?? options.screenShareFps ?? 15), 10),
     mode: options.mode || "synthetic",
     title: options.title || "Meeting Avatar Bot",
     subtitle: options.subtitle || "Shared agent workspace",
@@ -46,6 +49,9 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       subtitle: config.subtitle,
       videoUrl: config.videoUrl,
       imageUrl: config.imageUrl,
+      width: config.width,
+      height: config.height,
+      fps: config.fps,
       videoReady: false,
       videoError: "",
       imageReady: false,
@@ -62,16 +68,39 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
     let video = null;
     let image = null;
 
+    function clampDimension(value, fallback, min, max) {
+      const parsed = Number.parseInt(String(value ?? ""), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+      return Math.max(min, Math.min(max, parsed));
+    }
+
+    function clampFps(value, fallback) {
+      const parsed = Number.parseInt(String(value ?? ""), 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+      return Math.max(1, Math.min(30, parsed));
+    }
+
     function ensureCanvas() {
       if (canvas) return canvas;
       canvas = document.createElement("canvas");
-      canvas.width = config.width;
-      canvas.height = config.height;
+      canvas.width = state.width;
+      canvas.height = state.height;
       canvas.style.cssText = "position:fixed;right:12px;bottom:12px;width:256px;height:144px;z-index:2147483647;border:1px solid rgba(0,0,0,.25);background:#101418;display:none";
       canvas.dataset.meetingAvatarScreenShare = "1";
       document.documentElement.appendChild(canvas);
       ctx = canvas.getContext("2d");
       return canvas;
+    }
+
+    function resizeCanvas(width, height) {
+      const nextWidth = clampDimension(width, state.width || config.width, 320, 4096);
+      const nextHeight = clampDimension(height, state.height || config.height, 180, 2304);
+      state.width = nextWidth;
+      state.height = nextHeight;
+      if (canvas && (canvas.width !== nextWidth || canvas.height !== nextHeight)) {
+        canvas.width = nextWidth;
+        canvas.height = nextHeight;
+      }
     }
 
     function ensureVideo() {
@@ -164,7 +193,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       state.frames = frame;
       const w = canvas.width;
       const h = canvas.height;
-      const t = frame / Math.max(1, config.fps);
+      const t = frame / Math.max(1, state.fps || config.fps);
       const imageEl = ensureImage();
       if (imageEl && state.imageReady && drawContainImage(imageEl, w, h)) {
         ctx.fillStyle = "rgba(5, 7, 10, .70)";
@@ -218,7 +247,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       ctx.fillText("Live agent screen share", 104, boxY + 58);
       ctx.font = "400 24px ui-monospace, SFMono-Regular, Menlo, monospace";
       ctx.fillStyle = "rgba(255,255,255,.70)";
-      ctx.fillText("frame=" + frame + "  fps=" + config.fps + "  " + new Date().toLocaleTimeString(), 104, boxY + 106);
+      ctx.fillText("frame=" + frame + "  fps=" + (state.fps || config.fps) + "  " + new Date().toLocaleTimeString(), 104, boxY + 106);
       ctx.fillText("source=meeting-avatar synthetic display", 104, boxY + 148);
 
       ctx.fillStyle = "rgba(77, 218, 163, .9)";
@@ -230,7 +259,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
     function createStream() {
       ensureCanvas();
       drawFrame();
-      stream = canvas.captureStream(config.fps);
+      stream = canvas.captureStream(state.fps || config.fps);
       state.streamId = stream.id;
       state.trackIds = stream.getVideoTracks().map((track) => track.id);
       return stream;
@@ -251,20 +280,20 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       const originalGetCapabilities = track.getCapabilities?.bind(track);
       const originalGetConstraints = track.getConstraints?.bind(track);
       track.getSettings = () => ({
-        ...(originalGetSettings ? originalGetSettings() : {}),
-        width: config.width,
-        height: config.height,
-        frameRate: config.fps,
-        aspectRatio: config.width / config.height,
+          ...(originalGetSettings ? originalGetSettings() : {}),
+        width: state.width || config.width,
+        height: state.height || config.height,
+        frameRate: state.fps || config.fps,
+        aspectRatio: (state.width || config.width) / (state.height || config.height),
         displaySurface: "monitor",
         logicalSurface: true,
         cursor: "always",
       });
       track.getCapabilities = () => ({
-        ...(originalGetCapabilities ? originalGetCapabilities() : {}),
-        width: { min: config.width, max: config.width },
-        height: { min: config.height, max: config.height },
-        frameRate: { min: config.fps, max: config.fps },
+          ...(originalGetCapabilities ? originalGetCapabilities() : {}),
+        width: { min: state.width || config.width, max: state.width || config.width },
+        height: { min: state.height || config.height, max: state.height || config.height },
+        frameRate: { min: state.fps || config.fps, max: state.fps || config.fps },
         displaySurface: ["monitor"],
         logicalSurface: [true],
         cursor: ["always"],
@@ -278,6 +307,16 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
 
     async function start(options = {}) {
       try {
+        const nextWidth = options.width ?? options.screenShareWidth ?? state.width ?? config.width;
+        const nextHeight = options.height ?? options.screenShareHeight ?? state.height ?? config.height;
+        const nextFps = clampFps(options.fps ?? options.screenShareFps, state.fps || config.fps);
+        const fpsChanged = nextFps !== state.fps;
+        resizeCanvas(nextWidth, nextHeight);
+        state.fps = nextFps;
+        if (fpsChanged && timer) {
+          window.clearInterval(timer);
+          timer = null;
+        }
         state.title = options.title || state.title || config.title;
         state.subtitle = options.subtitle || state.subtitle || config.subtitle;
         const nextImageUrl = options.imageUrl || options.imagePath || options.framePath || state.imageUrl || config.imageUrl;
@@ -297,7 +336,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
         }
         if (!stream) createStream();
         if (!timer) {
-          timer = window.setInterval(drawFrame, Math.max(16, Math.round(1000 / config.fps)));
+          timer = window.setInterval(drawFrame, Math.max(16, Math.round(1000 / state.fps)));
         }
         state.active = true;
         state.startedAt = new Date().toISOString();
