@@ -191,6 +191,7 @@ Peng-facing final smoke:
 - [ ] Say "用编辑器演示当前画面" and verify the model lists shareable windows instead of guessing.
 - [ ] Say "打开 https://example.com 给我看" and verify the browser surface opens the URL.
 - [ ] Say "做一个贪吃蛇，然后给我看" and verify generated shared workspace is used.
+- [ ] Say "做一个 Q3 metrics dashboard" and verify generated shared workspace is used for a non-demo artifact request.
 - [ ] Say "停止分享" and verify sharing stops.
 
 ## Open Design Notes
