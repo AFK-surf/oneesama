@@ -41,7 +41,7 @@ test("macOS window capture target matching rejects unrelated apps", () => {
   assert.equal(matchesMacOSWindowCaptureTarget(safariWindow, { applicationName: "Code" }), false);
 });
 
-test("macOS window capture dimensions support PNG and JPEG frames", () => {
+test("macOS window capture dimensions support PNG, JPEG, and WebP frames", () => {
   const dir = mkdtempSync(join(tmpdir(), "oneesama-macos-capture-test-"));
   const pngPath = join(dir, "frame.png");
   const png = Buffer.alloc(24);
@@ -67,6 +67,19 @@ test("macOS window capture dimensions support PNG and JPEG frames", () => {
     ]),
   );
 
+  const webpPath = join(dir, "frame.webp");
+  const webp = Buffer.alloc(30);
+  webp.write("RIFF", 0, "ascii");
+  webp.writeUInt32LE(22, 4);
+  webp.write("WEBP", 8, "ascii");
+  webp.write("VP8X", 12, "ascii");
+  webp.writeUInt32LE(10, 16);
+  webp[20] = 0;
+  webp.writeUIntLE(1365 - 1, 24, 3);
+  webp.writeUIntLE(768 - 1, 27, 3);
+  writeFileSync(webpPath, webp);
+
   assert.deepEqual(readImageDimensions(pngPath), { width: 1920, height: 1280 });
   assert.deepEqual(readImageDimensions(jpegPath), { width: 2640, height: 1720 });
+  assert.deepEqual(readImageDimensions(webpPath), { width: 1365, height: 768 });
 });

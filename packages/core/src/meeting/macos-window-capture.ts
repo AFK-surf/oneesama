@@ -73,6 +73,44 @@ function jpegSofMarker(marker: number) {
   );
 }
 
+function uint24LE(buffer: Buffer, offset: number) {
+  return buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
+}
+
+function readWebPDimensions(header: Buffer, bytes: number): { width?: number; height?: number } {
+  if (
+    bytes < 30 ||
+    header.subarray(0, 4).toString("ascii") !== "RIFF" ||
+    header.subarray(8, 12).toString("ascii") !== "WEBP"
+  ) {
+    return {};
+  }
+  const chunk = header.subarray(12, 16).toString("ascii");
+  if (chunk === "VP8X") {
+    return {
+      width: uint24LE(header, 24) + 1,
+      height: uint24LE(header, 27) + 1,
+    };
+  }
+  if (chunk === "VP8 " && header[23] === 0x9d && header[24] === 0x01 && header[25] === 0x2a) {
+    return {
+      width: header.readUInt16LE(26) & 0x3fff,
+      height: header.readUInt16LE(28) & 0x3fff,
+    };
+  }
+  if (chunk === "VP8L" && header[20] === 0x2f) {
+    const b1 = header[21];
+    const b2 = header[22];
+    const b3 = header[23];
+    const b4 = header[24];
+    return {
+      width: 1 + b1 + ((b2 & 0x3f) << 8),
+      height: 1 + ((b2 & 0xc0) >> 6) + (b3 << 2) + ((b4 & 0x0f) << 10),
+    };
+  }
+  return {};
+}
+
 export function readImageDimensions(path: string): { width?: number; height?: number } {
   let fd: number | null = null;
   try {
@@ -87,6 +125,9 @@ export function readImageDimensions(path: string): { width?: number; height?: nu
         height: header.readUInt32BE(20),
       };
     }
+
+    const webPDimensions = readWebPDimensions(header, bytes);
+    if (webPDimensions.width && webPDimensions.height) return webPDimensions;
 
     if (header[0] !== 0xff || header[1] !== 0xd8) return {};
     let offset = 2;
@@ -148,6 +189,14 @@ function helperSourcePath() {
   return fileURLToPath(new URL("./macos-window-capture.swift", import.meta.url));
 }
 
+function helperWebPSourcePath() {
+  return fileURLToPath(new URL("./macos-window-webp.c", import.meta.url));
+}
+
+function helperWebPHeaderPath() {
+  return fileURLToPath(new URL("./macos-window-webp.h", import.meta.url));
+}
+
 function helperBinaryPath() {
   return resolve(
     process.env.ONEESAMA_MACOS_WINDOW_CAPTURE_HELPER ||
@@ -155,10 +204,19 @@ function helperBinaryPath() {
   );
 }
 
-function helperNeedsCompile(source: string, binary: string) {
+function helperWebPPrefix() {
+  const override = String(process.env.ONEESAMA_WEBP_PREFIX || "").trim();
+  if (override) return override;
+  if (existsSync("/opt/homebrew/include/webp/encode.h")) return "/opt/homebrew";
+  if (existsSync("/usr/local/include/webp/encode.h")) return "/usr/local";
+  return "/opt/homebrew";
+}
+
+function helperNeedsCompile(sources: string[], binary: string) {
   if (!existsSync(binary)) return true;
   try {
-    return statSync(binary).mtimeMs < statSync(source).mtimeMs;
+    const binaryMtime = statSync(binary).mtimeMs;
+    return sources.some((source) => binaryMtime < statSync(source).mtimeMs);
   } catch {
     return true;
   }
@@ -169,10 +227,29 @@ async function ensureHelperBinary() {
     throw new Error("macOS window capture requires darwin");
   }
   const source = helperSourcePath();
+  const webPSource = helperWebPSourcePath();
+  const webPHeader = helperWebPHeaderPath();
   const binary = helperBinaryPath();
-  if (!helperNeedsCompile(source, binary)) return binary;
+  if (!helperNeedsCompile([source, webPSource, webPHeader], binary)) return binary;
   await mkdir(dirname(binary), { recursive: true });
-  await execFileAsync("/usr/bin/swiftc", ["-parse-as-library", source, "-o", binary], {
+  const webPPrefix = helperWebPPrefix();
+  const object = join(tmpdir(), "oneesama-macos-window-webp.o");
+  await execFileAsync("/usr/bin/clang", ["-c", webPSource, "-I", `${webPPrefix}/include`, "-o", object], {
+    timeout: 30000,
+    maxBuffer: 1024 * 1024,
+  });
+  await execFileAsync("/usr/bin/swiftc", [
+    "-parse-as-library",
+    source,
+    object,
+    "-import-objc-header",
+    webPHeader,
+    "-L",
+    `${webPPrefix}/lib`,
+    "-lwebp",
+    "-o",
+    binary,
+  ], {
     timeout: 30000,
     maxBuffer: 1024 * 1024,
   });

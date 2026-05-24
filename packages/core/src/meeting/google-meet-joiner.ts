@@ -424,23 +424,34 @@ async function normalizeScreenShareImageUrl(value = ""): Promise<string> {
   return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
-interface LocalMjpegFrameServer {
+interface LocalMultipartFrameServer {
   url: string;
   port: number;
   token: string;
   framePath: string;
+  contentType: string;
   stop: () => void;
   clientCount: () => number;
 }
 
-async function startLocalMjpegFrameServer(input: {
+function imageContentTypeForPath(filePath: string) {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  return "application/octet-stream";
+}
+
+async function startLocalMultipartFrameServer(input: {
   framePath: string;
   fps: number;
-}): Promise<LocalMjpegFrameServer> {
+}): Promise<LocalMultipartFrameServer> {
   const framePath = pathResolve(input.framePath);
   const fps = Math.max(1, Math.min(30, Number.parseInt(String(input.fps || 25), 10) || 25));
   const token = randomUUID();
   const boundary = `oneesama-${token.replace(/-/g, "")}`;
+  const contentType = imageContentTypeForPath(framePath);
+  const streamExtension = contentType === "image/webp" ? "mwebp" : "mjpg";
   const clients = new Set<ServerResponse>();
   let latestFrame: Buffer | null = null;
   let latestSignature = "";
@@ -451,7 +462,7 @@ async function startLocalMjpegFrameServer(input: {
     if (res.destroyed || res.writableEnded) return;
     try {
       res.write(`--${boundary}\r\n`);
-      res.write("Content-Type: image/jpeg\r\n");
+      res.write(`Content-Type: ${contentType}\r\n`);
       res.write(`Content-Length: ${frame.length}\r\n`);
       res.write("Cache-Control: no-store\r\n\r\n");
       res.write(frame);
@@ -464,7 +475,7 @@ async function startLocalMjpegFrameServer(input: {
 
   const server = createServer((req, res) => {
     const url = new URL(req.url || "/", "http://127.0.0.1");
-    if (url.pathname !== `/screen-share/${token}.mjpg`) {
+    if (url.pathname !== `/screen-share/${token}.${streamExtension}`) {
       res.writeHead(404, {
         "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": "*",
@@ -520,10 +531,11 @@ async function startLocalMjpegFrameServer(input: {
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
   return {
-    url: `http://127.0.0.1:${port}/screen-share/${token}.mjpg`,
+    url: `http://127.0.0.1:${port}/screen-share/${token}.${streamExtension}`,
     port,
     token,
     framePath,
+    contentType,
     stop: () => {
       stopped = true;
       clearInterval(timer);
@@ -2436,7 +2448,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     stopped: boolean;
     window: unknown;
     stream?: { stop: () => void; processId?: number };
-    mjpeg?: LocalMjpegFrameServer;
+    mjpeg?: LocalMultipartFrameServer;
     stop: (reason?: string) => void;
   } = null;
   const activeBrowserPath = pathJoin(config.dataDir, "active-meet-browser.json");
@@ -3469,7 +3481,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const captureDir = pathJoin(active?.artifactsDir || config.dataDir, "screen-share-capture");
     const appPart = safeFilePart(app.applicationName || app.name || app.title || "app");
     const windowPart = safeFilePart(app.windowId || app.windowID || app.processId || "window");
-    return pathJoin(captureDir, `${appPart}-${windowPart}-latest.jpg`);
+    return pathJoin(captureDir, `${appPart}-${windowPart}-latest.webp`);
   }
 
   async function captureMacWindowToSynthetic(app: any, input: AppShareInput, frame: number) {
@@ -3595,9 +3607,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       return startMacWindowOneShotCaptureLoop(app, input, firstFrame, fallbackReason);
     }
 
-    let mjpeg: LocalMjpegFrameServer;
+    let mjpeg: LocalMultipartFrameServer;
     try {
-      mjpeg = await startLocalMjpegFrameServer({ framePath: outputPath, fps });
+      mjpeg = await startLocalMultipartFrameServer({ framePath: outputPath, fps });
     } catch (error) {
       stream.stop();
       const fallbackReason = String(error?.message || error);
@@ -3648,11 +3660,12 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       },
     };
     active?.diagnostics?.record("macos_window_capture_loop_started", {
-      backend: "screencapturekit_stream_mjpeg",
+      backend: "screencapturekit_stream_multipart",
       window: app,
       intervalMs,
       fps,
-      frameTransport: "local_mjpeg",
+      frameTransport: "local_multipart",
+      frameContentType: mjpeg.contentType,
       frameUrl: mjpeg.url,
       processId: stream.processId || null,
       output: outputPath,
@@ -3665,7 +3678,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     return {
       ok: true,
       source: "macos_screencapturekit",
-      backend: "screencapturekit_stream_mjpeg",
+      backend: "screencapturekit_stream_multipart",
       intervalMs,
       fps,
       output: outputPath,

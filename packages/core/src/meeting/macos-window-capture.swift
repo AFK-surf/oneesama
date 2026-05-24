@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import CoreImage
 import CoreMedia
+import CoreVideo
 import Foundation
 import ImageIO
 import ScreenCaptureKit
@@ -89,6 +90,36 @@ func writePixelBufferJPEG(_ pixelBuffer: CVPixelBuffer, outputURL: URL) throws {
   )
 }
 
+func writePixelBufferWebP(_ pixelBuffer: CVPixelBuffer, outputURL: URL) throws {
+  let pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer)
+  guard pixelFormat == kCVPixelFormatType_32BGRA else {
+    throw ToolError("webp_requires_bgra_pixel_buffer:\(pixelFormat)")
+  }
+  let width = CVPixelBufferGetWidth(pixelBuffer)
+  let height = CVPixelBufferGetHeight(pixelBuffer)
+  let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+  CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+  defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+  guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+    throw ToolError("webp_pixel_buffer_base_unavailable")
+  }
+  var output: UnsafeMutablePointer<UInt8>?
+  let encodedSize = oneesama_webp_encode_bgra_fast(
+    baseAddress.assumingMemoryBound(to: UInt8.self),
+    Int32(width),
+    Int32(height),
+    Int32(bytesPerRow),
+    78.0,
+    &output
+  )
+  guard encodedSize > 0, let encoded = output else {
+    throw ToolError("webp_encode_failed")
+  }
+  defer { oneesama_webp_free(encoded) }
+  let data = Data(bytes: encoded, count: encodedSize)
+  try data.write(to: outputURL, options: .atomic)
+}
+
 @available(macOS 12.3, *)
 func writePixelBufferImage(
   _ pixelBuffer: CVPixelBuffer,
@@ -161,7 +192,10 @@ final class StreamingOutput: NSObject, SCStreamOutput {
       let temporaryURL = outputURL.deletingLastPathComponent().appendingPathComponent(
         ".\(outputURL.lastPathComponent).tmp"
       )
-      if outputURL.pathExtension.lowercased() == "jpg" || outputURL.pathExtension.lowercased() == "jpeg" {
+      let pathExtension = outputURL.pathExtension.lowercased()
+      if pathExtension == "webp" {
+        try writePixelBufferWebP(pixelBuffer, outputURL: temporaryURL)
+      } else if pathExtension == "jpg" || pathExtension == "jpeg" {
         try writePixelBufferJPEG(pixelBuffer, outputURL: temporaryURL)
       } else {
         try writePixelBufferPNG(pixelBuffer, outputURL: temporaryURL)
@@ -237,6 +271,7 @@ func captureWindow(args: [String: String]) async throws {
   configuration.height = height
   configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
   configuration.queueDepth = 3
+  configuration.pixelFormat = kCVPixelFormatType_32BGRA
   // ScreenCaptureKit otherwise leaves desktop-independent windows in the top-left
   // of a larger Retina-sized surface, which appears as a cropped share in Meet.
   configuration.scalesToFit = true
@@ -299,6 +334,7 @@ func streamWindow(args: [String: String]) async throws {
   configuration.height = height
   configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
   configuration.queueDepth = 5
+  configuration.pixelFormat = kCVPixelFormatType_32BGRA
   configuration.scalesToFit = true
   configuration.showsCursor = true
 

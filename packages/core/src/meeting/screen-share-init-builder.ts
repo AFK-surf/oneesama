@@ -133,7 +133,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       if (image) return image;
       image = document.createElement("img");
       image.crossOrigin = "anonymous";
-      if (/\\.mjpg(?:[?#]|$)|[?&]mjpeg=1(?:&|$)|multipart/i.test(state.imageUrl)) {
+      if (/\\.(?:mjpg|mwebp)(?:[?#]|$)|[?&](?:mjpeg|stream)=1(?:&|$)|multipart/i.test(state.imageUrl)) {
         state.imageReady = true;
       }
       image.src = state.imageUrl;
