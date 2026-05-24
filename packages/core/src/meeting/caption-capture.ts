@@ -67,6 +67,12 @@ function isLocalMeetCaptionSpeaker(speaker: unknown): boolean {
   return /^you\s*\(.+\)$/.test(normalized);
 }
 
+function isCaptionSettingsUiText(text: unknown): boolean {
+  const normalized = normalizeCaptionText(text);
+  if (!normalized) return true;
+  return /^(English|Chinese, Mandarin \(Simplified\)|Chinese \(Simplified\)|Chinese \(Traditional\)|Japanese|Korean|French|German|Spanish|Portuguese|Italian|Dutch|Russian)$/i.test(normalized);
+}
+
 function compactCaptionEvent(event: CaptionEvent): CaptionEvent {
   return {
     ts: event.ts,
@@ -530,6 +536,7 @@ async function inspectCaptionSettingsPanel(page: import("playwright").Page) {
 
 export const __captionCaptureTestInternals = {
   clickCaptionLanguageOption,
+  isCaptionSettingsUiText,
   isLocalMeetCaptionSpeaker,
   liveCaptionsRadioSelected,
   translatedCaptionsEnabled,
@@ -648,6 +655,14 @@ export async function installMeetCaptionCapture(
       speaker: normalizeCaptionText(rawEvent?.speaker || "unknown") || "unknown",
     });
     if (!event.text) return;
+    if (isCaptionSettingsUiText(event.text)) {
+      diagnostics?.record("caption_event_dropped_ui_text", {
+        speaker: event.speaker,
+        text: event.text.slice(0, 240),
+        streamId: event.streamId,
+      });
+      return;
+    }
     if (isLocalMeetCaptionSpeaker(event.speaker)) {
       diagnostics?.record("caption_event_dropped_local_speaker", {
         speaker: event.speaker,
@@ -721,6 +736,7 @@ export async function installMeetCaptionCapture(
       const normalized = normalize(text);
       if (!normalized) return true;
       if (normalized.length <= 2) return true;
+      if (/^(English|Chinese, Mandarin \(Simplified\)|Chinese \(Simplified\)|Chinese \(Traditional\)|Japanese|Korean|French|German|Spanish|Portuguese|Italian|Dutch|Russian)$/i.test(normalized)) return true;
       if (/^(language|english|closed_caption|live captions|format_size|font size|circle|font color|settings|open caption settings|groups)$/i.test(normalized)) return true;
       if (/^(gemini|take notes with gemini|pen_spark|adaptive_audio_mic|domain_disabled)$/i.test(normalized)) return true;
       if (/^(press down arrow|external participants joined|your audio is merged with nearby devices)/i.test(normalized)) return true;
