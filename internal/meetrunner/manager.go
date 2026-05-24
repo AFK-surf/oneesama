@@ -17,6 +17,7 @@ import (
 const defaultTimeout = 10 * time.Second
 const joinLaunchTimeout = 4 * time.Minute
 const statusSnapshotTimeout = 45 * time.Second
+const screenShareCallTimeout = 60 * time.Second
 
 type Config struct {
 	Dir     string
@@ -178,7 +179,7 @@ func (m *Manager) callScreenShare(ctx context.Context, sessionID string, method 
 		return nil, err
 	}
 	var result ScreenShareResult
-	if err := worker.Call(ctx, method, input, &result); err != nil {
+	if err := worker.CallWithTimeoutNoClose(ctx, screenShareCallTimeout, method, input, &result); err != nil {
 		return nil, err
 	}
 	return result, nil

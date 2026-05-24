@@ -17,6 +17,8 @@ import {
   captureMacOSWindowFrame,
   listMacOSWindowCaptureTargets,
   matchesMacOSWindowCaptureTarget,
+  readPngDimensions,
+  startMacOSWindowCaptureStream,
 } from "./macos-window-capture.ts";
 import { buildRealtimeBrowserInitScript } from "../realtime/realtime-browser-init-builder.ts";
 import { buildWorkerResultInitScript } from "../realtime/worker-result-init-builder.ts";
@@ -2314,6 +2316,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     timer: NodeJS.Timeout | null;
     stopped: boolean;
     window: unknown;
+    stream?: { stop: () => void; processId?: number };
     stop: (reason?: string) => void;
   } = null;
   const activeBrowserPath = pathJoin(config.dataDir, "active-meet-browser.json");
@@ -3342,6 +3345,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     return pathJoin(captureDir, `${appPart}-${windowPart}-${String(frame).padStart(4, "0")}.png`);
   }
 
+  function macWindowLatestFramePath(app: any) {
+    const captureDir = pathJoin(active?.artifactsDir || config.dataDir, "screen-share-capture");
+    const appPart = safeFilePart(app.applicationName || app.name || app.title || "app");
+    const windowPart = safeFilePart(app.windowId || app.windowID || app.processId || "window");
+    return pathJoin(captureDir, `${appPart}-${windowPart}-latest.png`);
+  }
+
   async function captureMacWindowToSynthetic(app: any, input: AppShareInput, frame: number) {
     const windowId = Number(app.windowId || app.windowID || 0) || 0;
     if (!windowId) throw new Error("macos_window_id_required");
@@ -3371,8 +3381,12 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     return { capture, update, framePath, dimensions };
   }
 
-  function startMacWindowCaptureLoop(app: any, input: AppShareInput, firstFrame: number) {
-    stopActiveMacWindowCapture("replace_window_capture");
+  function startMacWindowOneShotCaptureLoop(
+    app: any,
+    input: AppShareInput,
+    firstFrame: number,
+    fallbackReason = "",
+  ) {
     const fps = Math.max(
       1,
       Math.min(30, positiveInteger(input.fps ?? input.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS),
@@ -3422,12 +3436,119 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       fps,
       width: input.width || null,
       height: input.height || null,
+      fallbackReason,
     });
     return {
       ok: true,
       source: "macos_screencapturekit",
+      backend: "screencapturekit_oneshot",
       intervalMs,
       fps,
+      fallbackReason,
+      window: app,
+    };
+  }
+
+  async function startMacWindowCaptureLoop(app: any, input: AppShareInput, firstFrame: number) {
+    stopActiveMacWindowCapture("replace_window_capture");
+    const fps = Math.max(
+      1,
+      Math.min(30, positiveInteger(input.fps ?? input.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS),
+    );
+    const intervalMs = Math.max(16, Math.round(1000 / fps));
+    const windowId = Number(app.windowId || app.windowID || 0) || 0;
+    const outputPath = macWindowLatestFramePath(app);
+    let stream: Awaited<ReturnType<typeof startMacOSWindowCaptureStream>>;
+    try {
+      stream = await startMacOSWindowCaptureStream({
+        windowId,
+        outputPath,
+        fps,
+        timeoutMs: 3000,
+      });
+    } catch (error) {
+      const fallbackReason = String(error?.message || error);
+      active?.diagnostics?.record("macos_window_capture_stream_fallback", {
+        window: app,
+        error: fallbackReason,
+      });
+      return startMacWindowOneShotCaptureLoop(app, input, firstFrame, fallbackReason);
+    }
+
+    let frame = firstFrame;
+    let busy = false;
+    const tick = async () => {
+      if (busy || !activeMacWindowCapture || activeMacWindowCapture.stopped) return;
+      busy = true;
+      frame += 1;
+      try {
+        const dimensions = syntheticShareDimensionsFromSource(input, {
+          ...readPngDimensions(outputPath),
+          frame: app.frame,
+        });
+        const update = await startScreenShare({
+          ...input,
+          title: input.title || `Share ${app.applicationName || app.name || "application"}`,
+          subtitle:
+            input.subtitle ||
+            `${app.title || app.applicationName || "Mac window"} via synthetic capture`,
+          imagePath: outputPath,
+          framePath: outputPath,
+          width: dimensions.width,
+          height: dimensions.height,
+          preview: input.preview,
+        });
+        active?.diagnostics?.record("macos_window_capture_frame", {
+          backend: "screencapturekit_stream",
+          frame,
+          window: app,
+          output: outputPath,
+          sourceWidth: stream.width || null,
+          sourceHeight: stream.height || null,
+          width: dimensions.width,
+          height: dimensions.height,
+          updateOk: update?.ok,
+        });
+      } catch (error) {
+        active?.diagnostics?.record("macos_window_capture_frame_error", {
+          backend: "screencapturekit_stream",
+          frame,
+          window: app,
+          error: String(error?.message || error),
+        });
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(tick, intervalMs);
+    activeMacWindowCapture = {
+      timer,
+      stopped: false,
+      window: app,
+      stream,
+      stop: () => {
+        if (timer) clearInterval(timer);
+        stream.stop();
+        if (activeMacWindowCapture) activeMacWindowCapture.stopped = true;
+      },
+    };
+    active?.diagnostics?.record("macos_window_capture_loop_started", {
+      backend: "screencapturekit_stream",
+      window: app,
+      intervalMs,
+      fps,
+      processId: stream.processId || null,
+      width: input.width || null,
+      height: input.height || null,
+    });
+    return {
+      ok: true,
+      source: "macos_screencapturekit",
+      backend: stream.captureBackend || "screencapturekit_stream",
+      intervalMs,
+      fps,
+      output: outputPath,
+      processId: stream.processId || null,
       window: app,
     };
   }
@@ -3521,7 +3642,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           waitMs: input.waitMs || 2500,
           fps: shareInput.fps || shareInput.screenShareFps || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
         });
-    const loop = startMacWindowCaptureLoop(app, shareInput, 1);
+    const loop = await startMacWindowCaptureLoop(app, shareInput, 1);
     const result = {
       ok: Boolean(present.ok),
       app,
