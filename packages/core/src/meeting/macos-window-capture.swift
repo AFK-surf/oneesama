@@ -166,8 +166,11 @@ func captureWindow(args: [String: String]) async throws {
   let configuration = SCStreamConfiguration()
   configuration.width = width
   configuration.height = height
-  configuration.minimumFrameInterval = CMTime(value: 1, timescale: 2)
+  configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
   configuration.queueDepth = 3
+  // ScreenCaptureKit otherwise leaves desktop-independent windows in the top-left
+  // of a larger Retina-sized surface, which appears as a cropped share in Meet.
+  configuration.scalesToFit = true
   configuration.showsCursor = true
 
   let outputSink = OneFrameOutput(outputURL: outputURL)
