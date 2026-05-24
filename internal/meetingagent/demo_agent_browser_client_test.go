@@ -27,14 +27,15 @@ func (r *fakeDemoAgentBrowserRunner) RunAgentBrowser(_ context.Context, args ...
 func TestDemoAgentBrowserClientOpenURLUsesDeterministicCLI(t *testing.T) {
 	now := time.Date(2026, 5, 21, 18, 50, 0, 0, time.UTC)
 	runner := &fakeDemoAgentBrowserRunner{outputs: map[string]string{
-		"--session oneesama-demo-surface-demo_browser open https://example.test/app": "✓ Oneesama App",
-		"--session oneesama-demo-surface-demo_browser get title":                     "Oneesama App",
-		"--session oneesama-demo-surface-demo_browser get text body":                 "Ready score: 0 Start snake",
+		"--session oneesama-demo-surface-demo_browser open https://example.test/app":                    "✓ Oneesama App",
+		"--session oneesama-demo-surface-demo_browser screenshot /tmp/demo-frames/demo_browser-007.png": "✓ screenshot",
+		"--session oneesama-demo-surface-demo_browser get title":                                        "Oneesama App",
+		"--session oneesama-demo-surface-demo_browser get text body":                                    "Ready score: 0 Start snake",
 	}}
 	client := &DemoAgentBrowserClient{Runner: runner, Now: func() time.Time { return now }}
 
 	result, err := client.DoDemoAction(context.Background(), DemoKWWKActionRequest{
-		Session:  DemoKWWKSessionRef{SessionID: "demo_browser"},
+		Session:  DemoKWWKSessionRef{SessionID: "demo_browser", FramesDir: "/tmp/demo-frames"},
 		Kind:     DemoActionOpenURL,
 		URL:      "https://example.test/app",
 		Sequence: 7,
@@ -51,9 +52,16 @@ func TestDemoAgentBrowserClientOpenURLUsesDeterministicCLI(t *testing.T) {
 	if result.Metadata["adapter"] != string(DemoKWWKAdapterAgentBrowser) || result.Metadata["session"] != "oneesama-demo-surface-demo_browser" {
 		t.Fatalf("metadata = %#v, want adapter/session", result.Metadata)
 	}
+	if result.FramePath != "/tmp/demo-frames/demo_browser-007.png" {
+		t.Fatalf("frame path = %q, want deterministic screenshot path", result.FramePath)
+	}
 	wantFirst := "--session oneesama-demo-surface-demo_browser open https://example.test/app"
 	if got := strings.Join(runner.calls[0], " "); got != wantFirst {
 		t.Fatalf("first call = %q, want %q", got, wantFirst)
+	}
+	wantScreenshot := "--session oneesama-demo-surface-demo_browser screenshot /tmp/demo-frames/demo_browser-007.png"
+	if got := strings.Join(runner.calls[2], " "); got != wantScreenshot {
+		t.Fatalf("screenshot call = %q, want %q", got, wantScreenshot)
 	}
 }
 

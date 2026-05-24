@@ -50,8 +50,11 @@ func TestRealtimeDemoBridgeStartPublishesObservationContext(t *testing.T) {
 	if !result.OK || result.Status != realtimeDemoBridgeStatusStarted || result.SessionID != "demo_bridge" {
 		t.Fatalf("result = %#v, want started demo_bridge", result)
 	}
-	if result.Presentation == nil || result.Presentation.Source != "screen_share_present" {
-		t.Fatalf("presentation = %#v, want synthetic share", result.Presentation)
+	if result.Presentation == nil || result.Presentation.Source != "screen_share_update" {
+		t.Fatalf("presentation = %#v, want shared frame update", result.Presentation)
+	}
+	if len(share.startCalls) != 2 || len(share.presentCalls) != 1 || share.startCalls[1].FramePath != "/tmp/demo/frame-001.png" {
+		t.Fatalf("share calls start=%#v present=%d, want initial share plus frame update", share.startCalls, len(share.presentCalls))
 	}
 	if result.Observation == nil || result.Observation.Summary != "The demo dashboard is visible and ready." {
 		t.Fatalf("observation = %#v", result.Observation)

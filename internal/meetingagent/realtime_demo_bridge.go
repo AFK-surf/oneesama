@@ -39,6 +39,10 @@ type DemoSurfacePresentationClient interface {
 	Stop(context.Context, DemoSurfaceStopRequest) (DemoSurfacePresentation, error)
 }
 
+type DemoSurfacePresentationUpdater interface {
+	Update(context.Context, DemoSurfacePresentRequest) (DemoSurfacePresentation, error)
+}
+
 type RealtimeDemoBridge struct {
 	Mode         string
 	Lifecycle    DemoWorkspaceLifecycleClient
@@ -200,6 +204,12 @@ func (b *RealtimeDemoBridge) Start(ctx context.Context, req RealtimeDemoSurfaceS
 		result.Workspace = &stoppedWorkspace
 		return result, err
 	}
+	if updated, updateErr := b.updatePresentationFrame(ctx, workspace, req.MeetingSessionID, obs, req.Title, req.Subtitle); updated != nil {
+		result.Presentation = updated
+		if updateErr != nil {
+			result.Error = updateErr.Error()
+		}
+	}
 	return result, nil
 }
 
@@ -334,7 +344,39 @@ func (b *RealtimeDemoBridge) Control(ctx context.Context, req RealtimeDemoSurfac
 		out.Error = err.Error()
 		return out, err
 	}
+	if updated, updateErr := b.updatePresentationFrame(ctx, workspace, req.MeetingSessionID, obs, "", ""); updated != nil {
+		out.Presentation = updated
+		if updateErr != nil {
+			out.Status = realtimeDemoBridgeStatusFailed
+			out.Error = updateErr.Error()
+			return out, updateErr
+		}
+	}
 	return out, nil
+}
+
+func (b *RealtimeDemoBridge) updatePresentationFrame(ctx context.Context, workspace DemoWorkspaceSession, meetingSessionID string, obs DemoObservation, title string, subtitle string) (*DemoSurfacePresentation, error) {
+	framePath := strings.TrimSpace(obs.FramePath)
+	if framePath == "" || b == nil || b.Presenter == nil {
+		return nil, nil
+	}
+	updater, ok := b.Presenter.(DemoSurfacePresentationUpdater)
+	if !ok {
+		return nil, nil
+	}
+	updated, err := updater.Update(ctx, DemoSurfacePresentRequest{
+		MeetingSessionID: strings.TrimSpace(meetingSessionID),
+		DemoSession:      workspace,
+		DemoSessionID:    workspace.ID,
+		Title:            strings.TrimSpace(title),
+		Subtitle:         strings.TrimSpace(subtitle),
+		FramePath:        framePath,
+	})
+	if err != nil {
+		b.recordAction(workspace.ID, DemoActionCapture, "", DemoSessionResultFailed, "screen_share_frame_update_failed", []string{framePath})
+		return &updated, err
+	}
+	return &updated, nil
 }
 
 func (b *RealtimeDemoBridge) runObservation(ctx context.Context, workspace DemoWorkspaceSession, req RealtimeDemoSurfaceStartRequest, token *DemoCancelToken) (DemoObservation, DemoFeedback, error) {

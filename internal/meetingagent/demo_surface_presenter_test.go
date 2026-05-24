@@ -117,6 +117,30 @@ func TestDemoSurfacePresenterUsesAppShareForExplicitAppTarget(t *testing.T) {
 	}
 }
 
+func TestDemoSurfacePresenterUpdatePushesFrameToSyntheticShare(t *testing.T) {
+	share := &fakeDemoSurfaceShareClient{}
+	presenter := DemoSurfacePresenter{Share: share}
+
+	result, err := presenter.Update(context.Background(), DemoSurfacePresentRequest{
+		MeetingSessionID: "meet_session",
+		DemoSessionID:    "demo_session",
+		FramePath:        "/tmp/demo/frame-001.png",
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if result.Status != DemoSurfacePresentationPresenting || result.Source != "screen_share_update" {
+		t.Fatalf("result = %#v, want synthetic frame update", result)
+	}
+	if len(share.startCalls) != 1 || share.startCalls[0].ImagePath != "/tmp/demo/frame-001.png" || share.startCalls[0].FramePath != "/tmp/demo/frame-001.png" {
+		t.Fatalf("start calls = %#v, want frame path image update", share.startCalls)
+	}
+	if len(share.presentCalls) != 0 || len(share.appCalls) != 0 {
+		t.Fatalf("present=%d app=%d, want no picker path on update", len(share.presentCalls), len(share.appCalls))
+	}
+}
+
 func TestDemoSurfacePresenterFallsBackToSyntheticShareWithoutAppTarget(t *testing.T) {
 	share := &fakeDemoSurfaceShareClient{}
 	presenter := DemoSurfacePresenter{Share: share}

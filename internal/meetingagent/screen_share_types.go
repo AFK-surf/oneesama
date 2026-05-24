@@ -10,6 +10,9 @@ type ScreenShareRequest struct {
 	Mode                string `json:"mode,omitempty"`
 	ScreenShareMode     string `json:"screenShareMode,omitempty"`
 	WaitMs              int    `json:"waitMs,omitempty"`
+	ImageURL            string `json:"imageUrl,omitempty"`
+	ImagePath           string `json:"imagePath,omitempty"`
+	FramePath           string `json:"framePath,omitempty"`
 }
 
 type VideoStageRequest struct {

@@ -1,7 +1,7 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { getRuntimeConfig } from "../env.ts";
 import type { ScreenShareState, VideoStageState } from "../browser-runtime-types.ts";
 import { buildAvatarInitScript } from "../avatar/init-script-builder.ts";
@@ -54,6 +54,9 @@ interface ScreenShareBridgeInput extends VideoStageInput {
   preview?: boolean;
   allowCoordinateFallback?: boolean;
   waitMs?: number;
+  imageUrl?: string;
+  imagePath?: string;
+  framePath?: string;
 }
 
 interface AppShareInput extends ScreenShareBridgeInput {
@@ -331,6 +334,21 @@ function normalizeStageVideoUrl(value = ""): string {
   if (!raw) return "";
   if (/^https?:\/\//i.test(raw) || /^file:\/\//i.test(raw) || /^data:/i.test(raw)) return raw;
   return pathToFileURL(pathResolve(raw)).toString();
+}
+
+async function normalizeScreenShareImageUrl(value = ""): Promise<string> {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^data:/i.test(raw) || /^https?:\/\//i.test(raw)) return raw;
+  const filePath = /^file:\/\//i.test(raw) ? fileURLToPath(raw) : pathResolve(raw);
+  const bytes = await readFile(filePath);
+  const lower = filePath.toLowerCase();
+  const mime = lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+    ? "image/jpeg"
+    : lower.endsWith(".webp")
+      ? "image/webp"
+      : "image/png";
+  return `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
 function buildVideoStageHtml(input: VideoStageInput = {}): string {
@@ -3235,6 +3253,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       mode: "synthetic",
       screenShareMode: "synthetic",
     };
+    const imageUrl = await normalizeScreenShareImageUrl(
+      bridgeInput.imageUrl || bridgeInput.imagePath || bridgeInput.framePath || "",
+    );
     const controller = await ensureScreenShareController(active.page, bridgeInput);
     if (!controller.ok) {
       const result = {
@@ -3262,6 +3283,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           title: bridgeInput.title || "Meeting Avatar Bot",
           subtitle: bridgeInput.subtitle || "Agent screen share",
           videoUrl: bridgeInput.videoUrl || bridgeInput.url || bridgeInput.path || "",
+          imageUrl,
           preview: Boolean(bridgeInput.preview),
         },
       )

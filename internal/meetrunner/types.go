@@ -173,6 +173,9 @@ type ScreenShareInput struct {
 	Preview   bool   `json:"preview,omitempty"`
 	Mode      string `json:"mode,omitempty"`
 	WaitMs    int    `json:"waitMs,omitempty"`
+	ImageURL  string `json:"imageUrl,omitempty"`
+	ImagePath string `json:"imagePath,omitempty"`
+	FramePath string `json:"framePath,omitempty"`
 }
 
 type VideoStageInput struct {

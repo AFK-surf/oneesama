@@ -7,6 +7,7 @@ interface ScreenShareInitOptions {
   title?: string;
   subtitle?: string;
   videoUrl?: string;
+  imageUrl?: string;
   muted?: boolean;
   autoStart?: boolean;
 }
@@ -21,6 +22,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
     title: options.title || "Meeting Avatar Bot",
     subtitle: options.subtitle || "Shared agent workspace",
     videoUrl: options.videoUrl || "",
+    imageUrl: options.imageUrl || "",
     muted: options.muted !== false,
     autoStart: Boolean(options.autoStart),
   };
@@ -43,8 +45,11 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       title: config.title,
       subtitle: config.subtitle,
       videoUrl: config.videoUrl,
+      imageUrl: config.imageUrl,
       videoReady: false,
       videoError: "",
+      imageReady: false,
+      imageError: "",
       errors: [],
     };
     window.MAB_SCREEN_SHARE = state;
@@ -55,6 +60,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
     let timer = null;
     let frame = 0;
     let video = null;
+    let image = null;
 
     function ensureCanvas() {
       if (canvas) return canvas;
@@ -93,6 +99,23 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       return video;
     }
 
+    function ensureImage() {
+      if (!state.imageUrl) return null;
+      if (image) return image;
+      image = document.createElement("img");
+      image.src = state.imageUrl;
+      image.crossOrigin = "anonymous";
+      image.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none";
+      image.addEventListener("load", () => { state.imageReady = true; });
+      image.addEventListener("error", () => {
+        state.imageReady = false;
+        state.imageError = "image_error";
+        state.errors.push("image_error");
+      });
+      document.documentElement.appendChild(image);
+      return image;
+    }
+
     function drawContainVideo(videoEl, w, h) {
       const vw = videoEl.videoWidth || 0;
       const vh = videoEl.videoHeight || 0;
@@ -114,6 +137,27 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       }
     }
 
+    function drawContainImage(imageEl, w, h) {
+      const iw = imageEl.naturalWidth || imageEl.width || 0;
+      const ih = imageEl.naturalHeight || imageEl.height || 0;
+      if (!iw || !ih) return false;
+      const scale = Math.min(w / iw, h / ih);
+      const dw = Math.round(iw * scale);
+      const dh = Math.round(ih * scale);
+      const dx = Math.round((w - dw) / 2);
+      const dy = Math.round((h - dh) / 2);
+      ctx.fillStyle = "#05070a";
+      ctx.fillRect(0, 0, w, h);
+      try {
+        ctx.drawImage(imageEl, dx, dy, dw, dh);
+        return true;
+      } catch (error) {
+        state.imageError = String(error && error.message || error);
+        state.errors.push("draw_image_failed: " + state.imageError);
+        return false;
+      }
+    }
+
     function drawFrame() {
       ensureCanvas();
       frame += 1;
@@ -121,6 +165,18 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       const w = canvas.width;
       const h = canvas.height;
       const t = frame / Math.max(1, config.fps);
+      const imageEl = ensureImage();
+      if (imageEl && state.imageReady && drawContainImage(imageEl, w, h)) {
+        ctx.fillStyle = "rgba(5, 7, 10, .70)";
+        ctx.fillRect(40, h - 116, Math.min(w - 80, 760), 72);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "700 26px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(state.title || config.title, 64, h - 76);
+        ctx.font = "400 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillStyle = "rgba(255,255,255,.78)";
+        ctx.fillText(state.subtitle || config.subtitle, 66, h - 50);
+        return;
+      }
       const videoEl = ensureVideo();
       if (videoEl && videoEl.readyState >= 2 && drawContainVideo(videoEl, w, h)) {
         ctx.fillStyle = "rgba(5, 7, 10, .70)";
@@ -224,6 +280,15 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       try {
         state.title = options.title || state.title || config.title;
         state.subtitle = options.subtitle || state.subtitle || config.subtitle;
+        const nextImageUrl = options.imageUrl || options.imagePath || options.framePath || state.imageUrl || config.imageUrl;
+        if (nextImageUrl && nextImageUrl !== state.imageUrl) {
+          state.imageUrl = nextImageUrl;
+          state.imageReady = false;
+          state.imageError = "";
+          if (image) image.remove();
+          image = null;
+          ensureImage();
+        }
         state.videoUrl = options.videoUrl || options.url || options.path || state.videoUrl || config.videoUrl;
         if (state.videoUrl && (!video || video.src !== state.videoUrl)) {
           if (video) video.remove();

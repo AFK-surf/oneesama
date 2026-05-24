@@ -20,6 +20,9 @@ func (s *Service) StartScreenShare(ctx context.Context, input ScreenShareRequest
 		Preview:   input.Preview,
 		Mode:      firstNonEmpty(input.Mode, input.ScreenShareMode),
 		WaitMs:    input.WaitMs,
+		ImageURL:  input.ImageURL,
+		ImagePath: firstNonEmpty(input.ImagePath, input.FramePath),
+		FramePath: input.FramePath,
 	})
 }
 
@@ -35,6 +38,9 @@ func (s *Service) PresentScreenShare(ctx context.Context, input ScreenShareReque
 		Preview:   input.Preview,
 		Mode:      firstNonEmpty(input.Mode, input.ScreenShareMode),
 		WaitMs:    input.WaitMs,
+		ImageURL:  input.ImageURL,
+		ImagePath: firstNonEmpty(input.ImagePath, input.FramePath),
+		FramePath: input.FramePath,
 	})
 }
 

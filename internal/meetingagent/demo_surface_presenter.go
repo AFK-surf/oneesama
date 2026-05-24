@@ -53,6 +53,8 @@ type DemoSurfacePresentRequest struct {
 	ProcessID        int
 	BundleIdentifier string
 	ApplicationName  string
+	ImageURL         string
+	FramePath        string
 }
 
 type DemoSurfaceStopRequest struct {
@@ -92,6 +94,9 @@ func (p DemoSurfacePresenter) Present(ctx context.Context, req DemoSurfacePresen
 		Preview:   req.Preview,
 		Mode:      firstNonEmpty(req.StartMode, defaultDemoSurfaceStartMode),
 		WaitMs:    req.WaitMs,
+		ImageURL:  strings.TrimSpace(req.ImageURL),
+		ImagePath: strings.TrimSpace(req.FramePath),
+		FramePath: strings.TrimSpace(req.FramePath),
 	}
 	started, err := p.Share.StartScreenShare(ctx, base)
 	out.Started = started
@@ -137,6 +142,44 @@ func (p DemoSurfacePresenter) Present(ctx context.Context, req DemoSurfacePresen
 		out.Status = DemoSurfacePresentationFailed
 		out.Reason = "screen_share_present_failed"
 		return out, screenShareResultFailureError(out.Reason, presented)
+	}
+	return out, nil
+}
+
+func (p DemoSurfacePresenter) Update(ctx context.Context, req DemoSurfacePresentRequest) (DemoSurfacePresentation, error) {
+	if p.Share == nil {
+		return DemoSurfacePresentation{Status: DemoSurfacePresentationFailed, Reason: errDemoSurfaceMissingShareClient.Error()}, errDemoSurfaceMissingShareClient
+	}
+	demoSessionID := firstNonEmpty(req.DemoSessionID, req.DemoSession.ID)
+	if strings.TrimSpace(demoSessionID) == "" {
+		return DemoSurfacePresentation{Status: DemoSurfacePresentationFailed, Reason: errDemoSurfaceMissingSession.Error()}, errDemoSurfaceMissingSession
+	}
+	out := DemoSurfacePresentation{
+		MeetingSessionID: strings.TrimSpace(req.MeetingSessionID),
+		DemoSessionID:    strings.TrimSpace(demoSessionID),
+		Status:           DemoSurfacePresentationPresenting,
+		Source:           "screen_share_update",
+	}
+	updated, err := p.Share.StartScreenShare(ctx, ScreenShareRequest{
+		SessionID: out.MeetingSessionID,
+		Title:     strings.TrimSpace(req.Title),
+		Subtitle:  strings.TrimSpace(req.Subtitle),
+		Mode:      firstNonEmpty(req.StartMode, defaultDemoSurfaceStartMode),
+		WaitMs:    req.WaitMs,
+		ImageURL:  strings.TrimSpace(req.ImageURL),
+		ImagePath: strings.TrimSpace(req.FramePath),
+		FramePath: strings.TrimSpace(req.FramePath),
+	})
+	out.Presented = updated
+	if err != nil {
+		out.Status = DemoSurfacePresentationFailed
+		out.Reason = "screen_share_update_failed"
+		return out, err
+	}
+	if screenShareResultFailed(updated) {
+		out.Status = DemoSurfacePresentationFailed
+		out.Reason = "screen_share_update_failed"
+		return out, screenShareResultFailureError(out.Reason, updated)
 	}
 	return out, nil
 }

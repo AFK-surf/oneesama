@@ -58,21 +58,7 @@ func (c *DemoAgentBrowserClient) DoDemoAction(ctx context.Context, req DemoKWWKA
 		_, _ = runner.RunAgentBrowser(ctx, append(base, "wait", "--load", "networkidle")...)
 		return c.pageObservation(ctx, runner, req, "surface_opened", now)
 	case DemoActionCapture:
-		framePath := demoAgentBrowserFramePath(req)
-		if framePath != "" {
-			if err := os.MkdirAll(filepath.Dir(framePath), 0o755); err != nil {
-				return DemoKWWKActionResult{}, err
-			}
-			if _, err := runner.RunAgentBrowser(ctx, append(base, "screenshot", framePath)...); err != nil {
-				return DemoKWWKActionResult{}, err
-			}
-		}
-		result, err := c.pageObservation(ctx, runner, req, "screenshot_observation", now)
-		if err != nil {
-			return DemoKWWKActionResult{}, err
-		}
-		result.FramePath = framePath
-		return result, nil
+		return c.pageObservation(ctx, runner, req, "screenshot_observation", now)
 	case DemoActionScroll:
 		if req.DryRun {
 			return c.dryRunObservation(req, "surface_scrolled", "dry-run scroll skipped"), nil
@@ -147,6 +133,10 @@ func (c *DemoAgentBrowserClient) runner() demoAgentBrowserRunner {
 func (c *DemoAgentBrowserClient) pageObservation(ctx context.Context, runner demoAgentBrowserRunner, req DemoKWWKActionRequest, kind string, now time.Time) (DemoKWWKActionResult, error) {
 	session := demoAgentBrowserSessionName(req.Session.SessionID)
 	base := []string{"--session", session}
+	framePath, err := c.captureFrame(ctx, runner, base, req)
+	if err != nil {
+		return DemoKWWKActionResult{}, err
+	}
 	title, _ := runner.RunAgentBrowser(ctx, append(base, "get", "title")...)
 	body, _ := runner.RunAgentBrowser(ctx, append(base, "get", "text", "body")...)
 	summary := demoAgentBrowserSummary(req, title, body)
@@ -160,12 +150,27 @@ func (c *DemoAgentBrowserClient) pageObservation(ctx context.Context, runner dem
 		Kind:       kind,
 		Summary:    summary,
 		Confidence: confidence,
+		FramePath:  framePath,
 		Metadata: map[string]string{
 			"adapter": string(DemoKWWKAdapterAgentBrowser),
 			"session": session,
 		},
 		CreatedAt: now,
 	}, now), nil
+}
+
+func (c *DemoAgentBrowserClient) captureFrame(ctx context.Context, runner demoAgentBrowserRunner, base []string, req DemoKWWKActionRequest) (string, error) {
+	framePath := demoAgentBrowserFramePath(req)
+	if framePath == "" {
+		return "", nil
+	}
+	if err := os.MkdirAll(filepath.Dir(framePath), 0o755); err != nil {
+		return "", err
+	}
+	if _, err := runner.RunAgentBrowser(ctx, append(base, "screenshot", framePath)...); err != nil {
+		return "", err
+	}
+	return framePath, nil
 }
 
 func (c *DemoAgentBrowserClient) dryRunObservation(req DemoKWWKActionRequest, kind string, summary string) DemoKWWKActionResult {
