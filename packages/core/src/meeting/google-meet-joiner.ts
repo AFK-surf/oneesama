@@ -3314,12 +3314,12 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       };
     }
     const title = input.title || `Share ${app.applicationName || app.name || "application"}`;
-    const mode = "synthetic";
+    const mode = input.mode || input.screenShareMode || "native";
     const present = await presentScreenShare({
       ...input,
       mode,
       title,
-      subtitle: input.subtitle || "Synthetic canvas/video share requested",
+      subtitle: input.subtitle || "Application share requested",
       waitMs: input.waitMs || 2500,
     });
     const result = {
@@ -3329,9 +3329,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       capture: {
         mode,
         appPixelsAutomaticallySelected: false,
-        reason: "Realtime demo sharing uses the synthetic canvas/video bridge only; app candidates are diagnostics for user-visible intent.",
+        reason: "Meet/Chrome owns the native app-window picker; the app candidate is selected for user-visible intent and diagnostics, not forced by the bot.",
       },
-      note: "app_share_requested; synthetic canvas/video bridge used, native picker bypassed.",
+      note: "app_share_requested; choose the matching app/window in the Meet picker if Chrome asks.",
     };
     active.diagnostics?.record("shareable_app_present_requested", {
       app,
@@ -3477,7 +3477,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       700,
       active.diagnostics,
     );
-    await active.page.waitForTimeout(Number(input.waitMs || 3000));
+    await active.page.waitForTimeout(Number(bridgeInput.waitMs || 3000));
     let screenshot = "";
     try {
       screenshot = await takeScreenshot(
@@ -3559,17 +3559,14 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       stageTitle: input.stageTitle || "Meeting Avatar Bot",
     });
     if (!stage.ok) return stage;
-    const presentationMode = input.mode || input.screenShareMode || "synthetic";
-    const syntheticController =
-      presentationMode === "synthetic"
-        ? await ensureScreenShareController(active.page, {
-            ...input,
-            mode: "synthetic",
-            title: input.title || "Onee Sama video stage",
-            subtitle: input.subtitle || "Shared by Onee Sama",
-            fps: input.fps || 30,
-          })
-        : null;
+    const presentationMode = "synthetic";
+    const syntheticController = await ensureScreenShareController(active.page, {
+      ...input,
+      mode: "synthetic",
+      title: input.title || "Onee Sama video stage",
+      subtitle: input.subtitle || "Shared by Onee Sama",
+      fps: input.fps || 30,
+    });
     await active.page.bringToFront().catch(() => {});
     const present = await presentScreenShare({
       ...input,
@@ -3582,9 +3579,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       syntheticController,
       present,
       note:
-        presentationMode === "synthetic"
-          ? "video_stage_tab_opened; synthetic Meet screen-share stream was requested"
-          : "video_stage_tab_opened; Meet native tab share was requested",
+        "video_stage_tab_opened; synthetic Meet screen-share stream was requested",
     };
   }
 
