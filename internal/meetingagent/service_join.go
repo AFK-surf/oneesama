@@ -28,7 +28,7 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 	prepare, err := s.meetRunner.PrepareGoogleMeet(ctx, meetrunner.PrepareGoogleMeetInput{
 		SessionID:                  sessionID,
 		MeetingURL:                 strings.TrimSpace(input.MeetingURL),
-		DisplayName:                strings.TrimSpace(input.DisplayName),
+		DisplayName:                firstNonEmpty(strings.TrimSpace(input.DisplayName), strings.TrimSpace(s.openai.BotName), "Onee Sama"),
 		Title:                      strings.TrimSpace(input.Title),
 		DryRun:                     input.DryRun,
 		AllowNonGoogleMeet:         input.AllowNonGoogleMeet,

@@ -24,6 +24,7 @@ var joinMonitorAloneTimeoutOverrideNanos atomic.Int64
 func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 	ticker := time.NewTicker(currentJoinMonitorInterval())
 	defer ticker.Stop()
+	emptyRoomAutoStop := !joinMonitorEmptyRoomAutoStopDisabled()
 	seenJoined := false
 	var aloneSince time.Time
 	lastDigestCaptionCount := 0
@@ -52,7 +53,7 @@ func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 			if state.ParticipantCount > 0 {
 				session.ParticipantCount = state.ParticipantCount
 			}
-			if state.Alone {
+			if state.Alone && emptyRoomAutoStop {
 				if aloneSince.IsZero() {
 					aloneSince = time.Now()
 					s.logger.Info("join monitor detected empty room", "session_id", sessionID, "participant_count", state.ParticipantCount)
@@ -222,6 +223,19 @@ func currentJoinMonitorAloneTimeout() time.Duration {
 		return time.Duration(value)
 	}
 	return defaultJoinMonitorAloneTimeout
+}
+
+func joinMonitorEmptyRoomAutoStopDisabled() bool {
+	return parseEnvBool("ONEESAMA_DISABLE_EMPTY_ROOM_AUTO_STOP") || parseEnvBool("MAB_DISABLE_EMPTY_ROOM_AUTO_STOP")
+}
+
+func parseEnvBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 type runtimeJoinSnapshot struct {

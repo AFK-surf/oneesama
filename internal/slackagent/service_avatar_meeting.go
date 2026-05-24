@@ -185,7 +185,7 @@ func (s *Service) postMeetingAgentJoin(ctx context.Context, input AvatarCommandI
 	request := meetingAgentJoinRequest{
 		SessionID:                 parsed.SessionID,
 		MeetingURL:                parsed.MeetURL,
-		DisplayName:               parsed.BotName,
+		DisplayName:               firstNonEmpty(parsed.BotName, "Onee Sama"),
 		Title:                     joinMeetingDisplayTitle(parsed.MeetURL),
 		DryRun:                    parsed.DryRunJoiner,
 		CaptureCaptions:           true,
