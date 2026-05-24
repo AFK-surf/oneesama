@@ -249,6 +249,11 @@ func demoAgentBrowserFramePath(req DemoKWWKActionRequest) string {
 	if framesDir == "" {
 		return ""
 	}
+	if !filepath.IsAbs(framesDir) {
+		if abs, err := filepath.Abs(framesDir); err == nil {
+			framesDir = abs
+		}
+	}
 	name := strings.TrimSpace(req.Session.SessionID)
 	if name == "" {
 		name = "demo"
