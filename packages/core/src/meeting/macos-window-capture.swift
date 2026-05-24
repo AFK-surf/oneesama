@@ -86,7 +86,7 @@ func writePixelBufferJPEG(_ pixelBuffer: CVPixelBuffer, outputURL: URL) throws {
     pixelBuffer,
     outputURL: outputURL,
     type: UTType.jpeg,
-    properties: [kCGImageDestinationLossyCompressionQuality as String: 0.92] as CFDictionary
+    properties: [kCGImageDestinationLossyCompressionQuality as String: 0.97] as CFDictionary
   )
 }
 

@@ -1131,6 +1131,62 @@
     }
   }
 
+  function isMeetingAvatarScreenShareTrack(track) {
+    if (!track || track.kind !== "video") return false;
+    const label = String(track.label || "");
+    let settings = {};
+    try {
+      settings = track.getSettings?.() || {};
+    } catch {
+      settings = {};
+    }
+    return (
+      track.contentHint === "detail" ||
+      /meeting avatar bot synthetic display|meeting-avatar-screen-share|synthetic display/i.test(label) ||
+      Boolean((settings as { displaySurface?: unknown }).displaySurface)
+    );
+  }
+
+  function handleMeetOutboundVideoSender(pc, pcId, sender, track, source) {
+    if (!sender || !track || track.kind !== "video") return;
+    if (pc === activePeerConnection || !isMeetingAvatarScreenShareTrack(track)) return;
+    try {
+      track.contentHint = "detail";
+    } catch {
+      // Best-effort encoder hint.
+    }
+    const optimize = async () => {
+      if (typeof sender.getParameters !== "function" || typeof sender.setParameters !== "function") return;
+      const parameters = sender.getParameters() || {};
+      parameters.degradationPreference = "maintain-resolution";
+      if (Array.isArray(parameters.encodings) && parameters.encodings.length > 0) {
+        parameters.encodings = parameters.encodings.map((encoding) => ({
+          ...encoding,
+          maxBitrate: Math.max(Number(encoding.maxBitrate) || 0, 8_000_000),
+          priority: "high",
+          networkPriority: "high",
+        }));
+      }
+      await sender.setParameters(parameters);
+      recordTimeline("screen_share_video_sender_optimized", {
+        pcId,
+        source,
+        trackId: track.id,
+        contentHint: track.contentHint || "",
+        degradationPreference: parameters.degradationPreference || "",
+        maxBitrate: parameters.encodings?.[0]?.maxBitrate || null,
+      });
+    };
+    optimize().catch((error) => {
+      recordTimeline("screen_share_video_sender_optimize_failed", {
+        pcId,
+        source,
+        trackId: track.id,
+        error: String(error && error.message || error).slice(0, 240),
+      });
+    });
+  }
+
   function instrumentMeetSender(pc, pcId, sender, source) {
     if (!sender || sender.__meetingAvatarRealtimeInstrumented) return sender;
     sender.__meetingAvatarRealtimeInstrumented = true;
@@ -1139,11 +1195,15 @@
       sender.replaceTrack = async function (track) {
         const result = await originalReplaceTrack(track);
         handleMeetOutboundAudioSender(pc, pcId, sender, track, `${source}.replaceTrack`);
+        handleMeetOutboundVideoSender(pc, pcId, sender, track, `${source}.replaceTrack`);
         return result;
       };
     }
     if (sender.track?.kind === "audio") {
       handleMeetOutboundAudioSender(pc, pcId, sender, sender.track, source);
+    }
+    if (sender.track?.kind === "video") {
+      handleMeetOutboundVideoSender(pc, pcId, sender, sender.track, source);
     }
     return sender;
   }
@@ -1154,6 +1214,9 @@
       instrumentMeetSender(pc, pcId, sender, `scan[${index}]`);
       if (sender?.track?.kind === "audio") {
         handleMeetOutboundAudioSender(pc, pcId, sender, sender.track, `scan[${index}]`);
+      }
+      if (sender?.track?.kind === "video") {
+        handleMeetOutboundVideoSender(pc, pcId, sender, sender.track, `scan[${index}]`);
       }
     });
   }
@@ -1174,6 +1237,7 @@
           const sender = originalAddTrack(track, ...streams);
           instrumentMeetSender(pc, pcId, sender, "addTrack");
           handleMeetOutboundAudioSender(pc, pcId, sender, track, "addTrack");
+          handleMeetOutboundVideoSender(pc, pcId, sender, track, "addTrack");
           return sender;
         };
       }
@@ -1185,6 +1249,13 @@
           instrumentMeetSender(pc, pcId, transceiver.sender, "addTransceiver");
           if (trackOrKind && typeof trackOrKind === "object") {
             handleMeetOutboundAudioSender(
+              pc,
+              pcId,
+              transceiver.sender,
+              trackOrKind,
+              "addTransceiver(track)",
+            );
+            handleMeetOutboundVideoSender(
               pc,
               pcId,
               transceiver.sender,

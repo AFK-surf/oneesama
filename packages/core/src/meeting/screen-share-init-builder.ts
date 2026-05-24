@@ -13,6 +13,7 @@ interface ScreenShareInitOptions {
   imageUrl?: string;
   muted?: boolean;
   autoStart?: boolean;
+  showOverlay?: boolean;
 }
 
 export function buildScreenShareInitScript(options: ScreenShareInitOptions = {}) {
@@ -28,6 +29,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
     imageUrl: options.imageUrl || "",
     muted: options.muted !== false,
     autoStart: Boolean(options.autoStart),
+    showOverlay: Boolean(options.showOverlay),
   };
 
   return `(() => {
@@ -56,6 +58,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       videoError: "",
       imageReady: false,
       imageError: "",
+      showOverlay: config.showOverlay,
       errors: [],
     };
     window.MAB_SCREEN_SHARE = state;
@@ -88,6 +91,10 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       canvas.dataset.meetingAvatarScreenShare = "1";
       document.documentElement.appendChild(canvas);
       ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+      }
       return canvas;
     }
 
@@ -198,26 +205,30 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       const t = frame / Math.max(1, state.fps || config.fps);
       const imageEl = ensureImage();
       if (imageEl && state.imageReady && drawContainImage(imageEl, w, h)) {
-        ctx.fillStyle = "rgba(5, 7, 10, .70)";
-        ctx.fillRect(40, h - 116, Math.min(w - 80, 760), 72);
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "700 26px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText(state.title || config.title, 64, h - 76);
-        ctx.font = "400 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillStyle = "rgba(255,255,255,.78)";
-        ctx.fillText(state.subtitle || config.subtitle, 66, h - 50);
+        if (state.showOverlay) {
+          ctx.fillStyle = "rgba(5, 7, 10, .70)";
+          ctx.fillRect(40, h - 116, Math.min(w - 80, 760), 72);
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "700 26px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillText(state.title || config.title, 64, h - 76);
+          ctx.font = "400 18px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = "rgba(255,255,255,.78)";
+          ctx.fillText(state.subtitle || config.subtitle, 66, h - 50);
+        }
         return;
       }
       const videoEl = ensureVideo();
       if (videoEl && videoEl.readyState >= 2 && drawContainVideo(videoEl, w, h)) {
-        ctx.fillStyle = "rgba(5, 7, 10, .70)";
-        ctx.fillRect(40, h - 132, Math.min(w - 80, 720), 86);
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "700 30px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText(state.title || config.title, 64, h - 84);
-        ctx.font = "400 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillStyle = "rgba(255,255,255,.78)";
-        ctx.fillText(state.subtitle || config.subtitle, 66, h - 54);
+        if (state.showOverlay) {
+          ctx.fillStyle = "rgba(5, 7, 10, .70)";
+          ctx.fillRect(40, h - 132, Math.min(w - 80, 720), 86);
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "700 30px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillText(state.title || config.title, 64, h - 84);
+          ctx.font = "400 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = "rgba(255,255,255,.78)";
+          ctx.fillText(state.subtitle || config.subtitle, 66, h - 54);
+        }
         return;
       }
       const hue = Math.round((t * 24) % 360);
@@ -262,6 +273,13 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       ensureCanvas();
       drawFrame();
       stream = canvas.captureStream(state.fps || config.fps);
+      for (const track of stream.getVideoTracks()) {
+        try {
+          track.contentHint = "detail";
+        } catch (_) {
+          // Optional browser hint.
+        }
+      }
       state.streamId = stream.id;
       state.trackIds = stream.getVideoTracks().map((track) => track.id);
       return stream;
@@ -321,6 +339,7 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
         }
         state.title = options.title || state.title || config.title;
         state.subtitle = options.subtitle || state.subtitle || config.subtitle;
+        state.showOverlay = options.showOverlay === undefined ? state.showOverlay : Boolean(options.showOverlay);
         const nextImageUrl = options.imageUrl || options.imagePath || options.framePath || state.imageUrl || config.imageUrl;
         if (nextImageUrl && nextImageUrl !== state.imageUrl) {
           state.imageUrl = nextImageUrl;

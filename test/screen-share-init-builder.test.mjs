@@ -10,6 +10,8 @@ test("screen-share init script supports local multipart frame streams", () => {
 
   assert.match(script, /mjpg/);
   assert.match(script, /state\.imageReady = true/);
+  assert.match(script, /state\.showOverlay/);
+  assert.match(script, /track\.contentHint = "detail"/);
   assert.ok(
     script.indexOf('image.crossOrigin = "anonymous"') < script.indexOf("image.src = state.imageUrl"),
     "crossOrigin must be set before image.src so localhost frame streams stay canvas-readable",
