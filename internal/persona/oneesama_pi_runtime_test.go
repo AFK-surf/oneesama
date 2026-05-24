@@ -53,12 +53,22 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 		"Oneesama's own Slack foreground Pi agent",
 		"Never post visible self-limitations",
 		"Do not infer negative product support/status from missing evidence",
+		"Do not infer deploy/build/CI/release/staging/production/PR status from chat history",
+		"deploy c44d5d6 staging",
+		"only reply if you add actionable substance beyond repeating who to ask",
 		"External URL identity/fact lookup is bounded secretary work",
 		"不认识 / 不知道",
+		"Oneesama/Cueboard/Bridge/Willow runtime",
+		"delegation_scope=oneesama_system",
 		"A visible reply must have concrete evidence",
 		"typed evidence_anchors",
 		`"evidence_anchors"`,
 		"fetched_link|workspace_memory|person_memory",
+		"error page, login wall, search UI",
+		"Search powered by",
+		"Do not narrate your reading process",
+		"我粗读了一下",
+		"核心信息是",
 	)
 	assertContainsNone(t, systemPrompt, "[[", "telegram-pi", "Linger")
 	if !strings.Contains(seen.Messages[1].Content, "产品相邻链接") {
@@ -73,6 +83,64 @@ func TestOneesamaPIRuntimeDecideCallsOpenAICompatibleChat(t *testing.T) {
 	status := runtime.Status(context.Background())
 	if status.Provider != ProviderOneesamaPi || !status.Ready || !status.Healthy || status.Version == "" {
 		t.Fatalf("status = %#v, want ready healthy oneesama-pi", status)
+	}
+}
+
+func TestOneesamaPIRuntimeRetriesMalformedDecisionJSONOnce(t *testing.T) {
+	var calls int
+	var repairRequest oneesamaPIChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var seen oneesamaPIChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&seen); err != nil {
+			t.Fatalf("decode chat request: %v", err)
+		}
+		if calls == 1 {
+			_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {
+				Message oneesamaPIChatMessage `json:"message"`
+			}{{
+				Message: oneesamaPIChatMessage{Role: "assistant", Content: `{"runtime":"oneesama-pi","decision":`},
+			}}})
+			return
+		}
+		repairRequest = seen
+		_ = json.NewEncoder(w).Encode(oneesamaPIChatResponse{Choices: []struct {
+			Message oneesamaPIChatMessage `json:"message"`
+		}{{
+			Message: oneesamaPIChatMessage{Role: "assistant", Content: `{"runtime":"oneesama-pi","decision":"delegate_worker","worker_requests":[{"kind":"codex","prompt":"inspect the source and return evidence-backed summary"}],"confidence":0.8,"reason":"repaired JSON"}`},
+		}}})
+	}))
+	defer server.Close()
+
+	runtime, err := NewOneesamaPIRuntime(OneesamaPIConfig{
+		Provider: ProviderOneesamaPi,
+		Mode:     ModeLive,
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+		Timeout:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewOneesamaPIRuntime: %v", err)
+	}
+	resp, err := runtime.Decide(context.Background(), Request{
+		ID:    "req-malformed-json",
+		Mode:  ModeLive,
+		Event: Event{Kind: "slack_triage", Text: "查一下这个链接后给结论"},
+		Safety: SafetyConstraints{
+			AllowWorkerRequest: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want one repair retry after malformed JSON", calls)
+	}
+	if len(repairRequest.Messages) != 3 || !strings.Contains(repairRequest.Messages[2].Content, "not valid JSON") {
+		t.Fatalf("repair request messages = %#v, want bounded JSON repair prompt", repairRequest.Messages)
+	}
+	if resp.Decision != DecisionDelegateWorker || len(resp.WorkerRequests) != 1 {
+		t.Fatalf("response = %#v, want repaired delegate_worker decision", resp)
 	}
 }
 

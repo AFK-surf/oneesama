@@ -54,7 +54,7 @@ intent_action_negations='["no need","no further action","not needed","not be del
 # triageQualityHandledByOtherMarkers; the audit endpoint exposes it via
 # audit.qualityThresholds.handledByOtherSummaryMarkers. Inline fallback for
 # pre-follow-up servers mirrors the same EN+ZH compound set.
-handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryMarkers // []) + ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already been answered","already been fully handled","already deeply handled","already handled","already handles","already on it","already active","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","already being handled","being actively handled","being handled by","being investigated and resolved","being investigated","was already handled","is being handled","is already being handled","active agent","active codex","active claude","already complied","has opened a session","has already opened","has already been answered","has already responded","has already been fully handled","has already complied","no actionable remainder","已经查了","已经由","已经被充分分析","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]) | unique' <"${tmpdir}/audit.json")"
+handled_by_other_markers="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryMarkers // []) + ["already answered","already responded","already replied","already acknowledged","already addressed","already implemented","already been answered","already been fully handled","already deeply handled","already handled","already handles","already on it","already active","already started reviewing","already joined","already executed","already merged","already resolved","already confirmed","actively handled","already being handled","being actively handled","being handled by","being investigated and resolved","being investigated","was already handled","is being handled","is already being handled","directive to worker agents","directive to active worker agents","directed to worker agents","active agent","active codex","active claude","already complied","has opened a session","has already opened","has already been answered","has already responded","has already been fully handled","has already complied","no actionable remainder","已经查了","已经由","已经被充分分析","已被回复","已被处理","已被解决","已被直接回复","已被直接处理","已由 codex","已由 claude","已经回复","已经处理","已经解决","已经确认","已经接手","正在处理","正在跟进","正在被处理","问题已被","已在 msg_ts","已在线程"]) | unique' <"${tmpdir}/audit.json")"
 handled_by_other_negations="$(jq -c '((.audit.qualityThresholds.handledByOtherSummaryNegations // []) + ["no idea","not sure","don'\''t know","doesn'\''t know","nobody knows","unknown who","unclear who","不认识","不知道","不清楚","搞不清","没人知道","无人知道","还没确定"]) | unique' <"${tmpdir}/audit.json")"
 harness_rollup="$(jq -c '.audit.harness // {}' <"${tmpdir}/audit.json")"
 reply_quality_samples="$(jq -c '.audit.replyQualitySamples // {}' <"${tmpdir}/audit.json")"
@@ -140,7 +140,9 @@ jq --arg cutoff "$cutoff" --argjson high_context "$high_context_threshold" --arg
     (failure_text($run)) as $text
     | (($text | contains("eof")) and (($text | contains("openrouter")) or ($text | contains("chat/completions"))))
       or ($text | contains("unexpected eof"))
-      or ($text | contains("connection reset by peer"));
+      or ($text | contains("connection reset by peer"))
+      or ($text | contains("decode oneesama pi decision json"))
+      or ($text | contains("unexpected end of json input"));
   def recovery_run($run; $runs):
     [
       $runs[]

@@ -251,7 +251,13 @@ func TestCueboardParitySurfaceFollowupPostsThreadMessage(t *testing.T) {
 	withCueboardParityClock(t, time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation()))
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
-	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Diagram follow-up", Summary: "Send the architecture sketch.", ChannelID: "C123", ThreadTS: "123.456"})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{
+		Title:     "Diagram follow-up",
+		Summary:   "Send the architecture sketch.",
+		ChannelID: "C123",
+		ThreadTS:  "123.456",
+		Metadata:  map[string]any{"allow_public_heartbeat_surface": true},
+	})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
 	}
@@ -297,6 +303,7 @@ func TestCueboardParitySurfaceFollowupBlocksWhenRecentlySurfaced(t *testing.T) {
 		ThreadTS:       "123.456",
 		SourceKind:     "thread",
 		LastSurfacedAt: now.Add(-2 * time.Hour).Format(time.RFC3339Nano),
+		Metadata:       map[string]any{"allow_public_heartbeat_surface": true},
 	})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
@@ -318,7 +325,7 @@ func TestCueboardParitySurfaceFollowupBlocksDuringQuietHours(t *testing.T) {
 	withCueboardParityClock(t, now)
 	poster := &recordingPoster{}
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
-	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Late public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal"})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Late public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal", Metadata: map[string]any{"allow_public_heartbeat_surface": true}})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
 	}
@@ -339,7 +346,7 @@ func TestCueboardParitySurfaceFollowupUrgentBypassesQuietHours(t *testing.T) {
 	withCueboardParityClock(t, now)
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
-	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Urgent public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "urgent"})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Urgent public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "urgent", Metadata: map[string]any{"allow_public_heartbeat_surface": true}})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
 	}
@@ -363,7 +370,7 @@ func TestCueboardParitySurfaceFollowupBlocksWhenPublicRateLimited(t *testing.T) 
 			t.Fatalf("RecordSurface #%d: %v", i, err)
 		}
 	}
-	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Fourth public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal"})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Fourth public nudge", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal", Metadata: map[string]any{"allow_public_heartbeat_surface": true}})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
 	}
@@ -388,7 +395,7 @@ func TestCueboardParitySurfaceFollowupBlocksWhenThreadHasNewerActivity(t *testin
 	t.Cleanup(func() { timeNow = previousClock })
 	poster := &recordingPoster{}
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
-	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Thread already moved", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal", CreatedAt: createdAt.Format(time.RFC3339Nano), UpdatedAt: createdAt.Format(time.RFC3339Nano)})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Thread already moved", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal", CreatedAt: createdAt.Format(time.RFC3339Nano), UpdatedAt: createdAt.Format(time.RFC3339Nano), Metadata: map[string]any{"allow_public_heartbeat_surface": true}})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
 	}
@@ -467,7 +474,7 @@ func TestCueboardParitySurfaceFollowupBlocksWhenAnyWorkspaceLedgerUpdated(t *tes
 	t.Cleanup(func() { timeNow = previousClock })
 	poster := &recordingPoster{}
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
-	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Thread already handled", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal", CreatedAt: createdAt.Format(time.RFC3339Nano), UpdatedAt: createdAt.Format(time.RFC3339Nano)})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Thread already handled", ChannelID: "C123", ThreadTS: "123.456", SourceKind: "thread", Priority: "normal", CreatedAt: createdAt.Format(time.RFC3339Nano), UpdatedAt: createdAt.Format(time.RFC3339Nano), Metadata: map[string]any{"allow_public_heartbeat_surface": true}})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
 	}
@@ -490,7 +497,7 @@ func TestCueboardParitySurfaceFollowupBlocksWhenAnyWorkspaceLedgerUpdated(t *tes
 func TestCueboardParitySurfaceFollowupUpdatesLastSurfacedAt(t *testing.T) {
 	withCueboardParityClock(t, time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation()))
 	service := NewService(Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: &recordingPoster{callCh: make(chan struct{}, 1)}})
-	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Ping", ChannelID: "C123", ThreadTS: "123.456"})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{Title: "Ping", ChannelID: "C123", ThreadTS: "123.456", Metadata: map[string]any{"allow_public_heartbeat_surface": true}})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
 	}
@@ -677,7 +684,7 @@ func TestCueboardParityFollowupSurfaceEndpointPostsSelectedFollowup(t *testing.T
 	withCueboardParityClock(t, time.Date(2026, 3, 24, 11, 0, 0, 0, shanghaiLocation()))
 	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
 	router := newTestRouter(t, Config{Persistence: appconfig.PersistenceConfig{Provider: "memory"}, Poster: poster})
-	create := postInternalJSON(t, router, "/slack/followups/create", `{"channel_id":"C123","thread_ts":"123.456","title":"Surface me","summary":"Thread reminder"}`)
+	create := postInternalJSON(t, router, "/slack/followups/create", `{"channel_id":"C123","thread_ts":"123.456","title":"Surface me","summary":"Thread reminder","metadata":{"allow_public_heartbeat_surface":true}}`)
 	var created SlackFollowupCreateResponse
 	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode create: %v", err)

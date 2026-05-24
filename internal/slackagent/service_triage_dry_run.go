@@ -19,13 +19,30 @@ func (s *Service) DryRunSlackTriage(ctx context.Context, channelID string, messa
 	result := callPersonaShadow(callCtx, s.personaRuntime, "triage_dry_run", request)
 	disposition := s.applySlackPersonaForegroundDispositions(result, request, prepared.Messages)
 	result = disposition.Result
+	if action, ok := slackTriageSharedLinkSynthesisAction(
+		prepared.ChannelID,
+		prepared.ThreadTS,
+		prepared.Messages,
+		prepared.ExternalLinks,
+		personaDynamicContextTextFromRequest(request, "workspace_triage_policy"),
+	); ok && strings.TrimSpace(result.Decision) == persona.DecisionStaySilent && slackVisibleReplyAllowListVerdictForAction(action).Allowed {
+		result = applySlackPersonaVisibleReplyAction(result, action)
+		disposition.ToolCalls = append(disposition.ToolCalls, SlackTriageToolCall{
+			Tool:    "persona_runtime",
+			Action:  "dry_run_link_synthesis_fallback",
+			Args:    marshalTriageArgs("persona", strings.TrimSpace(result.RequestID), true),
+			Success: true,
+			Brief:   "Dry-run link synthesis fallback converted silent result to visible reply",
+			Result:  "fetched_link_context",
+		})
+	}
 
 	actionsBeforeGate := slackPersonaForegroundActions(prepared.ChannelID, prepared.ThreadTS, result, request)
-	actionsAfterGate := requireSlackTriageVisibleReplyApproval(actionsBeforeGate)
+	actionsAfterGate := slackTriageVisibleReplyActionsAfterGate(actionsBeforeGate)
 	verdicts := slackTriageDryRunVisibleReplyVerdicts(actionsBeforeGate)
 	workers := slackTriageDryRunWorkers(result, request)
 	toolCalls := append([]SlackTriageToolCall(nil), disposition.ToolCalls...)
-	toolCalls = append(toolCalls, slackTriageDryRunApprovalToolCalls(actionsBeforeGate, actionsAfterGate)...)
+	toolCalls = append(toolCalls, slackTriageDryRunVisibleReplyToolCalls(actionsBeforeGate, actionsAfterGate)...)
 	toolCalls = append(toolCalls, slackTriageDryRunWorkerToolCalls(workers)...)
 
 	return SlackTriageDryRunResult{
@@ -34,6 +51,7 @@ func (s *Service) DryRunSlackTriage(ctx context.Context, channelID string, messa
 		ThreadTS:             prepared.ThreadTS,
 		MessageCount:         len(prepared.Messages),
 		Digest:               prepared.Digest,
+		RelatedMemory:        prepared.RelatedMemory,
 		RequestID:            request.ID,
 		Persona:              result,
 		FinalDecision:        slackTriageDryRunFinalDecision(result, actionsAfterGate, workers),
@@ -45,8 +63,6 @@ func (s *Service) DryRunSlackTriage(ctx context.Context, channelID string, messa
 		ToolCalls:            toolCalls,
 		SideEffectsBlocked: []string{
 			"slack_post",
-			"approval_card",
-			"pending_action",
 			"reaction",
 			"worker_start",
 			"memory_write",
@@ -62,6 +78,7 @@ type slackTriagePersonaRequestPreparation struct {
 	Messages        []SlackInboundMessage
 	Digest          string
 	ExternalLinks   []SlackExternalLinkContext
+	RelatedMemory   SlackRelatedMemorySearchResult
 	AuditMetadata   map[string]any
 	Request         persona.Request
 	WorkspaceID     string
@@ -74,6 +91,10 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 	workspaceID := firstNonEmpty(firstMessageTeamID(messages), "workspace")
 	threadTS := firstNonEmpty(lastMessageThreadTS(messages), "channel-root")
 	foregroundChain := s.slackTriageForegroundChain()
+	var ignoredMessageBotReplyCount int
+	if options.IgnoreExistingBotReply {
+		messages, ignoredMessageBotReplyCount = filterSlackTriageBotInboundMessages(messages, []string{s.botUserID})
+	}
 	if strings.TrimSpace(digest) == "" {
 		digest = renderSlackActivityDigest(channelID, messages)
 	}
@@ -97,8 +118,9 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 	auditMetadata = mergeStringAnyMaps(auditMetadata, slackWorkspacePolicyMetadataMap(workspacePolicyStatus))
 	if options.IgnoreExistingBotReply {
 		auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
-			"ignore_existing_bot_reply":        true,
-			"ignored_existing_bot_reply_count": ignoredBotReplyCount,
+			"ignore_existing_bot_reply":          true,
+			"ignored_existing_bot_reply_count":   ignoredBotReplyCount + ignoredMessageBotReplyCount,
+			"ignored_existing_bot_message_count": ignoredMessageBotReplyCount,
 		})
 	}
 	auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
@@ -113,7 +135,7 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 	}, options.ExtraMetadata)
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
-	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest)
+	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest, externalLinks)
 	relatedMemory := s.searchSlackTriageRelatedMemoryContext(ctx, memoryQuery, 5)
 	request := BuildSlackTriagePiFirstForegroundRequest(SlackTriagePiFirstForegroundRequestInput{
 		ChannelID:              channelID,
@@ -137,6 +159,7 @@ func (s *Service) prepareSlackTriagePersonaRequest(ctx context.Context, channelI
 		Messages:        messages,
 		Digest:          digest,
 		ExternalLinks:   externalLinks,
+		RelatedMemory:   relatedMemory,
 		AuditMetadata:   auditMetadata,
 		Request:         request,
 		WorkspaceID:     workspaceID,
@@ -187,7 +210,7 @@ func slackTriageDryRunWorkers(result SlackPersonaShadowResult, request persona.R
 	return workers
 }
 
-func slackTriageDryRunApprovalToolCalls(before []SlackTriageDecisionAction, after []SlackTriageDecisionAction) []SlackTriageToolCall {
+func slackTriageDryRunVisibleReplyToolCalls(before []SlackTriageDecisionAction, after []SlackTriageDecisionAction) []SlackTriageToolCall {
 	afterReplyCount := 0
 	for _, action := range after {
 		if strings.TrimSpace(action.Type) == slackActionTypeThreadReply {
@@ -211,10 +234,10 @@ func slackTriageDryRunApprovalToolCalls(before []SlackTriageDecisionAction, afte
 		if verdict.Allowed && afterReplyCount > 0 {
 			calls = append(calls, SlackTriageToolCall{
 				Tool:    "slack_api",
-				Action:  "dry_run_approval_card_blocked",
-				Args:    marshalTriageArgs("slack-triage-visible-reply-approval", "", true),
+				Action:  "dry_run_thread_reply_blocked",
+				Args:    marshalTriageArgs("chat.postMessage", "", true),
 				Success: true,
-				Brief:   "Dry-run would create Peng approval card in live mode",
+				Brief:   "Dry-run would post Slack thread reply in live mode",
 				Result:  "side_effect_blocked",
 			})
 		}
@@ -243,7 +266,7 @@ func slackTriageDryRunFinalDecision(result SlackPersonaShadowResult, actions []S
 	}
 	for _, action := range actions {
 		if strings.TrimSpace(action.Type) == slackActionTypeThreadReply {
-			return "would_request_reply_approval"
+			return "would_post_reply"
 		}
 		if strings.TrimSpace(action.Type) == "add_reaction" {
 			return "would_react"

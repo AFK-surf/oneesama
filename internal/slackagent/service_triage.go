@@ -92,6 +92,10 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	messages = normalizeSlackInboundMessages(messages)
 	workspaceID := firstNonEmpty(firstMessageTeamID(messages), "workspace")
 	threadTS := firstNonEmpty(lastMessageThreadTS(messages), "channel-root")
+	var ignoredMessageBotReplyCount int
+	if options.IgnoreExistingBotReply {
+		messages, ignoredMessageBotReplyCount = filterSlackTriageBotInboundMessages(messages, []string{s.botUserID})
+	}
 	sessionID := fmt.Sprintf("triage:%s:%d", channelID, timeNow().UnixMilli())
 	threadContexts := s.fetchSlackTriageThreadContexts(ctx, channelID, messages)
 	var ignoredBotReplyCount int
@@ -113,8 +117,9 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	auditMetadata = mergeStringAnyMaps(auditMetadata, slackWorkspacePolicyMetadataMap(workspacePolicyStatus))
 	if options.IgnoreExistingBotReply {
 		auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
-			"ignore_existing_bot_reply":        true,
-			"ignored_existing_bot_reply_count": ignoredBotReplyCount,
+			"ignore_existing_bot_reply":          true,
+			"ignored_existing_bot_reply_count":   ignoredBotReplyCount + ignoredMessageBotReplyCount,
+			"ignored_existing_bot_message_count": ignoredMessageBotReplyCount,
 		})
 	}
 	auditMetadata = mergeStringAnyMaps(auditMetadata, map[string]any{
@@ -144,7 +149,7 @@ func (s *Service) startSlackTriage(ctx context.Context, channelID string, messag
 	channelBrain, _ := s.cognition.GetChannelBrain(ctx, workspaceID, channelID)
 	previousRuns := loadTriageContexts(s.triage, s.workspaceDir)
 	previous := filterTriageContextsForChannel(previousRuns, channelID)
-	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest)
+	memoryQuery := slackTriageRelatedMemoryQuery(messages, digest, externalLinks)
 	localMemory := slackTriageMemoryFromLocal(s.SearchLocalMemoryContext(ctx, memoryQuery, 5), memoryQuery)
 	relatedMemory := s.searchSlackTriageRelatedMemoryContext(ctx, memoryQuery, 5)
 	if piFirstLive {
@@ -299,7 +304,7 @@ func (s *Service) recordSlackTriageOnly(ctx context.Context, channelID string, m
 	return run, err
 }
 
-func slackTriageRelatedMemoryQuery(messages []SlackInboundMessage, digest string) string {
+func slackTriageRelatedMemoryQuery(messages []SlackInboundMessage, digest string, externalLinks []SlackExternalLinkContext) string {
 	messages = normalizeSlackInboundMessages(messages)
 	lines := make([]string, 0, len(messages))
 	for _, message := range messages {
@@ -315,8 +320,33 @@ func slackTriageRelatedMemoryQuery(messages []SlackInboundMessage, digest string
 			}
 		}
 	}
+	if external := slackTriageExternalLinkRelatedMemoryQuery(externalLinks); external != "" {
+		lines = append(lines, external)
+	}
 	if query := strings.TrimSpace(strings.Join(lines, "\n")); query != "" {
 		return query
 	}
 	return strings.TrimSpace(digest)
+}
+
+func slackTriageExternalLinkRelatedMemoryQuery(externalLinks []SlackExternalLinkContext) string {
+	if len(externalLinks) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, link := range externalLinks {
+		parts := []string{link.Title, link.Excerpt}
+		if strings.TrimSpace(link.Error) == "" {
+			parts = append(parts, link.URL)
+		}
+		text := strings.TrimSpace(strings.Join(parts, "\n"))
+		if text == "" {
+			continue
+		}
+		lines = append(lines, truncateSlackContextText(text, appMentionRelatedMemorySupplementLimit))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "external link context:\n" + strings.TrimSpace(strings.Join(lines, "\n\n"))
 }

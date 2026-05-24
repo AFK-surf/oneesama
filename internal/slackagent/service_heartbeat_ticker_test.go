@@ -27,13 +27,14 @@ func TestHeartbeatTickerStartSurfacesDueFollowup(t *testing.T) {
 		Poster:      poster,
 	})
 	_, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{
-		Kind:       "commitment",
+		Kind:       slackDelayedNoReplyFollowupKind,
 		Title:      "Follow up owner",
 		Summary:    "Ask owner whether the pending task is still blocked.",
 		SourceKind: heartbeatSourceKindThread,
 		ChannelID:  "C123",
 		ThreadTS:   "123.456",
 		Priority:   heartbeatFollowupPriorityUrgent,
+		Metadata:   map[string]any{"allow_public_heartbeat_surface": true},
 	})
 	if err != nil {
 		t.Fatalf("CreateFollowup: %v", err)
@@ -60,6 +61,44 @@ func TestHeartbeatTickerStartSurfacesDueFollowup(t *testing.T) {
 	}
 	if calls[0].DedupKey == "" {
 		t.Fatalf("post dedup key empty")
+	}
+}
+
+func TestHeartbeatSurfaceBlocksDefaultPublicFollowups(t *testing.T) {
+	poster := &recordingPoster{}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Poster:      poster,
+	})
+	record, err := service.followups.CreateFollowup(context.Background(), SlackHeartbeatFollowup{
+		Kind:       "followup",
+		Title:      "Internal progress note",
+		Summary:    "This should stay in the heartbeat store unless explicitly marked user-visible.",
+		SourceKind: heartbeatSourceKindThread,
+		ChannelID:  "C123",
+		ThreadTS:   "123.456",
+		Priority:   heartbeatFollowupPriorityUrgent,
+	})
+	if err != nil {
+		t.Fatalf("CreateFollowup: %v", err)
+	}
+
+	response, err := service.SurfaceSlackFollowups(context.Background(), SlackFollowupSurfaceRequest{FollowupID: record.ID})
+	if err != nil {
+		t.Fatalf("SurfaceSlackFollowups: %v", err)
+	}
+	if len(poster.Calls()) != 0 {
+		t.Fatalf("poster calls = %#v, want no public heartbeat", poster.Calls())
+	}
+	if len(response.Skipped) != 1 || response.Skipped[0].BlockReason != heartbeatSurfaceBlockNotPubliclyAllowed {
+		t.Fatalf("response = %#v, want %s", response, heartbeatSurfaceBlockNotPubliclyAllowed)
+	}
+	updated, err := service.followups.GetFollowup(context.Background(), record.ID)
+	if err != nil {
+		t.Fatalf("GetFollowup: %v", err)
+	}
+	if updated == nil || updated.Status != "done" || updated.Metadata["resolution"] != heartbeatSurfaceBlockNotPubliclyAllowed {
+		t.Fatalf("updated = %#v, want closed non-public followup", updated)
 	}
 }
 

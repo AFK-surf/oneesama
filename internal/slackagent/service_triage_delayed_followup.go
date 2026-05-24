@@ -43,12 +43,13 @@ func (s *Service) maybeRecordDelayedNoReplyFollowup(ctx context.Context, workspa
 		Priority:    heartbeatFollowupPriorityNormal,
 		NextCheckAt: now.Add(slackDelayedNoReplyFollowupDelay).Format(time.RFC3339Nano),
 		Metadata: map[string]any{
-			"source":         "slack_triage",
-			"classification": candidate.Classification,
-			"triage_run_id":  run.ID,
-			"triage_session": run.SessionID,
-			"workspace_id":   firstNonEmpty(workspaceID, "workspace"),
-			"one_shot":       true,
+			"source":                         "slack_triage",
+			"classification":                 candidate.Classification,
+			"triage_run_id":                  run.ID,
+			"triage_session":                 run.SessionID,
+			"workspace_id":                   firstNonEmpty(workspaceID, "workspace"),
+			"one_shot":                       true,
+			"allow_public_heartbeat_surface": true,
 		},
 	}); err != nil {
 		s.logger.Warn("slack delayed no-reply followup create failed", "channel", channelID, "thread_ts", threadTS, "error", err)

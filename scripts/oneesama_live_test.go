@@ -258,10 +258,16 @@ func TestOneesamaLivePreflightFailsKnownSocketModeCompetitor(t *testing.T) {
 
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, "live-env.sh")
+	competitorEnv := filepath.Join(dir, "twitter-bot.env")
 	writeFile(t, envFile, strings.Join([]string{
 		"SLACK_BOT_TOKEN=xoxb-test",
-		"SLACK_APP_TOKEN=xapp-test",
+		"SLACK_APP_TOKEN=xapp-1-A0APMCDA89Y-test",
 		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_SOCKET_MODE_COMPETITOR_ENV_FILES=com.openclaw.twitter-reply-bot.live=" + competitorEnv,
+		"",
+	}, "\n"))
+	writeFile(t, competitorEnv, strings.Join([]string{
+		"SLACK_APP_TOKEN=xapp-1-A0APMCDA89Y-twitter",
 		"",
 	}, "\n"))
 
@@ -288,8 +294,58 @@ func TestOneesamaLivePreflightFailsKnownSocketModeCompetitor(t *testing.T) {
 	if err == nil {
 		t.Fatalf("oneesama-live preflight succeeded unexpectedly:\n%s", output)
 	}
-	if !strings.Contains(output, "known Slack Socket Mode competitor is running: com.openclaw.twitter-reply-bot.live") {
+	if !strings.Contains(output, "Slack Socket Mode app conflict: com.openclaw.twitter-reply-bot.live") ||
+		!strings.Contains(output, "app_id=A0APMCDA89Y") {
 		t.Fatalf("output = %s, want socket mode competitor failure", output)
+	}
+}
+
+func TestOneesamaLivePreflightAllowsDifferentSocketModeApp(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	competitorEnv := filepath.Join(dir, "twitter-bot.env")
+	writeFile(t, envFile, strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-1-A0APMCDA89Y-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_SOCKET_MODE_COMPETITOR_ENV_FILES=com.openclaw.twitter-reply-bot.live=" + competitorEnv,
+		"",
+	}, "\n"))
+	writeFile(t, competitorEnv, strings.Join([]string{
+		"SLACK_APP_TOKEN=xapp-1-A0B6DG2GR7A-twitter",
+		"",
+	}, "\n"))
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	launchctl := filepath.Join(binDir, "launchctl")
+	writeFile(t, launchctl, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"if [[ \"$1\" == \"print\" && \"$2\" == gui/*/com.openclaw.twitter-reply-bot.live ]]; then",
+		"  exit 0",
+		"fi",
+		"exit 113",
+		"",
+	}, "\n"))
+	if err := os.Chmod(launchctl, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := runLiveScriptWithEnv(t, []string{
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}, "--env", envFile, "--preflight-only", "slack-agent")
+	if err != nil {
+		t.Fatalf("oneesama-live preflight failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "preflight passed") {
+		t.Fatalf("output = %s, want preflight passed", output)
+	}
+	if strings.Contains(output, "Socket Mode app conflict") {
+		t.Fatalf("output = %s, should not flag different Slack app id", output)
 	}
 }
 

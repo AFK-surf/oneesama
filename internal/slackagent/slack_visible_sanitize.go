@@ -12,6 +12,8 @@ var (
 	slackVisibleKnowledgeBriefPattern = regexp.MustCompile(`(?is)\[\[\s*KNOWLEDGE_BRIEF\s*\]\].*?\[\[\s*/KNOWLEDGE_BRIEF\s*\]\]`)
 	slackVisibleKnownMarkerPattern    = regexp.MustCompile(`(?i)\[\[\s*/?(?:REACT|WORLD_BRIEF|KNOWLEDGE_BRIEF)\s*\]\]`)
 	slackVisibleBlankRunsPattern      = regexp.MustCompile(`\n{3,}`)
+	slackVisibleBareUserMentionRe     = regexp.MustCompile(`(^|[^<[:alnum:]_])@((?:U|W)[A-Z0-9]{6,})\b`)
+	slackVisibleBareChannelMentionRe  = regexp.MustCompile(`(^|[^<[:alnum:]_])@((?:C|G)[A-Z0-9]{6,})\b`)
 )
 
 func sanitizeSlackVisibleText(text string) string {
@@ -39,8 +41,21 @@ func sanitizeSlackVisibleText(text string) string {
 	return strings.TrimSpace(out)
 }
 
+func sanitizeSlackOutgoingText(text string) string {
+	return renderSlackVisibleMentionIDs(sanitizeSlackVisibleText(text))
+}
+
+func renderSlackVisibleMentionIDs(text string) string {
+	if text == "" || !strings.Contains(text, "@") {
+		return text
+	}
+	out := slackVisibleBareUserMentionRe.ReplaceAllString(text, `${1}<@${2}>`)
+	out = slackVisibleBareChannelMentionRe.ReplaceAllString(out, `${1}<#${2}>`)
+	return out
+}
+
 func sanitizeSlackPostMessageInput(input PostMessageInput) PostMessageInput {
-	input.Text = sanitizeSlackVisibleText(input.Text)
+	input.Text = sanitizeSlackOutgoingText(input.Text)
 	if len(input.Blocks) > 0 {
 		input.Blocks = sanitizeSlackVisibleBlockMaps(input.Blocks)
 	}
@@ -61,7 +76,7 @@ func sanitizeSlackVisibleBlockMaps(blocks []map[string]any) []map[string]any {
 func sanitizeSlackVisibleAny(value any) any {
 	switch typed := value.(type) {
 	case string:
-		return sanitizeSlackVisibleText(typed)
+		return sanitizeSlackOutgoingText(typed)
 	case map[string]any:
 		return sanitizeSlackVisibleMap(typed)
 	case []map[string]any:

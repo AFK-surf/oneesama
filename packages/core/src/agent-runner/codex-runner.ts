@@ -95,6 +95,7 @@ export function createCodexRunner(options: CodexRunnerOptions = {}) {
         config.codexBin,
         [
           "exec",
+          ...codexProviderArgs(config),
           "-m",
           config.codexModel,
           "-c",
@@ -135,4 +136,37 @@ export function createCodexRunner(options: CodexRunnerOptions = {}) {
   }
 
   return { startTask, getJob, listJobs };
+}
+
+function codexProviderArgs(config: ReturnType<typeof getRuntimeConfig>) {
+  const baseUrl = (config.codexBaseUrl || "").replace(/\/+$/, "");
+  let provider = (config.codexModelProvider || "").trim();
+  if (!provider && baseUrl) provider = "openrouter";
+  if (!provider) return [];
+
+  const args = ["-c", `model_provider=${tomlString(provider)}`];
+  if (!baseUrl) return args;
+
+  const envKey =
+    (config.codexEnvKey || "").trim() ||
+    (baseUrl.toLowerCase().includes("openrouter.ai") ? "OPENROUTER_API_KEY" : "OPENAI_API_KEY");
+  const wireApi = (config.codexWireApi || "").trim() || "responses";
+  const name = provider.toLowerCase() === "openrouter" ? "OpenRouter" : provider;
+  const prefix = `model_providers.${provider}.`;
+
+  args.push(
+    "-c",
+    `${prefix}name=${tomlString(name)}`,
+    "-c",
+    `${prefix}base_url=${tomlString(baseUrl)}`,
+    "-c",
+    `${prefix}env_key=${tomlString(envKey)}`,
+    "-c",
+    `${prefix}wire_api=${tomlString(wireApi)}`,
+  );
+  return args;
+}
+
+function tomlString(value: string) {
+  return JSON.stringify(value);
 }

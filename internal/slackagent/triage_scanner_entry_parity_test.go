@@ -261,6 +261,91 @@ func TestSlackTriageRelatedMemoryUsesFreshQuestionOverDigestContext(t *testing.T
 	}
 }
 
+func TestSlackTriageRelatedMemoryUsesExternalLinkContextForConceptualRecall(t *testing.T) {
+	reader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/reader" {
+			t.Fatalf("unexpected reader path %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(strings.Join([]string{
+			"Title: From Imperative to Declarative: Towards LLM-friendly OS Interfaces for Boosted Computer-Use Agents",
+			"",
+			"This paper proposes a Declarative Model Interface for computer-use agents and OS interfaces.",
+			"It connects computer-use agent workflows to higher level interface descriptions.",
+		}, "\n")))
+	}))
+	defer reader.Close()
+	oldClient := slackExternalLinkHTTPClient
+	oldReaderURL := slackExternalLinkReaderURL
+	slackExternalLinkHTTPClient = reader.Client()
+	slackExternalLinkReaderURL = func(string) string { return reader.URL + "/reader" }
+	defer func() {
+		slackExternalLinkHTTPClient = oldClient
+		slackExternalLinkReaderURL = oldReaderURL
+	}()
+
+	workspaceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(workspaceDir, "memory", "team", "facts", "computer-use-dmi.md"), strings.Join([]string{
+		"# Computer-use DMI discussion",
+		"",
+		"Peng and Oneesama previously discussed Declarative Model Interface ideas for computer-use agents.",
+		"The useful connection is LLM-friendly OS interfaces rather than merely restating an arxiv paper title.",
+	}, "\n"))
+
+	runner := &fakeRunner{job: agentrunner.Job{
+		ID:       "job_external_link_memory",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Result:   `{"summary":"fixture","actions":[]}`,
+	}}
+	service := NewService(Config{
+		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			Memory:       appconfig.SlackMemoryConfig{Enabled: true},
+		},
+		Runner: runner,
+	})
+	messages := []SlackInboundMessage{{
+		ChannelID: "C09LNPCGU3E",
+		TeamID:    "T123",
+		TS:        "1779434704.255149",
+		UserID:    "U09LYKJ382U",
+		Text:      "<https://arxiv.org/html/2510.04607v2>",
+	}, {
+		ChannelID: "C09LNPCGU3E",
+		TeamID:    "T123",
+		TS:        "1779434710.000000",
+		UserID:    "U09L4CPK3BL",
+		Text:      "写成论文可还行",
+	}}
+	digest := renderSlackActivityDigest("C09LNPCGU3E", messages)
+
+	if _, err := service.startSlackTriage(context.Background(), "C09LNPCGU3E", messages, digest, slackTriageStartOptions{}); err != nil {
+		t.Fatalf("startSlackTriage: %v", err)
+	}
+
+	related, ok := runner.startInput.Context["relatedMemory"].(SlackRelatedMemorySearchResult)
+	if !ok {
+		t.Fatalf("relatedMemory = %#v, want search result", runner.startInput.Context["relatedMemory"])
+	}
+	if !strings.Contains(related.Query, "external link context:") || !strings.Contains(related.Query, "Declarative Model Interface") {
+		t.Fatalf("related memory query = %q, want fetched link title/excerpt included", related.Query)
+	}
+	if len(related.Results) == 0 {
+		t.Fatalf("related memory empty, want conceptual memory from fetched link context; query=%q", related.Query)
+	}
+	var found bool
+	for _, record := range related.Results {
+		if strings.Contains(record.Source, "computer-use-dmi.md") && strings.Contains(record.Content, "LLM-friendly OS interfaces") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("related memory = %#v, want computer-use DMI memory", related.Results)
+	}
+}
+
 func writeNoActionTriageProjection(t *testing.T, workspaceDir string, context SlackTriageContext) {
 	t.Helper()
 	raw, err := json.Marshal([]SlackTriageContext{context})

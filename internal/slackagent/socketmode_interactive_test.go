@@ -89,8 +89,14 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 		t.Fatalf("handle envelope: %v", err)
 	}
 
-	if ackPayload != nil {
-		t.Fatalf("ack payload = %#v, want nil socket envelope ack", ackPayload)
+	rawAck, err := json.Marshal(ackPayload)
+	if err != nil {
+		t.Fatalf("marshal ack payload: %v", err)
+	}
+	if !strings.Contains(string(rawAck), `"replace_original":true`) ||
+		!strings.Contains(string(rawAck), "Bot is joining *Google Meet*") ||
+		!strings.Contains(string(rawAck), "*Joining Google Meet*") {
+		t.Fatalf("ack payload = %s, want compact card replacement", string(rawAck))
 	}
 	if got := runner.Snapshot().InteractionsHandled; got != 1 {
 		t.Fatalf("interactions handled = %d, want 1", got)
@@ -375,8 +381,14 @@ func TestSocketModeInteractiveJoinSetupAcksBeforeResponseURLUpdate(t *testing.T)
 
 	select {
 	case payload := <-ackCh:
-		if payload != nil {
-			t.Fatalf("ack payload = %#v, want nil socket envelope ack", payload)
+		rawAck, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal ack payload: %v", err)
+		}
+		if !strings.Contains(string(rawAck), `"replace_original":true`) ||
+			!strings.Contains(string(rawAck), "Bot is joining *Google Meet*") ||
+			!strings.Contains(string(rawAck), "*Joining Google Meet*") {
+			t.Fatalf("ack payload = %s, want compact card replacement", string(rawAck))
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("timed out waiting for socket ack before response_url update completed")
@@ -463,8 +475,14 @@ func TestSocketModeInteractiveJoinSetupFallsBackToMessageBlockValue(t *testing.T
 	if err != nil {
 		t.Fatalf("handle envelope: %v", err)
 	}
-	if ackPayload != nil {
-		t.Fatalf("ack payload = %#v, want nil socket envelope ack", ackPayload)
+	rawAck, err := json.Marshal(ackPayload)
+	if err != nil {
+		t.Fatalf("marshal ack payload: %v", err)
+	}
+	if !strings.Contains(string(rawAck), `"replace_original":true`) ||
+		!strings.Contains(string(rawAck), "Bot is joining *Google Meet*") ||
+		!strings.Contains(string(rawAck), "*Joining Google Meet*") {
+		t.Fatalf("ack payload = %s, want compact card replacement", string(rawAck))
 	}
 
 	select {

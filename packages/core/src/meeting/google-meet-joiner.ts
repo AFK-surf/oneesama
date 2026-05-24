@@ -754,22 +754,6 @@ async function getMeetPresentationState(page: Page): Promise<PresentationState> 
   ).catch((error) => ({ ok: false, error: String(error?.message || error) }));
 }
 
-function getNativeScreenShareFailureHint(presentation: PresentationState | null | undefined) {
-  const text = presentation?.textHead || "";
-  if (
-    process.platform === "darwin" &&
-    /Can't share your screen|Something went wrong when screen sharing/i.test(text)
-  ) {
-    return {
-      reason: "macos_screen_recording_permission_required",
-      permission: "System Settings > Privacy & Security > Screen & System Audio Recording",
-      action:
-        "Grant the browser used by MAB_CHROMIUM_EXECUTABLE permission, then restart that browser session.",
-    };
-  }
-  return null;
-}
-
 async function clickMeetShareScreenControl(
   page: Page,
   diagnostics: Diagnostics | null = null,
@@ -3246,6 +3230,26 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
 
   async function startScreenShare(input: ScreenShareBridgeInput = {}) {
     if (!active?.page) return { ok: false, error: "no_active_join" };
+    const bridgeInput: ScreenShareBridgeInput = {
+      ...input,
+      mode: "synthetic",
+      screenShareMode: "synthetic",
+    };
+    const controller = await ensureScreenShareController(active.page, bridgeInput);
+    if (!controller.ok) {
+      const result = {
+        ok: false,
+        error: "screen_share_controller_install_failed",
+        controller,
+      };
+      active.diagnostics?.record("screen_share_start_requested", result);
+      await refreshActiveRuntimeState();
+      return {
+        ...result,
+        screenShare: active.screenShare || null,
+        fixtureState: active.fixtureState || null,
+      };
+    }
     const result = await active.page
       .evaluate(
         async (payload) => {
@@ -3255,13 +3259,18 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           return await window.MAB_SCREEN_SHARE_CONTROLLER.start(payload);
         },
         {
-          title: input.title || "Meeting Avatar Bot",
-          subtitle: input.subtitle || "Agent screen share",
-          preview: Boolean(input.preview),
+          title: bridgeInput.title || "Meeting Avatar Bot",
+          subtitle: bridgeInput.subtitle || "Agent screen share",
+          videoUrl: bridgeInput.videoUrl || bridgeInput.url || bridgeInput.path || "",
+          preview: Boolean(bridgeInput.preview),
         },
       )
       .catch((error) => ({ ok: false, error: String(error?.message || error) }));
-    active.diagnostics?.record("screen_share_start_requested", result);
+    active.diagnostics?.record("screen_share_start_requested", {
+      ...result,
+      controllerInstalled: controller.installed,
+      controllerState: controller.state || null,
+    });
     await refreshActiveRuntimeState();
     return {
       ...result,
@@ -3272,16 +3281,22 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
 
   async function presentScreenShare(input: ScreenShareBridgeInput = {}) {
     if (!active?.page) return { ok: false, error: "no_active_join" };
+    const bridgeInput: ScreenShareBridgeInput = {
+      ...input,
+      mode: "synthetic",
+      screenShareMode: "synthetic",
+    };
     const meetPage = await evaluateMeetPageState(active.page);
     const beforePresentation = await getMeetPresentationState(active.page);
     const beforeButtons = await collectButtonInventory(
       active.page,
       active.diagnostics,
-      "before-native-present",
+      "before-synthetic-present",
     );
     active.diagnostics?.record("screen_share_present_start", {
-      inputMode: input.mode || "",
-      waitMs: input.waitMs || 0,
+      inputMode: "synthetic",
+      requestedMode: input.mode || input.screenShareMode || "",
+      waitMs: bridgeInput.waitMs || 0,
       meetPage,
       beforePresentation,
       beforeButtons: beforeButtons.slice(0, 30),
@@ -3297,25 +3312,16 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       return {
         ok: false,
         error: meetPage.signIn ? "google_sign_in_required" : "not_in_meeting",
-        mode: input.mode || "",
+        mode: "synthetic",
         meetPage,
         presentation: beforePresentation,
         buttons: beforeButtons.slice(0, 30),
       };
     }
     const controllerBefore = await readScreenShareControllerState(active.page);
-    const nativeMode = controllerBefore?.mode === "native" || input.mode === "native";
-    const start = nativeMode
-      ? {
-          ok: true,
-          mode: "native",
-          skipped: true,
-          reason: "meet_native_present_uses_meet_getDisplayMedia",
-          controllerBefore,
-        }
-      : await startScreenShare(input);
+    const start = await startScreenShare(bridgeInput);
     const clickedSelector = await clickMeetShareScreenControl(active.page, active.diagnostics, {
-      allowCoordinateFallback: Boolean(input.allowCoordinateFallback),
+      allowCoordinateFallback: Boolean(bridgeInput.allowCoordinateFallback),
     });
     if (!clickedSelector) {
       const afterMissPresentation = await getMeetPresentationState(active.page);
@@ -3328,7 +3334,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       return {
         ok: false,
         error: "share_screen_button_not_found",
-        mode: nativeMode ? "native" : "synthetic",
+        mode: "synthetic",
         start,
         presentation: afterMissPresentation,
         screenShare: active.screenShare || null,
@@ -3337,39 +3343,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     }
     const afterClickPresentation = await getMeetPresentationState(active.page);
     active.diagnostics?.record("screen_share_present_clicked", {
-      nativeMode,
+      nativeMode: false,
+      controllerBefore,
       clickedSelector,
       start,
       afterClickPresentation,
     });
     await saveDiagnostics(active.diagnostics).catch(() => {});
-    if (nativeMode) {
-      await withTimeout(
-        active.page.waitForTimeout(Math.min(Number(input.waitMs || 1500), 2000)),
-        2500,
-        null,
-      );
-      const afterWaitPresentation = await getMeetPresentationState(active.page);
-      const permissionHint = getNativeScreenShareFailureHint(afterWaitPresentation);
-      const ok = Boolean(start.ok && clickedSelector && !afterWaitPresentation.failed);
-      active.diagnostics?.record("screen_share_present_native_result", {
-        ok,
-        afterWaitPresentation,
-        permissionHint,
-      });
-      await saveDiagnostics(active.diagnostics).catch(() => {});
-      return {
-        ok,
-        mode: "native",
-        start,
-        clickedSelector,
-        presentation: afterWaitPresentation,
-        permissionHint,
-        note: "native_present_handoff_clicked; Meet/Chrome owns desktop picker and stream state",
-        screenShare: active.screenShare || null,
-        fixtureState: active.fixtureState || null,
-      };
-    }
     await clickFirstVisible(
       active.page,
       [
@@ -3382,7 +3362,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       700,
       active.diagnostics,
     );
-    await active.page.waitForTimeout(Number(input.waitMs || 3000));
+    await active.page.waitForTimeout(Number(bridgeInput.waitMs || 3000));
     let screenshot = "";
     try {
       screenshot = await takeScreenshot(
@@ -3464,17 +3444,14 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       stageTitle: input.stageTitle || "Meeting Avatar Bot",
     });
     if (!stage.ok) return stage;
-    const presentationMode = input.mode || input.screenShareMode || "synthetic";
-    const syntheticController =
-      presentationMode === "synthetic"
-        ? await ensureScreenShareController(active.page, {
-            ...input,
-            mode: "synthetic",
-            title: input.title || "Onee Sama video stage",
-            subtitle: input.subtitle || "Shared by Onee Sama",
-            fps: input.fps || 30,
-          })
-        : null;
+    const presentationMode = "synthetic";
+    const syntheticController = await ensureScreenShareController(active.page, {
+      ...input,
+      mode: "synthetic",
+      title: input.title || "Onee Sama video stage",
+      subtitle: input.subtitle || "Shared by Onee Sama",
+      fps: input.fps || 30,
+    });
     await active.page.bringToFront().catch(() => {});
     const present = await presentScreenShare({
       ...input,
@@ -3487,9 +3464,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       syntheticController,
       present,
       note:
-        presentationMode === "synthetic"
-          ? "video_stage_tab_opened; synthetic Meet screen-share stream was requested"
-          : "video_stage_tab_opened; Meet native tab share was requested",
+        "video_stage_tab_opened; synthetic Meet screen-share stream was requested",
     };
   }
 

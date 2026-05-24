@@ -196,6 +196,82 @@ socket_mode_competitor_labels() {
   printf '%s\n' "$labels" | tr ', ' '\n' | sed '/^$/d'
 }
 
+socket_mode_competitor_env_entries() {
+  local entries="${ONEESAMA_SOCKET_MODE_COMPETITOR_ENV_FILES:-com.openclaw.twitter-reply-bot.live=/Users/pengx17/.openclaw/twitter-bot/.env}"
+  printf '%s\n' "$entries" | tr ', ' '\n' | sed '/^$/d'
+}
+
+env_file_value() {
+  local file="$1"
+  local key="$2"
+  [[ -r "$file" ]] || return 1
+  awk -v key="$key" '
+    /^[[:space:]]*(#|$)/ { next }
+    {
+      line = $0
+      sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+      if (index(line, key "=") == 1) {
+        sub(/^[^=]*=/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if ((substr(line, 1, 1) == "\"" && substr(line, length(line), 1) == "\"") ||
+            (substr(line, 1, 1) == "'"'"'" && substr(line, length(line), 1) == "'"'"'")) {
+          line = substr(line, 2, length(line) - 2)
+        }
+        print line
+      }
+    }
+  ' "$file" | tail -n 1
+}
+
+slack_app_id_from_app_token() {
+  local token="$1"
+  if [[ "$token" =~ ^xapp-[^-]+-([A-Z0-9]+)- ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  fi
+}
+
+socket_mode_competitor_env_file() {
+  local label="$1"
+  local entry entry_label entry_path
+  while IFS= read -r entry; do
+    entry_label="${entry%%=*}"
+    entry_path="${entry#*=}"
+    if [[ "$entry_label" == "$label" && "$entry_path" != "$entry" ]]; then
+      printf '%s\n' "$entry_path"
+      return 0
+    fi
+  done < <(socket_mode_competitor_env_entries)
+  return 1
+}
+
+socket_mode_competitor_app_id() {
+  local label="$1"
+  local entry entry_label entry_app_id env_file app_token
+  local app_ids="${ONEESAMA_SOCKET_MODE_COMPETITOR_APP_IDS:-}"
+  if [[ -n "$app_ids" ]]; then
+    while IFS= read -r entry; do
+      entry_label="${entry%%=*}"
+      entry_app_id="${entry#*=}"
+      if [[ "$entry_label" == "$label" && "$entry_app_id" != "$entry" ]]; then
+        printf '%s\n' "$entry_app_id"
+        return 0
+      fi
+    done < <(printf '%s\n' "$app_ids" | tr ', ' '\n' | sed '/^$/d')
+  fi
+  if env_file="$(socket_mode_competitor_env_file "$label")"; then
+    app_token="$(env_file_value "$env_file" SLACK_APP_TOKEN || true)"
+    slack_app_id_from_app_token "$app_token"
+  fi
+}
+
+socket_mode_competitor_conflicts() {
+  local label="$1"
+  local own_app_id competitor_app_id
+  own_app_id="$(slack_app_id_from_app_token "${SLACK_APP_TOKEN:-}" || true)"
+  competitor_app_id="$(socket_mode_competitor_app_id "$label" || true)"
+  [[ -n "$own_app_id" && -n "$competitor_app_id" && "$own_app_id" == "$competitor_app_id" ]]
+}
+
 check_no_socket_mode_competitors() {
   if [[ "$subcommand" != "slack-agent" ]]; then
     return 0
@@ -211,8 +287,8 @@ check_no_socket_mode_competitors() {
   local domain label
   domain="gui/$(id -u)"
   while IFS= read -r label; do
-    if launchctl print "${domain}/${label}" >/dev/null 2>&1; then
-      die "known Slack Socket Mode competitor is running: ${label}; bootout/disable it or set ONEESAMA_ALLOW_SOCKET_MODE_COMPETITORS=1"
+    if launchctl print "${domain}/${label}" >/dev/null 2>&1 && socket_mode_competitor_conflicts "$label"; then
+      die "Slack Socket Mode app conflict: ${label} is running with app_id=$(socket_mode_competitor_app_id "$label"), matching Oneesama app_id=$(slack_app_id_from_app_token "${SLACK_APP_TOKEN:-}"); bootout/disable it or set ONEESAMA_ALLOW_SOCKET_MODE_COMPETITORS=1"
     fi
   done < <(socket_mode_competitor_labels)
 }

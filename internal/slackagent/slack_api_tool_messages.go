@@ -104,7 +104,7 @@ func (t *slackAPITool) actionPostMessage(ctx context.Context, params map[string]
 func (t *slackAPITool) actionPostMessageWithAction(ctx context.Context, params map[string]any, action string) (slackAPIToolResult, error) {
 	channel := strings.TrimSpace(stringFromAny(params["channel"]))
 	threadTS := strings.TrimSpace(stringFromAny(params["thread_ts"]))
-	text := strings.TrimSpace(sanitizeSlackVisibleText(stringFromAny(params["text"])))
+	text := strings.TrimSpace(sanitizeSlackOutgoingText(stringFromAny(params["text"])))
 
 	if t.activeThread != nil && t.activeThread(channel, threadTS) {
 		return slackAPIToolResult{Success: false, Text: "Cannot call chat.postMessage on the current thread. Output your response text directly — the system delivers it automatically."}, nil

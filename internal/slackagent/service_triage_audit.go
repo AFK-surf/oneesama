@@ -418,7 +418,10 @@ func triageQualityRunProviderTransientFailure(run SlackTriageContext) bool {
 	if strings.Contains(text, "eof") && (strings.Contains(text, "openrouter") || strings.Contains(text, "chat/completions")) {
 		return true
 	}
-	return strings.Contains(text, "connection reset by peer") || strings.Contains(text, "unexpected eof")
+	return strings.Contains(text, "connection reset by peer") ||
+		strings.Contains(text, "unexpected eof") ||
+		strings.Contains(text, "decode oneesama pi decision json") ||
+		strings.Contains(text, "unexpected end of json input")
 }
 
 func triageQualityRunThreadKey(run SlackTriageContext) (triageQualityThreadKey, bool) {

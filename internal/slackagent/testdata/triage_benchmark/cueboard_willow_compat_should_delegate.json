@@ -1,0 +1,30 @@
+{
+  "caseId": "cueboard_willow_compat_should_delegate",
+  "description": "A bounded compatibility question about Oneesama/Cueboard/Willow deployment order should be delegated when active workers have not produced a conclusion.",
+  "label": "should_delegate",
+  "tags": ["incident", "under_response", "oneesama_system", "compatibility_analysis"],
+  "sourceRefs": ["slack:C09LB7V1WGJ/1779524023.130022", "task:#390"],
+  "thread": {
+    "channelId": "C_BENCH",
+    "threadTs": "1779524023.130022",
+    "messages": [
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_PENG",
+        "text": "看一下 cueboard / willow 现在的部署顺序是不是有兼容性问题，会不会影响 oneesama 接管？需要给我一个结论。",
+        "ts": "1779524023.130022",
+        "threadTs": "1779524023.130022"
+      },
+      {
+        "channelId": "C_BENCH",
+        "userId": "U_CODEX3720",
+        "text": "我先看一下部署顺序和兼容性。",
+        "ts": "1779524050.000000",
+        "threadTs": "1779524023.130022"
+      }
+    ]
+  },
+  "expected": {
+    "minWorkerRequests": 1
+  }
+}

@@ -3,11 +3,13 @@ package meetingagent
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/AFK-surf/oneesama/internal/agentrunner"
+	"github.com/AFK-surf/oneesama/internal/internalauth"
 )
 
 func TestWorkerReportPollAndMarkSlackDelivered(t *testing.T) {
@@ -106,13 +108,48 @@ func TestWorkerPollRealtimeMarksDeliveryByDefault(t *testing.T) {
 func TestWorkerReportInjectsRealtimeWhenJoinActive(t *testing.T) {
 	t.Parallel()
 
-	router := newScreenShareTestRouter(t, t.TempDir())
-	performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_worker","meeting_url":"https://meet.google.com/abc-defg-hij","dry_run":true}`)
+	router, service := newScreenShareTestRouterWithService(t, t.TempDir())
+	join := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_worker","meeting_url":"https://meet.google.com/abc-defg-hij","dry_run":true}`))
+	join.Header.Set(internalauth.HeaderName, "secret-key")
+	join.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(httptest.NewRecorder(), join)
+	markSessionJoined(t, service, "session_worker")
 
 	report := performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_bridge","status":"completed","task":"answer","result":"done"}`)
 	if report.Code != http.StatusOK ||
 		!strings.Contains(report.Body.String(), `"realtimeDelivery":{"ok":true`) ||
 		!strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
 		t.Fatalf("report response = %d %s, want realtime injected", report.Code, report.Body.String())
+	}
+}
+
+func TestWorkerReportSuppressesNoActionRealtimeDelivery(t *testing.T) {
+	t.Parallel()
+
+	router, service := newScreenShareTestRouterWithService(t, t.TempDir())
+	join := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_worker_noop","meeting_url":"https://meet.google.com/abc-defg-hij","dry_run":true}`))
+	join.Header.Set(internalauth.HeaderName, "secret-key")
+	join.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(httptest.NewRecorder(), join)
+	markSessionJoined(t, service, "session_worker_noop")
+
+	report := httptest.NewRecorder()
+	reportRequest := httptest.NewRequest(http.MethodPost, "/worker/report", strings.NewReader(`{"id":"job_noop","status":"completed","task":"answer","result":"No action needed."}`))
+	reportRequest.Header.Set(internalauth.HeaderName, "secret-key")
+	reportRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(report, reportRequest)
+	if report.Code != http.StatusOK ||
+		!strings.Contains(report.Body.String(), `"channel":"realtime_noop_suppressed"`) ||
+		!strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
+		t.Fatalf("report response = %d %s, want suppressed realtime delivery", report.Code, report.Body.String())
+	}
+
+	poll := httptest.NewRecorder()
+	pollRequest := httptest.NewRequest(http.MethodPost, "/worker/poll-realtime", strings.NewReader(`{"markDelivered":false}`))
+	pollRequest.Header.Set(internalauth.HeaderName, "secret-key")
+	pollRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(poll, pollRequest)
+	if poll.Code != http.StatusOK || strings.Contains(poll.Body.String(), `"job_noop"`) {
+		t.Fatalf("poll response = %d %s, want no-op report hidden from realtime poll", poll.Code, poll.Body.String())
 	}
 }

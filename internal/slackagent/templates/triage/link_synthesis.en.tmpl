@@ -1,3 +1,1 @@
-I skimmed {{.Subject}}.{{if .Excerpt}} Core signal: {{.Excerpt}}
-
-My initial take: this is worth using as a discussion prompt; the useful next step is connecting it back to the current product or technical decision.{{else}} My initial take: it looks worth discussing, especially if we connect it back to the current product or technical decision.{{end}}
+{{if .Excerpt}}The useful signal in {{.Subject}} is: {{.Excerpt}}{{else}}{{.Subject}} looks worth discussing mainly for how it changes the current product or technical decision.{{end}}

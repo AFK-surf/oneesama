@@ -104,7 +104,7 @@ func (s *Service) StopScreenShare(ctx context.Context, input ScreenShareRequest)
 }
 
 func (s *Service) resolveScreenShareSessionID(ctx context.Context, sessionID string) (string, error) {
-	session, err := s.resolveJoinSession(ctx, sessionID)
+	session, err := s.resolveActiveJoinSession(ctx, sessionID)
 	if err != nil {
 		return "", err
 	}
@@ -112,6 +112,35 @@ func (s *Service) resolveScreenShareSessionID(ctx context.Context, sessionID str
 		return "", errNoActiveJoin()
 	}
 	return strings.TrimSpace(session.ID), nil
+}
+
+func (s *Service) resolveActiveJoinSession(ctx context.Context, sessionID string) (*SessionRecord, error) {
+	trimmedID := strings.TrimSpace(sessionID)
+	if trimmedID != "" {
+		session, err := s.GetSession(ctx, trimmedID)
+		if err != nil || session == nil {
+			return session, err
+		}
+		if isScreenShareEligibleSession(*session) {
+			return session, nil
+		}
+		return nil, nil
+	}
+
+	sessions, err := s.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if isScreenShareEligibleSession(session) {
+			return &session, nil
+		}
+	}
+	return nil, nil
+}
+
+func isScreenShareEligibleSession(session SessionRecord) bool {
+	return !isTerminalJoinSessionStatus(session.Status)
 }
 
 func firstNonZero(values ...int) int {

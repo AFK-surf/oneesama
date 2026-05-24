@@ -173,6 +173,10 @@ func stripExternalLinkBoilerplate(text string) string {
 func normalizeSlackExternalLinkURL(rawURL string) string {
 	rawURL = strings.TrimSpace(rawURL)
 	rawURL = strings.Trim(rawURL, "<>|.,，。)）]】")
+	if beforeLabel, _, ok := strings.Cut(rawURL, "|"); ok {
+		rawURL = strings.TrimSpace(beforeLabel)
+		rawURL = strings.Trim(rawURL, "<>|.,，。)）]】")
+	}
 	return rawURL
 }
 

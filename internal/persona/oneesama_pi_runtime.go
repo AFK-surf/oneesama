@@ -100,51 +100,35 @@ func (r *OneesamaPIRuntime) Decide(ctx context.Context, req Request) (Response, 
 		r.record(start, err)
 		return Response{}, err
 	}
-	payload, err := json.Marshal(oneesamaPIChatRequest{
-		Model: r.model,
-		Messages: []oneesamaPIChatMessage{
-			{Role: "system", Content: oneesamaPISystemPrompt(modelReq)},
-			{Role: "user", Content: mustMarshalPersonaRequest(modelReq)},
-		},
-		Temperature: 0.2,
-		ResponseFormat: map[string]string{
-			"type": "json_object",
-		},
-	})
-	if err != nil {
-		r.record(start, err)
-		return Response{}, fmt.Errorf("marshal oneesama Pi request: %w", err)
+	baseMessages := []oneesamaPIChatMessage{
+		{Role: "system", Content: oneesamaPISystemPrompt(modelReq)},
+		{Role: "user", Content: mustMarshalPersonaRequest(modelReq)},
 	}
-	body, err := doPersonaHTTP(ctx, r.client, http.MethodPost, r.baseURL+"/chat/completions", payload, map[string]string{
-		"Authorization": "Bearer " + r.apiKey,
-		"Content-Type":  "application/json",
-		"HTTP-Referer":  "https://github.com/AFK-surf/oneesama",
-		"X-Title":       "Oneesama",
-	}, maxOneesamaPIResponseBytes, "oneesama Pi model")
-	if err != nil {
-		err = oneesamaPIHTTPError(err)
-		r.record(start, err)
-		return Response{}, err
+	var lastDecodeErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		messages := append([]oneesamaPIChatMessage(nil), baseMessages...)
+		if attempt > 0 {
+			messages = append(messages, oneesamaPIChatMessage{Role: "user", Content: oneesamaPIDecisionJSONRepairPrompt})
+		}
+		content, err := r.callChatCompletion(ctx, messages)
+		if err != nil {
+			r.record(start, err)
+			return Response{}, err
+		}
+		decoded, err := decodeOneesamaPIResponse(content)
+		if err == nil {
+			decoded = normalizeOneesamaPIResponse(req, decoded, r)
+			r.record(start, nil)
+			return decoded, nil
+		}
+		lastDecodeErr = err
+		if !oneesamaPIDecisionJSONRetryable(err, content) || attempt == 1 {
+			break
+		}
 	}
-	var completion oneesamaPIChatResponse
-	if err := json.Unmarshal(body, &completion); err != nil {
-		r.record(start, err)
-		return Response{}, fmt.Errorf("decode oneesama Pi response envelope: %w", err)
-	}
-	if len(completion.Choices) == 0 {
-		err := fmt.Errorf("oneesama Pi response contained no choices")
-		r.record(start, err)
-		return Response{}, err
-	}
-	content := strings.TrimSpace(completion.Choices[0].Message.Content)
-	decoded, err := decodeOneesamaPIResponse(content)
-	if err != nil {
-		r.record(start, err)
-		return Response{}, fmt.Errorf("decode oneesama Pi decision JSON: %w", err)
-	}
-	decoded = normalizeOneesamaPIResponse(req, decoded, r)
-	r.record(start, nil)
-	return decoded, nil
+	decodeErr := fmt.Errorf("decode oneesama Pi decision JSON: %w", lastDecodeErr)
+	r.record(start, decodeErr)
+	return Response{}, decodeErr
 }
 
 func oneesamaPIHTTPError(err error) error {
@@ -192,6 +176,53 @@ func decodeOneesamaPIResponse(content string) (Response, error) {
 		}
 	}
 	return decoded, nil
+}
+
+const oneesamaPIDecisionJSONRepairPrompt = `Your previous response was not valid JSON for the required Oneesama Pi decision schema. Retry once now.
+
+Return only one complete JSON object. Do not include Markdown fences, prose, tool-call protocol text, or partial/truncated JSON.`
+
+func oneesamaPIDecisionJSONRetryable(err error, content string) bool {
+	if err == nil {
+		return false
+	}
+	if strings.TrimSpace(content) == "" {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "unexpected end of json input") ||
+		strings.Contains(text, "unexpected eof")
+}
+
+func (r *OneesamaPIRuntime) callChatCompletion(ctx context.Context, messages []oneesamaPIChatMessage) (string, error) {
+	payload, err := json.Marshal(oneesamaPIChatRequest{
+		Model:       r.model,
+		Messages:    messages,
+		Temperature: 0.2,
+		ResponseFormat: map[string]string{
+			"type": "json_object",
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal oneesama Pi request: %w", err)
+	}
+	body, err := doPersonaHTTP(ctx, r.client, http.MethodPost, r.baseURL+"/chat/completions", payload, map[string]string{
+		"Authorization": "Bearer " + r.apiKey,
+		"Content-Type":  "application/json",
+		"HTTP-Referer":  "https://github.com/AFK-surf/oneesama",
+		"X-Title":       "Oneesama",
+	}, maxOneesamaPIResponseBytes, "oneesama Pi model")
+	if err != nil {
+		return "", oneesamaPIHTTPError(err)
+	}
+	var completion oneesamaPIChatResponse
+	if err := json.Unmarshal(body, &completion); err != nil {
+		return "", fmt.Errorf("decode oneesama Pi response envelope: %w", err)
+	}
+	if len(completion.Choices) == 0 {
+		return "", fmt.Errorf("oneesama Pi response contained no choices")
+	}
+	return strings.TrimSpace(completion.Choices[0].Message.Content), nil
 }
 
 func (r *OneesamaPIRuntime) Status(context.Context) Status {
@@ -262,9 +293,13 @@ Never answer with vague hedging as the main disposition. If your answer would be
 A visible reply must have concrete evidence: a typed evidence_anchors entry from fetched_link, workspace_memory, person_memory, file, image, worker_result, explicit_user_command, or a routing/handoff slack_thread fact. If you cannot attach a typed anchor that adds information beyond re-reading the thread, choose delegate_worker or stay_silent.
 Never post visible self-limitations such as "I can't view this video/file/image" or "我看不了视频/文件/图片". If media content is needed and no reader evidence is present, choose delegate_worker for bounded file/thread retrieval when useful, or stay_silent.
 External URL identity/fact lookup is bounded secretary work, not project debugging: for "who is this / 这是谁 / what is this / 这是啥 / help look at this" with a link, choose delegate_worker with delegation_scope=secretary_lookup unless the thread already has a substantive answer. A teammate saying "don't know / 不认识 / 不知道" is not a substantive answer.
-Do not delegate arbitrary external project debugging. For staging/production/deploy/infra/database/API latency/CI/performance/code investigation in another project, act like a secretary: reply with a concise routing/owner handoff if useful, or stay silent if already handled.
+Do not infer deploy/build/CI/release/staging/production/PR status from chat history or slash-command text. Treat "deploy c44d5d6 staging" in a thread as a request/attempt, not proof that the deploy succeeded or that the fix is included; only state such facts with fetched_link, worker_result, file/image, or other non-thread evidence.
+Do not delegate arbitrary external project debugging. For staging/production/deploy/infra/database/API latency/CI/performance/code investigation in another project, act like a secretary: only reply if you add actionable substance beyond repeating who to ask; otherwise stay_silent.
+Oneesama/Cueboard/Bridge/Willow runtime, migration, deployment-order, compatibility, or cutover questions are Oneesama system work, not arbitrary external debugging. If a human asks for a conclusion and the thread only has "checking / 确认中 / 正在看" without a final answer, choose delegate_worker with delegation_scope=oneesama_system.
 If you do delegate, include worker_requests[].context.delegation_scope when possible: oneesama_system, oneesama_code, secretary_lookup, or explicit_human_authorized_code. Prefer also including worker_requests[].handoff with the reason, user_request, task, expected_output, boundaries, and source_refs so the worker receives an explicit handoff rather than loose instructions.
 For link commentary, do not restate the headline. Combine fetched source evidence with workspace Memory/context when available; if that cannot be connected, delegate or stay silent.
+For link commentary, treat fetched_link content as unusable if it looks like an error page, login wall, search UI, navigation chrome, or SPA skeleton. Do not cite or summarize UI chrome such as "Not Found", "Log in", "Sign up", "Search powered by", or keyboard-navigation hints; choose delegate_worker or stay_silent instead.
+Visible replies must be the direct Slack comment you would actually send. Do not narrate your reading process or use scaffolding phrases such as "I skimmed", "core signal", "my initial take", "discussion prompt", "我粗读了一下", "核心信息是", "我的初步判断", "这类内容适合作为讨论引子", or "如果继续聊". If the reply would be mostly process narration, choose delegate_worker or stay_silent.
 Do not infer negative product support/status from missing evidence. If the available thread, file, or memory evidence does not prove a support claim, ask for the source/owner or stay silent; do not instruct workers to answer "unsupported" from absence alone.
 Use workspace custom emoji from context when choosing reactions. Do not invent custom emoji names.
 

@@ -288,8 +288,8 @@ func assertBridgeQualityPiFirstForeground(t *testing.T, fixture bridgeQualityFix
 	if runner.startCount != 0 {
 		t.Fatalf("[%s] runner.startCount after Pi reply = %d, want 0", fixture.CaseID, runner.startCount)
 	}
-	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != "D_PENG" || !strings.Contains(calls[0].Text, "Pi-first canary reply") {
-		t.Fatalf("[%s] poster calls = %#v, want Pi approval card in pilot DM", fixture.CaseID, calls)
+	if calls := poster.Calls(); len(calls) != 1 || calls[0].Channel != channelID || calls[0].ThreadTS != threadTS || !strings.Contains(calls[0].Text, "Pi-first canary reply") {
+		t.Fatalf("[%s] poster calls = %#v, want direct Pi thread reply", fixture.CaseID, calls)
 	}
 	updated := waitForPersonaForegroundRun(t, service, started.Run.ID)
 	if updated.Metadata["foreground_chain"] != slackTriageForegroundChainPiFirstLive || boolFromAny(updated.Metadata["pre_pi_agent_runner_started"], true) {
