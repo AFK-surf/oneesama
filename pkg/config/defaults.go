@@ -19,7 +19,7 @@ const (
 	defaultSlackEventDebounce               = 5 * time.Minute
 	defaultSlackTriagePostActions           = true
 	defaultSlackTriageHeuristicFallback     = true
-	defaultSlackTriageForegroundChain       = "codex_then_pi"
+	defaultSlackTriageForegroundChain       = "codex_only"
 	defaultSlackMeetingScannerInterval      = time.Minute
 	defaultSlackDailyReportTimeOfDay        = "18:00"
 	defaultSlackDailyReportTimezone         = "Asia/Shanghai"

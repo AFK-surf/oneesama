@@ -41,6 +41,10 @@ func TestValidateRequiresSlackTokens(t *testing.T) {
 func TestValidateRejectsLiveSlackLegacyFallback(t *testing.T) {
 	cfg := validSlackStartupConfig()
 	cfg.AgentRunner = appconfig.AgentRunnerConfig{Provider: "codex", JobTimeout: time.Minute}
+	cfg.Slack.EventBuffer = appconfig.SlackEventBufferConfig{Enabled: true, Triage: true}
+	cfg.Slack.Memory = appconfig.SlackMemoryConfig{Enabled: true}
+	cfg.Slack.WorkspaceDir = "/Users/peng/oneesama/runtime/live-workspace"
+	cfg.Persistence = appconfig.PersistenceConfig{DataDir: "/Users/peng/oneesama/runtime/live-state"}
 
 	err := Validate(context.Background(), cfg)
 	if err == nil || !strings.Contains(err.Error(), "foreground_chain=pi_first_live") {
@@ -48,19 +52,28 @@ func TestValidateRejectsLiveSlackLegacyFallback(t *testing.T) {
 	}
 }
 
-func TestValidateAcceptsExplicitLegacySlackOverride(t *testing.T) {
-	t.Setenv("ONEESAMA_LIVE_ALLOW_LEGACY_SLACK", "1")
+func TestValidateAcceptsNonRealtimeSlackRuntime(t *testing.T) {
 	cfg := validSlackStartupConfig()
 	cfg.AgentRunner = appconfig.AgentRunnerConfig{Provider: "codex", JobTimeout: time.Minute}
 
 	if err := ValidateLiveTriagePosture(cfg); err != nil {
-		t.Fatalf("ValidateLiveTriagePosture should allow explicit legacy slack override, got %v", err)
+		t.Fatalf("ValidateLiveTriagePosture should allow non-realtime slack runtime, got %v", err)
+	}
+}
+
+func TestValidateAcceptsExplicitLegacySlackOverrideForLiveWorkspace(t *testing.T) {
+	t.Setenv("ONEESAMA_LIVE_ALLOW_LEGACY_SLACK", "1")
+	cfg := liveSlackStartupConfig()
+	cfg.AgentRunner = appconfig.AgentRunnerConfig{Provider: "codex", JobTimeout: time.Minute}
+
+	if err := ValidateLiveTriagePosture(cfg); err != nil {
+		t.Fatalf("ValidateLiveTriagePosture should allow explicit live slack override, got %v", err)
 	}
 }
 
 func TestValidateAcceptsPiFirstLiveSlackPosture(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-	cfg := validSlackStartupConfig()
+	cfg := liveSlackStartupConfig()
 	cfg.AgentRunner = appconfig.AgentRunnerConfig{Provider: "codex", JobTimeout: time.Minute}
 	cfg.Slack.Triage = appconfig.SlackTriageConfig{
 		ForegroundChain: "pi_first_live",
@@ -139,4 +152,13 @@ func validSlackStartupConfig() appconfig.Config {
 		},
 		AgentRunner: appconfig.AgentRunnerConfig{Provider: "dry-run", DryRun: true, JobTimeout: time.Minute},
 	}
+}
+
+func liveSlackStartupConfig() appconfig.Config {
+	cfg := validSlackStartupConfig()
+	cfg.Slack.EventBuffer = appconfig.SlackEventBufferConfig{Enabled: true, Triage: true}
+	cfg.Slack.Memory = appconfig.SlackMemoryConfig{Enabled: true}
+	cfg.Slack.WorkspaceDir = "/Users/peng/oneesama/runtime/live-workspace"
+	cfg.Persistence = appconfig.PersistenceConfig{DataDir: "/Users/peng/oneesama/runtime/live-state"}
+	return cfg
 }

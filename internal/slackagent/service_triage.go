@@ -25,16 +25,18 @@ func normalizeSlackTriageForegroundChain(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case slackTriageForegroundChainCodexOnly:
 		return slackTriageForegroundChainCodexOnly
+	case slackTriageForegroundChainCodexThenPi:
+		return slackTriageForegroundChainCodexThenPi
 	case slackTriageForegroundChainPiFirstLive:
 		return slackTriageForegroundChainPiFirstLive
 	default:
-		return slackTriageForegroundChainCodexThenPi
+		return slackTriageForegroundChainCodexOnly
 	}
 }
 
 func (s *Service) slackTriageForegroundChain() string {
 	if s == nil {
-		return slackTriageForegroundChainCodexThenPi
+		return slackTriageForegroundChainCodexOnly
 	}
 	return normalizeSlackTriageForegroundChain(s.triageForegroundChain)
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,7 +52,10 @@ func ValidateLiveTriagePosture(cfg appconfig.Config) error {
 	if legacySlackRuntimeAllowed() || slackRuntimeIsDryRun(cfg.AgentRunner) {
 		return nil
 	}
-	if got := strings.TrimSpace(cfg.Slack.Triage.ForegroundChain); got != "pi_first_live" {
+	if !slackRequiresLiveTriagePosture(cfg) {
+		return nil
+	}
+	if got := normalizeSlackForegroundChain(cfg.Slack.Triage.ForegroundChain); got != "pi_first_live" {
 		return fmt.Errorf("live slack-agent requires slack.triage.foreground_chain=pi_first_live; got %q", got)
 	}
 	if strings.TrimSpace(cfg.Slack.Triage.WorkspacePolicy) == "" {
@@ -70,6 +74,34 @@ func ValidateLiveTriagePosture(cfg appconfig.Config) error {
 		return fmt.Errorf("live slack-agent requires Oneesama Pi API key; set ONEESAMA_PI_API_KEY, PI_API_KEY, or OPENROUTER_API_KEY")
 	}
 	return nil
+}
+
+func slackRequiresLiveTriagePosture(cfg appconfig.Config) bool {
+	if normalizeSlackForegroundChain(cfg.Slack.Triage.ForegroundChain) == "pi_first_live" {
+		return true
+	}
+	return cfg.Slack.EventBuffer.Enabled &&
+		cfg.Slack.EventBuffer.Triage &&
+		slackConfigLooksLikeLiveWorkspace(cfg)
+}
+
+func slackConfigLooksLikeLiveWorkspace(cfg appconfig.Config) bool {
+	return cfg.Slack.Memory.Enabled &&
+		(pathLooksLikeLiveWorkspace(cfg.Slack.WorkspaceDir) || pathLooksLikeLiveState(cfg.Persistence.DataDir))
+}
+
+func pathLooksLikeLiveWorkspace(value string) bool {
+	normalized := filepath.ToSlash(strings.TrimSpace(value))
+	return strings.HasSuffix(normalized, "/runtime/live-workspace") || normalized == "runtime/live-workspace"
+}
+
+func pathLooksLikeLiveState(value string) bool {
+	normalized := filepath.ToSlash(strings.TrimSpace(value))
+	return strings.HasSuffix(normalized, "/runtime/live-state") || normalized == "runtime/live-state"
+}
+
+func normalizeSlackForegroundChain(value string) string {
+	return strings.NewReplacer("-", "_", " ", "_").Replace(strings.ToLower(strings.TrimSpace(value)))
 }
 
 func legacySlackRuntimeAllowed() bool {

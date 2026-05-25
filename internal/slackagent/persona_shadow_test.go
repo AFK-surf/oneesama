@@ -306,7 +306,11 @@ func TestSlackTriageLivePersonaForegroundPostsPersonaReplyInsteadOfCodexAction(t
 	}}
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
-		Slack:       appconfig.SlackConfig{WorkspaceDir: workspaceDir, PilotUserID: "U_PENG"},
+		Slack: appconfig.SlackConfig{
+			WorkspaceDir: workspaceDir,
+			PilotUserID:  "U_PENG",
+			Triage:       appconfig.SlackTriageConfig{ForegroundChain: slackTriageForegroundChainCodexThenPi},
+		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
 			Mode:     persona.ModeLive,
@@ -620,6 +624,7 @@ func TestSlackTriageLivePersonaForegroundFailureSuppressesCodexFallback(t *testi
 	}}
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{Triage: appconfig.SlackTriageConfig{ForegroundChain: slackTriageForegroundChainCodexThenPi}},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
 			Mode:     persona.ModeLive,
@@ -667,7 +672,11 @@ func TestSlackTriageLivePersonaRequestIncludesFilteredCandidateButPiOwnsVisibleR
 	}}
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
-		Slack:       appconfig.SlackConfig{BotUserID: "U_ONEE", PilotUserID: "U_PENG"},
+		Slack: appconfig.SlackConfig{
+			BotUserID:   "U_ONEE",
+			PilotUserID: "U_PENG",
+			Triage:      appconfig.SlackTriageConfig{ForegroundChain: slackTriageForegroundChainCodexThenPi},
+		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
 			Mode:     persona.ModeLive,
@@ -748,7 +757,10 @@ func TestSlackTriageLivePersonaStaySilentDoesNotPostOldBridgeMentionCandidate(t 
 	}}
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
-		Slack:       appconfig.SlackConfig{BotUserID: "U_ONEE"},
+		Slack: appconfig.SlackConfig{
+			BotUserID: "U_ONEE",
+			Triage:    appconfig.SlackTriageConfig{ForegroundChain: slackTriageForegroundChainCodexThenPi},
+		},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
 			Mode:     persona.ModeLive,
@@ -2513,6 +2525,7 @@ func TestSlackTriageLivePersonaEmptyReplyRecordsRetryFollowup(t *testing.T) {
 	}}
 	service := NewService(Config{
 		Persistence: appconfig.PersistenceConfig{Provider: "memory"},
+		Slack:       appconfig.SlackConfig{Triage: appconfig.SlackTriageConfig{ForegroundChain: slackTriageForegroundChainCodexThenPi}},
 		PersonaRuntime: appconfig.PersonaRuntimeConfig{
 			Provider: persona.ProviderFake,
 			Mode:     persona.ModeLive,
