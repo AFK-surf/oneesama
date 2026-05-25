@@ -155,9 +155,13 @@ type kwwkAppControlResponse struct {
 func (r kwwkAppControlResponse) appControlResult() AppControlResult {
 	status := appControlStatusCompleted
 	errorText := ""
+	blocker := strings.TrimSpace(r.Blocker)
 	if !r.OK {
 		status = appControlStatusFailed
 		errorText = "app_control_blocked"
+		if blocker == "accessibility_permission_required" {
+			errorText = "accessibility_permission_required"
+		}
 	}
 	raw := map[string]any{
 		"operations": r.Operations,
@@ -170,7 +174,7 @@ func (r kwwkAppControlResponse) appControlResult() AppControlResult {
 		Summary:    strings.TrimSpace(r.Summary),
 		Actions:    append([]string(nil), r.Actions...),
 		Confidence: r.Confidence,
-		Blocker:    strings.TrimSpace(r.Blocker),
+		Blocker:    blocker,
 		Error:      errorText,
 		Raw:        raw,
 	}

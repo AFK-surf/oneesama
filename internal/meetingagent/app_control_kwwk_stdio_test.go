@@ -86,6 +86,16 @@ func TestFallbackAppControlBackendFallsBackToCodexOnlyWhenKWWKUnavailable(t *tes
 	if result.Provider != "kwwk" || len(fallback.requests) != 0 {
 		t.Fatalf("result = %#v fallback=%d, blocked KWWK result must not fall through to Codex", result, len(fallback.requests))
 	}
+
+	primary.result = AppControlResult{OK: false, Provider: "kwwk", Status: appControlStatusFailed, Error: "accessibility_permission_required", Blocker: "accessibility_permission_required"}
+	fallback.requests = nil
+	result, err = backend.ControlSharedApp(context.Background(), AppControlRequest{Instruction: "open settings"})
+	if err != nil {
+		t.Fatalf("ControlSharedApp(accessibility) error = %v", err)
+	}
+	if result.Provider != "kwwk" || result.Error != "accessibility_permission_required" || len(fallback.requests) != 0 {
+		t.Fatalf("result = %#v fallback=%d, accessibility blocker must stay explicit and not fall through to Codex", result, len(fallback.requests))
+	}
 }
 
 func writeKWWKAppControlHelper(t *testing.T) string {
