@@ -1,6 +1,7 @@
 package slackagent
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -147,5 +148,51 @@ func TestHandleEventsJoinMentionDedupeAcrossAppMentionAndMessage(t *testing.T) {
 	poster.WaitForCalls(t, 1)
 	if calls := poster.Calls(); len(calls) != 1 {
 		t.Fatalf("poster calls = %d, want one join card", len(calls))
+	}
+}
+
+func TestHandleEventsJoinMentionBypassesBusyThreadWorkerQueue(t *testing.T) {
+	poster := &recordingPoster{callCh: make(chan struct{}, 4)}
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		t.Fatalf("meeting agent should not be called before join options are selected: %s", request.URL.Path)
+	}))
+	defer meetingAgent.Close()
+	service := NewService(Config{
+		MeetingAgentURL:        meetingAgent.URL,
+		DefaultCaptionLanguage: "English",
+		Slack:                  appconfig.SlackConfig{SigningSecret: "secret", BotUserID: "UBOT"},
+		Poster:                 poster,
+		AgentRunner:            appconfig.AgentRunnerConfig{Provider: "codex", DryRun: true},
+	})
+	if startWorker, _ := service.mentionQueue.enqueue("T123", "C123", "123.000", SlackEventPayload{}); !startWorker {
+		t.Fatalf("first worker queue entry must claim the thread")
+	}
+
+	response := service.handleEventAvatarCommand(context.Background(), SlackEventEnvelope{
+		EventID: "EvJoinCardWhileBusy",
+		TeamID:  "T123",
+		Event: SlackEventPayload{
+			Type:     "app_mention",
+			User:     "U123",
+			Text:     "<@UBOT> https://meet.google.com/cou-vspr-vkd",
+			Channel:  "C123",
+			TS:       "124.000",
+			ThreadTS: "123.000",
+		},
+	}, "app_mention")
+
+	if !response.OK || !response.Handled || response.Response == nil {
+		t.Fatalf("response = %#v, want handled join setup", response)
+	}
+	if response.Response.Text != "Join Google Meet: https://meet.google.com/cou-vspr-vkd" {
+		t.Fatalf("response text = %q, want join setup card", response.Response.Text)
+	}
+	poster.WaitForCalls(t, 1)
+	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "Join Google Meet") {
+		t.Fatalf("poster calls = %#v, want one join card", calls)
+	}
+	queued, ok := service.mentionQueue.dequeueOrStop("T123", "C123", "123.000")
+	if !ok || len(queued) != 1 {
+		t.Fatalf("queued worker entries = %#v ok=%v, want only the original worker mention queued", queued, ok)
 	}
 }

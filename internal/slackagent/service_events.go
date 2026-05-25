@@ -188,8 +188,19 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 	mentionWorkspaceID := firstNonEmpty(envelope.TeamID, "workspace")
 	mentionThreadTS := firstNonEmpty(event.ThreadTS, event.TS, event.EventTS)
 	mentionChannel := strings.TrimSpace(event.Channel)
+	var richContext *SlackAppMentionContext
+	if mentionMode {
+		richContext = s.buildSlackAppMentionContext(ctx, firstNonEmpty(envelope.TeamID, "workspace"), event)
+	}
+
+	commandText := eventTextToAvatarCommandForBot(event, s.botUserID)
+	if commandText == "" && mentionMode && richContext != nil && richContext.ContainsMeetURL {
+		if meetURL := slackMeetURLPattern.FindString(richContext.Transcript); meetURL != "" {
+			commandText = "join " + meetURL
+		}
+	}
 	mentionThreadOwned := false
-	if mentionMode && s.mentionQueue != nil && mentionChannel != "" && mentionThreadTS != "" {
+	if mentionMode && shouldUseMentionWorkerQueue(commandText) && s.mentionQueue != nil && mentionChannel != "" && mentionThreadTS != "" {
 		startWorker, postAck := s.mentionQueue.enqueue(mentionWorkspaceID, mentionChannel, mentionThreadTS, event)
 		if !startWorker {
 			if postAck {
@@ -224,17 +235,6 @@ func (s *Service) handleEventAvatarCommand(ctx context.Context, envelope SlackEv
 	}
 	_ = mentionThreadOwned
 
-	var richContext *SlackAppMentionContext
-	if mentionMode {
-		richContext = s.buildSlackAppMentionContext(ctx, firstNonEmpty(envelope.TeamID, "workspace"), event)
-	}
-
-	commandText := eventTextToAvatarCommandForBot(event, s.botUserID)
-	if commandText == "" && mentionMode && richContext != nil && richContext.ContainsMeetURL {
-		if meetURL := slackMeetURLPattern.FindString(richContext.Transcript); meetURL != "" {
-			commandText = "join " + meetURL
-		}
-	}
 	if commandText == "" {
 		return SlackEventResponse{
 			OK:        true,
@@ -361,6 +361,11 @@ func shouldRewriteMentionWorkerTask(commandText string, richContext *SlackAppMen
 		return false
 	}
 	return strings.HasPrefix(strings.TrimSpace(commandText), "work ") && strings.TrimSpace(richContext.MentionText) != ""
+}
+
+func shouldUseMentionWorkerQueue(commandText string) bool {
+	parsed := parseAvatarCommand(commandText)
+	return parsed.Action == "work" || parsed.Action == "delegate"
 }
 
 func mentionWorkerTaskText(richContext *SlackAppMentionContext) string {
