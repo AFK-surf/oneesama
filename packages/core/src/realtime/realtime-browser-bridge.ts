@@ -177,6 +177,8 @@
       mockRemoteAudioInjected: false,
       localAudioTrackAdded: false,
       localAudioFallbackEnabled: Boolean(config.fallbackToLocalMic),
+      localAudioRoutedToRealtimeMix: false,
+      localAudioMixTrackId: "",
       recvOnlyAudioTransceiverAdded: false,
       realtimeInputPlaceholderAdded: false,
       realtimeInputGateOpen: true,
@@ -274,6 +276,8 @@
   let meetAudioCaptureUploadChain = Promise.resolve();
   let meetAudioCaptureSequence = 0;
   let routingSilenceSource = null;
+  let localMicFallbackStream = null;
+  let localMicFallbackSource = null;
   let routingAudioResumeListenersInstalled = false;
   let silentMeetAudioTrack = null;
   let realtimeInputGateReopenTimer = 0;
@@ -768,6 +772,7 @@
         state.connection.participantAudioForwardingEnabled === true,
       meetAudioForwardingEnabled: state.connection.meetAudioForwardingEnabled === true,
       localAudioFallbackEnabled: state.connection.localAudioFallbackEnabled === true,
+      localAudioRoutedToRealtimeMix: state.connection.localAudioRoutedToRealtimeMix === true,
       realtimeInputPlaceholderAdded: state.connection.realtimeInputPlaceholderAdded === true,
       inputAudioAdded:
         state.connection.participantAudioTracksAdded > 0 ||
@@ -996,6 +1001,32 @@
       })
       .catch((error) => rememberError(error));
     return true;
+  }
+
+  function routeLocalMicFallbackToRealtimeMix(track, stream) {
+    if (!track || track.kind !== "audio") return false;
+    if (state.connection.meetAudioForwardingEnabled !== true) return false;
+    if (localMicFallbackSource) return true;
+    ensureMeetAudioRoutingContext();
+    try {
+      localMicFallbackStream = new MediaStream([track]);
+      localMicFallbackSource = routingAudioContext.createMediaStreamSource(localMicFallbackStream);
+      localMicFallbackSource.connect(routingInputGate);
+      state.connection.localAudioRoutedToRealtimeMix = true;
+      state.connection.localAudioMixTrackId = track.id || "";
+      recordTimeline("local_audio_routed_to_realtime_mix", {
+        trackId: track.id || "",
+        streamId: stream?.id || "",
+      });
+      updateFeedback();
+      return true;
+    } catch (error) {
+      recordTimeline("local_audio_route_to_realtime_mix_error", {
+        error: String((error && error.message) || error).slice(0, 240),
+      });
+      rememberError(error);
+      return false;
+    }
   }
 
   function updateMeetAudioCaptureState(patch: Record<string, unknown> = {}) {
@@ -1606,8 +1637,8 @@
       merged.modalities || ["audio"];
     delete merged.outputModalities;
     delete merged.modalities;
-    const inputTurnDetection = merged.audio?.input?.turn_detection ??
-      merged.turn_detection ?? "steady";
+    const inputTurnDetection =
+      merged.audio?.input?.turn_detection ?? merged.turn_detection ?? "steady";
     merged.truncation = defaultRealtimeTruncation((merged as Record<string, unknown>).truncation);
     merged.audio = {
       ...(merged.audio || {}),
@@ -2189,11 +2220,23 @@
     } catch {
       // Best-effort cleanup.
     }
+    try {
+      localMicFallbackSource?.disconnect?.();
+    } catch {
+      // Best-effort cleanup.
+    }
+    try {
+      localMicFallbackStream?.getTracks?.().forEach((track) => track.stop?.());
+    } catch {
+      // Best-effort cleanup.
+    }
     activePeerConnection = null;
     activeRealtimeAgentSession = null;
     activeRealtimeAgentTransport = null;
     activeRealtimeAgentSDKTools = [];
     realtimeAudioSender = null;
+    localMicFallbackSource = null;
+    localMicFallbackStream = null;
     window.MAB_REALTIME_DATA_CHANNEL = null;
     window.MAB_REALTIME_DC = null;
     window.MAB_REALTIME_PEER_CONNECTION = null;
@@ -3317,6 +3360,7 @@
       realtimeAudioSender = pc.addTrack(track, stream);
       state.connection.localAudioTrackAdded = true;
       recordTimeline("local_audio_track_added", { trackId: track.id });
+      routeLocalMicFallbackToRealtimeMix(track, stream);
       updateFeedback();
       return true;
     } catch (error) {
@@ -3727,7 +3771,7 @@
               ? "meet_audio_placeholder_present"
               : state.connection.localAudioTrackAdded === true
                 ? "local_mic_present"
-              : "participant_audio_tracks_present",
+                : "participant_audio_tracks_present",
           participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
         });
         updateFeedback();
