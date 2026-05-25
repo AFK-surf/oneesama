@@ -1123,259 +1123,57 @@ async function readScreenShareControllerState(
   ).catch((error) => ({ ok: false, error: String(error?.message || error) }));
 }
 
+async function waitForScreenShareImageSource(page: Page, timeoutMs = 2500) {
+  const deadline = Date.now() + timeoutMs;
+  let state: ScreenShareControllerState | null = null;
+  while (Date.now() < deadline) {
+    state = await readScreenShareControllerState(page);
+    const screenShare = state as any;
+    if (screenShare?.imageUrl && screenShare?.imageReady) {
+      return { ok: true, state };
+    }
+    const errors = Array.isArray(screenShare?.errors) ? screenShare.errors : [];
+    if (screenShare?.imageError || errors.some((entry) => /image/i.test(String(entry)))) {
+      return {
+        ok: false,
+        error: String(screenShare.imageError || errors.find((entry) => /image/i.test(String(entry)))),
+        state,
+      };
+    }
+    await page.waitForTimeout(100);
+  }
+  return {
+    ok: false,
+    error: "screen_share_image_source_not_attached",
+    state,
+  };
+}
+
 async function ensureScreenShareController(page: Page, input: ScreenShareBridgeInput = {}) {
   const current = await readScreenShareControllerState(page);
   if (current?.ok || current?.mode) return { ok: true, installed: false, state: current };
-  await page.evaluate(
-    (runtimeConfig) => {
-      if (window.MAB_SCREEN_SHARE_CONTROLLER) return;
-      const config = {
-        enabled: true,
-        width: Number.parseInt(String(runtimeConfig.width ?? 1280), 10),
-        height: Number.parseInt(String(runtimeConfig.height ?? 720), 10),
-        fps: Number.parseInt(String(runtimeConfig.fps ?? 30), 10),
-        mode: runtimeConfig.mode || "synthetic",
-        title: runtimeConfig.title || "Meeting Avatar Bot",
-        subtitle: runtimeConfig.subtitle || "Agent screen share",
-        videoUrl: runtimeConfig.videoUrl || "",
-        muted: runtimeConfig.muted !== false,
-      };
-      const state = {
-        ok: true,
-        enabled: true,
-        active: false,
-        startedAt: "",
-        stoppedAt: "",
-        streamId: "",
-        trackIds: [],
-        frames: 0,
-        displayMediaCalls: 0,
-        mode: config.mode,
-        title: config.title,
-        subtitle: config.subtitle,
-        videoUrl: config.videoUrl,
-        videoReady: false,
-        videoError: "",
-        errors: [],
-      };
-      window.MAB_SCREEN_SHARE = state;
-      let canvas = null;
-      let ctx = null;
-      let stream = null;
-      let timer = null;
-      let video = null;
-
-      function ensureCanvas() {
-        if (canvas) return canvas;
-        canvas = document.createElement("canvas");
-        canvas.width = config.width;
-        canvas.height = config.height;
-        canvas.style.cssText =
-          "position:fixed;right:12px;bottom:12px;width:256px;height:144px;z-index:2147483647;border:1px solid rgba(0,0,0,.25);background:#101418;display:none";
-        canvas.dataset.meetingAvatarScreenShare = "1";
-        document.documentElement.appendChild(canvas);
-        ctx = canvas.getContext("2d");
-        return canvas;
-      }
-
-      function ensureVideo() {
-        if (!state.videoUrl) return null;
-        if (video) return video;
-        video = document.createElement("video");
-        video.src = state.videoUrl;
-        video.crossOrigin = "anonymous";
-        video.muted = config.muted;
-        video.loop = true;
-        video.playsInline = true;
-        video.autoplay = true;
-        video.style.cssText =
-          "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none";
-        video.addEventListener("loadeddata", () => {
-          state.videoReady = true;
-        });
-        video.addEventListener("canplay", () => {
-          state.videoReady = true;
-        });
-        video.addEventListener("error", () => {
-          state.videoError = "video_error";
-          state.errors.push("video_error");
-        });
-        document.documentElement.appendChild(video);
-        video.play().catch((error) => {
-          state.videoError = String((error && error.message) || error);
-          state.errors.push("video_play_failed: " + state.videoError);
-        });
-        return video;
-      }
-
-      function drawFrame() {
-        ensureCanvas();
-        state.frames += 1;
-        const w = canvas.width;
-        const h = canvas.height;
-        const t = state.frames / Math.max(1, config.fps);
-        const videoEl = ensureVideo();
-        if (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth && videoEl.videoHeight) {
-          const scale = Math.min(w / videoEl.videoWidth, h / videoEl.videoHeight);
-          const dw = Math.round(videoEl.videoWidth * scale);
-          const dh = Math.round(videoEl.videoHeight * scale);
-          ctx.fillStyle = "#05070a";
-          ctx.fillRect(0, 0, w, h);
-          try {
-            ctx.drawImage(videoEl, Math.round((w - dw) / 2), Math.round((h - dh) / 2), dw, dh);
-          } catch (error) {
-            state.videoError = String((error && error.message) || error);
-          }
-        } else {
-          const hue = Math.round((t * 24) % 360);
-          const gradient = ctx.createLinearGradient(0, 0, w, h);
-          gradient.addColorStop(0, "hsl(" + hue + " 72% 18%)");
-          gradient.addColorStop(0.55, "#182332");
-          gradient.addColorStop(1, "hsl(" + ((hue + 80) % 360) + " 70% 24%)");
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, w, h);
-          ctx.fillStyle = "rgba(255,255,255,.10)";
-          for (let i = 0; i < 10; i += 1) {
-            const x = ((i * 173 + state.frames * 8) % (w + 180)) - 90;
-            ctx.fillRect(x, 110 + i * 52, 240, 3);
-          }
-        }
-        ctx.fillStyle = "rgba(5,7,10,.68)";
-        ctx.fillRect(48, h - 138, Math.min(w - 96, 760), 92);
-        ctx.fillStyle = "#fff";
-        ctx.font = "700 32px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText(state.title || config.title, 72, h - 86);
-        ctx.font = "400 20px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillStyle = "rgba(255,255,255,.78)";
-        ctx.fillText(state.subtitle || config.subtitle, 74, h - 56);
-      }
-
-      function createStream() {
-        ensureCanvas();
-        drawFrame();
-        stream = canvas.captureStream(config.fps);
-        state.streamId = stream.id;
-        state.trackIds = stream.getVideoTracks().map((track) => track.id);
-        return stream;
-      }
-
-      function decorateDisplayTrack(track, _constraints = {}) {
-        try {
-          track.contentHint = "detail";
-        } catch {
-          // Ignore browsers that expose a read-only contentHint.
-        }
-        const originalGetSettings = track.getSettings?.bind(track);
-        track.getSettings = () => ({
-          ...(originalGetSettings ? originalGetSettings() : {}),
-          width: config.width,
-          height: config.height,
-          frameRate: config.fps,
-          aspectRatio: config.width / config.height,
-          displaySurface: "browser",
-          logicalSurface: true,
-          cursor: "always",
-        });
-        return track;
-      }
-
-      async function start(options: ScreenShareBridgeInput = {}) {
-        state.title = options.title || state.title || config.title;
-        state.subtitle = options.subtitle || state.subtitle || config.subtitle;
-        state.videoUrl =
-          options.videoUrl || options.url || options.path || state.videoUrl || config.videoUrl;
-        if (state.videoUrl && (!video || video.src !== state.videoUrl)) {
-          if (video) video.remove();
-          video = null;
-          ensureVideo();
-        }
-        if (!stream) createStream();
-        if (!timer)
-          timer = window.setInterval(drawFrame, Math.max(16, Math.round(1000 / config.fps)));
-        state.active = true;
-        state.startedAt = new Date().toISOString();
-        state.stoppedAt = "";
-        canvas.style.display = options.preview === true ? "block" : "none";
-        window.dispatchEvent(
-          new CustomEvent("meeting-avatar-screen-share-stream", {
-            detail: { label: "meeting-avatar-screen-share", stream, state: { ...state } },
-          }),
-        );
-        return { ok: true, state: { ...state } };
-      }
-
-      async function stop() {
-        if (timer) window.clearInterval(timer);
-        timer = null;
-        if (stream) for (const track of stream.getTracks()) track.stop();
-        stream = null;
-        state.active = false;
-        state.stoppedAt = new Date().toISOString();
-        state.streamId = "";
-        state.trackIds = [];
-        return { ok: true, state: { ...state } };
-      }
-
-      const mediaDevices =
-        navigator.mediaDevices ||
-        ({} as MediaDevices & { getDisplayMedia?: typeof navigator.mediaDevices.getDisplayMedia });
-      Object.defineProperty(navigator, "mediaDevices", {
-        configurable: true,
-        value: mediaDevices,
-      });
-      const fakeGetDisplayMedia = async (constraints: { video?: boolean } = {}) => {
-        state.displayMediaCalls += 1;
-        const result = await start({ preview: false });
-        if (!result.ok) throw new Error("screen share failed");
-        const tracks = [];
-        if (constraints.video !== false) {
-          tracks.push(
-            ...stream
-              .getVideoTracks()
-              .map((track) => decorateDisplayTrack(track.clone(), constraints)),
-          );
-        }
-        return new MediaStream(tracks);
-      };
-      if (config.mode !== "native") {
-        try {
-          mediaDevices.getDisplayMedia = fakeGetDisplayMedia;
-        } catch (error) {
-          state.errors.push(
-            "install instance getDisplayMedia failed: " + String((error && error.message) || error),
-          );
-        }
-        try {
-          Object.defineProperty(Object.getPrototypeOf(mediaDevices), "getDisplayMedia", {
-            configurable: true,
-            writable: true,
-            value: fakeGetDisplayMedia,
-          });
-        } catch (error) {
-          state.errors.push(
-            "install prototype getDisplayMedia failed: " +
-              String((error && error.message) || error),
-          );
-        }
-      }
-      window.MAB_SCREEN_SHARE_CONTROLLER = {
-        start,
-        stop,
-        state: () => ({ ...state }),
-        mode: config.mode,
-      };
-    },
-    {
-      mode: input.mode || "synthetic",
-      title: input.title || "Meeting Avatar Bot",
-      subtitle: input.subtitle || "Agent screen share",
-      videoUrl: input.videoUrl || input.url || input.path || "",
-      width: input.width || 1280,
-      height: input.height || 720,
-      fps: input.fps || 30,
-      muted: input.muted !== false,
-    },
-  );
+  const installScript = buildScreenShareInitScript({
+    enabled: true,
+    mode: input.mode || "synthetic",
+    title: input.title || "Meeting Avatar Bot",
+    subtitle: input.subtitle || "Agent screen share",
+    width:
+      positiveInteger(input.width ?? input.screenShareWidth) ||
+      DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,
+    height:
+      positiveInteger(input.height ?? input.screenShareHeight) ||
+      DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
+    fps: positiveInteger(input.fps ?? input.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
+    videoUrl: input.videoUrl || input.url || input.path || "",
+    muted: input.muted !== false,
+  });
+  const install: { ok: boolean; error?: string } = await page
+    .evaluate(installScript)
+    .then(() => ({ ok: true }))
+    .catch((error) => ({ ok: false, error: String(error?.message || error) }));
+  if (!install.ok) {
+    return { ok: false, installed: false, error: install.error, state: current };
+  }
   const installed = await readScreenShareControllerState(page);
   return {
     ok: Boolean(installed?.ok || installed?.mode),
@@ -2095,6 +1893,15 @@ function compactRuntimeState({
           trackIds: screenShare.trackIds || [],
           frames: screenShare.frames || 0,
           displayMediaCalls: screenShare.displayMediaCalls || 0,
+          mode: screenShare.mode || "",
+          title: screenShare.title || "",
+          subtitle: screenShare.subtitle || "",
+          videoUrl: screenShare.videoUrl || "",
+          videoReady: Boolean(screenShare.videoReady),
+          videoError: screenShare.videoError || "",
+          imageUrl: screenShare.imageUrl || "",
+          imageReady: Boolean(screenShare.imageReady),
+          imageError: screenShare.imageError || "",
           errors: screenShare.errors || [],
         }
       : null,
@@ -3888,7 +3695,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         fixtureState: active.fixtureState || null,
       };
     }
-    const result = await ready.page
+    const result: any = await ready.page
       .evaluate(
         async (payload) => {
           if (!window.MAB_SCREEN_SHARE_CONTROLLER?.start) {
@@ -3914,10 +3721,20 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         },
       )
       .catch((error) => ({ ok: false, error: String(error?.message || error) }));
+    const imageSourcePostcheck: {
+      ok: boolean;
+      error?: string;
+      state?: ScreenShareControllerState | null;
+    } = imageUrl ? await waitForScreenShareImageSource(ready.page) : { ok: true };
+    if (imageUrl && !imageSourcePostcheck.ok) {
+      result.ok = false;
+      result.error = imageSourcePostcheck.error || "screen_share_image_source_not_attached";
+    }
     active.diagnostics?.record("screen_share_start_requested", {
       ...result,
       controllerInstalled: controller.installed,
       controllerState: controller.state || null,
+      imageSourcePostcheck,
     });
     await refreshActiveRuntimeState();
     if (meetPageUnavailable(active?.meetPage)) {
