@@ -210,6 +210,7 @@
       lastOutboundEventType: "",
       sentDataChannelMessages: [],
       lastTokenError: null as null | Record<string, unknown>,
+      lastSdpError: null as null | Record<string, unknown>,
       reconnectAttempts: 0,
       reconnecting: false,
       lastReconnectAt: "",
@@ -355,6 +356,64 @@
     });
     state.errors = state.errors.slice(-50);
     updateFeedback();
+  }
+
+  function parseRetryAfterMs(value: string | null | undefined) {
+    const raw = String(value || "").trim();
+    if (!raw) return 0;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const dateMs = Date.parse(raw);
+    if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+    return 0;
+  }
+
+  function sdpReconnectDelayMs(status: number, retryAfterMs = 0) {
+    const attempt = Math.max(1, Number(state.connection.reconnectAttempts || 0) + 1);
+    const baseMs = status === 429 ? 10000 : 1500;
+    const backoffMs = Math.min(
+      status === 429 ? 60000 : 30000,
+      baseMs * 2 ** Math.min(attempt - 1, 5),
+    );
+    const jitterMs = Math.floor(Math.random() * 400);
+    return Math.max(retryAfterMs, backoffMs + jitterMs);
+  }
+
+  function shouldRetrySdpStatus(status: number) {
+    return status === 429 || status === 408 || (status >= 500 && status <= 599);
+  }
+
+  function rememberSdpError(detail: Record<string, unknown>) {
+    state.connection.lastSdpError = {
+      ts: new Date().toISOString(),
+      ...detail,
+    };
+    recordTimeline("realtime_sdp_error", state.connection.lastSdpError);
+    updateFeedback();
+  }
+
+  function clearRecoveredConnectionErrors() {
+    state.connection.lastSdpError = null;
+    state.errors = state.errors.filter((entry) => {
+      const message = String(entry?.message || "");
+      return !message.startsWith("Realtime SDP exchange failed:");
+    });
+  }
+
+  function scheduleConnectFailureRetry(error) {
+    const detail = error?.realtimeSdpError;
+    if (!detail || detail.retryable !== true) return false;
+    const status = Number(detail.status || 0);
+    const delayMs = sdpReconnectDelayMs(status, Number(detail.retryAfterMs || 0));
+    recordTimeline("realtime_connect_retry_requested", {
+      reason: detail.reason || "sdp_exchange_failed",
+      status,
+      delayMs,
+    });
+    window.setTimeout(() => {
+      scheduleRealtimeReconnect(String(detail.reason || "sdp_exchange_failed"), delayMs);
+    }, 0);
+    return true;
   }
 
   function recordTimeline(type, detail = {}) {
@@ -692,7 +751,15 @@
     let status = "ready";
     let summary;
 
-    if (checks.errors) {
+    if (state.connection.lastSdpError && !checks.peerConnected) {
+      const sdpStatus = Number(state.connection.lastSdpError.status || 0);
+      status = "blocked";
+      summary =
+        sdpStatus === 429
+          ? "Realtime SDP exchange is rate limited; reconnect retry is scheduled."
+          : "Realtime SDP exchange failed before the peer connection opened.";
+      blockers.push(sdpStatus === 429 ? "realtime_sdp_rate_limited" : "realtime_sdp_failed");
+    } else if (checks.errors) {
       status = "error";
       summary = "Realtime bridge reported errors.";
       blockers.push("bridge_errors_present");
@@ -3419,6 +3486,8 @@
       dataChannel.onopen = () => {
         state.connected = true;
         state.connection.dataChannelOpen = true;
+        state.connection.reconnectAttempts = 0;
+        clearRecoveredConnectionErrors();
         recordTimeline("data_channel_open", { label: dataChannel.label || "" });
         configureRealtimeSession();
         installMeetChatObserver().catch((error) => {
@@ -3470,13 +3539,48 @@
         },
       });
       if (!sdpResponse.ok) {
-        throw new Error(`Realtime SDP exchange failed: ${sdpResponse.status}`);
+        const responseText = await sdpResponse.text().catch(() => "");
+        const retryAfter = sdpResponse.headers.get("retry-after") || "";
+        const retryAfterMs = parseRetryAfterMs(retryAfter);
+        const requestId =
+          sdpResponse.headers.get("x-request-id") ||
+          sdpResponse.headers.get("openai-request-id") ||
+          "";
+        const retryable = shouldRetrySdpStatus(sdpResponse.status);
+        const detail = {
+          status: sdpResponse.status,
+          ok: sdpResponse.ok,
+          retryable,
+          retryAfter,
+          retryAfterMs,
+          requestId,
+          body: responseText.slice(0, 1000),
+          reason:
+            sdpResponse.status === 429
+              ? "realtime_sdp_rate_limited"
+              : "realtime_sdp_exchange_failed",
+        };
+        rememberSdpError(detail);
+        const error = new Error(
+          [
+            `Realtime SDP exchange failed: ${sdpResponse.status}`,
+            retryAfter ? `retry_after=${retryAfter}` : "",
+            requestId ? `request_id=${requestId}` : "",
+            responseText ? `body=${responseText.slice(0, 240)}` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+        const typedError = error as Error & { realtimeSdpError?: Record<string, unknown> };
+        typedError.realtimeSdpError = detail;
+        throw error;
       }
       await pc.setRemoteDescription({ type: "answer", sdp: await sdpResponse.text() });
       window.MAB_REALTIME_PEER_CONNECTION = pc;
       return { ok: true, mode: state.connection.mode };
     } catch (error) {
       rememberError(error);
+      scheduleConnectFailureRetry(error);
       return { ok: false, error: String((error && error.message) || error) };
     } finally {
       state.connecting = false;
