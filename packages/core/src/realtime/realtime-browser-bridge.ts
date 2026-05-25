@@ -1238,6 +1238,11 @@
     replaceRealtimeInputWithRoutingMix("pending-meet-audio-flush");
   }
 
+  function isRoutingDestinationTrack(track: MediaStreamTrack | null | undefined) {
+    if (!track || !routingDestination) return false;
+    return routingDestination.stream.getAudioTracks().includes(track);
+  }
+
   function silenceDuplicateMeetAudioSender(sender, pcId, source) {
     if (!sender || !silentMeetAudioTrack || sender === primaryMeetAudioSender) return;
     sender
@@ -2160,7 +2165,13 @@
     }
     try {
       activePeerConnection?.getSenders?.().forEach((sender) => {
-        if (sender.track && sender.track !== silentMeetAudioTrack) sender.track.stop?.();
+        if (
+          sender.track &&
+          sender.track !== silentMeetAudioTrack &&
+          !isRoutingDestinationTrack(sender.track)
+        ) {
+          sender.track.stop?.();
+        }
       });
     } catch {
       // Best-effort cleanup.
@@ -3602,7 +3613,11 @@
         state.connection.realtimeInputPlaceholderAdded = true;
         silentMeetAudioTrack = placeholderTrack.clone();
         recordTimeline("realtime_input_placeholder_added", { trackId: placeholderTrack.id });
+        const hadPendingMeetAudioTracks = pendingMeetAudioTracks.length > 0;
         flushPendingMeetAudioTracks();
+        if (!hadPendingMeetAudioTracks && state.connection.meetAudioTracksForwarded > 0) {
+          replaceRealtimeInputWithRoutingMix("reconnect-meet-audio-mix");
+        }
         updateFeedback();
       }
 
