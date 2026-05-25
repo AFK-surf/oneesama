@@ -368,7 +368,7 @@
     return 0;
   }
 
-  function sdpReconnectDelayMs(status: number, retryAfterMs = 0) {
+  function realtimeReconnectDelayMs(status: number, retryAfterMs = 0) {
     const attempt = Math.max(1, Number(state.connection.reconnectAttempts || 0) + 1);
     const baseMs = status === 429 ? 10000 : 1500;
     const backoffMs = Math.min(
@@ -379,8 +379,52 @@
     return Math.max(retryAfterMs, backoffMs + jitterMs);
   }
 
-  function shouldRetrySdpStatus(status: number) {
+  function formatRealtimeErrorValue(value: unknown) {
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  function shouldRetryRealtimeConnectStatus(status: number) {
     return status === 429 || status === 408 || (status >= 500 && status <= 599);
+  }
+
+  async function readResponseText(response) {
+    try {
+      return await response.text();
+    } catch {
+      return "";
+    }
+  }
+
+  function parseJsonObject(text: string) {
+    try {
+      const value = JSON.parse(text);
+      return value && typeof value === "object" ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function responseRequestId(response) {
+    return (
+      response.headers.get("x-request-id") ||
+      response.headers.get("openai-request-id") ||
+      response.headers.get("cf-ray") ||
+      ""
+    );
+  }
+
+  function retryAfterDetail(response) {
+    const retryAfter = response.headers.get("retry-after") || "";
+    return {
+      retryAfter,
+      retryAfterMs: parseRetryAfterMs(retryAfter),
+    };
   }
 
   function rememberSdpError(detail: Record<string, unknown>) {
@@ -393,18 +437,22 @@
   }
 
   function clearRecoveredConnectionErrors() {
+    state.connection.lastTokenError = null;
     state.connection.lastSdpError = null;
     state.errors = state.errors.filter((entry) => {
       const message = String(entry?.message || "");
-      return !message.startsWith("Realtime SDP exchange failed:");
+      return (
+        !message.startsWith("Realtime SDP exchange failed:") &&
+        !message.startsWith("Realtime client secret")
+      );
     });
   }
 
   function scheduleConnectFailureRetry(error) {
-    const detail = error?.realtimeSdpError;
+    const detail = error?.realtimeSdpError || error?.realtimeTokenError;
     if (!detail || detail.retryable !== true) return false;
     const status = Number(detail.status || 0);
-    const delayMs = sdpReconnectDelayMs(status, Number(detail.retryAfterMs || 0));
+    const delayMs = realtimeReconnectDelayMs(status, Number(detail.retryAfterMs || 0));
     recordTimeline("realtime_connect_retry_requested", {
       reason: detail.reason || "sdp_exchange_failed",
       status,
@@ -751,7 +799,17 @@
     let status = "ready";
     let summary;
 
-    if (state.connection.lastSdpError && !checks.peerConnected) {
+    if (state.connection.lastTokenError && !checks.peerConnected) {
+      const tokenStatus = Number(state.connection.lastTokenError.status || 0);
+      status = "blocked";
+      summary =
+        tokenStatus === 429
+          ? "Realtime client secret request is rate limited; reconnect retry is scheduled."
+          : "Realtime client secret request failed before the peer connection opened.";
+      blockers.push(
+        tokenStatus === 429 ? "realtime_token_rate_limited" : "realtime_token_failed",
+      );
+    } else if (state.connection.lastSdpError && !checks.peerConnected) {
       const sdpStatus = Number(state.connection.lastSdpError.status || 0);
       status = "blocked";
       summary =
@@ -1681,34 +1739,82 @@
   }
 
   async function mintRealtimeClientSecretForSDK(connectionConfig) {
-    const response = await fetch(connectionConfig.tokenUrl || config.tokenUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...(connectionConfig.session || {}),
-        instructions: connectionConfig.instructions,
-        tools: connectionConfig.tools,
-        toolChoice: connectionConfig.toolChoice,
-      }),
-    });
-    const body = await response.json();
+    let response;
+    try {
+      response = await fetch(connectionConfig.tokenUrl || config.tokenUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...(connectionConfig.session || {}),
+          instructions: connectionConfig.instructions,
+          tools: connectionConfig.tools,
+          toolChoice: connectionConfig.toolChoice,
+        }),
+      });
+    } catch (tokenFetchError) {
+      const detail = {
+        status: 0,
+        ok: false,
+        retryable: true,
+        retryAfter: "",
+        retryAfterMs: 0,
+        requestId: "",
+        error: String((tokenFetchError && tokenFetchError.message) || tokenFetchError).slice(
+          0,
+          500,
+        ),
+        reason: "realtime_token_fetch_failed",
+      };
+      state.connection.lastTokenError = {
+        ts: new Date().toISOString(),
+        ...detail,
+      };
+      recordTimeline("realtime_token_error", state.connection.lastTokenError);
+      const error = new Error(`Realtime client secret fetch failed: ${detail.error}`);
+      const typedError = error as Error & { realtimeTokenError?: Record<string, unknown> };
+      typedError.realtimeTokenError = detail;
+      throw error;
+    }
+    const text = await readResponseText(response);
+    const body = parseJsonObject(text);
     const value = body.value || body.client_secret?.value || body.secret?.value;
     if (!response.ok || !value) {
+      const retry = retryAfterDetail(response);
+      const retryable = shouldRetryRealtimeConnectStatus(response.status);
+      const requestId = responseRequestId(response);
       state.connection.lastTokenError = {
+        ts: new Date().toISOString(),
         status: response.status,
         ok: response.ok,
+        retryable,
+        ...retry,
+        requestId,
         error: body.error || "",
         detail: body.detail || null,
+        body: text.slice(0, 1000),
+        reason:
+          response.status === 429 ? "realtime_token_rate_limited" : "realtime_token_request_failed",
       };
-      throw new Error(
+      recordTimeline("realtime_token_error", state.connection.lastTokenError);
+      const error = new Error(
         [
-          body.error || "Realtime client secret response did not include a value",
+          response.ok
+            ? "Realtime client secret response did not include a value"
+            : "Realtime client secret request failed:",
+          formatRealtimeErrorValue(body.error) ||
+            (!response.ok ? "" : "missing value"),
           `status=${response.status}`,
+          retry.retryAfter ? `retry_after=${retry.retryAfter}` : "",
+          requestId ? `request_id=${requestId}` : "",
           body.detail ? `detail=${JSON.stringify(body.detail)}` : "",
+          text && !body.error ? `body=${text.slice(0, 240)}` : "",
         ]
           .filter(Boolean)
           .join(" "),
       );
+      const typedError = error as Error & { realtimeTokenError?: Record<string, unknown> };
+      typedError.realtimeTokenError = state.connection.lastTokenError;
+      throw error;
     }
     return value;
   }
@@ -3334,6 +3440,7 @@
             0,
             500,
           );
+          scheduleConnectFailureRetry(error);
           if (state.connection.mode === "agents-sdk-mock") throw error;
           recordTimeline("realtime_agent_sdk_fallback_raw", {
             error: state.agentRuntime.fallbackReason,
@@ -3364,35 +3471,85 @@
       }
       state.agentRuntime.active = "raw";
 
-      const tokenResponse = await fetch(state.connection.tokenUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          ...(connectionConfig.session || {}),
-          instructions: connectionConfig.instructions,
-          tools: connectionConfig.tools,
-          toolChoice: connectionConfig.toolChoice,
-        }),
-      });
-      const tokenBody = await tokenResponse.json();
+      let tokenResponse;
+      try {
+        tokenResponse = await fetch(state.connection.tokenUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...(connectionConfig.session || {}),
+            instructions: connectionConfig.instructions,
+            tools: connectionConfig.tools,
+            toolChoice: connectionConfig.toolChoice,
+          }),
+        });
+      } catch (tokenFetchError) {
+        const detail = {
+          status: 0,
+          ok: false,
+          retryable: true,
+          retryAfter: "",
+          retryAfterMs: 0,
+          requestId: "",
+          error: String((tokenFetchError && tokenFetchError.message) || tokenFetchError).slice(
+            0,
+            500,
+          ),
+          reason: "realtime_token_fetch_failed",
+        };
+        state.connection.lastTokenError = {
+          ts: new Date().toISOString(),
+          ...detail,
+        };
+        recordTimeline("realtime_token_error", state.connection.lastTokenError);
+        const error = new Error(`Realtime client secret fetch failed: ${detail.error}`);
+        const typedError = error as Error & { realtimeTokenError?: Record<string, unknown> };
+        typedError.realtimeTokenError = detail;
+        throw error;
+      }
+      const tokenText = await readResponseText(tokenResponse);
+      const tokenBody = parseJsonObject(tokenText);
       const ephemeralKey =
         tokenBody.value || tokenBody.client_secret?.value || tokenBody.secret?.value;
       if (!tokenResponse.ok || !ephemeralKey) {
+        const retry = retryAfterDetail(tokenResponse);
+        const retryable = shouldRetryRealtimeConnectStatus(tokenResponse.status);
+        const requestId = responseRequestId(tokenResponse);
         state.connection.lastTokenError = {
+          ts: new Date().toISOString(),
           status: tokenResponse.status,
           ok: tokenResponse.ok,
+          retryable,
+          ...retry,
+          requestId,
           error: tokenBody.error || "",
           detail: tokenBody.detail || null,
+          body: tokenText.slice(0, 1000),
+          reason:
+            tokenResponse.status === 429
+              ? "realtime_token_rate_limited"
+              : "realtime_token_request_failed",
         };
-        throw new Error(
+        recordTimeline("realtime_token_error", state.connection.lastTokenError);
+        const error = new Error(
           [
-            tokenBody.error || "Realtime client secret response did not include a value",
+            tokenResponse.ok
+              ? "Realtime client secret response did not include a value"
+              : "Realtime client secret request failed:",
+            formatRealtimeErrorValue(tokenBody.error) ||
+              (!tokenResponse.ok ? "" : "missing value"),
             `status=${tokenResponse.status}`,
+            retry.retryAfter ? `retry_after=${retry.retryAfter}` : "",
+            requestId ? `request_id=${requestId}` : "",
             tokenBody.detail ? `detail=${JSON.stringify(tokenBody.detail)}` : "",
+            tokenText && !tokenBody.error ? `body=${tokenText.slice(0, 240)}` : "",
           ]
             .filter(Boolean)
             .join(" "),
         );
+        const typedError = error as Error & { realtimeTokenError?: Record<string, unknown> };
+        typedError.realtimeTokenError = state.connection.lastTokenError;
+        throw error;
       }
 
       if (!state.connection.sdpUrl) {
@@ -3539,20 +3696,15 @@
         },
       });
       if (!sdpResponse.ok) {
-        const responseText = await sdpResponse.text().catch(() => "");
-        const retryAfter = sdpResponse.headers.get("retry-after") || "";
-        const retryAfterMs = parseRetryAfterMs(retryAfter);
-        const requestId =
-          sdpResponse.headers.get("x-request-id") ||
-          sdpResponse.headers.get("openai-request-id") ||
-          "";
-        const retryable = shouldRetrySdpStatus(sdpResponse.status);
+        const responseText = await readResponseText(sdpResponse);
+        const retry = retryAfterDetail(sdpResponse);
+        const requestId = responseRequestId(sdpResponse);
+        const retryable = shouldRetryRealtimeConnectStatus(sdpResponse.status);
         const detail = {
           status: sdpResponse.status,
           ok: sdpResponse.ok,
           retryable,
-          retryAfter,
-          retryAfterMs,
+          ...retry,
           requestId,
           body: responseText.slice(0, 1000),
           reason:
@@ -3564,7 +3716,7 @@
         const error = new Error(
           [
             `Realtime SDP exchange failed: ${sdpResponse.status}`,
-            retryAfter ? `retry_after=${retryAfter}` : "",
+            retry.retryAfter ? `retry_after=${retry.retryAfter}` : "",
             requestId ? `request_id=${requestId}` : "",
             responseText ? `body=${responseText.slice(0, 240)}` : "",
           ]
