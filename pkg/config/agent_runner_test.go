@@ -123,3 +123,48 @@ func TestLoadHonorsAgentRunnerEnvOverrides(t *testing.T) {
 		t.Fatalf("Ollama env override = %#v, want trimmed env values", cfg.AgentRunner.Ollama)
 	}
 }
+
+func TestLoadParsesAppControlConfigFile(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "app-control.json")
+	payload := `{
+  "app_control": {
+    "provider": "kwwk",
+    "timeout": "1500ms",
+    "codex_fallback": false,
+    "kwwk": {"command": "/usr/local/bin/oneesama-kwwk-helper --stdio", "dir": "/tmp/kwwk"}
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv(oneesamaConfigEnvOverrideKey, configPath)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AppControl.Provider != "kwwk" || cfg.AppControl.Timeout != 1500*time.Millisecond || cfg.AppControl.CodexFallback {
+		t.Fatalf("AppControl = %#v, want file values", cfg.AppControl)
+	}
+	if cfg.AppControl.KWWK.Command != "/usr/local/bin/oneesama-kwwk-helper --stdio" || cfg.AppControl.KWWK.Dir != "/tmp/kwwk" {
+		t.Fatalf("KWWK app control = %#v, want file values", cfg.AppControl.KWWK)
+	}
+}
+
+func TestLoadHonorsAppControlEnvOverrides(t *testing.T) {
+	t.Setenv(oneesamaConfigEnvOverrideKey, "")
+	t.Setenv("ONEESAMA_APP_CONTROL_PROVIDER", "codex")
+	t.Setenv("ONEESAMA_APP_CONTROL_TIMEOUT", "1200ms")
+	t.Setenv("ONEESAMA_APP_CONTROL_CODEX_FALLBACK", "false")
+	t.Setenv("ONEESAMA_KWWK_APP_CONTROL_COMMAND", "kwwk-helper --stdio")
+	t.Setenv("ONEESAMA_KWWK_APP_CONTROL_DIR", "/tmp/kwwk-env")
+
+	cfg := loadInTempDir(t)
+	if cfg.AppControl.Provider != "codex" || cfg.AppControl.Timeout != 1200*time.Millisecond || cfg.AppControl.CodexFallback {
+		t.Fatalf("AppControl env = %#v, want env values", cfg.AppControl)
+	}
+	if cfg.AppControl.KWWK.Command != "kwwk-helper --stdio" || cfg.AppControl.KWWK.Dir != "/tmp/kwwk-env" {
+		t.Fatalf("KWWK app control env = %#v, want env values", cfg.AppControl.KWWK)
+	}
+}

@@ -68,6 +68,9 @@ func TestLoadUsesDefaultsWithoutConfigFile(t *testing.T) {
 	if !cfg.DemoSurface.RequireExternalWriteApproval || cfg.DemoSurface.ExternalWriteApprovalTokenTTL != defaultDemoSurfaceApprovalTokenTTL {
 		t.Fatalf("DemoSurface approval defaults = %#v, want external-write approval required with default TTL", cfg.DemoSurface)
 	}
+	if cfg.AppControl.Provider != defaultAppControlProvider || cfg.AppControl.Timeout != defaultAppControlTimeout || cfg.AppControl.CodexFallback {
+		t.Fatalf("AppControl defaults = %#v, want KWWK provider with short timeout and no Codex fallback", cfg.AppControl)
+	}
 	if len(cfg.Meetd.WebhookSecret) != 64 {
 		t.Fatalf("Meetd.WebhookSecret length = %d, want 64 hex chars", len(cfg.Meetd.WebhookSecret))
 	}

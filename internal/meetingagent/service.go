@@ -24,6 +24,7 @@ type Config struct {
 	MeetRunnerDir      string
 	MeetRunner         meetrunner.Runner
 	AgentRunner        appconfig.AgentRunnerConfig
+	AppControl         appconfig.AppControlConfig
 	Runner             agentrunner.Runner
 	Pipeline           *postmeeting.Pipeline
 	WebhookSender      *postmeeting.WebhookSender
@@ -40,6 +41,7 @@ type Config struct {
 	Dialog             appconfig.DialogConfig
 	HTTPClient         *http.Client
 	DemoBridge         *RealtimeDemoBridge
+	AppControlBackend  AppControlBackend
 }
 
 type Service struct {
@@ -77,6 +79,11 @@ type Service struct {
 	dialog              appconfig.DialogConfig
 	httpClient          *http.Client
 	demoBridge          *RealtimeDemoBridge
+	appControlBackend   AppControlBackend
+	appControlQueue     chan appControlQueuedJob
+	appControlJobsMu    sync.Mutex
+	appControlJobs      map[string]appControlJob
+	appControlJobSeq    uint64
 	meetdWake           chan struct{}
 	meetdRuntimeMu      sync.Mutex
 	meetdRuntimeCancel  context.CancelFunc
@@ -135,6 +142,9 @@ func NewService(cfg Config) *Service {
 		dialog:             cfg.Dialog,
 		httpClient:         cfg.HTTPClient,
 		demoBridge:         cfg.DemoBridge,
+		appControlBackend:  cfg.AppControlBackend,
+		appControlQueue:    make(chan appControlQueuedJob, 32),
+		appControlJobs:     map[string]appControlJob{},
 		meetdWake:          make(chan struct{}, 1),
 		backgroundCtx:      backgroundCtx,
 		backgroundCancel:   backgroundCancel,
@@ -164,6 +174,10 @@ func NewService(cfg Config) *Service {
 	}
 	service.runner = runner
 	service.runnerErr = runnerErr
+	if service.appControlBackend == nil {
+		service.appControlBackend = NewConfiguredAppControlBackend(cfg.AppControl, service)
+	}
+	service.startAppControlQueue()
 	if service.demoBridge == nil && service.demoSurface.Enabled {
 		service.demoBridge = service.newRealtimeDemoBridgeFromConfig()
 	}
@@ -185,7 +199,12 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		return err
 	}
 	if runner, ok := s.meetRunner.(shutdownRunner); ok {
-		return runner.Shutdown(ctx)
+		if err := runner.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	if backend, ok := s.appControlBackend.(shutdownRunner); ok {
+		return backend.Shutdown(ctx)
 	}
 	return nil
 }

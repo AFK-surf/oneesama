@@ -15,6 +15,8 @@ Options:
   --bin <path>          oneesama binary path. Default: ./oneesama
   --preflight-only      Load env and validate required exported tokens, then exit.
   --check-pid <pid>     Verify the already-started process still has required env.
+  --allow-legacy-slack  Allow slack-agent to boot without the live Pi foreground
+                        posture. Intended only for local/dev smoke tests.
   -h, --help            Show this help.
 
 This wrapper exists for live restarts. Every env file is sourced under `set -a`
@@ -59,6 +61,10 @@ while [[ $# -gt 0 ]]; do
       mode="check-pid"
       check_pid="$2"
       shift 2
+      ;;
+    --allow-legacy-slack)
+      export ONEESAMA_LIVE_ALLOW_LEGACY_SLACK=1
+      shift
       ;;
     -h|--help)
       usage
@@ -348,6 +354,54 @@ require_env_any() {
   log "ok: $label exported via $found"
 }
 
+require_env_value() {
+  local label="$1"
+  local expected="$2"
+  shift 2
+  local found value
+  found="$(first_env_name_with_value "$@" || true)"
+  if [[ -z "$found" ]]; then
+    die "$label is required; expected ${expected} via one of: $*"
+  fi
+  value="${!found}"
+  if [[ "$value" != "$expected" ]]; then
+    die "$label must be ${expected}; got ${found}=${value}"
+  fi
+  log "ok: $label = $expected via $found"
+}
+
+require_env_present() {
+  local label="$1"
+  shift
+  local found value
+  found="$(first_env_name_with_value "$@" || true)"
+  if [[ -z "$found" ]]; then
+    die "$label is required; expected one of: $*"
+  fi
+  value="${!found}"
+  log "ok: $label exported via $found (length ${#value})"
+}
+
+require_env_false() {
+  local label="$1"
+  shift
+  local found value normalized
+  found="$(first_env_name_with_value "$@" || true)"
+  if [[ -z "$found" ]]; then
+    die "$label must be explicitly false for live slack-agent; expected one of: $*"
+  fi
+  value="${!found}"
+  normalized="$(normalize_bool "$value")"
+  case "$normalized" in
+    0|false|no|n|off)
+      log "ok: $label = false via $found"
+      ;;
+    *)
+      die "$label must be false for live slack-agent; got ${found}=${value}"
+      ;;
+  esac
+}
+
 require_env_name() {
 	local name="$1"
 	local value="${!name:-}"
@@ -355,6 +409,28 @@ require_env_name() {
 		die "$name is required but not exported"
 	fi
 	log "ok: $name exported (length ${#value})"
+}
+
+strict_live_slack_enabled() {
+  [[ "$subcommand" == "slack-agent" ]] && ! is_true "${ONEESAMA_LIVE_ALLOW_LEGACY_SLACK:-0}"
+}
+
+check_live_slack_posture() {
+  if [[ "$subcommand" != "slack-agent" ]]; then
+    return 0
+  fi
+  if is_true "${ONEESAMA_LIVE_ALLOW_LEGACY_SLACK:-0}"; then
+    log "warn: skipping live slack-agent Pi foreground posture guard because ONEESAMA_LIVE_ALLOW_LEGACY_SLACK is enabled"
+    return 0
+  fi
+
+  require_env_value "triage foreground chain" "pi_first_live" ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN MAB_SLACK_TRIAGE_FOREGROUND_CHAIN
+  require_env_present "workspace triage policy" ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY MAB_SLACK_TRIAGE_WORKSPACE_POLICY
+  require_env_value "persona runtime provider" "oneesama-pi" ONEESAMA_PERSONA_RUNTIME MAB_PERSONA_RUNTIME
+  require_env_value "persona runtime mode" "live" ONEESAMA_PERSONA_RUNTIME_MODE MAB_PERSONA_RUNTIME_MODE
+  require_env_false "persona runtime shadow-only" ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY MAB_PERSONA_RUNTIME_SHADOW_ONLY
+  require_env_any "Oneesama Pi API key" ONEESAMA_PI_API_KEY PI_API_KEY OPENROUTER_API_KEY
+  log "ok: live slack-agent Pi foreground posture locked"
 }
 
 preflight_env() {
@@ -372,6 +448,7 @@ preflight_env() {
       log "warn: ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY not exported"
     fi
     check_no_socket_mode_competitors
+    check_live_slack_posture
     local persona_provider
     persona_provider="$(first_env_value ONEESAMA_PERSONA_RUNTIME MAB_PERSONA_RUNTIME || true)"
     persona_provider="$(normalize_provider "${persona_provider:-legacy}")"
@@ -402,6 +479,16 @@ process_has_env_name() {
   ps eww -p "$pid" 2>/dev/null | grep -Fq "${name}=${!name}"
 }
 
+process_has_env_key() {
+  local pid="$1"
+  local name="$2"
+  if [[ -r "/proc/$pid/environ" ]]; then
+    tr '\0' '\n' <"/proc/$pid/environ" | grep -Eq "^${name}="
+    return $?
+  fi
+  ps eww -p "$pid" 2>/dev/null | grep -Eq "(^|[[:space:]])${name}="
+}
+
 check_process_env() {
   local pid="$1"
   [[ -n "$pid" ]] || die "--check-pid requires a pid"
@@ -415,6 +502,24 @@ check_process_env() {
   [[ -n "$slack_app" ]] && names+=("$slack_app")
   required_codex_env="$(codex_required_env_key || true)"
   [[ -n "$required_codex_env" ]] && names+=("$required_codex_env")
+  if strict_live_slack_enabled; then
+    local foreground_chain persona_provider persona_mode persona_shadow pi_key workspace_policy
+    foreground_chain="$(first_env_name_with_value ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN MAB_SLACK_TRIAGE_FOREGROUND_CHAIN || true)"
+    workspace_policy="$(first_env_name_with_value ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY MAB_SLACK_TRIAGE_WORKSPACE_POLICY || true)"
+    persona_provider="$(first_env_name_with_value ONEESAMA_PERSONA_RUNTIME MAB_PERSONA_RUNTIME || true)"
+    persona_mode="$(first_env_name_with_value ONEESAMA_PERSONA_RUNTIME_MODE MAB_PERSONA_RUNTIME_MODE || true)"
+    persona_shadow="$(first_env_name_with_value ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY MAB_PERSONA_RUNTIME_SHADOW_ONLY || true)"
+    pi_key="$(first_env_name_with_value ONEESAMA_PI_API_KEY PI_API_KEY OPENROUTER_API_KEY || true)"
+    [[ -n "$foreground_chain" ]] && names+=("$foreground_chain")
+    [[ -n "$persona_provider" ]] && names+=("$persona_provider")
+    [[ -n "$persona_mode" ]] && names+=("$persona_mode")
+    [[ -n "$persona_shadow" ]] && names+=("$persona_shadow")
+    [[ -n "$pi_key" ]] && names+=("$pi_key")
+    if [[ -n "$workspace_policy" ]] && ! process_has_env_key "$pid" "$workspace_policy"; then
+      die "process $pid does not expose required env $workspace_policy"
+    fi
+    [[ -n "$workspace_policy" ]] && log "ok: process $pid exposes $workspace_policy"
+  fi
 
   local name
   for name in "${names[@]}"; do

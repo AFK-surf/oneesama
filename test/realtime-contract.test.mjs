@@ -31,6 +31,15 @@ test("Realtime contract maps fast turn detection preset for browser sessions", (
   });
 });
 
+test("Realtime contract defaults to steady semantic turn detection", () => {
+  const session = buildRealtimeSessionConfig();
+
+  assert.deepEqual(session.audio.input.turn_detection, {
+    type: "semantic_vad",
+    eagerness: "low",
+  });
+});
+
 test("Realtime contract applies product truncation defaults", () => {
   const session = buildRealtimeSessionConfig();
 
@@ -84,6 +93,8 @@ test("Realtime contract keeps identity data out of product instructions", () => 
 
   assert.equal(session.model, "gpt-realtime-2");
   assert.match(session.instructions, /Identity contract:/);
+  assert.match(session.instructions, /status queued or running/);
+  assert.match(session.instructions, /Do not claim completion/);
   assert.doesNotMatch(session.instructions, /老大|Peng Xiao|彭潇|肖鹏|peng@example\.com|pengxiao|pengx17/);
   assert.doesNotMatch(session.instructions, /Codex|codex|delegate_to_|worker|fetch_url|present_video_stage|send_meet_chat|update_avatar_state/);
 });
@@ -102,6 +113,22 @@ test("Realtime contract exposes application share tools", () => {
   assert.ok(present);
   assert.ok(control);
   assert.equal(present.parameters.properties.applicationName.type, "string");
-  assert.deepEqual(control.parameters.required, ["instruction"]);
+  assert.deepEqual(control.parameters.required, []);
   assert.match(control.description, /Computer Use/);
+  assert.match(control.description, /queues the app-control work asynchronously/);
+  assert.match(control.description, /Structured operations are required/);
+  assert.equal(control.parameters.properties.job_id.type, "string");
+  assert.equal(control.parameters.properties.wait.default, false);
+  assert.equal(control.parameters.properties.operations.type, "array");
+  assert.match(
+    control.parameters.properties.operations.description,
+    /instead of sending only a natural-language instruction/,
+  );
+  assert.deepEqual(control.parameters.properties.operations.items.required, ["kind"]);
+  assert.ok(control.parameters.properties.operations.items.properties.kind.enum.includes("drag"));
+  assert.ok(
+    !control.parameters.properties.operations.items.properties.kind.enum.includes(
+      "perform_secondary_action",
+    ),
+  );
 });

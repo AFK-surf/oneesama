@@ -114,6 +114,10 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"prefer the visual channel",
 		"If the user says stop planning",
 		"Ignore obvious self-echo",
+		"send explicit primitive operations",
+		"structured_operations_required",
+		"status queued or running",
+		"Do not claim completion",
 	} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("instructions missing %q:\n%s", want, instructions)
@@ -133,6 +137,21 @@ func TestBuildRealtimeSessionMapsFastTurnDetectionPreset(t *testing.T) {
 	turn := input["turn_detection"].(map[string]any)
 	if turn["type"] != "semantic_vad" || turn["eagerness"] != "high" {
 		t.Fatalf("turn_detection = %#v, want fast semantic_vad preset", turn)
+	}
+}
+
+func TestBuildRealtimeSessionDefaultsToSteadyTurnDetection(t *testing.T) {
+	t.Parallel()
+
+	cfg := testRealtimeOpenAIConfig()
+	cfg.RealtimeTurnDetection = "steady"
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{}, cfg)
+
+	audio := session["audio"].(map[string]any)
+	input := audio["input"].(map[string]any)
+	turn := input["turn_detection"].(map[string]any)
+	if turn["type"] != "semantic_vad" || turn["eagerness"] != "low" {
+		t.Fatalf("turn_detection = %#v, want steady semantic_vad preset", turn)
 	}
 }
 
@@ -173,7 +192,7 @@ func testRealtimeOpenAIConfig() appconfig.OpenAIConfig {
 		RealtimeModel:            "gpt-realtime-2",
 		RealtimeReasoningEffort:  "high",
 		RealtimeVoice:            "marin",
-		RealtimeTurnDetection:    "semantic_vad",
+		RealtimeTurnDetection:    "steady",
 		RealtimeSessionSchema:    "realtime-2",
 		BotName:                  "Meeting Avatar Bot",
 	}

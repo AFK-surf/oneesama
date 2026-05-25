@@ -161,6 +161,47 @@ Native Meet desktop sharing is separate from the avatar camera stream. On macOS,
 `MAB_CHROMIUM_EXECUTABLE` must be enabled in **System Settings > Privacy & Security > Screen & System Audio Recording**.
 If Meet shows `Can't share your screen`, grant that browser permission and restart the Meeting Agent browser session.
 
+Realtime `control_shared_app_window` uses the `app_control` backend, not the general background worker path. The tool queues app-control events by default and returns a `job_id` immediately, so the Realtime voice turn does not wait for macOS UI automation. Call the same tool with `job_id` to inspect status/result, or pass `wait:true` only for manual debugging. The default backend is a local KWWK/Computer Use stdio JSON-RPC helper with a short timeout and fast failure when that helper is not configured or unavailable. Codex fallback is available for non-live debugging, but should stay off in the voice loop because it is too slow and can make Realtime appear stuck:
+
+```bash
+MAB_APP_CONTROL_PROVIDER=kwwk
+MAB_APP_CONTROL_TIMEOUT=2s
+MAB_APP_CONTROL_CODEX_FALLBACK=0
+MAB_KWWK_APP_CONTROL_COMMAND="node --import tsx packages/core/src/meeting/app-control-helper.ts --stdio"
+```
+
+The bundled helper compiles a small Swift stdio JSON-RPC binary into the system temp directory. It supports `list_apps`, `list_windows`, `state`, `click`, `type`/`type_text`, `press_key`, `scroll`, `drag`, and `app_control.control_shared_app_window`. `state` accepts `includeScreenshot:true` and writes a PNG to `screenshotOutput` or a temp path, returning the path and dimensions instead of inlining image bytes. The high-level method receives the user instruction, current shared-window target, and a structured `operations` array; Realtime tool calls require this array, and an empty/missing array returns `structured_operations_required` after state capture. A state-only operation is only an observation step and must be followed by concrete primitive operations such as `click`, `type_text`, `press_key`, `scroll`, or `drag`. When the screen-share path knows `windowId` or `processId`, Meeting Agent forwards that stable target so the helper can control the shared app/window without guessing by app name. The helper needs macOS Accessibility permission for input events.
+
+Host app-control live smokes are opt-in because they inspect or mutate the local GUI:
+
+```bash
+MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE=1 \
+go test ./internal/meetingagent -run 'TestLive(KWWKStdioAppControlBackendControlsHostApp|RealtimeSharedAppControlHTTPUsesKWWKBackend)' -count=1 -v
+
+MAB_RUN_KWWK_APP_CONTROL_LIVE_MUTATE=1 \
+go test ./internal/meetingagent -run TestLiveRealtimeSharedAppControlHTTPMutatesHostApp -count=1 -v
+```
+
+The first command observes the shared app/window and writes a screenshot through the real KWWK backend. The second command sends click/type operations through `/tools/control_shared_app_window` and should leave a visible smoke label in the target app.
+
+To verify the live Realtime model routes a shared-app edit request to the app-control tool and continues from `state` into direct primitive operations, run:
+
+```bash
+MAB_RUN_REALTIME_LIVE_ROUTING=1 npm run smoke:realtime-live-routing
+```
+
+This smoke uses real OpenAI Realtime but dry-runs local tools. It proves routing, the state-to-direct-operation follow-up, and argument shape, not visible Pencil mutation.
+
+Final app-control acceptance still needs a real-room manual smoke because it crosses Google Meet admission, native app sharing, Realtime speech input, and host app mutation:
+
+1. Open Pencil to a disposable `.pen` file and keep the canvas visible.
+2. Start the Meeting Agent with the KWWK app-control env above and a real OpenAI Realtime key.
+3. Join a throwaway Meet room with native desktop sharing permission already granted to the selected Chromium binary.
+4. In the meeting, say “共享 Pencil 屏幕” and verify the shared surface is the existing Pencil window, not a browser/workspace fallback.
+5. Then say “在 Pencil 里画一个贪食蛇 mockup”.
+6. Pass condition: Pencil receives a visible mutation, such as a new label, line, grid, or shape sequence, and `/tools/control_shared_app_window` reports `ok:true` with KWWK `actions`.
+7. Blocker condition: if mutation does not happen, capture the exact tool result. Acceptable blockers must be specific, for example `accessibility_permission_required`, `shared_window_not_found`, or another KWWK helper error. A silent Realtime turn, natural-language-only tool call, or generic success without visible mutation is a failure.
+
 For the no-OpenAI-key local dialog bridge, run:
 
 ```bash

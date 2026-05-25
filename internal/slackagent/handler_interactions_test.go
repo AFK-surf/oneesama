@@ -174,8 +174,8 @@ func TestHandleInteractionJoinSetupCallsMeetingAgentWithSelectedOptions(t *testi
 	if body.MeetingURL != meetURL || body.DryRun {
 		t.Fatalf("join body = %#v, want real join for meet url", body)
 	}
-	if !body.CaptureCaptions || body.CaptionLanguage != "Chinese (Simplified)" {
-		t.Fatalf("caption flags = %#v, want capture in selected language", body)
+	if body.CaptureCaptions || body.CaptionLanguage != "Chinese (Simplified)" {
+		t.Fatalf("caption flags = %#v, want Realtime join to keep live persona on pure audio", body)
 	}
 	if !body.RecordMeeting {
 		t.Fatalf("record_meeting = false, want ordinary join to record audio artifact")
@@ -184,7 +184,7 @@ func TestHandleInteractionJoinSetupCallsMeetingAgentWithSelectedOptions(t *testi
 		t.Fatalf("realtime flags = %#v, want realtime bridge pair", body)
 	}
 	if body.RealtimeBridgeMode != "webrtc" || !body.AutoConnectRealtime ||
-		!body.SendRealtimeSessionUpdate || !body.ForwardMeetAudioToRealtime {
+		!body.SendRealtimeSessionUpdate || !body.IncludeParticipantAudio || !body.ForwardMeetAudioToRealtime {
 		t.Fatalf("realtime connect fields = %#v, want live OpenAI Realtime bridge", body)
 	}
 

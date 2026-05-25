@@ -2658,6 +2658,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,
           autoConnect: Boolean(input.autoConnectRealtime),
           tokenUrl: input.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
+          openaiRealtimeBaseUrl: config.openaiBaseUrl,
           sdpUrl: input.realtimeSdpUrl || config.openaiRealtimeSdpUrl,
         }),
       });

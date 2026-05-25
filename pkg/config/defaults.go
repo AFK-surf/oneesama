@@ -38,7 +38,7 @@ const (
 	defaultOpenAIRealtimeModel              = "gpt-realtime-2"
 	defaultOpenAIRealtimeReasoning          = "high"
 	defaultOpenAIRealtimeVoice              = "marin"
-	defaultOpenAIRealtimeTurnDetection      = "semantic_vad"
+	defaultOpenAIRealtimeTurnDetection      = "steady"
 	defaultOpenAIRealtimeSessionSchema      = "realtime-2"
 	defaultOpenAIRealtimeAgentRuntime       = "agents-sdk"
 	defaultRealtimeBotName                  = "Meeting Avatar Bot"
@@ -47,6 +47,9 @@ const (
 	defaultTTSVoice                         = "default"
 	defaultAgentRunner                      = "dry-run"
 	defaultAgentJobTimeout                  = 10 * time.Minute
+	defaultAppControlProvider               = "kwwk"
+	defaultAppControlTimeout                = 2 * time.Second
+	defaultAppControlCodexFallback          = false
 	defaultPersonaRuntimeProvider           = "legacy"
 	defaultPersonaRuntimeMode               = "shadow"
 	defaultPersonaRuntimeTimeout            = 90 * time.Second

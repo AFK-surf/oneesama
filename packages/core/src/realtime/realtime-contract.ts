@@ -178,14 +178,19 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "control_shared_app_window",
     description:
-      "Operate the currently shared existing macOS app/window through the host Computer Use adapter. Use when the user asks you to click, type, draw, edit, scroll, switch tools, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. Do not use this to create a new browser workspace.",
+      "Operate the currently shared existing macOS app/window through the host Computer Use adapter. Use when the user asks you to click, type, draw, edit, scroll, switch tools, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. By default this queues the app-control work asynchronously and returns a job_id immediately so voice turns do not block; call again with job_id to check status. Structured operations are required: use a state operation first when you need the current window snapshot, then send click/type_text/press_key/scroll/drag operations. A state-only result is not completion; use it to choose the next primitive operation. Do not use this to create a new browser workspace.",
     parameters: {
       type: "object",
       properties: {
+        job_id: {
+          type: "string",
+          description:
+            "Existing app-control job id to check. When set, instruction and operations are not required.",
+        },
         instruction: {
           type: "string",
           description:
-            "Concrete user-facing operation to perform in the shared app/window. Preserve important wording.",
+            "Concrete user-facing operation to perform in the shared app/window. Preserve important wording. Optional when operations fully describe the action.",
         },
         applicationName: {
           type: "string",
@@ -199,18 +204,62 @@ export const realtimeToolSchemas = [
           type: "string",
           description: "Optional visible window title when known.",
         },
+        windowId: {
+          type: "integer",
+          description:
+            "Optional macOS window id from the active app share, preferred over app-name guessing when known.",
+        },
         processId: {
           type: "integer",
           description: "Optional process id from list_shareable_windows.",
         },
+        operations: {
+          type: "array",
+          description:
+            "Explicit primitive app-control operations. Use kind=state to observe the shared window, then use click/type_text/press_key/scroll/drag for direct manipulation instead of sending only a natural-language instruction.",
+          items: {
+            type: "object",
+            properties: {
+              kind: {
+                type: "string",
+                enum: [
+                  "state",
+                  "click",
+                  "type_text",
+                  "press_key",
+                  "scroll",
+                  "drag",
+                ],
+              },
+              text: { type: "string", description: "Text to type for type_text." },
+              key: {
+                type: "string",
+                description:
+                  "Key name for press_key, e.g. Return, Tab, Escape, Space, ArrowUp, or a single character.",
+              },
+              direction: { type: "string", enum: ["up", "down", "left", "right"] },
+              x: { type: "number", description: "Window-local x coordinate for click." },
+              y: { type: "number", description: "Window-local y coordinate for click." },
+              from_x: { type: "number", description: "Window-local drag start x coordinate." },
+              from_y: { type: "number", description: "Window-local drag start y coordinate." },
+              to_x: { type: "number", description: "Window-local drag end x coordinate." },
+              to_y: { type: "number", description: "Window-local drag end y coordinate." },
+            },
+            required: ["kind"],
+          },
+        },
         session_id: { type: "string", description: "Current meeting session id when known." },
         timeoutMs: {
           type: "integer",
-          description: "Maximum time to wait for the host Computer Use worker.",
-          default: 90000,
+          description: "Maximum time for the queued backend task, not for the Realtime tool call.",
+          default: 2000,
+        },
+        wait: {
+          type: "boolean",
+          default: false,
         },
       },
-      required: ["instruction"],
+      required: [],
     },
   },
   {
@@ -704,7 +753,7 @@ export const realtimeToolSchemas = [
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
 export const DEFAULT_REALTIME_VOICE = "marin";
 export const DEFAULT_REALTIME_REASONING_EFFORT = "high";
-export const DEFAULT_REALTIME_TURN_DETECTION = "semantic_vad";
+export const DEFAULT_REALTIME_TURN_DETECTION = "steady";
 
 function normalizeModalities(value) {
   if (Array.isArray(value) && value.length) return value;
@@ -1040,6 +1089,9 @@ export function buildRealtimeInstructions({
     "For personal task questions, resolve the current user profile first and use its workspace identifiers.",
     "For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
     "Screen-share routing: if the user names a concrete existing app/window (for example Pencil, VS Code, Chrome, Notion, Terminal, Activity Monitor) and asks to show/share/present/演示 it, share that existing app/window. If the user only gives a category like editor/browser/window/app/design tool, list shareable windows first instead of guessing. Do not create a new workspace and do not invent a URL for the app name.",
+    "For visual share actions, only say it is shared after the tool result is ok:true and confirms an active screen-share/postcheck. If the tool result is ok:false or lacks active-share evidence, say one short blocker sentence and stop; do not ask the user to switch views and do not blame the receiver.",
+    "App-control routing: after an existing app/window is shared, if the user asks you to operate that app (click, type, draw, edit, scroll, switch tools, or use Pencil/VS Code/Notion), call the app-control action. For direct control, send explicit primitive operations such as state, click, type_text, press_key, scroll, and drag; do not rely on a natural-language instruction alone. If coordinates or tool state are unknown, first request state, then call again with concrete operations. If the action returns structured_operations_required, retry with explicit operations instead of saying the channel is unavailable.",
+    "Async task handling: if a tool result says status queued or running, treat it as accepted and in progress, not as a failure. Give at most one short natural acknowledgement if the user needs feedback; do not expose ids, queues, tools, backends, routing, or debug state. Do not claim completion until a later result says completed, and do not poll repeatedly in the same turn unless the user asks for status or the next step truly depends on the result.",
     "Browser-surface routing: use the bot-owned browser/synthetic surface for explicit URLs, web pages, video stages, or generated browser/workspace artifacts.",
     "Generation routing: create a shared workspace only when the user asks you to create, implement, build, or generate something new and then show the result.",
     "If the user says to stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",

@@ -10,6 +10,7 @@ type rawConfig struct {
 	MeetingAgent rawServiceConfig  `json:"meeting_agent"`
 	Slack        rawSlackConfig    `json:"slack"`
 	AgentRunner  rawAgentRunner    `json:"agent_runner"`
+	AppControl   rawAppControl     `json:"app_control"`
 	Persona      rawPersonaRuntime `json:"persona_runtime"`
 	Meetd        rawMeetdConfig    `json:"meetd"`
 	DemoSurface  rawDemoSurface    `json:"demo_surface"`
@@ -99,6 +100,18 @@ type rawAgentRunner struct {
 	Codex      rawCodexRunnerConfig  `json:"codex"`
 	Claude     rawClaudeRunnerConfig `json:"claude"`
 	Ollama     rawOllamaRunnerConfig `json:"ollama"`
+}
+
+type rawAppControl struct {
+	Provider      string            `json:"provider"`
+	Timeout       string            `json:"timeout"`
+	CodexFallback *bool             `json:"codex_fallback"`
+	KWWK          rawKWWKAppControl `json:"kwwk"`
+}
+
+type rawKWWKAppControl struct {
+	Command string `json:"command"`
+	Dir     string `json:"dir"`
 }
 
 type rawPersonaRuntime struct {
@@ -261,6 +274,7 @@ func (r rawConfig) toConfig(path string) Config {
 			},
 		},
 		AgentRunner: buildAgentRunnerConfig(r.AgentRunner),
+		AppControl:  buildAppControlConfig(r.AppControl),
 		PersonaRuntime: PersonaRuntimeConfig{
 			Provider:   stringOrDefault(r.Persona.Provider, defaultPersonaRuntimeProvider),
 			Mode:       stringOrDefault(r.Persona.Mode, defaultPersonaRuntimeMode),
@@ -348,6 +362,7 @@ func applyEnvOverrides(cfg *Config) {
 	applySlackMeetingScannerEnvOverrides(cfg)
 	applySlackDailyReportEnvOverrides(cfg)
 	applyAgentRunnerEnvOverrides(cfg)
+	applyAppControlEnvOverrides(cfg)
 	applyPersonaRuntimeEnvOverrides(cfg)
 	applyMeetdEnvOverrides(cfg)
 	applyDemoSurfaceEnvOverrides(cfg)

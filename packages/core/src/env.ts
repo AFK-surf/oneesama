@@ -19,7 +19,7 @@ export function getRuntimeConfig(env = process.env) {
       env.MAB_OPENAI_REALTIME_MODEL || env.OPENAI_REALTIME_MODEL || "gpt-realtime-2",
     openaiRealtimeReasoningEffort: env.MAB_OPENAI_REALTIME_REASONING_EFFORT || "high",
     openaiRealtimeVoice: env.MAB_OPENAI_REALTIME_VOICE || "marin",
-    openaiRealtimeTurnDetection: env.MAB_OPENAI_REALTIME_TURN_DETECTION || "semantic_vad",
+    openaiRealtimeTurnDetection: env.MAB_OPENAI_REALTIME_TURN_DETECTION || "steady",
     openaiRealtimeSessionSchema: env.MAB_OPENAI_REALTIME_SESSION_SCHEMA || "realtime-2",
     openaiRealtimeAgentRuntime: env.MAB_OPENAI_REALTIME_AGENT_RUNTIME || "agents-sdk",
     realtimePersonalityContext: env.MAB_REALTIME_PERSONALITY_CONTEXT || "",
@@ -168,7 +168,7 @@ export function getRuntimeConfig(env = process.env) {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    avatarRenderer: env.MAB_AVATAR_RENDERER || "vrm",
+    avatarRenderer: env.MAB_AVATAR_RENDERER || "live2d",
     avatarVRMModelUrl:
       env.MAB_AVATAR_VRM_MODEL_URL ||
       "https://raw.githubusercontent.com/trinhtanphat/AMI-Chat-AI/main/public/models/3d/Sendagaya_Shibu.vrm",

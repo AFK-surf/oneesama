@@ -15,11 +15,18 @@ test("avatar runtime config uses resilient Hiyori model URLs", () => {
   );
 });
 
-test("avatar runtime config defaults to VRM renderer", () => {
+test("avatar runtime config defaults to Live2D renderer", () => {
   const config = getRuntimeConfig({});
 
-  assert.equal(config.avatarRenderer, "vrm");
+  assert.equal(config.avatarRenderer, "live2d");
   assert.match(config.avatarVRMModelUrl, /\.vrm$/);
+});
+
+test("avatar init script does not bundle VRM dependencies by default", () => {
+  const script = buildAvatarInitScript();
+
+  assert.doesNotMatch(script, /MAB_AVATAR_INLINE_VRM_DEPS/);
+  assert.doesNotMatch(script, /MABAvatarVRMDepsBundle/);
 });
 
 test("avatar init script includes model fallback URLs", () => {

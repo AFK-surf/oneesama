@@ -18,6 +18,7 @@ func NewServer(cfg config.Config, logger *slog.Logger) *httpserver.ManagedServer
 		InternalAuthKey:    cfg.Slack.InternalAuthKey,
 		MeetRunnerDir:      cfg.Paths.MeetRunnerDir,
 		AgentRunner:        cfg.AgentRunner,
+		AppControl:         cfg.AppControl,
 		MeetdWebhookURL:    cfg.Meetd.WebhookURL,
 		MeetdWebhookSecret: cfg.Meetd.WebhookSecret,
 		MeetdWatchInterval: cfg.Meetd.WatchInterval,

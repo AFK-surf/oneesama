@@ -101,6 +101,7 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 			"realtime_agent_runtime":         firstNonEmpty(strings.TrimSpace(input.RealtimeAgentRuntime), s.openai.RealtimeAgentRuntime),
 			"auto_connect_realtime":          input.AutoConnectRealtime,
 			"send_realtime_session_update":   input.SendRealtimeSessionUpdate,
+			"include_participant_audio":      input.IncludeParticipantAudio,
 			"forward_meet_audio_to_realtime": input.ForwardMeetAudioToRealtime,
 			"slack_channel_id":               strings.TrimSpace(input.SlackChannelID),
 			"slack_thread_ts":                strings.TrimSpace(input.SlackThreadTS),

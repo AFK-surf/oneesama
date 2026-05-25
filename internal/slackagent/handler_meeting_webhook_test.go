@@ -169,7 +169,7 @@ func TestMeetingWebhookPreservesLargeNumericMeetingID(t *testing.T) {
 	}
 }
 
-func TestMeetingWebhookDigestQueuesCaptionsCopilot(t *testing.T) {
+func TestMeetingWebhookDigestDoesNotQueueLegacyCopilot(t *testing.T) {
 	runner := &fakeRunner{job: agentrunner.Job{ID: "job_meeting_copilot", Provider: "codex", Status: agentrunner.StatusRunning}}
 	router := newTestRouter(t, Config{
 		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
@@ -184,26 +184,15 @@ func TestMeetingWebhookDigestQueuesCaptionsCopilot(t *testing.T) {
 		t.Fatalf("digest status = %d, body=%s", response.Code, response.Body.String())
 	}
 	payload := decodeMeetingWebhookResponse(t, response)
-	if payload.Copilot == nil || !payload.Copilot.Queued {
-		t.Fatalf("copilot = %#v, want queued", payload.Copilot)
+	if payload.Copilot == nil || payload.Copilot.Queued || payload.Copilot.SkippedReason != meetingCopilotDisabledReason {
+		t.Fatalf("copilot = %#v, want disabled skip", payload.Copilot)
 	}
-	if runner.startCount != 1 {
-		t.Fatalf("runner start count = %d, want 1", runner.startCount)
-	}
-	if got := runner.startInput.Context["session_kind"]; got != agentrunner.SessionKindMeetingCopilot {
-		t.Fatalf("session_kind = %#v, want meeting_copilot", got)
-	}
-	if runner.startInput.AllowCodeChanges {
-		t.Fatal("meeting copilot must not allow code changes")
-	}
-	for _, want := range []string{"send_meeting_chat", "windows 怎么说", "Cue Team Stand-up"} {
-		if !strings.Contains(runner.startInput.Task, want) {
-			t.Fatalf("task = %q, want to contain %q", runner.startInput.Task, want)
-		}
+	if runner.startCount != 0 {
+		t.Fatalf("runner start count = %d, want no legacy copilot job", runner.startCount)
 	}
 }
 
-func TestMeetingWebhookDigestFiltersRealtimeSelfEchoBeforeCopilot(t *testing.T) {
+func TestMeetingWebhookDigestDisabledBeforeRealtimeSelfEchoCopilot(t *testing.T) {
 	runner := &fakeRunner{job: agentrunner.Job{ID: "job_meeting_copilot", Provider: "codex", Status: agentrunner.StatusRunning}}
 	router := newTestRouter(t, Config{
 		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
@@ -218,20 +207,34 @@ func TestMeetingWebhookDigestFiltersRealtimeSelfEchoBeforeCopilot(t *testing.T) 
 		t.Fatalf("digest status = %d, body=%s", response.Code, response.Body.String())
 	}
 	payload := decodeMeetingWebhookResponse(t, response)
-	if payload.Copilot == nil || !payload.Copilot.Queued {
-		t.Fatalf("copilot = %#v, want queued", payload.Copilot)
+	if payload.Copilot == nil || payload.Copilot.Queued || payload.Copilot.SkippedReason != meetingCopilotDisabledReason {
+		t.Fatalf("copilot = %#v, want disabled skip", payload.Copilot)
 	}
-	if payload.Copilot.FilteredSelfLines != 1 || payload.Copilot.FilteredSelfEchoLines != 1 {
-		t.Fatalf("copilot filter counts = self:%d echo:%d", payload.Copilot.FilteredSelfLines, payload.Copilot.FilteredSelfEchoLines)
+	if runner.startCount != 0 {
+		t.Fatalf("runner start count = %d, want no legacy copilot job", runner.startCount)
 	}
-	task := runner.startInput.Task
-	for _, leaked := range []string{"You: 你好", "如果这个名字不对"} {
-		if strings.Contains(task, leaked) {
-			t.Fatalf("task leaked self echo %q:\n%s", leaked, task)
-		}
+}
+
+func TestMeetingWebhookDigestSkipsRealtimeAppControlRequest(t *testing.T) {
+	runner := &fakeRunner{job: agentrunner.Job{ID: "job_meeting_copilot", Provider: "codex", Status: agentrunner.StatusRunning}}
+	router := newTestRouter(t, Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
+		MeetWebhookSecret: "meet-secret",
+		Slack:             appconfig.SlackConfig{SigningSecret: "slack-secret"},
+		Runner:            runner,
+	})
+
+	body := `{"event":"meeting.digest","meeting_id":42,"title":"Realtime Demo","transcript":"[2026-05-25T08:50:23Z] Peng Xiao: 你能用 Computer Use 切到 Activity Monitor 的 CPU 标签吗，我想看 CPU 占用最多的进程。","slack_ref":{"channel_id":"C123","thread_ts":"123.456"}}`
+	response := postMeetingWebhook(t, router, "meet-secret", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("digest status = %d, body=%s", response.Code, response.Body.String())
 	}
-	if !strings.Contains(task, "贪吃蛇游戏") {
-		t.Fatalf("task = %q, want real user ask preserved", task)
+	payload := decodeMeetingWebhookResponse(t, response)
+	if payload.Copilot == nil || payload.Copilot.Queued || payload.Copilot.SkippedReason != meetingCopilotDisabledReason {
+		t.Fatalf("copilot = %#v, want disabled skip", payload.Copilot)
+	}
+	if runner.startCount != 0 {
+		t.Fatalf("runner start count = %d, want no copilot job", runner.startCount)
 	}
 }
 
@@ -250,30 +253,18 @@ func TestMeetingWebhookDigestSkipsSelfEchoOnlyTranscript(t *testing.T) {
 		t.Fatalf("digest status = %d, body=%s", response.Code, response.Body.String())
 	}
 	payload := decodeMeetingWebhookResponse(t, response)
-	if payload.Copilot == nil || payload.Copilot.Queued || payload.Copilot.SkippedReason != "transcript_self_echo_only" {
-		t.Fatalf("copilot = %#v, want self echo skip", payload.Copilot)
+	if payload.Copilot == nil || payload.Copilot.Queued || payload.Copilot.SkippedReason != meetingCopilotDisabledReason {
+		t.Fatalf("copilot = %#v, want disabled skip", payload.Copilot)
 	}
 	if runner.startCount != 0 {
 		t.Fatalf("runner start count = %d, want no copilot job", runner.startCount)
 	}
 }
 
-func TestMeetingWebhookCopilotToolRequestSendsMeetChat(t *testing.T) {
+func TestMeetingWebhookCopilotToolRequestDoesNotSendMeetChat(t *testing.T) {
 	var seenPath string
-	var seenText string
 	meetingAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenPath = r.URL.Path
-		if r.Header.Get("X-Oneesama-Internal-Key") != "secret-key" {
-			t.Fatalf("internal auth header = %q, want secret-key", r.Header.Get("X-Oneesama-Internal-Key"))
-		}
-		if seenPath != "/meetings/42/chat" {
-			t.Fatalf("meeting-agent path = %s, want /meetings/42/chat", seenPath)
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode meeting-agent request: %v", err)
-		}
-		seenText, _ = body["text"].(string)
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "success": true})
 	}))
 	defer meetingAgent.Close()
@@ -297,11 +288,40 @@ func TestMeetingWebhookCopilotToolRequestSendsMeetChat(t *testing.T) {
 </oneesama_tool_request>`,
 	})
 
-	if seenPath != "/meetings/42/chat" {
-		t.Fatalf("meeting-agent path = %q, want /meetings/42/chat", seenPath)
+	if seenPath != "" {
+		t.Fatalf("meeting-agent path = %q, want no legacy copilot chat send", seenPath)
 	}
-	if seenText != "📋 已记：Windows 也纳入评估。" {
-		t.Fatalf("meeting chat text = %q", seenText)
+}
+
+func TestMeetingWebhookCopilotSuppressesRealtimeCapabilityLeakChat(t *testing.T) {
+	var seenPath string
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "success": true})
+	}))
+	defer meetingAgent.Close()
+
+	service := NewService(Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
+		MeetingAgentURL:   meetingAgent.URL,
+		Slack:             appconfig.SlackConfig{InternalAuthKey: "secret-key"},
+		MeetWebhookSecret: "meet-secret",
+	})
+	service.handleAgentRunnerUpdate(context.Background(), agentrunner.Job{
+		ID:       "job_meeting_copilot_done",
+		Provider: "codex",
+		Status:   agentrunner.StatusCompleted,
+		Context: map[string]any{
+			"session_kind": agentrunner.SessionKindMeetingCopilot,
+			"meetingId":    "42",
+		},
+		Result: `<oneesama_tool_request>
+{"calls":[{"tool":"send_meeting_chat","args":{"meeting_id":42,"text":"当前会议助手只有聊天权限，没有 Computer Use，没法帮你切窗口。"}}],"reason":"meeting chat reply"}
+</oneesama_tool_request>`,
+	})
+
+	if seenPath != "" {
+		t.Fatalf("meeting-agent path = %q, want no leaked chat send", seenPath)
 	}
 }
 

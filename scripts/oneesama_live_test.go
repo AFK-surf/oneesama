@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -20,6 +21,12 @@ func TestOneesamaLivePreflightReenablesAllexportForEachEnvFile(t *testing.T) {
 		"ONEESAMA_AGENT_RUNNER=codex",
 		"ONEESAMA_CODEX_BASE_URL=https://gateway.example.test/openrouter",
 		"ONEESAMA_CODEX_ENV_KEY=ONEESAMA_TEST_CODEX_TOKEN",
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
 		"set +a",
 		"",
 	}, "\n"))
@@ -52,6 +59,10 @@ func TestOneesamaLivePreflightLoadsDefaultWorkspacePolicyFile(t *testing.T) {
 		"SLACK_BOT_TOKEN=xoxb-test",
 		"SLACK_APP_TOKEN=xapp-test",
 		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
 		"",
 	}, "\n"))
 	writeFile(t, filepath.Join(defaultEnvDir, "oneesama-workspace-triage-policy.sh"), strings.Join([]string{
@@ -89,6 +100,12 @@ func TestOneesamaLivePreflightFailsMissingProviderToken(t *testing.T) {
 		"ONEESAMA_AGENT_RUNNER=codex",
 		"ONEESAMA_CODEX_BASE_URL=https://gateway.example.test/openrouter",
 		"ONEESAMA_CODEX_ENV_KEY=ONEESAMA_TEST_MISSING_TOKEN",
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
 		"",
 	}, "\n"))
 
@@ -145,6 +162,11 @@ func TestOneesamaLivePreflightAllowsIdenticalAliasValues(t *testing.T) {
 		"ONEESAMA_AGENT_RUNNER=dry-run",
 		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
 		"MAB_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
 		"",
 	}, "\n"))
 
@@ -220,8 +242,11 @@ func TestOneesamaLivePreflightRequiresOneesamaPiKey(t *testing.T) {
 		"SLACK_BOT_TOKEN=xoxb-test",
 		"SLACK_APP_TOKEN=xapp-test",
 		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
 		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
 		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
 		"",
 	}, "\n"))
 
@@ -238,8 +263,11 @@ func TestOneesamaLivePreflightRequiresOneesamaPiKey(t *testing.T) {
 		"SLACK_BOT_TOKEN=xoxb-test",
 		"SLACK_APP_TOKEN=xapp-test",
 		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
 		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
 		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
 		"ONEESAMA_PI_API_KEY=test-key",
 		"ONEESAMA_PI_MODEL=test-model",
 		"",
@@ -250,6 +278,103 @@ func TestOneesamaLivePreflightRequiresOneesamaPiKey(t *testing.T) {
 	}
 	if !strings.Contains(output, "Oneesama Pi runtime provider selected") || !strings.Contains(output, "Oneesama Pi model = test-model") {
 		t.Fatalf("output = %s, want Oneesama Pi provider/model logs", output)
+	}
+}
+
+func TestOneesamaLivePreflightRejectsLegacySlackPosture(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "slack-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "triage foreground chain is required; expected pi_first_live") {
+		t.Fatalf("output = %s, want missing live foreground posture", output)
+	}
+}
+
+func TestOneesamaLivePreflightRequiresShadowOnlyFalse(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=true",
+		"ONEESAMA_PI_API_KEY=test-key",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "slack-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "persona runtime shadow-only must be false for live slack-agent") {
+		t.Fatalf("output = %s, want shadow-only rejection", output)
+	}
+}
+
+func TestOneesamaLiveCheckPidRequiresLiveSlackPostureEnv(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	envLines := append([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+	}, strictLiveSlackPostureEnv()...)
+	envLines = append(envLines, "")
+	writeFile(t, envFile, strings.Join(envLines, "\n"))
+
+	goodProcessEnv := append([]string{"PATH=" + os.Getenv("PATH")}, strictLiveSlackPostureEnv()...)
+	goodProcessEnv = append(goodProcessEnv,
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+	)
+	good := startSleepWithEnv(t, goodProcessEnv)
+	output, err := runLiveScript(t, "--env", envFile, "--check-pid", good, "slack-agent")
+	if err != nil {
+		t.Fatalf("oneesama-live check-pid failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "pid env check passed") {
+		t.Fatalf("output = %s, want pid env check passed", output)
+	}
+
+	badProcessEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY=AI agent news gets concise workspace-aware comments",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
+	}
+	bad := startSleepWithEnv(t, badProcessEnv)
+	output, err = runLiveScript(t, "--env", envFile, "--check-pid", bad, "slack-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live check-pid succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "does not expose required env ONEESAMA_PERSONA_RUNTIME_MODE") {
+		t.Fatalf("output = %s, want missing process env", output)
 	}
 }
 
@@ -264,6 +389,12 @@ func TestOneesamaLivePreflightFailsKnownSocketModeCompetitor(t *testing.T) {
 		"SLACK_APP_TOKEN=xapp-1-A0APMCDA89Y-test",
 		"ONEESAMA_AGENT_RUNNER=dry-run",
 		"ONEESAMA_SOCKET_MODE_COMPETITOR_ENV_FILES=com.openclaw.twitter-reply-bot.live=" + competitorEnv,
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
 		"",
 	}, "\n"))
 	writeFile(t, competitorEnv, strings.Join([]string{
@@ -311,6 +442,12 @@ func TestOneesamaLivePreflightAllowsDifferentSocketModeApp(t *testing.T) {
 		"SLACK_APP_TOKEN=xapp-1-A0APMCDA89Y-test",
 		"ONEESAMA_AGENT_RUNNER=dry-run",
 		"ONEESAMA_SOCKET_MODE_COMPETITOR_ENV_FILES=com.openclaw.twitter-reply-bot.live=" + competitorEnv,
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
 		"",
 	}, "\n"))
 	writeFile(t, competitorEnv, strings.Join([]string{
@@ -359,6 +496,12 @@ func TestOneesamaLivePreflightCanAllowKnownSocketModeCompetitors(t *testing.T) {
 		"SLACK_APP_TOKEN=xapp-test",
 		"ONEESAMA_AGENT_RUNNER=dry-run",
 		"ONEESAMA_ALLOW_SOCKET_MODE_COMPETITORS=1",
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
 		"",
 	}, "\n"))
 
@@ -418,6 +561,31 @@ func runLiveScriptWithEnv(t *testing.T, env []string, args ...string) (string, e
 	command.Env = env
 	output, err := command.CombinedOutput()
 	return string(output), err
+}
+
+func strictLiveSlackPostureEnv() []string {
+	return []string{
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY=workspace-aware-policy",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
+	}
+}
+
+func startSleepWithEnv(t *testing.T, env []string) string {
+	t.Helper()
+	command := exec.Command("sleep", "30")
+	command.Env = env
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	})
+	return strconv.Itoa(command.Process.Pid)
 }
 
 func repoRoot(t *testing.T) string {

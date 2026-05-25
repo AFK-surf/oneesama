@@ -30,6 +30,9 @@ func Validate(cfg Config) error {
 	if err := validateAgentRunner(cfg.AgentRunner); err != nil {
 		errs = errors.Join(errs, err)
 	}
+	if err := validateAppControl(cfg.AppControl); err != nil {
+		errs = errors.Join(errs, err)
+	}
 	if err := validatePersonaRuntime(cfg.PersonaRuntime); err != nil {
 		errs = errors.Join(errs, err)
 	}
@@ -141,5 +144,18 @@ func validateAgentRunner(cfg AgentRunnerConfig) error {
 		errs = errors.Join(errs, errors.New("agent_runner.job_timeout must be greater than zero"))
 	}
 
+	return errs
+}
+
+func validateAppControl(cfg AppControlConfig) error {
+	var errs error
+	switch NormalizeAppControlProvider(cfg.Provider) {
+	case "kwwk", "codex":
+	default:
+		errs = errors.Join(errs, fmt.Errorf("app_control.provider is unsupported: %q", cfg.Provider))
+	}
+	if strings.TrimSpace(cfg.Provider) != "" && cfg.Timeout <= 0 {
+		errs = errors.Join(errs, errors.New("app_control.timeout must be greater than zero"))
+	}
 	return errs
 }

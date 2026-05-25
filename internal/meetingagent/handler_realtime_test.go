@@ -30,7 +30,7 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 		RealtimeModel:            "gpt-realtime-2",
 		RealtimeReasoningEffort:  "high",
 		RealtimeVoice:            "marin",
-		RealtimeTurnDetection:    "semantic_vad",
+		RealtimeTurnDetection:    "steady",
 		RealtimeSessionSchema:    "realtime-2",
 		BotName:                  "Meeting Avatar Bot",
 		CurrentUserName:          "Peng",
@@ -45,7 +45,7 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	}
 	var body map[string]any
 	decodeRealtimeBody(t, response.Body.String(), &body)
-	if body["model"] != "gpt-realtime-2" || body["voice"] != "marin" || body["turnDetection"] != "semantic_vad" {
+	if body["model"] != "gpt-realtime-2" || body["voice"] != "marin" || body["turnDetection"] != "steady" {
 		t.Fatalf("body = %#v, want old realtime defaults", body)
 	}
 	currentUser := body["currentUser"].(map[string]any)
@@ -60,6 +60,10 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	session := body["session"].(map[string]any)
 	audio := session["audio"].(map[string]any)
 	input := audio["input"].(map[string]any)
+	turn := input["turn_detection"].(map[string]any)
+	if turn["type"] != "semantic_vad" || turn["eagerness"] != "low" {
+		t.Fatalf("turn_detection = %#v, want steady semantic_vad", turn)
+	}
 	format := input["format"].(map[string]any)
 	if format["type"] != "audio/pcm" || format["rate"] != float64(24000) {
 		t.Fatalf("input format = %#v, want audio/pcm 24000", format)
@@ -1001,6 +1005,11 @@ func newRealtimeTestRouterWithConfig(t *testing.T, cfg Config) http.Handler {
 		cfg.MeetRunner = fakeMeetRunner{}
 	}
 	service := NewService(cfg)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = service.Shutdown(ctx)
+	})
 	return httpserver.New("meeting-agent", logger, []string{"*"}, NewHandler(service))
 }
 

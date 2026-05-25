@@ -85,11 +85,11 @@ func TestHandleAvatarCommandJoinCallsMeetingAgent(t *testing.T) {
 			t.Fatalf("join flags = %#v, want real join with active meeting bridges by default", body)
 		}
 		if body.RealtimeBridgeMode != "webrtc" || !body.AutoConnectRealtime ||
-			!body.SendRealtimeSessionUpdate || !body.ForwardMeetAudioToRealtime {
+			!body.SendRealtimeSessionUpdate || !body.IncludeParticipantAudio || !body.ForwardMeetAudioToRealtime {
 			t.Fatalf("realtime connect fields = %#v, want active meeting bridge", body)
 		}
-		if !body.CaptureCaptions || body.CaptionLanguage != "English" {
-			t.Fatalf("caption flags = %#v, want captions captured by default", body)
+		if body.CaptureCaptions || body.CaptionLanguage != "English" {
+			t.Fatalf("caption flags = %#v, want Realtime join to keep live persona on pure audio", body)
 		}
 		if !body.RecordMeeting {
 			t.Fatalf("record_meeting = false, want ordinary join to record audio artifact")

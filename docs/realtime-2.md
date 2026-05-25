@@ -38,7 +38,7 @@ MAB_OPENAI_BASE_URL=https://api.openai.com/v1
 MAB_OPENAI_REALTIME_MODEL=gpt-realtime-2
 MAB_OPENAI_REALTIME_REASONING_EFFORT=high
 MAB_OPENAI_REALTIME_VOICE=marin
-MAB_OPENAI_REALTIME_TURN_DETECTION=semantic_vad
+MAB_OPENAI_REALTIME_TURN_DETECTION=steady
 MAB_OPENAI_REALTIME_SESSION_SCHEMA=realtime-2
 MAB_CURRENT_USER_NAME=Operator
 MAB_CURRENT_USER_ENGLISH_NAME=Operator
@@ -72,8 +72,8 @@ eagerness, persona feel, and silence handling still need a human listener.
 `GET /realtime/config` returns the current session plus a `tuning` block with
 presets:
 
-- `balanced`: `semantic_vad` with `eagerness=auto`, the default starting point.
-- `steady`: `semantic_vad` with `eagerness=low`, less interrupt-prone.
+- `steady`: `semantic_vad` with `eagerness=low`, the default and less interrupt-prone.
+- `balanced`: `semantic_vad` with `eagerness=auto`.
 - `fast`: `semantic_vad` with `eagerness=high`, faster chunking/response timing.
 - `server_vad`: silence-based baseline with threshold/padding/silence controls.
 

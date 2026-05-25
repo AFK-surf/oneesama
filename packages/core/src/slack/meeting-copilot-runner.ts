@@ -1,5 +1,6 @@
 export const MEETING_COPILOT_MIN_CHAT_INTERVAL_MS = 2 * 60 * 1000;
 export const MEETING_COPILOT_MAX_FINAL_LINE_LEN = 240;
+export const MEETING_COPILOT_DISABLED_REASON = "meeting_copilot_disabled_realtime_foreground";
 
 export interface MeetingCopilotPayload {
   meetingId?: number | string;
@@ -139,6 +140,41 @@ export function containsExplicitMeetingFollowUp(transcript: unknown): boolean {
   const requestHit = requestPhrases.some((phrase) => lower.includes(phrase));
   if (requestHit) return true;
   return wakePhrases.some((phrase) => lower.includes(phrase)) && /[?？]/.test(lower);
+}
+
+export function containsMeetingCopilotRealtimeControlRequest(transcript: unknown): boolean {
+  const lower = text(transcript).toLowerCase();
+  if (!lower) return false;
+
+  const controlTerms = [
+    "computer use",
+    "control shared app",
+    "control_shared_app_window",
+    "activity monitor",
+    "活动监视器",
+    "共享屏幕",
+    "分享屏幕",
+    "共享窗口",
+    "分享窗口",
+    "控制窗口",
+    "操作窗口",
+    "操作应用",
+    "激活窗口",
+    "切窗口",
+    "切到",
+    "切换",
+  ];
+  if (controlTerms.some((phrase) => lower.includes(phrase))) return true;
+  if (
+    lower.includes("cpu") &&
+    (lower.includes("窗口") || lower.includes("切") || lower.includes("占用") || lower.includes("进程"))
+  ) {
+    return true;
+  }
+  return (
+    (lower.includes("cu") || lower.includes("comp")) &&
+    (lower.includes("切") || lower.includes("窗口") || lower.includes("控制"))
+  );
 }
 
 interface NormalizedCopilotEffect {
@@ -350,131 +386,16 @@ export function createMeetingCopilotRunner({
     state.stopped = false;
     state.stopReason = "";
 
-    const transcriptDelta = incrementalTranscript(state.lastDigest, payload.transcript);
-    const chatDelta = incrementalTranscript(
-      state.lastChatFeed,
-      payload.chatTranscript || payload.chat_transcript,
-    );
-    if (!transcriptDelta && !chatDelta) {
-      state.updatedAt = now.toISOString();
-      return {
-        ok: true,
-        accepted: true,
-        event: payload.event || "meeting.digest",
-        meetingId: payload.meetingId || meetingId,
-        copilotQueued: false,
-        skippedReason: "no_new_delta",
-        state: compactState(state),
-      };
-    }
-
     state.lastDigest = text(payload.transcript);
     state.lastChatFeed = text(payload.chatTranscript || payload.chat_transcript);
-    const followUpContext = [transcriptDelta, chatDelta].filter(Boolean).join("\n");
-    if (
-      state.lastChatAt &&
-      now.getTime() - new Date(state.lastChatAt).getTime() < MEETING_COPILOT_MIN_CHAT_INTERVAL_MS &&
-      !containsExplicitMeetingFollowUp(followUpContext)
-    ) {
-      state.updatedAt = now.toISOString();
-      return {
-        ok: true,
-        accepted: true,
-        event: payload.event || "meeting.digest",
-        meetingId: payload.meetingId || meetingId,
-        copilotQueued: false,
-        skippedReason: "chat_cooldown",
-        transcriptDelta,
-        chatDelta,
-        state: compactState(state),
-      };
-    }
-
-    const prompt = buildMeetingCopilotPrompt({
-      payload,
-      transcriptDelta,
-      chatDelta,
-      state: state as unknown as MeetingCopilotState & { priorActions?: string[] },
-      now,
-    });
-    const context = {
-      source: "meeting-copilot",
-      meetingId: payload.meetingId || meetingId,
-      sessionId: `meeting_copilot_${meetingId}_g${state.sessionGeneration}`,
-      meeting: {
-        id: payload.meetingId || meetingId,
-        title: text(payload.title, "Meeting"),
-        timeFrom: text(payload.timeFrom || payload.time_from),
-        timeTo: text(payload.timeTo || payload.time_to),
-      },
-      meetingCopilot: {
-        transcriptDelta,
-        chatDelta,
-        priorActions: state.priorActions,
-        sessionGeneration: state.sessionGeneration,
-      },
-    };
-    let job = null;
-    let error;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        job = await agentRunner.startTask({
-          task: prompt,
-          context,
-          mode: "analysis",
-          allowCodeChanges: false,
-        });
-        break;
-      } catch (err) {
-        error = String(err?.message || err);
-        state.sessionGeneration += 1;
-        context.sessionId = `meeting_copilot_${meetingId}_g${state.sessionGeneration}`;
-        if (attempt === 2) {
-          state.updatedAt = now.toISOString();
-          return {
-            ok: false,
-            accepted: true,
-            event: payload.event || "meeting.digest",
-            meetingId: payload.meetingId || meetingId,
-            copilotQueued: false,
-            error: "meeting_copilot_agent_failed",
-            detail: error,
-            state: compactState(state),
-          };
-        }
-      }
-    }
-
-    const effects = payloadEffects(payload);
-    recordEffects(state as unknown as { priorActions: string[]; lastChatAt?: string; [key: string]: unknown }, effects, now);
-    const verboseFinalText = meetingCopilotHasVerboseFinalText(job as MeetingCopilotJob);
-    if (verboseFinalText) state.sessionGeneration += 1;
-    const run = {
-      at: now.toISOString(),
-      jobId: job?.id || "",
-      provider: job?.provider || "",
-      status: job?.status || "",
-      transcriptDelta,
-      chatDelta,
-      effectsSummary: summarizeEffects(effects),
-      sessionGeneration: context.meetingCopilot.sessionGeneration,
-      sessionKey: String((job?.context as { codexAppServer?: { sessionKey?: string } } | undefined)?.codexAppServer?.sessionKey || ""),
-      codexThreadId: String((job?.context as { codexAppServer?: { codexThreadId?: string } } | undefined)?.codexAppServer?.codexThreadId || ""),
-      verboseFinalText,
-    };
-    state.runs.push(run);
-    if (state.runs.length > 20) state.runs = state.runs.slice(-20);
     state.updatedAt = now.toISOString();
     return {
       ok: true,
       accepted: true,
       event: payload.event || "meeting.digest",
       meetingId: payload.meetingId || meetingId,
-      copilotQueued: true,
-      transcriptDelta,
-      chatDelta,
-      job,
-      run,
+      copilotQueued: false,
+      skippedReason: MEETING_COPILOT_DISABLED_REASON,
       state: compactState(state),
     };
   }

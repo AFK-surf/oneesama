@@ -7,6 +7,7 @@ type Config struct {
 	MeetingAgent    ServiceConfig
 	Slack           SlackConfig
 	AgentRunner     AgentRunnerConfig
+	AppControl      AppControlConfig
 	PersonaRuntime  PersonaRuntimeConfig
 	Meetd           MeetdConfig
 	DemoSurface     DemoSurfaceConfig
@@ -100,6 +101,18 @@ type AgentRunnerConfig struct {
 	Codex      CodexRunnerConfig
 	Claude     ClaudeRunnerConfig
 	Ollama     OllamaRunnerConfig
+}
+
+type AppControlConfig struct {
+	Provider      string
+	Timeout       time.Duration
+	CodexFallback bool
+	KWWK          KWWKAppControlConfig
+}
+
+type KWWKAppControlConfig struct {
+	Command string
+	Dir     string
 }
 
 type PersonaRuntimeConfig struct {

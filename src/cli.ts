@@ -3321,8 +3321,9 @@ async function digestWebhookSmoke() {
     assertSmoke(
       validSlackReceiver.status === 202 &&
         validSlackBody.ok === true &&
-        validSlackBody.delivery?.copilotQueued === true,
-      "Slack Agent digest receiver rejected valid HMAC or failed to queue copilot digest",
+        validSlackBody.delivery?.copilotQueued === false &&
+        validSlackBody.delivery?.skippedReason === "meeting_copilot_disabled_realtime_foreground",
+      "Slack Agent digest receiver rejected valid HMAC or failed to disable legacy copilot digest",
       validSlackBody,
     );
 
@@ -3520,26 +3521,11 @@ async function meetingCopilotSmoke() {
       copilot_effects: [{ type: "meeting_chat", text: "收到，我会记录这个决定。" }],
     });
     assertSmoke(
-      firstDigest.httpStatus === 202 && firstDigest.delivery?.copilotQueued === true,
-      "meeting copilot first digest did not queue",
+      firstDigest.httpStatus === 202 &&
+        firstDigest.delivery?.copilotQueued === false &&
+        firstDigest.delivery?.skippedReason === "meeting_copilot_disabled_realtime_foreground",
+      "meeting copilot digest was not disabled for realtime foreground ownership",
       firstDigest,
-    );
-    assertSmoke(
-      firstDigest.delivery?.job?.provider === "codex-app-server",
-      "meeting copilot did not use Codex App Server runner",
-      firstDigest,
-    );
-    assertSmoke(
-      firstDigest.delivery?.job?.context?.codexAppServer?.sessionKey ===
-        "meeting:meeting_copilot_4242_g0",
-      "meeting copilot did not use stable per-meeting Codex session key",
-      firstDigest.delivery?.job?.context,
-    );
-    assertSmoke(
-      firstDigest.delivery?.transcriptDelta?.includes("帮我记一下") &&
-        firstDigest.delivery?.chatDelta?.includes("https://example.com/demo"),
-      "meeting copilot lost transcript/chat deltas",
-      firstDigest.delivery,
     );
 
     const duplicateDigest = await sendSlackWebhook({
@@ -3554,8 +3540,8 @@ async function meetingCopilotSmoke() {
     assertSmoke(
       duplicateDigest.httpStatus === 202 &&
         duplicateDigest.delivery?.copilotQueued === false &&
-        duplicateDigest.delivery?.skippedReason === "no_new_delta",
-      "meeting copilot did not skip duplicate digest",
+        duplicateDigest.delivery?.skippedReason === "meeting_copilot_disabled_realtime_foreground",
+      "meeting copilot duplicate digest was not disabled",
       duplicateDigest,
     );
 
@@ -3574,8 +3560,8 @@ async function meetingCopilotSmoke() {
     });
     assertSmoke(
       cooldownDigest.delivery?.copilotQueued === false &&
-        cooldownDigest.delivery?.skippedReason === "chat_cooldown",
-      "meeting copilot did not enforce meeting chat cooldown for non-explicit chatter",
+        cooldownDigest.delivery?.skippedReason === "meeting_copilot_disabled_realtime_foreground",
+      "meeting copilot chatter digest was not disabled",
       cooldownDigest,
     );
 
@@ -3594,20 +3580,10 @@ async function meetingCopilotSmoke() {
       time_to: "2026-05-12T02:08:00.000Z",
     });
     assertSmoke(
-      followUpDigest.delivery?.copilotQueued === true,
-      "meeting copilot did not queue explicit follow-up during cooldown",
+      followUpDigest.delivery?.copilotQueued === false &&
+        followUpDigest.delivery?.skippedReason === "meeting_copilot_disabled_realtime_foreground",
+      "meeting copilot explicit follow-up digest was not disabled",
       followUpDigest,
-    );
-    assertSmoke(
-      followUpDigest.delivery?.job?.context?.codexAppServer?.sessionKey ===
-        "meeting:meeting_copilot_4242_g0",
-      "meeting copilot did not reuse the same Codex session for same meeting",
-      followUpDigest.delivery?.job?.context,
-    );
-    assertSmoke(
-      followUpDigest.delivery?.job?.task?.includes("Prior actions this meeting"),
-      "meeting copilot prompt did not carry prior actions",
-      followUpDigest.delivery?.job,
     );
 
     const resultDelivery = await sendSlackWebhook({
@@ -3633,16 +3609,8 @@ async function meetingCopilotSmoke() {
       "meeting copilot status did not retain stopped state",
       status,
     );
-    assertSmoke(
-      state?.priorActions?.some((action) => action.includes("收到，我会记录")),
-      "meeting copilot status did not retain prior action",
-      status,
-    );
-    assertSmoke(
-      state?.runs?.length === 2,
-      "meeting copilot did not record exactly two queued runs",
-      status,
-    );
+    assertSmoke(!state?.priorActions?.length, "disabled meeting copilot should not retain actions", status);
+    assertSmoke(!state?.runs?.length, "disabled meeting copilot should not record queued runs", status);
 
     console.log(
       JSON.stringify(
@@ -7963,6 +7931,7 @@ async function realtimeLiveRoutingSmoke() {
     "stop_video_stage",
     "stop_shared_browser_surface",
     "list_shareable_windows",
+    "control_shared_app_window",
   ];
   const visualTools = visualToolNames.map((name) => {
     const tool = realtimeToolSchemas.find((entry) => entry.name === name);
@@ -7974,6 +7943,12 @@ async function realtimeLiveRoutingSmoke() {
       id: "existing_app_pencil",
       text: "用 Pencil 演示当前画面",
       expectedTools: ["share_existing_app_window"],
+    },
+    {
+      id: "control_shared_pencil",
+      text: "Pencil 已经在屏幕共享里了，请在 Pencil 里画一个贪食蛇 mockup",
+      expectedTools: ["control_shared_app_window"],
+      requireOperations: true,
     },
     {
       id: "ambiguous_app_editor",
@@ -8111,6 +8086,32 @@ async function realtimeLiveRoutingSmoke() {
           null,
           { timeout: 45_000 },
         );
+        if ("requireOperations" in testCase && testCase.requireOperations) {
+          await page.waitForFunction(
+            () => {
+              const calls =
+                (
+                  window.MAB_REALTIME_BRIDGE as
+                    | {
+                        workspaceTools?: {
+                          calls?: Array<{ name?: string; arguments?: { operations?: unknown } }>;
+                        };
+                      }
+                    | null
+                    | undefined
+                )?.workspaceTools?.calls || [];
+              return calls.some((call) => {
+                if (call.name !== "control_shared_app_window") return false;
+                const operations = Array.isArray(call.arguments?.operations)
+                  ? (call.arguments.operations as Array<{ kind?: unknown }>)
+                  : [];
+                return operations.some((operation) => String(operation?.kind || "") !== "state");
+              });
+            },
+            null,
+            { timeout: 45_000 },
+          );
+        }
 
         const result = (await page.evaluate(() => ({
           bridge: window.MAB_REALTIME_BRIDGE,
@@ -8147,12 +8148,35 @@ async function realtimeLiveRoutingSmoke() {
           `Realtime routing case ${testCase.id} called ${actualTools[0]}, expected ${testCase.expectedTools.join(" or ")}`,
           { text: testCase.text, actualTools, calls, bridge: result.bridge },
         );
+        const appControlCalls =
+          "requireOperations" in testCase && testCase.requireOperations
+            ? calls.filter((call) => call.name === "control_shared_app_window")
+            : [];
+        const directOperationCall = appControlCalls.find((call) => {
+          const args = call.arguments as { operations?: unknown } | undefined;
+          const operations = Array.isArray(args?.operations)
+            ? (args.operations as Array<{ kind?: unknown }>)
+            : [];
+          return operations.some((operation) => String(operation?.kind || "") !== "state");
+        });
+        if ("requireOperations" in testCase && testCase.requireOperations) {
+          const operations = appControlCalls.flatMap((call) => {
+            const args = call.arguments as { operations?: unknown } | undefined;
+            return Array.isArray(args?.operations) ? (args.operations as Array<{ kind?: unknown }>) : [];
+          });
+          assertSmoke(
+            operations.some((operation) => String(operation?.kind || "") !== "state"),
+            `Realtime routing case ${testCase.id} did not continue with direct app-control operations after state`,
+            { text: testCase.text, actualTools, appControlCalls, bridge: result.bridge },
+          );
+        }
         results.push({
           id: testCase.id,
           text: testCase.text,
           expectedTools: testCase.expectedTools,
           actualTools,
           firstCall: calls[0],
+          ...(directOperationCall ? { directOperationCall } : {}),
         });
       } catch (error) {
         const snapshot = await page

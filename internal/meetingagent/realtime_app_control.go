@@ -6,45 +6,49 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/meetrunner"
 )
 
-const defaultRealtimeAppControlTimeout = 90 * time.Second
+const defaultRealtimeAppControlTimeout = 2 * time.Second
 
 type RealtimeSharedAppControlRequest struct {
-	SessionID        string         `json:"session_id,omitempty"`
-	Instruction      string         `json:"instruction,omitempty"`
-	ApplicationName  string         `json:"applicationName,omitempty"`
-	BundleIdentifier string         `json:"bundleIdentifier,omitempty"`
-	WindowTitle      string         `json:"windowTitle,omitempty"`
-	ProcessID        int            `json:"processId,omitempty"`
-	TimeoutMs        int            `json:"timeoutMs,omitempty"`
-	Context          map[string]any `json:"context,omitempty"`
-}
-
-type realtimeAppControlWorkerPayload struct {
-	OK         *bool    `json:"ok"`
-	Summary    string   `json:"summary,omitempty"`
-	Actions    []string `json:"actions,omitempty"`
-	Confidence float64  `json:"confidence,omitempty"`
-	Blocker    string   `json:"blocker,omitempty"`
+	SessionID        string                    `json:"session_id,omitempty"`
+	JobID            string                    `json:"job_id,omitempty"`
+	Instruction      string                    `json:"instruction,omitempty"`
+	ApplicationName  string                    `json:"applicationName,omitempty"`
+	BundleIdentifier string                    `json:"bundleIdentifier,omitempty"`
+	WindowTitle      string                    `json:"windowTitle,omitempty"`
+	WindowID         int                       `json:"windowId,omitempty"`
+	ProcessID        int                       `json:"processId,omitempty"`
+	Operations       []KWWKAppControlOperation `json:"operations,omitempty"`
+	TimeoutMs        int                       `json:"timeoutMs,omitempty"`
+	Wait             bool                      `json:"wait,omitempty"`
+	Context          map[string]any            `json:"context,omitempty"`
 }
 
 func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSharedAppControlRequest) map[string]any {
+	if strings.TrimSpace(input.JobID) != "" {
+		status, ok := s.appControlJobStatus(input.JobID)
+		if !ok {
+			return map[string]any{
+				"ok":     false,
+				"error":  "app_control_job_not_found",
+				"job_id": strings.TrimSpace(input.JobID),
+			}
+		}
+		return status
+	}
 	instruction := strings.TrimSpace(input.Instruction)
-	if instruction == "" {
+	if instruction == "" && len(input.Operations) == 0 {
 		return map[string]any{
 			"ok":    false,
 			"error": "instruction_required",
 		}
 	}
-	if s.runner == nil {
+	if err := requireAppControlBackend(s.appControlBackend); err != nil {
 		return map[string]any{
-			"ok":       false,
-			"error":    "agent_runner_unavailable",
-			"provider": s.agentRunnerName(),
-			"detail":   runnerErrorText(s.runnerErr),
+			"ok":    false,
+			"error": err.Error(),
 		}
 	}
 	sessionID, err := s.resolveScreenShareSessionID(ctx, input.SessionID)
@@ -55,50 +59,48 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 		}
 	}
 	status := s.realtimeAppControlStatus(ctx, sessionID)
-	startInput := agentrunner.WithSessionCapabilities(agentrunner.StartInput{
-		Task:             buildRealtimeAppControlTask(input, status),
-		Context:          realtimeAppControlContext(input, sessionID, status),
-		Mode:             "analysis",
-		AllowCodeChanges: false,
-		Sandbox:          "danger-full-access",
-	}, agentrunner.SessionKindMeetingAppControl)
-	job, err := s.runner.StartTask(ctx, startInput)
+	request := appControlRequestFromRealtime(input, sessionID, status)
+	if request.Instruction == "" {
+		request.Instruction = "execute structured app-control operations"
+	}
+	if !input.Wait {
+		queued, err := s.enqueueAppControlJob(request, status)
+		if err != nil {
+			queued["screenShare"] = status
+		}
+		return queued
+	}
+	start := time.Now()
+	result, err := s.appControlBackend.ControlSharedApp(ctx, request)
+	elapsed := time.Since(start)
 	if err != nil {
+		s.logger.Warn(
+			"realtime app-control backend error",
+			"provider", s.appControlBackend.Name(),
+			"session_id", sessionID,
+			"duration", elapsed.String(),
+			"error", err.Error(),
+		)
 		return map[string]any{
-			"ok":       false,
-			"error":    err.Error(),
-			"provider": s.agentRunnerName(),
-			"status":   "failed",
+			"ok":          false,
+			"error":       err.Error(),
+			"provider":    s.appControlBackend.Name(),
+			"status":      appControlStatusFailed,
+			"screenShare": status,
 		}
 	}
-	completed := s.waitForRunnerJob(ctx, job.ID, realtimeAppControlTimeout(input.TimeoutMs))
-	var report *WorkerReport
-	if completed != nil && isTerminalWorkerStatus(string(completed.Status)) {
-		report = s.ReportFinishedWorkerJob(context.WithoutCancel(ctx), *completed)
-	}
-	responseText := dialogJobResult(completed)
-	workerPayload, hasWorkerPayload := parseRealtimeAppControlWorkerPayload(responseText)
-	ok := completed != nil && completed.Status == agentrunner.StatusCompleted
-	if hasWorkerPayload && workerPayload.OK != nil && !*workerPayload.OK {
-		ok = false
-	}
-	result := map[string]any{
-		"ok":           ok,
-		"provider":     firstNonEmpty(dialogJobProvider(completed), job.Provider, s.agentRunnerName()),
-		"status":       dialogJobStatus(completed),
-		"responseText": responseText,
-		"job":          firstNonNilJob(completed, job),
-		"report":       report,
-		"screenShare":  status,
-	}
-	if hasWorkerPayload {
-		result["workerResult"] = workerPayload
-		if !ok {
-			result["error"] = "app_control_blocked"
-			result["blocker"] = strings.TrimSpace(firstNonEmpty(workerPayload.Blocker, workerPayload.Summary))
-		}
-	}
-	return result
+	s.logger.Info(
+		"realtime app-control backend result",
+		"provider", firstNonEmpty(result.Provider, s.appControlBackend.Name()),
+		"session_id", sessionID,
+		"ok", result.OK,
+		"status", result.Status,
+		"duration", elapsed.String(),
+		"error", result.Error,
+		"blocker", result.Blocker,
+		"actions", strings.Join(result.Actions, ","),
+	)
+	return appControlResultMap(result, status)
 }
 
 func buildRealtimeAppControlTask(input RealtimeSharedAppControlRequest, status map[string]any) string {
@@ -107,7 +109,9 @@ func buildRealtimeAppControlTask(input RealtimeSharedAppControlRequest, status m
 		"applicationName":    strings.TrimSpace(input.ApplicationName),
 		"bundleIdentifier":   strings.TrimSpace(input.BundleIdentifier),
 		"windowTitle":        strings.TrimSpace(input.WindowTitle),
+		"windowId":           input.WindowID,
 		"processId":          input.ProcessID,
+		"operations":         input.Operations,
 		"currentShareStatus": status,
 	}, "", "  ")
 	return strings.Join([]string{
@@ -129,7 +133,9 @@ func realtimeAppControlContext(input RealtimeSharedAppControlRequest, sessionID 
 	context["application_name"] = strings.TrimSpace(input.ApplicationName)
 	context["bundle_identifier"] = strings.TrimSpace(input.BundleIdentifier)
 	context["window_title"] = strings.TrimSpace(input.WindowTitle)
+	context["window_id"] = input.WindowID
 	context["process_id"] = input.ProcessID
+	context["operations"] = append([]KWWKAppControlOperation(nil), input.Operations...)
 	context["screen_share_status"] = status
 	context["output_contract"] = map[string]any{
 		"format": "json_object_only",
@@ -164,18 +170,4 @@ func realtimeAppControlTimeout(timeoutMs int) time.Duration {
 		return defaultRealtimeAppControlTimeout
 	}
 	return time.Duration(timeoutMs) * time.Millisecond
-}
-
-func parseRealtimeAppControlWorkerPayload(raw string) (realtimeAppControlWorkerPayload, bool) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return realtimeAppControlWorkerPayload{}, false
-	}
-	for _, candidate := range demoCodexJSONCandidates(trimmed) {
-		var payload realtimeAppControlWorkerPayload
-		if err := json.Unmarshal([]byte(candidate), &payload); err == nil {
-			return payload, payload.OK != nil || strings.TrimSpace(payload.Summary) != "" || strings.TrimSpace(payload.Blocker) != ""
-		}
-	}
-	return realtimeAppControlWorkerPayload{}, false
 }

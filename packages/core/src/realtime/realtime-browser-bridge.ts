@@ -73,6 +73,7 @@
     botName: string;
     simulateRemoteAudio?: boolean;
     rtcConfiguration?: RTCConfiguration;
+    openaiRealtimeBaseUrl?: string;
     [key: string]: unknown;
   }
 
@@ -1606,7 +1607,7 @@
     delete merged.outputModalities;
     delete merged.modalities;
     const inputTurnDetection = merged.audio?.input?.turn_detection ??
-      merged.turn_detection ?? { type: "semantic_vad" };
+      merged.turn_detection ?? "steady";
     merged.truncation = defaultRealtimeTruncation((merged as Record<string, unknown>).truncation);
     merged.audio = {
       ...(merged.audio || {}),
@@ -2006,10 +2007,16 @@
     audioElement.dataset.meetingAvatarRealtimeAudio = "true";
     document.body.appendChild(audioElement);
     ensureMeetAudioRoutingContext();
+    const baseUrl =
+      String(connectionConfig.openaiRealtimeBaseUrl || "").trim() ||
+      String(connectionConfig.sdpUrl || "https://api.openai.com/v1/realtime/calls").replace(
+        /\/realtime\/calls\/?$/,
+        "",
+      );
     const transport = new namespace.OpenAIRealtimeWebRTC({
       audioElement,
       mediaStream: routingDestination?.stream,
-      baseUrl: String(connectionConfig.openaiRealtimeBaseUrl || "").replace(/\/realtime\/?$/, ""),
+      baseUrl: baseUrl.replace(/\/realtime\/?$/, ""),
       changePeerConnection: async (pc) => {
         activePeerConnection = pc;
         window.MAB_REALTIME_PEER_CONNECTION = pc;
@@ -3015,10 +3022,43 @@
     return name;
   }
 
+  function dryRunWorkspaceToolResult(name: string, args: Record<string, unknown> = {}) {
+    if (name !== "control_shared_app_window") {
+      return { ok: true, dryRun: true, tool: name, arguments: args };
+    }
+    const operations = Array.isArray(args.operations)
+      ? (args.operations as Array<{ kind?: unknown }>)
+      : [];
+    const actions = operations.map((operation) => String(operation?.kind || ""));
+    const hasDirectOperation = actions.some((kind) => kind && kind !== "state");
+    return {
+      ok: true,
+      dryRun: true,
+      tool: name,
+      arguments: args,
+      summary: hasDirectOperation
+        ? "Dry-run executed primitive app-control operations."
+        : "Dry-run captured shared app state. Continue with concrete click/type_text/press_key/scroll/drag operations to perform the requested edit.",
+      actions,
+      metadata: {
+        state: {
+          ok: true,
+          window: {
+            applicationName: String(args.applicationName || "Pencil"),
+            title: String(args.windowTitle || "Pencil"),
+            windowId: Number(args.windowId || 12345),
+            frame: { x: 0, y: 0, width: 960, height: 720 },
+          },
+          screenshotIncluded: true,
+        },
+      },
+    };
+  }
+
   async function runLocalWorkspaceTool(name, args = {}) {
     if (!LOCAL_WORKSPACE_TOOLS.has(name))
       throw new Error(`unsupported local workspace tool: ${name}`);
-    if (config.dryRunLocalTools) return { ok: true, dryRun: true, tool: name, arguments: args };
+    if (config.dryRunLocalTools) return dryRunWorkspaceToolResult(name, args);
     if (name === "create_shared_workspace" || name === "start_demo_execution") {
       updateAvatarHudStatus("writing_code", "Writing code", {
         mood: "thinking",
@@ -3163,10 +3203,13 @@
     if (LOCAL_WORKSPACE_TOOLS.has(toolCall.name)) {
       return runLocalWorkspaceTool(toolCall.name, toolCall.arguments)
         .then((result) => {
+          const appControlFollowup =
+            toolCall.name === "control_shared_app_window"
+              ? "If the result status is queued or running, treat the app action as accepted and in progress: say at most one short Chinese acknowledgement only if useful. Do not mention ids, queues, tools, backends, routing names, or debug state. Do not claim completion, and do not poll again in this same turn unless the user explicitly asked for status or the next step truly depends on the result. If the result failed or ok is false, state the exact blocker in one short Chinese sentence. If the result only captured state, has actions exactly [state], or says structured_operations_required, do not summarize yet; Continue by calling control_shared_app_window again with concrete primitive operations such as click, type_text, press_key, scroll, or drag. Otherwise, if the result is completed, summarize the visible outcome in one short Chinese sentence."
+              : "Summarize the result in concise Chinese. If it failed, state the exact blocker without mentioning internal routing names.";
           const delivery = sendFunctionCallOutput(toolCall.callId, result, {
             autoRespond: true,
-            responseInstructions:
-              "Summarize the result in concise Chinese. If it failed, state the exact blocker without mentioning internal routing names.",
+            responseInstructions: appControlFollowup,
           });
           rememberWorkspaceToolCall({
             name: toolCall.name,
@@ -3259,6 +3302,30 @@
     }
     state.connection.participantAudioTracksAdded += added;
     return added;
+  }
+
+  async function addLocalMicTrackToPeerConnection(pc) {
+    if (!pc || state.connection.localAudioTrackAdded === true) return false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const [track] = stream.getAudioTracks();
+      if (!track) {
+        recordTimeline("local_audio_track_skipped", { reason: "local_mic_no_audio_track" });
+        updateFeedback();
+        return false;
+      }
+      realtimeAudioSender = pc.addTrack(track, stream);
+      state.connection.localAudioTrackAdded = true;
+      recordTimeline("local_audio_track_added", { trackId: track.id });
+      updateFeedback();
+      return true;
+    } catch (error) {
+      const message = String((error && error.message) || error).slice(0, 500);
+      recordTimeline("local_audio_track_error", { error: message });
+      rememberError(error);
+      updateFeedback();
+      return false;
+    }
   }
 
   interface ParticipantStreamOptions {
@@ -3608,39 +3675,43 @@
         routeRemoteAudioStream(event.streams[0]).catch(rememberError);
       };
 
-      ensureMeetAudioRoutingContext();
-      const [placeholderTrack] = routingDestination.stream.getAudioTracks();
-      if (placeholderTrack) {
-        realtimeAudioSender = pc.addTrack(placeholderTrack);
-        state.connection.realtimeInputPlaceholderAdded = true;
-        silentMeetAudioTrack = placeholderTrack.clone();
-        recordTimeline("realtime_input_placeholder_added", { trackId: placeholderTrack.id });
-        const hadPendingMeetAudioTracks = pendingMeetAudioTracks.length > 0;
-        flushPendingMeetAudioTracks();
-        if (!hadPendingMeetAudioTracks && state.connection.meetAudioTracksForwarded > 0) {
-          replaceRealtimeInputWithRoutingMix("reconnect-meet-audio-mix");
-        }
-        updateFeedback();
-      }
-
       discoverParticipantAudioStreams();
-      addParticipantTracksToPeerConnection(pc);
+      addedParticipantTrackIds.clear();
+      const directParticipantTracksAdded = addParticipantTracksToPeerConnection(pc);
+      const preferDirectParticipantAudio =
+        state.connection.participantAudioForwardingEnabled === true &&
+        directParticipantTracksAdded > 0;
+      let localMicTrackAdded = false;
+      if (preferDirectParticipantAudio) {
+        realtimeAudioSender = pc.getSenders?.().find((sender) => sender.track?.kind === "audio");
+        recordTimeline("realtime_input_direct_participant_audio", {
+          participantAudioTracksAdded: directParticipantTracksAdded,
+          trackId: realtimeAudioSender?.track?.id || "",
+        });
+        updateFeedback();
+      } else if (connectionConfig.fallbackToLocalMic === true) {
+        localMicTrackAdded = await addLocalMicTrackToPeerConnection(pc);
+      }
+      if (!preferDirectParticipantAudio && !localMicTrackAdded) {
+        ensureMeetAudioRoutingContext();
+        const [placeholderTrack] = routingDestination.stream.getAudioTracks();
+        if (placeholderTrack) {
+          realtimeAudioSender = pc.addTrack(placeholderTrack);
+          state.connection.realtimeInputPlaceholderAdded = true;
+          silentMeetAudioTrack = placeholderTrack.clone();
+          recordTimeline("realtime_input_placeholder_added", { trackId: placeholderTrack.id });
+          const hadPendingMeetAudioTracks = pendingMeetAudioTracks.length > 0;
+          flushPendingMeetAudioTracks();
+          if (!hadPendingMeetAudioTracks && state.connection.meetAudioTracksForwarded > 0) {
+            replaceRealtimeInputWithRoutingMix("reconnect-meet-audio-mix");
+          }
+          updateFeedback();
+        }
+      }
       if (
         state.connection.participantAudioTracksAdded === 0 &&
         state.connection.realtimeInputPlaceholderAdded !== true &&
-        connectionConfig.fallbackToLocalMic === true
-      ) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const [track] = stream.getAudioTracks();
-        if (track) {
-          pc.addTrack(track, stream);
-          state.connection.localAudioTrackAdded = true;
-          recordTimeline("local_audio_track_added", { trackId: track.id });
-          updateFeedback();
-        }
-      } else if (
-        state.connection.participantAudioTracksAdded === 0 &&
-        state.connection.realtimeInputPlaceholderAdded !== true
+        state.connection.localAudioTrackAdded !== true
       ) {
         pc.addTransceiver("audio", { direction: "recvonly" });
         state.connection.recvOnlyAudioTransceiverAdded = true;
@@ -3654,6 +3725,8 @@
           reason:
             state.connection.realtimeInputPlaceholderAdded === true
               ? "meet_audio_placeholder_present"
+              : state.connection.localAudioTrackAdded === true
+                ? "local_mic_present"
               : "participant_audio_tracks_present",
           participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
         });

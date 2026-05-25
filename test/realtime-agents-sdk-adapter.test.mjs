@@ -6,6 +6,20 @@ import { chromium } from "playwright";
 
 import { buildRealtimeBrowserInitScript } from "../packages/core/src/realtime/realtime-browser-init-builder.ts";
 
+test("Realtime Agents SDK init carries the OpenAI base URL into the browser bridge", () => {
+  const script = buildRealtimeBrowserInitScript({
+    mode: "webrtc",
+    agentRuntime: "agents-sdk",
+    tokenUrl: "http://127.0.0.1:8781/realtime/client-secret",
+    openaiRealtimeBaseUrl: "https://api.openai.com/v1",
+    sdpUrl: "https://api.openai.com/v1/realtime/calls",
+  });
+  const configLine = script.split("\n")[0];
+
+  assert.match(configLine, /openaiRealtimeBaseUrl/);
+  assert.match(configLine, /https:\/\/api\.openai\.com\/v1/);
+});
+
 function readJson(request) {
   return new Promise((resolve, reject) => {
     let body = "";
