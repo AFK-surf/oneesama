@@ -20,6 +20,16 @@ import (
 
 type fakeMeetRunner struct{}
 
+type recordingStopMeetRunner struct {
+	fakeMeetRunner
+	stopInputs []meetrunner.StopSessionInput
+}
+
+func (r *recordingStopMeetRunner) StopSession(ctx context.Context, input meetrunner.StopSessionInput) (meetrunner.StopSessionResult, error) {
+	r.stopInputs = append(r.stopInputs, input)
+	return r.fakeMeetRunner.StopSession(ctx, input)
+}
+
 func (fakeMeetRunner) Ping(context.Context) (meetrunner.RunnerStatus, error) {
 	return meetrunner.RunnerStatus{OK: true, Name: "fake-meet-runner", BridgeMode: "persistent-session"}, nil
 }
@@ -252,6 +262,91 @@ func TestHandleJoinLifecycle(t *testing.T) {
 	}
 	if strings.Contains(cleanStatusResponse.Body.String(), `"active"`) {
 		t.Fatalf("body = %s, want stopped session not exposed as active", cleanStatusResponse.Body.String())
+	}
+}
+
+func TestHandleJoinStopsOverlappingSameMeetingURL(t *testing.T) {
+	t.Parallel()
+
+	runner := &recordingStopMeetRunner{}
+	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", runner)
+
+	seedSameURL := performMeetingRequest(router, http.MethodPost, "/meetings/session", `{"id":"session_old_same_url","status":"joined","meeting_url":"https://meet.google.com/abc-defg-hij","title":"old same URL"}`)
+	if seedSameURL.Code != http.StatusOK {
+		t.Fatalf("seed same URL status = %d, want 200", seedSameURL.Code)
+	}
+	seedOtherURL := performMeetingRequest(router, http.MethodPost, "/meetings/session", `{"id":"session_other_url","status":"joined","meeting_url":"https://meet.google.com/zzz-yyyy-xxx","title":"other URL"}`)
+	if seedOtherURL.Code != http.StatusOK {
+		t.Fatalf("seed other URL status = %d, want 200", seedOtherURL.Code)
+	}
+	seedTerminalSameURL := performMeetingRequest(router, http.MethodPost, "/meetings/session", `{"id":"session_done_same_url","status":"done","meeting_url":"https://meet.google.com/abc-defg-hij","title":"done same URL"}`)
+	if seedTerminalSameURL.Code != http.StatusOK {
+		t.Fatalf("seed terminal same URL status = %d, want 200", seedTerminalSameURL.Code)
+	}
+
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_new_same_url","meeting_url":"https://meet.google.com/abc-defg-hij?authuser=0","display_name":"Onee-sama"}`)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, want 200 body=%s", joinResponse.Code, joinResponse.Body.String())
+	}
+	if len(runner.stopInputs) != 1 {
+		t.Fatalf("stop inputs = %+v, want exactly one overlapping session stop", runner.stopInputs)
+	}
+	if runner.stopInputs[0].SessionID != "session_old_same_url" || runner.stopInputs[0].Reason != replaceExistingJoinReason {
+		t.Fatalf("stop input = %+v, want old same URL with replace reason", runner.stopInputs[0])
+	}
+
+	oldResponse := performMeetingRequest(router, http.MethodGet, "/meetings/session?id=session_old_same_url", "")
+	if oldResponse.Code != http.StatusOK {
+		t.Fatalf("old session status = %d, want 200", oldResponse.Code)
+	}
+	if !strings.Contains(oldResponse.Body.String(), `"status":"stopped"`) ||
+		!strings.Contains(oldResponse.Body.String(), `"stop_reason":"replace_existing_meeting_url"`) ||
+		!strings.Contains(oldResponse.Body.String(), `"replaced_by_session_id":"session_new_same_url"`) {
+		t.Fatalf("old session body = %s, want stopped replacement metadata", oldResponse.Body.String())
+	}
+
+	otherResponse := performMeetingRequest(router, http.MethodGet, "/meetings/session?id=session_other_url", "")
+	if otherResponse.Code != http.StatusOK {
+		t.Fatalf("other session status = %d, want 200", otherResponse.Code)
+	}
+	if !strings.Contains(otherResponse.Body.String(), `"status":"joined"`) {
+		t.Fatalf("other session body = %s, want unchanged joined status", otherResponse.Body.String())
+	}
+
+	terminalResponse := performMeetingRequest(router, http.MethodGet, "/meetings/session?id=session_done_same_url", "")
+	if terminalResponse.Code != http.StatusOK {
+		t.Fatalf("terminal session status = %d, want 200", terminalResponse.Code)
+	}
+	if !strings.Contains(terminalResponse.Body.String(), `"status":"done"`) {
+		t.Fatalf("terminal session body = %s, want unchanged done status", terminalResponse.Body.String())
+	}
+}
+
+func TestHandleJoinDryRunDoesNotStopOverlappingSession(t *testing.T) {
+	t.Parallel()
+
+	runner := &recordingStopMeetRunner{}
+	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", runner)
+
+	seed := performMeetingRequest(router, http.MethodPost, "/meetings/session", `{"id":"session_old_dry_run","status":"joined","meeting_url":"https://meet.google.com/abc-defg-hij","title":"old same URL"}`)
+	if seed.Code != http.StatusOK {
+		t.Fatalf("seed status = %d, want 200", seed.Code)
+	}
+
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_new_dry_run","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, want 200 body=%s", joinResponse.Code, joinResponse.Body.String())
+	}
+	if len(runner.stopInputs) != 0 {
+		t.Fatalf("stop inputs = %+v, want dry-run to avoid stop side effects", runner.stopInputs)
+	}
+
+	oldResponse := performMeetingRequest(router, http.MethodGet, "/meetings/session?id=session_old_dry_run", "")
+	if oldResponse.Code != http.StatusOK {
+		t.Fatalf("old session status = %d, want 200", oldResponse.Code)
+	}
+	if !strings.Contains(oldResponse.Body.String(), `"status":"joined"`) {
+		t.Fatalf("old session body = %s, want unchanged joined status", oldResponse.Body.String())
 	}
 }
 

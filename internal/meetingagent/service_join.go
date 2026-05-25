@@ -28,6 +28,11 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 	if artifactsDir == "" && input.RecordMeeting && sessionID != "" {
 		artifactsDir = defaultJoinArtifactsDir(s.pipeline.RootDir(), sessionID)
 	}
+	if !input.DryRun {
+		if err := s.stopOverlappingJoinSessions(ctx, input.MeetingURL, sessionID); err != nil {
+			return JoinGoogleMeetResponse{}, err
+		}
+	}
 	prepare, err := s.meetRunner.PrepareGoogleMeet(ctx, meetrunner.PrepareGoogleMeetInput{
 		SessionID:                  sessionID,
 		MeetingURL:                 strings.TrimSpace(input.MeetingURL),
@@ -116,6 +121,83 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 		Plan:     prepare.Plan,
 		Runner:   runner,
 	}, nil
+}
+
+const replaceExistingJoinReason = "replace_existing_meeting_url"
+
+func (s *Service) stopOverlappingJoinSessions(ctx context.Context, meetingURL string, nextSessionID string) error {
+	normalizedURL := normalizeJoinMeetingURL(meetingURL)
+	if normalizedURL == "" {
+		return nil
+	}
+	sessions, err := s.ListSessions(ctx)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if isTerminalSessionStatus(session.Status) || normalizeJoinMeetingURL(session.MeetingURL) != normalizedURL {
+			continue
+		}
+		if err := s.stopOverlappingJoinSession(ctx, session, nextSessionID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) stopOverlappingJoinSession(ctx context.Context, session SessionRecord, nextSessionID string) error {
+	stop, err := s.meetRunner.StopSession(ctx, meetrunner.StopSessionInput{
+		SessionID: session.ID,
+		Reason:    replaceExistingJoinReason,
+	})
+	if err != nil && !runnerSessionUnavailable(err) {
+		return fmt.Errorf("stop overlapping meeting session %s: %w", session.ID, err)
+	}
+
+	metadata := cloneMap(session.Metadata)
+	if len(metadata) == 0 {
+		metadata = map[string]any{}
+	}
+	metadata["stop_reason"] = replaceExistingJoinReason
+	if strings.TrimSpace(nextSessionID) != "" {
+		metadata["replaced_by_session_id"] = strings.TrimSpace(nextSessionID)
+	}
+	if err != nil {
+		metadata["stop_error"] = err.Error()
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	status := joinSessionStatusString(joinSessionStatusStopped)
+	endedAt := now
+	if err != nil {
+		status = joinSessionStatusString(joinSessionStatusStale)
+	} else {
+		status = strings.TrimSpace(firstNonEmpty(stop.Session.Status, status))
+		endedAt = strings.TrimSpace(firstNonEmpty(stop.StoppedAt, endedAt))
+	}
+	_, updateErr := s.UpsertSession(ctx, SessionUpsertInput{
+		ID:               session.ID,
+		MeetingID:        session.MeetingID,
+		MeetingURL:       session.MeetingURL,
+		Status:           status,
+		Title:            session.Title,
+		ParticipantCount: session.ParticipantCount,
+		StartedAt:        session.StartedAt,
+		EndedAt:          endedAt,
+		Metadata:         metadata,
+	})
+	if updateErr != nil {
+		return updateErr
+	}
+	return nil
+}
+
+func normalizeJoinMeetingURL(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	beforeQuery, _, _ := strings.Cut(trimmed, "?")
+	return strings.TrimRight(beforeQuery, "/")
 }
 
 func defaultJoinArtifactsDir(rootDir string, sessionID string) string {
