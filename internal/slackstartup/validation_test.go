@@ -38,6 +38,46 @@ func TestValidateRequiresSlackTokens(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsLiveSlackLegacyFallback(t *testing.T) {
+	cfg := validSlackStartupConfig()
+	cfg.AgentRunner = appconfig.AgentRunnerConfig{Provider: "codex", JobTimeout: time.Minute}
+
+	err := Validate(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "foreground_chain=pi_first_live") {
+		t.Fatalf("Validate error = %v, want live foreground posture failure", err)
+	}
+}
+
+func TestValidateAcceptsExplicitLegacySlackOverride(t *testing.T) {
+	t.Setenv("ONEESAMA_LIVE_ALLOW_LEGACY_SLACK", "1")
+	cfg := validSlackStartupConfig()
+	cfg.AgentRunner = appconfig.AgentRunnerConfig{Provider: "codex", JobTimeout: time.Minute}
+
+	if err := ValidateLiveTriagePosture(cfg); err != nil {
+		t.Fatalf("ValidateLiveTriagePosture should allow explicit legacy slack override, got %v", err)
+	}
+}
+
+func TestValidateAcceptsPiFirstLiveSlackPosture(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+	cfg := validSlackStartupConfig()
+	cfg.AgentRunner = appconfig.AgentRunnerConfig{Provider: "codex", JobTimeout: time.Minute}
+	cfg.Slack.Triage = appconfig.SlackTriageConfig{
+		ForegroundChain: "pi_first_live",
+		WorkspacePolicy: "Reply only with source-backed workspace-aware comments.",
+	}
+	cfg.PersonaRuntime = appconfig.PersonaRuntimeConfig{
+		Provider:   "oneesama-pi",
+		Mode:       "live",
+		Timeout:    time.Minute,
+		ShadowOnly: false,
+	}
+
+	if err := ValidateLiveTriagePosture(cfg); err != nil {
+		t.Fatalf("ValidateLiveTriagePosture should accept Pi-first live posture, got %v", err)
+	}
+}
+
 func TestValidateFailsOnFatalBackendAuth(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/llm/models" {

@@ -29,6 +29,9 @@ func Validate(ctx context.Context, cfg appconfig.Config) error {
 	if !strings.HasPrefix(strings.TrimSpace(cfg.Slack.AppToken), "xapp-") {
 		return fmt.Errorf("slack app token must start with xapp-")
 	}
+	if err := ValidateLiveTriagePosture(cfg); err != nil {
+		return err
+	}
 	if err := ValidateMeetdHealth(ctx, LocalServiceURL(cfg.MeetingAgent.Listen)); err != nil {
 		return err
 	}
@@ -42,6 +45,63 @@ func Validate(ctx context.Context, cfg appconfig.Config) error {
 		return err
 	}
 	return nil
+}
+
+func ValidateLiveTriagePosture(cfg appconfig.Config) error {
+	if legacySlackRuntimeAllowed() || slackRuntimeIsDryRun(cfg.AgentRunner) {
+		return nil
+	}
+	if got := strings.TrimSpace(cfg.Slack.Triage.ForegroundChain); got != "pi_first_live" {
+		return fmt.Errorf("live slack-agent requires slack.triage.foreground_chain=pi_first_live; got %q", got)
+	}
+	if strings.TrimSpace(cfg.Slack.Triage.WorkspacePolicy) == "" {
+		return fmt.Errorf("live slack-agent requires slack.triage.workspace_policy")
+	}
+	if got := normalizeRuntimeName(cfg.PersonaRuntime.Provider); got != "oneesama-pi" {
+		return fmt.Errorf("live slack-agent requires persona_runtime.provider=oneesama-pi; got %q", cfg.PersonaRuntime.Provider)
+	}
+	if got := normalizeRuntimeName(cfg.PersonaRuntime.Mode); got != "live" {
+		return fmt.Errorf("live slack-agent requires persona_runtime.mode=live; got %q", cfg.PersonaRuntime.Mode)
+	}
+	if cfg.PersonaRuntime.ShadowOnly {
+		return fmt.Errorf("live slack-agent requires persona_runtime.shadow_only=false")
+	}
+	if firstEnv("ONEESAMA_PI_API_KEY", "PI_API_KEY", "OPENROUTER_API_KEY") == "" {
+		return fmt.Errorf("live slack-agent requires Oneesama Pi API key; set ONEESAMA_PI_API_KEY, PI_API_KEY, or OPENROUTER_API_KEY")
+	}
+	return nil
+}
+
+func legacySlackRuntimeAllowed() bool {
+	return envBool("ONEESAMA_LIVE_ALLOW_LEGACY_SLACK") ||
+		envBool("ONEESAMA_ALLOW_LEGACY_SLACK") ||
+		envBool("MAB_ALLOW_LEGACY_SLACK")
+}
+
+func slackRuntimeIsDryRun(cfg appconfig.AgentRunnerConfig) bool {
+	return cfg.DryRun || normalizeRuntimeName(cfg.Provider) == "dry-run"
+}
+
+func normalizeRuntimeName(value string) string {
+	return strings.NewReplacer("_", "-", " ", "-").Replace(strings.ToLower(strings.TrimSpace(value)))
+}
+
+func firstEnv(names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func envBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func ValidateBackendAuth(ctx context.Context, backendURL string, apiKey string) error {
