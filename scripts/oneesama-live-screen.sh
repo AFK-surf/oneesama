@@ -114,7 +114,9 @@ log_path() {
 }
 
 screen_exists() {
-  screen -ls 2>/dev/null | grep -Fq ".$1"
+  local output
+  output="$(screen -ls 2>/dev/null || true)"
+  grep -Fq ".$1" <<<"$output"
 }
 
 find_service_pid() {
