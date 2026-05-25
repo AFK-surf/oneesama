@@ -73,20 +73,35 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
     limit = 1,
     markDelivered = true,
     minCreatedAt = "",
+    sessionId = "",
   }: {
     limit?: number;
     markDelivered?: boolean;
     minCreatedAt?: string;
+    sessionId?: string;
   } = {}) {
     const minTime = minCreatedAt ? Date.parse(minCreatedAt) : 0;
-    const ready = list()
-      .filter(
-        (job) =>
-          ["completed", "failed", "timeout"].includes(job.status) &&
-          !job.deliveredToRealtime &&
-          (!minTime || Date.parse(String(job.createdAt || job.updatedAt || "")) >= minTime),
-      )
-      .slice(0, limit);
+    const ready: WorkerReport[] = [];
+    for (const job of list()) {
+      if (ready.length >= limit) break;
+      if (!["completed", "failed", "timeout"].includes(job.status) || job.deliveredToRealtime) {
+        continue;
+      }
+      if (minTime && Date.parse(String(job.createdAt || job.updatedAt || "")) < minTime) {
+        continue;
+      }
+      const suppressChannel = realtimeSuppressChannel(job, sessionId);
+      if (suppressChannel) {
+        if (markDelivered) {
+          update(job.id, {
+            deliveredToRealtime: true,
+            realtimeDelivery: { channel: suppressChannel, deliveredAt: new Date().toISOString() },
+          });
+        }
+        continue;
+      }
+      ready.push(job);
+    }
     if (markDelivered) {
       for (const job of ready) update(job.id, { deliveredToRealtime: true });
     }
@@ -109,6 +124,58 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
       for (const job of ready) update(job.id, { deliveredToSlack: true });
     }
     return ready;
+  }
+
+  function realtimeSuppressChannel(job: WorkerReport, sessionId = "") {
+    if (!isRealtimeMeetingScoped(job)) return "realtime_non_meeting_suppressed";
+    const targetSessionId = workerMeetingSessionId(job);
+    if (sessionId && targetSessionId && targetSessionId !== sessionId) {
+      return "realtime_session_mismatch_suppressed";
+    }
+    return "";
+  }
+
+  function isRealtimeMeetingScoped(job: WorkerReport) {
+    const context = job.context || {};
+    const kind = String(context.session_kind || context.sessionKind || "").trim();
+    if (kind) {
+      const normalized = kind.toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
+      if (
+        [
+          "meeting-copilot",
+          "meeting-calibrate",
+          "meeting-summary",
+          "meeting-demo-surface",
+          "meeting-demo-execution",
+          "meeting-app-control",
+        ].includes(normalized)
+      ) {
+        return true;
+      }
+      if (
+        ["secretary-lookup", "slack-triage", "slack-case", "memory-compact"].includes(normalized)
+      ) {
+        return false;
+      }
+    }
+    const source = String(context.source || "").trim().toLowerCase();
+    if (!source) return false;
+    if (source.includes("persona_delegate") || source.includes("triage") || source.includes("secretary")) {
+      return false;
+    }
+    return source.startsWith("meeting-") || source.startsWith("meeting_");
+  }
+
+  function workerMeetingSessionId(job: WorkerReport) {
+    const context = job.context || {};
+    return String(
+      context.meeting_session_id ||
+        context.meetingSessionId ||
+        context.meetingSessionID ||
+        context.session_id ||
+        context.sessionId ||
+        "",
+    ).trim();
   }
 
   return {

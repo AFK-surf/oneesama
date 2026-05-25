@@ -6739,11 +6739,21 @@ async function workerBridgeSmoke() {
   try {
     await waitForHealth("http://127.0.0.1:18886/healthz");
     const workerResultMinCreatedAt = new Date(Date.now() - 1000).toISOString();
+    const longWorkerResult = [
+      "Worker bridge smoke long detail sentinel.",
+      "This is intentionally long so the bridge writes the full result to Meet chat instead of asking Realtime to read it aloud.",
+      "DETAIL_SENTINEL_".repeat(70),
+    ].join("\n");
     const reported = await postJson("http://127.0.0.1:18886/worker/report", {
       id: "job_worker_bridge_smoke",
       status: "completed",
       task: "prepare a spoken status update",
-      result: "Worker bridge smoke result.",
+      result: longWorkerResult,
+      context: {
+        source: "meeting-worker-bridge-smoke",
+        session_kind: "meeting_copilot",
+        meeting_session_id: "worker_bridge_smoke",
+      },
     });
     assertSmoke(reported.ok === true, "worker report route failed", reported);
 
@@ -6777,6 +6787,33 @@ async function workerBridgeSmoke() {
         meetPage: status.active?.meetPage,
       },
     );
+    const realtimeTexts = (status.active?.fixtureState?.realtimeEvents || [])
+      .flatMap((event) => event.item?.content || [])
+      .map((content) => String(content.text || ""));
+    assertSmoke(
+      (status.active?.fixtureState?.chatMessages || []).some((entry) =>
+        String(entry.text || "").includes("Worker bridge smoke long detail sentinel"),
+      ),
+      "long worker result was not written to Meet chat",
+      status.active?.fixtureState,
+    );
+    assertSmoke(
+      realtimeTexts.some((text) => text.includes("完整结果我已经发到 Meet chat")),
+      "long worker result did not use short voice handoff text",
+      realtimeTexts,
+    );
+    assertSmoke(
+      !realtimeTexts.some((text) => text.includes("DETAIL_SENTINEL_DETAIL_SENTINEL")),
+      "long worker result leaked into realtime voice context",
+      realtimeTexts,
+    );
+    assertSmoke(
+      status.active?.workerResultBridge?.delivered?.some(
+        (job) => job.jobId === "job_worker_bridge_smoke",
+      ),
+      "worker bridge did not deliver the meeting-scoped worker job to the browser",
+      status.active?.workerResultBridge,
+    );
 
     console.log(JSON.stringify({ ok: true, reported, join, status, workerJobs }, null, 2));
   } finally {
@@ -6808,6 +6845,11 @@ async function realtimeBrowserSmoke() {
       status: "completed",
       task: "summarize completed browser bridge work",
       result: "Realtime browser bridge smoke result.",
+      context: {
+        source: "meeting-realtime-browser-smoke",
+        session_kind: "meeting_copilot",
+        meeting_session_id: "realtime_browser_smoke",
+      },
     });
     assertSmoke(reported.ok === true, "realtime browser worker report failed", reported);
 
@@ -6891,6 +6933,11 @@ async function realtimeWebrtcSmoke() {
       status: "completed",
       task: "verify data-channel worker result reporting",
       result: "Realtime WebRTC smoke result.",
+      context: {
+        source: "meeting-realtime-webrtc-smoke",
+        session_kind: "meeting_copilot",
+        meeting_session_id: "realtime_webrtc_smoke",
+      },
     });
     assertSmoke(reported.ok === true, "realtime webrtc worker report failed", reported);
 
@@ -8835,6 +8882,11 @@ async function runtimeAcceptanceSmoke() {
       status: "completed",
       task: "verify integrated runtime acceptance",
       result: "Runtime acceptance worker result.",
+      context: {
+        source: "meeting-runtime-acceptance-smoke",
+        session_kind: "meeting_copilot",
+        meeting_session_id: "runtime_acceptance_smoke",
+      },
     });
     assertSmoke(report.ok === true, "runtime acceptance worker report failed", report);
 

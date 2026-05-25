@@ -49,6 +49,21 @@ const workspaceCredentialFile = process.env.MAB_WORKSPACE_TOOLS_ENV_FILE || "";
 let workspaceCredsCache = null;
 const googleTokenCache = { value: "", expiresAt: 0 };
 
+const realtimeMeetingSessionKinds = new Set([
+  "meeting-copilot",
+  "meeting-calibrate",
+  "meeting-summary",
+  "meeting-demo-surface",
+  "meeting-demo-execution",
+  "meeting-app-control",
+]);
+const realtimeNonMeetingSessionKinds = new Set([
+  "secretary-lookup",
+  "slack-triage",
+  "slack-case",
+  "memory-compact",
+]);
+
 function isLocalVideoPath(value = "") {
   const raw = String(value || "").trim();
   if (!raw) return false;
@@ -59,6 +74,50 @@ function isLocalVideoPath(value = "") {
 function stageVideoAssetUrl(filePath = "") {
   const resolved = resolve(String(filePath || ""));
   return `${config.meetingAgentUrl}/stage-media/video?path=${encodeURIComponent(resolved)}`;
+}
+
+function normalizeSessionKind(value = "") {
+  return String(value || "").trim().toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
+}
+
+function workerContext(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function workerMeetingSessionId(context: Record<string, unknown>) {
+  return String(
+    context.meeting_session_id ||
+      context.meetingSessionId ||
+      context.meetingSessionID ||
+      context.session_id ||
+      context.sessionId ||
+      "",
+  ).trim();
+}
+
+function isRealtimeMeetingScopedContext(context: Record<string, unknown>) {
+  const kind = normalizeSessionKind(String(context.session_kind || context.sessionKind || ""));
+  if (kind) {
+    if (realtimeMeetingSessionKinds.has(kind)) return true;
+    if (realtimeNonMeetingSessionKinds.has(kind)) return false;
+  }
+  const source = String(context.source || "").trim().toLowerCase();
+  if (!source) return false;
+  if (source.includes("persona_delegate") || source.includes("triage") || source.includes("secretary")) {
+    return false;
+  }
+  return source.startsWith("meeting-") || source.startsWith("meeting_");
+}
+
+function realtimeSuppressChannelForContext(context: Record<string, unknown>, sessionId = "") {
+  if (!isRealtimeMeetingScopedContext(context)) return "realtime_non_meeting_suppressed";
+  const targetSessionId = workerMeetingSessionId(context);
+  if (sessionId && targetSessionId && targetSessionId !== sessionId) {
+    return "realtime_session_mismatch_suppressed";
+  }
+  return "";
 }
 
 function videoContentType(filePath = "") {
@@ -1496,14 +1555,25 @@ const service = createJsonServer({
       const b = body as MeetingAgentInput & { result?: unknown; task?: string };
       const resultText =
         typeof b.result === "string" ? b.result : b.result ? JSON.stringify(b.result) : "";
+      const context = workerContext(b.context);
       const job = reports.create({
         id: String(b.id || b.jobId || ""),
         status: String(b.status || "completed"),
+        provider: String(b.provider || ""),
+        mode: String(b.mode || ""),
         task: String(b.task || ""),
+        context,
         result: resultText,
         error: String(b.error || ""),
       });
-      const realtimeDelivery = await joiner.injectWorkerResult(job);
+      const status = (await joiner.status()) as { active?: { sessionId?: string } | null };
+      const activeSessionId = String(status.active?.sessionId || "");
+      const suppressChannel = activeSessionId
+        ? realtimeSuppressChannelForContext(context, activeSessionId)
+        : "";
+      const realtimeDelivery = suppressChannel
+        ? { ok: true, channel: suppressChannel }
+        : await joiner.injectWorkerResult(job);
       if (realtimeDelivery.ok) {
         reports.update(job.id, {
           deliveredToRealtime: true,
@@ -1572,6 +1642,7 @@ const service = createJsonServer({
           limit: Number.parseInt(String(b.limit ?? "1"), 10),
           markDelivered: b.markDelivered !== false,
           minCreatedAt: String(b.minCreatedAt || ""),
+          sessionId: String(b.sessionId || b.session_id || ""),
         }),
       };
     },

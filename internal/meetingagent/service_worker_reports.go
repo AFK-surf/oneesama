@@ -132,6 +132,7 @@ func (s *Service) pollReadyWorkerReports(ctx context.Context, realtime bool, req
 	if minCreatedAt != "" {
 		minTime, _ = time.Parse(time.RFC3339Nano, minCreatedAt)
 	}
+	sessionID := firstNonEmpty(request.SessionID, request.SessionIDSnake)
 	ready := make([]WorkerReport, 0, limit)
 	for _, report := range reports {
 		if len(ready) >= limit || !isTerminalWorkerStatus(report.Status) {
@@ -148,6 +149,14 @@ func (s *Service) pollReadyWorkerReports(ctx context.Context, realtime bool, req
 				_, _ = s.markWorkerDelivered(ctx, report.ID, true, DeliveryMeta{Channel: "realtime_noop_suppressed"})
 			}
 			continue
+		}
+		if realtime {
+			if channel := workerReportRealtimeSuppressChannel(report, sessionID); channel != "" {
+				if workerPollMarkDelivered(request) {
+					_, _ = s.markWorkerDelivered(ctx, report.ID, true, DeliveryMeta{Channel: channel})
+				}
+				continue
+			}
 		}
 		ready = append(ready, report)
 	}

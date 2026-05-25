@@ -64,6 +64,8 @@ type WorkerPollRequest struct {
 	MarkDeliveredSnake *bool  `json:"mark_delivered,omitempty"`
 	MinCreatedAt       string `json:"minCreatedAt,omitempty"`
 	MinCreatedAtSnake  string `json:"min_created_at,omitempty"`
+	SessionID          string `json:"sessionId,omitempty"`
+	SessionIDSnake     string `json:"session_id,omitempty"`
 }
 
 type WorkerMarkSlackDeliveredRequest struct {

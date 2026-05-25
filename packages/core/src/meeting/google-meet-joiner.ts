@@ -2698,6 +2698,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           workerPollUrl,
           enabled: Boolean(workerPollUrl),
           minCreatedAt: input.workerResultMinCreatedAt || new Date().toISOString(),
+          sessionId,
         }),
       });
     }
@@ -3074,19 +3075,19 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   async function injectWorkerResult(job) {
     if (!active?.page) return { ok: false, error: "no_active_join" };
     const result = await active.page
-      .evaluate((payload) => {
+      .evaluate(async (payload) => {
         if (typeof window.MAB_REALTIME_CLIENT?.injectWorkerResult === "function") {
           return {
             ok: true,
             channel: "MAB_REALTIME_CLIENT.injectWorkerResult",
-            delivery: window.MAB_REALTIME_CLIENT.injectWorkerResult(payload),
+            delivery: await window.MAB_REALTIME_CLIENT.injectWorkerResult(payload),
           };
         }
         if (typeof window.MAB_REALTIME_CLIENT?.sendWorkerResult === "function") {
           return {
             ok: true,
             channel: "MAB_REALTIME_CLIENT.sendWorkerResult",
-            delivery: window.MAB_REALTIME_CLIENT.sendWorkerResult(payload),
+            delivery: await window.MAB_REALTIME_CLIENT.sendWorkerResult(payload),
           };
         }
         window.dispatchEvent(new CustomEvent("meeting-avatar-worker-result", { detail: payload }));

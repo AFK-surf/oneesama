@@ -8,6 +8,7 @@
     pollIntervalMs: 4000,
     enabled: true,
     minCreatedAt: "",
+    sessionId: "",
     ...(window.MAB_WORKER_RESULT_CONFIG || {}),
   };
 
@@ -31,14 +32,14 @@
     state.errors = state.errors.slice(-20);
   }
 
-  function injectIntoRealtime(job) {
+  async function injectIntoRealtime(job) {
     if (typeof window.MAB_REALTIME_CLIENT?.injectWorkerResult === "function") {
-      window.MAB_REALTIME_CLIENT.injectWorkerResult(job);
+      await window.MAB_REALTIME_CLIENT.injectWorkerResult(job);
       return "MAB_REALTIME_CLIENT.injectWorkerResult";
     }
 
     if (typeof window.MAB_REALTIME_CLIENT?.sendWorkerResult === "function") {
-      window.MAB_REALTIME_CLIENT.sendWorkerResult(job);
+      await window.MAB_REALTIME_CLIENT.sendWorkerResult(job);
       return "MAB_REALTIME_CLIENT.sendWorkerResult";
     }
 
@@ -52,7 +53,12 @@
     const response = await fetch(config.workerPollUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ limit: 5, markDelivered: true, minCreatedAt: config.minCreatedAt }),
+      body: JSON.stringify({
+        limit: 5,
+        markDelivered: true,
+        minCreatedAt: config.minCreatedAt,
+        sessionId: config.sessionId,
+      }),
     });
     const body = await response.json();
     if (!response.ok || body.ok === false) {
@@ -65,7 +71,7 @@
         jobId: job.id,
         status: job.status,
         task: job.task,
-        channel: injectIntoRealtime(job),
+        channel: await injectIntoRealtime(job),
       };
       state.delivered.push(delivery);
       state.delivered = state.delivered.slice(-50);

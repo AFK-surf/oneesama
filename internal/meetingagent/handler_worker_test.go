@@ -92,14 +92,14 @@ func TestWorkerPollRealtimeMarksDeliveryByDefault(t *testing.T) {
 	t.Parallel()
 
 	router := newTestRouter(t)
-	performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_realtime","status":"failed","task":"answer","error":"boom"}`)
+	performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_realtime","status":"failed","task":"answer","error":"boom","context":{"session_kind":"meeting_copilot","meeting_session_id":"session_worker_poll"}}`)
 
-	first := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{}`)
+	first := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{"sessionId":"session_worker_poll"}`)
 	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"job_realtime"`) || !strings.Contains(first.Body.String(), `"deliveredToRealtime":true`) {
 		t.Fatalf("first realtime poll = %d %s, want delivered job", first.Code, first.Body.String())
 	}
 
-	second := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{}`)
+	second := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{"sessionId":"session_worker_poll"}`)
 	if second.Code != http.StatusOK || strings.Contains(second.Body.String(), `"job_realtime"`) {
 		t.Fatalf("second realtime poll = %d %s, want no duplicate delivery", second.Code, second.Body.String())
 	}
@@ -115,11 +115,39 @@ func TestWorkerReportInjectsRealtimeWhenJoinActive(t *testing.T) {
 	router.ServeHTTP(httptest.NewRecorder(), join)
 	markSessionJoined(t, service, "session_worker")
 
-	report := performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_bridge","status":"completed","task":"answer","result":"done"}`)
+	report := performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_bridge","status":"completed","task":"answer","result":"done","context":{"session_kind":"meeting_copilot","meeting_session_id":"session_worker"}}`)
 	if report.Code != http.StatusOK ||
 		!strings.Contains(report.Body.String(), `"realtimeDelivery":{"ok":true`) ||
 		!strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
 		t.Fatalf("report response = %d %s, want realtime injected", report.Code, report.Body.String())
+	}
+}
+
+func TestWorkerReportSuppressesSecretaryLookupRealtimeDelivery(t *testing.T) {
+	t.Parallel()
+
+	router, service := newScreenShareTestRouterWithService(t, t.TempDir())
+	join := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_worker_scope","meeting_url":"https://meet.google.com/abc-defg-hij","dry_run":true}`))
+	join.Header.Set(internalauth.HeaderName, "secret-key")
+	join.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(httptest.NewRecorder(), join)
+	markSessionJoined(t, service, "session_worker_scope")
+
+	report := performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_secretary","status":"completed","task":"slack lookup","result":"unrelated slack answer","context":{"session_kind":"secretary_lookup","source":"persona_delegate_worker","session_id":"triage:C123:456"}}`)
+	if report.Code != http.StatusOK ||
+		!strings.Contains(report.Body.String(), `"channel":"realtime_non_meeting_suppressed"`) ||
+		!strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
+		t.Fatalf("report response = %d %s, want suppressed non-meeting realtime delivery", report.Code, report.Body.String())
+	}
+
+	pollRealtime := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{"sessionId":"session_worker_scope","markDelivered":false}`)
+	if pollRealtime.Code != http.StatusOK || strings.Contains(pollRealtime.Body.String(), `"job_secretary"`) {
+		t.Fatalf("realtime poll = %d %s, want secretary report hidden", pollRealtime.Code, pollRealtime.Body.String())
+	}
+
+	pollSlack := performMeetingRequest(router, http.MethodPost, "/worker/poll-slack", `{"limit":10,"markDelivered":false}`)
+	if pollSlack.Code != http.StatusOK || !strings.Contains(pollSlack.Body.String(), `"job_secretary"`) {
+		t.Fatalf("slack poll = %d %s, want secretary report still available for Slack", pollSlack.Code, pollSlack.Body.String())
 	}
 }
 
