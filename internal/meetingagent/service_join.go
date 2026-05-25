@@ -3,6 +3,7 @@ package meetingagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -300,6 +301,9 @@ func (s *Service) sessionFromRuntimeStatus(ctx context.Context, session SessionR
 	if runtimeStatus == "" {
 		return nil
 	}
+	if runtimeStatus == joinSessionStatusString(joinSessionStatusStale) {
+		return s.finalizeStaleJoin(ctx, session, errMeetRunnerPageClosed)
+	}
 	if runtimeStatus == session.Status {
 		metadata := cloneMap(session.Metadata)
 		if len(metadata) == 0 {
@@ -389,9 +393,33 @@ func runnerSessionUnavailable(err error) bool {
 	return false
 }
 
+var errMeetRunnerPageClosed = errors.New("meet-runner page closed")
+
+func runnerRuntimePageClosed(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"target page, context or browser has been closed",
+		"target page has been closed",
+		"context has been closed",
+		"browser has been closed",
+		"meet-runner page closed",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func runnerUnavailableReason(err error) string {
 	if runnerSessionMissing(err) {
 		return "meet_runner_session_missing"
+	}
+	if runnerRuntimePageClosed(err) {
+		return "meet_runner_page_closed"
 	}
 	return "meet_runner_session_unavailable"
 }
@@ -406,6 +434,9 @@ func runtimeMeetPageStatus(active any) string {
 		return ""
 	}
 	meetPage, _ := fields["meetPage"].(map[string]any)
+	if runtimeMeetPageUnavailable(meetPage) {
+		return joinSessionStatusString(joinSessionStatusStale)
+	}
 	if runtimeRemovedFromMeeting(meetPage) {
 		return joinSessionStatusString(joinSessionStatusRemoved)
 	}
@@ -419,6 +450,17 @@ func runtimeMeetPageStatus(active any) string {
 		return joinSessionStatusString(joinSessionStatusFailed)
 	}
 	return ""
+}
+
+func runtimeMeetPageUnavailable(meetPage map[string]any) bool {
+	if len(meetPage) == 0 {
+		return false
+	}
+	okValue, hasOK := meetPage["ok"].(bool)
+	if !hasOK || okValue {
+		return false
+	}
+	return runnerRuntimePageClosed(errors.New(stringFromMap(meetPage, "error")))
 }
 
 func runtimeRemovedFromMeeting(meetPage map[string]any) bool {

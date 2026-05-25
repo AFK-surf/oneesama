@@ -3516,7 +3516,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   ) {
     const fps = Math.max(
       1,
-      Math.min(30, positiveInteger(input.fps ?? input.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS),
+      Math.min(
+        30,
+        positiveInteger(input.fps ?? input.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
+      ),
     );
     const intervalMs = Math.max(16, Math.round(1000 / fps));
     let frame = firstFrame;
@@ -3580,7 +3583,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     stopActiveMacWindowCapture("replace_window_capture");
     const fps = Math.max(
       1,
-      Math.min(30, positiveInteger(input.fps ?? input.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS),
+      Math.min(
+        30,
+        positiveInteger(input.fps ?? input.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
+      ),
     );
     const intervalMs = Math.max(16, Math.round(1000 / fps));
     const windowId = Number(app.windowId || app.windowID || 0) || 0;
@@ -3722,10 +3728,46 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       .some((candidate) => candidate === name || candidate.includes(name));
   }
 
-  async function presentAppShare(input: AppShareInput = {}) {
+  function activeMeetPage(): { ok: true; page: Page } | { ok: false; error: string } {
     if (!active?.page) return { ok: false, error: "no_active_join" };
+    if (active.page.isClosed()) return { ok: false, error: "meet_page_closed" };
+    return { ok: true, page: active.page };
+  }
+
+  function meetPageUnavailable(meetPage?: MeetPageState | null) {
+    if (!meetPage || meetPage.ok !== false) return false;
+    return /target page, context or browser has been closed|target page has been closed|context has been closed|browser has been closed/i.test(
+      String(meetPage.error || ""),
+    );
+  }
+
+  function screenSharePostcheck() {
+    if (meetPageUnavailable(active?.meetPage)) {
+      return { ok: false, error: "meet_page_closed", meetPage: active?.meetPage || null };
+    }
+    if (!active?.screenShare?.active) {
+      return {
+        ok: false,
+        error: "screen_share_not_active_after_present",
+        meetPage: active?.meetPage || null,
+        screenShare: active?.screenShare || null,
+      };
+    }
+    return {
+      ok: true,
+      meetPage: active?.meetPage || null,
+      screenShare: active?.screenShare || null,
+    };
+  }
+
+  async function presentAppShare(input: AppShareInput = {}) {
+    const ready = activeMeetPage();
+    if ("error" in ready) return { ok: false, error: ready.error };
     await refreshActiveRuntimeState();
-    const beforePresentation = await getMeetPresentationState(active.page);
+    if (meetPageUnavailable(active?.meetPage)) {
+      return { ok: false, error: "meet_page_closed", meetPage: active?.meetPage || null };
+    }
+    const beforePresentation = await getMeetPresentationState(ready.page);
     const replaceExistingShare = Boolean(
       active?.screenShare?.active || beforePresentation.presenting,
     );
@@ -3758,6 +3800,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       height: firstFrame.dimensions.height,
     };
     await refreshActiveRuntimeState();
+    if (meetPageUnavailable(active?.meetPage)) {
+      return { ok: false, error: "meet_page_closed", meetPage: active?.meetPage || null };
+    }
     const present = replaceExistingShare
       ? {
           ok: true,
@@ -3774,10 +3819,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           fps: shareInput.fps || shareInput.screenShareFps || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
         });
     const loop = await startMacWindowCaptureLoop(app, shareInput, 1);
+    await refreshActiveRuntimeState();
+    const postcheck = screenSharePostcheck();
     const result = {
-      ok: Boolean(present.ok),
+      ok: Boolean(present.ok && postcheck.ok),
       app,
       present,
+      postcheck,
       beforePresentation,
       capture: {
         mode: "macos_window_to_synthetic",
@@ -3800,6 +3848,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       mode: "macos_window_to_synthetic",
       ok: result.ok,
       present,
+      postcheck,
       capture: result.capture,
     });
     await saveDiagnostics(active.diagnostics).catch(() => {});
@@ -3807,7 +3856,15 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   }
 
   async function startScreenShare(input: ScreenShareBridgeInput = {}) {
-    if (!active?.page) return { ok: false, error: "no_active_join" };
+    const ready = activeMeetPage();
+    if ("error" in ready) {
+      return {
+        ok: false,
+        error: ready.error,
+        screenShare: active?.screenShare || null,
+        fixtureState: active?.fixtureState || null,
+      };
+    }
     const bridgeInput: ScreenShareBridgeInput = {
       ...input,
       mode: "synthetic",
@@ -3816,7 +3873,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const imageUrl = await normalizeScreenShareImageUrl(
       bridgeInput.imageUrl || bridgeInput.imagePath || bridgeInput.framePath || "",
     );
-    const controller = await ensureScreenShareController(active.page, bridgeInput);
+    const controller = await ensureScreenShareController(ready.page, bridgeInput);
     if (!controller.ok) {
       const result = {
         ok: false,
@@ -3831,7 +3888,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         fixtureState: active.fixtureState || null,
       };
     }
-    const result = await active.page
+    const result = await ready.page
       .evaluate(
         async (payload) => {
           if (!window.MAB_SCREEN_SHARE_CONTROLLER?.start) {
@@ -3850,7 +3907,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           height:
             positiveInteger(bridgeInput.height ?? bridgeInput.screenShareHeight) ||
             DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
-          fps: positiveInteger(bridgeInput.fps ?? bridgeInput.screenShareFps) || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
+          fps:
+            positiveInteger(bridgeInput.fps ?? bridgeInput.screenShareFps) ||
+            DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
           preview: Boolean(bridgeInput.preview),
         },
       )
@@ -3861,6 +3920,16 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       controllerState: controller.state || null,
     });
     await refreshActiveRuntimeState();
+    if (meetPageUnavailable(active?.meetPage)) {
+      return {
+        ...result,
+        ok: false,
+        error: "meet_page_closed",
+        meetPage: active?.meetPage || null,
+        screenShare: active.screenShare || null,
+        fixtureState: active.fixtureState || null,
+      };
+    }
     return {
       ...result,
       screenShare: active.screenShare || null,
@@ -3869,16 +3938,20 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   }
 
   async function presentScreenShare(input: ScreenShareBridgeInput = {}) {
-    if (!active?.page) return { ok: false, error: "no_active_join" };
+    const ready = activeMeetPage();
+    if ("error" in ready) return { ok: false, error: ready.error };
     const bridgeInput: ScreenShareBridgeInput = {
       ...input,
       mode: "synthetic",
       screenShareMode: "synthetic",
     };
-    const meetPage = await evaluateMeetPageState(active.page);
-    const beforePresentation = await getMeetPresentationState(active.page);
+    const meetPage = await evaluateMeetPageState(ready.page);
+    if (meetPageUnavailable(meetPage)) {
+      return { ok: false, error: "meet_page_closed", mode: "synthetic", meetPage };
+    }
+    const beforePresentation = await getMeetPresentationState(ready.page);
     const beforeButtons = await collectButtonInventory(
-      active.page,
+      ready.page,
       active.diagnostics,
       "before-synthetic-present",
     );
@@ -3907,13 +3980,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         buttons: beforeButtons.slice(0, 30),
       };
     }
-    const controllerBefore = await readScreenShareControllerState(active.page);
+    const controllerBefore = await readScreenShareControllerState(ready.page);
     const start = await startScreenShare(bridgeInput);
-    const clickedSelector = await clickMeetShareScreenControl(active.page, active.diagnostics, {
+    const clickedSelector = await clickMeetShareScreenControl(ready.page, active.diagnostics, {
       allowCoordinateFallback: Boolean(bridgeInput.allowCoordinateFallback),
     });
     if (!clickedSelector) {
-      const afterMissPresentation = await getMeetPresentationState(active.page);
+      const afterMissPresentation = await getMeetPresentationState(ready.page);
       active.diagnostics?.record("screen_share_present_blocked", {
         reason: "share_screen_button_not_found",
         start,
@@ -3930,7 +4003,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         fixtureState: active.fixtureState || null,
       };
     }
-    const afterClickPresentation = await getMeetPresentationState(active.page);
+    const afterClickPresentation = await getMeetPresentationState(ready.page);
     active.diagnostics?.record("screen_share_present_clicked", {
       nativeMode: false,
       controllerBefore,
@@ -3940,7 +4013,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     });
     await saveDiagnostics(active.diagnostics).catch(() => {});
     await clickFirstVisible(
-      active.page,
+      ready.page,
       [
         "text=/Your entire screen/i",
         "text=/Entire screen/i",
@@ -3951,11 +4024,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       700,
       active.diagnostics,
     );
-    await active.page.waitForTimeout(Number(bridgeInput.waitMs || 3000));
+    await ready.page.waitForTimeout(Number(bridgeInput.waitMs || 3000));
     let screenshot = "";
     try {
       screenshot = await takeScreenshot(
-        active.page,
+        ready.page,
         active.diagnostics,
         "screen-share-present-click",
       );
@@ -3965,22 +4038,26 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       });
     }
     const buttons = await collectButtonInventory(
-      active.page,
+      ready.page,
       active.diagnostics,
       "after-screen-share-present-click",
     );
     await refreshActiveRuntimeState();
+    const postcheck = screenSharePostcheck();
     active.diagnostics?.record("screen_share_present_requested", {
       start,
       clickedSelector,
       screenshot,
+      postcheck,
     });
     await saveDiagnostics(active.diagnostics).catch(() => {});
     return {
-      ok: Boolean(start.ok && clickedSelector),
+      ok: Boolean(start.ok && clickedSelector && postcheck.ok),
+      error: postcheck.ok ? undefined : postcheck.error,
       start,
       clickedSelector,
       screenshot,
+      postcheck,
       visibleButtonLabels: buttons
         .filter((button) => button.visible)
         .map((button) => button.aria || button.text || "")
@@ -4027,21 +4104,22 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   }
 
   async function presentVideoStage(input: ScreenShareBridgeInput = {}) {
-    if (!active?.page) return { ok: false, error: "no_active_join" };
+    const ready = activeMeetPage();
+    if ("error" in ready) return { ok: false, error: ready.error };
     const stage = await openVideoStage({
       ...input,
       stageTitle: input.stageTitle || "Meeting Avatar Bot",
     });
     if (!stage.ok) return stage;
     const presentationMode = "synthetic";
-    const syntheticController = await ensureScreenShareController(active.page, {
+    const syntheticController = await ensureScreenShareController(ready.page, {
       ...input,
       mode: "synthetic",
       title: input.title || "Onee Sama video stage",
       subtitle: input.subtitle || "Shared by Onee Sama",
       fps: input.fps || 30,
     });
-    await active.page.bringToFront().catch(() => {});
+    await ready.page.bringToFront().catch(() => {});
     const present = await presentScreenShare({
       ...input,
       mode: presentationMode,
@@ -4057,9 +4135,17 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   }
 
   async function stopScreenShare() {
-    if (!active?.page) return { ok: false, error: "no_active_join" };
+    const ready = activeMeetPage();
+    if ("error" in ready) {
+      return {
+        ok: false,
+        error: ready.error,
+        screenShare: active?.screenShare || null,
+        fixtureState: active?.fixtureState || null,
+      };
+    }
     const captureStop = stopActiveMacWindowCapture("screen_share_stop");
-    const result = await active.page
+    const result = await ready.page
       .evaluate(async () => {
         if (!window.MAB_SCREEN_SHARE_CONTROLLER?.stop) {
           return { ok: false, error: "screen_share_controller_missing" };

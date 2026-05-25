@@ -79,6 +79,17 @@ func TestRuntimeMeetPageStatusUsesJoinLifecycleStatuses(t *testing.T) {
 			want: joinSessionStatusRemoved,
 		},
 		{
+			name: "closed meet page maps stale before stale captions can fake joined",
+			active: map[string]any{
+				"meetPage": map[string]any{
+					"ok":    false,
+					"error": "page.evaluate: Target page, context or browser has been closed",
+				},
+				"captions": map[string]any{"count": 733},
+			},
+			want: joinSessionStatusStale,
+		},
+		{
 			name:   "unknown page maps empty",
 			active: map[string]any{"meetPage": map[string]any{"preJoin": true}},
 			want:   "",

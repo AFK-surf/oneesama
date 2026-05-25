@@ -134,7 +134,19 @@ func (r *fakeClosedPipeStatusMeetRunner) setService(service *Service) {
 
 type fakeMeetRunnerWithRuntime struct {
 	fakeMeetRunner
-	runtime map[string]any
+	runtime      map[string]any
+	statusActive any
+}
+
+func (r fakeMeetRunnerWithRuntime) StatusSession(_ context.Context, input meetrunner.StatusSessionInput) (meetrunner.StatusSessionResult, error) {
+	if r.statusActive != nil {
+		return meetrunner.StatusSessionResult{
+			OK:      true,
+			Active:  r.statusActive,
+			Session: &meetrunner.RunnerSession{ID: input.SessionID, Status: "running"},
+		}, nil
+	}
+	return r.fakeMeetRunner.StatusSession(context.Background(), input)
 }
 
 func (r fakeMeetRunnerWithRuntime) StopSession(_ context.Context, input meetrunner.StopSessionInput) (meetrunner.StopSessionResult, error) {
@@ -417,6 +429,43 @@ func TestJoinStatusFinalizesStaleSessionWhenRunnerPipeCloses(t *testing.T) {
 	}
 	if result.SlackRef == nil || result.SlackRef.ChannelID != "C123" || result.SlackRef.ThreadTS != "123.456" {
 		t.Fatalf("slack ref = %+v, want C123/123.456", result.SlackRef)
+	}
+}
+
+func TestJoinStatusFinalizesStaleSessionWhenMeetPageClosedDespiteCaptions(t *testing.T) {
+	t.Parallel()
+
+	webhooks := make(chan MeetdWebhookPayload, 4)
+	webhookURL := meetdWebhookTestServer(t, "secret", webhooks)
+	router := newJoinTestRouterWithWebhookAndRunner(t, webhookURL, "secret", fakeMeetRunnerWithRuntime{
+		statusActive: map[string]any{
+			"sessionId": "session_join_page_closed",
+			"meetPage": map[string]any{
+				"ok":    false,
+				"error": "page.evaluate: Target page, context or browser has been closed",
+			},
+			"captions": map[string]any{"count": 733},
+		},
+	})
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_page_closed","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"slack_channel_id":"C123","slack_thread_ts":"123.456"}`)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
+	}
+
+	statusResponse := performMeetingRequest(router, http.MethodGet, "/join/status?session_id=session_join_page_closed", "")
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	body := statusResponse.Body.String()
+	if !strings.Contains(body, `"status":"stale"`) {
+		t.Fatalf("body = %s, want stale session status", body)
+	}
+	if !strings.Contains(body, `"stale_reason":"meet_runner_page_closed"`) {
+		t.Fatalf("body = %s, want page closed stale reason metadata", body)
+	}
+	result := waitMeetdWebhook(t, webhooks, "meeting.result")
+	if result.Status != "failed" || result.Error != staleJoinFailureMessage || !result.ForceDelivery {
+		t.Fatalf("result = %+v, want forced stale failure", result)
 	}
 }
 

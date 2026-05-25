@@ -806,9 +806,7 @@
         tokenStatus === 429
           ? "Realtime client secret request is rate limited; reconnect retry is scheduled."
           : "Realtime client secret request failed before the peer connection opened.";
-      blockers.push(
-        tokenStatus === 429 ? "realtime_token_rate_limited" : "realtime_token_failed",
-      );
+      blockers.push(tokenStatus === 429 ? "realtime_token_rate_limited" : "realtime_token_failed");
     } else if (state.connection.lastSdpError && !checks.peerConnected) {
       const sdpStatus = Number(state.connection.lastSdpError.status || 0);
       status = "blocked";
@@ -1276,7 +1274,9 @@
     }
     return (
       track.contentHint === "detail" ||
-      /meeting avatar bot synthetic display|meeting-avatar-screen-share|synthetic display/i.test(label) ||
+      /meeting avatar bot synthetic display|meeting-avatar-screen-share|synthetic display/i.test(
+        label,
+      ) ||
       Boolean((settings as { displaySurface?: unknown }).displaySurface)
     );
   }
@@ -1290,7 +1290,8 @@
       // Best-effort encoder hint.
     }
     const optimize = async () => {
-      if (typeof sender.getParameters !== "function" || typeof sender.setParameters !== "function") return;
+      if (typeof sender.getParameters !== "function" || typeof sender.setParameters !== "function")
+        return;
       const parameters = sender.getParameters() || {};
       parameters.degradationPreference = "maintain-resolution";
       if (Array.isArray(parameters.encodings) && parameters.encodings.length > 0) {
@@ -1316,7 +1317,7 @@
         pcId,
         source,
         trackId: track.id,
-        error: String(error && error.message || error).slice(0, 240),
+        error: String((error && error.message) || error).slice(0, 240),
       });
     });
   }
@@ -1801,8 +1802,7 @@
           response.ok
             ? "Realtime client secret response did not include a value"
             : "Realtime client secret request failed:",
-          formatRealtimeErrorValue(body.error) ||
-            (!response.ok ? "" : "missing value"),
+          formatRealtimeErrorValue(body.error) || (!response.ok ? "" : "missing value"),
           `status=${response.status}`,
           retry.retryAfter ? `retry_after=${retry.retryAfter}` : "",
           requestId ? `request_id=${requestId}` : "",
@@ -3026,7 +3026,10 @@
       });
     }
     const backendName = normalizeWorkspaceToolName(name);
-    const result = await postJson(localServiceUrl(`/tools/${encodeURIComponent(backendName)}`), args);
+    const result = await postJson(
+      localServiceUrl(`/tools/${encodeURIComponent(backendName)}`),
+      args,
+    );
     if (name === "create_shared_workspace" || name === "start_demo_execution") {
       const status = (result as { status?: string; ok?: boolean; error?: string })?.status || "";
       if ((result as { ok?: boolean })?.ok === false) {
@@ -3119,12 +3122,16 @@
     if (LOCAL_MEET_TOOLS.has(toolCall.name)) {
       return runLocalMeetTool(toolCall.name, toolCall.arguments)
         .then((result) => {
+          const shareToolResponse =
+            "For screen-share or app-share results: only say it is visible/shared if the result has ok:true and active screen-share/postcheck evidence. If it failed or lacks active-share evidence, state the exact blocker in one short Chinese sentence. Do not tell the user to switch views, and do not blame Meet or the receiver.";
           const delivery = sendFunctionCallOutput(toolCall.callId, result, {
             autoRespond: config.autoRespondToMeetToolCalls,
             responseInstructions:
               toolCall.name === "send_meet_chat"
                 ? "Confirm briefly in Chinese that the Meet chat message was sent."
-                : "Answer from the returned Meet chat messages/links in concise Chinese.",
+                : /share|stage/i.test(toolCall.name)
+                  ? shareToolResponse
+                  : "Answer from the returned Meet chat messages/links in concise Chinese.",
           });
           rememberMeetToolCall({
             name: toolCall.name,
@@ -3536,8 +3543,7 @@
             tokenResponse.ok
               ? "Realtime client secret response did not include a value"
               : "Realtime client secret request failed:",
-            formatRealtimeErrorValue(tokenBody.error) ||
-              (!tokenResponse.ok ? "" : "missing value"),
+            formatRealtimeErrorValue(tokenBody.error) || (!tokenResponse.ok ? "" : "missing value"),
             `status=${tokenResponse.status}`,
             retry.retryAfter ? `retry_after=${retry.retryAfter}` : "",
             requestId ? `request_id=${requestId}` : "",

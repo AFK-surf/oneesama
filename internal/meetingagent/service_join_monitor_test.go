@@ -110,6 +110,23 @@ func TestRuntimeJoinStatePrefersJoinedEvidenceOverCannotJoin(t *testing.T) {
 	}
 }
 
+func TestRuntimeJoinStateMarksClosedPageStaleBeforeCaptionFallback(t *testing.T) {
+	t.Parallel()
+
+	state := runtimeJoinState(map[string]any{
+		"meetPage": map[string]any{
+			"ok":    false,
+			"error": "page.evaluate: Target page, context or browser has been closed",
+		},
+		"captions": map[string]any{
+			"count": 733,
+		},
+	})
+	if !state.Stale || state.Joined || state.Reason != "meet_runner_page_closed" {
+		t.Fatalf("state = %+v, want stale page closed before captions fake joined", state)
+	}
+}
+
 func TestRuntimeJoinStateStillFailsPureCannotJoin(t *testing.T) {
 	t.Parallel()
 

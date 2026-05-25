@@ -48,6 +48,10 @@ func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 			continue
 		}
 		state := runtimeJoinState(status.Active)
+		if state.Stale {
+			_ = s.finalizeStaleJoin(ctx, *session, errMeetRunnerPageClosed)
+			return
+		}
 		if state.Joined {
 			seenJoined = true
 			if state.ParticipantCount > 0 {
@@ -242,6 +246,7 @@ type runtimeJoinSnapshot struct {
 	Joined           bool
 	Left             bool
 	Failed           bool
+	Stale            bool
 	Alone            bool
 	Reason           string
 	ParticipantCount int
@@ -255,6 +260,8 @@ func runtimeJoinState(active any) runtimeJoinSnapshot {
 	meetPage := mapFromAny(fields["meetPage"])
 	count := runtimeParticipantCount(meetPage)
 	switch {
+	case runtimeMeetPageUnavailable(meetPage):
+		return runtimeJoinSnapshot{Stale: true, Reason: "meet_runner_page_closed"}
 	case runtimeJoinedEvidence(fields, meetPage, count):
 		return runtimeJoinSnapshot{
 			Joined:           true,
