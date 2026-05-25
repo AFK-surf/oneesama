@@ -8,6 +8,39 @@ import { realtimeToolSchemas } from "../packages/core/src/realtime/realtime-cont
 
 const controlTool = realtimeToolSchemas.find((tool) => tool.name === "control_shared_app_window");
 
+test("Realtime bridge skips auto-connect in the initial about:blank document", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext();
+  try {
+    await context.addInitScript({
+      content: buildRealtimeBrowserInitScript({
+        mode: "webrtc-mock",
+        autoConnect: true,
+        simulateRemoteAudio: false,
+      }),
+    });
+    const page = await context.newPage();
+    await page.waitForTimeout(250);
+
+    const beforeNavigation = await page.evaluate(() => ({
+      href: window.location.href,
+      connected: window.MAB_REALTIME_BRIDGE?.connected,
+      dataChannelOpen: window.MAB_REALTIME_BRIDGE?.connection?.dataChannelOpen,
+    }));
+    assert.equal(beforeNavigation.href, "about:blank");
+    assert.equal(beforeNavigation.connected, false);
+    assert.equal(beforeNavigation.dataChannelOpen, false);
+
+    await page.goto("data:text/html,<html><body>bridge</body></html>");
+    await page.waitForFunction(
+      () => window.MAB_REALTIME_BRIDGE?.connection?.dataChannelOpen === true,
+    );
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+});
+
 async function withRealtimeBridge(callback) {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
@@ -48,8 +81,7 @@ async function dispatchToolCall(page, callId, args) {
     { callId, args },
   );
   await page.waitForFunction(
-    (id) =>
-      window.MAB_REALTIME_BRIDGE?.workspaceTools?.calls?.some((call) => call.callId === id),
+    (id) => window.MAB_REALTIME_BRIDGE?.workspaceTools?.calls?.some((call) => call.callId === id),
     callId,
   );
 }

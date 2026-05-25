@@ -4012,10 +4012,12 @@
     const interrupt = cancelActiveResponse("worker_result_ready");
     let chatDelivery = null;
     if (shouldSendWorkerResultToMeetChat(job)) {
-      chatDelivery = await sendMeetChat({ text: buildWorkerResultChatText(job) }).catch((error) => ({
-        ok: false,
-        error: String((error && error.message) || error),
-      }));
+      chatDelivery = await sendMeetChat({ text: buildWorkerResultChatText(job) }).catch(
+        (error) => ({
+          ok: false,
+          error: String((error && error.message) || error),
+        }),
+      );
     }
     const itemEvent = {
       type: "conversation.item.create",
@@ -4025,7 +4027,9 @@
         content: [
           {
             type: "input_text",
-            text: chatDelivery ? buildWorkerResultVoiceText(job, chatDelivery) : buildWorkerResultText(job),
+            text: chatDelivery
+              ? buildWorkerResultVoiceText(job, chatDelivery)
+              : buildWorkerResultText(job),
           },
         ],
       },
@@ -4126,7 +4130,13 @@
 
   installParticipantAudioDiscovery();
 
-  if (config.autoConnect) {
+  function shouldAutoConnectInCurrentDocument() {
+    const href = String(window.location?.href || "");
+    if (!href || href === "about:blank") return false;
+    return true;
+  }
+
+  if (config.autoConnect && shouldAutoConnectInCurrentDocument()) {
     window.setTimeout(() => connectRealtime(), 0);
   }
 })();

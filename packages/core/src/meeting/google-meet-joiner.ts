@@ -679,6 +679,38 @@ function installPageDiagnostics(page: Page, diagnostics: Diagnostics) {
   });
 }
 
+function isRetryableMeetGotoError(error: unknown): boolean {
+  const message = String((error as Error)?.message || error);
+  return ["net::ERR_CONNECTION_CLOSED", "net::ERR_ABORTED", "Execution context was destroyed"].some(
+    (fragment) => message.includes(fragment),
+  );
+}
+
+async function gotoMeetWithRetry(page: Page, meetUrl: string, diagnostics: Diagnostics) {
+  const maxAttempts = 2;
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    diagnostics.record("goto_attempt", { meetUrl, attempt, maxAttempts });
+    await saveDiagnostics(diagnostics);
+    try {
+      return await page.goto(meetUrl, { waitUntil: "commit", timeout: 25_000 });
+    } catch (error) {
+      lastError = error;
+      diagnostics.record("goto_attempt_failed", {
+        meetUrl,
+        attempt,
+        maxAttempts,
+        retryable: isRetryableMeetGotoError(error),
+        error: String((error as Error)?.message || error).slice(0, 1000),
+      });
+      await saveDiagnostics(diagnostics);
+      if (attempt >= maxAttempts || !isRetryableMeetGotoError(error)) break;
+      await page.waitForTimeout(750).catch(() => {});
+    }
+  }
+  throw lastError;
+}
+
 async function takeScreenshot(page: Page, diagnostics: Diagnostics, name: string): Promise<string> {
   if (process.env.MAB_SKIP_SCREENSHOTS === "1") {
     diagnostics.record("screenshot_skipped", { name });
@@ -1136,7 +1168,9 @@ async function waitForScreenShareImageSource(page: Page, timeoutMs = 2500) {
     if (screenShare?.imageError || errors.some((entry) => /image/i.test(String(entry)))) {
       return {
         ok: false,
-        error: String(screenShare.imageError || errors.find((entry) => /image/i.test(String(entry)))),
+        error: String(
+          screenShare.imageError || errors.find((entry) => /image/i.test(String(entry))),
+        ),
         state,
       };
     }
@@ -2711,8 +2745,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     installPageDiagnostics(page, diagnostics);
     diagnostics.record("goto_start", { meetUrl });
     await saveDiagnostics(diagnostics);
-    await page.goto(meetUrl, { waitUntil: "commit", timeout: 25_000 });
-    diagnostics.record("goto_complete", { url: page.url() });
+    const gotoResponse = await gotoMeetWithRetry(page, meetUrl, diagnostics);
+    diagnostics.record("goto_complete", { url: page.url(), status: gotoResponse?.status?.() || 0 });
     await saveDiagnostics(diagnostics);
     await installMeetPromptAutoDismisser(page, diagnostics);
     await installMeetLocalPlaybackMute(page, diagnostics);
