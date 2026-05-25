@@ -15,6 +15,13 @@ test("avatar runtime config uses resilient Hiyori model URLs", () => {
   );
 });
 
+test("avatar runtime config defaults to VRM renderer", () => {
+  const config = getRuntimeConfig({});
+
+  assert.equal(config.avatarRenderer, "vrm");
+  assert.match(config.avatarVRMModelUrl, /\.vrm$/);
+});
+
 test("avatar init script includes model fallback URLs", () => {
   const script = buildAvatarInitScript({
     modelUrl: "https://example.invalid/Hiyori.model3.json",
