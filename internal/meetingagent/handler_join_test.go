@@ -30,6 +30,16 @@ func (r *recordingStopMeetRunner) StopSession(ctx context.Context, input meetrun
 	return r.fakeMeetRunner.StopSession(ctx, input)
 }
 
+type recordingRuntimeMeetRunner struct {
+	fakeMeetRunnerWithRuntime
+	stopInputs []meetrunner.StopSessionInput
+}
+
+func (r *recordingRuntimeMeetRunner) StopSession(ctx context.Context, input meetrunner.StopSessionInput) (meetrunner.StopSessionResult, error) {
+	r.stopInputs = append(r.stopInputs, input)
+	return r.fakeMeetRunnerWithRuntime.StopSession(ctx, input)
+}
+
 func (fakeMeetRunner) Ping(context.Context) (meetrunner.RunnerStatus, error) {
 	return meetrunner.RunnerStatus{OK: true, Name: "fake-meet-runner", BridgeMode: "persistent-session"}, nil
 }
@@ -466,6 +476,44 @@ func TestJoinStatusFinalizesStaleSessionWhenMeetPageClosedDespiteCaptions(t *tes
 	result := waitMeetdWebhook(t, webhooks, "meeting.result")
 	if result.Status != "failed" || result.Error != staleJoinFailureMessage || !result.ForceDelivery {
 		t.Fatalf("result = %+v, want forced stale failure", result)
+	}
+}
+
+func TestJoinStatusStopsRunnerWhenRuntimeReportsRemovedFromMeeting(t *testing.T) {
+	t.Parallel()
+
+	runner := &recordingRuntimeMeetRunner{
+		fakeMeetRunnerWithRuntime: fakeMeetRunnerWithRuntime{
+			statusActive: map[string]any{
+				"sessionId": "session_join_removed_runtime",
+				"meetPage": map[string]any{
+					"url":       "https://workspace.google.com/products/meet/",
+					"textHead":  "You left the meeting Return to home screen",
+					"inMeeting": false,
+				},
+			},
+		},
+	}
+	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", runner)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_join_removed_runtime","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
+	}
+
+	statusResponse := performMeetingRequest(router, http.MethodGet, "/join/status?session_id=session_join_removed_runtime", "")
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	body := statusResponse.Body.String()
+	if !strings.Contains(body, `"status":"removed_from_meeting"`) {
+		t.Fatalf("body = %s, want removed_from_meeting session status", body)
+	}
+	if len(runner.stopInputs) != 1 {
+		t.Fatalf("stopInputs = %#v, want one terminal runtime stop", runner.stopInputs)
+	}
+	if runner.stopInputs[0].SessionID != "session_join_removed_runtime" ||
+		runner.stopInputs[0].Reason != "runtime_removed_from_meeting" {
+		t.Fatalf("stop input = %#v, want runtime removed stop", runner.stopInputs[0])
 	}
 }
 

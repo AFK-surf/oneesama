@@ -334,7 +334,27 @@ func (s *Service) sessionFromRuntimeStatus(ctx context.Context, session SessionR
 		s.logger.Warn("persist runtime join status failed", "session_id", session.ID, "error", err)
 		return nil
 	}
+	if isTerminalSessionStatus(runtimeStatus) {
+		s.stopRuntimeTerminalJoin(ctx, session.ID, runtimeStatus)
+	}
 	return &updated
+}
+
+func (s *Service) stopRuntimeTerminalJoin(ctx context.Context, sessionID string, runtimeStatus string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	reason := "runtime_" + strings.TrimSpace(runtimeStatus)
+	if strings.TrimSpace(runtimeStatus) == "" {
+		reason = "runtime_terminal"
+	}
+	if _, err := s.meetRunner.StopSession(context.WithoutCancel(ctx), meetrunner.StopSessionInput{
+		SessionID: sessionID,
+		Reason:    reason,
+	}); err != nil && !runnerSessionUnavailable(err) {
+		s.logger.Warn("stop terminal runtime join failed", "session_id", sessionID, "status", runtimeStatus, "error", err)
+	}
 }
 
 func (s *Service) markJoinSessionStale(ctx context.Context, session SessionRecord, cause error) *SessionRecord {

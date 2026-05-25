@@ -131,6 +131,9 @@
       handledLocalToolCallIds: [],
       duplicateLocalToolCallsSkipped: 0,
       activeResponseId: "",
+      outputAudioActive: false,
+      lastOutputAudioStartedAt: "",
+      lastInputSpeechStartedAt: "",
       cancelledResponses: 0,
       userSpeechCancels: 0,
     },
@@ -2293,16 +2296,17 @@
     return false;
   }
 
-  function cancelActiveResponse(reason = "interrupt") {
-    if (!state.protection.activeResponseId)
+  function cancelActiveResponse(reason = "interrupt", options: { force?: boolean } = {}) {
+    const responseId = state.protection.activeResponseId;
+    if (!responseId && !state.protection.outputAudioActive && !options.force)
       return { ok: true, skipped: true, reason: "no_active_response" };
-    const channel = sendRealtimeEvent({
-      type: "response.cancel",
-      response_id: state.protection.activeResponseId,
-    });
+    const event: Record<string, unknown> = { type: "response.cancel" };
+    if (responseId) event.response_id = responseId;
+    const channel = sendRealtimeEvent(event);
     state.protection.cancelledResponses += 1;
-    const cancelledResponseId = state.protection.activeResponseId;
+    const cancelledResponseId = responseId;
     state.protection.activeResponseId = "";
+    state.protection.outputAudioActive = false;
     return { ok: true, channel, responseId: cancelledResponseId, reason };
   }
 
@@ -2317,7 +2321,17 @@
       event.type === "response.output_audio.delta"
     ) {
       window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(true);
+      state.protection.outputAudioActive = true;
+      if (event.type === "output_audio_buffer.started") {
+        state.protection.lastOutputAudioStartedAt = new Date().toISOString();
+      }
       setRealtimeInputGate(false, event.type);
+    }
+    if (event.type === "input_audio_buffer.speech_started") {
+      state.protection.lastInputSpeechStartedAt = new Date().toISOString();
+      const result = cancelActiveResponse("user_speech_started");
+      if (!result.skipped) state.protection.userSpeechCancels += 1;
+      setRealtimeInputGate(true, "user-speech-started");
     }
     if (
       ["response.done", "response.cancelled", "response.failed"].includes(event.type) &&
@@ -2334,6 +2348,7 @@
       event.type === "response.output_audio.done"
     ) {
       window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
+      state.protection.outputAudioActive = false;
       scheduleRealtimeInputGateOpen(event.type, 1200);
     }
     handleLocalToolCallEvent(event);
@@ -3190,6 +3205,42 @@
     return { ok: true, outputChannel, responseChannel };
   }
 
+  function isVisualShareToolName(name: string) {
+    return /share|stage/i.test(name);
+  }
+
+  function resultRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  function nestedRecord(value: unknown, key: string): Record<string, unknown> {
+    return resultRecord(resultRecord(value)[key]);
+  }
+
+  function resultHasActiveScreenShare(value: unknown): boolean {
+    const direct = resultRecord(value);
+    const candidates = [
+      nestedRecord(direct, "screenShare"),
+      nestedRecord(direct, "state"),
+      nestedRecord(nestedRecord(direct, "postcheck"), "screenShare"),
+      nestedRecord(nestedRecord(direct, "present"), "screenShare"),
+      nestedRecord(nestedRecord(nestedRecord(direct, "present"), "postcheck"), "screenShare"),
+      nestedRecord(nestedRecord(direct, "start"), "screenShare"),
+    ];
+    return candidates.some((candidate) => candidate.active === true);
+  }
+
+  function shouldAutoRespondToMeetToolResult(name: string, result: unknown): boolean {
+    if (!config.autoRespondToMeetToolCalls) return false;
+    const record = resultRecord(result);
+    if (isVisualShareToolName(name) && record.ok === true && resultHasActiveScreenShare(record)) {
+      return false;
+    }
+    return true;
+  }
+
   function handleLocalToolCallEvent(event: unknown) {
     const toolCall = extractLocalToolCall(event);
     if (!toolCall) return null;
@@ -3238,11 +3289,11 @@
           const shareToolResponse =
             "For screen-share or app-share results: only say it is visible/shared if the result has ok:true and active screen-share/postcheck evidence. If it failed or lacks active-share evidence, state the exact blocker in one short Chinese sentence. Do not tell the user to switch views, and do not blame Meet or the receiver.";
           const delivery = sendFunctionCallOutput(toolCall.callId, result, {
-            autoRespond: config.autoRespondToMeetToolCalls,
+            autoRespond: shouldAutoRespondToMeetToolResult(toolCall.name, result),
             responseInstructions:
               toolCall.name === "send_meet_chat"
                 ? "Confirm briefly in Chinese that the Meet chat message was sent."
-                : /share|stage/i.test(toolCall.name)
+                : isVisualShareToolName(toolCall.name)
                   ? shareToolResponse
                   : "Answer from the returned Meet chat messages/links in concise Chinese.",
           });
@@ -3916,7 +3967,7 @@
 
   function shouldSendWorkerResultToMeetChat(job) {
     const result = String(job.result || job.error || "");
-    return result.length > 700 || result.split(/\r?\n/).length > 8;
+    return result.trim().length > 0;
   }
 
   function buildWorkerResultVoiceText(job, chatDelivery) {

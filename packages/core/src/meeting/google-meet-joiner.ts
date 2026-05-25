@@ -1883,8 +1883,10 @@ function compactRuntimeState({
           feedback: realtimeBridge.feedback || null,
           session: realtimeBridge.session || null,
           connection: realtimeBridge.connection || null,
+          protection: realtimeBridge.protection || null,
           inboundTail: (realtimeBridge.inbound || []).slice(-12),
           transcripts: realtimeBridge.transcripts || null,
+          workerResults: realtimeBridge.workerResults || [],
           outboundTail: (realtimeBridge.outbound || []).slice(-12).map((entry) => ({
             ts: entry.ts,
             type: entry.event?.type || "",
@@ -1895,6 +1897,7 @@ function compactRuntimeState({
           avatarTools: realtimeBridge.avatarTools || null,
           workerTools: realtimeBridge.workerTools || null,
           meetTools: realtimeBridge.meetTools || null,
+          workspaceTools: realtimeBridge.workspaceTools || null,
         }
       : null,
     workerResultBridge: workerResultBridge
