@@ -9,7 +9,7 @@ import (
 	"github.com/AFK-surf/oneesama/internal/meetrunner"
 )
 
-const defaultRealtimeAppControlTimeout = 2 * time.Second
+const defaultRealtimeAppControlTimeout = 15 * time.Second
 
 type RealtimeSharedAppControlRequest struct {
 	SessionID        string                    `json:"session_id,omitempty"`

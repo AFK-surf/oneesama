@@ -161,11 +161,11 @@ Native Meet desktop sharing is separate from the avatar camera stream. On macOS,
 `MAB_CHROMIUM_EXECUTABLE` must be enabled in **System Settings > Privacy & Security > Screen & System Audio Recording**.
 If Meet shows `Can't share your screen`, grant that browser permission and restart the Meeting Agent browser session.
 
-Realtime `control_shared_app_window` uses the `app_control` backend, not the general background worker path. The tool queues app-control events by default and returns a `job_id` immediately, so the Realtime voice turn does not wait for macOS UI automation. Call the same tool with `job_id` to inspect status/result, or pass `wait:true` only for manual debugging. The default backend is a local KWWK/Computer Use stdio JSON-RPC helper with a short timeout and fast failure when that helper is not configured or unavailable. Codex fallback is available for non-live debugging, but should stay off in the voice loop because it is too slow and can make Realtime appear stuck:
+Realtime `control_shared_app_window` uses the `app_control` backend, not the general background worker path. The tool queues app-control events by default and returns a `job_id` immediately, so the Realtime voice turn does not wait for macOS UI automation. Call the same tool with `job_id` to inspect status/result, or pass `wait:true` only for manual debugging. The default backend is a local KWWK/Computer Use stdio JSON-RPC helper with a live-safe timeout that covers the helper cold-start path while still surfacing real blockers promptly. Codex fallback is available for non-live debugging, but should stay off in the voice loop because it is too slow and can make Realtime appear stuck:
 
 ```bash
 MAB_APP_CONTROL_PROVIDER=kwwk
-MAB_APP_CONTROL_TIMEOUT=2s
+MAB_APP_CONTROL_TIMEOUT=15s
 MAB_APP_CONTROL_CODEX_FALLBACK=0
 MAB_KWWK_APP_CONTROL_COMMAND="node --import tsx packages/core/src/meeting/app-control-helper.ts --stdio"
 ```

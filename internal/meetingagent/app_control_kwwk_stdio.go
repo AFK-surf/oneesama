@@ -18,7 +18,7 @@ import (
 
 const kwwkAppControlMethod = "app_control.control_shared_app_window"
 const maxKWWKAppControlMessageBytes = 1 << 20
-const defaultKWWKAppControlTimeout = 2 * time.Second
+const defaultKWWKAppControlTimeout = 15 * time.Second
 
 type KWWKStdioAppControlConfig struct {
 	Command string

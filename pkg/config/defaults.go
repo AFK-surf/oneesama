@@ -48,7 +48,7 @@ const (
 	defaultAgentRunner                      = "dry-run"
 	defaultAgentJobTimeout                  = 10 * time.Minute
 	defaultAppControlProvider               = "kwwk"
-	defaultAppControlTimeout                = 2 * time.Second
+	defaultAppControlTimeout                = 15 * time.Second
 	defaultAppControlCodexFallback          = false
 	defaultPersonaRuntimeProvider           = "legacy"
 	defaultPersonaRuntimeMode               = "shadow"
