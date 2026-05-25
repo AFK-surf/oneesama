@@ -84,7 +84,7 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 			"followup_memory",
 		})
 	case SessionKindMeetingAppControl:
-		return newCapabilities(normalized, SessionRoleMeetingAppControl, []string{
+		return withExternalTools(newCapabilities(normalized, SessionRoleMeetingAppControl, []string{
 			"computer_use",
 			"kwwk_computer_use",
 			"view_screen",
@@ -102,7 +102,7 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 			"bash",
 			"manage_schedule",
 			"memory_write",
-		})
+		}), "codex app-control sessions launch with --enable apps so the host Computer Use adapter is available")
 	case SessionKindSecretaryLookup:
 		return newCapabilities(normalized, SessionRoleSecretaryLookup, []string{
 			"read_doc",
@@ -216,6 +216,14 @@ func newCapabilities(kind string, role string, allowed []string, blocked []strin
 		ExternalToolsExcluded: true,
 		Source:                "cueboard slack-agentd augmentLoopOptions transliteration; credentialed proxy tools excluded by product scope",
 	}
+}
+
+func withExternalTools(capabilities SessionCapabilities, source string) SessionCapabilities {
+	capabilities.ExternalToolsExcluded = false
+	if strings.TrimSpace(source) != "" {
+		capabilities.Source = strings.TrimSpace(source)
+	}
+	return capabilities
 }
 
 func appendToolNames(base []string, extra ...string) []string {

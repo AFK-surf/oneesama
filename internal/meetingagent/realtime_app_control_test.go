@@ -75,6 +75,50 @@ func TestRealtimeSharedAppControlStartsComputerUseWorker(t *testing.T) {
 		!demoCodexContainsString(capabilities.BlockedTools, "bash") {
 		t.Fatalf("capabilities = %#v, want Computer Use allowed and shell/code blocked", capabilities)
 	}
+	if capabilities.ExternalToolsExcluded {
+		t.Fatalf("capabilities = %#v, app control must expose real host Computer Use tools", capabilities)
+	}
+}
+
+func TestRealtimeSharedAppControlPropagatesWorkerBlocker(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeDemoCodexRunner{
+		startJob: agentrunner.Job{
+			ID:       "job_app_control_blocked",
+			Provider: "codex",
+			Status:   agentrunner.StatusCompleted,
+			Result:   `{"ok":false,"summary":"Pencil is shared but no Computer Use tool is available.","actions":["verified target"],"confidence":1,"blocker":"computer_use_unavailable"}`,
+		},
+	}
+	rootDir := t.TempDir()
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		OpenAI: appconfig.OpenAIConfig{
+			RealtimeModel: "gpt-realtime-2",
+			BotName:       "Meeting Avatar Bot",
+		},
+		Runner: runner,
+		MeetRunner: fakeMeetRunnerWithRuntime{
+			statusActive: map[string]any{
+				"sessionId": "meet_session",
+				"screenShare": map[string]any{
+					"active":          true,
+					"applicationName": "Pencil",
+				},
+			},
+		},
+	})
+
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a small circle in the canvas"}`, http.StatusOK)
+
+	if body["ok"] != false || body["error"] != "app_control_blocked" || body["blocker"] != "computer_use_unavailable" {
+		t.Fatalf("body = %#v, want worker blocker surfaced", body)
+	}
 }
 
 func TestRealtimeSharedAppControlRequiresInstruction(t *testing.T) {

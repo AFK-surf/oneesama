@@ -23,6 +23,14 @@ type RealtimeSharedAppControlRequest struct {
 	Context          map[string]any `json:"context,omitempty"`
 }
 
+type realtimeAppControlWorkerPayload struct {
+	OK         *bool    `json:"ok"`
+	Summary    string   `json:"summary,omitempty"`
+	Actions    []string `json:"actions,omitempty"`
+	Confidence float64  `json:"confidence,omitempty"`
+	Blocker    string   `json:"blocker,omitempty"`
+}
+
 func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSharedAppControlRequest) map[string]any {
 	instruction := strings.TrimSpace(input.Instruction)
 	if instruction == "" {
@@ -68,15 +76,29 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 	if completed != nil && isTerminalWorkerStatus(string(completed.Status)) {
 		report = s.ReportFinishedWorkerJob(context.WithoutCancel(ctx), *completed)
 	}
-	return map[string]any{
-		"ok":           completed != nil && completed.Status == agentrunner.StatusCompleted,
+	responseText := dialogJobResult(completed)
+	workerPayload, hasWorkerPayload := parseRealtimeAppControlWorkerPayload(responseText)
+	ok := completed != nil && completed.Status == agentrunner.StatusCompleted
+	if hasWorkerPayload && workerPayload.OK != nil && !*workerPayload.OK {
+		ok = false
+	}
+	result := map[string]any{
+		"ok":           ok,
 		"provider":     firstNonEmpty(dialogJobProvider(completed), job.Provider, s.agentRunnerName()),
 		"status":       dialogJobStatus(completed),
-		"responseText": dialogJobResult(completed),
+		"responseText": responseText,
 		"job":          firstNonNilJob(completed, job),
 		"report":       report,
 		"screenShare":  status,
 	}
+	if hasWorkerPayload {
+		result["workerResult"] = workerPayload
+		if !ok {
+			result["error"] = "app_control_blocked"
+			result["blocker"] = strings.TrimSpace(firstNonEmpty(workerPayload.Blocker, workerPayload.Summary))
+		}
+	}
+	return result
 }
 
 func buildRealtimeAppControlTask(input RealtimeSharedAppControlRequest, status map[string]any) string {
@@ -142,4 +164,18 @@ func realtimeAppControlTimeout(timeoutMs int) time.Duration {
 		return defaultRealtimeAppControlTimeout
 	}
 	return time.Duration(timeoutMs) * time.Millisecond
+}
+
+func parseRealtimeAppControlWorkerPayload(raw string) (realtimeAppControlWorkerPayload, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return realtimeAppControlWorkerPayload{}, false
+	}
+	for _, candidate := range demoCodexJSONCandidates(trimmed) {
+		var payload realtimeAppControlWorkerPayload
+		if err := json.Unmarshal([]byte(candidate), &payload); err == nil {
+			return payload, payload.OK != nil || strings.TrimSpace(payload.Summary) != "" || strings.TrimSpace(payload.Blocker) != ""
+		}
+	}
+	return realtimeAppControlWorkerPayload{}, false
 }

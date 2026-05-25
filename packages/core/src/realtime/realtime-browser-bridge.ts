@@ -1626,7 +1626,7 @@
           rate: 24000,
           ...(merged.audio?.output?.format || {}),
         },
-        voice: merged.audio?.output?.voice || merged.voice || "coral",
+        voice: merged.audio?.output?.voice || merged.voice || "marin",
       },
     };
     delete merged.voice;
@@ -2090,7 +2090,7 @@
       voice:
         connectionConfig.session?.audio?.output?.voice ||
         connectionConfig.session?.voice ||
-        "coral",
+        "marin",
     });
     const transport = createRealtimeAgentSDKTransport(namespace, connectionConfig);
     const session = new namespace.RealtimeSession(agent, {

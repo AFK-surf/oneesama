@@ -37,7 +37,7 @@ const (
 	defaultOpenAIBaseURL                    = "https://api.openai.com/v1"
 	defaultOpenAIRealtimeModel              = "gpt-realtime-2"
 	defaultOpenAIRealtimeReasoning          = "high"
-	defaultOpenAIRealtimeVoice              = "coral"
+	defaultOpenAIRealtimeVoice              = "marin"
 	defaultOpenAIRealtimeTurnDetection      = "semantic_vad"
 	defaultOpenAIRealtimeSessionSchema      = "realtime-2"
 	defaultOpenAIRealtimeAgentRuntime       = "agents-sdk"

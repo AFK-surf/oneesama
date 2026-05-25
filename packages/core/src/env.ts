@@ -18,7 +18,7 @@ export function getRuntimeConfig(env = process.env) {
     openaiRealtimeModel:
       env.MAB_OPENAI_REALTIME_MODEL || env.OPENAI_REALTIME_MODEL || "gpt-realtime-2",
     openaiRealtimeReasoningEffort: env.MAB_OPENAI_REALTIME_REASONING_EFFORT || "high",
-    openaiRealtimeVoice: env.MAB_OPENAI_REALTIME_VOICE || "coral",
+    openaiRealtimeVoice: env.MAB_OPENAI_REALTIME_VOICE || "marin",
     openaiRealtimeTurnDetection: env.MAB_OPENAI_REALTIME_TURN_DETECTION || "semantic_vad",
     openaiRealtimeSessionSchema: env.MAB_OPENAI_REALTIME_SESSION_SCHEMA || "realtime-2",
     openaiRealtimeAgentRuntime: env.MAB_OPENAI_REALTIME_AGENT_RUNTIME || "agents-sdk",

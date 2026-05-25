@@ -17,7 +17,7 @@ bring-your-own-agent runner path as the main product architecture.
 - The current `session.update` shape uses `output_modalities` and nested
   `audio.input` / `audio.output` settings, including `semantic_vad` and current
   Realtime voices such as `coral`, `marin`, and `cedar`. OpenAI docs list the
-  voice names but do not label them by gender; `coral` is the current local
+  voice names but do not label them by gender; `marin` is the current local
   A/B-listen default.
 - Function calling remains session/response `tools` plus
   `function_call_output`; `response.done.response.output[]` may also contain
@@ -37,7 +37,7 @@ MAB_OPENAI_API_KEY=...
 MAB_OPENAI_BASE_URL=https://api.openai.com/v1
 MAB_OPENAI_REALTIME_MODEL=gpt-realtime-2
 MAB_OPENAI_REALTIME_REASONING_EFFORT=high
-MAB_OPENAI_REALTIME_VOICE=coral
+MAB_OPENAI_REALTIME_VOICE=marin
 MAB_OPENAI_REALTIME_TURN_DETECTION=semantic_vad
 MAB_OPENAI_REALTIME_SESSION_SCHEMA=realtime-2
 MAB_CURRENT_USER_NAME=Operator

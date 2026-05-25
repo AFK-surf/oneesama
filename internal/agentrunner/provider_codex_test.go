@@ -69,3 +69,29 @@ func TestBuildCodexArgsHonorsInputSandboxOverrideWithoutCodeChanges(t *testing.T
 		t.Fatalf("args = %s, want input sandbox override", joined)
 	}
 }
+
+func TestBuildCodexArgsEnablesAppsForMeetingAppControl(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(appconfig.CodexRunnerConfig{
+		Model:         "deepseek/deepseek-v4-pro",
+		ModelProvider: "openrouter",
+		BaseURL:       "https://openrouter.ai/api/v1/",
+	}, WithSessionCapabilities(StartInput{Sandbox: "danger-full-access"}, SessionKindMeetingAppControl))
+	joined := strings.Join(args, "\n")
+
+	wantParts := []string{
+		"--enable\napps",
+		"-m\n" + defaultCodexComputerUseModel,
+		"-s\ndanger-full-access",
+	}
+	for _, want := range wantParts {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "model_provider=\"openrouter\"") ||
+		strings.Contains(joined, "model_providers.openrouter") {
+		t.Fatalf("args = %s, app-control must use local Codex Computer Use provider, not OpenRouter worker config", joined)
+	}
+}

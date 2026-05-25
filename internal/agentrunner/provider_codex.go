@@ -7,6 +7,8 @@ import (
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
+const defaultCodexComputerUseModel = "gpt-5.5"
+
 func newCodexProvider(cfg appconfig.AgentRunnerConfig) runnerProvider {
 	return commandProvider{
 		provider:      "codex",
@@ -19,6 +21,7 @@ func newCodexProvider(cfg appconfig.AgentRunnerConfig) runnerProvider {
 }
 
 func buildCodexArgs(cfg appconfig.CodexRunnerConfig, input StartInput) []string {
+	appControl := isMeetingAppControlStart(input)
 	sandbox := strings.TrimSpace(input.Sandbox)
 	if sandbox == "" {
 		sandbox = strings.TrimSpace(cfg.Sandbox)
@@ -32,8 +35,16 @@ func buildCodexArgs(cfg appconfig.CodexRunnerConfig, input StartInput) []string 
 	}
 
 	args := []string{"exec"}
-	args = appendCodexProviderArgs(args, cfg)
-	if model := strings.TrimSpace(cfg.Model); model != "" {
+	if appControl {
+		args = append(args, "--enable", "apps")
+	} else {
+		args = appendCodexProviderArgs(args, cfg)
+	}
+	model := strings.TrimSpace(cfg.Model)
+	if appControl {
+		model = defaultCodexComputerUseModel
+	}
+	if model != "" {
 		args = append(args, "-m", model)
 	}
 	args = append(args,

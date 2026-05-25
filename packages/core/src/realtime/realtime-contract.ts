@@ -702,7 +702,7 @@ export const realtimeToolSchemas = [
 ];
 
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
-export const DEFAULT_REALTIME_VOICE = "coral";
+export const DEFAULT_REALTIME_VOICE = "marin";
 export const DEFAULT_REALTIME_REASONING_EFFORT = "high";
 export const DEFAULT_REALTIME_TURN_DETECTION = "semantic_vad";
 
