@@ -138,6 +138,18 @@ wait_for_exit() {
   die "screen session ${session} did not exit"
 }
 
+wait_for_pid_exit() {
+  local pid="$1"
+  local attempt
+  for attempt in {1..40}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
 wait_for_pid() {
   local service="$1"
   local pid attempt
@@ -218,6 +230,20 @@ start_service() {
       log "screen session ${session} already exists; use --restart to replace it"
       return 0
     fi
+  fi
+
+  pid="$(find_service_pid "$service")"
+  if [[ "$restart" -eq 1 && -n "${pid:-}" ]]; then
+    log "stopping existing ${service} process pid=${pid}"
+    kill "$pid" || true
+    if ! wait_for_pid_exit "$pid"; then
+      log "existing ${service} process pid=${pid} did not exit after SIGTERM; sending SIGKILL"
+      kill -9 "$pid" || true
+      wait_for_pid_exit "$pid" || die "${service} process pid=${pid} did not exit"
+    fi
+  elif [[ -n "${pid:-}" ]]; then
+    log "${service} process pid=${pid} already exists outside screen; use --restart to replace it"
+    return 0
   fi
 
   mkdir -p "$log_dir"
