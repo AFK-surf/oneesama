@@ -133,6 +133,16 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, result)
+	case "control_shared_app_window":
+		var input RealtimeSharedAppControlRequest
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"ok":    false,
+				"error": "invalid_json",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, h.service.ControlRealtimeSharedApp(c.Request.Context(), input))
 	case "cancel_demo_surface", "stop_shared_browser_surface":
 		var input RealtimeDemoSurfaceCancelRequest
 		if err := c.ShouldBindJSON(&input); err != nil {

@@ -104,6 +104,15 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"subtitle":         stringSchema("Visible share subtitle."),
 			"mode":             stringSchema("Native app-share mode. Usually omit; the service defaults to native."),
 		})),
+		realtimeTool("control_shared_app_window", "Operate the currently shared existing macOS app/window through the host Computer Use adapter. Use when the user asks you to click, type, draw, edit, scroll, switch tools, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. Do not use this to create a new browser workspace.", objectSchema([]string{"instruction"}, map[string]realtimeJSONSchema{
+			"instruction":      stringSchema("Concrete user-facing operation to perform in the shared app/window. Preserve important wording."),
+			"applicationName":  stringSchema("Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal."),
+			"bundleIdentifier": stringSchema("Optional macOS bundle identifier when known."),
+			"windowTitle":      stringSchema("Optional visible window title when known."),
+			"processId":        integerSchema("Optional process id from list_shareable_windows.", nil),
+			"session_id":       stringSchema("Current meeting session id when known."),
+			"timeoutMs":        integerSchema("Maximum time to wait for the host Computer Use worker.", float64(90000)),
+		})),
 		realtimeTool("open_shared_browser_surface", "Share a bot-owned browser/synthetic surface for a URL, web page, or generated visual workspace. Use for explicit URL/page/browser-surface requests. Do not use for named local macOS app/window requests.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"url":             stringSchema("HTTP(S) URL to open in the bot-owned workspace."),
 			"goal":            stringSchema("Short user-facing goal for the shared surface, e.g. 'show the dashboard trend'."),

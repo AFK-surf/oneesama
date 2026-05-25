@@ -324,6 +324,7 @@
     "fetch_url",
     "open_shared_browser_surface",
     "create_shared_workspace",
+    "control_shared_app_window",
     "control_shared_browser_surface",
     "stop_shared_browser_surface",
     "start_demo_surface",
@@ -1625,7 +1626,7 @@
           rate: 24000,
           ...(merged.audio?.output?.format || {}),
         },
-        voice: merged.audio?.output?.voice || merged.voice || "marin",
+        voice: merged.audio?.output?.voice || merged.voice || "coral",
       },
     };
     delete merged.voice;
@@ -2089,7 +2090,7 @@
       voice:
         connectionConfig.session?.audio?.output?.voice ||
         connectionConfig.session?.voice ||
-        "marin",
+        "coral",
     });
     const transport = createRealtimeAgentSDKTransport(namespace, connectionConfig);
     const session = new namespace.RealtimeSession(agent, {
@@ -3027,6 +3028,7 @@
     } else if (
       name === "open_shared_browser_surface" ||
       name === "start_demo_surface" ||
+      name === "control_shared_app_window" ||
       name === "control_shared_browser_surface" ||
       name === "control_demo_surface"
     ) {

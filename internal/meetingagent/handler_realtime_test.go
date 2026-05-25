@@ -81,7 +81,7 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 		t.Fatalf("instructions leaked identity/mechanism details: %q", instructions)
 	}
 	tools := body["tools"].([]any)
-	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "share_existing_app_window", "update_avatar_state", "resolve_speaker_identity") {
+	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "share_existing_app_window", "control_shared_app_window", "update_avatar_state", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
 	}
 	if toolNamesInclude(tools, "list_shareable_apps", "present_app_share", "start_demo_surface", "start_demo_execution") {
@@ -530,7 +530,7 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	})
 
 	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
-	if !toolNamesInclude(configBody["tools"].([]any), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "share_existing_app_window") {
+	if !toolNamesInclude(configBody["tools"].([]any), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "share_existing_app_window", "control_shared_app_window") {
 		t.Fatalf("tools = %#v, want demo surface tools when flag enabled", configBody["tools"])
 	}
 	demoSurface := configBody["demoSurface"].(map[string]any)

@@ -60,6 +60,11 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Gate:  "active_meeting_session",
 		Notes: "native macOS app/window share boundary; use for named app/window requests",
 	},
+	"control_shared_app_window": {
+		Class: RealtimeToolClassStableForeground,
+		Gate:  "active_meeting_session_and_host_computer_use",
+		Notes: "native app/window Computer Use boundary; routes app operation requests to the host adapter instead of raw click primitives",
+	},
 	"open_shared_browser_surface": {
 		Class: RealtimeToolClassOptionalForeground,
 		Gate:  "demo_surface_enabled",

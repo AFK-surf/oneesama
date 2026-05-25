@@ -97,7 +97,11 @@ test("Realtime contract exposes product identity resolver tool", () => {
 test("Realtime contract exposes application share tools", () => {
   const list = realtimeToolSchemas.find((tool) => tool.name === "list_shareable_windows");
   const present = realtimeToolSchemas.find((tool) => tool.name === "share_existing_app_window");
+  const control = realtimeToolSchemas.find((tool) => tool.name === "control_shared_app_window");
   assert.ok(list);
   assert.ok(present);
+  assert.ok(control);
   assert.equal(present.parameters.properties.applicationName.type, "string");
+  assert.deepEqual(control.parameters.required, ["instruction"]);
+  assert.match(control.description, /Computer Use/);
 });

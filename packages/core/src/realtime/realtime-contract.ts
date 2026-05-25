@@ -176,6 +176,45 @@ export const realtimeToolSchemas = [
   },
   {
     type: "function",
+    name: "control_shared_app_window",
+    description:
+      "Operate the currently shared existing macOS app/window through the host Computer Use adapter. Use when the user asks you to click, type, draw, edit, scroll, switch tools, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. Do not use this to create a new browser workspace.",
+    parameters: {
+      type: "object",
+      properties: {
+        instruction: {
+          type: "string",
+          description:
+            "Concrete user-facing operation to perform in the shared app/window. Preserve important wording.",
+        },
+        applicationName: {
+          type: "string",
+          description: "Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal.",
+        },
+        bundleIdentifier: {
+          type: "string",
+          description: "Optional macOS bundle identifier when known.",
+        },
+        windowTitle: {
+          type: "string",
+          description: "Optional visible window title when known.",
+        },
+        processId: {
+          type: "integer",
+          description: "Optional process id from list_shareable_windows.",
+        },
+        session_id: { type: "string", description: "Current meeting session id when known." },
+        timeoutMs: {
+          type: "integer",
+          description: "Maximum time to wait for the host Computer Use worker.",
+          default: 90000,
+        },
+      },
+      required: ["instruction"],
+    },
+  },
+  {
+    type: "function",
     name: "open_shared_browser_surface",
     description:
       "Share a bot-owned browser/synthetic surface for a URL, web page, or generated visual workspace. Use for explicit URL/page/browser-surface requests. Do not use for named local macOS app/window requests.",
@@ -663,7 +702,7 @@ export const realtimeToolSchemas = [
 ];
 
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
-export const DEFAULT_REALTIME_VOICE = "marin";
+export const DEFAULT_REALTIME_VOICE = "coral";
 export const DEFAULT_REALTIME_REASONING_EFFORT = "high";
 export const DEFAULT_REALTIME_TURN_DETECTION = "semantic_vad";
 

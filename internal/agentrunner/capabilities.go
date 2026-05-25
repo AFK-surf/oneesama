@@ -3,24 +3,26 @@ package agentrunner
 import "strings"
 
 const (
-	SessionKindSlack           = "slack_case"
-	SessionKindTriage          = "slack_triage"
-	SessionKindMeetingCopilot  = "meeting_copilot"
-	SessionKindCompact         = "memory_compact"
-	SessionKindMeetingCalib    = "meeting_calibrate"
-	SessionKindMeetingSummary  = "meeting_summary"
-	SessionKindDemoSurface     = "meeting_demo_surface"
-	SessionKindDemoExecution   = "meeting_demo_execution"
-	SessionKindSecretaryLookup = "secretary_lookup"
+	SessionKindSlack             = "slack_case"
+	SessionKindTriage            = "slack_triage"
+	SessionKindMeetingCopilot    = "meeting_copilot"
+	SessionKindCompact           = "memory_compact"
+	SessionKindMeetingCalib      = "meeting_calibrate"
+	SessionKindMeetingSummary    = "meeting_summary"
+	SessionKindDemoSurface       = "meeting_demo_surface"
+	SessionKindDemoExecution     = "meeting_demo_execution"
+	SessionKindMeetingAppControl = "meeting_app_control"
+	SessionKindSecretaryLookup   = "secretary_lookup"
 
-	SessionRoleAssistant       = "assistant"
-	SessionRolePlanner         = "planner"
-	SessionRoleMeetingCopilot  = "meeting_copilot"
-	SessionRoleCompact         = "compact"
-	SessionRoleCompletionOnly  = "completion_only"
-	SessionRoleDemoSurface     = "demo_surface"
-	SessionRoleDemoExecution   = "demo_execution"
-	SessionRoleSecretaryLookup = "secretary_lookup"
+	SessionRoleAssistant         = "assistant"
+	SessionRolePlanner           = "planner"
+	SessionRoleMeetingCopilot    = "meeting_copilot"
+	SessionRoleCompact           = "compact"
+	SessionRoleCompletionOnly    = "completion_only"
+	SessionRoleDemoSurface       = "demo_surface"
+	SessionRoleDemoExecution     = "demo_execution"
+	SessionRoleMeetingAppControl = "meeting_app_control"
+	SessionRoleSecretaryLookup   = "secretary_lookup"
 )
 
 type SessionCapabilities struct {
@@ -80,6 +82,26 @@ func CapabilitiesForSessionKind(kind string) SessionCapabilities {
 			"memory_write",
 			"suggest_action",
 			"followup_memory",
+		})
+	case SessionKindMeetingAppControl:
+		return newCapabilities(normalized, SessionRoleMeetingAppControl, []string{
+			"computer_use",
+			"kwwk_computer_use",
+			"view_screen",
+			"click",
+			"type",
+			"press_key",
+			"scroll",
+		}, []string{
+			"send_meeting_chat",
+			"notify_meeting_slack",
+			"slack_api",
+			"send_message",
+			"write",
+			"edit",
+			"bash",
+			"manage_schedule",
+			"memory_write",
 		})
 	case SessionKindSecretaryLookup:
 		return newCapabilities(normalized, SessionRoleSecretaryLookup, []string{
@@ -164,6 +186,8 @@ func NormalizeSessionKind(kind string) string {
 		return SessionKindDemoSurface
 	case "meeting-demo-execution", "demo-execution", "demo-exec":
 		return SessionKindDemoExecution
+	case "meeting-app-control", "app-control", "native-app-control":
+		return SessionKindMeetingAppControl
 	case "secretary-lookup", "workspace-secretary-lookup", "slack-secretary-lookup":
 		return SessionKindSecretaryLookup
 	default:

@@ -19,6 +19,9 @@ func buildPrompt(input StartInput) string {
 	if isDemoSurfaceStart(input) {
 		return buildDemoSurfacePrompt(input, contextJSON)
 	}
+	if isMeetingAppControlStart(input) {
+		return buildMeetingAppControlPrompt(input, contextJSON)
+	}
 
 	return strings.Join([]string{
 		"You are a background worker for the oneesama Go rewrite.",
@@ -35,6 +38,21 @@ func buildDemoSurfacePrompt(input StartInput, contextJSON string) string {
 		"You are a read-only browser observation worker for Oneesama's meeting demo surface.",
 		"Use browser observation only for the bot-owned demo browser/session described in context.",
 		"Do not edit repository files, make code changes, run unrelated shell commands, or inspect unrelated host files.",
+		"Do not call meeting, Slack, or messaging tools. Never send messages to Meet or Slack from this worker.",
+		"Return exactly the JSON object requested by the task. Do not include Markdown fences, explanations, logs, or extra prose.",
+		"Mode: " + defaultMode(input.Mode),
+		"Allow code changes: " + yesNo(input.AllowCodeChanges),
+		"Task: " + strings.TrimSpace(input.Task),
+		"Context:\n" + contextJSON,
+	}, "\n\n")
+}
+
+func buildMeetingAppControlPrompt(input StartInput, contextJSON string) string {
+	return strings.Join([]string{
+		"You are the high-level Computer Use adapter for Oneesama's live meeting app control.",
+		"Use the runtime's native app Computer Use capability when available. Prefer semantic app/window operations over coordinates.",
+		"Do not implement raw CGEvent, AppleScript, shell-based clicking, or repository-code edits to simulate UI control.",
+		"Operate only the target app/window described in context, and only for the user's requested action. If the request would be destructive or unsafe, report the blocker instead.",
 		"Do not call meeting, Slack, or messaging tools. Never send messages to Meet or Slack from this worker.",
 		"Return exactly the JSON object requested by the task. Do not include Markdown fences, explanations, logs, or extra prose.",
 		"Mode: " + defaultMode(input.Mode),
@@ -249,6 +267,10 @@ func isSecretaryLookupStart(input StartInput) bool {
 
 func isDemoSurfaceStart(input StartInput) bool {
 	return NormalizeSessionKind(stringFromContext(input.Context, "session_kind", "sessionKind")) == SessionKindDemoSurface
+}
+
+func isMeetingAppControlStart(input StartInput) bool {
+	return NormalizeSessionKind(stringFromContext(input.Context, "session_kind", "sessionKind")) == SessionKindMeetingAppControl
 }
 
 func firstPromptString(values ...string) string {
