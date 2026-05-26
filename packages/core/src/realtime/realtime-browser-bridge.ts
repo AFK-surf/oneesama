@@ -930,13 +930,14 @@
 
   function scanMeetOutboundSenders(pc, pcId) {
     if (pc === activePeerConnection || typeof pc.getSenders !== "function") return;
-    pc.getSenders().forEach((sender, index) => {
-      instrumentMeetSender(pc, pcId, sender, `scan[${index}]`);
-      if (sender?.track?.kind === "audio") {
-        handleMeetOutboundAudioSender(pc, pcId, sender, sender.track, `scan[${index}]`);
-      }
-      if (sender?.track?.kind === "video") {
-        handleMeetOutboundVideoSender(pc, pcId, sender, sender.track, `scan[${index}]`);
+    pc.getSenders().forEach((sender, index) => instrumentMeetSender(pc, pcId, sender, `scan[${index}]`));
+  }
+  function scanMeetInboundReceivers(pc, pcId) {
+    if (pc === activePeerConnection || typeof pc.getReceivers !== "function") return;
+    pc.getReceivers().forEach((receiver, index) => {
+      const track = receiver?.track;
+      if (track?.kind === "audio" && track.readyState !== "ended") {
+        forwardMeetAudioTrackToRealtime(track, { pcId, source: `scanReceiver[${index}]` });
       }
     });
   }
@@ -956,8 +957,6 @@
         pc.addTrack = function (track, ...streams) {
           const sender = originalAddTrack(track, ...streams);
           instrumentMeetSender(pc, pcId, sender, "addTrack");
-          handleMeetOutboundAudioSender(pc, pcId, sender, track, "addTrack");
-          handleMeetOutboundVideoSender(pc, pcId, sender, track, "addTrack");
           return sender;
         };
       }
@@ -999,6 +998,7 @@
           return;
         }
         scanMeetOutboundSenders(pc, pcId);
+        scanMeetInboundReceivers(pc, pcId);
       }, 1000);
 
       return pc;

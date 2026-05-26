@@ -47,6 +47,10 @@ func (s *Service) monitorJoinSession(ctx context.Context, sessionID string) {
 			}
 			continue
 		}
+		if runtimeMeetPageStatus(status.Active) == joinSessionStatusString(joinSessionStatusRemoved) {
+			_ = s.sessionFromRuntimeStatus(ctx, *session, status)
+			return
+		}
 		state := runtimeJoinState(status.Active)
 		if state.Stale {
 			_ = s.finalizeStaleJoin(ctx, *session, errMeetRunnerPageClosed)
@@ -262,6 +266,8 @@ func runtimeJoinState(active any) runtimeJoinSnapshot {
 	switch {
 	case runtimeMeetPageUnavailable(meetPage):
 		return runtimeJoinSnapshot{Stale: true, Reason: "meet_runner_page_closed"}
+	case runtimeRemovedFromMeeting(meetPage):
+		return runtimeJoinSnapshot{Left: true, Reason: "removed_from_meeting"}
 	case runtimeJoinedEvidence(fields, meetPage, count):
 		return runtimeJoinSnapshot{
 			Joined:           true,

@@ -127,6 +127,24 @@ func TestRuntimeJoinStateMarksClosedPageStaleBeforeCaptionFallback(t *testing.T)
 	}
 }
 
+func TestRuntimeJoinStateDetectsRemovedMeetingPage(t *testing.T) {
+	t.Parallel()
+
+	state := runtimeJoinState(map[string]any{
+		"meetPage": map[string]any{
+			"url":       "https://workspace.google.com/products/meet/",
+			"textHead":  "You've been removed from the meeting Return to home screen",
+			"inMeeting": false,
+		},
+		"captions": map[string]any{
+			"count": 12,
+		},
+	})
+	if !state.Left || state.Joined || state.Reason != "removed_from_meeting" {
+		t.Fatalf("state = %+v, want removed_from_meeting left state before stale captions fake joined", state)
+	}
+}
+
 func TestRuntimeJoinStateStillFailsPureCannotJoin(t *testing.T) {
 	t.Parallel()
 
@@ -137,6 +155,57 @@ func TestRuntimeJoinStateStillFailsPureCannotJoin(t *testing.T) {
 	})
 	if !state.Failed || state.Joined || state.Reason != "cannot_join" {
 		t.Fatalf("state = %+v, want pure cannot_join failure", state)
+	}
+}
+
+func TestJoinMonitorStopsRemovedMeetingPageWithoutStatusPoll(t *testing.T) {
+	oldInterval := joinMonitorIntervalOverrideNanos.Swap(int64(time.Millisecond))
+	t.Cleanup(func() {
+		joinMonitorIntervalOverrideNanos.Store(oldInterval)
+	})
+
+	runner := &removedPageMeetRunner{stopCh: make(chan meetrunner.StopSessionInput, 1)}
+	_ = newJoinTestRouterWithWebhookAndRunner(t, "", "", runner)
+
+	service := runner.service
+	if service == nil {
+		t.Fatal("expected test service to be wired")
+	}
+	session, err := service.UpsertSession(context.Background(), SessionUpsertInput{
+		ID:         "session_removed_monitor",
+		MeetingURL: "https://meet.google.com/abc-defg-hij",
+		Status:     "joined",
+		Title:      "Removed Room",
+	})
+	if err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		service.monitorJoinSession(context.Background(), session.ID)
+		close(done)
+	}()
+
+	select {
+	case stop := <-runner.stopCh:
+		if stop.SessionID != "session_removed_monitor" || stop.Reason != "runtime_removed_from_meeting" {
+			t.Fatalf("stop = %+v, want runtime_removed_from_meeting", stop)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for removed meeting StopSession")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitor did not exit after removed meeting")
+	}
+	current, err := service.GetSession(context.Background(), session.ID)
+	if err != nil || current == nil {
+		t.Fatalf("get current session: session=%+v err=%v", current, err)
+	}
+	if current.Status != "removed_from_meeting" {
+		t.Fatalf("session status = %q, want removed_from_meeting", current.Status)
 	}
 }
 
@@ -559,5 +628,39 @@ func (r *soloMeetRunner) StopSession(ctx context.Context, input meetrunner.StopS
 }
 
 func (r *soloMeetRunner) setService(service *Service) {
+	r.service = service
+}
+
+type removedPageMeetRunner struct {
+	fakeEmptyCaptionMeetRunner
+	service *Service
+	stopCh  chan meetrunner.StopSessionInput
+}
+
+func (r *removedPageMeetRunner) StatusSession(_ context.Context, input meetrunner.StatusSessionInput) (meetrunner.StatusSessionResult, error) {
+	return meetrunner.StatusSessionResult{
+		OK: true,
+		Active: map[string]any{
+			"sessionId": input.SessionID,
+			"meetPage": map[string]any{
+				"url":       "https://workspace.google.com/products/meet/",
+				"textHead":  "You've been removed from the meeting Return to home screen",
+				"inMeeting": false,
+			},
+			"captions": map[string]any{"count": 12},
+		},
+		Session: &meetrunner.RunnerSession{ID: input.SessionID, Status: "running"},
+	}, nil
+}
+
+func (r *removedPageMeetRunner) StopSession(ctx context.Context, input meetrunner.StopSessionInput) (meetrunner.StopSessionResult, error) {
+	select {
+	case r.stopCh <- input:
+	default:
+	}
+	return r.fakeEmptyCaptionMeetRunner.StopSession(ctx, input)
+}
+
+func (r *removedPageMeetRunner) setService(service *Service) {
 	r.service = service
 }

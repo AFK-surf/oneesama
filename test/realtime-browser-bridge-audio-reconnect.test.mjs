@@ -300,6 +300,160 @@ test("Realtime bridge prefers direct participant audio over a silent mix placeho
   }
 });
 
+test("Realtime bridge scans Meet inbound receiver audio when track event was missed", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.setContent("<!doctype html><html><body></body></html>");
+    await page.evaluate(() => {
+      window.__MAB_FAKE_PEERS = [];
+      class FakeRTCPeerConnection {
+        constructor() {
+          this.connectionState = "new";
+          this.senders = [];
+          this.receivers = [];
+          this.dataChannels = [];
+          this.listeners = {};
+          window.__MAB_FAKE_PEERS.push(this);
+        }
+
+        addTrack(track) {
+          const sender = {
+            track,
+            replaceTrack(nextTrack) {
+              sender.track = nextTrack;
+              return Promise.resolve();
+            },
+          };
+          this.senders.push(sender);
+          return sender;
+        }
+
+        getSenders() {
+          return this.senders;
+        }
+
+        getReceivers() {
+          return this.receivers;
+        }
+
+        addEventListener(type, listener) {
+          (this.listeners[type] ||= []).push(listener);
+        }
+
+        createDataChannel(label) {
+          const channel = {
+            label,
+            readyState: "connecting",
+            sent: [],
+            send(payload) {
+              this.sent.push(payload);
+            },
+            close() {
+              this.readyState = "closed";
+              this.onclose?.({});
+            },
+            onclose: null,
+            onmessage: null,
+            onopen: null,
+          };
+          this.dataChannels.push(channel);
+          return channel;
+        }
+
+        async createOffer() {
+          return { type: "offer", sdp: "offer" };
+        }
+
+        async setLocalDescription(description) {
+          this.localDescription = description;
+        }
+
+        async setRemoteDescription(description) {
+          this.remoteDescription = description;
+          this.connectionState = "connected";
+          this.onconnectionstatechange?.({});
+        }
+
+        close() {
+          this.connectionState = "closed";
+          for (const channel of this.dataChannels) channel.close();
+        }
+      }
+      window.RTCPeerConnection = FakeRTCPeerConnection;
+      window.fetch = async (url) => {
+        const value = String(url);
+        if (value.includes("/token")) {
+          return new Response(JSON.stringify({ value: "ek_test" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("answer", {
+          status: 200,
+          headers: { "content-type": "application/sdp" },
+        });
+      };
+    });
+
+    await page.addScriptTag({
+      content: buildRealtimeBrowserInitScript({
+        mode: "webrtc",
+        agentRuntime: "raw",
+        autoConnect: false,
+        tokenUrl: "https://example.test/token",
+        sdpUrl: "https://example.test/sdp",
+        forwardMeetAudioToRealtime: true,
+        includeParticipantAudio: true,
+        fallbackToLocalMic: false,
+        captureMeetAudioForTranscript: false,
+        sendSessionUpdateOnConnect: false,
+      }),
+    });
+
+    const result = await page.evaluate(async () => {
+      const audioContext = new AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const destination = audioContext.createMediaStreamDestination();
+      oscillator.connect(destination);
+      oscillator.start();
+      const [participantTrack] = destination.stream.getAudioTracks();
+
+      const meetPeer = new RTCPeerConnection();
+      meetPeer.receivers = [{ track: participantTrack }];
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await window.MAB_REALTIME_CLIENT.connect();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      const realtimePeer = window.__MAB_FAKE_PEERS.at(-1);
+      const forwarded = window.MAB_REALTIME_BRIDGE.timeline.filter(
+        (entry) => entry.type === "meet_audio_track_forwarded",
+      );
+      const replaceReasons = window.MAB_REALTIME_BRIDGE.timeline
+        .filter((entry) => entry.type === "realtime_input_replace_track")
+        .map((entry) => entry.detail.reason);
+      oscillator.stop();
+      await audioContext.close();
+      return {
+        participantTrackId: participantTrack.id,
+        senderTrackCount: realtimePeer.senders.length,
+        forwardedSources: forwarded.map((entry) => entry.detail.source),
+        replaceReasons,
+      };
+    });
+
+    assert.equal(result.senderTrackCount, 1);
+    assert.ok(result.forwardedSources.includes("scanReceiver[0]"));
+    assert.ok(
+      result.replaceReasons.includes("pending-meet-audio-flush") ||
+        result.replaceReasons.includes("meet-audio-forwarded"),
+      `expected receiver audio to become realtime input, got ${result.replaceReasons.join(",")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
 test("Realtime bridge keeps local mic fallback audible after late Meet audio replaces input", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
