@@ -317,6 +317,16 @@
         participantAudioAdded: state.connection.participantAudioTracksAdded > 0,
         meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
         localAudioTrackAdded: state.connection.localAudioTrackAdded === true,
+        meetParticipantAudioExpected:
+          state.connection.participantAudioForwardingEnabled === true ||
+          state.connection.meetAudioForwardingEnabled === true,
+        meetParticipantAudioReady:
+          state.connection.participantAudioTracksAdded > 0 ||
+          state.connection.meetAudioTracksForwarded > 0,
+        onlyLocalMicFallbackInput:
+          state.connection.localAudioTrackAdded === true &&
+          state.connection.participantAudioTracksAdded === 0 &&
+          state.connection.meetAudioTracksForwarded === 0,
         recvOnlyAudioTransceiverAdded: state.connection.recvOnlyAudioTransceiverAdded === true,
         inboundEvents: state.inbound.length,
         responseEvents: state.inbound.filter((entry) =>
@@ -376,6 +386,22 @@
         status = "blocked";
         summary = "Realtime session.update has not been sent.";
         blockers.push("session_not_configured");
+      } else if (
+        checks.meetParticipantAudioExpected &&
+        !checks.meetParticipantAudioReady &&
+        (checks.onlyLocalMicFallbackInput || checks.realtimeInputPlaceholderAdded)
+      ) {
+        status = "waiting_for_turn";
+        summary = checks.onlyLocalMicFallbackInput
+          ? "Realtime is connected with only local mic fallback; waiting for Meet participant audio."
+          : "Realtime is connected with a silent input placeholder; waiting for Meet participant audio.";
+        blockers.push("waiting_for_meet_audio");
+        if (checks.onlyLocalMicFallbackInput) {
+          blockers.push("only_local_mic_fallback_input");
+        }
+        if (checks.realtimeInputPlaceholderAdded) {
+          blockers.push("silent_input_placeholder_only");
+        }
       } else if (!checks.inboundEvents) {
         if (!checks.inputAudioAdded) {
           status = "waiting_for_turn";

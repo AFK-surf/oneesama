@@ -7161,6 +7161,13 @@ async function realtimeParticipantAudioSmoke() {
       "Realtime bridge did not forward participant audio into the Realtime input mix",
       bridge?.connection,
     );
+    const audioBlockers = new Set(bridge?.feedback?.blockers || []);
+    assertSmoke(
+      !audioBlockers.has("waiting_for_meet_audio") &&
+        !audioBlockers.has("only_local_mic_fallback_input"),
+      "Realtime harness did not prove it is using Meet participant audio",
+      bridge?.feedback,
+    );
     assertSmoke(
       bridge?.timeline?.some((entry) => entry.type === "meet_audio_track_forwarded"),
       "Realtime bridge did not record participant audio forwarding in the timeline",
