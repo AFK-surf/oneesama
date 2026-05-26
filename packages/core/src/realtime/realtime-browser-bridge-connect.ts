@@ -110,24 +110,29 @@
         tokenBody.value || tokenBody.client_secret?.value || tokenBody.secret?.value;
       if (!tokenResponse.ok || !ephemeralKey) {
         const retry = retryAfterDetail(tokenResponse);
-        const retryable = shouldRetryRealtimeConnectStatus(tokenResponse.status);
+        const failure = classifyRealtimeConnectFailure(
+          tokenResponse.status,
+          tokenText,
+          "realtime_token",
+        );
         const requestId = responseRequestId(tokenResponse);
         state.connection.lastTokenError = {
           ts: new Date().toISOString(),
           status: tokenResponse.status,
           ok: tokenResponse.ok,
-          retryable,
+          retryable: failure.retryable,
+          terminal: failure.terminal,
           ...retry,
           requestId,
           error: tokenBody.error || "",
           detail: tokenBody.detail || null,
           body: tokenText.slice(0, 1000),
-          reason:
-            tokenResponse.status === 429
-              ? "realtime_token_rate_limited"
-              : "realtime_token_request_failed",
+          reason: failure.reason,
         };
         recordTimeline("realtime_token_error", state.connection.lastTokenError);
+        if (failure.terminal) {
+          updateAvatarHudStatus("blocked", "Realtime blocked", { mood: "sad", action: "shrug" });
+        }
         const error = new Error(
           [
             tokenResponse.ok
@@ -305,20 +310,25 @@
         const responseText = await readResponseText(sdpResponse);
         const retry = retryAfterDetail(sdpResponse);
         const requestId = responseRequestId(sdpResponse);
-        const retryable = shouldRetryRealtimeConnectStatus(sdpResponse.status);
+        const failure = classifyRealtimeConnectFailure(
+          sdpResponse.status,
+          responseText,
+          "realtime_sdp",
+        );
         const detail = {
           status: sdpResponse.status,
           ok: sdpResponse.ok,
-          retryable,
+          retryable: failure.retryable,
+          terminal: failure.terminal,
           ...retry,
           requestId,
           body: responseText.slice(0, 1000),
-          reason:
-            sdpResponse.status === 429
-              ? "realtime_sdp_rate_limited"
-              : "realtime_sdp_exchange_failed",
+          reason: failure.reason,
         };
         rememberSdpError(detail);
+        if (failure.terminal) {
+          updateAvatarHudStatus("blocked", "Realtime blocked", { mood: "sad", action: "shrug" });
+        }
         const error = new Error(
           [
             `Realtime SDP exchange failed: ${sdpResponse.status}`,

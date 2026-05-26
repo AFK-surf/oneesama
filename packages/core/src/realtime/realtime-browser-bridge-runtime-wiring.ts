@@ -270,22 +270,29 @@
     const value = body.value || body.client_secret?.value || body.secret?.value;
     if (!response.ok || !value) {
       const retry = retryAfterDetail(response);
-      const retryable = shouldRetryRealtimeConnectStatus(response.status);
+      const failure = classifyRealtimeConnectFailure(
+        response.status,
+        text,
+        "realtime_token",
+      );
       const requestId = responseRequestId(response);
       state.connection.lastTokenError = {
         ts: new Date().toISOString(),
         status: response.status,
         ok: response.ok,
-        retryable,
+        retryable: failure.retryable,
+        terminal: failure.terminal,
         ...retry,
         requestId,
         error: body.error || "",
         detail: body.detail || null,
         body: text.slice(0, 1000),
-        reason:
-          response.status === 429 ? "realtime_token_rate_limited" : "realtime_token_request_failed",
+        reason: failure.reason,
       };
       recordTimeline("realtime_token_error", state.connection.lastTokenError);
+      if (failure.terminal) {
+        updateAvatarHudStatus("blocked", "Realtime blocked", { mood: "sad", action: "shrug" });
+      }
       const error = new Error(
         [
           response.ok

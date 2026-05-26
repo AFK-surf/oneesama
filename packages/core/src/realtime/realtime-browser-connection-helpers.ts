@@ -34,6 +34,48 @@
     return status === 429 || status === 408 || (status >= 500 && status <= 599);
   }
 
+  function realtimeErrorCodeFromBody(text: string) {
+    const parsed = parseJsonObject(text);
+    const candidates = [
+      parsed?.error?.code,
+      parsed?.error?.type,
+      parsed?.error?.message,
+      parsed?.code,
+      parsed?.type,
+      parsed?.message,
+      parsed?.detail?.error?.code,
+      parsed?.detail?.error?.type,
+      parsed?.detail?.error?.message,
+    ];
+    return candidates
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function classifyRealtimeConnectFailure(status: number, bodyText: string, prefix: string) {
+    const errorCode = realtimeErrorCodeFromBody(bodyText);
+    if (errorCode.includes("insufficient_quota")) {
+      return {
+        reason: `${prefix}_insufficient_quota`,
+        retryable: false,
+        terminal: true,
+      };
+    }
+    if (status === 429) {
+      return {
+        reason: `${prefix}_rate_limited`,
+        retryable: true,
+        terminal: false,
+      };
+    }
+    return {
+      reason: `${prefix}_request_failed`,
+      retryable: shouldRetryRealtimeConnectStatus(status),
+      terminal: false,
+    };
+  }
+
   async function readResponseText(response) {
     try {
       return await response.text();
@@ -79,6 +121,7 @@
     realtimeReconnectDelayMs,
     formatRealtimeErrorValue,
     shouldRetryRealtimeConnectStatus,
+    classifyRealtimeConnectFailure,
     readResponseText,
     parseJsonObject,
     responseRequestId,

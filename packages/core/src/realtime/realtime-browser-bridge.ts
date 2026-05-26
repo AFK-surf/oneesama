@@ -93,6 +93,7 @@
     realtimeReconnectDelayMs,
     formatRealtimeErrorValue,
     shouldRetryRealtimeConnectStatus,
+    classifyRealtimeConnectFailure,
     readResponseText,
     parseJsonObject,
     responseRequestId,

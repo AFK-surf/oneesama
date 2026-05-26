@@ -603,22 +603,34 @@
 
       if (state.connection.lastTokenError && !checks.peerConnected) {
         const tokenStatus = Number(state.connection.lastTokenError.status || 0);
+        const tokenReason = String(state.connection.lastTokenError.reason || "");
         status = "blocked";
-        summary =
-          tokenStatus === 429
-            ? "Realtime client secret request is rate limited; reconnect retry is scheduled."
-            : "Realtime client secret request failed before the peer connection opened.";
-        blockers.push(
-          tokenStatus === 429 ? "realtime_token_rate_limited" : "realtime_token_failed",
-        );
+        if (tokenReason === "realtime_token_insufficient_quota") {
+          summary = "Realtime client secret request is blocked by OpenAI quota/billing.";
+          blockers.push("realtime_token_insufficient_quota");
+        } else {
+          summary =
+            tokenStatus === 429
+              ? "Realtime client secret request is rate limited; reconnect retry is scheduled."
+              : "Realtime client secret request failed before the peer connection opened.";
+          blockers.push(
+            tokenStatus === 429 ? "realtime_token_rate_limited" : "realtime_token_failed",
+          );
+        }
       } else if (state.connection.lastSdpError && !checks.peerConnected) {
         const sdpStatus = Number(state.connection.lastSdpError.status || 0);
+        const sdpReason = String(state.connection.lastSdpError.reason || "");
         status = "blocked";
-        summary =
-          sdpStatus === 429
-            ? "Realtime SDP exchange is rate limited; reconnect retry is scheduled."
-            : "Realtime SDP exchange failed before the peer connection opened.";
-        blockers.push(sdpStatus === 429 ? "realtime_sdp_rate_limited" : "realtime_sdp_failed");
+        if (sdpReason === "realtime_sdp_insufficient_quota") {
+          summary = "Realtime SDP exchange is blocked by OpenAI quota/billing.";
+          blockers.push("realtime_sdp_insufficient_quota");
+        } else {
+          summary =
+            sdpStatus === 429
+              ? "Realtime SDP exchange is rate limited; reconnect retry is scheduled."
+              : "Realtime SDP exchange failed before the peer connection opened.";
+          blockers.push(sdpStatus === 429 ? "realtime_sdp_rate_limited" : "realtime_sdp_failed");
+        }
       } else if (checks.errors) {
         status = "error";
         summary = "Realtime bridge reported errors.";
