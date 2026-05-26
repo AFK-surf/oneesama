@@ -150,7 +150,7 @@ func (c *SlackAssistantClient) call(ctx context.Context, method string, payload 
 	if err != nil {
 		return AssistantAPIResult{Method: method, Payload: payload, Error: "request_failed", Detail: err.Error()}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	var body SlackAssistantAPIBody
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {

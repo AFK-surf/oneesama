@@ -265,6 +265,9 @@ func searchEntityGraph(index entityGraphIndex, query string, tokens []string, li
 		}
 		return selected[i].SourcePath < selected[j].SourcePath
 	})
+	if len(selected) > limit {
+		selected = selected[:limit]
+	}
 	content := renderEntityGraphEvidence(queryEntities, selected)
 	source := firstNonEmpty(selected[0].SourcePath, "entity_graph")
 	return []SlackRelatedMemoryRecord{{
@@ -368,9 +371,7 @@ func splitEntityAliases(text string) []string {
 	for _, part := range strings.FieldsFunc(text, func(r rune) bool {
 		return r == ',' || r == '，' || r == '/' || r == '、' || r == ';' || r == '；'
 	}) {
-		for _, candidate := range entityGraphEntitiesInText(part) {
-			aliases = append(aliases, candidate)
-		}
+		aliases = append(aliases, entityGraphEntitiesInText(part)...)
 	}
 	return compactUniqueStrings(aliases)
 }

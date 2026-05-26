@@ -277,7 +277,7 @@ func (s *Service) doMeetingAgentJSON(request *http.Request, target any, timeout 
 	if err != nil {
 		return fmt.Errorf("call meeting-agent %s: %w", request.URL.Path, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, meetingAgentResponseLimit))
 	if err != nil {

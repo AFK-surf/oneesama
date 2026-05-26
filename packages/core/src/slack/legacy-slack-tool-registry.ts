@@ -261,7 +261,7 @@ export interface LegacyToolArgs {
 }
 
 export function createLegacySlackToolRegistry(options: CreateLegacySlackToolRegistryOptions = {}) {
-  const specs = LEGACY_SLACK_TOOL_SPECS.map((spec) => ({ ...spec }));
+  const specs = LEGACY_SLACK_TOOL_SPECS.map((spec) => Object.assign({}, spec));
   const byName = new Map(specs.map((spec) => [spec.name, spec]));
   const botToken = options.botToken || "";
   const fetchImpl = options.fetchImpl || fetch;

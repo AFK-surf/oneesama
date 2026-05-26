@@ -168,7 +168,7 @@ func (s *Service) runHTTPTTS(ctx context.Context, payload normalizedTTSPayload) 
 	if err != nil {
 		return TTSSynthesizeResponse{"ok": false, "provider": "http", "error": err.Error()}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	parsed := parseProviderResponse(string(body), TTSSynthesizeResponse{"provider": "http"})
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {

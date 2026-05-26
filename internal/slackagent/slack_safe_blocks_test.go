@@ -259,10 +259,10 @@ func percentDecode(s string) (string, error) {
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		switch {
-		case c == '+':
+		switch c {
+		case '+':
 			out = append(out, ' ')
-		case c == '%':
+		case '%':
 			if i+2 >= len(s) {
 				return "", io.ErrUnexpectedEOF
 			}

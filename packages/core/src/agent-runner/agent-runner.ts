@@ -205,7 +205,7 @@ function createJobStore({ provider, onJobUpdate }: JobStoreOptions) {
   }
 
   function listJobs() {
-    return [...jobs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...jobs.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   return { createJob, updateJob, getJob, listJobs };

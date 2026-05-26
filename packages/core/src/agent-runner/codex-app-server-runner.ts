@@ -665,9 +665,14 @@ class CodexAppServerClient {
     };
     const turn = result.thread?.turns?.find((entry) => entry.id === turnId);
     if (!turn) return null;
-    const lastAgentMessage = (turn.items || [])
-      .filter((item) => item.type === "agentMessage")
-      .at(-1);
+    let lastAgentMessage: { type?: string; text?: string } | undefined;
+    for (let index = (turn.items || []).length - 1; index >= 0; index -= 1) {
+      const item = turn.items?.[index];
+      if (item?.type === "agentMessage") {
+        lastAgentMessage = item;
+        break;
+      }
+    }
     return {
       status: normalizeTurnStatus(turn.status),
       finalMessage: String(lastAgentMessage?.text || "").trim(),
@@ -817,7 +822,7 @@ export function createCodexAppServerRunner(options: CreateCodexAppServerRunnerOp
   }
 
   function listJobs(): CodexJobShape[] {
-    return [...(jobs.values() as Iterable<CodexJobShape>)].sort((a, b) =>
+    return [...(jobs.values() as Iterable<CodexJobShape>)].toSorted((a, b) =>
       String(a.createdAt).localeCompare(String(b.createdAt)),
     );
   }

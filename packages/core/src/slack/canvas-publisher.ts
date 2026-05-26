@@ -270,7 +270,7 @@ export function createCanvasPublisher(options: CreateCanvasPublisherOptions = {}
             | null,
       )
       .filter((entry): entry is PublishedCanvasManifest => Boolean(entry))
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+      .toSorted((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   }
 
   async function publish(input: CanvasPublishInput = {}): Promise<PublishedCanvasManifest> {

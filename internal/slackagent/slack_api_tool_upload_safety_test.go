@@ -218,7 +218,7 @@ func TestSlackAPIToolUploadFileRejectsOutsideWorkspaceAbsolutePath(t *testing.T)
 	if result.Success {
 		t.Fatalf("expected rejection, got success: %q", result.Text)
 	}
-	if !strings.Contains(result.Text, "Slack-triggered file uploads must stay within the Slack agent workspace") {
+	if !strings.Contains(result.Text, "slack-triggered file uploads must stay within the Slack agent workspace") {
 		t.Fatalf("expected workspace-boundary error, got %q", result.Text)
 	}
 	if len(rec.requests) != 0 {
@@ -260,7 +260,7 @@ func TestSlackAPIToolUploadFileRejectsNestedTempWorkspaceEscape(t *testing.T) {
 	if result.Success {
 		t.Fatalf("expected nested temp workspace escape rejection, got success: %q", result.Text)
 	}
-	if !strings.Contains(result.Text, "Slack-triggered file uploads must stay within the Slack agent workspace") {
+	if !strings.Contains(result.Text, "slack-triggered file uploads must stay within the Slack agent workspace") {
 		t.Fatalf("expected workspace-boundary error, got %q", result.Text)
 	}
 	if len(rec.requests) != 0 {

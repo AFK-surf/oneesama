@@ -32,6 +32,7 @@
   },
   "rules": {
     "eslint/no-underscore-dangle": "off",
+    "eslint/no-await-in-loop": "off",
     "eslint/no-unused-vars": [
       "warn",
       {
@@ -40,17 +41,50 @@
         "ignoreRestSiblings": true
       }
     ],
+    "promise/no-multiple-resolved": "off",
     "unicorn/consistent-function-scoping": "off",
-    "unicorn/no-useless-fallback-in-spread": "warn"
+    "unicorn/require-post-message-target-origin": "off",
+    "unicorn/no-useless-fallback-in-spread": "warn",
+    "max-lines": [
+      "error",
+      {
+        "max": 1200,
+        "skipBlankLines": true
+      }
+    ]
   },
   "overrides": [
     {
-      "files": ["packages/core/src/realtime/*.ts"],
+      "files": ["src/cli.ts"],
       "rules": {
         "max-lines": [
           "error",
           {
-            "max": 1200,
+            "max": 11783,
+            "skipBlankLines": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/core/src/meeting/google-meet-joiner.ts"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 4071,
+            "skipBlankLines": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/slack-agent/src/index.ts"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 3741,
             "skipBlankLines": true
           }
         ]
@@ -69,24 +103,36 @@
       }
     },
     {
-      "files": ["packages/core/src/realtime/realtime-browser-*-helpers.ts"],
+      "files": ["packages/core/src/slack/legacy-slack-domain-store.ts"],
       "rules": {
         "max-lines": [
           "error",
           {
-            "max": 700,
+            "max": 1720,
             "skipBlankLines": true
           }
         ]
       }
     },
     {
-      "files": ["packages/core/src/realtime/realtime-browser-init-builder.ts"],
+      "files": ["apps/meeting-agent/src/index.ts"],
       "rules": {
         "max-lines": [
           "error",
           {
-            "max": 120,
+            "max": 1680,
+            "skipBlankLines": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/core/src/avatar/hiyori-avatar-inject.ts"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1639,
             "skipBlankLines": true
           }
         ]

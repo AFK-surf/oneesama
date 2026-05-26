@@ -264,7 +264,7 @@ func legacySlackRenderDBMarkdown(ctx context.Context, dbPath string, maxTriageRu
 	if err != nil {
 		return files, counts, warnings, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := db.PingContext(ctx); err != nil {
 		return files, counts, warnings, err
 	}
@@ -318,7 +318,7 @@ func legacySlackRenderChannelBrain(ctx context.Context, db *sql.DB) (string, int
 	if err != nil {
 		return "", 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var b strings.Builder
 	b.WriteString("# Legacy Slack Agent D channel brain\n\n")
 	count := 0
@@ -346,7 +346,7 @@ func legacySlackRenderThreadLedger(ctx context.Context, db *sql.DB) (string, int
 	if err != nil {
 		return "", 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var b strings.Builder
 	b.WriteString("# Legacy Slack Agent D thread ledger\n\n")
 	count := 0
@@ -377,7 +377,7 @@ func legacySlackRenderFeedback(ctx context.Context, db *sql.DB) (string, int, er
 	if err != nil {
 		return "", 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var b strings.Builder
 	b.WriteString("# Legacy Slack Agent D feedback\n\n")
 	count := 0
@@ -405,7 +405,7 @@ func legacySlackRenderTriageRuns(ctx context.Context, db *sql.DB, maxRuns int) (
 	if err != nil {
 		return "", 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var b strings.Builder
 	b.WriteString("# Legacy Slack Agent D triage runs\n\n")
 	count := 0

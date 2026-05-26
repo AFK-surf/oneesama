@@ -291,7 +291,7 @@ export function formatTriageContexts(contexts = [], budget = TRIAGE_CONTEXT_CHAR
       channelActions.set(channel, actions);
     }
     const channelParts = [...channelActions.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .toSorted(([left], [right]) => left.localeCompare(right))
       .map(([channel, actions]) => {
         return actions.length
           ? `#${channel}: ${actions.join(" | ")}`

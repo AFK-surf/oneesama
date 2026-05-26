@@ -1042,11 +1042,11 @@ export function buildRealtimeSessionConfig(
       ...options.audio,
       input: {
         ...session.audio.input,
-        ...(options.audio.input || {}),
+        ...options.audio.input,
       } as Realtime2AudioConfig["input"],
       output: {
         ...session.audio.output,
-        ...(options.audio.output || {}),
+        ...options.audio.output,
       } as Realtime2AudioConfig["output"],
     };
   }
@@ -1067,7 +1067,7 @@ export function buildRealtimeSessionConfig(
 export function buildRealtimeInstructions({
   botName = "Meeting Avatar Bot",
   personalityContext = "",
-  currentUser = {},
+  currentUser: _currentUser = {},
 }: RealtimeInstructionOptions = {}) {
   const lines = [
     `You are ${botName}, a low-latency AI meeting avatar.`,

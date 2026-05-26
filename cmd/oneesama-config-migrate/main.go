@@ -60,9 +60,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	fs.StringVar(&outputPath, "output", "", "Path to write JSON output. Use '-' or omit for stdout.")
 	fs.BoolVar(&quiet, "quiet", false, "Suppress informational stderr output (errors still print).")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: oneesama-config-migrate [--input PATH] [--output PATH] [--quiet]\n")
-		fmt.Fprintf(stderr, "\nReads a cueboard-era YAML config and emits oneesama-compatible JSON.\n")
-		fmt.Fprintf(stderr, "Unknown fields fail loudly so dead config keys are caught at migration time.\n\n")
+		_, _ = fmt.Fprintf(stderr, "Usage: oneesama-config-migrate [--input PATH] [--output PATH] [--quiet]\n")
+		_, _ = fmt.Fprintf(stderr, "\nReads a cueboard-era YAML config and emits oneesama-compatible JSON.\n")
+		_, _ = fmt.Fprintf(stderr, "Unknown fields fail loudly so dead config keys are caught at migration time.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -74,40 +74,40 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 
 	yamlBytes, source, err := readInput(inputPath, stdin)
 	if err != nil {
-		fmt.Fprintf(stderr, "oneesama-config-migrate: read input: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "oneesama-config-migrate: read input: %v\n", err)
 		return 1
 	}
 	if len(bytes.TrimSpace(yamlBytes)) == 0 {
-		fmt.Fprintf(stderr, "oneesama-config-migrate: input is empty (source=%s)\n", source)
+		_, _ = fmt.Fprintf(stderr, "oneesama-config-migrate: input is empty (source=%s)\n", source)
 		return 1
 	}
 
 	jsonBytes, err := convertYAMLToJSON(yamlBytes)
 	if err != nil {
-		fmt.Fprintf(stderr, "oneesama-config-migrate: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "oneesama-config-migrate: %v\n", err)
 		return 1
 	}
 
 	dest, closeFn, err := openOutput(outputPath, stdout)
 	if err != nil {
-		fmt.Fprintf(stderr, "oneesama-config-migrate: open output: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "oneesama-config-migrate: open output: %v\n", err)
 		return 1
 	}
 	defer closeFn()
 
 	if _, err := dest.Write(jsonBytes); err != nil {
-		fmt.Fprintf(stderr, "oneesama-config-migrate: write output: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "oneesama-config-migrate: write output: %v\n", err)
 		return 1
 	}
 	if !bytes.HasSuffix(jsonBytes, []byte("\n")) {
 		if _, err := dest.Write([]byte("\n")); err != nil {
-			fmt.Fprintf(stderr, "oneesama-config-migrate: write trailing newline: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "oneesama-config-migrate: write trailing newline: %v\n", err)
 			return 1
 		}
 	}
 
 	if !quiet {
-		fmt.Fprintf(stderr, "oneesama-config-migrate: migrated %s → %s (%d bytes)\n",
+		_, _ = fmt.Fprintf(stderr, "oneesama-config-migrate: migrated %s → %s (%d bytes)\n",
 			source, describeOutput(outputPath), len(jsonBytes),
 		)
 	}

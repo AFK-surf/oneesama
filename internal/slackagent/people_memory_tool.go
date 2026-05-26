@@ -95,7 +95,7 @@ func personMemorySearchText(profile personMemoryProfile) string {
 
 func renderPersonMemoryLookup(profile personMemoryProfile) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Person: %s\n", profile.Name))
+	_, _ = fmt.Fprintf(&sb, "Person: %s\n", profile.Name)
 	if profile.Source != "" {
 		sb.WriteString("Source: " + profile.Source + "\n")
 	}
@@ -109,7 +109,7 @@ func renderPersonMemoryLookup(profile personMemoryProfile) string {
 
 func renderPersonMemoryBriefing(profile personMemoryProfile) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Briefing for %s\n", profile.Name))
+	_, _ = fmt.Fprintf(&sb, "Briefing for %s\n", profile.Name)
 	appendPersonMemorySection(&sb, "Who they are", profile.IdentityMap, 2)
 	appendPersonMemorySection(&sb, "Operator notes", profile.OperatorNotes, 2)
 	if len(profile.CurrentResponsibilities) > 0 {

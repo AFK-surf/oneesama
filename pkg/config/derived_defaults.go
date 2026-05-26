@@ -99,7 +99,7 @@ func loadOrCreateMeetdWebhookSecret(cfg PersistenceConfig) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create runtime secret file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if _, err := file.Write(payload); err != nil {
 		return "", fmt.Errorf("write runtime secret file: %w", err)
 	}

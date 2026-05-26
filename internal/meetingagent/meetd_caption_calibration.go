@@ -1,3 +1,5 @@
+//go:build cueboardparity
+
 package meetingagent
 
 import (
@@ -86,6 +88,20 @@ func calibrateTranscriptInChunks(
 		output = append(output, captionTranscript)
 	}
 	return strings.Join(output, "\n"), calibratedChunks, len(chunks), nil
+}
+
+func meetdCaptionTranscriptInRange(captions []MeetdCaptionRecord, origin, start, end time.Time) string {
+	filtered := make([]MeetdCaptionRecord, 0, len(captions))
+	for _, caption := range captions {
+		if !start.IsZero() && caption.Timestamp.Before(start) {
+			continue
+		}
+		if !end.IsZero() && caption.Timestamp.After(end) {
+			continue
+		}
+		filtered = append(filtered, caption)
+	}
+	return meetdCaptionTranscript(filtered, origin)
 }
 
 func readAndMergeChunkTranscripts(artifactsDir string, joinedAt time.Time) (string, error) {

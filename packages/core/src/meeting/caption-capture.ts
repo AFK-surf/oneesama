@@ -31,8 +31,6 @@ const CAPTION_LANGUAGE_COMBOBOX_XPATH = [
   "/following::*[@role='combobox'][1]",
   ")[1]",
 ].join("");
-const TRANSLATED_CAPTIONS_LABEL = /Translated captions|翻译字幕|翻譯字幕/i;
-
 type Diagnostics = { record?: (type: string, detail?: Record<string, unknown>) => void } | null;
 type CaptionToggleProbe = {
   ok: boolean;
@@ -570,7 +568,7 @@ async function clickMeetingLanguageComboboxByLabel(page: import("playwright").Pa
       })
       .filter((entry) => labelPattern.test(`${entry.text} ${entry.aria}`))
       .filter((entry) => !translationPattern.test(`${entry.text} ${entry.aria}`))
-      .sort((left, right) => left.score - right.score);
+      .toSorted((left, right) => left.score - right.score);
     if (directCombos[0]?.combo) {
       directCombos[0].combo.click();
       return true;
@@ -579,7 +577,7 @@ async function clickMeetingLanguageComboboxByLabel(page: import("playwright").Pa
     const labels = Array.from(document.querySelectorAll<HTMLElement>("div, span, label"))
       .filter((node) => visible(node) && labelPattern.test(textOf(node)) && !translationPattern.test(textOf(node)))
       .filter((node) => !Array.from(node.children).some((child) => labelPattern.test(textOf(child as HTMLElement))))
-      .sort((left, right) => textOf(left).length - textOf(right).length);
+      .toSorted((left, right) => textOf(left).length - textOf(right).length);
 
     for (const label of labels) {
       const labelRect = label.getBoundingClientRect();
@@ -596,7 +594,7 @@ async function clickMeetingLanguageComboboxByLabel(page: import("playwright").Pa
           };
         })
         .filter((entry) => !translationPattern.test(entry.text))
-        .sort((left, right) => left.score - right.score);
+        .toSorted((left, right) => left.score - right.score);
       if (combos[0]?.combo) {
         combos[0].combo.click();
         return true;
@@ -617,7 +615,7 @@ async function disableTranslatedCaptions(page: import("playwright").Page): Promi
     };
     const labels = Array.from(document.querySelectorAll<HTMLElement>("div, span, label"))
       .filter((node) => visible(node) && translationPattern.test(textOf(node)))
-      .sort((left, right) => textOf(left).length - textOf(right).length);
+      .toSorted((left, right) => textOf(left).length - textOf(right).length);
     for (const label of labels) {
       let current: HTMLElement | null = label;
       for (let depth = 0; current && depth < 6; depth += 1, current = current.parentElement) {
@@ -768,7 +766,7 @@ export async function installMeetCaptionCapture(
         counts.set(line, (counts.get(line) || 0) + 1);
       }
       return Array.from(counts.entries())
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || "unknown";
+        .toSorted((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || "unknown";
     }
     function lineCaptionCandidate(line: string, speaker: string): boolean {
       const normalized = normalize(line);

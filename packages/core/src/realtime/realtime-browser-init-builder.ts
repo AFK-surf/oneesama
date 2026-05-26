@@ -63,6 +63,16 @@ export function buildRealtimeBrowserInitScript(config = {}) {
     ),
     readBrowserInitSource(
       import.meta.url,
+      "./realtime-browser-meeting-event-helpers.js",
+      "./realtime-browser-meeting-event-helpers.ts",
+    ),
+    readBrowserInitSource(
+      import.meta.url,
+      "./realtime-browser-turn-policy-helpers.js",
+      "./realtime-browser-turn-policy-helpers.ts",
+    ),
+    readBrowserInitSource(
+      import.meta.url,
       "./realtime-browser-context-helpers.js",
       "./realtime-browser-context-helpers.ts",
     ),

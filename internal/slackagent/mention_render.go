@@ -112,20 +112,3 @@ func mentionLoopError(runErr error, result AvatarCommandResponse) error {
 	}
 	return nil
 }
-
-func latestAssistantTextSince(history []slackHistoryMessage, since time.Time) string {
-	for i := len(history) - 1; i >= 0; i-- {
-		msg := history[i]
-		if msg.Type != slackHistoryMessageTypeMessage || msg.Role != slackHistoryRoleAssistant {
-			continue
-		}
-		if !msg.Timestamp.IsZero() && msg.Timestamp.Before(since) {
-			break
-		}
-		text := historyMessageText(msg)
-		if strings.TrimSpace(text) != "" {
-			return text
-		}
-	}
-	return ""
-}

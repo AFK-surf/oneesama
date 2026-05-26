@@ -34,7 +34,7 @@
     disableLive2D: false,
     deferRendererUntilExplicitStart: false,
     enableVisualTestHooks: false,
-    ...(window.MAB_AVATAR_CONFIG || {}),
+    ...window.MAB_AVATAR_CONFIG,
   };
 
   const log = (...args) => console.log("[meeting-avatar]", ...args);
@@ -411,8 +411,8 @@
       const policy = getTrustedScriptPolicy();
       script.src = policy ? policy.createScriptURL(src) : src;
       script.async = true;
-      script.onload = resolve;
-      script.onerror = () => reject(new Error(`failed to load ${src}`));
+      script.addEventListener("load", resolve, { once: true });
+      script.addEventListener("error", () => reject(new Error(`failed to load ${src}`)), { once: true });
       document.head.appendChild(script);
     });
   }

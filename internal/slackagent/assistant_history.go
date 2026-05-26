@@ -1,3 +1,5 @@
+//go:build cueboardparity
+
 package slackagent
 
 import (
@@ -121,4 +123,21 @@ func historyMessageText(msg slackHistoryMessage) string {
 		parts = append(parts, part.Text)
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func latestAssistantTextSince(history []slackHistoryMessage, since time.Time) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		msg := history[i]
+		if msg.Type != slackHistoryMessageTypeMessage || msg.Role != slackHistoryRoleAssistant {
+			continue
+		}
+		if !msg.Timestamp.IsZero() && msg.Timestamp.Before(since) {
+			break
+		}
+		text := historyMessageText(msg)
+		if strings.TrimSpace(text) != "" {
+			return text
+		}
+	}
+	return ""
 }

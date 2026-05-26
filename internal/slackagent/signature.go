@@ -29,7 +29,7 @@ type SlackRequestVerification struct {
 
 func SignSlackRequestBody(signingSecret string, timestamp string, rawBody string) string {
 	mac := hmac.New(sha256.New, []byte(signingSecret))
-	_, _ = mac.Write([]byte(fmt.Sprintf("v0:%s:%s", timestamp, rawBody)))
+	_, _ = fmt.Fprintf(mac, "v0:%s:%s", timestamp, rawBody)
 	return "v0=" + hex.EncodeToString(mac.Sum(nil))
 }
 

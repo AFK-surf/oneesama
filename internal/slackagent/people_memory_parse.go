@@ -103,7 +103,7 @@ func writePeopleMemoryProfile(workspaceDir string, profile *personMemoryProfile)
 
 func renderPeopleMemoryProfile(profile *personMemoryProfile) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Person Memory: %s\n\n", profile.Name))
+	_, _ = fmt.Fprintf(&sb, "# Person Memory: %s\n\n", profile.Name)
 	appendMemoryBullets(&sb, "Identity Map", profile.IdentityMap)
 	appendMemoryBullets(&sb, "Durable Context", profile.DurableContext)
 	appendMemoryBullets(&sb, "Current Responsibilities", profile.CurrentResponsibilities)

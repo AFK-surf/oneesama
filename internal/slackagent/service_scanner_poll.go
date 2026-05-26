@@ -494,7 +494,7 @@ func (s *Service) callSlackScannerAPI(ctx context.Context, method string, params
 	if err != nil {
 		return fmt.Errorf("call %s: %w", method, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	raw, readErr := io.ReadAll(response.Body)
 	if readErr != nil {
 		return fmt.Errorf("read %s response: %w", method, readErr)

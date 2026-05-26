@@ -205,7 +205,7 @@ export function createSlackAgentDRunner(options: SlackAgentDRunnerOptions = {}) 
   }
 
   function listJobs() {
-    return [...jobs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...jobs.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   async function runSlackAgentD(job: SlackAgentDJob) {
@@ -247,12 +247,14 @@ export function createSlackAgentDRunner(options: SlackAgentDRunnerOptions = {}) 
     let status = parsed.status || "completed";
     const statusUrl = resolveStatusUrl(parsed.statusUrl, config.slackAgentDUrl);
     const deadline = Date.now() + config.slackAgentDTimeoutMs;
-    while (statusUrl && !TERMINAL_STATUSES.has(status) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, config.slackAgentDPollIntervalMs));
-      const pollResponse = await getJson(statusUrl);
-      parsed = pollResponse.parsed;
-      status = parsed.status || (pollResponse.ok ? "completed" : "failed");
-      if (!pollResponse.ok) break;
+    if (statusUrl) {
+      while (!TERMINAL_STATUSES.has(status) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, config.slackAgentDPollIntervalMs));
+        const pollResponse = await getJson(statusUrl);
+        parsed = pollResponse.parsed;
+        status = parsed.status || (pollResponse.ok ? "completed" : "failed");
+        if (!pollResponse.ok) break;
+      }
     }
 
     if (!TERMINAL_STATUSES.has(status) && statusUrl) {

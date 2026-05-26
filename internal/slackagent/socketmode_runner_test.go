@@ -87,7 +87,7 @@ func TestSocketModeServeOnceDispatchesEventsAPI(t *testing.T) {
 			if err != nil {
 				t.Fatalf("upgrade websocket: %v", err)
 			}
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 
 			if err := conn.WriteJSON(SlackSocketEnvelope{Type: "hello"}); err != nil {
 				t.Fatalf("write hello: %v", err)

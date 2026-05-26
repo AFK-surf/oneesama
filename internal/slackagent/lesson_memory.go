@@ -22,7 +22,7 @@ func recordLessonCandidate(workspaceDir string, lesson lessonCandidate) error {
 		return nil
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Lesson Candidate: %s\n\n", firstNonEmpty(lesson.Title, slug)))
+	_, _ = fmt.Fprintf(&sb, "# Lesson Candidate: %s\n\n", firstNonEmpty(lesson.Title, slug))
 	if lesson.Scope != "" {
 		sb.WriteString("- Scope: " + lesson.Scope + "\n")
 	}

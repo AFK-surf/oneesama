@@ -149,7 +149,7 @@ func (t *slackAPITool) downloadCanvasHTML(ctx context.Context, downloadURL strin
 	if err != nil {
 		return "", fmt.Errorf("canvas request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("canvas download returned %s", resp.Status)
 	}

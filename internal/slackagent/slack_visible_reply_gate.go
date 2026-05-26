@@ -39,11 +39,7 @@ func EvaluateSlackVisibleReplyCandidate(candidate SlackVisibleReplyCandidate) Sl
 		Message:         candidate.Message,
 		EvidenceAnchors: candidate.EvidenceAnchors,
 	})
-	return SlackVisibleReplyCandidateVerdict{
-		Allowed:         verdict.Allowed,
-		Reason:          verdict.Reason,
-		EvidenceAnchors: verdict.EvidenceAnchors,
-	}
+	return SlackVisibleReplyCandidateVerdict(verdict)
 }
 
 func slackVisibleReplyQualityBlockReason(text string) string {

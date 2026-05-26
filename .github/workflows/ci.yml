@@ -20,8 +20,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: npm ci
+      - run: npm run lint
       - run: npm test
-      - run: npx tsc --noEmit --allowImportingTsExtensions
+      - run: npm run typecheck
       - run: make vet
       - run: make build
       - run: make test

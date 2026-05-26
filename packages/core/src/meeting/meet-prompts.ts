@@ -22,7 +22,7 @@ async function evaluatePromptClick(page) {
         style.display !== "none"
       );
     };
-    const prompts = nodes
+    const prompt = nodes
       .map((node, index) => {
         const label =
           `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""}`
@@ -30,14 +30,13 @@ async function evaluatePromptClick(page) {
             .trim();
         return { node, index, label };
       })
-      .filter(
+      .find(
         ({ node, label }) =>
           isVisible(node) &&
           /^(got it|continue|continue without.*|dismiss|ok|okay|allow|close|not now|maybe later|skip)$/i.test(
             label,
           ),
       );
-    const prompt = prompts[0];
     if (!prompt) return { ok: false };
     prompt.node.click();
     return { ok: true, selector: `dom:prompt:${prompt.index}`, label: prompt.label };

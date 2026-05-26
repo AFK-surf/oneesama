@@ -180,7 +180,7 @@ export function createSlackContextProvider(options: CreateSlackContextProviderOp
       recentCommands,
       channelBrain: previous.channelBrain || "",
       threadLedger: {
-        ...(previous.threadLedger || {}),
+        ...previous.threadLedger,
         latestSessionId: recentCommand.sessionId || previous.threadLedger?.latestSessionId || "",
         latestMeetUrl: recentCommand.meetUrl || previous.threadLedger?.latestMeetUrl || "",
         latestTask: recentCommand.task || previous.threadLedger?.latestTask || "",

@@ -117,7 +117,7 @@ func (s *WebhookSender) sendOnce(ctx context.Context, request DigestWebhookReque
 	if err != nil {
 		return DigestWebhookAttempt{Attempt: attempt, OK: false, Status: 0, Error: "request_failed", Detail: err.Error()}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	payload, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if readErr != nil {

@@ -400,7 +400,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		mode = "fixture"
 	}
 	if !liveMode && mode != "fixture" {
-		fmt.Fprintln(stderr, "oneesama-triage-benchmark: --fixture path is required when --live=false")
+		_, _ = fmt.Fprintln(stderr, "oneesama-triage-benchmark: --fixture path is required when --live=false")
 		return 2
 	}
 	scanSince, scanNow, sinceLabel, err := resolveBenchmarkWindow(since, after, before, time.Now())
@@ -507,7 +507,7 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			strings.TrimSpace(os.Getenv("MAB_SLACK_BOT_TOKEN")),
 		)
 		if token == "" {
-			fmt.Fprintln(stderr, "oneesama-triage-benchmark: --token or ONEESAMA_SLACK_BOT_TOKEN / SLACK_BOT_TOKEN / MAB_SLACK_BOT_TOKEN is required")
+			_, _ = fmt.Fprintln(stderr, "oneesama-triage-benchmark: --token or ONEESAMA_SLACK_BOT_TOKEN / SLACK_BOT_TOKEN / MAB_SLACK_BOT_TOKEN is required")
 			return 1
 		}
 		channelIDs, err := resolveChannels(ctx, channels, token, stderr)
@@ -1255,7 +1255,7 @@ func requestBenchmarkJudge(ctx context.Context, client *http.Client, opts benchm
 	if err != nil {
 		return benchmarkJudgeVerdict{}, fmt.Errorf("judge request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out struct {
 		Choices []struct {
 			Message struct {
@@ -1363,7 +1363,7 @@ func dryRunThread(ctx context.Context, client *http.Client, baseURL string, vari
 		row.Error = err.Error()
 		return row, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out triageRunResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		row.Error = fmt.Sprintf("decode HTTP %d: %v", resp.StatusCode, err)
@@ -2476,9 +2476,9 @@ func anyString(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return strings.TrimSpace(typed)
-	case fmt.Stringer:
-		return strings.TrimSpace(typed.String())
 	case json.Number:
+		return strings.TrimSpace(typed.String())
+	case fmt.Stringer:
 		return strings.TrimSpace(typed.String())
 	default:
 		return ""
@@ -2529,7 +2529,7 @@ func fetchBenchmarkJSONMap(ctx context.Context, client *http.Client, url string)
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil
 	}
@@ -2965,7 +2965,7 @@ func slackGetJSON(ctx context.Context, client *http.Client, token string, method
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("slack %s HTTP %d", method, resp.StatusCode)
 	}

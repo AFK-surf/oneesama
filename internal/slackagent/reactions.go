@@ -114,7 +114,7 @@ func (c *SlackReactionClient) call(ctx context.Context, method string, input Sla
 	if err != nil {
 		return SlackReactionResult{Method: method, Payload: payload, Error: "request_failed", Detail: err.Error()}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	var body SlackReactionAPIBody
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {

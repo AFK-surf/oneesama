@@ -1,3 +1,5 @@
+//go:build cueboardparity
+
 package slackagent
 
 import "strings"

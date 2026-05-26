@@ -27,7 +27,7 @@ func probeBackendAuth(ctx context.Context, backendURL string, apiKey string) (fa
 	if err != nil {
 		return false, fmt.Errorf("backend auth probe request failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
 	bodyText := strings.TrimSpace(string(body))

@@ -152,7 +152,7 @@ func (c *sqliteCollection) List(ctx context.Context) ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sqlite list %s: %w", c.collection, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	entries := make([]Entry, 0)
 	for rows.Next() {
@@ -262,7 +262,7 @@ func sqliteDatabaseNeedsRecovery(dbPath string) bool {
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	header := make([]byte, len(sqliteHeader))
 	n, err := io.ReadFull(file, header)
@@ -290,7 +290,7 @@ func sqliteFileUsable(dbPath string) bool {
 	if err != nil {
 		return false
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var result string
 	if err := db.QueryRow(`PRAGMA quick_check`).Scan(&result); err != nil {
@@ -321,7 +321,7 @@ func copyFileAtomic(sourcePath string, targetPath string) error {
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return err

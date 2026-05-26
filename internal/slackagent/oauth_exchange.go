@@ -53,7 +53,7 @@ func (e *slackOAuthHTTPExchanger) ExchangeCode(ctx context.Context, input SlackO
 	if err != nil {
 		return SlackOAuthExchangeResult{}, fmt.Errorf("run slack oauth exchange request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	var body SlackOAuthResponseBody
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {

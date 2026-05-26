@@ -706,7 +706,7 @@ async function sweepSlackScanner(input: SlackHandlerInput = {}) {
     }
     const messages = [...history.messages]
       .filter((message) => slackTsAfter(message.ts || message.event_ts || "", previousCursor))
-      .sort((a, b) =>
+      .toSorted((a, b) =>
         String(a.ts || a.event_ts || "").localeCompare(String(b.ts || b.event_ts || "")),
       );
     let nextCursor = previousCursor;
@@ -2144,12 +2144,11 @@ async function scheduleSlackAssistantThreadStatus({
       state.pendingTimer = null;
       if (pending && pending !== state.lastStatus) {
         setSlackAssistantThreadStatus({ channelId, threadTs, status: pending })
-          .then((result) => {
-            if (result.ok !== false) {
-              state.lastStatus = pending;
-              state.lastCallAt = Date.now();
-            }
-          })
+          .then((result) =>
+            result.ok !== false
+              ? Object.assign(state, { lastStatus: pending, lastCallAt: Date.now() })
+              : undefined,
+          )
           .catch((error) => {
             console.warn(
               "[slack-agent] assistant status throttle flush failed",
@@ -2732,7 +2731,7 @@ function buildPreviousTriagePromptContext({
       (context) =>
         !channelId || context.channels.length === 0 || context.channels.includes(channelId),
     )
-    .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
+    .toSorted((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
     .slice(0, limit);
   const text = formatTriageContexts(contexts);
   return {
@@ -2762,7 +2761,7 @@ async function flushSlackMessageBuffer(channelId) {
   slackMessageBuffers.delete(channelId);
   updateBufferChannelStats(channelId, 0);
 
-  const messages = [...buffer.messages].sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+  const messages = [...buffer.messages].toSorted((a, b) => String(a.ts).localeCompare(String(b.ts)));
   const digest = renderSlackActivityDigest(channelId, messages);
   slackInbound.eventBuffer.flushes += 1;
   slackInbound.eventBuffer.lastFlushAt = new Date().toISOString();

@@ -72,7 +72,7 @@ function listWorkspaceMemoryFiles(workspaceDir) {
   if (!workspaceDir || !existsSync(workspaceDir)) return [];
   return walkFiles(workspaceDir)
     .filter(isAllowedMemoryPath)
-    .sort((a, b) => a.localeCompare(b));
+    .toSorted((a, b) => a.localeCompare(b));
 }
 
 function copyPrivateMemoryFiles({ sourceWorkspaceDir, targetWorkspaceDir }) {
@@ -254,7 +254,7 @@ function snippet(text, maxChars = MAX_SNIPPET_CHARS) {
   return `${compact.slice(0, maxChars).trimEnd()}...`;
 }
 
-function fileSearchResults({ workspaceDir, query, keywords, limit }) {
+function fileSearchResults({ workspaceDir, query: _query, keywords, limit }) {
   const results = [];
   for (const relPath of listWorkspaceMemoryFiles(workspaceDir)) {
     const content = readFileSync(join(workspaceDir, relPath), "utf8");
@@ -268,7 +268,7 @@ function fileSearchResults({ workspaceDir, query, keywords, limit }) {
     });
   }
   return results
-    .sort((a, b) => b.score - a.score || a.source.localeCompare(b.source))
+    .toSorted((a, b) => b.score - a.score || a.source.localeCompare(b.source))
     .slice(0, limit);
 }
 
@@ -301,7 +301,7 @@ function seedSearchResults({ seed, keywords, limit }) {
       });
     }
   }
-  return results.sort((a, b) => b.score - a.score || a.kind.localeCompare(b.kind)).slice(0, limit);
+  return results.toSorted((a, b) => b.score - a.score || a.kind.localeCompare(b.kind)).slice(0, limit);
 }
 
 export function createLocalSlackMemoryProvider(options: LocalSlackMemoryProviderOptions = {}) {
@@ -338,7 +338,7 @@ export function createLocalSlackMemoryProvider(options: LocalSlackMemoryProvider
     const fileResults = fileSearchResults({ workspaceDir, query: text, keywords, limit });
     const dbResults = seedSearchResults({ seed, keywords, limit });
     return [...fileResults, ...dbResults]
-      .sort((a, b) => b.score - a.score || a.kind.localeCompare(b.kind))
+      .toSorted((a, b) => b.score - a.score || a.kind.localeCompare(b.kind))
       .slice(0, limit);
   }
 

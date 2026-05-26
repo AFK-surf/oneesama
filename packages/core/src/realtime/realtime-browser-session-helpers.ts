@@ -106,22 +106,22 @@
       merged.audio?.input?.turn_detection ?? merged.turn_detection ?? "steady";
     merged.truncation = defaultRealtimeTruncation((merged as Record<string, unknown>).truncation);
     merged.audio = {
-      ...(merged.audio || {}),
+      ...merged.audio,
       input: {
-        ...(merged.audio?.input || {}),
+        ...merged.audio?.input,
         format: {
           type: "audio/pcm",
           rate: 24000,
-          ...(merged.audio?.input?.format || {}),
+          ...merged.audio?.input?.format,
         },
         turn_detection: normalizeTurnDetectionConfig(inputTurnDetection),
       },
       output: {
-        ...(merged.audio?.output || {}),
+        ...merged.audio?.output,
         format: {
           type: "audio/pcm",
           rate: 24000,
-          ...(merged.audio?.output?.format || {}),
+          ...merged.audio?.output?.format,
         },
         voice: merged.audio?.output?.voice || merged.voice || "marin",
       },
@@ -146,7 +146,7 @@
       session_schema?: string;
       tool_choice?: string;
     } = isLegacyRealtimeSessionSchema(schema)
-      ? { ...(options.session || {}) }
+      ? { ...options.session }
       : defaultRealtime2Session(options.session || {});
     delete session.schema;
     delete session.session_schema;

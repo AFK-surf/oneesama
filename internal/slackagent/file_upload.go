@@ -78,7 +78,7 @@ func (r slackWorkspaceFileResolver) ensurePathWithinWorkspace(path string) error
 		return fmt.Errorf("check upload path scope: %w", err)
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("Slack-triggered file uploads must stay within the Slack agent workspace: %s", workspaceRoot)
+		return fmt.Errorf("slack-triggered file uploads must stay within the Slack agent workspace: %s", workspaceRoot)
 	}
 	return nil
 }
@@ -213,7 +213,7 @@ func copyFileForSlackUpload(srcPath, dstPath string) error {
 	if err != nil {
 		return fmt.Errorf("open source file %s: %w", srcPath, err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {

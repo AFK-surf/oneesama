@@ -91,7 +91,7 @@
     autoRespondToMeetToolCalls: true,
     observeMeetChat: true,
     botName: "Meeting Avatar Bot",
-    ...(window.MAB_REALTIME_BRIDGE_CONFIG || {}),
+    ...window.MAB_REALTIME_BRIDGE_CONFIG,
   };
   const {
     realtimeReconnectDelayMs,
@@ -159,6 +159,12 @@
     workspaceTools: {
       calls: [],
       errors: [],
+    },
+    meetingEvents: [],
+    turnPolicy: {
+      decisions: [],
+      events: [],
+      appControlJobs: {},
     },
     meetChat: {
       observerInstalled: false,
@@ -295,7 +301,6 @@
   let peerConnectionHookInstalled = false;
   let reconnectTimer = null;
   let reconnectGeneration = 0;
-  let activeRealtimeAgentSDKTools = [];
   const observedMeetChatKeys = new Set();
   const pendingMeetAudioTracks = [];
   const routedMeetAudioTrackIds = new Set();
@@ -427,7 +432,6 @@
 
   const {
     buildCompactedHistory,
-    buildSessionContextSummary,
     compactRealtimeHistory,
     currentHistorySnapshot,
     maybeCompactRealtimeHistory,
@@ -479,7 +483,7 @@
           reason,
           state: routingAudioContext.state || "",
         });
-        updateFeedback();
+        return updateFeedback();
       })
       .catch((error) => {
         recordTimeline("meet_audio_context_resume_failed", {
@@ -540,7 +544,7 @@
           trackId: mixedTrack.id,
           meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
         });
-        updateFeedback();
+        return updateFeedback();
       })
       .catch((error) => rememberError(error));
     return true;
@@ -574,7 +578,7 @@
 
   function updateMeetAudioCaptureState(patch: Record<string, unknown> = {}) {
     state.connection.meetAudioCapture = {
-      ...(state.connection.meetAudioCapture || {}),
+      ...state.connection.meetAudioCapture,
       ...patch,
     } as typeof state.connection.meetAudioCapture;
     updateFeedback();
@@ -602,11 +606,11 @@
   function blobToBase64(blob) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.addEventListener("loadend", () => {
         const result = String(reader.result || "");
         resolve(result.includes(",") ? result.slice(result.indexOf(",") + 1) : result);
-      };
-      reader.onerror = () => reject(reader.error || new Error("audio_chunk_read_failed"));
+      }, { once: true });
+      reader.addEventListener("error", () => reject(reader.error || new Error("audio_chunk_read_failed")), { once: true });
       reader.readAsDataURL(blob);
     });
   }
@@ -645,7 +649,7 @@
           bytes?: number;
         };
         if (!result?.ok) throw new Error(result?.error || result?.reason || "audio_chunk_rejected");
-        updateMeetAudioCaptureState({
+        return updateMeetAudioCaptureState({
           chunks: result.chunks || sequence,
           bytes: result.bytes || (state.connection.meetAudioCapture?.bytes || 0) + blob.size,
           lastChunkAt: new Date().toISOString(),
@@ -826,7 +830,7 @@
       .then(() => {
         state.connection.duplicateMeetAudioSendersMuted += 1;
         recordTimeline("duplicate_meet_audio_sender_muted", { pcId, source });
-        updateFeedback();
+        return updateFeedback();
       })
       .catch((error) => rememberError(error));
   }
@@ -1120,9 +1124,6 @@
     localServiceUrl,
     runLocalWorkerTool,
     runLocalWorkspaceTool,
-    sendFunctionCallOutput,
-    isVisualShareToolName,
-    shouldAutoRespondToMeetToolResult,
   } = (window as any).__MAB_REALTIME_LOCAL_TOOL_HELPERS.create({
     config,
     state,
@@ -1130,12 +1131,14 @@
     isLocalToolName,
     recordTimeline,
     rememberAvatarToolError,
-    sendRealtimeEvent,
   });
 
-  const { sendMeetChat, readMeetChat, installMeetChatObserver, runLocalMeetTool } = (
-    window as any
-  ).__MAB_REALTIME_MEET_CHAT_HELPERS.create({
+  const {
+    sendMeetChat,
+    readMeetChat: _readMeetChat,
+    installMeetChatObserver,
+    runLocalMeetTool,
+  } = (window as any).__MAB_REALTIME_MEET_CHAT_HELPERS.create({
     config,
     state,
     observedMeetChatKeys,
@@ -1144,6 +1147,30 @@
     recordTimeline,
     sendRealtimeEvent,
     updateFeedback,
+  });
+
+  const meetingEventHelpers = (window as any).__MAB_REALTIME_MEETING_EVENT_HELPERS.create({
+    config,
+    state,
+    recordTimeline,
+  });
+
+  const {
+    deliverFunctionToolResult,
+    deliverWorkerResult,
+    rememberSuppressedWorkerResult,
+    shouldDeliverWorkerResult,
+  } = (window as any).__MAB_REALTIME_TURN_POLICY_HELPERS.create({
+    config,
+    state,
+    sendRealtimeEvent,
+    sendMeetChat,
+    recordTimeline,
+    buildWorkerResultChatText,
+    shouldSendWorkerResultToMeetChat,
+    buildWorkerResultVoiceText,
+    buildWorkerResultText,
+    meetingEvents: meetingEventHelpers,
   });
 
   const { createMockDataChannel, routeRemoteAudioStream, injectMockRemoteAudio } = (
@@ -1241,7 +1268,7 @@
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          ...(connectionConfig.session || {}),
+          ...connectionConfig.session,
           instructions: connectionConfig.instructions,
           tools: connectionConfig.tools,
           toolChoice: connectionConfig.toolChoice,
@@ -1372,7 +1399,6 @@
         }),
       );
     }
-    activeRealtimeAgentSDKTools = sdkTools;
     state.agentRuntime.sdkToolNames = sdkTools.map((entry) => entry.name || "");
     return sdkTools;
   }
@@ -1690,7 +1716,6 @@
     activePeerConnection = null;
     activeRealtimeAgentSession = null;
     activeRealtimeAgentTransport = null;
-    activeRealtimeAgentSDKTools = [];
     realtimeAudioSender = null;
     localMicFallbackSource = null;
     localMicFallbackStream = null;
@@ -1829,12 +1854,11 @@
     if (LOCAL_WORKER_TOOLS.has(toolCall.name)) {
       return runLocalWorkerTool(toolCall.name, toolCall.arguments)
         .then((result) => {
-          const delivery = sendFunctionCallOutput(toolCall.callId, result, {
-            autoRespond: config.autoRespondToWorkerToolCalls,
-            responseInstructions:
-              toolCall.name === "delegate_to_worker"
-                ? "Tell the user briefly in Chinese that you will handle it; if the result is already complete, summarize it now. Do not mention internal routing names."
-                : "Summarize the background status in concise Chinese without mentioning internal routing names.",
+          const delivery = deliverFunctionToolResult({
+            kind: "worker",
+            name: toolCall.name,
+            callId: toolCall.callId,
+            result,
           });
           rememberWorkerToolCall({
             name: toolCall.name,
@@ -1853,16 +1877,11 @@
     if (LOCAL_MEET_TOOLS.has(toolCall.name)) {
       return runLocalMeetTool(toolCall.name, toolCall.arguments)
         .then((result) => {
-          const shareToolResponse =
-            "For screen-share or app-share results: only say it is visible/shared if the result has ok:true and active screen-share/postcheck evidence. If it failed or lacks active-share evidence, state the exact blocker in one short Chinese sentence. Do not tell the user to switch views, and do not blame Meet or the receiver.";
-          const delivery = sendFunctionCallOutput(toolCall.callId, result, {
-            autoRespond: shouldAutoRespondToMeetToolResult(toolCall.name, result),
-            responseInstructions:
-              toolCall.name === "send_meet_chat"
-                ? "Confirm briefly in Chinese that the Meet chat message was sent."
-                : isVisualShareToolName(toolCall.name)
-                  ? shareToolResponse
-                  : "Answer from the returned Meet chat messages/links in concise Chinese.",
+          const delivery = deliverFunctionToolResult({
+            kind: "meet",
+            name: toolCall.name,
+            callId: toolCall.callId,
+            result,
           });
           rememberMeetToolCall({
             name: toolCall.name,
@@ -1881,13 +1900,11 @@
     if (LOCAL_WORKSPACE_TOOLS.has(toolCall.name)) {
       return runLocalWorkspaceTool(toolCall.name, toolCall.arguments)
         .then((result) => {
-          const appControlFollowup =
-            toolCall.name === "control_shared_app_window"
-              ? "If the result status is queued or running, treat the app action as accepted and in progress: say at most one short Chinese acknowledgement only if useful. Do not mention ids, queues, tools, backends, routing names, or debug state. Do not claim completion, and do not poll again in this same turn unless the user explicitly asked for status or the next step truly depends on the result. If the result failed or ok is false, state the exact blocker in one short Chinese sentence. If the result only captured state, has actions exactly [state], or says structured_operations_required, do not summarize yet; Continue by calling control_shared_app_window again with concrete primitive operations such as click, type_text, press_key, scroll, or drag. Otherwise, if the result is completed, summarize the visible outcome in one short Chinese sentence."
-              : "Summarize the result in concise Chinese. If it failed, state the exact blocker without mentioning internal routing names.";
-          const delivery = sendFunctionCallOutput(toolCall.callId, result, {
-            autoRespond: true,
-            responseInstructions: appControlFollowup,
+          const delivery = deliverFunctionToolResult({
+            kind: "workspace",
+            name: toolCall.name,
+            callId: toolCall.callId,
+            result,
           });
           rememberWorkspaceToolCall({
             name: toolCall.name,
@@ -1905,9 +1922,11 @@
     }
     try {
       const result = runLocalAvatarTool(toolCall.name, toolCall.arguments);
-      const delivery = sendFunctionCallOutput(toolCall.callId, result, {
-        autoRespond: config.autoRespondToAvatarToolCalls,
-        responseInstructions: "Continue after applying the avatar visual state.",
+      const delivery = deliverFunctionToolResult({
+        kind: "avatar",
+        name: toolCall.name,
+        callId: toolCall.callId,
+        result,
       });
       rememberAvatarToolCall({
         name: toolCall.name,
@@ -2157,7 +2176,7 @@
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            ...(connectionConfig.session || {}),
+            ...connectionConfig.session,
             instructions: connectionConfig.instructions,
             tools: connectionConfig.tools,
             toolChoice: connectionConfig.toolChoice,
@@ -2329,7 +2348,7 @@
       const dataChannel = pc.createDataChannel("oai-events");
       window.MAB_REALTIME_DATA_CHANNEL = dataChannel;
       window.MAB_REALTIME_DC = dataChannel;
-      dataChannel.onopen = () => {
+      dataChannel.addEventListener("open", () => {
         state.connected = true;
         state.connection.dataChannelOpen = true;
         state.connection.reconnectAttempts = 0;
@@ -2349,8 +2368,8 @@
             detail: { mode: state.connection.mode },
           }),
         );
-      };
-      dataChannel.onclose = () => {
+      });
+      dataChannel.addEventListener("close", () => {
         state.connected = false;
         state.connection.dataChannelOpen = false;
         recordTimeline("data_channel_close", { label: dataChannel.label || "" });
@@ -2361,8 +2380,8 @@
           scheduleRealtimeReconnect("data_channel_close", 500);
         }
         updateFeedback();
-      };
-      dataChannel.onmessage = (event) => {
+      });
+      dataChannel.addEventListener("message", (event) => {
         let detail = event.data;
         try {
           detail = JSON.parse(event.data);
@@ -2372,7 +2391,7 @@
         if (detail && typeof detail === "object") detail.__meetingAvatarInboundRecorded = true;
         rememberInboundEvent(detail, "data-channel");
         window.dispatchEvent(new CustomEvent("meeting-avatar-realtime-server-event", { detail }));
-      };
+      });
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -2429,6 +2448,13 @@
   }
 
   async function injectWorkerResult(job) {
+    const scope = shouldDeliverWorkerResult(job);
+    if (!scope.ok) {
+      const suppressed = rememberSuppressedWorkerResult(job, scope.reason, scope);
+      state.workerResults.push(suppressed);
+      state.workerResults = state.workerResults.slice(-50);
+      return suppressed;
+    }
     if (rememberInjectedWorkerJob(job.id)) {
       const duplicate = {
         ts: new Date().toISOString(),
@@ -2441,63 +2467,13 @@
       return duplicate;
     }
     if (isNoActionWorkerJob(job)) {
-      const suppressed = {
-        ts: new Date().toISOString(),
-        jobId: job.id,
-        status: job.status,
-        suppressed: true,
-        reason: "no_action_result",
-      };
+      const suppressed = rememberSuppressedWorkerResult(job, "no_action_result", scope);
       state.workerResults.push(suppressed);
       state.workerResults = state.workerResults.slice(-50);
       return suppressed;
     }
     const interrupt = cancelActiveResponse("worker_result_ready");
-    let chatDelivery = null;
-    if (shouldSendWorkerResultToMeetChat(job)) {
-      chatDelivery = await sendMeetChat({ text: buildWorkerResultChatText(job) }).catch(
-        (error) => ({
-          ok: false,
-          error: String((error && error.message) || error),
-        }),
-      );
-    }
-    const itemEvent = {
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "system",
-        content: [
-          {
-            type: "input_text",
-            text: chatDelivery
-              ? buildWorkerResultVoiceText(job, chatDelivery)
-              : buildWorkerResultText(job),
-          },
-        ],
-      },
-    };
-    const itemChannel = sendRealtimeEvent(itemEvent);
-    let responseChannel = "";
-    if (config.autoRespondToWorkerResults) {
-      responseChannel = sendRealtimeEvent({
-        type: "response.create",
-        response: {
-          instructions:
-            "Summarize the completed background result proactively in concise Chinese without mentioning internal routing names.",
-        },
-      });
-      state.responsesRequested += 1;
-    }
-    const delivery = {
-      ts: new Date().toISOString(),
-      jobId: job.id,
-      status: job.status,
-      interrupt,
-      meetChat: chatDelivery,
-      itemChannel,
-      responseChannel,
-    };
+    const delivery = await deliverWorkerResult(job, { interrupt });
     state.workerResults.push(delivery);
     state.workerResults = state.workerResults.slice(-50);
     return delivery;

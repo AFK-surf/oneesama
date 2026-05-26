@@ -40,6 +40,9 @@ test("Realtime browser bridge records SDP 429 details and schedules retry", asyn
               this.readyState = "connecting";
               this.label = "oai-events";
             }
+            addEventListener(type, handler) {
+              this["on" + type] = handler;
+            }
             send() {}
             close() {
               this.readyState = "closed";

@@ -776,21 +776,6 @@ func normalizeIdentityToken(value string) string {
 	return b.String()
 }
 
-func normalizeSpeakerIdentityText(value string) string {
-	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(strings.NewReplacer("·", " ", "・", " ").Replace(value)))), " ")
-}
-
-func preferredSpeakerAddress(aliases []string, fallback string) string {
-	for _, alias := range aliases {
-		for _, r := range alias {
-			if r >= '\u4e00' && r <= '\u9fff' {
-				return alias
-			}
-		}
-	}
-	return fallback
-}
-
 func compactUniqueIdentityStrings(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))

@@ -430,7 +430,7 @@ func (s *Service) recordPendingActionImprovement(ctx context.Context, action Sla
 	if !ok {
 		return nil
 	}
-	signalType := improvementSignalTypeConfirm
+	var signalType string
 	switch interaction.Status {
 	case "dismissed", "snoozed":
 		signalType = improvementSignalTypeDismiss

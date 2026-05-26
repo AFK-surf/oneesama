@@ -67,7 +67,7 @@ func (p *slackDMPoster) openDM(ctx context.Context, client *http.Client, botToke
 	if err != nil {
 		return "", fmt.Errorf("conversations.open: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body struct {
 		OK      bool   `json:"ok"`
 		Error   string `json:"error,omitempty"`

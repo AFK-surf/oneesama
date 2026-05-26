@@ -53,7 +53,7 @@ async function withRealtimeBridge(callback, options = {}) {
         simulateRemoteAudio: false,
         dryRunLocalTools: true,
         tools: options.tools || (controlTool ? [controlTool] : []),
-        ...(options.config || {}),
+        ...options.config,
       }),
     });
     await page.goto("data:text/html,<html><body>bridge</body></html>");
@@ -104,6 +104,12 @@ test("Realtime app-control dry-run state result asks the model to continue with 
     assert.equal(stateCall.result.ok, true);
     assert.deepEqual(stateCall.result.actions, ["state"]);
     assert.match(stateCall.result.summary, /Continue with concrete click\/type_text/);
+    assert.equal(stateCall.delivery.policy.channel, "silent");
+    assert.equal(stateCall.delivery.policy.reason, "app_control_needs_primitive_followup");
+    assert.ok(stateCall.delivery.responseChannel);
+    assert.equal(stateCall.delivery.meetingEvent.type, "app_control.running");
+    assert.equal(stateCall.delivery.meetingEvent.visibility, "silent");
+    assert.equal(stateCall.delivery.meetingEvent.turnId, "call_state_probe");
 
     const responseCreate = await page.evaluate(() =>
       window.MAB_REALTIME_BRIDGE.connection.sentDataChannelMessages
@@ -141,7 +147,120 @@ test("Realtime app-control dry-run state result asks the model to continue with 
     assert.equal(directCall.result.ok, true);
     assert.deepEqual(directCall.result.actions, ["click", "drag", "type_text"]);
     assert.match(directCall.result.summary, /executed primitive app-control operations/i);
+    assert.equal(directCall.delivery.policy.channel, "voice");
+    assert.equal(directCall.delivery.meetingEvent.type, "app_control.completed");
+    assert.equal(directCall.delivery.meetingEvent.interruptible, true);
   });
+});
+
+test("Realtime app-control queued result stays silent until job completion event", async () => {
+  await withRealtimeBridge(
+    async (page) => {
+      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+        await route.fulfill({
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "access-control-allow-origin": "*",
+          },
+          body: JSON.stringify({
+            ok: true,
+            status: "queued",
+            jobId: "app_job_queued",
+          }),
+        });
+      });
+
+      await dispatchToolCall(page, "call_queued_app_control", {
+        applicationName: "Pencil",
+        instruction: "draw a snake mockup",
+        operations: [{ kind: "click", x: 40, y: 40 }],
+      });
+
+      const queuedCall = await page.evaluate(() =>
+        window.MAB_REALTIME_BRIDGE.workspaceTools.calls.find(
+          (call) => call.callId === "call_queued_app_control",
+        ),
+      );
+      assert.equal(queuedCall.result.status, "queued");
+      assert.equal(queuedCall.delivery.policy.channel, "silent");
+      assert.equal(queuedCall.delivery.policy.reason, "app_control_async_accepted");
+      assert.equal(queuedCall.delivery.responseChannel, "");
+      assert.equal(queuedCall.delivery.meetingEvent.type, "app_control.accepted");
+      assert.equal(queuedCall.delivery.meetingEvent.jobId, "app_job_queued");
+
+      const appControlJob = await page.evaluate(
+        () => window.MAB_REALTIME_BRIDGE.turnPolicy.appControlJobs.app_job_queued,
+      );
+      assert.equal(appControlJob.status, "accepted");
+      assert.equal(appControlJob.visibility, "silent");
+    },
+    {
+      config: {
+        dryRunLocalTools: false,
+        tokenUrl: "http://meeting.local/realtime/client-secret",
+      },
+    },
+  );
+});
+
+test("Realtime app-control terminal job status updates the typed state machine", async () => {
+  await withRealtimeBridge(
+    async (page) => {
+      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+        const body = route.request().postDataJSON();
+        const jobId = body.job_id || body.jobId;
+        await route.fulfill({
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "access-control-allow-origin": "*",
+          },
+          body: JSON.stringify(
+            jobId === "app_job_blocked"
+              ? {
+                  ok: false,
+                  status: "failed",
+                  job_id: "app_job_blocked",
+                  error: "accessibility permission denied",
+                }
+              : {
+                  ok: true,
+                  status: "completed",
+                  job_id: "app_job_done",
+                  result: { summary: "queued job finished" },
+                },
+          ),
+        });
+      });
+
+      await dispatchToolCall(page, "call_completed_app_control", { job_id: "app_job_done" });
+      await dispatchToolCall(page, "call_blocked_app_control", { job_id: "app_job_blocked" });
+
+      const calls = await page.evaluate(() => window.MAB_REALTIME_BRIDGE.workspaceTools.calls);
+      const completed = calls.find((call) => call.callId === "call_completed_app_control");
+      const blocked = calls.find((call) => call.callId === "call_blocked_app_control");
+
+      assert.equal(completed.delivery.meetingEvent.type, "app_control.completed");
+      assert.equal(completed.delivery.meetingEvent.jobId, "app_job_done");
+      assert.equal(completed.delivery.policy.channel, "voice");
+      assert.equal(blocked.delivery.meetingEvent.type, "app_control.blocked");
+      assert.equal(blocked.delivery.meetingEvent.jobId, "app_job_blocked");
+      assert.equal(blocked.delivery.policy.channel, "blocked");
+
+      const jobs = await page.evaluate(() => window.MAB_REALTIME_BRIDGE.turnPolicy.appControlJobs);
+      assert.equal(jobs.app_job_done.status, "completed");
+      assert.equal(jobs.app_job_done.visibility, "voice");
+      assert.equal(jobs.app_job_blocked.status, "blocked");
+      assert.equal(jobs.app_job_blocked.visibility, "blocked");
+    },
+    {
+      config: {
+        dryRunLocalTools: false,
+        tokenUrl: "http://meeting.local/realtime/client-secret",
+      },
+    },
+  );
 });
 
 test("Realtime bridge cancels output when user speech starts even without a tracked response id", async () => {
@@ -160,7 +279,9 @@ test("Realtime bridge cancels output when user speech starts even without a trac
     });
 
     await page.waitForFunction(() =>
-      window.MAB_REALTIME_BRIDGE?.outbound?.some((entry) => entry.event?.type === "response.cancel"),
+      window.MAB_REALTIME_BRIDGE?.outbound?.some(
+        (entry) => entry.event?.type === "response.cancel",
+      ),
     );
 
     const protection = await page.evaluate(() => window.MAB_REALTIME_BRIDGE.protection);
@@ -185,13 +306,23 @@ test("Realtime worker results are posted to Meet chat and only briefly acknowled
     });
 
     assert.equal(delivery.meetChat?.ok, true);
+    assert.equal(delivery.policy.channel, "meet_chat");
+    assert.equal(delivery.meetingEvent.type, "worker_result.completed");
+    assert.equal(delivery.meetingEvent.visibility, "meet_chat");
+    assert.equal(delivery.meetingEvent.interruptible, true);
 
     const state = await page.evaluate(() => ({
       chatMessages: window.__MAB_MEET_FIXTURE.chatMessages,
       outbound: window.MAB_REALTIME_BRIDGE.outbound,
+      meetingEvents: window.MAB_REALTIME_BRIDGE.meetingEvents,
     }));
     assert.equal(state.chatMessages.length, 1);
     assert.match(state.chatMessages[0].text, /Codex 设置页面已经打开/);
+    assert.ok(
+      state.meetingEvents.some(
+        (event) => event.type === "worker_result.completed" && event.visibility === "meet_chat",
+      ),
+    );
 
     const systemMessage = state.outbound
       .map((entry) => entry.event?.item)
@@ -200,6 +331,59 @@ test("Realtime worker results are posted to Meet chat and only briefly acknowled
     assert.match(voiceText, /完整结果我已经发到 Meet chat/);
     assert.doesNotMatch(voiceText, /General 和 Account/);
   });
+});
+
+test("Realtime worker results from a different meeting session stay silent", async () => {
+  await withRealtimeBridge(
+    async (page) => {
+      const delivery = await page.evaluate(() => {
+        window.MAB_REALTIME_BRIDGE.protection.activeResponseId = "resp_current_session";
+        window.MAB_REALTIME_BRIDGE.protection.outputAudioActive = true;
+        return window.MAB_REALTIME_CLIENT.injectWorkerResult({
+          id: "job_other_session",
+          status: "completed",
+          task: "other meeting task",
+          result: "这个结果属于另一个会议。",
+          context: {
+            meeting_session_id: "other_session",
+          },
+        });
+      });
+
+      assert.equal(delivery.suppressed, true);
+      assert.equal(delivery.reason, "worker_result_session_mismatch");
+      assert.equal(delivery.policy.channel, "silent");
+      assert.equal(delivery.meetingEvent.type, "worker_result.suppressed");
+      assert.equal(delivery.meetingEvent.interruptible, false);
+
+      const state = await page.evaluate(() => ({
+        outbound: window.MAB_REALTIME_BRIDGE.outbound,
+        protection: window.MAB_REALTIME_BRIDGE.protection,
+        meetingEvents: window.MAB_REALTIME_BRIDGE.meetingEvents,
+      }));
+      assert.equal(
+        state.outbound.some((entry) => entry.event?.type === "response.cancel"),
+        false,
+      );
+      assert.equal(
+        state.outbound.some((entry) => entry.event?.type === "response.create"),
+        false,
+      );
+      assert.equal(state.protection.cancelledResponses, 0);
+      assert.ok(
+        state.meetingEvents.some(
+          (event) =>
+            event.type === "worker_result.suppressed" &&
+            event.reason === "worker_result_session_mismatch",
+        ),
+      );
+    },
+    {
+      config: {
+        sessionId: "current_session",
+      },
+    },
+  );
 });
 
 test("Realtime app-share success stays silent after verified active share evidence", async () => {
@@ -247,6 +431,16 @@ test("Realtime app-share success stays silent after verified active share eviden
         ),
       );
       assert.equal(responseCreate, false);
+
+      const shareCall = await page.evaluate(() =>
+        window.MAB_REALTIME_BRIDGE.meetTools.calls.find(
+          (call) => call.callId === "call_share_codex",
+        ),
+      );
+      assert.equal(shareCall.delivery.policy.channel, "visual_only");
+      assert.equal(shareCall.delivery.responseChannel, "");
+      assert.equal(shareCall.delivery.meetingEvent.type, "tool_result.visual_only");
+      assert.equal(shareCall.delivery.meetingEvent.visibility, "visual_only");
     },
     {
       tools: shareTool ? [shareTool] : [],

@@ -241,7 +241,7 @@ func postSlackInteractionResponse(ctx context.Context, responseURL string, respo
 	if err != nil {
 		return fmt.Errorf("post slack interaction response: %w", err)
 	}
-	defer httpResponse.Body.Close()
+	defer func() { _ = httpResponse.Body.Close() }()
 	body, readErr := io.ReadAll(io.LimitReader(httpResponse.Body, slackInteractionResponseLimit))
 	if readErr != nil {
 		return fmt.Errorf("read slack interaction response: %w", readErr)

@@ -84,7 +84,7 @@ func fetchSlackExternalLinkContext(ctx context.Context, rawURL string) SlackExte
 		result.Error = err.Error()
 		return result
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(response.Body, slackExternalLinkFetchBodyLimit))
 	if err != nil {
 		result.Error = err.Error()

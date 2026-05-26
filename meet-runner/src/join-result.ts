@@ -37,13 +37,18 @@ export async function recoverAcceptedJoinAfterError(
   joiner: { status: () => Promise<any> },
 ) {
   const message = error instanceof Error ? error.message : String(error);
-  const runtime = await joiner.status().catch(() => null);
+  let runtime = null;
+  try {
+    runtime = await joiner.status();
+  } catch {
+    runtime = null;
+  }
   const active = runtime?.active || null;
   if (!hasJoinAcceptedEvidence(active)) {
     throw error;
   }
   return {
-    ...(active || {}),
+    ...active,
     ok: true,
     recovered_after_error: message,
   };

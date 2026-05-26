@@ -328,7 +328,7 @@ async function withMockDom(root, fn) {
   };
   const all = queryAll([root], "*", true);
   globalThis.HTMLElement = MockElement;
-  globalThis.MouseEvent = class MouseEvent {};
+  globalThis.MouseEvent = function MouseEvent() {};
   globalThis.getComputedStyle = () => ({ visibility: "visible", display: "block" });
   globalThis.document = {
     body: root,

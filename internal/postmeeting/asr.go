@@ -117,7 +117,7 @@ func (p *OpenAIASRProvider) Transcribe(ctx context.Context, request ASRRequest) 
 	if err != nil {
 		return ASRTranscript{}, fmt.Errorf("open audio: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	part, err := writer.CreateFormFile("file", filepath.Base(audioPath))
 	if err != nil {
 		return ASRTranscript{}, fmt.Errorf("create audio part: %w", err)
@@ -140,7 +140,7 @@ func (p *OpenAIASRProvider) Transcribe(ctx context.Context, request ASRRequest) 
 	if err != nil {
 		return ASRTranscript{}, fmt.Errorf("openai asr request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := readProviderResponseBody(resp.Body)
 	if err != nil {
 		return ASRTranscript{}, fmt.Errorf("read openai asr response body: %w", err)
@@ -241,7 +241,7 @@ func (p *GeminiASRProvider) uploadFile(ctx context.Context, audioPath string) (s
 	if err != nil {
 		return "", "", fmt.Errorf("open audio: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return "", "", fmt.Errorf("stat audio: %w", err)
@@ -275,7 +275,7 @@ func (p *GeminiASRProvider) uploadFile(ctx context.Context, audioPath string) (s
 		<-errCh
 		return "", "", providerRequestError("gemini upload", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if writeErr := <-errCh; writeErr != nil {
 		return "", "", fmt.Errorf("gemini upload body: %w", writeErr)
 	}
@@ -325,7 +325,7 @@ func writeGeminiUploadBody(pw *io.PipeWriter, writer *multipart.Writer, audioPat
 	if err != nil {
 		return fmt.Errorf("open audio: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	filePart, err := writer.CreatePart(map[string][]string{
 		"Content-Disposition": {fmt.Sprintf("form-data; name=\"file\"; filename=\"%s\"", filepath.Base(audioPath))},
 		"Content-Type":        {mimeTypeForAudio(audioPath)},
@@ -365,7 +365,7 @@ func (p *GeminiASRProvider) generateTranscript(ctx context.Context, fileURI, mim
 	if err != nil {
 		return "", providerRequestError("gemini generate", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := readProviderResponseBody(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read gemini generate response body: %w", err)
@@ -396,7 +396,7 @@ func (p *GeminiASRProvider) deleteFile(ctx context.Context, fileName string) err
 	if err != nil {
 		return providerRequestError("gemini delete", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		body, err := readProviderResponseBody(resp.Body)
 		if err != nil {

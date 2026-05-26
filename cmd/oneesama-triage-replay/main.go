@@ -557,10 +557,10 @@ func appendLiveStatsSection(markdown string, stats []slackagent.SlackBackfillRep
 		if len(s.Warnings) > 0 {
 			warnings = strings.Join(s.Warnings, "; ")
 		}
-		b.WriteString(fmt.Sprintf(
+		_, _ = fmt.Fprintf(&b,
 			"| `%s` | %d | %d | %d | %v | %d | %s |\n",
 			s.ChannelID, s.MessagesScanned, s.RepliesFetched, s.CandidatesFound, s.Truncated, s.APIRetries429, warnings,
-		))
+		)
 	}
 	return b.String()
 }
@@ -585,7 +585,7 @@ func appendPersonaShadowSection(markdown string, results []slackagent.SlackPerso
 		} else if result.Reason != "" {
 			outcome = result.Reason
 		}
-		b.WriteString(fmt.Sprintf(
+		_, _ = fmt.Fprintf(&b,
 			"| `%s` | `%s` | `%s` | `%s` | `%s` | `%s` | %dms | %s |\n",
 			result.Source,
 			result.ChannelID,
@@ -595,7 +595,7 @@ func appendPersonaShadowSection(markdown string, results []slackagent.SlackPerso
 			result.Decision,
 			result.LatencyMS,
 			strings.ReplaceAll(outcome, "|", "\\|"),
-		))
+		)
 	}
 	return b.String()
 }
@@ -618,14 +618,14 @@ func appendLearningSignalsSection(markdown string, signals []slackagent.SlackLea
 		if len(signal.Refs) > 0 {
 			refs = strings.Join(signal.Refs, ", ")
 		}
-		b.WriteString(fmt.Sprintf(
+		_, _ = fmt.Fprintf(&b,
 			"| `%s` | `%s` | `%s` | `%s` | %s |\n",
 			escapeMarkdownCell(signal.Source),
 			escapeMarkdownCell(signal.Subject),
 			escapeMarkdownCell(signal.Verdict),
 			escapeMarkdownCell(signal.ReasonCode),
 			escapeMarkdownCell(refs),
-		))
+		)
 	}
 	return b.String()
 }

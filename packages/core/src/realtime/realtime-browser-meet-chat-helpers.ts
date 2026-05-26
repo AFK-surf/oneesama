@@ -60,7 +60,6 @@
       updateFeedback,
     } = deps;
     let meetChatObserver = null;
-    let meetChatPollTimer = null;
 
     function getElementLabel(element) {
       if (!element) return "";
@@ -199,7 +198,7 @@
             : 0;
           return { element, distance, label: getElementLabel(element) };
         })
-        .sort((a, b) => a.distance - b.distance);
+        .toSorted((a, b) => a.distance - b.distance);
       return candidates[0]?.element || null;
     }
 
@@ -223,7 +222,7 @@
       return "";
     }
 
-    async function triggerMeetChatSubmit(input, text) {
+    async function triggerMeetChatSubmit(input) {
       const sendButton = await waitForMeetChatSendButton(input);
       if (sendButton) {
         sendButton.click();
@@ -289,7 +288,7 @@
       if (!input) throw new Error("meet chat input not found");
       setMeetChatInputText(input, text);
       await new Promise((resolve) => window.setTimeout(resolve, 150));
-      const submitPath = await triggerMeetChatSubmit(input, text);
+      const submitPath = await triggerMeetChatSubmit(input);
       const sentConfirmation = await waitForMeetChatSent(input, text);
       if (!sentConfirmation) {
         return {
@@ -557,7 +556,7 @@
         subtree: true,
         characterData: true,
       });
-      meetChatPollTimer = window.setInterval(() => {
+      window.setInterval(() => {
         try {
           scanMeetChatMessages("poll");
         } catch (error) {

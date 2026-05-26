@@ -151,7 +151,7 @@ func writeLegacySlackDBFixture(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Open sqlite fixture: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	statements := []string{
 		`create table channel_brain (workspace_id text, channel_id text, summary text, summary_version integer, last_session_id text, last_thread_ts text, created_at text, updated_at text)`,
 		`create table thread_ledger (workspace_id text, channel_id text, thread_ts text, assistant_session_id text, status text, owner_user_id text, last_user_id text, last_user_message_at text, last_assistant_message_at text, last_action_type text, last_action_status text, summary text, created_at text, updated_at text)`,

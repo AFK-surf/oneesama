@@ -47,7 +47,7 @@ func compactPersonKey(value string) string {
 
 func compactReverseWordKey(value string) string {
 	words := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
-		return !(unicode.IsLetter(r) || unicode.IsDigit(r))
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 	for i, j := 0, len(words)-1; i < j; i, j = i+1, j-1 {
 		words[i], words[j] = words[j], words[i]

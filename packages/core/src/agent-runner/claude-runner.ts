@@ -78,7 +78,7 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}) {
   }
 
   function listJobs() {
-    return [...jobs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...jobs.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   function runClaude(job: ClaudeRunnerJob) {

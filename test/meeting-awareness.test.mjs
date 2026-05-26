@@ -46,7 +46,7 @@ test("meeting awareness prefers fresh caption speaker and merges participant sou
 
   assert.equal(awareness.ok, true);
   assert.equal(awareness.participantCount, 3);
-  assert.deepEqual(awareness.participants.map((participant) => participant.name).sort(), [
+  assert.deepEqual(awareness.participants.map((participant) => participant.name).toSorted(), [
     "Cindy",
     "Miao",
     "Peng Xiao",

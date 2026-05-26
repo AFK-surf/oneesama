@@ -420,7 +420,7 @@ func doSlackGetWithRetry(ctx context.Context, token string, method string, value
 		switch {
 		case resp.StatusCode == http.StatusTooManyRequests:
 			retryAfter := parseRetryAfterSeconds(resp.Header.Get("Retry-After"))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if stats != nil {
 				stats.APIRetries429++
 				stats.APIRetriesTotal++
@@ -433,14 +433,14 @@ func doSlackGetWithRetry(ctx context.Context, token string, method string, value
 			}
 			continue
 		case resp.StatusCode >= 200 && resp.StatusCode < 300:
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 				return fmt.Errorf("decode %s response: %w", method, err)
 			}
 			return nil
 		default:
 			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return fmt.Errorf("%s returned HTTP %d: %s", method, resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 	}

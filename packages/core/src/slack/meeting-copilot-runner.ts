@@ -53,12 +53,6 @@ function text(value: unknown, fallback: string = ""): string {
   return normalized || fallback;
 }
 
-function truncate(value: unknown, max: number = 160): string {
-  const normalized = String(value || "").trim();
-  if (normalized.length <= max) return normalized;
-  return `${normalized.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
-}
-
 function safeMeetingId(payload: MeetingCopilotPayload = {}): string {
   const id = Number(payload.meetingId || payload.meeting_id || payload.id || 0);
   return Number.isFinite(id) && id > 0 ? String(id) : text(payload.title, "unknown");
@@ -177,30 +171,6 @@ export function containsMeetingCopilotRealtimeControlRequest(transcript: unknown
   );
 }
 
-interface NormalizedCopilotEffect {
-  type: string;
-  text: string;
-  summary: string;
-}
-
-function normalizeEffect(effect: CopilotEffectInput | string | null | undefined): NormalizedCopilotEffect | null {
-  if (!effect) return null;
-  if (typeof effect === "string") return { type: "other", text: "", summary: effect };
-  return {
-    type: text(effect.type || effect.kind || effect.tool || "other"),
-    text: text(effect.text || effect.message || effect.summary),
-    summary: text(effect.summary || effect.text || effect.message),
-  };
-}
-
-function payloadEffects(payload: MeetingCopilotPayload = {}): NormalizedCopilotEffect[] {
-  const raw = (payload.raw || payload) as MeetingCopilotPayload;
-  const source = raw.copilot_effects || raw.copilotEffects || payload.copilotEffects || [];
-  return Array.isArray(source)
-    ? (source.map(normalizeEffect).filter(Boolean) as NormalizedCopilotEffect[])
-    : [];
-}
-
 function jobResultContent(job: MeetingCopilotJob = {}): string {
   return text(job.result || job.finalMessage || job.text || job.message);
 }
@@ -254,47 +224,6 @@ export function buildMeetingCopilotPrompt({
   }
   lines.push("", `Generated at: ${nowIso(now)}`);
   return `${lines.join("\n").trim()}\n`;
-}
-
-function summarizeEffects(effects: NormalizedCopilotEffect[] = []): string {
-  const parts: string[] = [];
-  for (const effect of effects) {
-    if (effect.type === "meeting_chat" || effect.type === "send_meeting_chat") {
-      parts.push(
-        `sent meeting chat: ${truncate(effect.text || effect.summary || "meeting chat sent", 80)}`,
-      );
-    } else if (effect.type === "slack_notify" || effect.type === "notify_meeting_slack") {
-      parts.push("notified linked Slack thread");
-    } else if (effect.summary) {
-      parts.push(truncate(effect.summary, 160));
-    } else if (effect.type) {
-      parts.push(effect.type);
-    }
-  }
-  return parts.length ? parts.join("; ") : "no action";
-}
-
-function recordEffects(
-  state: { priorActions: string[]; lastChatAt?: string; [key: string]: unknown },
-  effects: NormalizedCopilotEffect[] = [],
-  now: Date = new Date(),
-): void {
-  for (const effect of effects) {
-    if (effect.type === "meeting_chat" || effect.type === "send_meeting_chat") {
-      const summary = truncate(effect.text || effect.summary || "meeting chat sent", 160);
-      state.priorActions.push(`[${shanghaiTime(now).replace(/\sGMT[+-].*$/, "")}] ${summary}`);
-      state.lastChatAt = now.toISOString();
-    } else if (effect.type === "slack_notify" || effect.type === "notify_meeting_slack") {
-      state.priorActions.push(
-        `[${shanghaiTime(now).replace(/\sGMT[+-].*$/, "")}] notified linked Slack thread`,
-      );
-    } else if (effect.summary || effect.type) {
-      state.priorActions.push(
-        `[${shanghaiTime(now).replace(/\sGMT[+-].*$/, "")}] ${truncate(effect.summary || effect.type, 160)}`,
-      );
-    }
-  }
-  if (state.priorActions.length > 10) state.priorActions = state.priorActions.slice(-10);
 }
 
 interface CopilotRunRecord {

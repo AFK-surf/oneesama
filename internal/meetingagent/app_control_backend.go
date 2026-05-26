@@ -224,14 +224,7 @@ type KWWKAppControlTarget struct {
 }
 
 func KWWKTargetFromAppControl(target AppControlTarget) KWWKAppControlTarget {
-	return KWWKAppControlTarget{
-		ApplicationName:  target.ApplicationName,
-		BundleIdentifier: target.BundleIdentifier,
-		WindowTitle:      target.WindowTitle,
-		WindowID:         target.WindowID,
-		ProcessID:        target.ProcessID,
-		ScreenShare:      target.ScreenShare,
-	}
+	return KWWKAppControlTarget(target)
 }
 
 func requireAppControlBackend(backend AppControlBackend) error {

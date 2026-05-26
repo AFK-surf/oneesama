@@ -341,7 +341,7 @@ function normalizePathList(paths: Array<string | AudioChunkInput> = []): string[
     seen.add(resolved);
     normalized.push(resolved);
   }
-  return normalized.sort((a, b) => basename(a).localeCompare(basename(b)));
+  return normalized.toSorted((a, b) => basename(a).localeCompare(basename(b)));
 }
 
 function discoverAudioChunks(input: MeetingArtifactInput = {}): string[] {
@@ -666,14 +666,15 @@ export function createMeetingArtifactPipeline(options: MeetingArtifactInput = {}
       const chunkSegments = normalizeSegments({
         segments: result.segments || result.captions || result.transcript?.segments || [],
         transcriptText: chunkText,
-      }).map((segment) => ({
-        ...segment,
-        source: segment.source?.includes("chunk")
-          ? segment.source
-          : `${segment.source || result.provider || provider}_chunk`,
-        chunkIndex: index,
-        chunkPath: audioPath,
-      }));
+      }).map((segment) =>
+        Object.assign({}, segment, {
+          source: segment.source?.includes("chunk")
+            ? segment.source
+            : `${segment.source || result.provider || provider}_chunk`,
+          chunkIndex: index,
+          chunkPath: audioPath,
+        }),
+      );
       segments.push(...chunkSegments);
       if (chunkText) textParts.push(chunkText);
       chunks.push({
@@ -871,7 +872,7 @@ export function createMeetingArtifactPipeline(options: MeetingArtifactInput = {}
       .filter((entry) => entry.isDirectory())
       .map((entry) => getArtifact(entry.name))
       .filter(Boolean)
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+      .toSorted((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   }
 
   return {

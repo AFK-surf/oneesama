@@ -9,7 +9,7 @@
     enabled: true,
     minCreatedAt: "",
     sessionId: "",
-    ...(window.MAB_WORKER_RESULT_CONFIG || {}),
+    ...window.MAB_WORKER_RESULT_CONFIG,
   };
 
   const state = {

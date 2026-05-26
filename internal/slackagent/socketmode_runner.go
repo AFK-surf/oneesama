@@ -207,7 +207,7 @@ func (r *SocketModeRunner) serveOnce(ctx context.Context) error {
 	}
 	r.setConn(conn)
 	defer r.clearConn(conn)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	serveCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go r.runPingLoop(serveCtx, conn)
@@ -231,7 +231,9 @@ func (r *SocketModeRunner) serveOnce(ctx context.Context) error {
 			})
 			return err
 		}
-		r.touchReadDeadline(conn)
+		if err := r.touchReadDeadline(conn); err != nil {
+			return fmt.Errorf("refresh slack socket mode read deadline: %w", err)
+		}
 		if err := r.handleMessage(ctx, conn, message); err != nil {
 			if errors.Is(err, errSlackSocketDisconnect) {
 				return err

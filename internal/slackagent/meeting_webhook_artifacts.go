@@ -65,7 +65,7 @@ func (m meetingArtifactMaterializer) downloadMeetingArtifact(ctx context.Context
 	if err != nil {
 		return "", cleanup, fmt.Errorf("download remote %s artifact: %w", artifactName, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", cleanup, fmt.Errorf("download remote %s artifact: status %d", artifactName, response.StatusCode)
 	}

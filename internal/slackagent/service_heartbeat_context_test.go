@@ -31,7 +31,7 @@ func TestFormatHeartbeatUpcomingDigestSortsByDeadline(t *testing.T) {
 	if idxSooner < 0 || idxLater < 0 || idxWell < 0 {
 		t.Fatalf("expected all 3 followups present in output, got %q", got)
 	}
-	if !(idxSooner < idxLater && idxLater < idxWell) {
+	if idxSooner >= idxLater || idxLater >= idxWell {
 		t.Fatalf("expected sooner→later→well-later order, got %q", got)
 	}
 }

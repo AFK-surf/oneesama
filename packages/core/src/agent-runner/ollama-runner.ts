@@ -80,7 +80,7 @@ export function createOllamaRunner(options: OllamaRunnerOptions = {}) {
   }
 
   function listJobs() {
-    return [...jobs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...jobs.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   async function runOllama(job: OllamaRunnerJob) {

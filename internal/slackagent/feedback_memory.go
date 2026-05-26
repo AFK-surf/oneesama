@@ -324,7 +324,7 @@ func writeFeedbackProjection(workspaceDir string, entry SlackFeedbackEntry) erro
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	_, err = file.WriteString(line)
 	return err
 }

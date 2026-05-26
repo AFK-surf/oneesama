@@ -161,7 +161,7 @@ func ValidateMeetdHealth(ctx context.Context, meetAgentdURL string) error {
 	if err != nil {
 		return fmt.Errorf("meetd health probe request failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	if response.StatusCode == http.StatusOK {
 		return nil

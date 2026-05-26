@@ -9,10 +9,6 @@ import (
 
 const appMentionRelatedMemorySupplementLimit = 1600
 
-func (s *Service) searchAppMentionRelatedMemory(mention *SlackAppMentionContext, channelName, userName string, limit int) SlackRelatedMemorySearchResult {
-	return s.searchAppMentionRelatedMemoryContext(context.Background(), mention, channelName, userName, limit)
-}
-
 func (s *Service) searchAppMentionRelatedMemoryContext(ctx context.Context, mention *SlackAppMentionContext, channelName, userName string, limit int) SlackRelatedMemorySearchResult {
 	if ctx == nil {
 		ctx = context.Background()

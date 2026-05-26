@@ -52,11 +52,11 @@ async function main() {
   const child = spawn(binary, ["--stdio"], {
     stdio: "inherit",
   });
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((settle, reject) => {
     child.once("error", reject);
     child.once("exit", (code, signal) => {
       if (code === 0) {
-        resolve();
+        settle();
       } else {
         reject(new Error(`app-control helper exited: ${code ?? signal ?? "unknown"}`));
       }

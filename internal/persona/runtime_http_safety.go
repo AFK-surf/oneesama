@@ -66,7 +66,7 @@ func doPersonaHTTP(ctx context.Context, client *http.Client, method string, url 
 	if err != nil {
 		return nil, personaHTTPError{stage: "call", err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := readPersonaBody(resp.Body, maxBytes)
 	if err != nil {
 		return nil, personaHTTPError{stage: "read", err: err}

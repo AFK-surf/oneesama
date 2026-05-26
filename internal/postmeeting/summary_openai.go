@@ -55,7 +55,7 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []SummaryLLMMessag
 	if err != nil {
 		return SummaryLLMResponse{}, fmt.Errorf("summary llm request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := readProviderResponseBody(resp.Body)
 	if err != nil {
 		return SummaryLLMResponse{}, fmt.Errorf("read summary llm response body: %w", err)

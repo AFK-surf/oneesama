@@ -2,7 +2,6 @@ package config
 
 import (
 	"strings"
-	"time"
 )
 
 func buildAppControlConfig(raw rawAppControl) AppControlConfig {
@@ -47,11 +46,4 @@ func NormalizeAppControlProvider(value string) string {
 	default:
 		return normalized
 	}
-}
-
-func defaultedAppControlTimeout(value time.Duration) time.Duration {
-	if value > 0 {
-		return value
-	}
-	return defaultAppControlTimeout
 }

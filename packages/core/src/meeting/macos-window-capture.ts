@@ -185,7 +185,7 @@ async function waitForImage(path: string, timeoutMs: number, child?: ChildProces
     if (lastExit) {
       throw new Error(`macos_window_capture_stream_exited:${lastExit.code ?? lastExit.signal ?? "unknown"}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await new Promise((settle) => setTimeout(settle, 40));
   }
   throw new Error("macos_window_capture_stream_timeout");
 }
@@ -258,7 +258,7 @@ async function killOrphanedHelperStreams(options: {
     }
   }
   if (killed > 0) {
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, options.settleMs ?? 150)));
+    await new Promise((settle) => setTimeout(settle, Math.max(0, options.settleMs ?? 150)));
   }
   return killed;
 }
@@ -321,9 +321,9 @@ async function runHelper<T>(args: string[]): Promise<T> {
     timeout: 10000,
     maxBuffer: 4 * 1024 * 1024,
   });
-  const text = String(stdout || "").trim();
-  if (!text) throw new Error(String(stderr || "macos_window_capture_empty_output").trim());
-  const parsed = JSON.parse(text) as T & { ok?: boolean; error?: string };
+  const outputText = String(stdout || "").trim();
+  if (!outputText) throw new Error(String(stderr || "macos_window_capture_empty_output").trim());
+  const parsed = JSON.parse(outputText) as T & { ok?: boolean; error?: string };
   if (parsed && parsed.ok === false) {
     throw new Error(parsed.error || "macos_window_capture_failed");
   }

@@ -249,7 +249,7 @@ func (s *Service) fetchMeetingScannerEvents(ctx context.Context, min, max time.T
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(response.Body, meetingScannerMaxResponseBytes))
 	if err != nil {
 		return nil, err
@@ -296,7 +296,7 @@ func (s *Service) meetingScannerAccessToken(ctx context.Context) (string, error)
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(response.Body, meetingScannerMaxResponseBytes))
 	if err != nil {
 		return "", err

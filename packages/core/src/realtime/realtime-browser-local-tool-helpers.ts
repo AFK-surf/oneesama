@@ -20,11 +20,6 @@
     [key: string]: unknown;
   }
 
-  interface FunctionCallOutputOptions {
-    autoRespond?: boolean;
-    responseInstructions?: string;
-  }
-
   interface RealtimeLocalToolHelperDeps {
     config: Record<string, unknown>;
     state: Record<string, any>;
@@ -32,7 +27,6 @@
     isLocalToolName(name: string): boolean;
     recordTimeline(type: string, detail?: Record<string, unknown>): void;
     rememberAvatarToolError(error: unknown, detail?: Record<string, unknown>): void;
-    sendRealtimeEvent(event: unknown): string;
   }
 
   function create(deps: RealtimeLocalToolHelperDeps) {
@@ -43,7 +37,6 @@
       isLocalToolName,
       recordTimeline,
       rememberAvatarToolError,
-      sendRealtimeEvent,
     } = deps;
 
     function parseToolArguments(rawArguments) {
@@ -288,69 +281,6 @@
       return result;
     }
 
-    function sendFunctionCallOutput(
-      callId: string,
-      result: unknown,
-      options: FunctionCallOutputOptions = {},
-    ) {
-      if (!callId) return { ok: true, skipped: true, reason: "missing_call_id" };
-      const outputChannel = sendRealtimeEvent({
-        type: "conversation.item.create",
-        item: {
-          type: "function_call_output",
-          call_id: callId,
-          output: JSON.stringify(result),
-        },
-      });
-      let responseChannel = "";
-      if (options.autoRespond !== false) {
-        responseChannel = sendRealtimeEvent({
-          type: "response.create",
-          response: {
-            instructions: options.responseInstructions || "Continue after applying the result.",
-          },
-        });
-        state.responsesRequested += 1;
-      }
-      return { ok: true, outputChannel, responseChannel };
-    }
-
-    function isVisualShareToolName(name: string) {
-      return /share|stage/i.test(name);
-    }
-
-    function resultRecord(value: unknown): Record<string, unknown> {
-      return value && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : {};
-    }
-
-    function nestedRecord(value: unknown, key: string): Record<string, unknown> {
-      return resultRecord(resultRecord(value)[key]);
-    }
-
-    function resultHasActiveScreenShare(value: unknown): boolean {
-      const direct = resultRecord(value);
-      const candidates = [
-        nestedRecord(direct, "screenShare"),
-        nestedRecord(direct, "state"),
-        nestedRecord(nestedRecord(direct, "postcheck"), "screenShare"),
-        nestedRecord(nestedRecord(direct, "present"), "screenShare"),
-        nestedRecord(nestedRecord(nestedRecord(direct, "present"), "postcheck"), "screenShare"),
-        nestedRecord(nestedRecord(direct, "start"), "screenShare"),
-      ];
-      return candidates.some((candidate) => candidate.active === true);
-    }
-
-    function shouldAutoRespondToMeetToolResult(name: string, result: unknown): boolean {
-      if (!config.autoRespondToMeetToolCalls) return false;
-      const record = resultRecord(result);
-      if (isVisualShareToolName(name) && record.ok === true && resultHasActiveScreenShare(record)) {
-        return false;
-      }
-      return true;
-    }
-
     return {
       extractLocalToolCall,
       runLocalAvatarTool,
@@ -359,9 +289,6 @@
       localServiceUrl,
       runLocalWorkerTool,
       runLocalWorkspaceTool,
-      sendFunctionCallOutput,
-      isVisualShareToolName,
-      shouldAutoRespondToMeetToolResult,
     };
   }
 

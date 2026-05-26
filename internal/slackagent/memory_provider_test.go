@@ -28,10 +28,7 @@ type simpleRecordingMemoryProvider struct {
 func (p *simpleRecordingMemoryProvider) Name() string { return p.name }
 
 func (p *simpleRecordingMemoryProvider) Available() bool {
-	if !p.available {
-		return false
-	}
-	return true
+	return p.available
 }
 
 func (p *simpleRecordingMemoryProvider) Initialize(_ context.Context, init SlackMemoryProviderInit) error {

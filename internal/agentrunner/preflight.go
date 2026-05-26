@@ -90,7 +90,7 @@ func validateOllama(ctx context.Context, cfg appconfig.OllamaRunnerConfig) error
 	if err != nil {
 		return fmt.Errorf("ollama preflight request failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		return nil
 	}

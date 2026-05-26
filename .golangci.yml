@@ -1,0 +1,49 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  allow-parallel-runners: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    generated: lax
+    paths:
+      - ^node_modules/
+      - ^runtime/
+      - ^dist/
+      - ^coverage/
+      - ^downloads/
+      - ^output/
+      - ^reports/
+      - ^tmp/
+      - ^snake-mobile-app/
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - ^node_modules/
+      - ^runtime/
+      - ^dist/
+      - ^coverage/
+      - ^downloads/
+      - ^output/
+      - ^reports/
+      - ^tmp/
+      - ^snake-mobile-app/

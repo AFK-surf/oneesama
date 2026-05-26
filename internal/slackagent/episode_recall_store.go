@@ -206,7 +206,7 @@ LIMIT ?`, ftsQuery, limit*4)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []SlackEpisodeRecallSearchResult
 	for rows.Next() {
 		result, err := scanSlackEpisodeRecallSearchResult(rows, "fts")
@@ -237,7 +237,7 @@ LIMIT ?`, query, limit*4)
 	if err != nil {
 		return nil, fmt.Errorf("episode recall like search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []SlackEpisodeRecallSearchResult
 	for rows.Next() {
 		result, err := scanSlackEpisodeRecallSearchResult(rows, "like")

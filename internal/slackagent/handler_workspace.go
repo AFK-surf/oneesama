@@ -24,7 +24,7 @@ func (h *Handler) handleWorkspaceBootstrap(c *gin.Context) {
 		return
 	}
 
-	result := h.service.BootstrapWorkspace(WorkspaceBootstrapInput{WorkspaceDir: request.WorkspaceDir})
+	result := h.service.BootstrapWorkspace(WorkspaceBootstrapInput(request))
 	c.JSON(http.StatusOK, result)
 }
 
@@ -35,10 +35,6 @@ func (h *Handler) handleRuntimeValidate(c *gin.Context) {
 		return
 	}
 
-	result := h.service.ValidateRuntime(c.Request.Context(), RuntimeValidationInput{
-		MeetingAgentURL:    request.MeetingAgentURL,
-		WebhookListen:      request.WebhookListen,
-		RequireSlackTokens: request.RequireSlackTokens,
-	})
+	result := h.service.ValidateRuntime(c.Request.Context(), RuntimeValidationInput(request))
 	c.JSON(http.StatusOK, result)
 }

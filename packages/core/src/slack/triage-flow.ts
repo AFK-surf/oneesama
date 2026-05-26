@@ -224,7 +224,7 @@ export function parseSlackTriageDecision(rawOutput: unknown, fallback: SlackTria
 }
 
 export function suggestSlackTriageFallback({
-  channelId = "",
+  channelId: _channelId = "",
   messages = [],
 }: {
   channelId?: string;

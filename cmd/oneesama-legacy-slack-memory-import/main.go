@@ -47,9 +47,9 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	fs.BoolVar(&write, "write", false, "Actually write files. Omit for dry-run.")
 	fs.IntVar(&maxTriageRuns, "max-triage-runs", 200, "Maximum legacy triage_run rows to render into Markdown.")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: oneesama-legacy-slack-memory-import --source-workspace PATH --source-db PATH --target-workspace PATH [--write]\n\n")
-		fmt.Fprintf(stderr, "Imports old Slack Agent D memory into Oneesama workspace memory as line-citable Markdown.\n")
-		fmt.Fprintf(stderr, "Default mode is dry-run; pass --write to create/update memory/legacy/slack-agent-d files.\n\n")
+		_, _ = fmt.Fprintf(stderr, "Usage: oneesama-legacy-slack-memory-import --source-workspace PATH --source-db PATH --target-workspace PATH [--write]\n\n")
+		_, _ = fmt.Fprintf(stderr, "Imports old Slack Agent D memory into Oneesama workspace memory as line-citable Markdown.\n")
+		_, _ = fmt.Fprintf(stderr, "Default mode is dry-run; pass --write to create/update memory/legacy/slack-agent-d files.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

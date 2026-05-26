@@ -44,7 +44,7 @@ func main() {
 func run(args []string, stderr io.Writer) int {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(stderr, "load config: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "load config: %v\n", err)
 		return 1
 	}
 
@@ -52,14 +52,14 @@ func run(args []string, stderr io.Writer) int {
 	logger.Info("config loaded", "config", config.RedactForLogging(cfg))
 
 	if len(args) < 1 {
-		fmt.Fprintln(stderr, "usage: oneesama <slack-agent|meeting-agent>")
+		_, _ = fmt.Fprintln(stderr, "usage: oneesama <slack-agent|meeting-agent>")
 		return 1
 	}
 
 	subcommand := args[0]
 	buildServer, ok := subcommands[subcommand]
 	if !ok {
-		fmt.Fprintf(stderr, "unknown subcommand: %s\n", subcommand)
+		_, _ = fmt.Fprintf(stderr, "unknown subcommand: %s\n", subcommand)
 		return 1
 	}
 

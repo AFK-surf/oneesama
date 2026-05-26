@@ -258,7 +258,7 @@ func writeLegacySlackdDailyReportDB(t *testing.T, occurredAt time.Time) string {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	schema := []string{
 		`create table triage_run (id integer primary key, session_id text, occurred_at text, status text, summary text, error text, digest text, steps integer, duration_seconds real, mutations integer, failures integer, tokens_used integer, channels_json text, raw_output text)`,
 		`create table triage_action (id integer primary key, run_id integer, position integer, tool text, channel text, brief text, created_at text)`,

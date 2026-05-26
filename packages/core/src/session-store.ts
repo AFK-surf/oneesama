@@ -52,10 +52,10 @@ export function createSessionStore(options: SessionStoreOptions = {}) {
       return sessions.get(id);
     },
     list() {
-      return sessions.list().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return sessions.list().toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
     latest() {
-      const items = sessions.list().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const items = sessions.list().toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
       return items[0] || null;
     },
     update(id: string, patch: Partial<SessionRecord>) {

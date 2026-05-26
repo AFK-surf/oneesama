@@ -66,7 +66,7 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
   }
 
   function list() {
-    return jobs.list().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return jobs.list().toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   function pollReadyForRealtime({

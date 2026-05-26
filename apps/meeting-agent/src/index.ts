@@ -822,7 +822,7 @@ async function waitForRunnerJob(jobId, timeoutMs = 30_000) {
   while (Date.now() < deadline) {
     job = runner.getJob(jobId);
     if (job && ["completed", "failed", "timeout"].includes(job.status)) return job;
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise((settle) => setTimeout(settle, 150));
   }
   job = runner.getJob(jobId);
   return job
@@ -1603,7 +1603,7 @@ const service = createJsonServer({
       const job = await runner.startTask({
         task: utterance,
         context: {
-          ...((b.context as Record<string, unknown>) || {}),
+          ...(b.context as Record<string, unknown>),
           sessionId: String(b.sessionId || ""),
           source: "meeting-local-dialog",
         },

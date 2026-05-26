@@ -120,7 +120,7 @@ func slackUploadToExternalURL(ctx context.Context, client *http.Client, botToken
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("upload http %d", response.StatusCode)
 	}
@@ -206,7 +206,7 @@ func callSlackFormAPI(ctx context.Context, client *http.Client, botToken string,
 	if err != nil {
 		return slackFormAPIResult{Error: "request_failed", Detail: err.Error()}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
 		return slackFormAPIResult{Status: response.StatusCode, Error: "decode_response_failed", Detail: err.Error()}
 	}

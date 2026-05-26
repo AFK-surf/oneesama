@@ -198,7 +198,7 @@ export async function listShareableApplications(options: MeetingRecorderOptions 
   return apps
     .map(normalizeShareableApplication)
     .filter((app) => app.processId || app.bundleIdentifier || app.applicationName)
-    .sort((a, b) => a.applicationName.localeCompare(b.applicationName));
+    .toSorted((a, b) => a.applicationName.localeCompare(b.applicationName));
 }
 
 class PulseAudioRecorder {

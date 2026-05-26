@@ -221,7 +221,7 @@ func (p *Poster) postOnce(ctx context.Context, payload map[string]any, input Pos
 			Detail:   err.Error(),
 		}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	var body SlackPostMessageBody
 	if decodeErr := json.NewDecoder(response.Body).Decode(&body); decodeErr != nil {

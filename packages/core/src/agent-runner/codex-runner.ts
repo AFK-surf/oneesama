@@ -77,7 +77,7 @@ export function createCodexRunner(options: CodexRunnerOptions = {}) {
   }
 
   function listJobs() {
-    return [...jobs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...jobs.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   function runCodex(job: CodexRunnerJob) {

@@ -75,7 +75,7 @@ func CallSlackAPI(ctx context.Context, client *http.Client, botToken string, api
 	if err != nil {
 		return SlackCanvasAPIResult{Method: method, Error: "request_failed", Detail: err.Error()}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	var body SlackCanvasAPIBody
 	if decodeErr := json.NewDecoder(response.Body).Decode(&body); decodeErr != nil {

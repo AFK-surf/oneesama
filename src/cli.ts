@@ -604,7 +604,7 @@ function requiredAgentRealTaskKeywords() {
   return configured.length ? configured : ["Alice", "Bob", "Slack", "Meet", "latency", "alpha42"];
 }
 
-function agentRealTaskPrompt({ provider, keywords }) {
+function agentRealTaskPrompt({ provider: _provider, keywords }) {
   return [
     "你是 meeting-avatar-bot 的可替换 AgentRunner provider。",
     "请阅读下面的短会议 transcript，输出一段中文摘要。",
@@ -645,7 +645,7 @@ async function copyAgentRealTaskReports({ rootDir }) {
     await copyFile(sourcePath, targetPath);
     copied.push(relative(rootDir, targetPath));
   }
-  return copied.sort();
+  return copied.toSorted();
 }
 
 async function runAgentRealTaskForProvider(providerInput, { keywords, reportDir }) {
@@ -4598,7 +4598,7 @@ async function slackToolRegistrySmoke() {
       "usage_api",
       "manage_schedule",
     ];
-    const names = report.tools.map((tool) => tool.name).sort();
+    const names = report.tools.map((tool) => tool.name).toSorted();
     for (const name of expected) {
       assertSmoke(names.includes(name), `Legacy tool registry missing ${name}`, names);
       assertSmoke(
@@ -5474,7 +5474,7 @@ async function slackTriageFlowSmoke() {
     };
     const actionBlock: ActionBlock =
       (blockFixture as ActionBlock[]).find((block) => block.type === "actions") || {};
-    const actionIds = (actionBlock.elements || []).map((element) => element.action_id);
+    const actionIds = new Set((actionBlock.elements || []).map((element) => element.action_id));
     for (const expectedActionId of [
       "mab_pending_action_confirm",
       "mab_pending_action_dismiss",
@@ -5483,7 +5483,7 @@ async function slackTriageFlowSmoke() {
       "mab_pending_action_assign",
     ]) {
       assertSmoke(
-        actionIds.includes(expectedActionId),
+        actionIds.has(expectedActionId),
         `Slack pending action Block Kit missing ${expectedActionId}`,
         blockFixture,
       );
@@ -5579,7 +5579,7 @@ async function slackTriageFlowSmoke() {
                       kind: "mab_pending_action",
                       id: pendingAction.id,
                       status: spec.status,
-                      ...(spec.extra || {}),
+                      ...spec.extra,
                     }),
                   }
                 : {}),
@@ -6876,7 +6876,7 @@ async function realtimeBrowserSmoke() {
     const status = await (await fetch("http://127.0.0.1:18887/join/status")).json();
     const workerJobs = await (await fetch("http://127.0.0.1:18887/worker/jobs")).json();
     const realtimeEvents = status.active?.fixtureState?.realtimeEvents || [];
-    const eventTypes = realtimeEvents.map((event) => event.type);
+    const eventTypes = new Set(realtimeEvents.map((event) => event.type));
     const deliveredJob = workerJobs.jobs.find((job) => job.id === "job_realtime_browser_smoke");
     assertSmoke(
       deliveredJob?.deliveredToRealtime === true,
@@ -6888,12 +6888,12 @@ async function realtimeBrowserSmoke() {
       },
     );
     assertSmoke(
-      eventTypes.includes("conversation.item.create"),
+      eventTypes.has("conversation.item.create"),
       "worker result did not create a realtime conversation item",
       status,
     );
     assertSmoke(
-      eventTypes.includes("response.create"),
+      eventTypes.has("response.create"),
       "worker result did not request a realtime response",
       status,
     );
@@ -6965,14 +6965,14 @@ async function realtimeWebrtcSmoke() {
     const status = await (await fetch("http://127.0.0.1:18888/join/status")).json();
     const workerJobs = await (await fetch("http://127.0.0.1:18888/worker/jobs")).json();
     const bridge = status.active?.realtimeBridge;
-    const eventTypes = (bridge?.outbound || []).map((entry) => entry.event?.type);
-    const sentPayloadTypes = (bridge?.connection?.sentDataChannelMessages || []).map((entry) => {
+    const eventTypes = new Set((bridge?.outbound || []).map((entry) => entry.event?.type));
+    const sentPayloadTypes = new Set((bridge?.connection?.sentDataChannelMessages || []).map((entry) => {
       try {
         return JSON.parse(entry.payload).type;
       } catch {
         return "";
       }
-    });
+    }));
     const deliveredJob = workerJobs.jobs.find((job) => job.id === "job_realtime_webrtc_smoke");
     assertSmoke(
       deliveredJob?.deliveredToRealtime === true,
@@ -6990,22 +6990,22 @@ async function realtimeWebrtcSmoke() {
       bridge?.connection,
     );
     assertSmoke(
-      eventTypes.includes("conversation.item.create"),
+      eventTypes.has("conversation.item.create"),
       "worker result did not create a realtime conversation item",
       bridge,
     );
     assertSmoke(
-      eventTypes.includes("response.create"),
+      eventTypes.has("response.create"),
       "worker result did not request a realtime response",
       bridge,
     );
     assertSmoke(
-      sentPayloadTypes.includes("conversation.item.create"),
+      sentPayloadTypes.has("conversation.item.create"),
       "conversation item was not sent over data-channel seam",
       bridge?.connection,
     );
     assertSmoke(
-      sentPayloadTypes.includes("response.create"),
+      sentPayloadTypes.has("response.create"),
       "response request was not sent over data-channel seam",
       bridge?.connection,
     );
@@ -7228,11 +7228,6 @@ async function realtimeRepeatGuardSmoke() {
       { timeout: 10_000 },
     );
 
-    type RealtimeBridgeSnapshot = {
-      outbound?: Array<{ event?: { type?: string } }>;
-      connection?: { sentDataChannelMessages?: Array<{ payload?: string }> };
-      protection?: { duplicateWorkerResultsSkipped?: number; userSpeechCancels?: number };
-    };
     type RepeatGuardResult = {
       firstDelivery?: unknown;
       duplicateDelivery?: { duplicate?: boolean };
@@ -7599,19 +7594,19 @@ async function realtimeWorkerToolSmoke() {
     const functionOutputs = sentEvents.filter(
       (event) => event.item?.type === "function_call_output",
     );
-    const outputCallIds = functionOutputs.map((event) => event.item?.call_id);
+    const outputCallIds = new Set(functionOutputs.map((event) => event.item?.call_id));
     const workerJobs = (await (await fetch("http://127.0.0.1:18892/worker/jobs")).json()) as {
       jobs?: Array<{ id?: string; status?: string }>;
     };
     const reportedJob = workerJobs.jobs?.find((job) => job.id === jobId);
 
     assertSmoke(
-      outputCallIds.includes("call_delegate_worker_smoke"),
+      outputCallIds.has("call_delegate_worker_smoke"),
       "delegate_to_worker did not emit a function_call_output",
       sentEvents,
     );
     assertSmoke(
-      outputCallIds.includes("call_worker_status_smoke"),
+      outputCallIds.has("call_worker_status_smoke"),
       "worker_status did not emit a function_call_output",
       sentEvents,
     );
@@ -7828,9 +7823,6 @@ async function realtimeLiveToolSmoke() {
       bridge?: RealtimeBridgeSnapshot & { errors?: unknown[] };
       avatar?: unknown;
       clientTools?: string[];
-    };
-    const workerJobs = (await (await fetch("http://127.0.0.1:18893/worker/jobs")).json()) as {
-      jobs?: Array<{ id?: string; status?: string }>;
     };
     const sentEvents = collectRealtimeSentEvents(result.bridge || {}) as Array<
       Record<string, unknown> & { item?: { type?: string; call_id?: string } }
@@ -10166,7 +10158,7 @@ async function runEvidenceCommand({ name, args, rootDir, required = false }) {
     encoding: "utf8",
     maxBuffer: 20 * 1024 * 1024,
   });
-  const command = {
+  const evidenceCommand = {
     name,
     args,
     startedAt,
@@ -10177,10 +10169,10 @@ async function runEvidenceCommand({ name, args, rootDir, required = false }) {
     stdoutPath: `commands/${safeName}.stdout.txt`,
     stderrPath: `commands/${safeName}.stderr.txt`,
   };
-  await writeTextArtifact(pathJoin(rootDir, command.stdoutPath), result.stdout || "");
-  await writeTextArtifact(pathJoin(rootDir, command.stderrPath), result.stderr || "");
-  if (required) assertSmoke(command.ok, `evidence command failed: ${name}`, command);
-  return command;
+  await writeTextArtifact(pathJoin(rootDir, evidenceCommand.stdoutPath), result.stdout || "");
+  await writeTextArtifact(pathJoin(rootDir, evidenceCommand.stderrPath), result.stderr || "");
+  if (required) assertSmoke(evidenceCommand.ok, `evidence command failed: ${name}`, evidenceCommand);
+  return evidenceCommand;
 }
 
 async function fetchJsonArtifact(url, filePath) {
@@ -10208,7 +10200,7 @@ async function collectArtifacts(rootDir) {
     }
   }
   await walk(rootDir);
-  return artifacts.sort((a, b) => a.path.localeCompare(b.path));
+  return artifacts.toSorted((a, b) => a.path.localeCompare(b.path));
 }
 
 async function copyStateArtifacts({ statePath, rootDir }) {
@@ -10761,7 +10753,7 @@ interface SignedSlackRequestOptions extends SlackCommandFormOptions {
   omitSignature?: boolean;
 }
 
-function buildSlackCommandForm(command: string, options: SlackCommandFormOptions = {}) {
+function buildSlackCommandForm(commandText: string, options: SlackCommandFormOptions = {}) {
   const form = new URLSearchParams({
     token: "deprecated-verification-token",
     team_id: "T_SMOKE",
@@ -10771,21 +10763,21 @@ function buildSlackCommandForm(command: string, options: SlackCommandFormOptions
     user_id: options.userId || "U_SMOKE",
     user_name: options.userName || "smoke-user",
     command: "/avatar",
-    text: command,
+    text: commandText,
     response_url: "https://hooks.slack.com/commands/smoke",
     trigger_id: "smoke-trigger",
-    ...(options.formOverrides || {}),
+    ...options.formOverrides,
   });
   return form.toString();
 }
 
 async function postSignedSlackCommand(
   url: string,
-  command: string,
+  commandText: string,
   options: SignedSlackRequestOptions = {},
 ) {
   const timestamp = String(options.timestamp || Math.floor(Date.now() / 1000));
-  const rawBody = options.rawBody || buildSlackCommandForm(command, options);
+  const rawBody = options.rawBody || buildSlackCommandForm(commandText, options);
   const signature =
     options.signature ??
     signSlackRequestBody({

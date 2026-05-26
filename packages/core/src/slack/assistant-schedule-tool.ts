@@ -287,10 +287,11 @@ export function createInMemoryAssistantScheduleManager(
   const schedules = [...definitions];
   return {
     async list() {
-      return schedules.map((definition) => ({
-        ...definition,
-        metadata: definition.metadata ? { ...definition.metadata } : definition.metadata,
-      }));
+      return schedules.map((definition) =>
+        Object.assign({}, definition, {
+          metadata: definition.metadata ? { ...definition.metadata } : definition.metadata,
+        }),
+      );
     },
   };
 }

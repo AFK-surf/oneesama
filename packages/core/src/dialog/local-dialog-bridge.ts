@@ -20,28 +20,6 @@ interface LocalDialogTurn {
   error?: string;
 }
 
-interface LocalDialogState {
-  ok: boolean;
-  enabled: boolean;
-  provider: string;
-  turns: LocalDialogTurn[];
-  utterancesReceived: number;
-  responsesSpoken: number;
-  lastTurn: LocalDialogTurn | null;
-  errors: Array<Record<string, unknown>>;
-  tts: {
-    mode?: string;
-    provider?: string;
-    routedToAvatarBus: boolean;
-    lastRoute: Record<string, unknown> | null;
-  };
-  stt: {
-    provider?: string;
-    utterancesReceived: number;
-    lastUtterance: Record<string, unknown> | null;
-  };
-}
-
 interface SpeakResult extends AudioPlaybackResult {
   avatar?: unknown;
   provider?: string;
@@ -69,7 +47,7 @@ interface SpeakResult extends AudioPlaybackResult {
     ttsProvider: "browser-tone",
     avatarMood: "happy",
     avatarAction: "speak",
-    ...(window.MAB_LOCAL_DIALOG_CONFIG || {}),
+    ...window.MAB_LOCAL_DIALOG_CONFIG,
   };
 
   const TERMINAL_STATUSES = new Set(["completed", "failed", "timeout"]);

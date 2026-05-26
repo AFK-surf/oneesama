@@ -340,7 +340,7 @@ func (s *Service) callSlackConversationsReplies(ctx context.Context, channel str
 	if err != nil {
 		return slackRepliesResponse{}, fmt.Errorf("call conversations.replies: %w", err)
 	}
-	defer httpResponse.Body.Close()
+	defer func() { _ = httpResponse.Body.Close() }()
 
 	var response slackRepliesResponse
 	if err := json.NewDecoder(httpResponse.Body).Decode(&response); err != nil {

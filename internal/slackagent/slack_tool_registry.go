@@ -557,7 +557,7 @@ func executeExaSearchTool(ctx context.Context, args map[string]any) SlackToolCal
 	if err != nil {
 		return SlackToolCallResponse{OK: false, Schema: "oneesama.slack-tool-result.v1", Tool: "exa_search", Error: err.Error()}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, slackExternalLinkFetchBodyLimit))
 	if err != nil {
 		return SlackToolCallResponse{OK: false, Schema: "oneesama.slack-tool-result.v1", Tool: "exa_search", Error: err.Error()}

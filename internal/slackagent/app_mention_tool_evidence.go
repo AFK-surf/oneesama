@@ -106,7 +106,7 @@ func appMentionFreshSearchQuery(mention *SlackAppMentionContext) string {
 
 func containsFreshEntityToken(query string) bool {
 	for _, field := range strings.Fields(query) {
-		token := strings.Trim(field, " \t\r\n.,;:!?？!()[]{}<>\"'`“”‘’")
+		token := strings.Trim(field, " \t\r\n.,;:!?？()[]{}<>\"'`“”‘’")
 		if len([]rune(token)) < 3 {
 			continue
 		}

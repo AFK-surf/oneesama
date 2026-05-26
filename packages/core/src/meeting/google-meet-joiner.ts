@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { getRuntimeConfig } from "../env.ts";
-import type { ScreenShareState, VideoStageState } from "../browser-runtime-types.ts";
+import type { ScreenShareState } from "../browser-runtime-types.ts";
 import { buildAvatarInitScript } from "../avatar/init-script-builder.ts";
 import { buildLocalDialogInitScript } from "../dialog/local-dialog-init-builder.ts";
 import { enableMeetCaptions, installMeetCaptionCapture } from "./caption-capture.ts";
@@ -39,8 +39,6 @@ import {
 const require = createRequire(import.meta.url);
 
 type Page = import("playwright").Page;
-type BrowserContext = import("playwright").BrowserContext;
-
 const DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH = 2560;
 const DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT = 1440;
 const DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS = 25;
@@ -1693,7 +1691,7 @@ export function buildMeetingAwarenessState({
     });
   }
 
-  const participants = Array.from(participantMap.values()).sort((a, b) =>
+  const participants = Array.from(participantMap.values()).toSorted((a, b) =>
     a.name.localeCompare(b.name),
   );
   const participantCount =
@@ -1743,7 +1741,7 @@ function meetingAwarenessSignature(awareness: MeetingAwarenessState | null): str
   if (!awareness?.ok) return "";
   const participants = awareness.participants
     .map((participant) => participant.name.toLowerCase())
-    .sort()
+    .toSorted()
     .join("|");
   const speakerIdentity = awareness.activeSpeaker?.identity;
   const speaker = [
@@ -2029,11 +2027,11 @@ async function evaluateMeetPageState(page: Page): Promise<MeetPageState> {
           const name = cleanPersonName(candidate);
           if (name) return name;
         }
-        const lines = (node.innerText || node.textContent || "")
+        const line = (node.innerText || node.textContent || "")
           .split("\n")
-          .map((line) => cleanPersonName(line))
-          .filter(Boolean);
-        return lines[0] || "";
+          .map((candidateLine) => cleanPersonName(candidateLine))
+          .find(Boolean);
+        return line || "";
       }
       function addParticipant(
         map: Map<string, MeetParticipantSignal>,
@@ -3245,10 +3243,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     let recappiApplications: any[] = [];
     try {
       const applications = await listShareableApplications();
-      recappiApplications = applications.map((app) => ({
-        ...app,
-        source: app.source || "recappi_shareable_content",
-      }));
+      recappiApplications = applications.map((app) =>
+        Object.assign({}, app, { source: app.source || "recappi_shareable_content" }),
+      );
     } catch (error) {
       const message = String(error?.message || error);
       errors.push(`recappi_shareable_content: ${message}`);

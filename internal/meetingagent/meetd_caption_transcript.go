@@ -27,20 +27,6 @@ func meetdCaptionTranscript(captions []MeetdCaptionRecord, origin time.Time) str
 	return strings.Join(lines, "\n")
 }
 
-func meetdCaptionTranscriptInRange(captions []MeetdCaptionRecord, origin, start, end time.Time) string {
-	filtered := make([]MeetdCaptionRecord, 0, len(captions))
-	for _, caption := range captions {
-		if !start.IsZero() && caption.Timestamp.Before(start) {
-			continue
-		}
-		if !end.IsZero() && caption.Timestamp.After(end) {
-			continue
-		}
-		filtered = append(filtered, caption)
-	}
-	return meetdCaptionTranscript(filtered, origin)
-}
-
 func dedupeMeetdCaptionsForTranscript(captions []MeetdCaptionRecord) []MeetdCaptionRecord {
 	if len(captions) == 0 {
 		return nil

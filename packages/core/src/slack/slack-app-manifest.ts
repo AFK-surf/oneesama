@@ -53,7 +53,7 @@ function cleanUrl(url, fallback = "http://127.0.0.1:8780") {
 function uniqSorted(values) {
   return [
     ...new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)),
-  ].sort();
+  ].toSorted();
 }
 
 function hasPathValue(object, path, expected) {
@@ -337,7 +337,7 @@ export async function exchangeSlackOAuthCode({
 }
 
 export function maskSlackOAuthResult(result: SlackOAuthExchangeResult = {}) {
-  const body = { ...(result.body || {}) };
+  const body = { ...result.body };
   for (const key of ["access_token", "bot_access_token", "refresh_token"]) {
     if (body[key]) body[key] = `${String(body[key]).slice(0, 8)}...`;
   }

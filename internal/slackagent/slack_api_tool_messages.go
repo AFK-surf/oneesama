@@ -164,7 +164,7 @@ func (t *slackAPITool) actionPostMessageWithAction(ctx context.Context, params m
 	if err != nil {
 		return slackAPIToolResult{Success: false, Text: "Failed to post chat.postMessage: " + err.Error()}, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var body struct {
 		OK      bool   `json:"ok"`
@@ -569,7 +569,7 @@ func (t *slackAPITool) callSlackGET(ctx context.Context, baseURL string, method 
 	if err != nil {
 		return slackFormAPIResult{Error: "request_failed", Detail: err.Error()}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
 		return slackFormAPIResult{Status: response.StatusCode, Error: "decode_response_failed", Detail: err.Error()}
 	}

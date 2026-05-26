@@ -239,7 +239,7 @@ func (s *Service) MintRealtimeClientSecret(ctx context.Context, options Realtime
 	if err != nil {
 		return nil, http.StatusBadGateway, fmt.Errorf("post realtime client secret: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	parsed := readRealtimeJSON(response.Body)
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {

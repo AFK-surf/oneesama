@@ -1392,10 +1392,7 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
       `,
         )
         .all(runId)
-        .map((call) => ({
-          ...call,
-          success: Boolean(call.success),
-        }));
+        .map((call) => Object.assign({}, call, { success: Boolean(call.success) }));
       return normalizeTriageContext({
         ...run,
         actions,

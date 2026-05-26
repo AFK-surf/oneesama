@@ -425,12 +425,12 @@ func loadLegacySlackdTriageRunsFromDB(ctx context.Context, path string, start ti
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	rows, err := db.QueryContext(ctx, `select id, session_id, occurred_at, status, summary, error, digest, steps, duration_seconds, mutations, failures, tokens_used, channels_json, raw_output from triage_run where unixepoch(occurred_at) >= unixepoch(?) and unixepoch(occurred_at) <= unixepoch(?) order by occurred_at asc, id asc`, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, fmt.Errorf("query legacy triage_run: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var runs []SlackTriageContext
 	runIndexByID := map[int64]int{}
 	for rows.Next() {
@@ -462,7 +462,7 @@ func attachLegacyTriageActionsAndTools(ctx context.Context, db *sql.DB, runs []S
 	if err != nil {
 		return fmt.Errorf("query legacy triage_action: %w", err)
 	}
-	defer actions.Close()
+	defer func() { _ = actions.Close() }()
 	for actions.Next() {
 		var runID int64
 		var action SlackTriageAction
@@ -480,7 +480,7 @@ func attachLegacyTriageActionsAndTools(ctx context.Context, db *sql.DB, runs []S
 	if err != nil {
 		return fmt.Errorf("query legacy triage_tool_call: %w", err)
 	}
-	defer tools.Close()
+	defer func() { _ = tools.Close() }()
 	for tools.Next() {
 		var runID int64
 		var call SlackTriageToolCall
@@ -1319,6 +1319,9 @@ func slackDailyReportEmojiSummary(counts map[string]int, reactionRuns int) strin
 }
 
 func (s *Service) dailyReportStatus() SlackDailyReportStatus {
+	if s == nil {
+		return SlackDailyReportStatus{}
+	}
 	cfg := s.dailyReportConfig
 	status := SlackDailyReportStatus{
 		Enabled:          cfg.Enabled,
@@ -1331,9 +1334,6 @@ func (s *Service) dailyReportStatus() SlackDailyReportStatus {
 	}
 	if next, err := nextSlackDailyReportRun(timeNow().UTC(), cfg); err == nil {
 		status.NextRunAt = next.UTC().Format(time.RFC3339Nano)
-	}
-	if s == nil {
-		return status
 	}
 	s.dailyReportMu.Lock()
 	defer s.dailyReportMu.Unlock()
