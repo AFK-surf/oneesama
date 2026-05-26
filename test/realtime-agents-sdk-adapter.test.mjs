@@ -80,6 +80,11 @@ async function withToolServer(callback) {
         );
         return;
       }
+      if (request.url === "/tools/fetch_url") {
+        response.statusCode = 500;
+        response.end(JSON.stringify({ ok: false, error: "upstream_fetch_failed" }));
+        return;
+      }
       response.statusCode = 404;
       response.end(JSON.stringify({ ok: false, error: "not_found" }));
     } catch (error) {
@@ -275,6 +280,53 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
             entry.detail.session_id === "sdk-smoke-session",
         ),
       );
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+test("Realtime Agents SDK local tool failures use the shared blocked turn policy", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk-mock",
+          agentRuntime: "agents-sdk",
+          sessionId: "sdk-tool-failure-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          toolCallbackToken: "test-session-token",
+          tools: [
+            {
+              type: "function",
+              name: "fetch_url",
+              description: "Fetch URL.",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          ],
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.agentRuntime?.sdkConnected === true,
+      );
+
+      const toolResult = await page.evaluate(() =>
+        window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("fetch_url", {
+          url: "https://example.test",
+        }),
+      );
+      const bridge = await page.evaluate(() => window.MAB_REALTIME_BRIDGE);
+
+      assert.equal(toolResult.delivery.policy.channel, "blocked");
+      assert.equal(toolResult.delivery.policy.reason, "workspace_tool_blocked");
+      assert.equal(toolResult.delivery.modelResult.turnPolicy.channel, "blocked");
+      assert.equal(bridge.turnPolicy.decisions.at(-1).channel, "blocked");
+      assert.equal(bridge.turnPolicy.events.at(-1).visibility, "blocked");
     } finally {
       await browser.close();
     }

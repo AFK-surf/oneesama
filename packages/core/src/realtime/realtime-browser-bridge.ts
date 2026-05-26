@@ -248,6 +248,21 @@
       summary: "Realtime bridge is initializing.",
       blockers: [],
       checks: {},
+      audioInputPolicy: null,
+      failureMatrix: {},
+      runtimeState: null,
+      updatedAt: new Date().toISOString(),
+    },
+    audioInputPolicy: null,
+    runtimeState: {
+      status: "initializing",
+      phase: "initializing",
+      reason: "initializing",
+      blockers: [],
+      audioInputReady: false,
+      audioInputSource: "",
+      canSpeak: false,
+      toolTurnsHealthy: true,
       updatedAt: new Date().toISOString(),
     },
     contextHealth: {
@@ -1156,7 +1171,9 @@
 
   const {
     deliverFunctionToolResult,
+    deliverFunctionToolError,
     prepareFunctionToolResult,
+    prepareFunctionToolError,
     deliverWorkerResult,
     rememberSuppressedWorkerResult,
     shouldDeliverWorkerResult,
@@ -1341,23 +1358,42 @@
     return value;
   }
 
+  function localToolKind(name) {
+    if (LOCAL_WORKER_TOOLS.has(name)) return "worker";
+    if (LOCAL_MEET_TOOLS.has(name)) return "meet";
+    if (LOCAL_WORKSPACE_TOOLS.has(name)) return "workspace";
+    return "avatar";
+  }
+
+  function runLocalToolByKind(kind, name, args) {
+    if (kind === "worker") return runLocalWorkerTool(name, args);
+    if (kind === "meet") return runLocalMeetTool(name, args);
+    if (kind === "workspace") return runLocalWorkspaceTool(name, args);
+    return runLocalAvatarTool(name, args);
+  }
+
+  function rememberLocalToolCallByKind(kind, call) {
+    if (kind === "worker") rememberWorkerToolCall(call);
+    else if (kind === "meet") rememberMeetToolCall(call);
+    else if (kind === "workspace") rememberWorkspaceToolCall(call);
+    else rememberAvatarToolCall(call);
+  }
+
+  function rememberLocalToolErrorByKind(kind, error, detail) {
+    if (kind === "worker") rememberWorkerToolError(error, detail);
+    else if (kind === "meet") rememberMeetToolError(error, detail);
+    else if (kind === "workspace") rememberWorkspaceToolError(error, detail);
+    else rememberAvatarToolError(error, detail);
+  }
+
   async function runLocalToolForSDK(name, args = {}, callId = "") {
     recordTimeline("realtime_agent_sdk_tool_start", { name, callId });
-    const kind = LOCAL_WORKER_TOOLS.has(name) ? "worker"
-      : LOCAL_MEET_TOOLS.has(name) ? "meet"
-        : LOCAL_WORKSPACE_TOOLS.has(name) ? "workspace"
-          : "avatar";
+    const kind = localToolKind(name);
     try {
-      const result = kind === "worker" ? await runLocalWorkerTool(name, args)
-        : kind === "meet" ? await runLocalMeetTool(name, args)
-          : kind === "workspace" ? await runLocalWorkspaceTool(name, args)
-            : runLocalAvatarTool(name, args);
+      const result = await runLocalToolByKind(kind, name, args);
       const delivery = prepareFunctionToolResult({ kind, name, callId, result }, { sendOutput: false });
       const call = { name, callId, arguments: args, result, runtime: "agents-sdk", delivery };
-      if (kind === "worker") rememberWorkerToolCall(call);
-      else if (kind === "meet") rememberMeetToolCall(call);
-      else if (kind === "workspace") rememberWorkspaceToolCall(call);
-      else rememberAvatarToolCall(call);
+      rememberLocalToolCallByKind(kind, call);
       recordTimeline("realtime_agent_sdk_tool_end", { name, callId, ok: true });
       updateFeedback();
       return { result, delivery };
@@ -1368,11 +1404,10 @@
         ok: false,
         error: String((error && error.message) || error).slice(0, 300),
       });
-      if (kind === "worker") rememberWorkerToolError(error, { name, callId });
-      else if (kind === "meet") rememberMeetToolError(error, { name, callId });
-      else if (kind === "workspace") rememberWorkspaceToolError(error, { name, callId });
-      else rememberAvatarToolError(error, { name, callId });
-      throw error;
+      rememberLocalToolErrorByKind(kind, error, { name, callId });
+      const delivery = prepareFunctionToolError({ kind, name, callId, error }, { sendOutput: false });
+      updateFeedback();
+      return { result: delivery.modelResult, delivery };
     }
   }
 
@@ -1855,95 +1890,38 @@
       handledLocalToolCallIds.add(toolCallKey);
       state.protection.handledLocalToolCallIds = Array.from(handledLocalToolCallIds).slice(-80);
     }
-    if (LOCAL_WORKER_TOOLS.has(toolCall.name)) {
-      return runLocalWorkerTool(toolCall.name, toolCall.arguments)
-        .then((result) => {
-          const delivery = deliverFunctionToolResult({
-            kind: "worker",
-            name: toolCall.name,
-            callId: toolCall.callId,
-            result,
-          });
-          rememberWorkerToolCall({
-            name: toolCall.name,
-            callId: toolCall.callId,
-            arguments: toolCall.arguments,
-            result,
-            delivery,
-          });
-          return { ok: true, result, delivery };
-        })
-        .catch((error) => {
-          rememberWorkerToolError(error, { name: toolCall.name, callId: toolCall.callId });
-          return { ok: false, error: String((error && error.message) || error) };
+    const kind = localToolKind(toolCall.name);
+    return Promise.resolve()
+      .then(() => runLocalToolByKind(kind, toolCall.name, toolCall.arguments))
+      .then((result) => {
+        const delivery = deliverFunctionToolResult({
+          kind,
+          name: toolCall.name,
+          callId: toolCall.callId,
+          result,
         });
-    }
-    if (LOCAL_MEET_TOOLS.has(toolCall.name)) {
-      return runLocalMeetTool(toolCall.name, toolCall.arguments)
-        .then((result) => {
-          const delivery = deliverFunctionToolResult({
-            kind: "meet",
-            name: toolCall.name,
-            callId: toolCall.callId,
-            result,
-          });
-          rememberMeetToolCall({
-            name: toolCall.name,
-            callId: toolCall.callId,
-            arguments: toolCall.arguments,
-            result,
-            delivery,
-          });
-          return { ok: true, result, delivery };
-        })
-        .catch((error) => {
-          rememberMeetToolError(error, { name: toolCall.name, callId: toolCall.callId });
-          return { ok: false, error: String((error && error.message) || error) };
+        rememberLocalToolCallByKind(kind, {
+          name: toolCall.name,
+          callId: toolCall.callId,
+          arguments: toolCall.arguments,
+          result,
+          delivery,
         });
-    }
-    if (LOCAL_WORKSPACE_TOOLS.has(toolCall.name)) {
-      return runLocalWorkspaceTool(toolCall.name, toolCall.arguments)
-        .then((result) => {
-          const delivery = deliverFunctionToolResult({
-            kind: "workspace",
-            name: toolCall.name,
-            callId: toolCall.callId,
-            result,
-          });
-          rememberWorkspaceToolCall({
-            name: toolCall.name,
-            callId: toolCall.callId,
-            arguments: toolCall.arguments,
-            result,
-            delivery,
-          });
-          return { ok: true, result, delivery };
-        })
-        .catch((error) => {
-          rememberWorkspaceToolError(error, { name: toolCall.name, callId: toolCall.callId });
-          return { ok: false, error: String((error && error.message) || error) };
+        return { ok: true, result, delivery };
+      })
+      .catch((error) => {
+        rememberLocalToolErrorByKind(kind, error, {
+          name: toolCall.name,
+          callId: toolCall.callId,
         });
-    }
-    try {
-      const result = runLocalAvatarTool(toolCall.name, toolCall.arguments);
-      const delivery = deliverFunctionToolResult({
-        kind: "avatar",
-        name: toolCall.name,
-        callId: toolCall.callId,
-        result,
+        const delivery = deliverFunctionToolError({
+          kind,
+          name: toolCall.name,
+          callId: toolCall.callId,
+          error,
+        });
+        return { ok: false, error: String((error && error.message) || error), delivery };
       });
-      rememberAvatarToolCall({
-        name: toolCall.name,
-        callId: toolCall.callId,
-        arguments: toolCall.arguments,
-        result,
-        delivery,
-      });
-      return { ok: true, result, delivery };
-    } catch (error) {
-      rememberAvatarToolError(error, { name: toolCall.name, callId: toolCall.callId });
-      return { ok: false, error: String((error && error.message) || error) };
-    }
   }
 
   function rememberParticipantSource(

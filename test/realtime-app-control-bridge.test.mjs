@@ -8,6 +8,7 @@ import { realtimeToolSchemas } from "../packages/core/src/realtime/realtime-cont
 
 const controlTool = realtimeToolSchemas.find((tool) => tool.name === "control_shared_app_window");
 const shareTool = realtimeToolSchemas.find((tool) => tool.name === "share_existing_app_window");
+const avatarTool = realtimeToolSchemas.find((tool) => tool.name === "update_avatar_state");
 
 test("Realtime bridge skips auto-connect in the initial about:blank document", async () => {
   const browser = await chromium.launch({ headless: true });
@@ -198,6 +199,8 @@ test("Realtime app-control queued result stays silent until job completion event
     {
       config: {
         dryRunLocalTools: false,
+        forwardMeetAudioToRealtime: false,
+        includeParticipantAudio: false,
         tokenUrl: "http://meeting.local/realtime/client-secret",
       },
     },
@@ -254,6 +257,8 @@ test("Realtime feedback surfaces stale app-control jobs before generic output bl
     {
       config: {
         dryRunLocalTools: false,
+        forwardMeetAudioToRealtime: false,
+        includeParticipantAudio: false,
         tokenUrl: "http://meeting.local/realtime/client-secret",
       },
     },
@@ -344,6 +349,57 @@ test("Realtime bridge cancels output when user speech starts even without a trac
     assert.equal(protection.userSpeechCancels, 1);
     assert.equal(protection.outputAudioActive, false);
   });
+});
+
+test("Realtime raw tool errors are delivered through the central turn policy", async () => {
+  await withRealtimeBridge(
+    async (page) => {
+      await page.evaluate(() => {
+        window.dispatchEvent(
+          new CustomEvent("meeting-avatar-realtime-server-event", {
+            detail: {
+              type: "response.function_call_arguments.done",
+              name: "update_avatar_state",
+              call_id: "call_avatar_missing",
+              arguments: JSON.stringify({ mood: "happy" }),
+            },
+          }),
+        );
+      });
+
+      await page.waitForFunction(() =>
+        window.MAB_REALTIME_BRIDGE?.outbound?.some(
+          (entry) => entry.event?.item?.call_id === "call_avatar_missing",
+        ),
+      );
+
+      const state = await page.evaluate(() => ({
+        errors: window.MAB_REALTIME_BRIDGE.avatarTools.errors,
+        outbound: window.MAB_REALTIME_BRIDGE.outbound,
+        decisions: window.MAB_REALTIME_BRIDGE.turnPolicy.decisions,
+        events: window.MAB_REALTIME_BRIDGE.meetingEvents,
+      }));
+      const output = state.outbound
+        .map((entry) => entry.event?.item)
+        .find((item) => item?.call_id === "call_avatar_missing");
+      assert.equal(output.type, "function_call_output");
+      assert.match(output.output, /avatar controller is not available/);
+      assert.ok(
+        state.outbound.some(
+          (entry) =>
+            entry.event?.type === "response.create" &&
+            entry.event?.response?.instructions?.includes("exact blocker"),
+        ),
+      );
+      assert.equal(state.decisions.at(-1).channel, "blocked");
+      assert.equal(state.decisions.at(-1).reason, "avatar_tool_blocked");
+      assert.equal(state.events.at(-1).visibility, "blocked");
+      assert.equal(state.errors.length, 1);
+    },
+    {
+      tools: avatarTool ? [avatarTool] : [],
+    },
+  );
 });
 
 test("Realtime worker results are posted to Meet chat and only briefly acknowledged by voice", async () => {

@@ -606,6 +606,10 @@ test("Realtime feedback blocks only-local-mic input when Meet audio is expected"
     assert.equal(result.feedback.status, "waiting_for_turn");
     assert.equal(result.feedback.checks.onlyLocalMicFallbackInput, true);
     assert.equal(result.feedback.checks.meetParticipantAudioReady, false);
+    assert.equal(result.feedback.audioInputPolicy.source, "local_mic_fallback");
+    assert.equal(result.feedback.audioInputPolicy.ready, false);
+    assert.equal(result.feedback.failureMatrix.audioInput.reason, "only_local_mic_fallback_input");
+    assert.equal(result.feedback.runtimeState.phase, "audioInput:only_local_mic_fallback_input");
     assert.ok(result.feedback.blockers.includes("waiting_for_meet_audio"));
     assert.ok(result.feedback.blockers.includes("only_local_mic_fallback_input"));
     assert.ok(!result.feedback.blockers.includes("no_response_events"));

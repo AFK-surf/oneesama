@@ -17,6 +17,13 @@
     sendOutput?: boolean;
   }
 
+  interface FunctionToolErrorInput {
+    kind: "worker" | "meet" | "workspace" | "avatar";
+    name: string;
+    callId: string;
+    error: unknown;
+  }
+
   interface WorkerResultScope {
     ok: boolean;
     reason: string;
@@ -69,6 +76,13 @@
       return value && typeof value === "object" && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : {};
+    }
+
+    function errorMessage(error: unknown): string {
+      return String((error as { message?: string })?.message || error || "tool_error").slice(
+        0,
+        500,
+      );
     }
 
     function firstNonEmptyString(...values: unknown[]): string {
@@ -190,6 +204,16 @@
 
     function functionToolPolicy(input: FunctionToolPolicyInput): RealtimeTurnPolicy {
       const { kind, name, result } = input;
+      if (name !== "control_shared_app_window" && resultIsBlocked(result)) {
+        return {
+          channel: "blocked",
+          autoRespond: true,
+          reason: `${kind}_tool_blocked`,
+          responseInstructions:
+            "The tool result failed or is blocked. State the exact blocker in one short Chinese sentence. Do not mention ids, queues, tools, backends, routing names, or debug state.",
+        };
+      }
+
       if (kind === "worker") {
         return {
           channel: "voice",
@@ -430,6 +454,29 @@
       return prepareFunctionToolResult(input);
     }
 
+    function prepareFunctionToolError(
+      input: FunctionToolErrorInput,
+      options: FunctionToolDeliveryOptions = {},
+    ) {
+      return prepareFunctionToolResult(
+        {
+          kind: input.kind,
+          name: input.name,
+          callId: input.callId,
+          result: {
+            ok: false,
+            status: "error",
+            error: errorMessage(input.error),
+          },
+        },
+        options,
+      );
+    }
+
+    function deliverFunctionToolError(input: FunctionToolErrorInput) {
+      return prepareFunctionToolError(input);
+    }
+
     async function deliverWorkerResult(job, options: WorkerResultPolicyInput = {}) {
       const scope = meetingEvents.shouldDeliverWorkerResult(job);
       if (!scope.ok) return rememberSuppressedWorkerResult(job, scope.reason, scope);
@@ -566,7 +613,9 @@
 
     return {
       deliverFunctionToolResult,
+      deliverFunctionToolError,
       prepareFunctionToolResult,
+      prepareFunctionToolError,
       deliverWorkerResult,
       rememberSuppressedWorkerResult,
       shouldDeliverWorkerResult: meetingEvents.shouldDeliverWorkerResult,

@@ -687,8 +687,8 @@
             <span>可见输出通道：voice、Meet chat、screen/app share、worker result、avatar HUD。</span>
           </div>
           <div class="pulse ok">
-            <strong>已起步</strong>
-            <span>现在已有 typed turn policy / meeting event，并新增 failure matrix 暴露真正卡点。</span>
+            <strong>已收口</strong>
+            <span>现在已有 runtime state、audio input policy、typed turn policy 和 failure matrix。</span>
           </div>
         </div>
       </aside>
@@ -836,6 +836,8 @@
         <p>
           新版 feedback 不再只给一个“ready / waiting / blocked”摘要，而是按五个子系统给出状态。
           这能避免“本地 mic fallback 算输入”“工具 pending 被 remote audio blocker 掩盖”这类误诊。
+          页面状态同时写入 <code>state.runtimeState</code> 和 <code>state.audioInputPolicy</code>，
+          后续 harness 不再需要自己从散字段猜当前卡点。
         </p>
       </div>
 
@@ -979,11 +981,12 @@
         </article>
 
         <article class="before-after good">
-          <h3>目标形状</h3>
+          <h3>当前收口后的形状</h3>
           <ul>
             <li>统一 <code>RealtimeTurnPolicy</code> 决定 voice / Meet chat / visual-only / silent / blocked。</li>
             <li>所有副作用输出统一包成 typed <code>MeetingEvent</code>，带 session、turn、visibility、interruptible。</li>
             <li>app-control 变成 <code>accepted → running → completed/blocked</code> 状态机。</li>
+            <li><code>state.runtimeState</code> 是 harness 读取的 canonical 状态；<code>state.audioInputPolicy</code> 是唯一音频入口判定。</li>
             <li>browser bridge 拆成 transport、audio、tool-router、meet-chat、worker-results、presentation-state。</li>
             <li>Go service 成为 terminal cleanup 的唯一 owner。</li>
           </ul>
@@ -1096,9 +1099,9 @@
       <div class="callout">
         <strong>一句话结论：</strong>
         Realtime 现在脆弱，是因为它把“实时对话系统”和“后台 agent 操作系统”混在同一个模型回合里，
-        还允许多个输出通道各自触发下一轮模型。下一步最值得做的不是继续补单点 bug，
-        而是先用 failure matrix 把卡点显性化，再继续把 app-control / worker / presentation
-        收进 typed event state machine。
+        还允许多个输出通道各自触发下一轮模型。当前修复把最关键的三条链路先收成硬边界：
+        canonical runtime state、single audio input policy、single tool-result turn policy。
+        剩下的大块工作是继续拆小 <code>realtime-browser-bridge.ts</code>，不是再加 prompt 补丁。
       </div>
     </section>
 

@@ -25,6 +25,16 @@
     signals: Record<string, unknown>;
   }
 
+  interface AudioInputPolicy {
+    status: FailureMatrixCell["status"];
+    reason: string;
+    ready: boolean;
+    expected: boolean;
+    source: string;
+    blockers: string[];
+    signals: Record<string, unknown>;
+  }
+
   function create(deps: RealtimeContextHelperDeps) {
     const { config, state, getRealtimeAgentSession, recordTimeline, sendRealtimeEvent } = deps;
 
@@ -368,7 +378,71 @@
       return { status, reason, signals };
     }
 
-    function buildFailureMatrix(checks, appControlJobs) {
+    function classifyAudioInput(checks): AudioInputPolicy {
+      const signals = {
+        participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
+        meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
+        localAudioTrackAdded: checks.localAudioTrackAdded,
+        realtimeInputPlaceholderAdded: checks.realtimeInputPlaceholderAdded,
+      };
+      if (!checks.meetParticipantAudioExpected && !checks.inputAudioAdded) {
+        return {
+          status: "disabled",
+          reason: "audio_input_intentionally_disabled",
+          ready: false,
+          expected: false,
+          source: "disabled",
+          blockers: [],
+          signals,
+        };
+      }
+      if (checks.meetParticipantAudioExpected && !checks.meetParticipantAudioReady) {
+        if (checks.onlyLocalMicFallbackInput) {
+          return {
+            status: "waiting",
+            reason: "only_local_mic_fallback_input",
+            ready: false,
+            expected: true,
+            source: "local_mic_fallback",
+            blockers: ["waiting_for_meet_audio", "only_local_mic_fallback_input"],
+            signals,
+          };
+        }
+        if (checks.realtimeInputPlaceholderAdded) {
+          return {
+            status: "waiting",
+            reason: "silent_input_placeholder_only",
+            ready: false,
+            expected: true,
+            source: "silent_placeholder",
+            blockers: ["waiting_for_meet_audio", "silent_input_placeholder_only"],
+            signals,
+          };
+        }
+      }
+      if (!checks.inputAudioAdded) {
+        return {
+          status: "waiting",
+          reason: "input_audio_not_configured",
+          ready: false,
+          expected: checks.meetParticipantAudioExpected,
+          source: "none",
+          blockers: ["input_audio_not_configured"],
+          signals,
+        };
+      }
+      return {
+        status: "ok",
+        reason: "input_audio_ready",
+        ready: true,
+        expected: checks.meetParticipantAudioExpected,
+        source: checks.meetParticipantAudioReady ? "meet_participant_audio" : "local_mic",
+        blockers: [],
+        signals,
+      };
+    }
+
+    function buildFailureMatrix(checks, appControlJobs, audioInputPolicy: AudioInputPolicy) {
       const transport = (() => {
         if (state.connection.lastTokenError && !checks.peerConnected) {
           return matrixCell("blocked", "token_exchange_failed", {
@@ -394,37 +468,11 @@
         });
       })();
 
-      const audioInput = (() => {
-        if (!checks.meetParticipantAudioExpected && !checks.inputAudioAdded) {
-          return matrixCell("disabled", "audio_input_intentionally_disabled");
-        }
-        if (
-          checks.meetParticipantAudioExpected &&
-          !checks.meetParticipantAudioReady &&
-          checks.onlyLocalMicFallbackInput
-        ) {
-          return matrixCell("waiting", "only_local_mic_fallback_input", {
-            participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
-            meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
-          });
-        }
-        if (
-          checks.meetParticipantAudioExpected &&
-          !checks.meetParticipantAudioReady &&
-          checks.realtimeInputPlaceholderAdded
-        ) {
-          return matrixCell("waiting", "silent_input_placeholder_only", {
-            participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
-            meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
-          });
-        }
-        if (!checks.inputAudioAdded) return matrixCell("waiting", "input_audio_not_configured");
-        return matrixCell("ok", "input_audio_ready", {
-          participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
-          meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
-          localAudioTrackAdded: checks.localAudioTrackAdded,
-        });
-      })();
+      const audioInput = matrixCell(
+        audioInputPolicy.status,
+        audioInputPolicy.reason,
+        audioInputPolicy.signals,
+      );
 
       const modelTurn = (() => {
         if (!checks.inboundEvents) return matrixCell("waiting", "no_realtime_server_events");
@@ -464,6 +512,30 @@
         modelTurn,
         toolTurns,
         audioOutput,
+      };
+    }
+
+    function deriveRuntimeState(feedback) {
+      const matrix = feedback.failureMatrix || {};
+      const firstBlockingCell = ["transport", "audioInput", "toolTurns", "modelTurn", "audioOutput"]
+        .map((key) => [key, matrix[key]])
+        .find(([, cell]) => cell?.status === "blocked" || cell?.status === "waiting");
+      const phase = firstBlockingCell
+        ? `${firstBlockingCell[0]}:${firstBlockingCell[1].reason}`
+        : "ready";
+      return {
+        status: feedback.status,
+        phase,
+        reason: firstBlockingCell?.[1]?.reason || "ready",
+        blockers: feedback.blockers || [],
+        audioInputReady: feedback.audioInputPolicy?.ready === true,
+        audioInputSource: feedback.audioInputPolicy?.source || "",
+        canSpeak:
+          matrix.audioOutput?.status === "ok" ||
+          matrix.modelTurn?.status === "waiting" ||
+          feedback.status === "waiting_for_model",
+        toolTurnsHealthy: matrix.toolTurns?.status === "ok",
+        updatedAt: feedback.updatedAt,
       };
     }
 
@@ -523,7 +595,8 @@
         ),
         errors: state.errors.length,
       };
-      const failureMatrix = buildFailureMatrix(checks, appControlJobs);
+      const audioInputPolicy = classifyAudioInput(checks);
+      const failureMatrix = buildFailureMatrix(checks, appControlJobs, audioInputPolicy);
       const blockers = [];
       let status = "ready";
       let summary;
@@ -562,22 +635,12 @@
         status = "blocked";
         summary = "Realtime session.update has not been sent.";
         blockers.push("session_not_configured");
-      } else if (
-        checks.meetParticipantAudioExpected &&
-        !checks.meetParticipantAudioReady &&
-        (checks.onlyLocalMicFallbackInput || checks.realtimeInputPlaceholderAdded)
-      ) {
+      } else if (audioInputPolicy.expected && !audioInputPolicy.ready && audioInputPolicy.blockers.length) {
         status = "waiting_for_turn";
-        summary = checks.onlyLocalMicFallbackInput
+        summary = audioInputPolicy.source === "local_mic_fallback"
           ? "Realtime is connected with only local mic fallback; waiting for Meet participant audio."
           : "Realtime is connected with a silent input placeholder; waiting for Meet participant audio.";
-        blockers.push("waiting_for_meet_audio");
-        if (checks.onlyLocalMicFallbackInput) {
-          blockers.push("only_local_mic_fallback_input");
-        }
-        if (checks.realtimeInputPlaceholderAdded) {
-          blockers.push("silent_input_placeholder_only");
-        }
+        blockers.push(...audioInputPolicy.blockers);
       } else if (appControlJobs.blocked > 0) {
         status = "tool_blocked";
         summary = "Realtime has a blocked app-control job that needs a visible recovery path.";
@@ -587,16 +650,12 @@
         summary = "Realtime has an app-control job that stayed pending too long.";
         blockers.push("app_control_job_stale");
       } else if (!checks.inboundEvents) {
-        if (!checks.inputAudioAdded) {
+        if (!audioInputPolicy.ready) {
           status = "waiting_for_turn";
-          summary = checks.realtimeInputPlaceholderAdded
+          summary = audioInputPolicy.reason === "silent_input_placeholder_only"
             ? "Realtime is connected with a silent input placeholder; waiting for Meet participant audio."
             : "Realtime is connected in output-only mode; send a text/tool turn or enable Meet audio forwarding.";
-          blockers.push(
-            checks.realtimeInputPlaceholderAdded
-              ? "waiting_for_meet_audio"
-              : "input_audio_not_configured",
-          );
+          blockers.push(...(audioInputPolicy.blockers.length ? audioInputPolicy.blockers : [audioInputPolicy.reason]));
         } else {
           status = "waiting_for_model";
           summary = "Realtime is connected, but no server events have been received yet.";
@@ -615,23 +674,27 @@
         summary = "Realtime remote audio is attached but not routed into the avatar audio bus.";
         blockers.push("remote_audio_not_routed");
       } else {
-        summary = checks.inputAudioAdded
+        summary = audioInputPolicy.ready
           ? "Realtime E2E transport is healthy: input track, model events, output audio, and avatar audio route are present."
           : "Realtime output path is healthy for text/tool turns; audio input is intentionally disabled to avoid avatar self-echo.";
       }
 
-      return {
+      const feedback = {
         status,
         summary,
         blockers,
         checks,
+        audioInputPolicy,
         failureMatrix,
         updatedAt: new Date().toISOString(),
       };
+      return { ...feedback, runtimeState: deriveRuntimeState(feedback) };
     }
 
     function updateFeedback() {
       state.feedback = classifyRealtimeFeedback();
+      state.audioInputPolicy = state.feedback.audioInputPolicy;
+      state.runtimeState = state.feedback.runtimeState;
       return state.feedback;
     }
 
