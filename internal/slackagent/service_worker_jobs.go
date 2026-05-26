@@ -319,16 +319,23 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 	}
 	dedupKey := fmt.Sprintf("slack-worker-result:%s:%s:%s", job.ID, ref.ChannelID, firstNonEmpty(ref.ThreadTS, "root"))
 	snapshotTS := slackWorkerFreshnessSnapshotTS(job, ref)
-	if delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
-		Source:        slackPublicReplySourceWorkerFreshnessProbe,
-		SurfaceKind:   slackPublicReplySurfaceThreadReply,
-		ChannelID:     ref.ChannelID,
-		ThreadTS:      ref.ThreadTS,
-		Message:       text,
-		SnapshotTS:    snapshotTS,
-		FreshnessOnly: true,
-	}); delivery.Blocked {
-		return false
+	directMention := isDirectMentionWorkerJob(job)
+	if !directMention {
+		if delivery := s.deliverSlackPublicThreadReply(ctx, slackPublicThreadReplyDelivery{
+			Source:        slackPublicReplySourceWorkerFreshnessProbe,
+			SurfaceKind:   slackPublicReplySurfaceThreadReply,
+			ChannelID:     ref.ChannelID,
+			ThreadTS:      ref.ThreadTS,
+			Message:       text,
+			SnapshotTS:    snapshotTS,
+			FreshnessOnly: true,
+		}); delivery.Blocked {
+			return false
+		}
+	}
+	deliverySnapshotTS := snapshotTS
+	if directMention {
+		deliverySnapshotTS = ""
 	}
 	if shouldPublishWorkerResultAsCanvas(job, text) {
 		manifest, err := s.PublishCanvas(ctx, workerResultCanvasInput(job, ref, text, dedupKey))
@@ -351,7 +358,7 @@ func (s *Service) postSlackWorkerResult(ctx context.Context, job agentrunner.Job
 		Message:       text,
 		Blocks:        buildSlackThreadReplyBlocks(text, "", nil),
 		DedupKey:      dedupKey,
-		SnapshotTS:    snapshotTS,
+		SnapshotTS:    deliverySnapshotTS,
 		LedgerSummary: "worker_result: " + firstTextLine(text),
 	})
 	result := delivery.Post

@@ -58,6 +58,24 @@ func isPersonaDelegatedWorkerJob(job agentrunner.Job) bool {
 	return strings.EqualFold(stringFromContext(job.Context, "source"), "persona_delegate_worker")
 }
 
+func isDirectMentionWorkerJob(job agentrunner.Job) bool {
+	slack, _ := mapFromAny(job.Context["slack"])
+	command := firstNonEmpty(
+		stringFromAny(slack["command"]),
+		stringFromAny(slack["mode"]),
+	)
+	if isSlackMentionCommandMode(command) {
+		return true
+	}
+	if _, ok := job.Context["slackAppMention"]; ok {
+		return true
+	}
+	if _, ok := job.Context["slack_app_mention"]; ok {
+		return true
+	}
+	return false
+}
+
 // slackWorkerResultText returns the model's actual completed result for posting
 // to Slack. Every non-completed state (failed / timeout / auth / canceled), any
 // completed-with-empty-result, and any completed-result containing an internal

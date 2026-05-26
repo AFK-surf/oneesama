@@ -235,6 +235,62 @@ func TestSlackWorkerPostSkipsWhenThreadHasNewerHumanActivity(t *testing.T) {
 	}
 }
 
+func TestSlackWorkerPostDeliversDirectMentionDespiteNewerHumanActivity(t *testing.T) {
+	snapshotTS, _, restore := installNewerHumanReplyFixture(t, "<@U_BOT> 你是不是也有 minimachine", "meiyou")
+	defer restore()
+
+	provider := &simpleRecordingMemoryProvider{name: "turn_fake", available: true}
+	poster := &recordingPoster{callCh: make(chan struct{}, 1)}
+	service := NewService(Config{
+		Slack: appconfig.SlackConfig{
+			BotToken:  "xoxb-test",
+			BotUserID: "U_BOT",
+		},
+		MemoryProviders: []SlackMemoryProvider{provider},
+		Poster:          poster,
+	})
+
+	delivered := service.postSlackWorkerResult(context.Background(), agentrunner.Job{
+		ID:     "job_direct_mention",
+		Status: agentrunner.StatusCompleted,
+		Task:   "你是不是也有 minimachine",
+		Result: "没有，我这边是 Linux Docker 里的 Slack Agent + Meeting Agent，没有 macOS minimachine。",
+		Context: map[string]any{
+			"source": "slack-agent",
+			"slack": map[string]any{
+				"channel_id":            "C123",
+				"thread_ts":             snapshotTS,
+				"reaction_ts":           snapshotTS,
+				"command":               "app_mention",
+				"freshness_snapshot_ts": snapshotTS,
+			},
+			"slackAppMention": SlackAppMentionContext{
+				MentionText: "你是不是也有 minimachine",
+				ThreadTS:    snapshotTS,
+				ChannelID:   "C123",
+				UserID:      "U_ASKER",
+			},
+		},
+	})
+
+	if !delivered {
+		t.Fatal("postSlackWorkerResult suppressed direct mention worker result, want visible reply")
+	}
+	calls := poster.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("poster calls = %#v, want one direct mention reply", calls)
+	}
+	if calls[0].ThreadTS != snapshotTS {
+		t.Fatalf("thread_ts = %q, want %q", calls[0].ThreadTS, snapshotTS)
+	}
+	if !strings.Contains(calls[0].Text, "没有") || !strings.Contains(calls[0].Text, "minimachine") {
+		t.Fatalf("posted text = %q, want direct minimachine answer", calls[0].Text)
+	}
+	if len(provider.turns) != 1 {
+		t.Fatalf("memory turns = %#v, want delivered direct mention turn sync", provider.turns)
+	}
+}
+
 func TestSlackWorkerResultTextSilentOnNonCompletedStates(t *testing.T) {
 	// Every non-completed state must yield empty text so postSlackWorkerResult
 	// skips the Slack post entirely. Status is conveyed via the mention
