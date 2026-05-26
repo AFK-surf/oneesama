@@ -204,6 +204,62 @@ test("Realtime app-control queued result stays silent until job completion event
   );
 });
 
+test("Realtime feedback surfaces stale app-control jobs before generic output blockers", async () => {
+  await withRealtimeBridge(
+    async (page) => {
+      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+        await route.fulfill({
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "access-control-allow-origin": "*",
+          },
+          body: JSON.stringify({
+            ok: true,
+            status: "queued",
+            jobId: "app_job_stale",
+          }),
+        });
+      });
+
+      await dispatchToolCall(page, "call_stale_app_control", {
+        applicationName: "Pencil",
+        instruction: "draw a snake mockup",
+        operations: [{ kind: "click", x: 40, y: 40 }],
+      });
+
+      await page.evaluate(() => {
+        const job = window.MAB_REALTIME_BRIDGE.turnPolicy.appControlJobs.app_job_stale;
+        job.updatedAt = new Date(Date.now() - 90000).toISOString();
+        window.dispatchEvent(
+          new CustomEvent("meeting-avatar-realtime-server-event", {
+            detail: { type: "session.updated" },
+          }),
+        );
+      });
+
+      await page.waitForFunction(() =>
+        window.MAB_REALTIME_BRIDGE.feedback?.blockers?.includes("app_control_job_stale"),
+      );
+
+      const feedback = await page.evaluate(() => window.MAB_REALTIME_BRIDGE.feedback);
+      assert.equal(feedback.status, "tool_blocked");
+      assert.equal(feedback.checks.appControlJobsPending, 1);
+      assert.equal(feedback.checks.appControlJobsStale, 1);
+      assert.equal(feedback.failureMatrix.toolTurns.status, "blocked");
+      assert.equal(feedback.failureMatrix.toolTurns.reason, "app_control_job_stale");
+      assert.equal(feedback.failureMatrix.audioOutput.status, "blocked");
+      assert.ok(!feedback.blockers.includes("remote_audio_not_attached"));
+    },
+    {
+      config: {
+        dryRunLocalTools: false,
+        tokenUrl: "http://meeting.local/realtime/client-secret",
+      },
+    },
+  );
+});
+
 test("Realtime app-control terminal job status updates the typed state machine", async () => {
   await withRealtimeBridge(
     async (page) => {

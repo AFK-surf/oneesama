@@ -1,0 +1,1111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Oneesama Realtime Flow Analysis</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f4ee;
+      --ink: #1f2524;
+      --muted: #66716d;
+      --line: #d8d2c6;
+      --panel: #fffdf8;
+      --panel-2: #f1fbf6;
+      --critical: #bd3b2f;
+      --critical-soft: #ffe8e2;
+      --warn: #a86b00;
+      --warn-soft: #fff2cf;
+      --ok: #237457;
+      --ok-soft: #dff5ea;
+      --blue: #316b9a;
+      --blue-soft: #e4f1fb;
+      --violet: #7057a6;
+      --violet-soft: #eee8fb;
+      --orange: #b7611f;
+      --orange-soft: #ffe9d7;
+      --shadow: 0 16px 45px rgba(45, 42, 35, 0.11);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(135deg, rgba(49, 107, 154, 0.08), transparent 28rem),
+        linear-gradient(220deg, rgba(35, 116, 87, 0.08), transparent 34rem),
+        var(--bg);
+      color: var(--ink);
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .page {
+      width: min(1240px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 28px 0 60px;
+    }
+
+    .hero {
+      min-height: 76vh;
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+      align-items: center;
+      gap: 32px;
+      padding: 36px 0 24px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--blue);
+      font-weight: 750;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 34px;
+      height: 3px;
+      background: var(--blue);
+      border-radius: 999px;
+    }
+
+    h1 {
+      font-size: clamp(48px, 7vw, 88px);
+      line-height: 0.94;
+      margin: 0 0 22px;
+      letter-spacing: 0;
+      max-width: 12ch;
+    }
+
+    .hero-copy {
+      font-size: 20px;
+      line-height: 1.55;
+      color: #35413e;
+      max-width: 760px;
+      margin: 0 0 28px;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.72);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+      color: #3f4946;
+      white-space: nowrap;
+    }
+
+    .health-board {
+      background: rgba(255, 253, 248, 0.88);
+      border: 1px solid rgba(216, 210, 198, 0.9);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .health-board h2 {
+      margin: 0 0 16px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .pulse-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .pulse {
+      min-height: 126px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      background: var(--panel);
+    }
+
+    .pulse strong {
+      display: block;
+      font-size: 28px;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .pulse span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .pulse.critical {
+      background: var(--critical-soft);
+      border-color: rgba(189, 59, 47, 0.3);
+    }
+
+    .pulse.warn {
+      background: var(--warn-soft);
+      border-color: rgba(168, 107, 0, 0.35);
+    }
+
+    .pulse.ok {
+      background: var(--ok-soft);
+      border-color: rgba(35, 116, 87, 0.3);
+    }
+
+    section {
+      margin: 44px 0;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: clamp(28px, 3vw, 42px);
+      letter-spacing: 0;
+    }
+
+    .section-head p {
+      margin: 0;
+      max-width: 520px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .map {
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.82);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .map-row {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      border-top: 1px solid var(--line);
+    }
+
+    .map-row:first-child {
+      border-top: 0;
+    }
+
+    .lane-label {
+      padding: 18px;
+      background: #f1eadc;
+      border-right: 1px solid var(--line);
+      font-weight: 800;
+      color: #403832;
+    }
+
+    .lane-body {
+      padding: 18px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .node {
+      position: relative;
+      min-height: 148px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+
+    .node::after {
+      content: "→";
+      position: absolute;
+      right: -15px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #93877a;
+      font-weight: 900;
+    }
+
+    .node:last-child::after {
+      display: none;
+    }
+
+    .node h3 {
+      margin: 0 0 9px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    .node p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .node code,
+    .code-pill {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      color: #202927;
+      background: rgba(31, 37, 36, 0.06);
+      border-radius: 5px;
+      padding: 2px 5px;
+    }
+
+    .node.go {
+      border-color: rgba(49, 107, 154, 0.28);
+      background: var(--blue-soft);
+    }
+
+    .node.browser {
+      border-color: rgba(112, 87, 166, 0.28);
+      background: var(--violet-soft);
+    }
+
+    .node.side {
+      border-color: rgba(183, 97, 31, 0.3);
+      background: var(--orange-soft);
+    }
+
+    .node.policy {
+      border-color: rgba(35, 116, 87, 0.28);
+      background: var(--ok-soft);
+    }
+
+    .clock-wrap {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .clock {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 18px;
+      min-height: 260px;
+      box-shadow: 0 10px 26px rgba(45, 42, 35, 0.06);
+    }
+
+    .clock h3 {
+      margin: 0 0 12px;
+      font-size: 20px;
+    }
+
+    .clock ol {
+      margin: 0;
+      padding-left: 20px;
+      color: #3d4744;
+      line-height: 1.55;
+    }
+
+    .clock li + li {
+      margin-top: 6px;
+    }
+
+    .clock .risk {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border-left: 4px solid var(--critical);
+      background: var(--critical-soft);
+      color: #633128;
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .findings {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .finding {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 10px 26px rgba(45, 42, 35, 0.05);
+    }
+
+    .finding h3 {
+      margin: 0 0 10px;
+      font-size: 19px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 24px;
+      border-radius: 999px;
+      padding: 0 8px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #fff;
+      background: var(--critical);
+    }
+
+    .finding p {
+      margin: 0;
+      color: #3f4946;
+      line-height: 1.58;
+    }
+
+    .evidence {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: rgba(31, 37, 36, 0.055);
+      border-radius: var(--radius);
+      color: #5b6662;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .principle-board {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .before-after {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    .before-after h3 {
+      margin: 0;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #efe7d6;
+      font-size: 18px;
+    }
+
+    .before-after.bad h3 {
+      background: var(--critical-soft);
+      color: #7f2b24;
+    }
+
+    .before-after.good h3 {
+      background: var(--ok-soft);
+      color: #205c49;
+    }
+
+    .before-after ul {
+      margin: 0;
+      padding: 16px 20px 18px 34px;
+      line-height: 1.58;
+      color: #3e4945;
+    }
+
+    .before-after li + li {
+      margin-top: 8px;
+    }
+
+    .migration {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      min-height: 210px;
+      background: var(--panel);
+      position: relative;
+    }
+
+    .step::before {
+      content: attr(data-step);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fff;
+      font-weight: 900;
+      margin-bottom: 14px;
+    }
+
+    .step h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .step p {
+      margin: 0;
+      line-height: 1.52;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .test {
+      border: 1px solid rgba(35, 116, 87, 0.32);
+      background: var(--ok-soft);
+      border-radius: 12px;
+      padding: 15px;
+      min-height: 156px;
+    }
+
+    .test h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+      color: #205c49;
+    }
+
+    .test p {
+      margin: 0;
+      color: #39534a;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .matrix {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--panel);
+      box-shadow: 0 10px 26px rgba(45, 42, 35, 0.05);
+    }
+
+    .matrix-row {
+      display: grid;
+      grid-template-columns: 180px 150px minmax(0, 1fr) minmax(0, 1fr);
+      border-top: 1px solid var(--line);
+    }
+
+    .matrix-row:first-child {
+      border-top: 0;
+      background: #f0eadf;
+      font-weight: 800;
+    }
+
+    .matrix-row > div {
+      padding: 13px 14px;
+      border-left: 1px solid var(--line);
+      line-height: 1.45;
+    }
+
+    .matrix-row > div:first-child {
+      border-left: 0;
+      font-weight: 800;
+    }
+
+    .state-ok {
+      color: var(--ok);
+      font-weight: 800;
+    }
+
+    .state-waiting {
+      color: var(--warn);
+      font-weight: 800;
+    }
+
+    .state-blocked {
+      color: var(--critical);
+      font-weight: 800;
+    }
+
+    .source-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .source {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 253, 248, 0.8);
+      padding: 12px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      color: #45504c;
+      line-height: 1.45;
+    }
+
+    .callout {
+      border: 1px solid rgba(189, 59, 47, 0.28);
+      background: var(--critical-soft);
+      border-radius: 12px;
+      padding: 18px;
+      line-height: 1.62;
+      color: #59322d;
+      font-size: 16px;
+    }
+
+    .callout strong {
+      color: #842b24;
+    }
+
+    footer {
+      margin-top: 54px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .principle-board {
+        grid-template-columns: 1fr;
+      }
+
+      .lane-body,
+      .migration,
+      .clock-wrap,
+      .test-grid,
+      .findings,
+      .matrix-row,
+      .source-list {
+        grid-template-columns: 1fr;
+      }
+
+      .map-row {
+        grid-template-columns: 1fr;
+      }
+
+      .lane-label {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .node::after {
+        right: 50%;
+        top: auto;
+        bottom: -21px;
+        transform: translateX(50%) rotate(90deg);
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .hero {
+        min-height: auto;
+      }
+
+      .health-board,
+      .map,
+      .finding,
+      .clock,
+      .before-after,
+      .step,
+      .test {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">Realtime system map</div>
+        <h1>它为什么脆弱</h1>
+        <p class="hero-copy">
+          当前 Realtime 不是一条单纯的“语音模型接 Meet”链路，而是把 WebRTC、Meet DOM、头像、
+          app 分享、Computer Use、后台 worker、Meet chat 和 session 清理都塞进同一个实时回路。
+          真正的问题不是某一个 bug，而是多个异步系统在用 prompt 和 heuristics 勉强同步。
+        </p>
+        <div class="hero-actions">
+          <span class="chip">scope: meeting-agent Realtime</span>
+          <span class="chip">read: Go service + TS runner + browser bridge</span>
+          <span class="chip">date: 2026-05-26 SHA</span>
+        </div>
+      </div>
+
+      <aside class="health-board" aria-label="Realtime fragility summary">
+        <h2>当前健康判断</h2>
+        <div class="pulse-grid">
+          <div class="pulse critical">
+            <strong>1</strong>
+            <span>一个浏览器 bridge 同时管连接、音频、工具、worker、chat、screen share、diagnostics。</span>
+          </div>
+          <div class="pulse warn">
+            <strong>3</strong>
+            <span>至少三个时钟：Realtime event clock、Meet browser clock、Go/worker clock。</span>
+          </div>
+          <div class="pulse warn">
+            <strong>4+</strong>
+            <span>可见输出通道：voice、Meet chat、screen/app share、worker result、avatar HUD。</span>
+          </div>
+          <div class="pulse ok">
+            <strong>已起步</strong>
+            <span>现在已有 typed turn policy / meeting event，并新增 failure matrix 暴露真正卡点。</span>
+          </div>
+        </div>
+      </aside>
+    </header>
+
+    <section>
+      <div class="section-head">
+        <h2>主流程</h2>
+        <p>这是现在真实跑起来的一条链路。每个格子都不是抽象概念，而是代码里已有的边界或注入点。</p>
+      </div>
+
+      <div class="map">
+        <div class="map-row">
+          <div class="lane-label">Join / Boot</div>
+          <div class="lane-body">
+            <article class="node go">
+              <h3>1. Slack / API 触发 Join</h3>
+              <p><code>/join/google-meet</code> 进入 Go service，先停重叠 session，再准备 meet-runner 参数。</p>
+            </article>
+            <article class="node go">
+              <h3>2. Go 调 meet-runner</h3>
+              <p><code>PrepareGoogleMeet</code> 带上 Realtime、worker poll、screen share、browser args 等十几组开关。</p>
+            </article>
+            <article class="node browser">
+              <h3>3. Playwright 打开 Meet</h3>
+              <p>Chromium 进会，填名字、点 Join，并在导航前注入头像、Realtime、worker、screen share 脚本。</p>
+            </article>
+            <article class="node policy">
+              <h3>4. Session 记录启动</h3>
+              <p>Go DB 保存 session；monitor goroutine 轮询 runner 状态，但页面内状态仍由浏览器自己维护。</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="map-row">
+          <div class="lane-label">Realtime Core</div>
+          <div class="lane-body">
+            <article class="node go">
+              <h3>5. Mint client secret</h3>
+              <p><code>/realtime/client-secret</code> 用工具 schema、instructions、voice、turn detection 生成 session。</p>
+            </article>
+            <article class="node browser">
+              <h3>6. Browser bridge 建 WebRTC</h3>
+              <p>页面内建 RTCPeerConnection，转发 Meet audio，打开 data channel，发送 <code>session.update</code>。</p>
+            </article>
+            <article class="node browser">
+              <h3>7. 监听 Realtime event</h3>
+              <p>处理 <code>response.created</code>、音频 delta、<code>speech_started</code>、tool call、response done。</p>
+            </article>
+            <article class="node policy">
+              <h3>8. Input gate / cancel</h3>
+              <p>用户讲话时尝试 <code>response.cancel</code>，并用 gate 控制什么时候重新收音。</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="map-row">
+          <div class="lane-label">Tool Branches</div>
+          <div class="lane-body">
+            <article class="node side">
+              <h3>9A. Meet tools</h3>
+              <p>发 Meet chat、读 chat、看 participants、present/stop stage、share existing app window。</p>
+            </article>
+            <article class="node side">
+              <h3>9B. Workspace / app control</h3>
+              <p><code>control_shared_app_window</code> 通过 KWWK/Codex backend 排队或等待执行，默认异步。</p>
+            </article>
+            <article class="node side">
+              <h3>9C. Worker</h3>
+              <p>Realtime 可 delegate；Go 也会把 meeting-scoped worker result 注入页面或发到 Meet chat。</p>
+            </article>
+            <article class="node side">
+              <h3>9D. Avatar / memory / fetch</h3>
+              <p>同一个 Realtime session 还拥有头像动作、memory、URL fetch、Slack/Notion/GitHub 查询工具。</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="map-row">
+          <div class="lane-label">Return / Cleanup</div>
+          <div class="lane-body">
+            <article class="node browser">
+              <h3>10. Tool result 回写</h3>
+              <p>页面发送 <code>function_call_output</code>，很多分支会自动追加 <code>response.create</code>。</p>
+            </article>
+            <article class="node browser">
+              <h3>11. 可见输出</h3>
+              <p>模型可能说话，也可能发 Meet chat、更新分享画面、显示 avatar HUD、或被要求保持 silent。</p>
+            </article>
+            <article class="node go">
+              <h3>12. Status refresh</h3>
+              <p>Go 通过 runner status 把 browser runtime state 压缩回 <code>/join/status</code>。</p>
+            </article>
+            <article class="node policy">
+              <h3>13. Stop / terminal</h3>
+              <p>stop、removed、stale、restart 都必须同时收掉 Meet、screen share、worker poll 和 active response。</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>三个异步时钟</h2>
+        <p>脆弱感的根因在这里：系统经常把“某个时钟成功”误读成“整条链路完成”。</p>
+      </div>
+
+      <div class="clock-wrap">
+        <article class="clock">
+          <h3>Realtime event clock</h3>
+          <ol>
+            <li>server 产生语音、function_call、response.done。</li>
+            <li>data channel 收到事件后页面本地处理。</li>
+            <li>tool result 回传后可能立刻触发下一轮 response。</li>
+          </ol>
+          <div class="risk">风险：模型听到“工具 accepted”就开始口头总结，但真实 app 操作可能还在队列里。</div>
+        </article>
+
+        <article class="clock">
+          <h3>Meet browser clock</h3>
+          <ol>
+            <li>Playwright 页面进入 Meet，DOM 状态随 Google UI 改。</li>
+            <li>音频、字幕、chat、screen share 都在页面内观测。</li>
+            <li>ScreenCaptureKit / MJPEG / canvas 再转成 Meet 里可见的 stream。</li>
+          </ol>
+          <div class="risk">风险：sender 侧 active 不等于 receiver 侧看见，真实验收必须看浏览器 consumer。</div>
+        </article>
+
+        <article class="clock">
+          <h3>Go / worker clock</h3>
+          <ol>
+            <li>Go 持有 session DB、worker queue、tool HTTP handlers。</li>
+            <li>worker result 可能从 HTTP 注入，也可能由页面 poll。</li>
+            <li>join status / cleanup 依赖 runner 状态刷新。</li>
+          </ol>
+          <div class="risk">风险：session 已 terminal 但 poller、screen share、worker result 某条支线还活着。</div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Failure matrix</h2>
+        <p>
+          新版 feedback 不再只给一个“ready / waiting / blocked”摘要，而是按五个子系统给出状态。
+          这能避免“本地 mic fallback 算输入”“工具 pending 被 remote audio blocker 掩盖”这类误诊。
+        </p>
+      </div>
+
+      <div class="matrix" aria-label="Realtime failure matrix">
+        <div class="matrix-row">
+          <div>维度</div>
+          <div>状态</div>
+          <div>真实含义</div>
+          <div>典型 blocker</div>
+        </div>
+        <div class="matrix-row">
+          <div>Transport</div>
+          <div><span class="state-ok">ok</span> / <span class="state-blocked">blocked</span></div>
+          <div>Realtime token、SDP、peer connection、data channel、session.update 是否全通。</div>
+          <div><code>realtime_token_failed</code>、<code>realtime_sdp_failed</code>、<code>peer_not_connected</code></div>
+        </div>
+        <div class="matrix-row">
+          <div>Audio input</div>
+          <div><span class="state-ok">ok</span> / <span class="state-waiting">waiting</span></div>
+          <div>Meet 里真人声音是否真的进入 Realtime；本地 mic fallback 和 silent placeholder 不再算成功。</div>
+          <div><code>waiting_for_meet_audio</code>、<code>only_local_mic_fallback_input</code>、<code>silent_input_placeholder_only</code></div>
+        </div>
+        <div class="matrix-row">
+          <div>Model turn</div>
+          <div><span class="state-ok">ok</span> / <span class="state-waiting">waiting</span></div>
+          <div>是否收到 Realtime server event，是否已经产生 response event。</div>
+          <div><code>no_realtime_server_events</code>、<code>no_response_events</code></div>
+        </div>
+        <div class="matrix-row">
+          <div>Tool turns</div>
+          <div><span class="state-ok">ok</span> / <span class="state-waiting">waiting</span> / <span class="state-blocked">blocked</span></div>
+          <div>app-control job 是否还在 accepted/running，是否过期，是否 blocked；这个维度优先于 generic output blocker。</div>
+          <div><code>app_control_job_pending</code>、<code>app_control_job_stale</code>、<code>app_control_job_blocked</code></div>
+        </div>
+        <div class="matrix-row">
+          <div>Audio output</div>
+          <div><span class="state-ok">ok</span> / <span class="state-blocked">blocked</span></div>
+          <div>模型音频是否 attach 到 remote track，并路由到 avatar audio bus。</div>
+          <div><code>remote_audio_not_attached</code>、<code>remote_audio_not_routed</code></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>主要脆弱点</h2>
+        <p>按“会导致 Peng 体感失败”的优先级排序，不是纯代码洁癖。</p>
+      </div>
+
+      <div class="findings">
+        <article class="finding">
+          <h3><span class="badge">P0</span> Tool result 没有统一出口政策</h3>
+          <p>
+            每个 tool branch 自己决定是否 <code>response.create</code>、说什么、是否沉默。
+            结果就是一个修复常常只覆盖某个工具，换到 worker result 或 app-control 又开始乱讲话。
+          </p>
+          <div class="evidence">realtime-browser-bridge.ts: sendFunctionCallOutput / shouldAutoRespondToMeetToolResult / handleLocalToolCallEvent / injectWorkerResult</div>
+        </article>
+
+        <article class="finding">
+          <h3><span class="badge">P0</span> App control 是异步任务，却被语音当同步动作</h3>
+          <p>
+            <code>control_shared_app_window</code> 默认排队返回 <code>job_id</code>，真实点击/输入还没结束。
+            现在靠 prompt 告诉模型“不要 claim completion”，这太软，应该变成协议层状态。
+          </p>
+          <div class="evidence">realtime_app_control.go: ControlRealtimeSharedApp；realtime_tools.go: control_shared_app_window schema</div>
+        </article>
+
+        <article class="finding">
+          <h3><span class="badge">P0</span> Worker result 有多条注入通道</h3>
+          <p>
+            Go 的 <code>deliverWorkerReportRealtime</code> 会注入到 meet-runner；页面里还有 worker-result bridge poller。
+            近期已经靠 session/source 过滤止血，但架构上仍然容易重复、串线或晚到。
+          </p>
+          <div class="evidence">service_worker_realtime.go；google-meet-joiner.ts: injectWorkerResult；worker-result-bridge.ts</div>
+        </article>
+
+        <article class="finding">
+          <h3><span class="badge">P0</span> Realtime bridge 过大，状态边界混在一起</h3>
+          <p>
+            一个 4000+ 行 browser bridge 同时管 WebRTC、VAD/cancel、tool router、Meet chat、
+            avatar、worker、diagnostics。任何小改动都可能影响另一条用户路径。
+          </p>
+          <div class="evidence">packages/core/src/realtime/realtime-browser-bridge.ts: legacy baseline 2559 lines, plus extracted helpers.</div>
+        </article>
+
+        <article class="finding">
+          <h3><span class="badge">P1</span> raw WebRTC 和 Agents SDK 两套运行时语义不一致</h3>
+          <p>
+            raw path 发送 <code>response.cancel</code>；Agents SDK path 走 <code>session.interrupt</code>。
+            tool、cancel、reconnect 的状态不是同一个抽象，调一个 path 不代表另一个 path 安全。
+          </p>
+          <div class="evidence">realtime-browser-bridge.ts: connectRealtimeAgentSDK / connectRealtime / cancelActiveResponse</div>
+        </article>
+
+        <article class="finding">
+          <h3><span class="badge">P1</span> 可见 share 成功依赖嵌套 heuristic</h3>
+          <p>
+            app-share 成功后是否沉默现在靠在 result 里找多层 <code>screenShare.active</code>。
+            这比 typed presentation state 脆弱，后端返回结构一变就误说或误沉默。
+          </p>
+          <div class="evidence">realtime-browser-bridge.ts: resultHasActiveScreenShare / shouldAutoRespondToMeetToolResult</div>
+        </article>
+
+        <article class="finding">
+          <h3><span class="badge">P1</span> session state 分裂</h3>
+          <p>
+            Go DB、meet-runner active record、browser page state、Realtime connection 都各自有“活着/死了”的判断。
+            如果 stop 没穿透每层，就会出现分享还在、poller 还在、join/status 却说 inactive。
+          </p>
+          <div class="evidence">service_join.go: JoinStatus / sessionFromRuntimeStatus；google-meet-joiner.ts: refreshActiveRuntimeState</div>
+        </article>
+
+        <article class="finding">
+          <h3><span class="badge">P1</span> 工具面太宽，模型路由成本太高</h3>
+          <p>
+            同一个 session 暴露 app share、browser workspace、create workspace、fetch、Linear、Slack、Notion、
+            GitHub、memory、avatar。再加 compatibility aliases，模型很容易选错路径。
+          </p>
+          <div class="evidence">realtime_tools.go: defaultRealtimeToolDefinitions</div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>应该变成什么</h2>
+        <p>别再靠“这次 prompt 多写一句”续命。要把实时系统拆成几个硬边界。</p>
+      </div>
+
+      <div class="principle-board">
+        <article class="before-after bad">
+          <h3>现在的形状</h3>
+          <ul>
+            <li>tool handler 自己决定 spoken follow-up。</li>
+            <li>异步 job 返回值和完成值混在一个 tool output 里。</li>
+            <li>screen share、worker、Meet chat、voice 都能各自触发下一轮模型。</li>
+            <li>browser bridge 是总控台，也是运输层，也是产品策略层。</li>
+            <li>状态靠 diagnostics 和局部 postcheck 拼起来。</li>
+          </ul>
+        </article>
+
+        <article class="before-after good">
+          <h3>目标形状</h3>
+          <ul>
+            <li>统一 <code>RealtimeTurnPolicy</code> 决定 voice / Meet chat / visual-only / silent / blocked。</li>
+            <li>所有副作用输出统一包成 typed <code>MeetingEvent</code>，带 session、turn、visibility、interruptible。</li>
+            <li>app-control 变成 <code>accepted → running → completed/blocked</code> 状态机。</li>
+            <li>browser bridge 拆成 transport、audio、tool-router、meet-chat、worker-results、presentation-state。</li>
+            <li>Go service 成为 terminal cleanup 的唯一 owner。</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>重构路线</h2>
+        <p>按可落地顺序来，先收最影响 demo 体感的口子。</p>
+      </div>
+
+      <div class="migration">
+        <article class="step" data-step="1">
+          <h3>收口 tool result policy</h3>
+          <p>
+            新增一个中心函数，例如 <code>deliverToolResult()</code>。所有 worker / meet / workspace / avatar 工具都只返回事实，
+            由 policy 决定是否发语音、Meet chat、或静默。
+          </p>
+        </article>
+
+        <article class="step" data-step="2">
+          <h3>把 app-control job 协议硬化</h3>
+          <p>
+            <code>control_shared_app_window</code> 的第一次返回只能是 accepted/running，不允许模型口头总结完成。
+            completed/blocked 由 job event 单独注入，且默认 Meet chat 简报优先于长语音。
+          </p>
+        </article>
+
+        <article class="step" data-step="3">
+          <h3>合并 worker result 通道</h3>
+          <p>
+            选一个主通道。建议 Go service 写入 session-scoped event queue，页面只消费 queue；
+            移除“双注入 + poller markDelivered”这种竞态结构。
+          </p>
+        </article>
+
+        <article class="step" data-step="4">
+          <h3>拆 browser bridge</h3>
+          <p>
+            先切文件，不改行为：transport、audio-gate、tool-router、presentation-state、worker-results。
+            拆完再对每层加 targeted smoke，避免继续在 4000 行文件里打补丁。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>必须保留的回归门</h2>
+        <p>以后每次动 Realtime，不应该只看后端 green，要看这些用户体感门。</p>
+      </div>
+
+      <div class="test-grid">
+        <article class="test">
+          <h3>打断门</h3>
+          <p>让 bot 说长 worker/result 总结时真人插话，必须能 cancel 当前输出，后续仍能继续听。</p>
+        </article>
+        <article class="test">
+          <h3>可见分享门</h3>
+          <p>share Pencil / VS Code / generic editor / URL / create workspace / stop，receiver 端必须可见。</p>
+        </article>
+        <article class="test">
+          <h3>chat-vs-voice 门</h3>
+          <p>worker result 长内容必须进 Meet chat；voice 只说一句“我发到聊天里了”。</p>
+        </article>
+        <article class="test">
+          <h3>session scoping 门</h3>
+          <p>Slack triage、secretary、旧 meeting worker result 不得注入当前 Realtime。</p>
+        </article>
+        <article class="test">
+          <h3>terminal cleanup 门</h3>
+          <p>stop / removed / restart 后，join/status、browser process、screen share、poller 全部归零。</p>
+        </article>
+        <article class="test">
+          <h3>consumer rendering 门</h3>
+          <p>屏幕分享不只看 sender FPS，还要看 Meet receiver 端真实画面，尤其文字清晰度。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>代码证据</h2>
+        <p>这次分析读过的关键入口，后续拆代码可以从这里继续。</p>
+      </div>
+
+      <div class="source-list">
+        <div class="source">docs/realtime-2.md<br />Realtime provider/session contract and verification notes.</div>
+        <div class="source">internal/meetingagent/service_join.go<br />JoinGoogleMeet / JoinStatus / terminal runtime refresh.</div>
+        <div class="source">internal/meetingagent/realtime_token.go<br />RealtimeConfig / MintRealtimeClientSecret / session payload.</div>
+        <div class="source">internal/meetingagent/realtime_tools.go<br />Foreground Realtime tool schema and compatibility aliases.</div>
+        <div class="source">internal/meetingagent/realtime_app_control.go<br />control_shared_app_window backend and async job entry.</div>
+        <div class="source">internal/meetingagent/service_worker_realtime.go<br />meeting-scoped worker result delivery and suppression.</div>
+        <div class="source">packages/core/src/meeting/google-meet-joiner.ts<br />Meet joiner, injected scripts, runtime state, worker result bridge.</div>
+        <div class="source">packages/core/src/realtime/realtime-browser-context-helpers.ts<br />Context health, transcripts, feedback, and failure matrix.</div>
+        <div class="source">packages/core/src/realtime/realtime-browser-turn-policy-helpers.ts<br />Single outlet policy for voice / Meet chat / visual-only / silent / blocked.</div>
+        <div class="source">packages/core/src/realtime/realtime-browser-meeting-event-helpers.ts<br />Typed meeting events and app-control job state tracking.</div>
+        <div class="source">packages/core/src/realtime/realtime-browser-local-tool-helpers.ts<br />Browser-side tool routing for meet / workspace / avatar / worker tools.</div>
+        <div class="source">packages/core/src/realtime/realtime-browser-audio-output-helpers.ts<br />Remote audio attachment and avatar bus routing.</div>
+        <div class="source">packages/core/src/realtime/realtime-browser-meet-chat-helpers.ts<br />Meet chat observation and send path.</div>
+        <div class="source">packages/core/src/realtime/realtime-browser-worker-result-helpers.ts<br />Worker result text shaping and Meet chat preference.</div>
+        <div class="source">packages/core/src/realtime/realtime-browser-bridge.ts<br />Current glue layer: WebRTC, data channel, local tools, cancellation, worker injection.</div>
+        <div class="source">packages/core/src/meeting/macos-window-capture.swift<br />ScreenCaptureKit native app/window capture helper.</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="callout">
+        <strong>一句话结论：</strong>
+        Realtime 现在脆弱，是因为它把“实时对话系统”和“后台 agent 操作系统”混在同一个模型回合里，
+        还允许多个输出通道各自触发下一轮模型。下一步最值得做的不是继续补单点 bug，
+        而是先用 failure matrix 把卡点显性化，再继续把 app-control / worker / presentation
+        收进 typed event state machine。
+      </div>
+    </section>
+
+    <footer>
+      <span>Prepared for #meeting-avatar task #404 follow-up.</span>
+      <span>Generated from local source inspection, no external services required.</span>
+    </footer>
+  </main>
+</body>
+</html>

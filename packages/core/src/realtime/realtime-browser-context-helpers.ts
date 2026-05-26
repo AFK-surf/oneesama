@@ -19,6 +19,12 @@
     sendRealtimeEvent(event: unknown): string;
   }
 
+  interface FailureMatrixCell {
+    status: "ok" | "waiting" | "blocked" | "disabled";
+    reason: string;
+    signals: Record<string, unknown>;
+  }
+
   function create(deps: RealtimeContextHelperDeps) {
     const { config, state, getRealtimeAgentSession, recordTimeline, sendRealtimeEvent } = deps;
 
@@ -297,7 +303,172 @@
       }
     }
 
+    function appControlJobStaleMs(): number {
+      const raw = Number(config.appControlJobStaleMs || config.turnPolicy?.appControlJobStaleMs);
+      return Number.isFinite(raw) && raw > 0 ? raw : 45000;
+    }
+
+    function appControlJobStatus(value: unknown): string {
+      return String((value as Record<string, unknown>)?.status || "")
+        .trim()
+        .toLowerCase();
+    }
+
+    function summarizeAppControlJobs(nowMs = Date.now()) {
+      const jobs = Object.values(state.turnPolicy?.appControlJobs || {}) as Record<
+        string,
+        unknown
+      >[];
+      const staleMs = appControlJobStaleMs();
+      let pending = 0;
+      let stale = 0;
+      let blocked = 0;
+      let completed = 0;
+      let newestUpdatedAt = "";
+      let newestJobId = "";
+      for (const job of jobs) {
+        const status = appControlJobStatus(job);
+        const jobId = String(job.jobId || "");
+        const updatedAt = String(job.updatedAt || "");
+        if (!newestUpdatedAt || updatedAt > newestUpdatedAt) {
+          newestUpdatedAt = updatedAt;
+          newestJobId = jobId;
+        }
+        if (["blocked", "failed", "error", "timeout"].includes(status)) {
+          blocked += 1;
+          continue;
+        }
+        if (["completed", "done", "success", "succeeded"].includes(status)) {
+          completed += 1;
+          continue;
+        }
+        if (["accepted", "queued", "running", "started"].includes(status)) {
+          pending += 1;
+          const updatedMs = Date.parse(updatedAt);
+          if (Number.isFinite(updatedMs) && nowMs - updatedMs > staleMs) stale += 1;
+        }
+      }
+      return {
+        total: jobs.length,
+        pending,
+        stale,
+        blocked,
+        completed,
+        staleMs,
+        newestJobId,
+        newestUpdatedAt,
+      };
+    }
+
+    function matrixCell(
+      status: FailureMatrixCell["status"],
+      reason: string,
+      signals: Record<string, unknown> = {},
+    ): FailureMatrixCell {
+      return { status, reason, signals };
+    }
+
+    function buildFailureMatrix(checks, appControlJobs) {
+      const transport = (() => {
+        if (state.connection.lastTokenError && !checks.peerConnected) {
+          return matrixCell("blocked", "token_exchange_failed", {
+            status: state.connection.lastTokenError.status || "",
+            retryScheduled: Boolean(state.connection.reconnecting),
+          });
+        }
+        if (state.connection.lastSdpError && !checks.peerConnected) {
+          return matrixCell("blocked", "sdp_exchange_failed", {
+            status: state.connection.lastSdpError.status || "",
+            retryScheduled: Boolean(state.connection.reconnecting),
+          });
+        }
+        if (!checks.peerConnected) {
+          return matrixCell("blocked", "peer_not_connected", {
+            peerConnectionState: state.connection.peerConnectionState || "",
+          });
+        }
+        if (!checks.dataChannelOpen) return matrixCell("blocked", "data_channel_not_open");
+        if (!checks.sessionConfigured) return matrixCell("blocked", "session_not_configured");
+        return matrixCell("ok", "peer_data_channel_and_session_ready", {
+          peerConnectionState: state.connection.peerConnectionState || "",
+        });
+      })();
+
+      const audioInput = (() => {
+        if (!checks.meetParticipantAudioExpected && !checks.inputAudioAdded) {
+          return matrixCell("disabled", "audio_input_intentionally_disabled");
+        }
+        if (
+          checks.meetParticipantAudioExpected &&
+          !checks.meetParticipantAudioReady &&
+          checks.onlyLocalMicFallbackInput
+        ) {
+          return matrixCell("waiting", "only_local_mic_fallback_input", {
+            participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
+            meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
+          });
+        }
+        if (
+          checks.meetParticipantAudioExpected &&
+          !checks.meetParticipantAudioReady &&
+          checks.realtimeInputPlaceholderAdded
+        ) {
+          return matrixCell("waiting", "silent_input_placeholder_only", {
+            participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
+            meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
+          });
+        }
+        if (!checks.inputAudioAdded) return matrixCell("waiting", "input_audio_not_configured");
+        return matrixCell("ok", "input_audio_ready", {
+          participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
+          meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
+          localAudioTrackAdded: checks.localAudioTrackAdded,
+        });
+      })();
+
+      const modelTurn = (() => {
+        if (!checks.inboundEvents) return matrixCell("waiting", "no_realtime_server_events");
+        if (!checks.responseEvents) return matrixCell("waiting", "no_response_events");
+        return matrixCell("ok", "response_events_observed", {
+          inboundEvents: checks.inboundEvents,
+          responseEvents: checks.responseEvents,
+          inputTranscriptChars: checks.inputTranscriptChars,
+          outputTranscriptChars: checks.outputTranscriptChars,
+        });
+      })();
+
+      const toolTurns = (() => {
+        if (appControlJobs.blocked > 0) {
+          return matrixCell("blocked", "app_control_job_blocked", appControlJobs);
+        }
+        if (appControlJobs.stale > 0) {
+          return matrixCell("blocked", "app_control_job_stale", appControlJobs);
+        }
+        if (appControlJobs.pending > 0) {
+          return matrixCell("waiting", "app_control_job_pending", appControlJobs);
+        }
+        return matrixCell("ok", "no_pending_tool_turns", appControlJobs);
+      })();
+
+      const audioOutput = (() => {
+        if (!checks.responseEvents) return matrixCell("waiting", "waiting_for_model_response");
+        if (!checks.remoteAudioAttached) return matrixCell("blocked", "remote_audio_not_attached");
+        if (!checks.remoteAudioRoutedToAvatarBus)
+          return matrixCell("blocked", "remote_audio_not_routed");
+        return matrixCell("ok", "remote_audio_routed_to_avatar_bus");
+      })();
+
+      return {
+        transport,
+        audioInput,
+        modelTurn,
+        toolTurns,
+        audioOutput,
+      };
+    }
+
     function classifyRealtimeFeedback() {
+      const appControlJobs = summarizeAppControlJobs();
       const checks = {
         peerConnected:
           state.connected === true ||
@@ -338,6 +509,10 @@
         workerToolCalls: state.workerTools.calls.length,
         meetToolCalls: state.meetTools.calls.length,
         workspaceToolCalls: state.workspaceTools.calls.length,
+        appControlJobTotal: appControlJobs.total,
+        appControlJobsPending: appControlJobs.pending,
+        appControlJobsStale: appControlJobs.stale,
+        appControlJobsBlocked: appControlJobs.blocked,
         inputTranscriptChars: state.transcripts.input.reduce(
           (sum, entry) => sum + String(entry.text || "").length,
           0,
@@ -348,6 +523,7 @@
         ),
         errors: state.errors.length,
       };
+      const failureMatrix = buildFailureMatrix(checks, appControlJobs);
       const blockers = [];
       let status = "ready";
       let summary;
@@ -402,6 +578,14 @@
         if (checks.realtimeInputPlaceholderAdded) {
           blockers.push("silent_input_placeholder_only");
         }
+      } else if (appControlJobs.blocked > 0) {
+        status = "tool_blocked";
+        summary = "Realtime has a blocked app-control job that needs a visible recovery path.";
+        blockers.push("app_control_job_blocked");
+      } else if (appControlJobs.stale > 0) {
+        status = "tool_blocked";
+        summary = "Realtime has an app-control job that stayed pending too long.";
+        blockers.push("app_control_job_stale");
       } else if (!checks.inboundEvents) {
         if (!checks.inputAudioAdded) {
           status = "waiting_for_turn";
@@ -441,6 +625,7 @@
         summary,
         blockers,
         checks,
+        failureMatrix,
         updatedAt: new Date().toISOString(),
       };
     }
