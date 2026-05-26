@@ -69,6 +69,17 @@ async function withToolServer(callback) {
         );
         return;
       }
+      if (request.url === "/tools/control_shared_app_window") {
+        response.end(
+          JSON.stringify({
+            ok: true,
+            status: "queued",
+            jobId: "job_sdk_app_control_queued",
+            summary: "Queued app control job.",
+          }),
+        );
+        return;
+      }
       response.statusCode = 404;
       response.end(JSON.stringify({ ok: false, error: "not_found" }));
     } catch (error) {
@@ -263,6 +274,74 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
             entry.type === "realtime_agent_sdk_tool_start" &&
             entry.detail.session_id === "sdk-smoke-session",
         ),
+      );
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+test("Realtime Agents SDK local app-control tools record silent turn policy", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk-mock",
+          agentRuntime: "agents-sdk",
+          sessionId: "sdk-policy-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          toolCallbackToken: "test-session-token",
+          tools: [
+            {
+              type: "function",
+              name: "control_shared_app_window",
+              description: "Control the currently shared app window.",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          ],
+          session: {
+            model: "gpt-realtime-2",
+            audio: { output: { voice: "marin" } },
+          },
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.agentRuntime?.sdkConnected === true,
+      );
+      assert.equal(
+        await page.evaluate(() => typeof window.OpenAIAgentsRealtime?.backgroundResult),
+        "function",
+      );
+
+      const toolResult = await page.evaluate(() =>
+        window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("control_shared_app_window", {
+          operation: "type_text",
+        }),
+      );
+      const bridge = await page.evaluate(() => window.MAB_REALTIME_BRIDGE);
+
+      assert.equal(toolResult.result.status, "queued");
+      assert.equal(toolResult.delivery.policy.reason, "app_control_async_accepted");
+      assert.equal(toolResult.delivery.policy.autoRespond, false);
+      assert.equal(bridge.turnPolicy.decisions.at(-1).reason, "app_control_async_accepted");
+      assert.equal(
+        bridge.turnPolicy.events.at(-1).type,
+        "app_control.accepted",
+      );
+      assert.equal(
+        bridge.turnPolicy.appControlJobs.job_sdk_app_control_queued.visibility,
+        "silent",
+      );
+      assert.equal(
+        bridge.connection.sentDataChannelMessages.some((entry) =>
+          String(entry.payload || "").includes("response.create"),
+        ),
+        false,
       );
     } finally {
       await browser.close();

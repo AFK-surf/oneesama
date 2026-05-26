@@ -1132,7 +1132,6 @@
     recordTimeline,
     rememberAvatarToolError,
   });
-
   const {
     sendMeetChat,
     readMeetChat: _readMeetChat,
@@ -1157,6 +1156,7 @@
 
   const {
     deliverFunctionToolResult,
+    prepareFunctionToolResult,
     deliverWorkerResult,
     rememberSuppressedWorkerResult,
     shouldDeliverWorkerResult,
@@ -1343,24 +1343,24 @@
 
   async function runLocalToolForSDK(name, args = {}, callId = "") {
     recordTimeline("realtime_agent_sdk_tool_start", { name, callId });
+    const kind = LOCAL_WORKER_TOOLS.has(name) ? "worker"
+      : LOCAL_MEET_TOOLS.has(name) ? "meet"
+        : LOCAL_WORKSPACE_TOOLS.has(name) ? "workspace"
+          : "avatar";
     try {
-      let result;
-      if (LOCAL_WORKER_TOOLS.has(name)) {
-        result = await runLocalWorkerTool(name, args);
-        rememberWorkerToolCall({ name, callId, arguments: args, result, runtime: "agents-sdk" });
-      } else if (LOCAL_MEET_TOOLS.has(name)) {
-        result = await runLocalMeetTool(name, args);
-        rememberMeetToolCall({ name, callId, arguments: args, result, runtime: "agents-sdk" });
-      } else if (LOCAL_WORKSPACE_TOOLS.has(name)) {
-        result = await runLocalWorkspaceTool(name, args);
-        rememberWorkspaceToolCall({ name, callId, arguments: args, result, runtime: "agents-sdk" });
-      } else {
-        result = runLocalAvatarTool(name, args);
-        rememberAvatarToolCall({ name, callId, arguments: args, result, runtime: "agents-sdk" });
-      }
+      const result = kind === "worker" ? await runLocalWorkerTool(name, args)
+        : kind === "meet" ? await runLocalMeetTool(name, args)
+          : kind === "workspace" ? await runLocalWorkspaceTool(name, args)
+            : runLocalAvatarTool(name, args);
+      const delivery = prepareFunctionToolResult({ kind, name, callId, result }, { sendOutput: false });
+      const call = { name, callId, arguments: args, result, runtime: "agents-sdk", delivery };
+      if (kind === "worker") rememberWorkerToolCall(call);
+      else if (kind === "meet") rememberMeetToolCall(call);
+      else if (kind === "workspace") rememberWorkspaceToolCall(call);
+      else rememberAvatarToolCall(call);
       recordTimeline("realtime_agent_sdk_tool_end", { name, callId, ok: true });
       updateFeedback();
-      return result;
+      return { result, delivery };
     } catch (error) {
       recordTimeline("realtime_agent_sdk_tool_end", {
         name,
@@ -1368,9 +1368,9 @@
         ok: false,
         error: String((error && error.message) || error).slice(0, 300),
       });
-      if (LOCAL_WORKER_TOOLS.has(name)) rememberWorkerToolError(error, { name, callId });
-      else if (LOCAL_MEET_TOOLS.has(name)) rememberMeetToolError(error, { name, callId });
-      else if (LOCAL_WORKSPACE_TOOLS.has(name)) rememberWorkspaceToolError(error, { name, callId });
+      if (kind === "worker") rememberWorkerToolError(error, { name, callId });
+      else if (kind === "meet") rememberMeetToolError(error, { name, callId });
+      else if (kind === "workspace") rememberWorkspaceToolError(error, { name, callId });
       else rememberAvatarToolError(error, { name, callId });
       throw error;
     }
@@ -1394,7 +1394,11 @@
               details?.callId ||
               details?.call_id ||
               "";
-            return JSON.stringify(await runLocalToolForSDK(name, input || {}, callId));
+            const execution = await runLocalToolForSDK(name, input || {}, callId);
+            const output = JSON.stringify(execution.delivery?.modelResult || execution.result);
+            return execution.delivery?.policy?.autoRespond === false && namespace.backgroundResult
+              ? namespace.backgroundResult(output)
+              : output;
           },
         }),
       );
@@ -2484,9 +2488,9 @@
       throw new Error(`unsupported local tool for SDK smoke: ${name}`);
     }
     const callId = `mock_call_${randomEventId()}`;
-    const result = await runLocalToolForSDK(name, args, callId);
+    const execution = await runLocalToolForSDK(name, args, callId);
     recordTimeline("realtime_agent_sdk_mock_tool_call", { name, callId });
-    return { ok: true, name, callId, result };
+    return { ok: true, name, callId, result: execution.result, delivery: execution.delivery };
   }
 
   window.MAB_REALTIME_CLIENT = {

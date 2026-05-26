@@ -13,6 +13,10 @@
     interrupt?: unknown;
   }
 
+  interface FunctionToolDeliveryOptions {
+    sendOutput?: boolean;
+  }
+
   interface WorkerResultScope {
     ok: boolean;
     reason: string;
@@ -363,9 +367,31 @@
       return { ok: true, outputChannel, responseChannel };
     }
 
-    function deliverFunctionToolResult(input: FunctionToolPolicyInput) {
+    function functionToolModelResult(
+      input: FunctionToolPolicyInput,
+      policy: RealtimeTurnPolicy,
+    ) {
+      return {
+        ok: resultRecord(input.result).ok !== false,
+        result: input.result,
+        turnPolicy: {
+          channel: policy.channel,
+          autoRespond: policy.autoRespond,
+          reason: policy.reason,
+          instructions: policy.responseInstructions,
+        },
+      };
+    }
+
+    function prepareFunctionToolResult(
+      input: FunctionToolPolicyInput,
+      options: FunctionToolDeliveryOptions = {},
+    ) {
       const policy = functionToolPolicy(input);
-      const delivery = sendFunctionCallOutput(input.callId, input.result, policy);
+      const delivery =
+        options.sendOutput === false
+          ? { ok: true, skipped: true, reason: "caller_handles_function_call_output" }
+          : sendFunctionCallOutput(input.callId, input.result, policy);
       const event =
         input.name === "control_shared_app_window"
           ? rememberAppControlEvent(input, policy)
@@ -391,7 +417,17 @@
         outputChannel: delivery.outputChannel || "",
         responseChannel: delivery.responseChannel || "",
       });
-      return { ...delivery, policy, decision, meetingEvent: event };
+      return {
+        ...delivery,
+        policy,
+        decision,
+        meetingEvent: event,
+        modelResult: functionToolModelResult(input, policy),
+      };
+    }
+
+    function deliverFunctionToolResult(input: FunctionToolPolicyInput) {
+      return prepareFunctionToolResult(input);
     }
 
     async function deliverWorkerResult(job, options: WorkerResultPolicyInput = {}) {
@@ -530,6 +566,7 @@
 
     return {
       deliverFunctionToolResult,
+      prepareFunctionToolResult,
       deliverWorkerResult,
       rememberSuppressedWorkerResult,
       shouldDeliverWorkerResult: meetingEvents.shouldDeliverWorkerResult,
