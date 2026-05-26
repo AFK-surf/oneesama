@@ -12,18 +12,16 @@ const legacyBaselines = new Map([
   ["src/cli.ts", 11783],
   ["packages/core/src/meeting/google-meet-joiner.ts", 4071],
   ["apps/slack-agent/src/index.ts", 3741],
-  ["cmd/oneesama-triage-benchmark/main.go", 2973],
-  ["internal/slackagent/persona_shadow_test.go", 2794],
-  ["internal/slackagent/persona_shadow.go", 2699],
-  ["internal/slackagent/daily_report.go", 1725],
   ["packages/core/src/slack/legacy-slack-domain-store.ts", 1720],
   ["apps/meeting-agent/src/index.ts", 1680],
   ["packages/core/src/avatar/hiyori-avatar-inject.ts", 1639],
-  ["internal/slackagent/handler_inbound_test.go", 1528],
-  ["internal/slackagent/handler_triage_test.go", 1458],
-  ["internal/slackagent/service_triage_audit.go", 1111],
-  ["internal/slackagent/service_worker_jobs.go", 949],
 ]);
+
+for (const file of legacyBaselines.keys()) {
+  if (file.endsWith(".go")) {
+    throw new Error(`Go files cannot use legacy line-count baselines: ${file}`);
+  }
+}
 
 const sourceExtensions = new Set([".cjs", ".go", ".js", ".jsx", ".mjs", ".ts", ".tsx"]);
 const ignoredPrefixes = [
