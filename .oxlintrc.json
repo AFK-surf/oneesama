@@ -91,18 +91,6 @@
       }
     },
     {
-      "files": ["packages/core/src/realtime/realtime-browser-bridge.ts"],
-      "rules": {
-        "max-lines": [
-          "error",
-          {
-            "max": 2600,
-            "skipBlankLines": true
-          }
-        ]
-      }
-    },
-    {
       "files": ["packages/core/src/slack/legacy-slack-domain-store.ts"],
       "rules": {
         "max-lines": [

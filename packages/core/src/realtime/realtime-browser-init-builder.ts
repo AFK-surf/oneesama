@@ -53,6 +53,11 @@ export function buildRealtimeBrowserInitScript(config = {}) {
     ),
     readBrowserInitSource(
       import.meta.url,
+      "./realtime-browser-local-tool-router-helpers.js",
+      "./realtime-browser-local-tool-router-helpers.ts",
+    ),
+    readBrowserInitSource(
+      import.meta.url,
       "./realtime-browser-meet-chat-helpers.js",
       "./realtime-browser-meet-chat-helpers.ts",
     ),
@@ -77,11 +82,26 @@ export function buildRealtimeBrowserInitScript(config = {}) {
       "./realtime-browser-context-helpers.ts",
     ),
   ];
-  const source = readBrowserInitSource(
-    import.meta.url,
-    "./realtime-browser-bridge.js",
-    "./realtime-browser-bridge.ts",
+  const bridgeSources = [
+    "./realtime-browser-bridge",
+    "./realtime-browser-bridge-audio-routing",
+    "./realtime-browser-bridge-meet-peer-hook",
+    "./realtime-browser-bridge-runtime-wiring",
+    "./realtime-browser-bridge-agent-transport",
+    "./realtime-browser-bridge-meeting-input",
+    "./realtime-browser-bridge-connect",
+    "./realtime-browser-bridge-public-api",
+  ].map((basePath) =>
+    readBrowserInitSource(import.meta.url, `${basePath}.js`, `${basePath}.ts`),
   );
+  const source = [
+    "(() => {",
+    "  if (window.__meetingAvatarRealtimeBridge) return;",
+    "  if (window.top !== window) return;",
+    "  window.__meetingAvatarRealtimeBridge = true;",
+    ...bridgeSources,
+    "})();",
+  ].join("\n");
   if (!shouldInjectRealtimeAgentsSDK(normalizedConfig)) {
     return [
       `window.MAB_REALTIME_BRIDGE_CONFIG = ${JSON.stringify(config)};`,

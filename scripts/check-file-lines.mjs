@@ -15,7 +15,6 @@ const legacyBaselines = new Map([
   ["cmd/oneesama-triage-benchmark/main.go", 2973],
   ["internal/slackagent/persona_shadow_test.go", 2794],
   ["internal/slackagent/persona_shadow.go", 2699],
-  ["packages/core/src/realtime/realtime-browser-bridge.ts", 2559],
   ["internal/slackagent/daily_report.go", 1725],
   ["packages/core/src/slack/legacy-slack-domain-store.ts", 1720],
   ["apps/meeting-agent/src/index.ts", 1680],
@@ -67,6 +66,9 @@ function lineCount(file) {
 }
 
 function limitFor(file) {
+  if (file.startsWith("packages/core/src/realtime/realtime-browser-bridge")) {
+    return { limit: 500, reason: "realtime-bridge-shard" };
+  }
   const baseline = legacyBaselines.get(file);
   if (baseline) return { limit: baseline, reason: "legacy-baseline" };
   if (file.endsWith("_test.go")) return { limit: defaultLimits.goTest, reason: "go-test" };
