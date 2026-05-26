@@ -277,10 +277,7 @@ function mergeAttachmentCanvasFiles(messages: SlackMessageShape[] = []) {
   const cloned: SlackMessageShape[] = messages.map((message) => ({ ...message }));
   const canvasFiles = extractCanvasFilesFromAttachments(cloned);
   if (canvasFiles.length && cloned[0]) {
-    cloned[0].files = [
-      ...messageFiles(cloned[0]),
-      ...(canvasFiles as unknown as SlackFileLike[]),
-    ];
+    cloned[0].files = [...messageFiles(cloned[0]), ...(canvasFiles as unknown as SlackFileLike[])];
   }
   return { messages: cloned, canvasFiles };
 }
@@ -293,7 +290,7 @@ export function stripSlackBotMention(value: unknown = "", botUserId: string = ""
 
 export function findGoogleMeetUrl(value: unknown = ""): string {
   const match = String(value || "").match(MEET_URL_RE)?.[0] || "";
-  return match.replace(/[.,;:!?\]\)}>]+$/g, "");
+  return match.replace(/[.,;:!?\])}>]+$/g, "");
 }
 
 export function containsGoogleMeetUrl(value: unknown = ""): boolean {

@@ -85,7 +85,7 @@ function handleDryRunJoin(params: PrepareJoinParams) {
 }
 
 async function handleJoinRequest(params: PrepareJoinParams) {
-  if (Boolean(params.dry_run)) {
+  if (params.dry_run) {
     return handleDryRunJoin(params);
   }
 

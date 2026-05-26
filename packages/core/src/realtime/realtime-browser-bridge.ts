@@ -3,18 +3,6 @@
   if (window.top !== window) return;
   window.__meetingAvatarRealtimeBridge = true;
 
-  interface RealtimeEventSummary {
-    type: string;
-    responseId?: string;
-    itemType?: string;
-    name?: string;
-    callId?: string;
-    error?: string;
-    delta?: string;
-    transcript?: string;
-    text?: string;
-  }
-
   interface RealtimeSessionShape {
     type?: string;
     model?: string;
@@ -62,7 +50,7 @@
     meetAudioCaptureChunkMs?: number;
     fallbackToLocalMic: boolean;
     instructions: string;
-    tools: RealtimeToolLike[];
+    tools: any[];
     toolChoice?: string;
     session: RealtimeSessionShape;
     sendSessionUpdateOnConnect: boolean;
@@ -105,6 +93,25 @@
     botName: "Meeting Avatar Bot",
     ...(window.MAB_REALTIME_BRIDGE_CONFIG || {}),
   };
+  const {
+    realtimeReconnectDelayMs,
+    formatRealtimeErrorValue,
+    shouldRetryRealtimeConnectStatus,
+    readResponseText,
+    parseJsonObject,
+    responseRequestId,
+    retryAfterDetail,
+    shouldAutoConnectInCurrentDocument,
+  } = (window as any).__MAB_REALTIME_CONNECTION_HELPERS;
+  const { normalizeToolNames, defaultRealtime2Session, buildSessionUpdateEvent } = (window as any)
+    .__MAB_REALTIME_SESSION_HELPERS;
+  const {
+    buildWorkerResultChatText,
+    shouldSendWorkerResultToMeetChat,
+    buildWorkerResultVoiceText,
+    buildWorkerResultText,
+    isNoActionWorkerJob,
+  } = (window as any).__MAB_REALTIME_WORKER_RESULT_HELPERS;
 
   const state = {
     ok: true,
@@ -290,8 +297,6 @@
   let reconnectGeneration = 0;
   let activeRealtimeAgentSDKTools = [];
   const observedMeetChatKeys = new Set();
-  let meetChatObserver = null;
-  let meetChatPollTimer = null;
   const pendingMeetAudioTracks = [];
   const routedMeetAudioTrackIds = new Set();
   const routedMeetAudioSources = [];
@@ -367,75 +372,6 @@
     updateFeedback();
   }
 
-  function parseRetryAfterMs(value: string | null | undefined) {
-    const raw = String(value || "").trim();
-    if (!raw) return 0;
-    const seconds = Number(raw);
-    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
-    const dateMs = Date.parse(raw);
-    if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
-    return 0;
-  }
-
-  function realtimeReconnectDelayMs(status: number, retryAfterMs = 0) {
-    const attempt = Math.max(1, Number(state.connection.reconnectAttempts || 0) + 1);
-    const baseMs = status === 429 ? 10000 : 1500;
-    const backoffMs = Math.min(
-      status === 429 ? 60000 : 30000,
-      baseMs * 2 ** Math.min(attempt - 1, 5),
-    );
-    const jitterMs = Math.floor(Math.random() * 400);
-    return Math.max(retryAfterMs, backoffMs + jitterMs);
-  }
-
-  function formatRealtimeErrorValue(value: unknown) {
-    if (!value) return "";
-    if (typeof value === "string") return value;
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-
-  function shouldRetryRealtimeConnectStatus(status: number) {
-    return status === 429 || status === 408 || (status >= 500 && status <= 599);
-  }
-
-  async function readResponseText(response) {
-    try {
-      return await response.text();
-    } catch {
-      return "";
-    }
-  }
-
-  function parseJsonObject(text: string) {
-    try {
-      const value = JSON.parse(text);
-      return value && typeof value === "object" ? value : {};
-    } catch {
-      return {};
-    }
-  }
-
-  function responseRequestId(response) {
-    return (
-      response.headers.get("x-request-id") ||
-      response.headers.get("openai-request-id") ||
-      response.headers.get("cf-ray") ||
-      ""
-    );
-  }
-
-  function retryAfterDetail(response) {
-    const retryAfter = response.headers.get("retry-after") || "";
-    return {
-      retryAfter,
-      retryAfterMs: parseRetryAfterMs(retryAfter),
-    };
-  }
-
   function rememberSdpError(detail: Record<string, unknown>) {
     state.connection.lastSdpError = {
       ts: new Date().toISOString(),
@@ -461,7 +397,11 @@
     const detail = error?.realtimeSdpError || error?.realtimeTokenError;
     if (!detail || detail.retryable !== true) return false;
     const status = Number(detail.status || 0);
-    const delayMs = realtimeReconnectDelayMs(status, Number(detail.retryAfterMs || 0));
+    const delayMs = realtimeReconnectDelayMs(
+      status,
+      Number(detail.retryAfterMs || 0),
+      Number(state.connection.reconnectAttempts || 0) + 1,
+    );
     recordTimeline("realtime_connect_retry_requested", {
       reason: detail.reason || "sdp_exchange_failed",
       status,
@@ -485,425 +425,25 @@
     state.timeline = state.timeline.slice(-120);
   }
 
-  function contextLifecycleConfig() {
-    const raw = (config.contextLifecycle || {}) as Record<string, unknown>;
-    return {
-      enabled: raw.enabled !== false,
-      compactTokenThreshold: Number(raw.compactTokenThreshold || 80000),
-      compactItemThreshold: Number(raw.compactItemThreshold || 200),
-      recentItems: Math.max(5, Math.min(Number(raw.recentItems || 20), 80)),
-      dedupeWindowMs: Math.max(1000, Number(raw.dedupeWindowMs || 5000)),
-      summaryMaxChars: Math.max(800, Number(raw.summaryMaxChars || 3000)),
-    };
-  }
-
-  function estimateTokensFromText(value: unknown): number {
-    return Math.ceil(String(value || "").length / 4);
-  }
-
-  function estimateHistoryTokens(history: unknown[]): number {
-    return Math.ceil(JSON.stringify(history || []).length / 4);
-  }
-
-  function currentHistorySnapshot(): unknown[] {
-    const history = activeRealtimeAgentSession?.history;
-    return Array.isArray(history) ? history : [];
-  }
-
-  function updateContextHealthFromHistory(history = currentHistorySnapshot()) {
-    const lifecycle = contextLifecycleConfig();
-    state.contextHealth.enabled = lifecycle.enabled;
-    state.contextHealth.itemsCount = history.length;
-    state.contextHealth.tokenEstimate = estimateHistoryTokens(history);
-    state.contextHealth.nextCompactThreshold = lifecycle.compactTokenThreshold;
-    state.contextHealth.recentItemsRetained = lifecycle.recentItems;
-    return state.contextHealth;
-  }
-
-  function rememberSessionContext(kind: string, value: unknown, reason = "update") {
-    if (!kind) return state.contextHealth;
-    const cache = state.contextHealth.cache as Record<string, unknown>;
-    if (kind === "identity") cache.identity = value;
-    else if (kind === "meetingAwareness") cache.meetingAwareness = value;
-    else if (kind === "currentTask") cache.currentTask = value;
-    state.contextHealth.refreshCount += 1;
-    state.contextHealth.lastRefreshAt = new Date().toISOString();
-    state.contextHealth.lastRefreshReason = reason;
-    recordTimeline("realtime_context_refresh", {
-      kind,
-      reason,
-      tokenEstimate: state.contextHealth.tokenEstimate,
-    });
-    return state.contextHealth;
-  }
-
-  function displayNameFromIdentity(identity: unknown): string {
-    const value = (identity || {}) as Record<string, unknown>;
-    return String(
-      value.preferredName ||
-        value.preferred_name ||
-        value.canonicalName ||
-        value.canonical_name ||
-        value.name ||
-        "",
-    ).trim();
-  }
-
-  function buildSessionContextSummary(): string {
-    const cache = state.contextHealth.cache as Record<string, unknown>;
-    const awareness = (cache.meetingAwareness || {}) as Record<string, any>;
-    const identity = cache.identity || null;
-    const speaker = awareness.activeSpeaker || awareness.active_speaker || null;
-    const speakerIdentity = speaker?.identity || null;
-    const speakerName = displayNameFromIdentity(speakerIdentity) || String(speaker?.name || "");
-    const currentUserName = displayNameFromIdentity(identity);
-    const participants = Array.isArray(awareness.participants)
-      ? awareness.participants
-          .map((entry) => displayNameFromIdentity(entry?.identity) || String(entry?.name || ""))
-          .filter(Boolean)
-          .slice(0, 12)
-      : [];
-    const currentTask = (cache.currentTask || {}) as Record<string, unknown>;
-    const lines = [
-      "会议上下文快照：",
-      currentUserName ? `当前用户：${currentUserName}` : "",
-      speakerName ? `当前或最近说话的人：${speakerName}` : "",
-      speakerIdentity?.isCurrentUser === true || speakerIdentity?.is_current_user === true
-        ? "这位说话者就是当前用户。"
-        : "",
-      participants.length ? `当前可见参会者：${participants.join("、")}` : "",
-      currentTask.summary ? `当前正在处理的事：${String(currentTask.summary).slice(0, 500)}` : "",
-      "回答时自然使用这些事实；如果事实不确定，简短澄清，不要猜。",
-    ].filter(Boolean);
-    return lines.join("\n").slice(0, contextLifecycleConfig().summaryMaxChars);
-  }
-
-  function makeContextSummaryItem(reason = "manual") {
-    return {
-      itemId: `ctx_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-      type: "message",
-      role: "system",
-      status: "completed",
-      content: [{ type: "input_text", text: buildSessionContextSummary() }],
-      metadata: { source: "meeting_context_snapshot", reason },
-    };
-  }
-
-  function buildCompactedHistory(history: unknown[] = [], reason = "manual") {
-    const lifecycle = contextLifecycleConfig();
-    const recentItems = Array.isArray(history) ? history.slice(-lifecycle.recentItems) : [];
-    return [makeContextSummaryItem(reason), ...recentItems];
-  }
-
-  function compactRealtimeHistory(reason = "manual") {
-    const lifecycle = contextLifecycleConfig();
-    if (!lifecycle.enabled) {
-      return { ok: false, skipped: true, reason: "context_lifecycle_disabled" };
-    }
-    const session = activeRealtimeAgentSession;
-    if (!session || typeof session.updateHistory !== "function") {
-      return { ok: false, skipped: true, reason: "sdk_history_unavailable" };
-    }
-    const before = currentHistorySnapshot();
-    const beforeItems = before.length;
-    const nextHistory = buildCompactedHistory(before, reason);
-    session.updateHistory(() => nextHistory);
-    const afterItems = nextHistory.length;
-    state.contextHealth.compactCount += 1;
-    state.contextHealth.lastCompactAt = new Date().toISOString();
-    state.contextHealth.lastCompactReason = reason;
-    state.contextHealth.lastCompactBeforeItems = beforeItems;
-    state.contextHealth.lastCompactAfterItems = afterItems;
-    state.contextHealth.lastSummaryChars = String(
-      (nextHistory[0] as any)?.content?.[0]?.text || "",
-    ).length;
-    state.contextHealth.itemsCount = afterItems;
-    state.contextHealth.tokenEstimate = estimateHistoryTokens(nextHistory);
-    recordTimeline("realtime_context_compact", {
-      reason,
-      beforeItems,
-      afterItems,
-      summaryChars: state.contextHealth.lastSummaryChars,
-      retainedRecentItems: Math.max(0, nextHistory.length - 1),
-    });
-    return {
-      ok: true,
-      reason,
-      beforeItems,
-      afterItems,
-      retainedRecentItems: Math.max(0, nextHistory.length - 1),
-      summaryChars: state.contextHealth.lastSummaryChars,
-    };
-  }
-
-  function maybeCompactRealtimeHistory(reason = "history_updated") {
-    const lifecycle = contextLifecycleConfig();
-    const history = currentHistorySnapshot();
-    updateContextHealthFromHistory(history);
-    if (!lifecycle.enabled) return { ok: false, skipped: true, reason: "disabled" };
-    if (
-      history.length >= lifecycle.compactItemThreshold ||
-      state.contextHealth.tokenEstimate >= lifecycle.compactTokenThreshold
-    ) {
-      return compactRealtimeHistory(reason);
-    }
-    return { ok: true, skipped: true, reason: "below_threshold" };
-  }
-
-  function pushSessionContext(
-    input: {
-      text?: string;
-      signature?: string;
-      reason?: string;
-      kind?: string;
-      value?: unknown;
-      force?: boolean;
-    } = {},
-  ) {
-    const lifecycle = contextLifecycleConfig();
-    const signature = String(input.signature || input.text || input.reason || "").slice(0, 800);
-    const nowMs = Date.now();
-    if (
-      !input.force &&
-      signature &&
-      signature === state.contextHealth.lastSignature &&
-      nowMs - Number(state.contextHealth.lastSignatureAt || 0) < lifecycle.dedupeWindowMs
-    ) {
-      state.contextHealth.dedupeSkips += 1;
-      recordTimeline("realtime_context_push_deduped", {
-        reason: input.reason || "",
-        signature: signature.slice(0, 120),
-      });
-      return { ok: true, skipped: true, reason: "dedupe_window" };
-    }
-    if (input.kind) rememberSessionContext(input.kind, input.value, input.reason || "push");
-    state.contextHealth.lastSignature = signature;
-    state.contextHealth.lastSignatureAt = nowMs;
-    const text = String(input.text || buildSessionContextSummary()).trim();
-    if (!text) return { ok: true, skipped: true, reason: "empty_context" };
-    const channel = sendRealtimeEvent({
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "system",
-        content: [{ type: "input_text", text }],
-      },
-    });
-    recordTimeline("realtime_context_pushed", {
-      reason: input.reason || "",
-      kind: input.kind || "",
-      channel,
-      chars: text.length,
-    });
-    maybeCompactRealtimeHistory(input.reason || "context_push");
-    return { ok: true, channel, chars: text.length };
-  }
-
-  function summarizeRealtimeEvent(event: unknown): RealtimeEventSummary {
-    const eventObj = (typeof event === "object" && event !== null ? event : {}) as Record<
-      string,
-      unknown
-    >;
-    const summary: RealtimeEventSummary = {
-      type: (eventObj.type as string | undefined) || typeof event,
-    };
-    const response = eventObj.response as { id?: string } | undefined;
-    if (response?.id) summary.responseId = response.id;
-    const item = eventObj.item as { type?: string } | undefined;
-    if (item?.type) summary.itemType = item.type;
-    if (eventObj.name) summary.name = String(eventObj.name);
-    const callId = (eventObj.call_id || eventObj.callId) as string | undefined;
-    if (callId) summary.callId = callId;
-    const errorObj = eventObj.error as { message?: string } | undefined;
-    if (errorObj?.message) summary.error = String(errorObj.message).slice(0, 300);
-    if (typeof eventObj.delta === "string") summary.delta = eventObj.delta.slice(0, 300);
-    if (typeof eventObj.transcript === "string")
-      summary.transcript = eventObj.transcript.slice(0, 500);
-    if (typeof eventObj.text === "string") summary.text = eventObj.text.slice(0, 500);
-    if (typeof event === "string") summary.text = event.slice(0, 300);
-    return summary;
-  }
-
-  function rememberTranscriptEvent(event) {
-    const type = String(event?.type || "");
-    if (type === "response.output_audio_transcript.delta" && typeof event.delta === "string") {
-      state.transcripts.currentOutput += event.delta;
-      state.transcripts.currentOutput = state.transcripts.currentOutput.slice(-4000);
-      return;
-    }
-    if (type === "response.output_audio_transcript.done") {
-      const text = String(event.transcript || state.transcripts.currentOutput || "").trim();
-      if (text) {
-        state.transcripts.output.push({
-          ts: new Date().toISOString(),
-          text: text.slice(0, 2000),
-        });
-        state.transcripts.output = state.transcripts.output.slice(-10);
-      }
-      state.transcripts.currentOutput = "";
-      return;
-    }
-    if (
-      type === "conversation.item.input_audio_transcription.delta" &&
-      typeof event.delta === "string"
-    ) {
-      state.transcripts.currentInput += event.delta;
-      state.transcripts.currentInput = state.transcripts.currentInput.slice(-4000);
-      return;
-    }
-    if (type === "conversation.item.input_audio_transcription.completed") {
-      const text = String(event.transcript || state.transcripts.currentInput || "").trim();
-      if (text) {
-        state.transcripts.input.push({
-          ts: new Date().toISOString(),
-          text: text.slice(0, 2000),
-        });
-        state.transcripts.input = state.transcripts.input.slice(-10);
-      }
-      state.transcripts.currentInput = "";
-    }
-  }
-
-  function classifyRealtimeFeedback() {
-    const checks = {
-      peerConnected:
-        state.connected === true ||
-        ["connected", "completed"].includes(state.connection.peerConnectionState),
-      dataChannelOpen: state.connection.dataChannelOpen === true,
-      sessionConfigured: state.session.configured === true,
-      participantAudioForwardingEnabled:
-        state.connection.participantAudioForwardingEnabled === true,
-      meetAudioForwardingEnabled: state.connection.meetAudioForwardingEnabled === true,
-      localAudioFallbackEnabled: state.connection.localAudioFallbackEnabled === true,
-      localAudioRoutedToRealtimeMix: state.connection.localAudioRoutedToRealtimeMix === true,
-      realtimeInputPlaceholderAdded: state.connection.realtimeInputPlaceholderAdded === true,
-      inputAudioAdded:
-        state.connection.participantAudioTracksAdded > 0 ||
-        state.connection.meetAudioTracksForwarded > 0 ||
-        state.connection.localAudioTrackAdded === true,
-      participantAudioAdded: state.connection.participantAudioTracksAdded > 0,
-      meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
-      localAudioTrackAdded: state.connection.localAudioTrackAdded === true,
-      recvOnlyAudioTransceiverAdded: state.connection.recvOnlyAudioTransceiverAdded === true,
-      inboundEvents: state.inbound.length,
-      responseEvents: state.inbound.filter((entry) =>
-        String(entry.event?.type || "").startsWith("response."),
-      ).length,
-      remoteAudioAttached: state.connection.remoteAudioAttached === true,
-      remoteAudioRoutedToAvatarBus: state.connection.remoteAudioRoutedToAvatarBus === true,
-      avatarToolCalls: state.avatarTools.calls.length,
-      workerToolCalls: state.workerTools.calls.length,
-      meetToolCalls: state.meetTools.calls.length,
-      workspaceToolCalls: state.workspaceTools.calls.length,
-      inputTranscriptChars: state.transcripts.input.reduce(
-        (sum, entry) => sum + String(entry.text || "").length,
-        0,
-      ),
-      outputTranscriptChars: state.transcripts.output.reduce(
-        (sum, entry) => sum + String(entry.text || "").length,
-        0,
-      ),
-      errors: state.errors.length,
-    };
-    const blockers = [];
-    let status = "ready";
-    let summary;
-
-    if (state.connection.lastTokenError && !checks.peerConnected) {
-      const tokenStatus = Number(state.connection.lastTokenError.status || 0);
-      status = "blocked";
-      summary =
-        tokenStatus === 429
-          ? "Realtime client secret request is rate limited; reconnect retry is scheduled."
-          : "Realtime client secret request failed before the peer connection opened.";
-      blockers.push(tokenStatus === 429 ? "realtime_token_rate_limited" : "realtime_token_failed");
-    } else if (state.connection.lastSdpError && !checks.peerConnected) {
-      const sdpStatus = Number(state.connection.lastSdpError.status || 0);
-      status = "blocked";
-      summary =
-        sdpStatus === 429
-          ? "Realtime SDP exchange is rate limited; reconnect retry is scheduled."
-          : "Realtime SDP exchange failed before the peer connection opened.";
-      blockers.push(sdpStatus === 429 ? "realtime_sdp_rate_limited" : "realtime_sdp_failed");
-    } else if (checks.errors) {
-      status = "error";
-      summary = "Realtime bridge reported errors.";
-      blockers.push("bridge_errors_present");
-    } else if (!checks.peerConnected) {
-      status = "blocked";
-      summary = "Realtime peer connection is not connected.";
-      blockers.push("peer_not_connected");
-    } else if (!checks.dataChannelOpen) {
-      status = "blocked";
-      summary = "Realtime data channel is not open.";
-      blockers.push("data_channel_not_open");
-    } else if (!checks.sessionConfigured) {
-      status = "blocked";
-      summary = "Realtime session.update has not been sent.";
-      blockers.push("session_not_configured");
-    } else if (!checks.inboundEvents) {
-      if (!checks.inputAudioAdded) {
-        status = "waiting_for_turn";
-        summary = checks.realtimeInputPlaceholderAdded
-          ? "Realtime is connected with a silent input placeholder; waiting for Meet participant audio."
-          : "Realtime is connected in output-only mode; send a text/tool turn or enable Meet audio forwarding.";
-        blockers.push(
-          checks.realtimeInputPlaceholderAdded
-            ? "waiting_for_meet_audio"
-            : "input_audio_not_configured",
-        );
-      } else {
-        status = "waiting_for_model";
-        summary = "Realtime is connected, but no server events have been received yet.";
-        blockers.push("no_realtime_server_events");
-      }
-    } else if (!checks.responseEvents) {
-      status = "waiting_for_response";
-      summary = "Realtime server events are arriving, but no response events have been observed.";
-      blockers.push("no_response_events");
-    } else if (!checks.remoteAudioAttached) {
-      status = "output_blocked";
-      summary = "Realtime response events exist, but no remote audio track is attached.";
-      blockers.push("remote_audio_not_attached");
-    } else if (!checks.remoteAudioRoutedToAvatarBus) {
-      status = "output_blocked";
-      summary = "Realtime remote audio is attached but not routed into the avatar audio bus.";
-      blockers.push("remote_audio_not_routed");
-    } else {
-      summary = checks.inputAudioAdded
-        ? "Realtime E2E transport is healthy: input track, model events, output audio, and avatar audio route are present."
-        : "Realtime output path is healthy for text/tool turns; audio input is intentionally disabled to avoid avatar self-echo.";
-    }
-
-    return {
-      status,
-      summary,
-      blockers,
-      checks,
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  function updateFeedback() {
-    state.feedback = classifyRealtimeFeedback();
-    return state.feedback;
-  }
-
-  function rememberInboundEvent(event, source = "data-channel") {
-    const summary = summarizeRealtimeEvent(event);
-    state.inbound.push({
-      ts: new Date().toISOString(),
-      source,
-      event: summary,
-    });
-    state.inbound = state.inbound.slice(-100);
-    state.connection.dataChannelMessagesReceived += 1;
-    state.connection.lastInboundEventAt = new Date().toISOString();
-    state.connection.lastInboundEventType = summary.type || "";
-    rememberTranscriptEvent(event);
-    recordTimeline("realtime_inbound", { source, ...summary });
-    updateFeedback();
-  }
+  const {
+    buildCompactedHistory,
+    buildSessionContextSummary,
+    compactRealtimeHistory,
+    currentHistorySnapshot,
+    maybeCompactRealtimeHistory,
+    pushSessionContext,
+    rememberInboundEvent,
+    rememberSessionContext,
+    summarizeRealtimeEvent,
+    updateContextHealthFromHistory,
+    updateFeedback,
+  } = (window as any).__MAB_REALTIME_CONTEXT_HELPERS.create({
+    config,
+    state,
+    getRealtimeAgentSession: () => activeRealtimeAgentSession,
+    recordTimeline,
+    sendRealtimeEvent,
+  });
 
   function ensureMeetAudioRoutingContext() {
     if (routingDestination) return routingDestination;
@@ -1572,139 +1112,55 @@
     return "custom-event";
   }
 
-  interface RealtimeToolLike {
-    name?: string;
-    server_label?: string;
-    type?: string;
-    [key: string]: unknown;
-  }
+  const {
+    extractLocalToolCall,
+    runLocalAvatarTool,
+    updateAvatarHudStatus,
+    postJson,
+    localServiceUrl,
+    runLocalWorkerTool,
+    runLocalWorkspaceTool,
+    sendFunctionCallOutput,
+    isVisualShareToolName,
+    shouldAutoRespondToMeetToolResult,
+  } = (window as any).__MAB_REALTIME_LOCAL_TOOL_HELPERS.create({
+    config,
+    state,
+    localWorkspaceTools: LOCAL_WORKSPACE_TOOLS,
+    isLocalToolName,
+    recordTimeline,
+    rememberAvatarToolError,
+    sendRealtimeEvent,
+  });
 
-  function normalizeToolNames(tools: RealtimeToolLike[] = []): string[] {
-    return tools
-      .map((tool) => tool?.name || tool?.server_label || tool?.type || "")
-      .filter(Boolean);
-  }
+  const { sendMeetChat, readMeetChat, installMeetChatObserver, runLocalMeetTool } = (
+    window as any
+  ).__MAB_REALTIME_MEET_CHAT_HELPERS.create({
+    config,
+    state,
+    observedMeetChatKeys,
+    postJson,
+    localServiceUrl,
+    recordTimeline,
+    sendRealtimeEvent,
+    updateFeedback,
+  });
 
-  function isLegacyRealtimeSessionSchema(value: unknown): boolean {
-    return ["legacy", "v1", "1", "1.5", "realtime-1.5"].includes(String(value || "").toLowerCase());
-  }
-
-  function normalizeTurnDetectionConfig(value: unknown) {
-    if (value === null) return null;
-    if (typeof value === "object" && value !== undefined) {
-      return { ...(value as Record<string, unknown>) };
-    }
-    const normalized = String(value || "").trim();
-    if (!normalized || normalized === "none") return null;
-    if (normalized.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(normalized);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          return { ...parsed };
-        }
-      } catch {
-        // Fall through to treating the value as a literal turn_detection type.
-      }
-    }
-    switch (normalized.toLowerCase()) {
-      case "steady":
-        return { type: "semantic_vad", eagerness: "low" };
-      case "balanced":
-        return { type: "semantic_vad", eagerness: "auto" };
-      case "fast":
-        return { type: "semantic_vad", eagerness: "high" };
-    }
-    return { type: normalized };
-  }
-
-  function defaultRealtimeTruncation(value: unknown) {
-    if (value !== undefined && value !== null && value !== "") return value;
-    return {
-      type: "retention_ratio",
-      retention_ratio: 0.8,
-      token_limits: {
-        post_instructions: 8000,
-      },
-    };
-  }
-
-  function defaultRealtime2Session(session: RealtimeSessionShape = {}): RealtimeSessionShape {
-    const merged: RealtimeSessionShape & {
-      reasoning?: { effort?: string };
-      voice?: string;
-    } = { ...session };
-    merged.type = merged.type || "realtime";
-    merged.model = merged.model || "gpt-realtime-2";
-    merged.output_modalities = merged.output_modalities ||
-      merged.outputModalities ||
-      merged.modalities || ["audio"];
-    delete merged.outputModalities;
-    delete merged.modalities;
-    const inputTurnDetection =
-      merged.audio?.input?.turn_detection ?? merged.turn_detection ?? "steady";
-    merged.truncation = defaultRealtimeTruncation((merged as Record<string, unknown>).truncation);
-    merged.audio = {
-      ...(merged.audio || {}),
-      input: {
-        ...(merged.audio?.input || {}),
-        format: {
-          type: "audio/pcm",
-          rate: 24000,
-          ...(merged.audio?.input?.format || {}),
-        },
-        turn_detection: normalizeTurnDetectionConfig(inputTurnDetection),
-      },
-      output: {
-        ...(merged.audio?.output || {}),
-        format: {
-          type: "audio/pcm",
-          rate: 24000,
-          ...(merged.audio?.output?.format || {}),
-        },
-        voice: merged.audio?.output?.voice || merged.voice || "marin",
-      },
-    };
-    delete merged.voice;
-    delete merged.turn_detection;
-    if (!merged.reasoning && String(merged.model || "").includes("gpt-realtime-2")) {
-      merged.reasoning = { effort: "high" };
-    }
-    return merged;
-  }
+  const { createMockDataChannel, routeRemoteAudioStream, injectMockRemoteAudio } = (
+    window as any
+  ).__MAB_REALTIME_AUDIO_OUTPUT_HELPERS.create({
+    state,
+    rememberError,
+    recordTimeline,
+    updateFeedback,
+  });
 
   interface BuildSessionUpdateOptions {
     session?: RealtimeSessionShape & { schema?: string; session_schema?: string };
     instructions?: string;
-    tools?: RealtimeToolLike[];
+    tools?: any[];
     toolChoice?: string;
     sessionSchema?: string;
-  }
-
-  function buildSessionUpdateEvent(options: BuildSessionUpdateOptions = {}) {
-    const schema = String(
-      options.session?.schema ||
-        options.session?.session_schema ||
-        options.sessionSchema ||
-        "realtime-2",
-    ).toLowerCase();
-    const session: RealtimeSessionShape & {
-      schema?: string;
-      session_schema?: string;
-      tool_choice?: string;
-    } = isLegacyRealtimeSessionSchema(schema)
-      ? { ...(options.session || {}) }
-      : defaultRealtime2Session(options.session || {});
-    delete session.schema;
-    delete session.session_schema;
-    const instructions = options.instructions ?? session.instructions;
-    const tools = Array.isArray(options.tools) ? options.tools : session.tools;
-    if (instructions) session.instructions = instructions;
-    if (Array.isArray(tools) && tools.length) session.tools = tools;
-    if (options.toolChoice) session.tool_choice = options.toolChoice;
-    return {
-      type: "session.update" as const,
-      session,
-    };
   }
 
   function sendSessionUpdate(options: BuildSessionUpdateOptions = {}) {
@@ -1723,9 +1179,7 @@
     state.session.lastUpdateChannel = channel;
     state.session.lastUpdateAt = new Date().toISOString();
     state.session.instructionsLength = String(event.session?.instructions || "").length;
-    state.session.toolNames = normalizeToolNames(
-      (event.session?.tools as RealtimeToolLike[] | undefined) || [],
-    );
+    state.session.toolNames = normalizeToolNames((event.session?.tools as any[] | undefined) || []);
     updateFeedback();
     return { ok: true, channel, event };
   }
@@ -2354,893 +1808,6 @@
     handleLocalToolCallEvent(event);
   }
 
-  function parseToolArguments(rawArguments) {
-    if (!rawArguments) return {};
-    if (typeof rawArguments === "object") return rawArguments;
-    try {
-      return JSON.parse(String(rawArguments));
-    } catch {
-      return {};
-    }
-  }
-
-  function extractLocalToolCall(event) {
-    if (event.type === "response.function_call_arguments.done" && isLocalToolName(event.name)) {
-      return {
-        name: event.name,
-        callId: event.call_id || event.callId || "",
-        arguments: parseToolArguments(event.arguments),
-      };
-    }
-    const item = event.item || event.output_item || {};
-    if (
-      event.type === "response.output_item.done" &&
-      item.type === "function_call" &&
-      isLocalToolName(item.name)
-    ) {
-      return {
-        name: item.name,
-        callId: item.call_id || item.callId || event.call_id || "",
-        arguments: parseToolArguments(item.arguments),
-      };
-    }
-    if (event.type === "response.done") {
-      const output = event.response?.output || [];
-      const functionCall = output.find(
-        (entry) => entry?.type === "function_call" && isLocalToolName(entry.name),
-      );
-      if (functionCall) {
-        return {
-          name: functionCall.name,
-          callId: functionCall.call_id || functionCall.callId || "",
-          arguments: parseToolArguments(functionCall.arguments),
-        };
-      }
-    }
-    return null;
-  }
-
-  interface AvatarToolArgs {
-    mood?: string;
-    holdMs?: number;
-    action?: string;
-    intensity?: number;
-    durationMs?: number;
-    [key: string]: unknown;
-  }
-
-  function runLocalAvatarTool(name: string, args: AvatarToolArgs = {}) {
-    const controller = window.MAB_AVATAR_CONTROLLER;
-    if (!controller) throw new Error("avatar controller is not available");
-    if (name === "set_avatar_expression") {
-      if (!controller.setExpression) throw new Error("controller.setExpression not available");
-      return controller.setExpression(args.mood || "neutral", { holdMs: args.holdMs });
-    }
-    if (name === "set_avatar_action") {
-      if (!controller.setAction) throw new Error("controller.setAction not available");
-      return controller.setAction(args.action || "idle", args.intensity ?? 0.8, {
-        holdMs: args.holdMs,
-        durationMs: args.durationMs,
-      });
-    }
-    if (name === "update_avatar_state") return controller.updateState(args);
-    throw new Error(`unsupported local avatar tool: ${name}`);
-  }
-
-  function updateAvatarHudStatus(
-    statusKind: string,
-    statusText: string,
-    options: { mood?: string; action?: string; holdMs?: number } = {},
-  ) {
-    try {
-      const controller = window.MAB_AVATAR_CONTROLLER;
-      if (!controller?.updateState) return { ok: false, reason: "avatar_controller_missing" };
-      const result = controller.updateState({
-        mood: options.mood,
-        action: options.action,
-        status_kind: statusKind,
-        status_text: statusText,
-        status_hold_ms: options.holdMs ?? 15000,
-      });
-      recordTimeline("avatar_status_hud", {
-        statusKind,
-        statusText: statusText.slice(0, 80),
-      });
-      return { ok: true, result };
-    } catch (error) {
-      rememberAvatarToolError(error, { name: "avatar_status_hud" });
-      return { ok: false, error: String((error && error.message) || error) };
-    }
-  }
-
-  async function postJson(url: string, body: unknown) {
-    const headers: Record<string, string> = { "content-type": "application/json" };
-    if (config.toolCallbackToken) {
-      headers["X-Oneesama-Internal-Key"] = String(config.toolCallbackToken);
-    }
-    const response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    });
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = { ok: false, error: "invalid_json_response" };
-    }
-    if (!response.ok) {
-      return { ok: false, status: response.status, body: payload };
-    }
-    return payload as { ok?: boolean; [key: string]: unknown };
-  }
-
-  function recordFromUnknown(value: unknown): Record<string, unknown> {
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      return value as Record<string, unknown>;
-    }
-    const text = String(value || "").trim();
-    return text ? { context_text: text } : {};
-  }
-
-  function localServiceUrl(path: string): string {
-    try {
-      return new URL(path, new URL(config.tokenUrl, window.location.href).origin).toString();
-    } catch {
-      return path;
-    }
-  }
-
-  interface WorkerToolArgs {
-    task?: string;
-    context?: Record<string, unknown>;
-    mode?: string;
-    allowCodeChanges?: boolean;
-    allow_code_changes?: boolean;
-    jobId?: string;
-    job_id?: string;
-    id?: string;
-    [key: string]: unknown;
-  }
-
-  async function runLocalWorkerTool(name: string, args: WorkerToolArgs = {}) {
-    if (name === "delegate_to_worker" || name === "delegate_to_codex") {
-      if (!args.task) throw new Error("delegate_to_worker requires task");
-      const rawContext = recordFromUnknown(args.context);
-      const context = {
-        ...rawContext,
-        source: rawContext.source || "meeting-realtime-worker",
-        sessionId: rawContext.sessionId || state.sessionId || String(config.sessionId || ""),
-        session_id: rawContext.session_id || state.sessionId || String(config.sessionId || ""),
-        meeting_session_id:
-          rawContext.meeting_session_id || state.sessionId || String(config.sessionId || ""),
-      };
-      return postJson(config.workerDelegateUrl, {
-        task: args.task,
-        context,
-        mode: args.mode || "analysis",
-        allowCodeChanges: Boolean(args.allowCodeChanges || args.allow_code_changes),
-      });
-    }
-    if (name === "worker_status" || name === "delegate_status") {
-      return postJson(config.workerStatusUrl, {
-        jobId: args.jobId || args.job_id || args.id || "",
-      });
-    }
-    throw new Error(`unsupported local worker tool: ${name}`);
-  }
-
-  function getElementLabel(element) {
-    if (!element) return "";
-    return [
-      element.getAttribute?.("aria-label"),
-      element.getAttribute?.("title"),
-      element.getAttribute?.("data-tooltip"),
-      element.getAttribute?.("data-tooltip-id"),
-      element.getAttribute?.("placeholder"),
-      element.innerText,
-      element.textContent,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-  }
-
-  function isVisibleElement(element) {
-    if (!element || typeof element.getBoundingClientRect !== "function") return false;
-    const style = window.getComputedStyle(element);
-    if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0)
-      return false;
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-  }
-
-  function findMeetChatInput(): HTMLElement | null {
-    const candidates = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        [
-          "textarea",
-          "input[type='text']",
-          "input:not([type])",
-          "[contenteditable='true']",
-          "[role='textbox']",
-        ].join(","),
-      ),
-    );
-    return (
-      candidates.find((element) => {
-        if (!isVisibleElement(element)) return false;
-        const label = getElementLabel(element);
-        if (label.includes("search")) return false;
-        if (label.includes("your name")) return false;
-        return (
-          label.includes("message") ||
-          label.includes("chat") ||
-          label.includes("send") ||
-          label.includes("everyone") ||
-          label.includes("输入") ||
-          label.includes("消息") ||
-          element.isContentEditable
-        );
-      }) || null
-    );
-  }
-
-  function findVisibleButtonByLabels(labels: string[] = []): HTMLButtonElement | null {
-    const lowerLabels = labels.map((label) => String(label).toLowerCase());
-    const candidates = Array.from(
-      document.querySelectorAll<HTMLButtonElement>("button,[role='button']"),
-    );
-    return (
-      candidates.find((element) => {
-        if (!isVisibleElement(element)) return false;
-        if (element.disabled || element.getAttribute?.("aria-disabled") === "true") return false;
-        const label = getElementLabel(element);
-        return lowerLabels.some((needle) => label.includes(needle));
-      }) || null
-    );
-  }
-
-  async function waitForMeetChatInput(timeoutMs = 3000) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const input = findMeetChatInput();
-      if (input) return input;
-      await new Promise((resolve) => window.setTimeout(resolve, 100));
-    }
-    return null;
-  }
-
-  function setMeetChatInputText(input, text) {
-    input.focus?.();
-    if (input.isContentEditable || input.getAttribute?.("contenteditable") === "true") {
-      try {
-        document.getSelection()?.selectAllChildren(input);
-        document.execCommand?.("insertText", false, text);
-      } catch {
-        input.textContent = text;
-      }
-      if (!String(input.innerText || input.textContent || "").includes(text)) {
-        input.textContent = text;
-      }
-    } else {
-      const prototype =
-        input instanceof HTMLTextAreaElement
-          ? HTMLTextAreaElement.prototype
-          : HTMLInputElement.prototype;
-      const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
-      if (descriptor?.set) descriptor.set.call(input, text);
-      else input.value = text;
-    }
-    input.dispatchEvent(
-      new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }),
-    );
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  function getInputText(input) {
-    return String(
-      input?.isContentEditable || input?.getAttribute?.("contenteditable") === "true"
-        ? input.innerText || input.textContent || ""
-        : input?.value || "",
-    ).trim();
-  }
-
-  function findMeetChatSendButton(input) {
-    const inputRect = input?.getBoundingClientRect?.() || null;
-    const candidates = Array.from(
-      document.querySelectorAll<HTMLButtonElement>("button,[role='button']"),
-    )
-      .filter((element) => {
-        if (!isVisibleElement(element)) return false;
-        if (element.disabled || element.getAttribute?.("aria-disabled") === "true") return false;
-        const label = getElementLabel(element);
-        if (label.includes("reaction") || label.includes("mood") || label.includes("emoji"))
-          return false;
-        return /\b(send|send message|send a message)\b|发送|傳送/.test(label);
-      })
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const distance = inputRect
-          ? Math.abs((rect.top + rect.bottom) / 2 - (inputRect.top + inputRect.bottom) / 2) +
-            Math.max(0, inputRect.left - rect.right)
-          : 0;
-        return { element, distance, label: getElementLabel(element) };
-      })
-      .sort((a, b) => a.distance - b.distance);
-    return candidates[0]?.element || null;
-  }
-
-  async function waitForMeetChatSendButton(input, timeoutMs = 1500) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const button = findMeetChatSendButton(input);
-      if (button) return button;
-      await new Promise((resolve) => window.setTimeout(resolve, 100));
-    }
-    return null;
-  }
-
-  async function waitForMeetChatSent(input, text, timeoutMs = 2500) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const currentText = getInputText(input);
-      if (!currentText || !currentText.includes(text)) return "input-cleared";
-      await new Promise((resolve) => window.setTimeout(resolve, 120));
-    }
-    return "";
-  }
-
-  async function triggerMeetChatSubmit(input, text) {
-    const sendButton = await waitForMeetChatSendButton(input);
-    if (sendButton) {
-      sendButton.click();
-      return "send-button";
-    }
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        bubbles: true,
-        cancelable: true,
-        key: "Enter",
-        code: "Enter",
-      }),
-    );
-    input.dispatchEvent(
-      new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter" }),
-    );
-    return "enter-key";
-  }
-
-  interface SendMeetChatArgs {
-    text?: string;
-    message?: string;
-    [key: string]: unknown;
-  }
-
-  interface MeetFixtureChatMessage {
-    ts?: string;
-    sender?: string;
-    source?: string;
-    text?: string;
-    [key: string]: unknown;
-  }
-
-  type MeetFixture =
-    | (Record<string, unknown> & {
-        chatMessages?: MeetFixtureChatMessage[];
-      })
-    | null
-    | undefined;
-
-  async function sendMeetChat(args: SendMeetChatArgs = {}) {
-    const text = String(args.text || args.message || "").trim();
-    if (!text) throw new Error("send_meet_chat requires text");
-
-    const fixture = window.__MAB_MEET_FIXTURE as MeetFixture;
-    if (fixture) {
-      const beforeCount = fixture.chatMessages?.length || 0;
-      window.dispatchEvent(new CustomEvent("meeting-avatar-meet-chat-send", { detail: { text } }));
-      const afterCount = fixture.chatMessages?.length || 0;
-      if (afterCount > beforeCount) {
-        return {
-          ok: true,
-          path: "fixture-event",
-          text,
-          count: afterCount,
-          sentAt: new Date().toISOString(),
-        };
-      }
-    }
-
-    let input = await waitForMeetChatInput(400);
-    if (!input) {
-      const chatButton = findVisibleButtonByLabels([
-        "chat",
-        "chat with everyone",
-        "open chat",
-        "show everyone",
-        "messages",
-        "聊天",
-        "訊息",
-        "消息",
-      ]);
-      if (!chatButton) throw new Error("meet chat button not found");
-      chatButton.click();
-      input = await waitForMeetChatInput(3000);
-    }
-    if (!input) throw new Error("meet chat input not found");
-    setMeetChatInputText(input, text);
-    await new Promise((resolve) => window.setTimeout(resolve, 150));
-    const submitPath = await triggerMeetChatSubmit(input, text);
-    const sentConfirmation = await waitForMeetChatSent(input, text);
-    if (!sentConfirmation) {
-      return {
-        ok: false,
-        error: "meet_chat_submit_unconfirmed",
-        path: "meet-dom",
-        submitPath,
-        inputText: getInputText(input),
-        text,
-      };
-    }
-    return {
-      ok: true,
-      path: "meet-dom",
-      submitPath,
-      sentConfirmation,
-      text,
-      sentAt: new Date().toISOString(),
-    };
-  }
-
-  function readMeetingAwarenessTool(name = "meet_participants") {
-    const awareness = window.MAB_MEETING_AWARENESS || null;
-    const base = {
-      ok: Boolean(awareness),
-      source: awareness?.source || "",
-      observedAt: awareness?.observedAt || "",
-      caveat:
-        awareness?.caveat ||
-        "Best-effort Google Meet DOM/caption heuristic; no live awareness has been published yet.",
-    };
-    if (name === "active_speaker") {
-      return {
-        ...base,
-        activeSpeaker: awareness?.activeSpeaker || null,
-        recentSpeakers: awareness?.recentSpeakers || [],
-      };
-    }
-    return {
-      ...base,
-      participants: awareness?.participants || [],
-      participantCount: awareness?.participantCount || null,
-      activeSpeaker: awareness?.activeSpeaker || null,
-      recentSpeakers: awareness?.recentSpeakers || [],
-    };
-  }
-
-  function extractUrls(text: unknown): string[] {
-    return Array.from(String(text || "").matchAll(/https?:\/\/[^\s<>"')\]]+/g)).map((match) =>
-      match[0].replace(/[.,，。!?！？;；:：]+$/g, ""),
-    );
-  }
-
-  function readFixtureMeetChat(limit: number, onlyLinks: boolean) {
-    const fixture = window.__MAB_MEET_FIXTURE as MeetFixture;
-    const messages = (fixture?.chatMessages || []).slice(-limit).map((entry) => ({
-      ts: entry.ts || "",
-      sender: entry.source || "",
-      text: String(entry.text || ""),
-      links: extractUrls(entry.text || ""),
-    }));
-    return onlyLinks ? messages.filter((entry) => entry.links.length) : messages;
-  }
-
-  function findMeetChatMessageElements(): HTMLElement[] {
-    const candidates = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        [
-          "[data-message-id]",
-          "[data-message-text]",
-          "[data-message-text-content]",
-          "[role='listitem']",
-          "[role='article']",
-          "a[href^='http']",
-        ].join(","),
-      ),
-    );
-    return candidates.filter((element) => {
-      if (!isVisibleElement(element)) return false;
-      const text = String(element.innerText || element.textContent || "").trim();
-      const href = (element as HTMLAnchorElement).href || "";
-      if (!text && !href) return false;
-      if (/^(chat|messages|send a message|发送消息|訊息|聊天)$/i.test(text)) return false;
-      return (
-        /^https?:\/\//.test(href) ||
-        /https?:\/\//.test(text) ||
-        Boolean(
-          element.closest(
-            "[aria-label*='Chat'],[aria-label*='chat'],[aria-label*='messages'],[aria-label*='Messages']",
-          ),
-        ) ||
-        text.length < 500
-      );
-    });
-  }
-
-  async function ensureMeetChatOpen() {
-    if (findMeetChatInput()) return true;
-    const chatButton = findVisibleButtonByLabels([
-      "chat",
-      "chat with everyone",
-      "open chat",
-      "show everyone",
-      "messages",
-      "聊天",
-      "訊息",
-      "消息",
-    ]);
-    if (!chatButton) return false;
-    chatButton.click();
-    await waitForMeetChatInput(2500);
-    return true;
-  }
-
-  interface ReadMeetChatArgs {
-    limit?: number;
-    onlyLinks?: boolean;
-    only_links?: boolean;
-    [key: string]: unknown;
-  }
-
-  async function readMeetChat(args: ReadMeetChatArgs = {}) {
-    const limit = Math.max(1, Math.min(Number(args.limit || 10), 50));
-    const onlyLinks = Boolean(args.onlyLinks || args.only_links);
-    if (window.__MAB_MEET_FIXTURE) {
-      const messages = readFixtureMeetChat(limit, onlyLinks);
-      return {
-        ok: true,
-        path: "fixture-state",
-        messages,
-        links: messages.flatMap((entry) => entry.links),
-        count: messages.length,
-        readAt: new Date().toISOString(),
-      };
-    }
-    await ensureMeetChatOpen();
-    const seen = new Set();
-    const messages = [];
-    for (const element of findMeetChatMessageElements()) {
-      const rawText = String(element.innerText || element.textContent || "").trim();
-      const text = rawText.replace(/\s+/g, " ").slice(0, 1000);
-      if (!text || seen.has(text)) continue;
-      seen.add(text);
-      const links = Array.from(element.querySelectorAll<HTMLAnchorElement>("a[href]"))
-        .map((anchor) => anchor.href)
-        .filter((href) => /^https?:\/\//.test(href));
-      for (const url of extractUrls(text)) {
-        if (!links.includes(url)) links.push(url);
-      }
-      if (onlyLinks && links.length === 0) continue;
-      messages.push({
-        text,
-        links,
-      });
-    }
-    const recent = messages.slice(-limit);
-    return {
-      ok: true,
-      path: "meet-dom",
-      messages: recent,
-      links: Array.from(new Set(recent.flatMap((entry) => entry.links))),
-      count: recent.length,
-      readAt: new Date().toISOString(),
-    };
-  }
-
-  interface MeetChatMessageEntry {
-    text: string;
-    links: string[];
-  }
-
-  function normalizeMeetChatElement(element: HTMLElement): MeetChatMessageEntry | null {
-    const rawText = String(element.innerText || element.textContent || "").trim();
-    const href = (element as HTMLAnchorElement).href || "";
-    const text = (rawText || href).replace(/\s+/g, " ").slice(0, 1000);
-    if (!text) return null;
-    const anchors = element.querySelectorAll
-      ? Array.from(element.querySelectorAll<HTMLAnchorElement>("a[href]"))
-      : [];
-    const links = anchors.map((anchor) => anchor.href).filter((url) => /^https?:\/\//.test(url));
-    if (/^https?:\/\//.test(href) && !links.includes(href)) links.push(href);
-    for (const url of extractUrls(text)) {
-      if (!links.includes(url)) links.push(url);
-    }
-    if (
-      !links.length &&
-      /^(more_vert|call_end|info|chat_bubble|apps|mood|closed_caption|back_hand|keep|pin message|send message)$/i.test(
-        text,
-      )
-    )
-      return null;
-    if (!links.length && text.length < 8) return null;
-    return {
-      text,
-      links: Array.from(new Set(links)),
-    };
-  }
-
-  interface RememberMeetChatMessageOptions {
-    inject?: boolean;
-    [key: string]: unknown;
-  }
-
-  function rememberMeetChatMessage(
-    message: MeetChatMessageEntry | null,
-    source: string = "observer",
-    options: RememberMeetChatMessageOptions = {},
-  ) {
-    if (!message?.text) return { ok: false, skipped: true, reason: "empty_message" };
-    const botName = String(config.botName || "").trim();
-    if (botName && message.text.includes(botName)) {
-      return { ok: false, skipped: true, reason: "own_message" };
-    }
-    const key = `${message.text}|${message.links.join(",")}`;
-    if (observedMeetChatKeys.has(key)) return { ok: false, skipped: true, reason: "duplicate" };
-    observedMeetChatKeys.add(key);
-    if (options.inject === false) return { ok: true, seeded: true };
-    const entry = {
-      ts: new Date().toISOString(),
-      source,
-      text: message.text,
-      links: message.links || [],
-    };
-    state.meetChat.messages.push(entry);
-    state.meetChat.messages = state.meetChat.messages.slice(-30);
-    state.meetChat.links = Array.from(
-      new Set(state.meetChat.messages.flatMap((item) => item.links)),
-    ).slice(-50);
-    state.meetChat.lastObservedAt = entry.ts;
-    recordTimeline("meet_chat_observed", {
-      source,
-      text: entry.text.slice(0, 200),
-      links: entry.links,
-    });
-    const channel = sendRealtimeEvent({
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: `Meet chat message from the operator: ${entry.text}${entry.links.length ? `\nLinks: ${entry.links.join(" ")}` : ""}`,
-          },
-        ],
-      },
-    });
-    state.meetChat.injected += 1;
-    updateFeedback();
-    return { ok: true, channel, entry };
-  }
-
-  function scanMeetChatMessages(source = "scan", options = {}) {
-    const results = [];
-    for (const element of findMeetChatMessageElements()) {
-      const message = normalizeMeetChatElement(element);
-      if (!message) continue;
-      const result = rememberMeetChatMessage(message, source, options);
-      if (result.ok) results.push(result.entry);
-    }
-    return results;
-  }
-
-  async function installMeetChatObserver() {
-    if (config.observeMeetChat === false || state.meetChat.observerInstalled)
-      return { ok: true, skipped: true };
-    await ensureMeetChatOpen();
-    scanMeetChatMessages("initial-scan", { inject: false });
-    meetChatObserver = new MutationObserver(() => {
-      try {
-        scanMeetChatMessages("mutation");
-      } catch (error) {
-        state.meetChat.errors.push({
-          ts: new Date().toISOString(),
-          message: String((error && error.message) || error).slice(0, 300),
-        });
-        state.meetChat.errors = state.meetChat.errors.slice(-20);
-      }
-    });
-    meetChatObserver.observe(document.body, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-    meetChatPollTimer = window.setInterval(() => {
-      try {
-        scanMeetChatMessages("poll");
-      } catch (error) {
-        state.meetChat.errors.push({
-          ts: new Date().toISOString(),
-          message: String((error && error.message) || error).slice(0, 300),
-        });
-        state.meetChat.errors = state.meetChat.errors.slice(-20);
-      }
-    }, 1500);
-    state.meetChat.observerInstalled = true;
-    recordTimeline("meet_chat_observer_installed", {});
-    updateFeedback();
-    return { ok: true };
-  }
-
-  async function runLocalMeetTool(name, args = {}) {
-    if (config.dryRunLocalTools) return { ok: true, dryRun: true, tool: name, arguments: args };
-    if (name === "send_meet_chat") return sendMeetChat(args);
-    if (name === "present_video_stage")
-      return postJson(localServiceUrl("/screen-share/video"), args);
-    if (name === "stop_video_stage") return postJson(localServiceUrl("/screen-share/stop"), args);
-    if (name === "list_shareable_windows" || name === "list_shareable_apps")
-      return postJson(localServiceUrl("/screen-share/apps"), args);
-    if (name === "share_existing_app_window" || name === "present_app_share")
-      return postJson(localServiceUrl("/screen-share/app"), args);
-    if (name === "read_meet_chat") return readMeetChat(args);
-    if (name === "meet_participants" || name === "active_speaker")
-      return readMeetingAwarenessTool(name);
-    throw new Error(`unsupported local meet tool: ${name}`);
-  }
-
-  function normalizeWorkspaceToolName(name: string) {
-    if (name === "open_shared_browser_surface") return "start_demo_surface";
-    if (name === "create_shared_workspace") return "start_demo_execution";
-    if (name === "control_shared_browser_surface") return "control_demo_surface";
-    if (name === "stop_shared_browser_surface") return "cancel_demo_surface";
-    return name;
-  }
-
-  function dryRunWorkspaceToolResult(name: string, args: Record<string, unknown> = {}) {
-    if (name !== "control_shared_app_window") {
-      return { ok: true, dryRun: true, tool: name, arguments: args };
-    }
-    const operations = Array.isArray(args.operations)
-      ? (args.operations as Array<{ kind?: unknown }>)
-      : [];
-    const actions = operations.map((operation) => String(operation?.kind || ""));
-    const hasDirectOperation = actions.some((kind) => kind && kind !== "state");
-    return {
-      ok: true,
-      dryRun: true,
-      tool: name,
-      arguments: args,
-      summary: hasDirectOperation
-        ? "Dry-run executed primitive app-control operations."
-        : "Dry-run captured shared app state. Continue with concrete click/type_text/press_key/scroll/drag operations to perform the requested edit.",
-      actions,
-      metadata: {
-        state: {
-          ok: true,
-          window: {
-            applicationName: String(args.applicationName || "Pencil"),
-            title: String(args.windowTitle || "Pencil"),
-            windowId: Number(args.windowId || 12345),
-            frame: { x: 0, y: 0, width: 960, height: 720 },
-          },
-          screenshotIncluded: true,
-        },
-      },
-    };
-  }
-
-  async function runLocalWorkspaceTool(name, args = {}) {
-    if (!LOCAL_WORKSPACE_TOOLS.has(name))
-      throw new Error(`unsupported local workspace tool: ${name}`);
-    if (config.dryRunLocalTools) return dryRunWorkspaceToolResult(name, args);
-    if (name === "create_shared_workspace" || name === "start_demo_execution") {
-      updateAvatarHudStatus("writing_code", "Writing code", {
-        mood: "thinking",
-        action: "think",
-        holdMs: 30000,
-      });
-    } else if (
-      name === "open_shared_browser_surface" ||
-      name === "start_demo_surface" ||
-      name === "control_shared_app_window" ||
-      name === "control_shared_browser_surface" ||
-      name === "control_demo_surface"
-    ) {
-      updateAvatarHudStatus("opening_preview", "Opening preview", {
-        mood: "thinking",
-        action: "lean_forward",
-        holdMs: 15000,
-      });
-    }
-    const backendName = normalizeWorkspaceToolName(name);
-    const result = await postJson(
-      localServiceUrl(`/tools/${encodeURIComponent(backendName)}`),
-      args,
-    );
-    if (name === "create_shared_workspace" || name === "start_demo_execution") {
-      const status = (result as { status?: string; ok?: boolean; error?: string })?.status || "";
-      if ((result as { ok?: boolean })?.ok === false) {
-        updateAvatarHudStatus("blocked", "Blocked", { mood: "sad", action: "shrug" });
-      } else if (status === "started") {
-        updateAvatarHudStatus("writing_code", "Writing code", {
-          mood: "thinking",
-          action: "think",
-          holdMs: 30000,
-        });
-      }
-    }
-    return result;
-  }
-
-  interface FunctionCallOutputOptions {
-    autoRespond?: boolean;
-    responseInstructions?: string;
-  }
-
-  function sendFunctionCallOutput(
-    callId: string,
-    result: unknown,
-    options: FunctionCallOutputOptions = {},
-  ) {
-    if (!callId) return { ok: true, skipped: true, reason: "missing_call_id" };
-    const outputChannel = sendRealtimeEvent({
-      type: "conversation.item.create",
-      item: {
-        type: "function_call_output",
-        call_id: callId,
-        output: JSON.stringify(result),
-      },
-    });
-    let responseChannel = "";
-    if (options.autoRespond !== false) {
-      responseChannel = sendRealtimeEvent({
-        type: "response.create",
-        response: {
-          instructions: options.responseInstructions || "Continue after applying the result.",
-        },
-      });
-      state.responsesRequested += 1;
-    }
-    return { ok: true, outputChannel, responseChannel };
-  }
-
-  function isVisualShareToolName(name: string) {
-    return /share|stage/i.test(name);
-  }
-
-  function resultRecord(value: unknown): Record<string, unknown> {
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-  }
-
-  function nestedRecord(value: unknown, key: string): Record<string, unknown> {
-    return resultRecord(resultRecord(value)[key]);
-  }
-
-  function resultHasActiveScreenShare(value: unknown): boolean {
-    const direct = resultRecord(value);
-    const candidates = [
-      nestedRecord(direct, "screenShare"),
-      nestedRecord(direct, "state"),
-      nestedRecord(nestedRecord(direct, "postcheck"), "screenShare"),
-      nestedRecord(nestedRecord(direct, "present"), "screenShare"),
-      nestedRecord(nestedRecord(nestedRecord(direct, "present"), "postcheck"), "screenShare"),
-      nestedRecord(nestedRecord(direct, "start"), "screenShare"),
-    ];
-    return candidates.some((candidate) => candidate.active === true);
-  }
-
-  function shouldAutoRespondToMeetToolResult(name: string, result: unknown): boolean {
-    if (!config.autoRespondToMeetToolCalls) return false;
-    const record = resultRecord(result);
-    if (isVisualShareToolName(name) && record.ok === true && resultHasActiveScreenShare(record)) {
-      return false;
-    }
-    return true;
-  }
-
   function handleLocalToolCallEvent(event: unknown) {
     const toolCall = extractLocalToolCall(event);
     if (!toolCall) return null;
@@ -3354,32 +1921,6 @@
       rememberAvatarToolError(error, { name: toolCall.name, callId: toolCall.callId });
       return { ok: false, error: String((error && error.message) || error) };
     }
-  }
-
-  interface MockDataChannel {
-    readyState: RTCDataChannelState;
-    send(payload: unknown): void;
-    close(): void;
-  }
-
-  function createMockDataChannel(): MockDataChannel {
-    const channel: MockDataChannel = {
-      readyState: "open",
-      send(payload: unknown) {
-        state.connection.sentDataChannelMessages.push({
-          ts: new Date().toISOString(),
-          payload,
-        });
-        state.connection.sentDataChannelMessages =
-          state.connection.sentDataChannelMessages.slice(-100);
-      },
-      close() {
-        channel.readyState = "closed";
-        state.connected = false;
-        state.connection.dataChannelOpen = false;
-      },
-    };
-    return channel;
   }
 
   function rememberParticipantSource(
@@ -3539,66 +2080,6 @@
       document.addEventListener("DOMContentLoaded", installObserver, { once: true });
     }
     window.setInterval(run, 1500);
-  }
-
-  async function waitForAvatarAudioBus(timeoutMs = 2500) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (window.MAB_AVATAR_AUDIO_BUS) return window.MAB_AVATAR_AUDIO_BUS;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    return window.MAB_AVATAR_AUDIO_BUS || null;
-  }
-
-  interface RouteRemoteAudioOptions {
-    label?: string;
-    gain?: number;
-    timeoutMs?: number;
-  }
-
-  async function routeRemoteAudioStream(
-    stream: MediaStream | null | undefined,
-    options: RouteRemoteAudioOptions = {},
-  ) {
-    const bus = await waitForAvatarAudioBus(options.timeoutMs);
-    if (!bus?.addStream) {
-      rememberError(new Error("avatar audio bus is not available for remote audio routing"));
-      return { ok: false, error: "avatar_audio_bus_missing" };
-    }
-    const result = bus.addStream(stream, {
-      label: options.label || "openai-realtime-remote-audio",
-      gain: options.gain,
-    });
-    state.connection.remoteAudioRoutedToAvatarBus = result.ok === true;
-    recordTimeline("remote_audio_route", {
-      ok: result.ok === true,
-      label: options.label || "openai-realtime-remote-audio",
-      trackIds: stream?.getAudioTracks?.().map((track) => track.id) || [],
-    });
-    updateFeedback();
-    return result;
-  }
-
-  interface MockRemoteAudioOptions extends RouteRemoteAudioOptions {
-    durationMs?: number;
-  }
-
-  async function injectMockRemoteAudio(options: MockRemoteAudioOptions = {}) {
-    const bus = await waitForAvatarAudioBus(options.timeoutMs);
-    if (!bus?.injectTone) {
-      rememberError(new Error("avatar audio bus is not available for mock remote audio injection"));
-      return { ok: false, error: "avatar_audio_bus_missing" };
-    }
-    const result = bus.injectTone({
-      label: options.label || "webrtc-mock-remote-audio",
-      gain: options.gain ?? 0.0001,
-      durationMs: options.durationMs ?? 120,
-    });
-    state.connection.remoteAudioRoutedToAvatarBus = result.ok === true;
-    state.connection.mockRemoteAudioInjected = result.ok === true;
-    recordTimeline("mock_remote_audio_route", { ok: result.ok === true });
-    updateFeedback();
-    return result;
   }
 
   async function connectRealtime(options = {}) {
@@ -3947,95 +2428,6 @@
     }
   }
 
-  function truncateText(text: unknown, maxChars = 3500): string {
-    const raw = String(text || "");
-    if (raw.length <= maxChars) return raw;
-    return `${raw.slice(0, maxChars).trimEnd()}\n\n...(已截断，原文 ${raw.length} 字符)`;
-  }
-
-  function workerResultStatusLabel(job) {
-    if (job.status === "failed") return "失败";
-    if (job.status === "timeout") return "超时";
-    return "完成";
-  }
-
-  function buildWorkerResultChatText(job) {
-    const status = workerResultStatusLabel(job);
-    const result = job.result || job.error || "没有返回详细结果。";
-    return truncateText([`后台任务${status}：${job.task || job.id}`, "", result].join("\n"));
-  }
-
-  function shouldSendWorkerResultToMeetChat(job) {
-    const result = String(job.result || job.error || "");
-    return result.trim().length > 0;
-  }
-
-  function buildWorkerResultVoiceText(job, chatDelivery) {
-    const status = workerResultStatusLabel(job);
-    if (chatDelivery?.ok) {
-      return [
-        `后台任务${status}。`,
-        "完整结果我已经发到 Meet chat，不在语音里整段念。",
-        "你可以先看聊天里的结果，需要我继续处理再直接说。",
-      ].join("\n");
-    }
-    if (chatDelivery && chatDelivery.ok === false) {
-      return [
-        `后台任务${status}，但结果太长，Meet chat 发送失败。`,
-        `发送失败原因：${chatDelivery.error || "unknown"}`,
-        "我先不整段朗读，避免打断会议。",
-      ].join("\n");
-    }
-    const result = job.result || job.error || "没有返回详细结果。";
-    return [
-      `后台任务 ${status}。`,
-      `任务：${job.task || job.id}`,
-      `结果：${result}`,
-      "请用 1-2 句中文主动汇报给会议里的用户。",
-    ].join("\n");
-  }
-
-  function buildWorkerResultText(job) {
-    const status = job.status === "failed" ? "失败" : "完成";
-    const result = job.result || job.error || "没有返回详细结果。";
-    return [
-      `后台任务 ${status}。`,
-      `任务：${job.task || job.id}`,
-      `结果：${result}`,
-      "请用 1-2 句中文主动汇报给会议里的用户。",
-    ].join("\n");
-  }
-
-  function isNoActionWorkerJob(job) {
-    if (!job || String(job.status || "").toLowerCase() !== "completed") {
-      return false;
-    }
-    const envelope = job.resultEnvelope || job.result_envelope || {};
-    const action = String(envelope.action || "")
-      .trim()
-      .toLowerCase();
-    if (action === "none" || action === "no_action") {
-      return true;
-    }
-    const text = [job.result, envelope.summary]
-      .filter(Boolean)
-      .map((value) => String(value).trim().toLowerCase())
-      .join("\n");
-    if (!text) {
-      return true;
-    }
-    return [
-      "no action needed",
-      "no action.",
-      "no action",
-      "nothing to do",
-      "无需",
-      "不需要执行",
-      "没有需要执行",
-      "无需助手介入",
-    ].some((phrase) => text.includes(phrase));
-  }
-
   async function injectWorkerResult(job) {
     if (rememberInjectedWorkerJob(job.id)) {
       const duplicate = {
@@ -4180,12 +2572,6 @@
   });
 
   installParticipantAudioDiscovery();
-
-  function shouldAutoConnectInCurrentDocument() {
-    const href = String(window.location?.href || "");
-    if (!href || href === "about:blank") return false;
-    return true;
-  }
 
   if (config.autoConnect && shouldAutoConnectInCurrentDocument()) {
     window.setTimeout(() => connectRealtime(), 0);

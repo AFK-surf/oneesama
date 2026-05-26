@@ -1,0 +1,96 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "node"],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2022": true
+  },
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    "coverage/**",
+    "snake-mobile-app/**",
+    "downloads/**",
+    "output/**",
+    "reports/**",
+    "tmp/**",
+    "**/*.min.js"
+  ],
+  "options": {
+    "reportUnusedDisableDirectives": "warn",
+    "respectEslintDisableDirectives": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn",
+    "pedantic": "off",
+    "style": "off",
+    "restriction": "off",
+    "nursery": "off"
+  },
+  "rules": {
+    "eslint/no-underscore-dangle": "off",
+    "eslint/no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "ignoreRestSiblings": true
+      }
+    ],
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-useless-fallback-in-spread": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["packages/core/src/realtime/*.ts"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1200,
+            "skipBlankLines": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/core/src/realtime/realtime-browser-bridge.ts"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 2600,
+            "skipBlankLines": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/core/src/realtime/realtime-browser-*-helpers.ts"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 700,
+            "skipBlankLines": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/core/src/realtime/realtime-browser-init-builder.ts"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 120,
+            "skipBlankLines": true
+          }
+        ]
+      }
+    }
+  ]
+}

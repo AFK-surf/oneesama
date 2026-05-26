@@ -1,0 +1,9 @@
+pre-commit:
+  jobs:
+    - name: oxlint error gate
+      run: npm run lint:oxlint -- --quiet
+
+pre-push:
+  jobs:
+    - name: realtime size gate
+      run: npm run lint:size

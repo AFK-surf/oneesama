@@ -2270,7 +2270,7 @@ async function openMeetPeoplePanelForAwareness(page: Page, diagnostics?: Diagnos
     error: String(error?.message || error),
   }));
   diagnostics?.record("meeting_awareness_people_panel", result);
-  if (Boolean((result as any)?.clicked)) await page.waitForTimeout(700).catch(() => {});
+  if ((result as any)?.clicked) await page.waitForTimeout(700).catch(() => {});
   return result;
 }
 
