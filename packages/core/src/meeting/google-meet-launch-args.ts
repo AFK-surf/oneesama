@@ -13,7 +13,7 @@ export function buildGoogleMeetChromiumArgs(input: {
   return [
     "--use-fake-ui-for-media-stream",
     "--use-fake-device-for-media-stream",
-    "--mute-audio",
+    // Do not use --mute-audio: it can silence Meet remote tracks before WebAudio sees them.
     "--enable-usermedia-screen-capturing",
     "--auto-select-desktop-capture-source=Entire screen",
     "--auto-select-tab-capture-source-by-title=Meeting Avatar Bot",

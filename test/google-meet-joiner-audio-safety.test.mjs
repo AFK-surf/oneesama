@@ -8,7 +8,7 @@ test("Google Meet launcher avoids host audio devices by default", () => {
 
   assert.ok(args.includes("--use-fake-ui-for-media-stream"));
   assert.ok(args.includes("--use-fake-device-for-media-stream"));
-  assert.ok(args.includes("--mute-audio"));
+  assert.equal(args.includes("--mute-audio"), false);
 });
 
 test("Google Meet launcher preserves caller-supplied Chromium args", () => {
