@@ -213,6 +213,7 @@ const state = {
     currentRealtimeInputSource: "",
     currentRealtimeInputIsRoutingMix: false,
     realtimeAudioSenderStats: null as null | Record<string, unknown>,
+    realtimeAgentSDKInputTrackIds: [],
     lastRealtimeInputReplaceReason: "",
     lastRealtimeInputReplaceAt: "",
     realtimeInputGateOpen: true,

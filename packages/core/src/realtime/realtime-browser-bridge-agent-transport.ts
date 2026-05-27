@@ -113,6 +113,16 @@ function createMockRealtimeAgentTransport() {
 function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
   if (connectionConfig.mode === "agents-sdk-mock") return createMockRealtimeAgentTransport();
   ensureMeetAudioRoutingContext();
+  const sourceTracks = routingDestination?.stream?.getAudioTracks?.() || [];
+  const clonedTracks = sourceTracks
+    .filter((track) => track.readyState !== "ended")
+    .map((track) => track.clone());
+  state.connection.realtimeAgentSDKInputTrackIds = clonedTracks.map((track) => track.id);
+  recordTimeline("realtime_agent_sdk_input_stream_cloned", {
+    sourceTrackIds: sourceTracks.map((track) => track.id),
+    sourceTrackStates: sourceTracks.map((track) => track.readyState || ""),
+    clonedTrackIds: clonedTracks.map((track) => track.id),
+  });
   const baseUrl =
     String(connectionConfig.openaiRealtimeBaseUrl || "").trim() ||
     String(connectionConfig.sdpUrl || "https://api.openai.com/v1/realtime/calls").replace(
@@ -120,7 +130,7 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
       "",
     );
   const transport = new namespace.OpenAIRealtimeWebRTC({
-    mediaStream: routingDestination?.stream,
+    mediaStream: new MediaStream(clonedTracks),
     baseUrl: baseUrl.replace(/\/realtime\/?$/, ""),
     changePeerConnection: async (pc) => {
       activePeerConnection = pc;
