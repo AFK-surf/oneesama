@@ -35,3 +35,32 @@ test("Meet local playback mute silences existing and newly added media elements"
     await browser.close();
   }
 });
+
+test("Meet local playback mute leaves media elements alone when disabled", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.setContent("<!doctype html><html><body><audio></audio></body></html>");
+
+    const installed = await installMeetLocalPlaybackMute(page, null, false);
+    const result = await page.evaluate(() => {
+      const audio = document.querySelector("audio");
+      return {
+        muted: audio?.muted,
+        defaultMuted: audio?.defaultMuted,
+        volume: audio?.volume,
+        marked: audio?.dataset.meetingAvatarLocalPlaybackMuted || "",
+      };
+    });
+
+    assert.equal(installed.ok, true);
+    assert.equal(installed.skipped, true);
+    assert.equal(installed.reason, "disabled_for_audio_capture");
+    assert.equal(result.muted, false);
+    assert.equal(result.defaultMuted, false);
+    assert.equal(result.volume, 1);
+    assert.equal(result.marked, "");
+  } finally {
+    await browser.close();
+  }
+});

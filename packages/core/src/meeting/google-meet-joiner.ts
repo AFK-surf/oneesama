@@ -2743,7 +2743,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     diagnostics.record("goto_complete", { url: page.url(), status: gotoResponse?.status?.() || 0 });
     await saveDiagnostics(diagnostics);
     await installMeetPromptAutoDismisser(page, diagnostics);
-    await installMeetLocalPlaybackMute(page, diagnostics, input.muteLocalPlayback !== false);
+    await installMeetLocalPlaybackMute(page, diagnostics, input.muteLocalPlayback === true);
     await page.waitForTimeout(2500);
     await takeScreenshot(page, diagnostics, "01-after-nav");
     await collectButtonInventory(page, diagnostics, "after-nav");
