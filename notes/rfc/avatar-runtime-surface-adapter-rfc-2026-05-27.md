@@ -1,7 +1,7 @@
 # RFC: Avatar Runtime + Surface Adapter
 
 Date: 2026-05-27
-Status: draft v0.2
+Status: draft v0.3
 Owner: @劲霸仁波切
 Implementation driver: local Codex session
 
@@ -30,6 +30,19 @@ conversationTransport:
 `GoogleMeetSurface` becomes one adapter plugged into the runtime core. A new
 `LocalBrowserSurface` can run the same avatar/conversation runtime in a normal
 browser page without copying Meet join logic or weakening Meet audio invariants.
+
+## Reading Guide
+
+This RFC is intentionally layered.
+
+- For the decision: read `Summary`, `Problem`, `Decision`, `Goals`, and
+  `Non-Goals`.
+- For implementation: read `Runtime Core Responsibilities`, `Surface Adapter
+  Responsibilities`, `Proposed Contracts`, and `Migration Plan`.
+- For safety/debuggability: read `Observability and Self-Iteration`,
+  `Progressive Disclosure`, and `Compatibility Shims`.
+- For a local Codex implementation session: start from `First Slice For Local
+  Codex`, then jump back to the contracts and validation rules it references.
 
 ## Problem
 
