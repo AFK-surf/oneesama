@@ -9,6 +9,7 @@ import type { ScreenShareState } from "../browser-runtime-types.ts";
 import { buildAvatarRuntimeInitScripts } from "../avatar-runtime/runtime-init-builder.ts";
 import { validateGoogleMeetRuntimeSessionConfig } from "../avatar-runtime/google-meet-surface.ts";
 import { enableMeetCaptions, installMeetCaptionCapture } from "./caption-capture.ts";
+import { buildGoogleMeetChromiumArgs } from "./google-meet-launch-args.ts";
 import { waitForMeetAdmission } from "./meet-admission.ts";
 import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
 import { createMeetingRecorder, listShareableApplications } from "./meeting-recorder.ts";
@@ -2547,31 +2548,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       executablePath: options.chromiumExecutablePath || config.chromiumExecutablePath || undefined,
       headless: config.browserHeadless,
       env: recorderLaunchEnv,
-      args: [
-        "--use-fake-ui-for-media-stream",
-        "--enable-usermedia-screen-capturing",
-        "--auto-select-desktop-capture-source=Entire screen",
-        "--auto-select-tab-capture-source-by-title=Meeting Avatar Bot",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        ...(config.avatarUseSwiftShader
-          ? ["--use-angle=swiftshader", "--use-gl=angle", "--enable-unsafe-swiftshader"]
-          : ["--use-angle=default", "--enable-gpu-rasterization"]),
-        "--ignore-gpu-blocklist",
-        "--enable-webgl",
-        "--disable-blink-features=AutomationControlled",
-        "--autoplay-policy=no-user-gesture-required",
-        "--no-first-run",
-        "--no-default-browser-check",
-        ...String(input.browserExtraArgs || "")
-          .split(/\s+/)
-          .map((arg) => arg.trim())
-          .filter(Boolean),
-        ...String(config.chromiumExtraArgs || "")
-          .split(/\s+/)
-          .map((arg) => arg.trim())
-          .filter(Boolean),
-      ],
+      args: buildGoogleMeetChromiumArgs({
+        avatarUseSwiftShader: config.avatarUseSwiftShader,
+        browserExtraArgs: input.browserExtraArgs,
+        chromiumExtraArgs: config.chromiumExtraArgs,
+      }),
     };
     const contextOptions = {
       permissions: ["microphone", "camera"],
@@ -2588,6 +2569,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         persistentUserDataDir: browserUserDataDir,
         executablePath: browserLaunchOptions.executablePath || "",
         headless: browserLaunchOptions.headless,
+        args: browserLaunchOptions.args,
       });
       context = await playwright.chromium.launchPersistentContext(browserUserDataDir, {
         ...browserLaunchOptions,
@@ -2599,6 +2581,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         persistentUserDataDir: "",
         executablePath: browserLaunchOptions.executablePath || "",
         headless: browserLaunchOptions.headless,
+        args: browserLaunchOptions.args,
       });
       browser = await playwright.chromium.launch(browserLaunchOptions);
       context = await browser.newContext(contextOptions);
@@ -2760,7 +2743,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     diagnostics.record("goto_complete", { url: page.url(), status: gotoResponse?.status?.() || 0 });
     await saveDiagnostics(diagnostics);
     await installMeetPromptAutoDismisser(page, diagnostics);
-    await installMeetLocalPlaybackMute(page, diagnostics, input.muteLocalPlayback === true);
+    await installMeetLocalPlaybackMute(page, diagnostics, input.muteLocalPlayback !== false);
     await page.waitForTimeout(2500);
     await takeScreenshot(page, diagnostics, "01-after-nav");
     await collectButtonInventory(page, diagnostics, "after-nav");
