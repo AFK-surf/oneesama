@@ -6,8 +6,10 @@ import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { getRuntimeConfig } from "../env.ts";
 import type { ScreenShareState } from "../browser-runtime-types.ts";
-import { buildAvatarInitScript } from "../avatar/init-script-builder.ts";
-import { buildLocalDialogInitScript } from "../dialog/local-dialog-init-builder.ts";
+import {
+  buildAvatarRuntimeInitScripts,
+  inferConversationTransportFromRealtimeMode,
+} from "../avatar-runtime/runtime-init-builder.ts";
 import { enableMeetCaptions, installMeetCaptionCapture } from "./caption-capture.ts";
 import { waitForMeetAdmission } from "./meet-admission.ts";
 import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
@@ -22,8 +24,6 @@ import {
   readImageDimensions,
   startMacOSWindowCaptureStream,
 } from "./macos-window-capture.ts";
-import { buildRealtimeBrowserInitScript } from "../realtime/realtime-browser-init-builder.ts";
-import { buildWorkerResultInitScript } from "../realtime/worker-result-init-builder.ts";
 import {
   buildRealtimeInstructions,
   buildRealtimeSessionConfig,
@@ -2286,6 +2286,18 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   } = null;
   const activeBrowserPath = pathJoin(config.dataDir, "active-meet-browser.json");
 
+  function buildConfiguredRealtimeCurrentUser(): RealtimeCurrentUser {
+    return {
+      name: config.currentUserName,
+      englishName: config.currentUserEnglishName,
+      email: config.currentUserEmail,
+      linear: config.currentUserLinear,
+      github: config.currentUserGithub,
+      role: config.currentUserRole,
+      aliases: config.currentUserAliases,
+    };
+  }
+
   async function clearActiveBrowserRecord() {
     await unlink(activeBrowserPath).catch(() => {});
   }
@@ -2624,45 +2636,20 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         })();
       `,
     });
-    if (installAvatar) {
-      await context.addInitScript({
-        content: buildAvatarInitScript({
-          modelUrl: input.avatarModelUrl || config.avatarModelUrl,
-          modelFallbackUrls: config.avatarModelFallbackUrls,
-          avatarRenderer: input.avatarRenderer || config.avatarRenderer,
-          vrmModelUrl: input.avatarVRMModelUrl || config.avatarVRMModelUrl,
-          vrmModelFallbackUrls: config.avatarVRMModelFallbackUrls,
-          live2dDepsDir: input.avatarDepsDir || config.avatarDepsDir,
-          layout: input.avatarLayout || config.avatarLayout,
-          botName,
-          disableLive2D: Boolean(input.disableLive2D),
-          deferRendererUntilExplicitStart:
-            input.deferAvatarRendererUntilJoined !== false && installAvatar,
-          canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1920),
-          canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 1080),
-          captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 30),
-        }),
-      });
-    }
-    const realtimeCurrentUser = {
-      name: config.currentUserName,
-      englishName: config.currentUserEnglishName,
-      email: config.currentUserEmail,
-      linear: config.currentUserLinear,
-      github: config.currentUserGithub,
-      role: config.currentUserRole,
-      aliases: config.currentUserAliases,
-    };
+    const realtimeCurrentUser = buildConfiguredRealtimeCurrentUser();
+    const realtimeTools = input.realtimeTools || realtimeToolSchemas;
+    const realtimeBridgeMode = input.realtimeBridgeMode || "mock";
+    let realtimeInstructions = "",
+      realtimeSession = null;
     if (installRealtimeBridge) {
-      const realtimeTools = input.realtimeTools || realtimeToolSchemas;
-      const realtimeInstructions =
+      realtimeInstructions =
         input.realtimeInstructions ||
         buildRealtimeInstructions({
           botName,
           personalityContext: config.realtimePersonalityContext,
           currentUser: realtimeCurrentUser,
         });
-      const realtimeSession =
+      realtimeSession =
         input.realtimeSession ||
         buildRealtimeSessionConfig(
           {
@@ -2673,69 +2660,89 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           },
           config,
         );
-      await context.addInitScript({
-        content: buildRealtimeBrowserInitScript({
-          mode: input.realtimeBridgeMode || "mock",
-          agentRuntime: input.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime,
-          sessionId,
-          botName,
-          toolCallbackToken: input.realtimeToolCallbackToken || config.internalAuthKey || "",
-          autoRespondToWorkerResults: input.autoRespondToWorkerResults !== false,
-          instructions: realtimeInstructions,
-          tools: realtimeTools,
-          session: realtimeSession,
-          currentUser: realtimeCurrentUser,
-          sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
-          includeParticipantAudio: Boolean(input.includeParticipantAudio),
-          forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
-          captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
-          workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,
-          workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,
-          autoConnect: Boolean(input.autoConnectRealtime),
-          tokenUrl: input.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
-          openaiRealtimeBaseUrl: config.openaiBaseUrl,
-          sdpUrl: input.realtimeSdpUrl || config.openaiRealtimeSdpUrl,
-        }),
-      });
     }
-    if (installLocalDialogBridge) {
-      await context.addInitScript({
-        content: buildLocalDialogInitScript({
-          enabled: true,
-          botName,
-          sessionId,
-          turnUrl: input.localDialogTurnUrl || `${config.meetingAgentUrl}/dialog/turn`,
-          ttsMode: input.localDialogTtsMode || "tone",
-          ttsUrl: input.localDialogTtsUrl || `${config.meetingAgentUrl}/tts/synthesize`,
-          sttProvider: input.localDialogSttProvider || config.sttProvider,
-          ttsProvider: input.localDialogTtsProvider || config.ttsProvider,
-          ttsGain: Number(input.localDialogTtsGain ?? 0.025),
-        }),
-      });
-    }
-    if (installScreenShareBridge) {
-      await context.addInitScript({
-        content: buildScreenShareInitScript({
-          enabled: true,
-          autoStart: autoStartScreenShare,
-          mode: input.screenShareMode || "synthetic",
-          title: input.screenShareTitle || "Meeting Avatar Bot",
-          subtitle: input.screenShareSubtitle || "Agent screen share",
-          width: input.screenShareWidth || DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,
-          height: input.screenShareHeight || DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
-          fps: input.screenShareFps || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
-        }),
-      });
-    }
-    if (installWorkerResultBridge) {
-      await context.addInitScript({
-        content: buildWorkerResultInitScript({
-          workerPollUrl,
-          enabled: Boolean(workerPollUrl),
-          minCreatedAt: input.workerResultMinCreatedAt || new Date().toISOString(),
-          sessionId,
-        }),
-      });
+    const runtimeInitScripts = buildAvatarRuntimeInitScripts({
+      sessionId,
+      botName,
+      surfaceKind: "google_meet",
+      conversationTransport: inferConversationTransportFromRealtimeMode(realtimeBridgeMode),
+      installAvatar,
+      installRealtimeBridge,
+      installLocalDialogBridge,
+      installScreenShareBridge,
+      installWorkerResultBridge,
+      avatar: {
+        modelUrl: input.avatarModelUrl || config.avatarModelUrl,
+        modelFallbackUrls: config.avatarModelFallbackUrls,
+        avatarRenderer: input.avatarRenderer || config.avatarRenderer,
+        vrmModelUrl: input.avatarVRMModelUrl || config.avatarVRMModelUrl,
+        vrmModelFallbackUrls: config.avatarVRMModelFallbackUrls,
+        live2dDepsDir: input.avatarDepsDir || config.avatarDepsDir,
+        layout: input.avatarLayout || config.avatarLayout,
+        botName,
+        disableLive2D: Boolean(input.disableLive2D),
+        deferRendererUntilExplicitStart:
+          input.deferAvatarRendererUntilJoined !== false && installAvatar,
+        canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1920),
+        canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 1080),
+        captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 30),
+      },
+      realtime: {
+        mode: realtimeBridgeMode,
+        agentRuntime: input.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime,
+        sessionId,
+        botName,
+        toolCallbackToken: input.realtimeToolCallbackToken || config.internalAuthKey || "",
+        autoRespondToWorkerResults: input.autoRespondToWorkerResults !== false,
+        instructions: realtimeInstructions,
+        tools: realtimeTools,
+        session: realtimeSession,
+        currentUser: realtimeCurrentUser,
+        sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
+        includeParticipantAudio: Boolean(input.includeParticipantAudio),
+        forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
+        captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
+        workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,
+        workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,
+        autoConnect: Boolean(input.autoConnectRealtime),
+        tokenUrl: input.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
+        openaiRealtimeBaseUrl: config.openaiBaseUrl,
+        sdpUrl: input.realtimeSdpUrl || config.openaiRealtimeSdpUrl,
+      },
+      localDialog: {
+        enabled: true,
+        botName,
+        sessionId,
+        turnUrl: input.localDialogTurnUrl || `${config.meetingAgentUrl}/dialog/turn`,
+        ttsMode: input.localDialogTtsMode || "tone",
+        ttsUrl: input.localDialogTtsUrl || `${config.meetingAgentUrl}/tts/synthesize`,
+        sttProvider: input.localDialogSttProvider || config.sttProvider,
+        ttsProvider: input.localDialogTtsProvider || config.ttsProvider,
+        ttsGain: Number(input.localDialogTtsGain ?? 0.025),
+      },
+      screenShare: {
+        enabled: true,
+        autoStart: autoStartScreenShare,
+        mode: input.screenShareMode || "synthetic",
+        title: input.screenShareTitle || "Meeting Avatar Bot",
+        subtitle: input.screenShareSubtitle || "Agent screen share",
+        width: input.screenShareWidth || DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,
+        height: input.screenShareHeight || DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
+        fps: input.screenShareFps || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
+      },
+      workerResult: {
+        workerPollUrl,
+        enabled: Boolean(workerPollUrl),
+        minCreatedAt: input.workerResultMinCreatedAt || new Date().toISOString(),
+        sessionId,
+      },
+    });
+    diagnostics.record("runtime_init_scripts", {
+      categories: runtimeInitScripts.map((script) => script.category),
+      events: runtimeInitScripts.map((script) => script.event),
+    });
+    for (const script of runtimeInitScripts) {
+      await context.addInitScript({ content: script.content });
     }
     const page = await context.newPage();
     active = {
@@ -3046,15 +3053,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       await openMeetPeoplePanelForAwareness(active.page, active.diagnostics);
       meetPage = await evaluateMeetPageState(active.page);
     }
-    const realtimeCurrentUser = {
-      name: config.currentUserName,
-      englishName: config.currentUserEnglishName,
-      email: config.currentUserEmail,
-      linear: config.currentUserLinear,
-      github: config.currentUserGithub,
-      role: config.currentUserRole,
-      aliases: config.currentUserAliases,
-    };
+    const realtimeCurrentUser = buildConfiguredRealtimeCurrentUser();
     const meetingAwareness = buildMeetingAwarenessState({
       meetPage,
       captions,

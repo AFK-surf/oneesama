@@ -15,7 +15,8 @@ test("screen-share init script supports local multipart frame streams", () => {
   assert.match(script, /state\.showOverlay/);
   assert.match(script, /track\.contentHint = "detail"/);
   assert.ok(
-    script.indexOf('image.crossOrigin = "anonymous"') < script.indexOf("image.src = state.imageUrl"),
+    script.indexOf('image.crossOrigin = "anonymous"') <
+      script.indexOf("image.src = state.imageUrl"),
     "crossOrigin must be set before image.src so localhost frame streams stay canvas-readable",
   );
 });
@@ -27,6 +28,15 @@ test("meet runner late screen-share install reuses full image-capable bridge", a
   const ensureBody = source.slice(ensureStart, ensureEnd);
 
   assert.match(ensureBody, /buildScreenShareInitScript/);
+  assert.match(source, /buildAvatarRuntimeInitScripts/);
+  assert.doesNotMatch(
+    source.slice(
+      source.indexOf("const runtimeInitScripts"),
+      source.indexOf("const page = await context.newPage"),
+    ),
+    /buildScreenShareInitScript/,
+    "main init stack should use the runtime composer instead of manually assembling screen-share init",
+  );
   assert.doesNotMatch(
     ensureBody,
     /function ensureVideo\(\)/,
