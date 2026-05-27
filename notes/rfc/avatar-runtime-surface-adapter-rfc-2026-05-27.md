@@ -414,6 +414,7 @@ export interface AvatarRuntimeSessionConfig {
   inputPolicy: RuntimeInputPolicy;
   outputPolicy: RuntimeOutputPolicy;
   capabilities: SurfaceCapability[];
+  diagnostics?: RuntimeDiagnosticsConfig;
 }
 
 export interface SurfaceAdapter {
@@ -447,6 +448,47 @@ export interface RuntimeOutputPolicy {
   videoOutputs: Array<"meet_camera" | "dom_canvas" | "capture_track" | "none">;
   allowLocalSpeaker?: boolean;
 }
+
+export type RuntimeStatusView = "summary" | "diagnostic" | "trace";
+
+export interface RuntimeDiagnosticsConfig {
+  eventLogEnabled: boolean;
+  defaultStatusView: RuntimeStatusView;
+  retainTraceArtifacts?: boolean;
+  redactByDefault: boolean;
+}
+
+export interface RuntimeEvent {
+  ts: string;
+  sessionId: string;
+  surfaceKind: SurfaceKind;
+  conversationTransport: ConversationTransport;
+  phase: "init" | "join" | "media" | "realtime" | "tool" | "guard" | "shutdown";
+  event: string;
+  severity: "debug" | "info" | "warn" | "error";
+  summary: string;
+  detail?: Record<string, unknown>;
+  redaction?: "none" | "omitted" | "hashed" | "summarized";
+  correlation?: {
+    turnId?: string;
+    responseId?: string;
+    toolCallId?: string;
+    trackId?: string;
+    capabilityName?: string;
+    workerJobId?: string;
+  };
+}
+
+export interface RuntimeStatusSnapshot {
+  view: RuntimeStatusView;
+  summary: string;
+  health: "starting" | "ready" | "degraded" | "failed" | "stopped";
+  surfaceKind: SurfaceKind;
+  conversationTransport: ConversationTransport;
+  capabilities?: string[];
+  warnings?: string[];
+  errors?: string[];
+}
 ```
 
 ### Phase 1 Validation Rules
@@ -462,6 +504,10 @@ export interface RuntimeOutputPolicy {
 - Surface capabilities are frozen once the runtime session is created.
 - Worker internal delivery is allowed as an engine text/event lane, not as a
   surface-contributed input.
+- Diagnostics default to `summary` or `diagnostic`, never raw `trace`.
+- Runtime events must be redacted by default.
+- Validation failures must emit structured events that can seed regression
+  tests.
 
 ## Compatibility Shims
 
@@ -488,9 +534,11 @@ extracted. They must have an explicit deletion target:
 - [ ] Model `SurfaceKind` and `ConversationTransport` as separate axes.
 - [ ] Add surface/capability interfaces.
 - [ ] Add input/output policy interfaces.
+- [ ] Add diagnostics config, runtime event, and status snapshot interfaces.
 - [ ] Encode Meet audio invariant validation.
 - [ ] Encode local browser loop guard validation.
 - [ ] Encode session-immutable surface/capability validation.
+- [ ] Encode default progressive-disclosure behavior for status views.
 - [ ] Document that worker dispatch/result is internal to the engine.
 
 Acceptance:
@@ -501,6 +549,8 @@ Acceptance:
 - [ ] Contract tests reject invalid local continuous-mic + local-speaker config
       unless an approved loop guard is set.
 - [ ] Contract tests prove surface and transport normalize independently.
+- [ ] Contract tests prove default status view does not expose trace payloads.
+- [ ] Contract tests prove validation rejects can emit redacted runtime events.
 
 ### Phase 2: Runtime init composer, no behavior change
 
@@ -514,6 +564,7 @@ Acceptance:
 - [ ] Update `GoogleMeetJoiner` to call the composer instead of manually
       assembling every init script.
 - [ ] Keep generated init scripts behavior-equivalent for the current Meet path.
+- [ ] Composer emits a structured event for each installed init-script category.
 
 Acceptance:
 
@@ -523,6 +574,8 @@ Acceptance:
 - [ ] Meet surface still has no Realtime DOM `<audio>` sink.
 - [ ] Composer snapshot/golden proves the existing init-script categories remain
       present.
+- [ ] Diagnostic summary can list installed categories without exposing raw
+      injected script content.
 
 ### Phase 3: Extract renderer/audio modules
 
@@ -531,6 +584,8 @@ Acceptance:
 - [ ] Add module-level tests for renderer readiness and audio-bus routing.
 - [ ] Add a grep/lint guard that blocks new runtime code from depending on new
       global reads.
+- [ ] Emit compatibility-shim access events so remaining global dependencies are
+      visible during rollout.
 
 ### Phase 4: Extract conversation engine
 
@@ -539,6 +594,7 @@ Acceptance:
       `GoogleMeetSurface`.
 - [ ] Keep Realtime transport reusable across surfaces.
 - [ ] Keep `function_call_output` delivery inside the engine.
+- [ ] Emit Realtime lifecycle, tool-call, tool-result, and reconnect events.
 
 ### Phase 5: LocalBrowserSurface
 
@@ -548,6 +604,7 @@ Acceptance:
 - [ ] Add push-to-talk or AEC-gated local mic as explicit opt-in.
 - [ ] Add optional local speaker sink only behind policy validation.
 - [ ] Ensure `LocalBrowserSurface` does not load Meet peer hooks or Meet tools.
+- [ ] Surface loop guard decisions in default status and diagnostic events.
 
 ### Phase 6: Contract tests
 
@@ -558,6 +615,10 @@ Acceptance:
 - [ ] Local browser surface rejects continuous mic + local speaker without guard.
 - [ ] Tool schema differs by surface capability set.
 - [ ] Worker result delivery stays engine-owned.
+- [ ] Runtime event log can produce a post-run summary for Meet and local
+      browser sessions.
+- [ ] Default status stays short while diagnostic/trace views provide deeper
+      evidence.
 
 ### Phase 7: Meet runtime-v2 rollout
 
@@ -565,6 +626,8 @@ Acceptance:
 - [ ] Run smoke tests on both old and new init paths.
 - [ ] Switch live Meet path only after equivalence is proven.
 - [ ] Keep old path as rollback for a short window.
+- [ ] Runtime-v2 smoke artifacts include a post-run summary derived from
+      structured events.
 
 ### Phase 8: Remove compatibility globals
 
@@ -583,7 +646,9 @@ The first implementable slice is Phase 1 + Phase 2 only.
   - Meet invariant rejection for local mic and local speaker;
   - local browser loop guard rejection;
   - session-immutable capability model;
-  - Meet composer includes existing init script categories.
+  - diagnostics redaction and progressive-disclosure defaults;
+  - Meet composer includes existing init script categories;
+  - composer event summary includes categories without raw script content.
 - [ ] Refactor `packages/core/src/meeting/google-meet-joiner.ts` to call the
       composer.
 - [ ] Do not extract `packages/core/src/avatar/hiyori-avatar-inject.ts` yet.
@@ -610,6 +675,12 @@ The first implementable slice is Phase 1 + Phase 2 only.
 - Should Meet screen-share capabilities live under the same `SurfaceCapability`
   registry as app-control capabilities? Proposed answer: yes for schema
   filtering, while implementation modules can remain separate.
+- What retention policy should trace artifacts use for live sessions? Proposed
+  answer: keep short-lived local artifacts by default, then promote only
+  explicit smoke/debug evidence into longer-lived notes.
+- Should self-iteration summaries ever be visible to the model in realtime?
+  Proposed answer: only compact, redacted summaries; raw traces stay operator
+  and test evidence unless a future RFC defines a safe feedback lane.
 
 ## Reader Checklist
 
@@ -620,4 +691,6 @@ After reading this RFC, a local implementation session should know:
 - not to reintroduce a local Realtime `<audio>` sink;
 - not to make worker result delivery a surface responsibility;
 - not to hot-swap surface/capabilities inside an active Realtime session;
+- not to rely on scattered console logs for future debugging or self-iteration;
+- not to expose deep trace output as the default status view;
 - where the first low-risk implementation slice begins and stops.
