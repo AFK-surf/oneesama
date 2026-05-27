@@ -82,6 +82,9 @@ runtime session is configured with both `surfaceKind` and
   the Meet joiner.
 - Filter tool schemas by surface capability.
 - Keep worker dispatch/result delivery inside the conversation engine.
+- Emit enough structured diagnostics for the runtime to explain failures and
+  support future self-iteration.
+- Keep long diagnostics and long docs usable through progressive disclosure.
 - Start with low-risk contracts and a composer before extracting large browser
   injectors.
 
@@ -93,6 +96,8 @@ runtime session is configured with both `surfaceKind` and
 - Do not silently enable continuous local mic plus local speaker output.
 - Do not expose Meet-only tools to non-Meet surfaces.
 - Do not make every surface implement worker-result plumbing.
+- Do not expose raw debug logs, prompts, secrets, or stack traces to meeting or
+  local-browser foreground users by default.
 - Do not keep `window.MAB_AVATAR_*` compatibility globals forever.
 
 ## Terminology
@@ -107,6 +112,11 @@ runtime session is configured with both `surfaceKind` and
 - Capability: surface-contributed feature that may expose tools, events, ports,
   or diagnostics.
 - Input/output policy: explicit media/text routing policy for the session.
+- Runtime event: structured, session-scoped log entry safe for machines to
+  analyze and compact for humans.
+- Progressive disclosure: layered status/debug output where the default view is
+  short, with drill-down into timelines, traces, and raw artifacts only when
+  requested.
 
 ## Architecture
 
@@ -120,6 +130,7 @@ flowchart TD
   Runtime --> Conversation["Conversation Engine<br/>Realtime / turn policy"]
   Runtime --> Tools["Tool Registry<br/>capability-filtered"]
   Runtime --> State["Runtime State + Diagnostics"]
+  Runtime --> Events["Runtime Event Log<br/>structured / redacted / replayable"]
 
   Adapter --> Inputs["Input Ports<br/>audio / text / captions / events"]
   Adapter --> Outputs["Output Ports<br/>video / audio / UI / chat"]
@@ -128,9 +139,11 @@ flowchart TD
   Inputs --> Conversation
   Conversation --> AudioBus
   Conversation --> Tools
+  Conversation --> Events
   Renderer --> Outputs
   AudioBus --> Outputs
   Caps --> Tools
+  State --> Events
 ```
 
 ## Runtime Core Responsibilities
@@ -164,6 +177,12 @@ It owns:
 - `RuntimeState`
   - Health gates, timeline, diagnostics.
   - Surface-independent readiness plus namespaced surface status.
+
+- `RuntimeEventLog`
+  - Structured event timeline for joins, media routing, Realtime state, tool
+    calls, loop guards, validation rejects, and recovery decisions.
+  - Redacted by default and safe to attach to test/smoke artifacts.
+  - Supports compact human summaries and deeper machine-readable traces.
 
 ## Surface Adapter Responsibilities
 
@@ -250,6 +269,111 @@ tool execution and result delivery.
 
 This keeps worker-result polling/delivery from becoming an adapter API every new
 surface must reimplement.
+
+## Observability and Self-Iteration
+
+The runtime must emit enough structured evidence for a future implementation or
+agent session to answer: "what happened, why did it choose that path, and what
+should change next?"
+
+This is a runtime contract, not optional debug noise.
+
+### Required Event Shape
+
+Runtime events should be small, typed, session-scoped, and redacted by default.
+
+Minimum fields:
+
+- `ts`: monotonic or wall-clock timestamp.
+- `sessionId`: runtime session id.
+- `surfaceKind`: active surface.
+- `conversationTransport`: active transport.
+- `phase`: lifecycle phase, for example `init`, `join`, `media`, `realtime`,
+  `tool`, `guard`, `shutdown`.
+- `event`: stable event name.
+- `severity`: `debug`, `info`, `warn`, or `error`.
+- `summary`: short human-readable summary.
+- `detail`: compact structured details.
+- `redaction`: whether sensitive fields were omitted, hashed, or summarized.
+- `correlation`: optional ids such as `turnId`, `responseId`, `toolCallId`,
+  `trackId`, `capabilityName`, or `workerJobId`.
+
+### Events That Must Exist
+
+- session created, validated, started, stopped;
+- selected `surfaceKind` and `conversationTransport`;
+- surface capability set and generated tool schema hash;
+- input/output policy validation pass/fail;
+- Meet audio input source selected, including `meet_audio_mix`;
+- local mic/speaker loop guard decisions;
+- Realtime connection lifecycle and reconnect decisions;
+- response audio route selected;
+- tool call, tool result, and `function_call_output` delivery;
+- compatibility-shim access during migration;
+- validation rejects with enough context to write a regression test.
+
+### Self-Iteration Loop
+
+Every smoke or live-debug artifact should be able to produce a compact
+post-run summary:
+
+- what surface and transport ran;
+- which capabilities were exposed;
+- which media routes were selected;
+- which guards fired or should have fired;
+- which tools were called;
+- whether output was delivered through the expected surface;
+- top warnings/errors;
+- suggested next regression test if the run failed.
+
+This summary should be derived from structured runtime events, not manually
+written from scattered console logs.
+
+Raw logs remain available as private artifacts for debugging, but foreground
+user-visible output should receive only the compact summary unless an operator
+explicitly asks for deeper evidence.
+
+## Progressive Disclosure
+
+The RFC and runtime diagnostics both need layered disclosure because this system
+is inherently multi-surface, multi-transport, and media-heavy.
+
+### Document Disclosure
+
+The RFC should keep this shape:
+
+- executive path: `Summary`, `Problem`, `Decision`, `Goals`, `Non-Goals`;
+- implementer path: responsibilities, contracts, validation rules;
+- migration path: phased checklist and first slice;
+- audit path: observability, self-iteration, compatibility shims, reader
+  checklist.
+
+Future edits should avoid turning the top of the RFC into a full implementation
+manual. Deep details belong in contracts, migration phases, or linked runbooks.
+
+### Runtime Disclosure
+
+Runtime status should expose at least three layers:
+
+- default status: short health summary safe for a live meeting or local page;
+- diagnostic summary: compact structured state for operators and tests;
+- deep trace: full redacted event timeline and artifacts for debugging.
+
+Default user-facing status must not include raw prompts, stack traces, secrets,
+or full worker/tool logs. It can say what failed and what action is needed.
+
+### API Shape
+
+The eventual runtime API should make disclosure level explicit, for example:
+
+```text
+GET /avatar/session/:id/status?view=summary
+GET /avatar/session/:id/status?view=diagnostic
+GET /avatar/session/:id/events?view=trace
+```
+
+Exact endpoints are not decided in Phase 1, but the contract should prevent
+accidentally treating a full trace as the default status payload.
 
 ## Session Lifecycle
 
