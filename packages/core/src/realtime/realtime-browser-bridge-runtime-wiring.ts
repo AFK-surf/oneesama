@@ -33,7 +33,7 @@ function isUserInputTextItem(event) {
 function shouldAllowUserInputTextEvent(event) {
   if (!isUserInputTextItem(event)) return { ok: true, source: "" };
   const source = realtimeEventSource(event);
-  const allowed = new Set(["manual_text_turn", "meet_chat_observer", "meet_caption_observer"]);
+  const allowed = new Set(["manual_text_turn", "meet_chat_observer"]);
   return { ok: allowed.has(source), source };
 }
 

@@ -13,7 +13,13 @@ test("Realtime bridge does not route browser local mic into the Meet audio mix",
       window.__MAB_FAKE_PEERS = [];
       window.__MAB_GET_USER_MEDIA_CALLS = 0;
       window.__MAB_AVATAR_BUS_STREAMS = [];
+      window.__MAB_AVATAR_AUDIO_CONTEXT = new AudioContext();
+      window.__MAB_AVATAR_AUDIO_DESTINATION =
+        window.__MAB_AVATAR_AUDIO_CONTEXT.createMediaStreamDestination();
+      window.__MAB_AVATAR_AUDIO_TRACK =
+        window.__MAB_AVATAR_AUDIO_DESTINATION.stream.getAudioTracks()[0];
       window.MAB_AVATAR_AUDIO_BUS = {
+        track: window.__MAB_AVATAR_AUDIO_TRACK,
         addStream(stream, options = {}) {
           window.__MAB_AVATAR_BUS_STREAMS.push({
             streamId: stream?.id || "",
@@ -122,15 +128,32 @@ test("Realtime bridge does not route browser local mic into the Meet audio mix",
 
     const result = await page.evaluate(async () => {
       await window.MAB_REALTIME_CLIENT.connect();
+      const realtimePeer = window.__MAB_FAKE_PEERS[0];
+      const meetAudioContext = new AudioContext();
+      const meetDestination = meetAudioContext.createMediaStreamDestination();
+      const meetPeer = new RTCPeerConnection();
+      const meetSender = meetPeer.addTrack(
+        meetDestination.stream.getAudioTracks()[0],
+        meetDestination.stream,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const mediaElementContext = new AudioContext();
+      const mediaElementDestination = mediaElementContext.createMediaStreamDestination();
+      const audioElement = document.createElement("audio");
+      audioElement.captureStream = () => mediaElementDestination.stream;
+      document.body.append(audioElement);
+      await new Promise((resolve) => setTimeout(resolve, 1100));
       const audioContext = new AudioContext();
       const oscillator = audioContext.createOscillator();
       const destination = audioContext.createMediaStreamDestination();
       oscillator.connect(destination);
       oscillator.start();
-      window.__MAB_FAKE_PEERS[0].ontrack?.({ streams: [destination.stream] });
+      realtimePeer.ontrack?.({ streams: [destination.stream] });
       await new Promise((resolve) => setTimeout(resolve, 100));
       oscillator.stop();
       await audioContext.close();
+      await meetAudioContext.close();
+      await mediaElementContext.close();
 
       return {
         getUserMediaCalls: window.__MAB_GET_USER_MEDIA_CALLS,
@@ -138,7 +161,12 @@ test("Realtime bridge does not route browser local mic into the Meet audio mix",
           "audio[data-meeting-avatar-realtime-audio]",
         ).length,
         avatarBusStreams: window.__MAB_AVATAR_BUS_STREAMS,
+        avatarAudioTrackId: window.__MAB_AVATAR_AUDIO_TRACK.id,
+        meetSenderTrackId: meetSender.track?.id || "",
         connection: window.MAB_REALTIME_BRIDGE.connection,
+        primarySenderAttachEvents: window.MAB_REALTIME_BRIDGE.timeline.filter(
+          (entry) => entry.type === "primary_meet_audio_sender_attached",
+        ),
         localMicEvents: window.MAB_REALTIME_BRIDGE.timeline.filter((entry) =>
           String(entry.type).startsWith("local_audio"),
         ),
@@ -148,13 +176,18 @@ test("Realtime bridge does not route browser local mic into the Meet audio mix",
     assert.equal(result.getUserMediaCalls, 0);
     assert.equal(result.localRealtimeAudioElements, 0);
     assert.equal(result.avatarBusStreams.length, 1);
+    assert.equal(result.meetSenderTrackId, result.avatarAudioTrackId);
+    assert.equal(result.connection.primaryMeetAudioSenderUsingAvatarBus, true);
+    assert.equal(result.primarySenderAttachEvents.length, 1);
+    assert.equal(result.connection.meetMediaElementsScanned, 1);
+    assert.equal(result.connection.meetMediaElementAudioTracksAdded, 1);
     assert.equal(result.connection.localAudioFallbackEnabled, false);
     assert.equal(result.connection.localAudioTrackAdded, false);
     assert.equal(result.connection.localAudioFallbackTrackAdded, false);
     assert.equal(result.connection.localAudioRoutedToRealtimeMix, false);
     assert.equal(result.connection.localAudioMixEnabled, false);
-    assert.equal(result.connection.currentRealtimeInputSource, "silent_placeholder");
-    assert.equal(result.connection.realtimeInputPlaceholderAdded, true);
+    assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
+    assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
     assert.deepEqual(result.localMicEvents, []);
   } finally {
     await browser.close();

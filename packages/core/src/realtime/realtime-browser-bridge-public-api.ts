@@ -40,104 +40,26 @@ function normalizeCaptionTurnText(value) {
     .trim();
 }
 
-function captionSpeakerMatchesBot(speaker) {
-  const normalized = normalizeCaptionTurnText(speaker).toLowerCase();
-  const botName = normalizeCaptionTurnText(config.botName || "").toLowerCase();
-  if (!normalized || !botName) return false;
-  return normalized === botName || normalized.includes(botName) || botName.includes(normalized);
-}
-
-function captionTurnDebounceMs() {
-  const value = Number(config.captionTurnDebounceMs || 900);
-  if (!Number.isFinite(value)) return 900;
-  return Math.max(250, Math.min(value, 3000));
-}
-
 function injectCaptionTurn(
   rawEvent: { text?: unknown; speaker?: unknown; streamId?: unknown; ts?: unknown } = {},
 ) {
-  if (config.captionTurnFallback === false) {
-    return { ok: true, skipped: true, reason: "caption_turn_fallback_disabled" };
-  }
   const text = normalizeCaptionTurnText(rawEvent.text || "");
   const speaker = normalizeCaptionTurnText(rawEvent.speaker || "unknown") || "unknown";
   const streamId = normalizeCaptionTurnText(rawEvent.streamId || speaker || "caption");
   if (!text) return { ok: true, skipped: true, reason: "empty_caption_turn" };
-  if (captionSpeakerMatchesBot(speaker)) {
-    return { ok: true, skipped: true, reason: "bot_caption_turn" };
-  }
-
   state.connection.captionTurnsObserved = (state.connection.captionTurnsObserved || 0) + 1;
-  const key = streamId || speaker;
-  const signature = `${speaker}\n${text}`;
-  if (captionTurnSubmitted.get(key) === signature) {
-    return { ok: true, skipped: true, reason: "duplicate_caption_turn", key };
-  }
-  const pending = captionTurnTimers.get(key);
-  if (pending) window.clearTimeout(pending);
-
-  const delayMs = captionTurnDebounceMs();
-  const timer = window.setTimeout(() => {
-    captionTurnTimers.delete(key);
-    state.connection.captionTurnsPending = captionTurnTimers.size;
-    if (captionTurnSubmitted.get(key) === signature) return;
-    captionTurnSubmitted.set(key, signature);
-    if (captionTurnSubmitted.size > 60) {
-      const firstKey = captionTurnSubmitted.keys().next().value;
-      if (firstKey) captionTurnSubmitted.delete(firstKey);
-    }
-    const interrupt = cancelActiveResponse("meet_caption_observer");
-    const itemChannel = sendRealtimeEvent({
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "user",
-        metadata: {
-          source: "meet_caption_observer",
-          speaker,
-          streamId: key,
-          captionTs: rawEvent.ts || "",
-        },
-        content: [
-          {
-            type: "input_text",
-            text,
-          },
-        ],
-      },
-    });
-    const responseChannel = sendRealtimeEvent({
-      type: "response.create",
-      response: {
-        instructions:
-          "Reply to the user's latest captioned speech in concise Chinese. Treat this as live meeting speech, not a debug transcript. Do not mention captions, fallback paths, routing, or internal state.",
-      },
-    });
-    state.responsesRequested += 1;
-    state.connection.captionTurnsInjected = (state.connection.captionTurnsInjected || 0) + 1;
-    state.connection.lastCaptionTurnAt = new Date().toISOString();
-    state.connection.lastCaptionTurnSpeaker = speaker;
-    state.connection.lastCaptionTurnText = text.slice(0, 500);
-    recordTimeline("meet_caption_turn_injected", {
-      speaker,
-      streamId: key,
-      chars: text.length,
-      itemChannel,
-      responseChannel,
-      interrupted: !interrupt?.skipped,
-    });
-    updateFeedback();
-  }, delayMs);
-  captionTurnTimers.set(key, timer);
-  state.connection.captionTurnsPending = captionTurnTimers.size;
-  recordTimeline("meet_caption_turn_scheduled", {
+  state.connection.lastCaptionTurnAt = new Date().toISOString();
+  state.connection.lastCaptionTurnSpeaker = speaker;
+  state.connection.lastCaptionTurnText = text.slice(0, 500);
+  recordTimeline("meet_caption_turn_observed", {
     speaker,
-    streamId: key,
+    streamId,
     chars: text.length,
-    delayMs,
+    ignored: true,
+    reason: "caption_turn_realtime_input_disabled",
   });
   updateFeedback();
-  return { ok: true, scheduled: true, key, delayMs };
+  return { ok: true, skipped: true, reason: "caption_turn_realtime_input_disabled", streamId };
 }
 
 async function simulateRealtimeAgentToolCall(name, args = {}) {

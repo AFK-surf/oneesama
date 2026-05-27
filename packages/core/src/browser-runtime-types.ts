@@ -34,6 +34,7 @@ export interface AudioPlaybackResult {
 }
 
 export interface AvatarAudioBus {
+  track?: MediaStreamTrack;
   playAudioDataUrl(
     audioDataUrl: string,
     options?: { label?: string; gain?: number },

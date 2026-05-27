@@ -43,9 +43,19 @@ test("Realtime bridge blocks untagged user text turns from internal streams", as
           content: [{ type: "input_text", text: "explicit operator text turn" }],
         },
       });
+      const captionBlocked = window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          metadata: { source: "meet_caption_observer" },
+          content: [{ type: "input_text", text: "caption text is diagnostics only" }],
+        },
+      });
       return {
         allowed,
         blocked,
+        captionBlocked,
         blockedCount: window.MAB_REALTIME_BRIDGE.connection.blockedUserTextEvents,
         blockedTimeline: window.MAB_REALTIME_BRIDGE.timeline.filter(
           (entry) => entry.type === "realtime_user_text_blocked",
@@ -57,8 +67,9 @@ test("Realtime bridge blocks untagged user text turns from internal streams", as
 
     assert.equal(result.blocked, "blocked-untrusted-user-text");
     assert.equal(result.allowed, "custom-event");
-    assert.equal(result.blockedCount, 1);
-    assert.equal(result.blockedTimeline.length, 1);
+    assert.equal(result.captionBlocked, "blocked-untrusted-user-text");
+    assert.equal(result.blockedCount, 2);
+    assert.equal(result.blockedTimeline.length, 2);
     assert.equal(result.outbound.length, 1);
     assert.equal(result.outbound[0].item.metadata.source, "manual_text_turn");
     assert.equal(result.wireEvents.length, 1);
@@ -68,7 +79,7 @@ test("Realtime bridge blocks untagged user text turns from internal streams", as
   }
 });
 
-test("Realtime bridge accepts debounced Meet caption turns as live user speech", async () => {
+test("Realtime bridge observes Meet caption turns without using them as model input", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -79,7 +90,6 @@ test("Realtime bridge accepts debounced Meet caption turns as live user speech",
         agentRuntime: "raw",
         autoConnect: false,
         botName: "Onee Sama",
-        captionTurnDebounceMs: 50,
         forwardMeetAudioToRealtime: true,
         includeParticipantAudio: false,
         captureMeetAudioForTranscript: false,
@@ -92,25 +102,17 @@ test("Realtime bridge accepts debounced Meet caption turns as live user speech",
       window.addEventListener("meeting-avatar-realtime-event", (event) => {
         wireEvents.push(event.detail);
       });
-      const scheduled = window.MAB_REALTIME_CLIENT.injectCaptionTurn({
+      const skipped = window.MAB_REALTIME_CLIENT.injectCaptionTurn({
         ts: "2026-05-27T02:10:00.000Z",
         speaker: "Peng Xiao",
         text: "现在还是不理我",
         streamId: "caption-1",
         source: "google-meet-caption-dom",
       });
-      const botSkipped = window.MAB_REALTIME_CLIENT.injectCaptionTurn({
-        ts: "2026-05-27T02:10:01.000Z",
-        speaker: "Onee Sama",
-        text: "我自己的回声不该触发",
-        streamId: "caption-2",
-        source: "google-meet-caption-dom",
-      });
-      await new Promise((resolve) => setTimeout(resolve, 320));
       return {
-        scheduled,
-        botSkipped,
+        skipped,
         responsesRequested: window.MAB_REALTIME_BRIDGE.responsesRequested,
+        captionTurnsObserved: window.MAB_REALTIME_BRIDGE.connection.captionTurnsObserved,
         captionTurnsInjected: window.MAB_REALTIME_BRIDGE.connection.captionTurnsInjected,
         outbound: window.MAB_REALTIME_BRIDGE.outbound.map((entry) => entry.event),
         wireEvents,
@@ -120,21 +122,65 @@ test("Realtime bridge accepts debounced Meet caption turns as live user speech",
       };
     });
 
-    assert.equal(result.scheduled.scheduled, true);
-    assert.equal(result.botSkipped.skipped, true);
-    assert.equal(result.botSkipped.reason, "bot_caption_turn");
-    assert.equal(result.responsesRequested, 1);
-    assert.equal(result.captionTurnsInjected, 1);
-    assert.deepEqual(result.timeline, [
-      "meet_caption_turn_scheduled",
-      "meet_caption_turn_injected",
-    ]);
-    assert.equal(result.outbound.length, 2);
-    assert.equal(result.outbound[0].item.metadata.source, "meet_caption_observer");
-    assert.equal(result.outbound[0].item.content[0].text, "现在还是不理我");
-    assert.equal(result.outbound[1].type, "response.create");
-    assert.equal(result.wireEvents.length, 2);
-    assert.equal(result.wireEvents[0].item.metadata, undefined);
+    assert.equal(result.skipped.skipped, true);
+    assert.equal(result.skipped.reason, "caption_turn_realtime_input_disabled");
+    assert.equal(result.responsesRequested, 0);
+    assert.equal(result.captionTurnsObserved, 1);
+    assert.equal(result.captionTurnsInjected, 0);
+    assert.deepEqual(result.timeline, ["meet_caption_turn_observed"]);
+    assert.equal(result.outbound.length, 0);
+    assert.equal(result.wireEvents.length, 0);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Realtime bridge does not resurrect caption fallback for duplicate streams", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.setContent("<!doctype html><html><body></body></html>");
+    await page.addScriptTag({
+      content: buildRealtimeBrowserInitScript({
+        mode: "mock",
+        agentRuntime: "raw",
+        autoConnect: false,
+        botName: "Onee Sama",
+        forwardMeetAudioToRealtime: true,
+        includeParticipantAudio: false,
+        captureMeetAudioForTranscript: false,
+        sendSessionUpdateOnConnect: false,
+      }),
+    });
+
+    const result = await page.evaluate(async () => {
+      window.MAB_REALTIME_CLIENT.injectCaptionTurn({
+        ts: "2026-05-27T13:43:33.548Z",
+        speaker: "Peng Xiao",
+        text: "No. Hello. Hello.",
+        streamId: "caption-1",
+      });
+      const duplicate = window.MAB_REALTIME_CLIENT.injectCaptionTurn({
+        ts: "2026-05-27T13:43:33.548Z",
+        speaker: "Peng Xiao",
+        text: "No. Hello. Hello.",
+        streamId: "caption-2",
+      });
+      return {
+        duplicate,
+        responsesRequested: window.MAB_REALTIME_BRIDGE.responsesRequested,
+        captionTurnsObserved: window.MAB_REALTIME_BRIDGE.connection.captionTurnsObserved,
+        captionTurnsInjected: window.MAB_REALTIME_BRIDGE.connection.captionTurnsInjected,
+        outbound: window.MAB_REALTIME_BRIDGE.outbound.map((entry) => entry.event),
+      };
+    });
+
+    assert.equal(result.duplicate.skipped, true);
+    assert.equal(result.duplicate.reason, "caption_turn_realtime_input_disabled");
+    assert.equal(result.responsesRequested, 0);
+    assert.equal(result.captionTurnsObserved, 2);
+    assert.equal(result.captionTurnsInjected, 0);
+    assert.equal(result.outbound.filter((event) => event.type === "response.create").length, 0);
   } finally {
     await browser.close();
   }

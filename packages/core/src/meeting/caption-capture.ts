@@ -859,22 +859,6 @@ export async function installMeetCaptionCapture(
       });
     }
 
-    function forwardToRealtime(event: CaptionEvent): void {
-      const client = window.MAB_REALTIME_CLIENT;
-      if (typeof client?.injectCaptionTurn !== "function") return;
-      const botName = normalize(window.MAB_REALTIME_BRIDGE_CONFIG?.botName || "");
-      const speaker = normalize(event?.speaker || "");
-      if (speaker && botName && (speaker === botName || speaker.includes(botName) || botName.includes(speaker))) return;
-      try {
-        if (normalize(event?.text || "")) client.injectCaptionTurn(event);
-      } catch (error) {
-        const state = ensureState();
-        const message = error instanceof Error ? error.message : String(error);
-        state.errors.push(message.slice(0, 300));
-        if (state.errors.length > 20) state.errors.splice(0, state.errors.length - 20);
-      }
-    }
-
     if (window.__MAB_CAPTION_CAPTURE_INSTALLED) {
       return { ok: true, alreadyInstalled: true };
     }
@@ -923,7 +907,6 @@ export async function installMeetCaptionCapture(
           if (state.captions.length > 100) state.captions.splice(0, state.captions.length - 100);
           window.__mabOnCaptionCapture(event);
           forwardToLocalDialog(event);
-          forwardToRealtime(event);
           emittedForContainer = true;
         }
         if (!emittedForContainer) {
@@ -950,7 +933,6 @@ export async function installMeetCaptionCapture(
           if (state.captions.length > 100) state.captions.splice(0, state.captions.length - 100);
           window.__mabOnCaptionCapture(event);
           forwardToLocalDialog(event);
-          forwardToRealtime(event);
         }
       }
     }
