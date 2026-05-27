@@ -11,6 +11,6 @@ export function buildLocalDialogInitScript(config: LocalDialogConfig = {}) {
       removeComments: false,
     },
     fileName: "local-dialog-bridge.ts",
-  }).outputText;
+  }).outputText.replace(/\nexport \{\};\s*$/u, "");
   return [`window.MAB_LOCAL_DIALOG_CONFIG = ${JSON.stringify(config)};`, compiled].join("\n");
 }

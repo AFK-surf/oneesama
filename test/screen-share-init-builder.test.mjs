@@ -29,6 +29,11 @@ test("meet runner late screen-share install reuses full image-capable bridge", a
 
   assert.match(ensureBody, /buildScreenShareInitScript/);
   assert.match(source, /buildAvatarRuntimeInitScripts/);
+  assert.match(source, /validateGoogleMeetRuntimeSessionConfig/);
+  assert.ok(
+    source.indexOf("const runtimeSessionValidation") < source.indexOf("const runtimeInitScripts"),
+    "Meet joiner must validate runtime session config before composing init scripts",
+  );
   assert.doesNotMatch(
     source.slice(
       source.indexOf("const runtimeInitScripts"),

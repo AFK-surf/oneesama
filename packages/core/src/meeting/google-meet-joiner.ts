@@ -6,10 +6,8 @@ import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { getRuntimeConfig } from "../env.ts";
 import type { ScreenShareState } from "../browser-runtime-types.ts";
-import {
-  buildAvatarRuntimeInitScripts,
-  inferConversationTransportFromRealtimeMode,
-} from "../avatar-runtime/runtime-init-builder.ts";
+import { buildAvatarRuntimeInitScripts } from "../avatar-runtime/runtime-init-builder.ts";
+import { validateGoogleMeetRuntimeSessionConfig } from "../avatar-runtime/google-meet-surface.ts";
 import { enableMeetCaptions, installMeetCaptionCapture } from "./caption-capture.ts";
 import { waitForMeetAdmission } from "./meet-admission.ts";
 import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
@@ -2483,6 +2481,19 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       );
     }
     const browserUserDataDir = meetProfileMode === "persistent" ? browserUserDataDirInput : "";
+    const realtimeBridgeMode = input.realtimeBridgeMode || "mock";
+    const runtimeSessionValidation = validateGoogleMeetRuntimeSessionConfig({
+      sessionId,
+      botName,
+      realtimeBridgeMode,
+      installAvatar,
+      installRealtimeBridge,
+      installLocalDialogBridge,
+      installScreenShareBridge,
+      installWorkerResultBridge,
+    });
+    if (runtimeSessionValidation.failure) throw new Error(runtimeSessionValidation.failure.error);
+    const runtimeSessionConfig = runtimeSessionValidation.config!;
 
     const replacementStop = await stop("replace_existing_bot");
     const recordedBrowserStop = replacementStop.stopped
@@ -2513,16 +2524,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       browserUserDataDir,
       replacementStop,
       recordedBrowserStop,
-      steps: [
-        "launch chromium",
-        "install init scripts from avatar/realtime layers",
-        "install optional synthetic screen-share provider",
-        "open meet URL",
-        "dismiss popups",
-        "fill guest display name",
-        "click Join now / Ask to join",
-        "keep browser session alive until stopped",
-      ],
+      runtimeSessionValidation: runtimeSessionValidation.summary,
+      steps: [],
     };
 
     if (dryRun) return { ok: true, dryRun: true, plan };
@@ -2638,7 +2641,6 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     });
     const realtimeCurrentUser = buildConfiguredRealtimeCurrentUser();
     const realtimeTools = input.realtimeTools || realtimeToolSchemas;
-    const realtimeBridgeMode = input.realtimeBridgeMode || "mock";
     let realtimeInstructions = "",
       realtimeSession = null;
     if (installRealtimeBridge) {
@@ -2664,8 +2666,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const runtimeInitScripts = buildAvatarRuntimeInitScripts({
       sessionId,
       botName,
-      surfaceKind: "google_meet",
-      conversationTransport: inferConversationTransportFromRealtimeMode(realtimeBridgeMode),
+      surfaceKind: runtimeSessionConfig.surfaceKind,
+      conversationTransport: runtimeSessionConfig.conversationTransport,
       installAvatar,
       installRealtimeBridge,
       installLocalDialogBridge,
@@ -2737,6 +2739,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         sessionId,
       },
     });
+    diagnostics.record("runtime_session_validation", runtimeSessionValidation.summary);
     diagnostics.record("runtime_init_scripts", {
       categories: runtimeInitScripts.map((script) => script.category),
       events: runtimeInitScripts.map((script) => script.event),
