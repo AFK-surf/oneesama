@@ -760,8 +760,6 @@ test("Realtime feedback waits on silent placeholder when Meet audio is expected"
     });
 
     assert.equal(result.getUserMediaCalls, 0);
-    assert.equal(result.connection.localAudioTrackAdded, false);
-    assert.equal(result.connection.localAudioFallbackEnabled, false);
     assert.equal(result.connection.realtimeInputPlaceholderAdded, true);
     assert.equal(result.connection.meetAudioTracksForwarded, 0);
     assert.equal(result.connection.participantAudioTracksAdded, 0);
@@ -929,11 +927,6 @@ test("Realtime bridge flushes pending Meet audio when the silent placeholder bec
       };
     });
 
-    assert.equal(result.connection.localAudioTrackAdded, false);
-    assert.equal(result.connection.localAudioFallbackEnabled, false);
-    assert.equal(result.connection.localAudioRoutedToRealtimeMix, false);
-    assert.equal(result.connection.localAudioMixEnabled, false);
-    assert.equal(result.connection.localAudioMixGain, 0);
     assert.equal(result.connection.meetAudioTracksForwarded, 1);
     assert.equal(result.connection.pendingMeetAudioTrackCount, 0);
     assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
@@ -1100,14 +1093,9 @@ test("Realtime bridge replaces the silent placeholder after late Meet audio arri
       };
     });
 
-    assert.equal(result.connection.localAudioTrackAdded, false);
-    assert.equal(result.connection.localAudioFallbackEnabled, false);
-    assert.equal(result.connection.localAudioRoutedToRealtimeMix, false);
     assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
     assert.ok(result.replaceReasons.includes("meet-audio-forwarded"));
     assert.equal(result.localMicMixEvents, 0);
-    assert.equal(result.connection.localAudioMixEnabled, false);
-    assert.equal(result.connection.localAudioMixGain, 0);
     assert.ok(
       result.rms < 0.002,
       `expected silent Meet mix without local mic, got rms=${result.rms}`,

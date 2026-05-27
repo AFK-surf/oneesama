@@ -9116,9 +9116,8 @@ async function realtimeSdpSmoke() {
       bridge,
     );
     assertSmoke(
-      bridge?.connection?.realtimeInputPlaceholderAdded === true ||
-        bridge?.connection?.localAudioTrackAdded === true,
-      "Realtime SDP bridge did not add an input sender placeholder or local fallback audio track",
+      bridge?.connection?.realtimeInputPlaceholderAdded === true,
+      "Realtime SDP bridge did not add an input sender placeholder",
       bridge?.connection,
     );
 

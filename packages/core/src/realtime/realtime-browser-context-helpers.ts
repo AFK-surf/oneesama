@@ -387,11 +387,6 @@
       const signals = {
         participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
         meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
-        localAudioTrackAdded: checks.localAudioTrackAdded,
-        localAudioFallbackTrackAdded: state.connection.localAudioFallbackTrackAdded === true,
-        localAudioFallbackReason: state.connection.localAudioFallbackReason || "",
-        localAudioMixEnabled: state.connection.localAudioMixEnabled === true,
-        localAudioMixGain: Number(state.connection.localAudioMixGain || 0),
         realtimeInputPlaceholderAdded: checks.realtimeInputPlaceholderAdded,
         pendingMeetAudioTrackCount: state.connection.pendingMeetAudioTrackCount,
         currentRealtimeInputTrackId: state.connection.currentRealtimeInputTrackId,
@@ -595,8 +590,6 @@
         participantAudioForwardingEnabled:
           state.connection.participantAudioForwardingEnabled === true,
         meetAudioForwardingEnabled: state.connection.meetAudioForwardingEnabled === true,
-        localAudioFallbackEnabled: state.connection.localAudioFallbackEnabled === true,
-        localAudioRoutedToRealtimeMix: state.connection.localAudioRoutedToRealtimeMix === true,
         realtimeInputPlaceholderAdded: state.connection.realtimeInputPlaceholderAdded === true,
         inputAudioAdded:
           state.connection.participantAudioTracksAdded > 0 ||
@@ -615,7 +608,6 @@
         meetAudioLastEnergyAt: state.connection.meetAudioEnergy?.lastEnergyAt || "",
         meetAudioSilenceMs: Number(state.connection.meetAudioEnergy?.silenceMs || 0),
         meetAudioEnergyStaleMs: Number(state.connection.meetAudioEnergyStaleMs || 10000),
-        localAudioTrackAdded: state.connection.localAudioTrackAdded === true,
         meetParticipantAudioExpected:
           state.connection.participantAudioForwardingEnabled === true ||
           state.connection.meetAudioForwardingEnabled === true,

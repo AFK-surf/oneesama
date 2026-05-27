@@ -56,7 +56,6 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 		SendRealtimeSessionUpdate:  input.SendRealtimeSessionUpdate,
 		IncludeParticipantAudio:    input.IncludeParticipantAudio,
 		ForwardMeetAudioToRealtime: input.ForwardMeetAudioToRealtime,
-		RealtimeFallbackToLocalMic: input.RealtimeFallbackToLocalMic,
 		InstallLocalDialogBridge:   input.InstallLocalDialogBridge,
 		InstallWorkerResultBridge:  input.InstallWorkerResultBridge,
 		InstallScreenShareBridge:   input.InstallScreenShareBridge,

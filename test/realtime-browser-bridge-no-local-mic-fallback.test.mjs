@@ -181,11 +181,6 @@ test("Realtime bridge does not route browser local mic into the Meet audio mix",
     assert.equal(result.primarySenderAttachEvents.length, 1);
     assert.equal(result.connection.meetMediaElementsScanned, 1);
     assert.equal(result.connection.meetMediaElementAudioTracksAdded, 1);
-    assert.equal(result.connection.localAudioFallbackEnabled, false);
-    assert.equal(result.connection.localAudioTrackAdded, false);
-    assert.equal(result.connection.localAudioFallbackTrackAdded, false);
-    assert.equal(result.connection.localAudioRoutedToRealtimeMix, false);
-    assert.equal(result.connection.localAudioMixEnabled, false);
     assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
     assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
     assert.deepEqual(result.localMicEvents, []);

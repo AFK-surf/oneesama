@@ -48,7 +48,6 @@ type PrepareGoogleMeetInput struct {
 	SendRealtimeSessionUpdate  bool   `json:"send_realtime_session_update,omitempty"`
 	IncludeParticipantAudio    bool   `json:"include_participant_audio,omitempty"`
 	ForwardMeetAudioToRealtime bool   `json:"forward_meet_audio_to_realtime,omitempty"`
-	RealtimeFallbackToLocalMic bool   `json:"realtime_fallback_to_local_mic,omitempty"`
 	InstallLocalDialogBridge   bool   `json:"install_local_dialog_bridge,omitempty"`
 	InstallWorkerResultBridge  bool   `json:"install_worker_result_bridge,omitempty"`
 	InstallScreenShareBridge   bool   `json:"install_screen_share_bridge,omitempty"`
@@ -100,7 +99,6 @@ type JoinPlan struct {
 	SendRealtimeSessionUpdate  bool   `json:"send_realtime_session_update,omitempty"`
 	IncludeParticipantAudio    bool   `json:"include_participant_audio,omitempty"`
 	ForwardMeetAudioToRealtime bool   `json:"forward_meet_audio_to_realtime,omitempty"`
-	RealtimeFallbackToLocalMic bool   `json:"realtime_fallback_to_local_mic,omitempty"`
 	InstallLocalDialogBridge   bool   `json:"install_local_dialog_bridge,omitempty"`
 	InstallWorkerResultBridge  bool   `json:"install_worker_result_bridge,omitempty"`
 	InstallScreenShareBridge   bool   `json:"install_screen_share_bridge,omitempty"`

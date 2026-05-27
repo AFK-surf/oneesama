@@ -43,7 +43,6 @@
     state.connection.mode = connectionConfig.mode || state.mode;
     state.connection.tokenUrl = connectionConfig.tokenUrl || config.tokenUrl;
     state.connection.sdpUrl = connectionConfig.sdpUrl || config.sdpUrl;
-    state.connection.localAudioFallbackEnabled = false;
     state.connection.participantAudioForwardingEnabled =
       connectionConfig.includeParticipantAudio === true;
     state.connection.meetAudioForwardingEnabled =

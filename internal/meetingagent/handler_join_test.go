@@ -75,7 +75,6 @@ func (fakeMeetRunner) PrepareGoogleMeet(_ context.Context, input meetrunner.Prep
 			SendRealtimeSessionUpdate:  input.SendRealtimeSessionUpdate,
 			IncludeParticipantAudio:    input.IncludeParticipantAudio,
 			ForwardMeetAudioToRealtime: input.ForwardMeetAudioToRealtime,
-			RealtimeFallbackToLocalMic: input.RealtimeFallbackToLocalMic,
 			InstallLocalDialogBridge:   input.InstallLocalDialogBridge,
 			InstallWorkerResultBridge:  input.InstallWorkerResultBridge,
 			InstallScreenShareBridge:   input.InstallScreenShareBridge,

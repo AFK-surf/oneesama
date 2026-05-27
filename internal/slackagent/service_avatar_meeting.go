@@ -37,7 +37,6 @@ type meetingAgentJoinRequest struct {
 	SendRealtimeSessionUpdate  bool   `json:"send_realtime_session_update,omitempty"`
 	IncludeParticipantAudio    bool   `json:"include_participant_audio,omitempty"`
 	ForwardMeetAudioToRealtime bool   `json:"forward_meet_audio_to_realtime,omitempty"`
-	RealtimeFallbackToLocalMic bool   `json:"realtime_fallback_to_local_mic,omitempty"`
 	SlackChannelID             string `json:"slack_channel_id,omitempty"`
 	SlackThreadTS              string `json:"slack_thread_ts,omitempty"`
 }
