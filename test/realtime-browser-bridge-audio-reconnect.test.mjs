@@ -155,7 +155,7 @@ test("Realtime bridge keeps Meet audio routed after startup reconnect", async ()
   }
 });
 
-test("Realtime bridge routes direct participant audio through the mixer", async () => {
+test("Realtime bridge routes participant audio through a single mixer sender", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -274,17 +274,28 @@ test("Realtime bridge routes direct participant audio through the mixer", async 
       oscillator.connect(quietGain);
       quietGain.connect(destination);
       oscillator.start();
+      const secondOscillator = audioContext.createOscillator();
+      const secondGain = audioContext.createGain();
+      secondGain.gain.value = 0.00025;
+      const secondDestination = audioContext.createMediaStreamDestination();
+      secondOscillator.connect(secondGain);
+      secondGain.connect(secondDestination);
+      secondOscillator.start();
       const [participantTrack] = destination.stream.getAudioTracks();
+      const [secondParticipantTrack] = secondDestination.stream.getAudioTracks();
 
       window.MAB_REALTIME_CLIENT.registerParticipantAudioStream(destination.stream, {
         label: "quiet-test-participant-audio",
+      });
+      window.MAB_REALTIME_CLIENT.registerParticipantAudioStream(secondDestination.stream, {
+        label: "quiet-test-participant-audio-2",
       });
       await window.MAB_REALTIME_CLIENT.connect();
       await new Promise((resolve) => setTimeout(resolve, 350));
 
       const peer = window.__MAB_FAKE_PEERS.at(-1);
       return {
-        participantTrackId: participantTrack.id,
+        participantTrackIds: [participantTrack.id, secondParticipantTrack.id],
         senderTrackIds: peer.senders.map((sender) => sender.track?.id || ""),
         placeholderEvents: window.MAB_REALTIME_BRIDGE.timeline.filter(
           (entry) => entry.type === "realtime_input_placeholder_added",
@@ -300,11 +311,13 @@ test("Realtime bridge routes direct participant audio through the mixer", async 
     });
 
     assert.equal(result.senderTrackIds.length, 1);
-    assert.notEqual(result.senderTrackIds[0], result.participantTrackId);
-    assert.equal(result.placeholderEvents, 0);
-    assert.equal(result.directEvents, 1);
+    assert.ok(!result.participantTrackIds.includes(result.senderTrackIds[0]));
+    assert.equal(result.placeholderEvents, 1);
+    assert.equal(result.directEvents, 0);
     assert.ok(result.replaceReasons.includes("pending-meet-audio-flush"));
     assert.equal(result.connection.pendingMeetAudioTrackCount, 0);
+    assert.equal(result.connection.participantAudioTracksAdded, 0);
+    assert.equal(result.connection.meetAudioTracksForwarded, 2);
     assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
     assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
     assert.equal(result.connection.meetAudioInputGain, 48);
@@ -317,7 +330,7 @@ test("Realtime bridge routes direct participant audio through the mixer", async 
   }
 });
 
-test("Realtime bridge skips late participant tracks when the peer connection is closed", async () => {
+test("Realtime bridge keeps late participant tracks in the mixer when the peer connection is closed", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -459,12 +472,18 @@ test("Realtime bridge skips late participant tracks when the peer connection is 
         skipped: window.MAB_REALTIME_BRIDGE.timeline.filter(
           (entry) => entry.type === "participant_audio_add_track_skipped",
         ),
+        forwarded: window.MAB_REALTIME_BRIDGE.timeline.filter(
+          (entry) => entry.type === "meet_audio_track_forwarded",
+        ),
+        connection: window.MAB_REALTIME_BRIDGE.connection,
       };
     });
 
     assert.equal(result.errors.length, 0);
-    assert.equal(result.skipped.length, 1);
-    assert.equal(result.skipped[0].detail.reason, "peer_connection_closed");
+    assert.equal(result.skipped.length, 0);
+    assert.equal(result.forwarded.length, 1);
+    assert.equal(result.connection.participantAudioTracksAdded, 0);
+    assert.equal(result.connection.meetAudioTracksForwarded, 1);
   } finally {
     await browser.close();
   }

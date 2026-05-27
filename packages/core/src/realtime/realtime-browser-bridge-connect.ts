@@ -14,6 +14,7 @@ function installMockRealtimeInputSender(reason = "webrtc-mock") {
   };
   realtimeAudioSender = mockSender;
   rememberRealtimeInputTrack("silent_placeholder", placeholderTrack);
+  ensureRealtimeAudioSenderStatsMonitor("mock-placeholder");
   state.connection.realtimeInputPlaceholderAdded = true;
   silentMeetAudioTrack = placeholderTrack.clone();
   recordTimeline("realtime_input_mock_placeholder_added", {
@@ -222,44 +223,25 @@ async function connectRealtime(options = {}) {
       routeRemoteAudioStream(event.streams[0]).catch(rememberError);
     };
 
-    discoverParticipantAudioStreams();
     addedParticipantTrackIds.clear();
-    const directParticipantTracksAdded = addParticipantTracksToPeerConnection(pc);
-    const preferDirectParticipantAudio =
-      state.connection.participantAudioForwardingEnabled === true &&
-      directParticipantTracksAdded > 0;
-    if (preferDirectParticipantAudio) {
-      realtimeAudioSender = pc.getSenders?.().find((sender) => sender.track?.kind === "audio");
-      rememberRealtimeInputTrack("direct_participant_audio", realtimeAudioSender?.track);
-      recordTimeline("realtime_input_direct_participant_audio", {
-        participantAudioTracksAdded: directParticipantTracksAdded,
-        trackId: realtimeAudioSender?.track?.id || "",
-      });
-      if (state.connection.meetAudioTracksForwarded > 0) {
-        const hadPendingMeetAudioTracks = pendingMeetAudioTracks.length > 0;
-        flushPendingMeetAudioTracks();
-        if (!hadPendingMeetAudioTracks) {
-          replaceRealtimeInputWithRoutingMix("direct-participant-meet-audio-mix");
-        }
+    ensureMeetAudioRoutingContext();
+    const [placeholderTrack] = routingDestination.stream.getAudioTracks();
+    if (placeholderTrack) {
+      realtimeAudioSender = pc.addTrack(placeholderTrack);
+      rememberRealtimeInputTrack("silent_placeholder", placeholderTrack);
+      ensureRealtimeAudioSenderStatsMonitor("placeholder");
+      state.connection.realtimeInputPlaceholderAdded = true;
+      silentMeetAudioTrack = placeholderTrack.clone();
+      recordTimeline("realtime_input_placeholder_added", { trackId: placeholderTrack.id });
+      discoverParticipantAudioStreams();
+      const hadPendingMeetAudioTracks = pendingMeetAudioTracks.length > 0;
+      flushPendingMeetAudioTracks();
+      if (!hadPendingMeetAudioTracks && state.connection.meetAudioTracksForwarded > 0) {
+        replaceRealtimeInputWithRoutingMix("reconnect-meet-audio-mix");
       }
       updateFeedback();
-    }
-    if (!preferDirectParticipantAudio) {
-      ensureMeetAudioRoutingContext();
-      const [placeholderTrack] = routingDestination.stream.getAudioTracks();
-      if (placeholderTrack) {
-        realtimeAudioSender = pc.addTrack(placeholderTrack);
-        rememberRealtimeInputTrack("silent_placeholder", placeholderTrack);
-        state.connection.realtimeInputPlaceholderAdded = true;
-        silentMeetAudioTrack = placeholderTrack.clone();
-        recordTimeline("realtime_input_placeholder_added", { trackId: placeholderTrack.id });
-        const hadPendingMeetAudioTracks = pendingMeetAudioTracks.length > 0;
-        flushPendingMeetAudioTracks();
-        if (!hadPendingMeetAudioTracks && state.connection.meetAudioTracksForwarded > 0) {
-          replaceRealtimeInputWithRoutingMix("reconnect-meet-audio-mix");
-        }
-        updateFeedback();
-      }
+    } else {
+      discoverParticipantAudioStreams();
     }
     if (
       state.connection.participantAudioTracksAdded === 0 &&

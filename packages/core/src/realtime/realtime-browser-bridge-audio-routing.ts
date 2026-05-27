@@ -144,6 +144,65 @@ function rememberRealtimeInputTrack(source, track, detail = {}) {
   Object.assign(state.connection, detail);
 }
 
+async function sampleRealtimeAudioSenderStats(reason = "interval") {
+  const sender = realtimeAudioSender;
+  const now = new Date().toISOString();
+  if (!sender?.getStats) {
+    state.connection.realtimeAudioSenderStats = {
+      supported: false,
+      reason: "sender_get_stats_unavailable",
+      checkedAt: now,
+    };
+    updateFeedback();
+    return;
+  }
+  try {
+    const report = await sender.getStats();
+    let selected = null;
+    report?.forEach?.((entry) => {
+      if (selected) return;
+      const kind = entry.kind || entry.mediaType;
+      if (entry.type === "outbound-rtp" && (!kind || kind === "audio")) selected = entry;
+    });
+    const bytesSent = Number(selected?.bytesSent || 0);
+    const packetsSent = Number(selected?.packetsSent || 0);
+    const previous = state.connection.realtimeAudioSenderStats || {};
+    state.connection.realtimeAudioSenderStats = {
+      supported: true,
+      checkedAt: now,
+      reason,
+      trackId: sender.track?.id || "",
+      trackReadyState: sender.track?.readyState || "",
+      trackEnabled: sender.track?.enabled !== false,
+      trackMuted: sender.track?.muted === true,
+      currentRealtimeInputSource: state.connection.currentRealtimeInputSource || "",
+      currentRealtimeInputIsRoutingMix: state.connection.currentRealtimeInputIsRoutingMix === true,
+      bytesSent,
+      packetsSent,
+      bytesDelta: bytesSent - Number(previous.bytesSent || 0),
+      packetsDelta: packetsSent - Number(previous.packetsSent || 0),
+    };
+    updateFeedback();
+  } catch (error) {
+    state.connection.realtimeAudioSenderStats = {
+      supported: false,
+      reason: "sender_get_stats_failed",
+      checkedAt: now,
+      error: String((error && error.message) || error).slice(0, 240),
+    };
+    updateFeedback();
+  }
+}
+
+function ensureRealtimeAudioSenderStatsMonitor(reason = "sender-ready") {
+  if (!realtimeAudioSender || realtimeAudioSenderStatsTimer) return;
+  sampleRealtimeAudioSenderStats(reason);
+  realtimeAudioSenderStatsTimer = window.setInterval(
+    () => sampleRealtimeAudioSenderStats("interval"),
+    1000,
+  );
+}
+
 function setRealtimeInputGate(open, reason = "") {
   if (!routingInputGate || !routingAudioContext) return;
   if (!open && realtimeInputGateReopenTimer) {
@@ -191,6 +250,7 @@ function replaceRealtimeInputWithRoutingMix(reason = "meet-audio") {
         trackId: mixedTrack.id,
         meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
       });
+      ensureRealtimeAudioSenderStatsMonitor("replace-track");
       return updateFeedback();
     })
     .catch((error) => rememberError(error));

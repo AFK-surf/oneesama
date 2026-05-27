@@ -212,6 +212,7 @@ const state = {
     currentRealtimeInputTrackId: "",
     currentRealtimeInputSource: "",
     currentRealtimeInputIsRoutingMix: false,
+    realtimeAudioSenderStats: null as null | Record<string, unknown>,
     lastRealtimeInputReplaceReason: "",
     lastRealtimeInputReplaceAt: "",
     realtimeInputGateOpen: true,
@@ -352,6 +353,7 @@ let routingDestination = null;
 let routingAnalyser = null;
 let routingAnalyserBuffer = null;
 let routingEnergyTimer = 0;
+let realtimeAudioSenderStatsTimer = 0;
 let meetAudioRecorder = null;
 let meetAudioRecorderStopResolve = null;
 let meetAudioCaptureUploadChain = Promise.resolve();
