@@ -1,8 +1,11 @@
 import http from "node:http";
+import { readFileSync } from "node:fs";
 
 interface LocalMeetFixtureServerOptions {
   host?: string;
   port?: number;
+  participantAudioFile?: string;
+  participantAudioContentType?: string;
 }
 
 interface LocalMeetFixtureServer {
@@ -141,6 +144,44 @@ function fixtureHtml() {
 
       function maybeCreateParticipantAudio() {
         const params = new URLSearchParams(window.location.search);
+        if (params.get("participantSpeech") === "1") {
+          const audio = document.createElement("audio");
+          audio.autoplay = true;
+          audio.loop = params.get("participantSpeechLoop") === "1";
+          audio.dataset.meetingAvatarParticipant = "fixture-participant-speech";
+          audio.src = "/fixture-participant-audio.wav";
+          document.body.appendChild(audio);
+          const attach = () => {
+            const stream = audio.captureStream ? audio.captureStream() : audio.mozCaptureStream && audio.mozCaptureStream();
+            if (!stream) {
+              record("participant_speech_capture_stream_missing");
+              return;
+            }
+            const tracks = stream.getAudioTracks();
+            if (!tracks.length) {
+              record("participant_speech_audio_tracks_missing");
+              return;
+            }
+            window.__MAB_MEET_FIXTURE.participantAudio = {
+              streamId: stream.id,
+              trackIds: tracks.map((track) => track.id),
+              source: "fixture-participant-speech",
+            };
+            record("participant_speech_ready", window.__MAB_MEET_FIXTURE.participantAudio);
+            window.dispatchEvent(new CustomEvent("meeting-avatar-participant-audio-stream", {
+              detail: {
+                label: "fixture-participant-speech",
+                stream,
+              },
+            }));
+          };
+          audio.addEventListener("canplay", () => {
+            audio.play().catch((error) => record("participant_speech_play_failed", { error: String(error && error.message || error) }));
+            attach();
+          }, { once: true });
+          audio.load();
+          return;
+        }
         if (params.get("participantAudio") !== "1") return;
         const AudioContextImpl = window.AudioContext || window.webkitAudioContext;
         const audioContext = new AudioContextImpl({ sampleRate: 48000 });
@@ -331,6 +372,19 @@ export function startLocalMeetFixtureServer(
     if (req.url === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, service: "local-meet-fixture" }));
+      return;
+    }
+    if (req.url?.startsWith("/fixture-participant-audio.wav")) {
+      if (!options.participantAudioFile) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "participant_audio_file_missing" }));
+        return;
+      }
+      res.writeHead(200, {
+        "content-type": options.participantAudioContentType || "audio/wav",
+        "cache-control": "no-store",
+      });
+      res.end(readFileSync(options.participantAudioFile));
       return;
     }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
