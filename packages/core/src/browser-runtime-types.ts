@@ -181,6 +181,7 @@ export interface RealtimeClient {
   stopMeetAudioCapture?(reason?: string): Promise<unknown>;
   injectWorkerResult?(payload: unknown): unknown;
   sendWorkerResult?(payload: unknown): unknown;
+  injectCaptionTurn?(payload: CaptionEvent): unknown;
   sendRealtimeEvent?(payload: unknown): unknown;
   runLocalMeetTool?(toolName: string, payload: unknown): Promise<unknown>;
   [key: string]: unknown;

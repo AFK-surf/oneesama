@@ -1,4 +1,34 @@
 /* eslint-disable no-unused-vars */
+  function installMockRealtimeInputSender(reason = "webrtc-mock") {
+    if (state.connection.mode !== "webrtc-mock") return false;
+    if (state.connection.meetAudioForwardingEnabled === false) return false;
+    ensureMeetAudioRoutingContext();
+    const [placeholderTrack] = routingDestination.stream.getAudioTracks();
+    if (!placeholderTrack) return false;
+    const mockSender = {
+      track: placeholderTrack,
+      replaceTrack(nextTrack) {
+        mockSender.track = nextTrack || null;
+        return Promise.resolve();
+      },
+    };
+    realtimeAudioSender = mockSender;
+    rememberRealtimeInputTrack("silent_placeholder", placeholderTrack);
+    state.connection.realtimeInputPlaceholderAdded = true;
+    silentMeetAudioTrack = placeholderTrack.clone();
+    recordTimeline("realtime_input_mock_placeholder_added", {
+      reason,
+      trackId: placeholderTrack.id,
+    });
+    const hadPendingMeetAudioTracks = pendingMeetAudioTracks.length > 0;
+    flushPendingMeetAudioTracks();
+    if (!hadPendingMeetAudioTracks && state.connection.meetAudioTracksForwarded > 0) {
+      replaceRealtimeInputWithRoutingMix("webrtc-mock-meet-audio-mix");
+    }
+    updateFeedback();
+    return true;
+  }
+
   async function connectRealtime(options = {}) {
     if (
       state.connected &&
@@ -13,11 +43,19 @@
     state.connection.mode = connectionConfig.mode || state.mode;
     state.connection.tokenUrl = connectionConfig.tokenUrl || config.tokenUrl;
     state.connection.sdpUrl = connectionConfig.sdpUrl || config.sdpUrl;
-    state.connection.localAudioFallbackEnabled = connectionConfig.fallbackToLocalMic === true;
+    state.connection.localAudioFallbackEnabled = false;
     state.connection.participantAudioForwardingEnabled =
       connectionConfig.includeParticipantAudio === true;
     state.connection.meetAudioForwardingEnabled =
       connectionConfig.forwardMeetAudioToRealtime !== false;
+    state.connection.meetAudioInputGain = Math.max(
+      0.1,
+      Math.min(Number(connectionConfig.meetAudioInputGain || config.meetAudioInputGain || 4), 8),
+    );
+    state.connection.meetAudioEnergyStaleMs = Math.max(
+      1000,
+      Number(connectionConfig.meetAudioEnergyStaleMs || config.meetAudioEnergyStaleMs || 10000),
+    );
     try {
       if (
         activePeerConnection &&
@@ -33,10 +71,7 @@
         try {
           return await connectRealtimeAgentSDK(connectionConfig);
         } catch (error) {
-          state.agentRuntime.fallbackReason = String((error && error.message) || error).slice(
-            0,
-            500,
-          );
+          state.agentRuntime.fallbackReason = String((error && error.message) || error).slice(0, 500);
           scheduleConnectFailureRetry(error);
           if (state.connection.mode === "agents-sdk-mock") throw error;
           recordTimeline("realtime_agent_sdk_fallback_raw", {
@@ -52,6 +87,11 @@
         state.agentRuntime.active = "raw";
         state.connection.dataChannelOpen = true;
         state.connection.peerConnectionState = "mock-connected";
+        if (state.connection.mode === "webrtc-mock") {
+          installMockRealtimeInputSender("webrtc-mock-connect");
+          discoverParticipantAudioStreams();
+          flushPendingMeetAudioTracks();
+        }
         configureRealtimeSession();
         if (
           state.connection.mode === "webrtc-mock" &&
@@ -176,12 +216,6 @@
         updateFeedback();
       };
       pc.ontrack = (event) => {
-        const audio = document.createElement("audio");
-        audio.autoplay = true;
-        audio.dataset.meetingAvatarRealtimeAudio = "true";
-        audio.srcObject = event.streams[0];
-        document.body.appendChild(audio);
-        state.connection.remoteAudioAttached = true;
         recordTimeline("remote_audio_track", {
           streamId: event.streams[0]?.id || "",
           trackIds: (event.streams[0]?.getAudioTracks?.() || []).map((track) => track.id),
@@ -196,22 +230,28 @@
       const preferDirectParticipantAudio =
         state.connection.participantAudioForwardingEnabled === true &&
         directParticipantTracksAdded > 0;
-      let localMicTrackAdded = false;
       if (preferDirectParticipantAudio) {
         realtimeAudioSender = pc.getSenders?.().find((sender) => sender.track?.kind === "audio");
+        rememberRealtimeInputTrack("direct_participant_audio", realtimeAudioSender?.track);
         recordTimeline("realtime_input_direct_participant_audio", {
           participantAudioTracksAdded: directParticipantTracksAdded,
           trackId: realtimeAudioSender?.track?.id || "",
         });
+        if (state.connection.meetAudioTracksForwarded > 0) {
+          const hadPendingMeetAudioTracks = pendingMeetAudioTracks.length > 0;
+          flushPendingMeetAudioTracks();
+          if (!hadPendingMeetAudioTracks) {
+            replaceRealtimeInputWithRoutingMix("direct-participant-meet-audio-mix");
+          }
+        }
         updateFeedback();
-      } else if (connectionConfig.fallbackToLocalMic === true) {
-        localMicTrackAdded = await addLocalMicTrackToPeerConnection(pc);
       }
-      if (!preferDirectParticipantAudio && !localMicTrackAdded) {
+      if (!preferDirectParticipantAudio) {
         ensureMeetAudioRoutingContext();
         const [placeholderTrack] = routingDestination.stream.getAudioTracks();
         if (placeholderTrack) {
           realtimeAudioSender = pc.addTrack(placeholderTrack);
+          rememberRealtimeInputTrack("silent_placeholder", placeholderTrack);
           state.connection.realtimeInputPlaceholderAdded = true;
           silentMeetAudioTrack = placeholderTrack.clone();
           recordTimeline("realtime_input_placeholder_added", { trackId: placeholderTrack.id });
@@ -225,24 +265,21 @@
       }
       if (
         state.connection.participantAudioTracksAdded === 0 &&
-        state.connection.realtimeInputPlaceholderAdded !== true &&
-        state.connection.localAudioTrackAdded !== true
+        state.connection.realtimeInputPlaceholderAdded !== true
       ) {
         pc.addTransceiver("audio", { direction: "recvonly" });
         state.connection.recvOnlyAudioTransceiverAdded = true;
-        recordTimeline("local_audio_track_skipped", {
-          reason: "fallback_to_local_mic_disabled",
+        recordTimeline("realtime_input_recvonly_added", {
+          reason: "no_meet_audio_sender_available",
           recvOnlyAudioTransceiverAdded: true,
         });
         updateFeedback();
       } else {
-        recordTimeline("local_audio_track_skipped", {
+        recordTimeline("realtime_input_source_selected", {
           reason:
             state.connection.realtimeInputPlaceholderAdded === true
               ? "meet_audio_placeholder_present"
-              : state.connection.localAudioTrackAdded === true
-                ? "local_mic_present"
-                : "participant_audio_tracks_present",
+              : "participant_audio_tracks_present",
           participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
         });
         updateFeedback();

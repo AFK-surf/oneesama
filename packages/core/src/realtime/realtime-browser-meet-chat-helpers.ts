@@ -372,15 +372,21 @@
         const href = (element as HTMLAnchorElement).href || "";
         if (!text && !href) return false;
         if (/^(chat|messages|send a message|发送消息|訊息|聊天)$/i.test(text)) return false;
+        const hasMessageAttribute = Boolean(
+          element.hasAttribute("data-message-id") ||
+          element.hasAttribute("data-message-text") ||
+          element.hasAttribute("data-message-text-content"),
+        );
+        const hasChatAncestor = Boolean(
+          element.closest(
+            "[aria-label*='Chat'],[aria-label*='chat'],[aria-label*='messages'],[aria-label*='Messages']",
+          ),
+        );
+        const hasLink = /^https?:\/\//.test(href) || /https?:\/\//.test(text);
         return (
-          /^https?:\/\//.test(href) ||
-          /https?:\/\//.test(text) ||
-          Boolean(
-            element.closest(
-              "[aria-label*='Chat'],[aria-label*='chat'],[aria-label*='messages'],[aria-label*='Messages']",
-            ),
-          ) ||
-          text.length < 500
+          hasChatAncestor ||
+          hasMessageAttribute ||
+          (hasLink && !element.closest("[aria-label*='People'],[aria-label*='people']"))
         );
       });
     }
@@ -469,6 +475,13 @@
       )
         return null;
       if (!links.length && text.length < 8) return null;
+      if (
+        !links.length &&
+        /meeting host/i.test(text) &&
+        (/mute .+ microphone/i.test(text) || /more actions/i.test(text))
+      ) {
+        return null;
+      }
       return {
         text,
         links: Array.from(new Set(links)),
@@ -511,6 +524,10 @@
         item: {
           type: "message",
           role: "user",
+          metadata: {
+            source: "meet_chat_observer",
+            observedSource: source,
+          },
           content: [
             {
               type: "input_text",

@@ -235,6 +235,11 @@
         item: {
           type: "message",
           role: "system",
+          metadata: {
+            source: "context_push",
+            reason: input.reason || "",
+            kind: input.kind || "",
+          },
           content: [{ type: "input_text", text }],
         },
       });
@@ -383,7 +388,21 @@
         participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
         meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
         localAudioTrackAdded: checks.localAudioTrackAdded,
+        localAudioFallbackTrackAdded: state.connection.localAudioFallbackTrackAdded === true,
+        localAudioFallbackReason: state.connection.localAudioFallbackReason || "",
+        localAudioMixEnabled: state.connection.localAudioMixEnabled === true,
+        localAudioMixGain: Number(state.connection.localAudioMixGain || 0),
         realtimeInputPlaceholderAdded: checks.realtimeInputPlaceholderAdded,
+        pendingMeetAudioTrackCount: state.connection.pendingMeetAudioTrackCount,
+        currentRealtimeInputTrackId: state.connection.currentRealtimeInputTrackId,
+        currentRealtimeInputSource: state.connection.currentRealtimeInputSource,
+        currentRealtimeInputIsRoutingMix: state.connection.currentRealtimeInputIsRoutingMix,
+        lastRealtimeInputReplaceReason: state.connection.lastRealtimeInputReplaceReason,
+        meetAudioContextState: state.connection.meetAudioContextState || "",
+        meetAudioSourcesActive: state.connection.meetAudioSourcesActive || 0,
+        meetAudioSourcesUnmuted: state.connection.meetAudioSourcesUnmuted || 0,
+        meetAudioTrackStates: state.connection.meetAudioTrackStates || [],
+        meetAudioEnergy: state.connection.meetAudioEnergy,
       };
       if (!checks.meetParticipantAudioExpected && !checks.inputAudioAdded) {
         return {
@@ -397,14 +416,14 @@
         };
       }
       if (checks.meetParticipantAudioExpected && !checks.meetParticipantAudioReady) {
-        if (checks.onlyLocalMicFallbackInput) {
+        if (checks.meetAudioTracksForwarded > 0 && !checks.meetAudioRoutedToRealtimeInput) {
           return {
             status: "waiting",
-            reason: "only_local_mic_fallback_input",
+            reason: "meet_audio_not_routed_to_realtime_input",
             ready: false,
             expected: true,
-            source: "local_mic_fallback",
-            blockers: ["waiting_for_meet_audio", "only_local_mic_fallback_input"],
+            source: checks.currentRealtimeInputSource || "unknown",
+            blockers: ["waiting_for_meet_audio", "meet_audio_not_routed_to_realtime_input"],
             signals,
           };
         }
@@ -436,7 +455,7 @@
         reason: "input_audio_ready",
         ready: true,
         expected: checks.meetParticipantAudioExpected,
-        source: checks.meetParticipantAudioReady ? "meet_participant_audio" : "local_mic",
+        source: checks.meetParticipantAudioReady ? "meet_participant_audio" : "none",
         blockers: [],
         signals,
       };
@@ -476,6 +495,32 @@
 
       const modelTurn = (() => {
         if (!checks.inboundEvents) return matrixCell("waiting", "no_realtime_server_events");
+        if (
+          checks.meetParticipantAudioExpected &&
+          checks.meetAudioRoutedToRealtimeInput &&
+          !checks.meetAudioEnergyObserved
+        ) {
+          return matrixCell("waiting", "meet_audio_no_energy_observed", {
+            rms: checks.meetAudioEnergyRms,
+            peak: checks.meetAudioEnergyPeak,
+            lastCheckedAt: state.connection.meetAudioEnergy?.lastCheckedAt || "",
+          });
+        }
+        if (
+          checks.meetParticipantAudioExpected &&
+          checks.meetAudioRoutedToRealtimeInput &&
+          checks.meetAudioEnergyObserved &&
+          checks.meetAudioSilenceMs > checks.meetAudioEnergyStaleMs &&
+          !checks.responseEvents
+        ) {
+          return matrixCell("waiting", "meet_audio_energy_stale", {
+            silenceMs: checks.meetAudioSilenceMs,
+            staleMs: checks.meetAudioEnergyStaleMs,
+            lastEnergyAt: checks.meetAudioLastEnergyAt,
+            rms: checks.meetAudioEnergyRms,
+            peak: checks.meetAudioEnergyPeak,
+          });
+        }
         if (!checks.responseEvents) return matrixCell("waiting", "no_response_events");
         return matrixCell("ok", "response_events_observed", {
           inboundEvents: checks.inboundEvents,
@@ -555,21 +600,34 @@
         realtimeInputPlaceholderAdded: state.connection.realtimeInputPlaceholderAdded === true,
         inputAudioAdded:
           state.connection.participantAudioTracksAdded > 0 ||
-          state.connection.meetAudioTracksForwarded > 0 ||
-          state.connection.localAudioTrackAdded === true,
+          state.connection.meetAudioTracksForwarded > 0,
         participantAudioAdded: state.connection.participantAudioTracksAdded > 0,
         meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
+        pendingMeetAudioTrackCount: state.connection.pendingMeetAudioTrackCount,
+        currentRealtimeInputTrackId: state.connection.currentRealtimeInputTrackId,
+        currentRealtimeInputSource: state.connection.currentRealtimeInputSource,
+        currentRealtimeInputIsRoutingMix:
+          state.connection.currentRealtimeInputIsRoutingMix === true,
+        lastRealtimeInputReplaceReason: state.connection.lastRealtimeInputReplaceReason,
+        meetAudioEnergyObserved: state.connection.meetAudioEnergy?.observed === true,
+        meetAudioEnergyRms: Number(state.connection.meetAudioEnergy?.rms || 0),
+        meetAudioEnergyPeak: Number(state.connection.meetAudioEnergy?.peak || 0),
+        meetAudioLastEnergyAt: state.connection.meetAudioEnergy?.lastEnergyAt || "",
+        meetAudioSilenceMs: Number(state.connection.meetAudioEnergy?.silenceMs || 0),
+        meetAudioEnergyStaleMs: Number(state.connection.meetAudioEnergyStaleMs || 10000),
         localAudioTrackAdded: state.connection.localAudioTrackAdded === true,
         meetParticipantAudioExpected:
           state.connection.participantAudioForwardingEnabled === true ||
           state.connection.meetAudioForwardingEnabled === true,
         meetParticipantAudioReady:
-          state.connection.participantAudioTracksAdded > 0 ||
-          state.connection.meetAudioTracksForwarded > 0,
-        onlyLocalMicFallbackInput:
-          state.connection.localAudioTrackAdded === true &&
-          state.connection.participantAudioTracksAdded === 0 &&
-          state.connection.meetAudioTracksForwarded === 0,
+          (state.connection.meetAudioTracksForwarded === 0 &&
+            state.connection.participantAudioTracksAdded > 0 &&
+            state.connection.currentRealtimeInputSource === "direct_participant_audio") ||
+          (state.connection.meetAudioTracksForwarded > 0 &&
+            state.connection.currentRealtimeInputIsRoutingMix === true),
+        meetAudioRoutedToRealtimeInput:
+          state.connection.meetAudioTracksForwarded > 0 &&
+          state.connection.currentRealtimeInputIsRoutingMix === true,
         recvOnlyAudioTransceiverAdded: state.connection.recvOnlyAudioTransceiverAdded === true,
         inboundEvents: state.inbound.length,
         responseEvents: state.inbound.filter((entry) =>
@@ -593,6 +651,7 @@
           (sum, entry) => sum + String(entry.text || "").length,
           0,
         ),
+        blockedUserTextEvents: state.connection.blockedUserTextEvents || 0,
         errors: state.errors.length,
       };
       const audioInputPolicy = classifyAudioInput(checks);
@@ -647,11 +706,14 @@
         status = "blocked";
         summary = "Realtime session.update has not been sent.";
         blockers.push("session_not_configured");
-      } else if (audioInputPolicy.expected && !audioInputPolicy.ready && audioInputPolicy.blockers.length) {
+      } else if (
+        audioInputPolicy.expected &&
+        !audioInputPolicy.ready &&
+        audioInputPolicy.blockers.length
+      ) {
         status = "waiting_for_turn";
-        summary = audioInputPolicy.source === "local_mic_fallback"
-          ? "Realtime is connected with only local mic fallback; waiting for Meet participant audio."
-          : "Realtime is connected with a silent input placeholder; waiting for Meet participant audio.";
+        summary =
+          "Realtime is connected with a silent input placeholder; waiting for Meet participant audio.";
         blockers.push(...audioInputPolicy.blockers);
       } else if (appControlJobs.blocked > 0) {
         status = "tool_blocked";
@@ -664,15 +726,41 @@
       } else if (!checks.inboundEvents) {
         if (!audioInputPolicy.ready) {
           status = "waiting_for_turn";
-          summary = audioInputPolicy.reason === "silent_input_placeholder_only"
-            ? "Realtime is connected with a silent input placeholder; waiting for Meet participant audio."
-            : "Realtime is connected in output-only mode; send a text/tool turn or enable Meet audio forwarding.";
-          blockers.push(...(audioInputPolicy.blockers.length ? audioInputPolicy.blockers : [audioInputPolicy.reason]));
+          summary =
+            audioInputPolicy.reason === "silent_input_placeholder_only"
+              ? "Realtime is connected with a silent input placeholder; waiting for Meet participant audio."
+              : "Realtime is connected in output-only mode; send a text/tool turn or enable Meet audio forwarding.";
+          blockers.push(
+            ...(audioInputPolicy.blockers.length
+              ? audioInputPolicy.blockers
+              : [audioInputPolicy.reason]),
+          );
         } else {
           status = "waiting_for_model";
           summary = "Realtime is connected, but no server events have been received yet.";
           blockers.push("no_realtime_server_events");
         }
+      } else if (
+        checks.meetParticipantAudioExpected &&
+        checks.meetAudioRoutedToRealtimeInput &&
+        !checks.meetAudioEnergyObserved &&
+        !checks.responseEvents
+      ) {
+        status = "waiting_for_turn";
+        summary =
+          "Realtime input is routed through the Meet audio mix, but no mixer energy has been observed yet.";
+        blockers.push("meet_audio_no_energy_observed");
+      } else if (
+        checks.meetParticipantAudioExpected &&
+        checks.meetAudioRoutedToRealtimeInput &&
+        checks.meetAudioEnergyObserved &&
+        checks.meetAudioSilenceMs > checks.meetAudioEnergyStaleMs &&
+        !checks.responseEvents
+      ) {
+        status = "waiting_for_turn";
+        summary =
+          "Realtime input is routed through the Meet audio mix, but recent mixer energy is stale.";
+        blockers.push("meet_audio_energy_stale");
       } else if (!checks.responseEvents) {
         status = "waiting_for_response";
         summary = "Realtime server events are arriving, but no response events have been observed.";

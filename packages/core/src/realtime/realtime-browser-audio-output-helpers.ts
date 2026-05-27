@@ -67,6 +67,7 @@
         label: options.label || "openai-realtime-remote-audio",
         gain: options.gain,
       });
+      state.connection.remoteAudioAttached = result.ok === true;
       state.connection.remoteAudioRoutedToAvatarBus = result.ok === true;
       recordTimeline("remote_audio_route", {
         ok: result.ok === true,
@@ -90,6 +91,7 @@
         gain: options.gain ?? 0.0001,
         durationMs: options.durationMs ?? 120,
       });
+      state.connection.remoteAudioAttached = result.ok === true;
       state.connection.remoteAudioRoutedToAvatarBus = result.ok === true;
       state.connection.mockRemoteAudioInjected = result.ok === true;
       recordTimeline("mock_remote_audio_route", { ok: result.ok === true });

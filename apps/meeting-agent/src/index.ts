@@ -242,7 +242,6 @@ export interface MeetingAgentInput {
   installScreenShareBridge?: boolean;
   installWorkerResultBridge?: boolean;
   realtimeBridgeMode?: string;
-  realtimeFallbackToLocalMic?: boolean;
   realtimeInstructions?: string;
   realtimeSdpUrl?: string;
   realtimeTokenUrl?: string;
@@ -1278,7 +1277,6 @@ const service = createJsonServer({
           autoConnectRealtime: Boolean(b.autoConnectRealtime),
           includeParticipantAudio: Boolean(b.includeParticipantAudio),
           forwardMeetAudioToRealtime: b.forwardMeetAudioToRealtime !== false,
-          realtimeFallbackToLocalMic: Boolean(b.realtimeFallbackToLocalMic),
           realtimeTokenUrl: String(
             b.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
           ),
@@ -1362,7 +1360,6 @@ const service = createJsonServer({
         autoConnectRealtime: Boolean(b.autoConnectRealtime),
         includeParticipantAudio: Boolean(b.includeParticipantAudio),
         forwardMeetAudioToRealtime: b.forwardMeetAudioToRealtime !== false,
-        realtimeFallbackToLocalMic: Boolean(b.realtimeFallbackToLocalMic),
         realtimeTokenUrl: b.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
         realtimeSdpUrl: b.realtimeSdpUrl,
         installLocalDialogBridge: Boolean(b.installLocalDialogBridge),

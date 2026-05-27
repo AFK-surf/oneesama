@@ -7163,8 +7163,7 @@ async function realtimeParticipantAudioSmoke() {
     );
     const audioBlockers = new Set(bridge?.feedback?.blockers || []);
     assertSmoke(
-      !audioBlockers.has("waiting_for_meet_audio") &&
-        !audioBlockers.has("only_local_mic_fallback_input"),
+      !audioBlockers.has("waiting_for_meet_audio"),
       "Realtime harness did not prove it is using Meet participant audio",
       bridge?.feedback,
     );
@@ -9095,7 +9094,6 @@ async function realtimeSdpSmoke() {
       installRealtimeBridge: true,
       realtimeBridgeMode: "webrtc",
       autoConnectRealtime: true,
-      realtimeFallbackToLocalMic: true,
     });
     assertSmoke(
       join.result?.fixtureState?.joined === true,

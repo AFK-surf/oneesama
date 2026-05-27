@@ -279,6 +279,7 @@ interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   meetProfileMode?: string;
   browserViewportWidth?: number | string;
   browserViewportHeight?: number | string;
+  muteLocalPlayback?: boolean;
   allowNonGoogleMeet?: boolean;
   realtimeInstructions?: string;
   avatarModelUrl?: string;
@@ -300,7 +301,6 @@ interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   sendRealtimeSessionUpdate?: boolean;
   includeParticipantAudio?: boolean;
   forwardMeetAudioToRealtime?: boolean;
-  realtimeFallbackToLocalMic?: boolean;
   workerDelegateUrl?: string;
   workerStatusUrl?: string;
   autoConnectRealtime?: boolean;
@@ -1792,6 +1792,7 @@ async function publishMeetingAwarenessToPage(
           item: {
             type: "message",
             role: "system",
+            metadata: { source: "meeting_awareness" },
             content: [{ type: "input_text", text }],
           },
         });
@@ -2688,7 +2689,6 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           includeParticipantAudio: Boolean(input.includeParticipantAudio),
           forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
           captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
-          fallbackToLocalMic: Boolean(input.realtimeFallbackToLocalMic),
           workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,
           workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,
           autoConnect: Boolean(input.autoConnectRealtime),
@@ -2750,7 +2750,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     diagnostics.record("goto_complete", { url: page.url(), status: gotoResponse?.status?.() || 0 });
     await saveDiagnostics(diagnostics);
     await installMeetPromptAutoDismisser(page, diagnostics);
-    await installMeetLocalPlaybackMute(page, diagnostics);
+    await installMeetLocalPlaybackMute(page, diagnostics, input.muteLocalPlayback === true);
     await page.waitForTimeout(2500);
     await takeScreenshot(page, diagnostics, "01-after-nav");
     await collectButtonInventory(page, diagnostics, "after-nav");
@@ -3164,6 +3164,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       item: {
         type: "message",
         role: "user",
+        metadata: { source: "manual_text_turn" },
         content: [
           {
             type: "input_text",

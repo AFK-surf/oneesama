@@ -44,7 +44,10 @@
     forwardMeetAudioToRealtime: boolean;
     captureMeetAudioForTranscript?: boolean;
     meetAudioCaptureChunkMs?: number;
-    fallbackToLocalMic: boolean;
+    meetAudioInputGain?: number;
+    meetAudioEnergyStaleMs?: number;
+    captionTurnFallback?: boolean;
+    captionTurnDebounceMs?: number;
     instructions: string;
     tools: any[];
     toolChoice?: string;
@@ -78,7 +81,8 @@
     forwardMeetAudioToRealtime: true,
     captureMeetAudioForTranscript: false,
     meetAudioCaptureChunkMs: 5000,
-    fallbackToLocalMic: false,
+    meetAudioInputGain: 4,
+    meetAudioEnergyStaleMs: 10000,
     instructions: "",
     tools: [],
     session: {},
@@ -189,17 +193,41 @@
       remoteAudioRoutedToAvatarBus: false,
       mockRemoteAudioInjected: false,
       localAudioTrackAdded: false,
-      localAudioFallbackEnabled: Boolean(config.fallbackToLocalMic),
+      localAudioFallbackEnabled: false,
+      localAudioFallbackTrackAdded: false,
+      localAudioFallbackReason: "",
       localAudioRoutedToRealtimeMix: false,
+      localAudioMixEnabled: false,
+      localAudioMixGain: 0,
       localAudioMixTrackId: "",
       recvOnlyAudioTransceiverAdded: false,
       realtimeInputPlaceholderAdded: false,
+      currentRealtimeInputTrackId: "",
+      currentRealtimeInputSource: "",
+      currentRealtimeInputIsRoutingMix: false,
+      lastRealtimeInputReplaceReason: "",
+      lastRealtimeInputReplaceAt: "",
       realtimeInputGateOpen: true,
+      meetAudioInputGain: Math.max(0.1, Math.min(Number(config.meetAudioInputGain || 4), 8)),
+      meetAudioEnergyStaleMs: Math.max(1000, Number(config.meetAudioEnergyStaleMs || 10000)),
       meetAudioForwardingEnabled: config.forwardMeetAudioToRealtime !== false,
       meetAudioContextState: "",
       meetAudioTracksForwarded: 0,
+      pendingMeetAudioTrackCount: 0,
       meetAudioSourcesActive: 0,
+      meetAudioSourcesUnmuted: 0,
       meetAudioTrackStates: [],
+      meetAudioEnergy: {
+        rms: 0,
+        peak: 0,
+        observed: false,
+        lastEnergyAt: "",
+        lastCheckedAt: "",
+        silenceMs: 0,
+        thresholdRms: 0.003,
+        thresholdPeak: 0.01,
+      },
+      meetAudioEnergyLogged: false,
       lastMeetAudioTrackId: "",
       meetAudioCapture: {
         enabled: Boolean(config.captureMeetAudioForTranscript),
@@ -224,6 +252,13 @@
       lastInboundEventType: "",
       lastOutboundEventAt: "",
       lastOutboundEventType: "",
+      blockedUserTextEvents: 0,
+      captionTurnsObserved: 0,
+      captionTurnsInjected: 0,
+      captionTurnsPending: 0,
+      lastCaptionTurnAt: "",
+      lastCaptionTurnSpeaker: "",
+      lastCaptionTurnText: "",
       sentDataChannelMessages: [],
       lastTokenError: null as null | Record<string, unknown>,
       lastSdpError: null as null | Record<string, unknown>,
@@ -299,13 +334,14 @@
   let routingAudioContext = null;
   let routingInputGate = null;
   let routingDestination = null;
+  let routingAnalyser = null;
+  let routingAnalyserBuffer = null;
+  let routingEnergyTimer = 0;
   let meetAudioRecorder = null;
   let meetAudioRecorderStopResolve = null;
   let meetAudioCaptureUploadChain = Promise.resolve();
   let meetAudioCaptureSequence = 0;
   let routingSilenceSource = null;
-  let localMicFallbackStream = null;
-  let localMicFallbackSource = null;
   let routingAudioResumeListenersInstalled = false;
   let silentMeetAudioTrack = null;
   let realtimeInputGateReopenTimer = 0;
@@ -317,6 +353,8 @@
   const pendingMeetAudioTracks = [];
   const routedMeetAudioTrackIds = new Set();
   const routedMeetAudioSources = [];
+  const captionTurnTimers = new Map();
+  const captionTurnSubmitted = new Map();
   const { isLocalToolName, localWorkspaceTools } = (window as any)
     .__MAB_REALTIME_LOCAL_TOOL_ROUTER_HELPERS;
 

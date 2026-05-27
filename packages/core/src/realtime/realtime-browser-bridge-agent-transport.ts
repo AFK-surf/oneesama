@@ -112,10 +112,6 @@
 
   function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
     if (connectionConfig.mode === "agents-sdk-mock") return createMockRealtimeAgentTransport();
-    const audioElement = document.createElement("audio");
-    audioElement.autoplay = true;
-    audioElement.dataset.meetingAvatarRealtimeAudio = "true";
-    document.body.appendChild(audioElement);
     ensureMeetAudioRoutingContext();
     const baseUrl =
       String(connectionConfig.openaiRealtimeBaseUrl || "").trim() ||
@@ -124,7 +120,6 @@
         "",
       );
     const transport = new namespace.OpenAIRealtimeWebRTC({
-      audioElement,
       mediaStream: routingDestination?.stream,
       baseUrl: baseUrl.replace(/\/realtime\/?$/, ""),
       changePeerConnection: async (pc) => {
@@ -136,16 +131,14 @@
         });
         pc.addEventListener("connectionstatechange", () => {
           state.connection.peerConnectionState = pc.connectionState;
-          state.connected =
-            pc.connectionState === "connected" || pc.connectionState === "completed";
+          state.connected = pc.connectionState === "connected" || pc.connectionState === "completed";
           recordTimeline("realtime_agent_sdk_peer_connection", { state: pc.connectionState });
           updateFeedback();
         });
-        pc.addEventListener("track", (event) => {
-          state.connection.remoteAudioAttached = true;
+        pc.ontrack = (event) => {
           routeRemoteAudioStream(event.streams?.[0]).catch(rememberError);
           updateFeedback();
-        });
+        };
         return pc;
       },
     });
@@ -205,9 +198,7 @@
       instructions: connectionConfig.instructions || "",
       tools,
       voice:
-        connectionConfig.session?.audio?.output?.voice ||
-        connectionConfig.session?.voice ||
-        "marin",
+        connectionConfig.session?.audio?.output?.voice || connectionConfig.session?.voice || "marin",
     });
     const transport = createRealtimeAgentSDKTransport(namespace, connectionConfig);
     const session = new namespace.RealtimeSession(agent, {
@@ -299,22 +290,10 @@
     } catch {
       // Best-effort cleanup.
     }
-    try {
-      localMicFallbackSource?.disconnect?.();
-    } catch {
-      // Best-effort cleanup.
-    }
-    try {
-      localMicFallbackStream?.getTracks?.().forEach((track) => track.stop?.());
-    } catch {
-      // Best-effort cleanup.
-    }
     activePeerConnection = null;
     activeRealtimeAgentSession = null;
     activeRealtimeAgentTransport = null;
     realtimeAudioSender = null;
-    localMicFallbackSource = null;
-    localMicFallbackStream = null;
     window.MAB_REALTIME_DATA_CHANNEL = null;
     window.MAB_REALTIME_DC = null;
     window.MAB_REALTIME_PEER_CONNECTION = null;

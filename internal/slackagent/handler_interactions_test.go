@@ -174,8 +174,8 @@ func TestHandleInteractionJoinSetupCallsMeetingAgentWithSelectedOptions(t *testi
 	if body.MeetingURL != meetURL || body.DryRun {
 		t.Fatalf("join body = %#v, want real join for meet url", body)
 	}
-	if body.CaptureCaptions || body.CaptionLanguage != "Chinese (Simplified)" {
-		t.Fatalf("caption flags = %#v, want Realtime join to keep live persona on pure audio", body)
+	if !body.CaptureCaptions || body.CaptionLanguage != "Chinese (Simplified)" {
+		t.Fatalf("caption flags = %#v, want Realtime join to keep caption fallback available", body)
 	}
 	if !body.RecordMeeting {
 		t.Fatalf("record_meeting = false, want ordinary join to record audio artifact")

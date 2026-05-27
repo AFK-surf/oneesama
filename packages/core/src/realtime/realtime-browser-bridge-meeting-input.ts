@@ -58,47 +58,56 @@
     state.connection.participantAudioSources = state.connection.participantAudioSources.slice(-20);
   }
 
+  function peerConnectionCanAcceptAudioTrack(pc) {
+    if (!pc) return false;
+    return (
+      String(pc.signalingState || "") !== "closed" && String(pc.connectionState || "") !== "closed"
+    );
+  }
+
   function addParticipantTracksToPeerConnection(pc) {
     if (!pc) return 0;
     if (!state.connection.participantAudioForwardingEnabled) {
+      return 0;
+    }
+    if (!peerConnectionCanAcceptAudioTrack(pc)) {
+      recordTimeline("participant_audio_add_track_skipped", {
+        reason: "peer_connection_closed",
+        signalingState: String(pc.signalingState || ""),
+        connectionState: String(pc.connectionState || ""),
+      });
+      updateFeedback();
       return 0;
     }
     let added = 0;
     for (const stream of participantStreams) {
       for (const track of stream.getAudioTracks()) {
         if (addedParticipantTrackIds.has(track.id)) continue;
-        pc.addTrack(track, stream);
-        addedParticipantTrackIds.add(track.id);
-        added += 1;
+        try {
+          pc.addTrack(track, stream);
+          addedParticipantTrackIds.add(track.id);
+          added += 1;
+        } catch (error) {
+          const message = String((error && error.message) || error);
+          if (
+            /signalingState is 'closed'|peer.?connection.*closed|connectionState.*closed/i.test(
+              message,
+            )
+          ) {
+            recordTimeline("participant_audio_add_track_skipped", {
+              reason: "peer_connection_closed",
+              signalingState: String(pc.signalingState || ""),
+              connectionState: String(pc.connectionState || ""),
+              trackId: track.id || "",
+            });
+            continue;
+          }
+          rememberError(error);
+        }
       }
     }
     state.connection.participantAudioTracksAdded += added;
     return added;
-  }
-
-  async function addLocalMicTrackToPeerConnection(pc) {
-    if (!pc || state.connection.localAudioTrackAdded === true) return false;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const [track] = stream.getAudioTracks();
-      if (!track) {
-        recordTimeline("local_audio_track_skipped", { reason: "local_mic_no_audio_track" });
-        updateFeedback();
-        return false;
-      }
-      realtimeAudioSender = pc.addTrack(track, stream);
-      state.connection.localAudioTrackAdded = true;
-      recordTimeline("local_audio_track_added", { trackId: track.id });
-      routeLocalMicFallbackToRealtimeMix(track, stream);
-      updateFeedback();
-      return true;
-    } catch (error) {
-      const message = String((error && error.message) || error).slice(0, 500);
-      recordTimeline("local_audio_track_error", { error: message });
-      rememberError(error);
-      updateFeedback();
-      return false;
-    }
   }
 
   interface ParticipantStreamOptions {
@@ -148,17 +157,14 @@
   }
 
   function discoverParticipantAudioStreams() {
-    const mediaElements = Array.from(document.querySelectorAll<HTMLMediaElement>("audio, video"));
-    for (const element of mediaElements) {
-      if (element.dataset?.meetingAvatarRealtimeAudio === "true") continue;
-      const provider = element.srcObject;
-      if (!provider || !(provider instanceof MediaStream)) continue;
+  const mediaElements = Array.from(document.querySelectorAll<HTMLMediaElement>("audio, video"));
+  for (const element of mediaElements) {
+    const provider = element.srcObject;
+    if (!provider || !(provider instanceof MediaStream)) continue;
       if (provider.getAudioTracks?.().length) {
         registerParticipantAudioStream(provider, {
           label:
-            element.dataset?.meetingAvatarParticipant ||
-            element.id ||
-            element.tagName.toLowerCase(),
+            element.dataset?.meetingAvatarParticipant || element.id || element.tagName.toLowerCase(),
         });
       }
     }

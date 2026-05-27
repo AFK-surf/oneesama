@@ -34,6 +34,7 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 			return JoinGoogleMeetResponse{}, err
 		}
 	}
+	captureCaptions := input.CaptureCaptions || input.InstallRealtimeBridge
 	prepare, err := s.meetRunner.PrepareGoogleMeet(ctx, meetrunner.PrepareGoogleMeetInput{
 		SessionID:                  sessionID,
 		MeetingURL:                 strings.TrimSpace(input.MeetingURL),
@@ -42,7 +43,7 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 		DryRun:                     input.DryRun,
 		AllowNonGoogleMeet:         input.AllowNonGoogleMeet,
 		CollectFixtureState:        input.CollectFixtureState,
-		CaptureCaptions:            input.CaptureCaptions,
+		CaptureCaptions:            captureCaptions,
 		CaptionLanguage:            strings.TrimSpace(input.CaptionLanguage),
 		RecordMeeting:              input.RecordMeeting,
 		ArtifactsDir:               artifactsDir,
@@ -92,7 +93,7 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 			"bridge_mode":                    prepare.BridgeMode,
 			"runner_name":                    runner.Name,
 			"started":                        prepare.Started,
-			"capture_captions":               input.CaptureCaptions,
+			"capture_captions":               captureCaptions,
 			"caption_language":               strings.TrimSpace(input.CaptionLanguage),
 			"record_meeting":                 input.RecordMeeting,
 			"artifacts_dir":                  artifactsDir,

@@ -190,7 +190,7 @@ func (s *Service) postMeetingAgentJoin(ctx context.Context, input AvatarCommandI
 		DisplayName:               firstNonEmpty(parsed.BotName, "Onee Sama"),
 		Title:                     joinMeetingDisplayTitle(parsed.MeetURL),
 		DryRun:                    parsed.DryRunJoiner,
-		CaptureCaptions:           !parsed.RealtimeJoin,
+		CaptureCaptions:           true,
 		CaptionLanguage:           s.effectiveCaptionLanguage(parsed.CaptionLanguage),
 		RecordMeeting:             true,
 		InstallRealtimeBridge:     parsed.RealtimeJoin,
@@ -204,7 +204,6 @@ func (s *Service) postMeetingAgentJoin(ctx context.Context, input AvatarCommandI
 		request.SendRealtimeSessionUpdate = true
 		request.IncludeParticipantAudio = true
 		request.ForwardMeetAudioToRealtime = true
-		request.RealtimeFallbackToLocalMic = true
 	}
 	var result meetingAgentJoinResponse
 	if err := s.postMeetingAgentJSONWithTimeout(ctx, "/join/google-meet", request, &result, meetingAgentJoinTimeout); err != nil {

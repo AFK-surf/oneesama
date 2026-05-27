@@ -91,9 +91,7 @@ export function buildRealtimeBrowserInitScript(config = {}) {
     "./realtime-browser-bridge-meeting-input",
     "./realtime-browser-bridge-connect",
     "./realtime-browser-bridge-public-api",
-  ].map((basePath) =>
-    readBrowserInitSource(import.meta.url, `${basePath}.js`, `${basePath}.ts`),
-  );
+  ].map((basePath) => readBrowserInitSource(import.meta.url, `${basePath}.js`, `${basePath}.ts`));
   const source = [
     "(() => {",
     "  if (window.__meetingAvatarRealtimeBridge) return;",

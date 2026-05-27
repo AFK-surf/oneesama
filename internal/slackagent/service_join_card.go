@@ -79,7 +79,7 @@ func (s *Service) joinSetupResponse(input AvatarCommandInput, parsed parsedAvata
 				"source_channel_id": card.ChannelID,
 				"source_thread_ts":  card.ThreadTS,
 				"source_message_ts": card.MessageTS,
-				"capture_captions":  !parsed.RealtimeJoin,
+				"capture_captions":  true,
 				"action_items":      true,
 				"canvas_publishing": true,
 			},

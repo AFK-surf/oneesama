@@ -124,8 +124,8 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 	if body.MeetingURL != meetURL || body.DryRun {
 		t.Fatalf("join body = %#v, want real join", body)
 	}
-	if body.CaptureCaptions || body.CaptionLanguage != "Japanese" {
-		t.Fatalf("caption flags = %#v, want Realtime join to keep live persona on pure audio", body)
+	if !body.CaptureCaptions || body.CaptionLanguage != "Japanese" {
+		t.Fatalf("caption flags = %#v, want Realtime join to keep caption fallback available", body)
 	}
 	if !body.InstallRealtimeBridge || !body.InstallWorkerResultBridge {
 		t.Fatalf("realtime flags = %#v, want realtime bridge pair", body)

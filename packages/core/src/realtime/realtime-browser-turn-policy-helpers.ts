@@ -375,6 +375,11 @@
         item: {
           type: "function_call_output",
           call_id: callId,
+          metadata: {
+            source: "function_tool_output",
+            policyChannel: policy.channel,
+            policyReason: policy.reason,
+          },
           output: JSON.stringify(result),
         },
       });
@@ -391,10 +396,7 @@
       return { ok: true, outputChannel, responseChannel };
     }
 
-    function functionToolModelResult(
-      input: FunctionToolPolicyInput,
-      policy: RealtimeTurnPolicy,
-    ) {
+    function functionToolModelResult(input: FunctionToolPolicyInput, policy: RealtimeTurnPolicy) {
       return {
         ok: resultRecord(input.result).ok !== false,
         result: input.result,
@@ -502,6 +504,10 @@
         item: {
           type: "message",
           role: "system",
+          metadata: {
+            source: "worker_result",
+            jobId: job.id || "",
+          },
           content: [
             {
               type: "input_text",

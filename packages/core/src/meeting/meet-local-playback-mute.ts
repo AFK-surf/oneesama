@@ -8,6 +8,7 @@ type LocalPlaybackMute = {
   state: LocalPlaybackMuteState;
   sweep: () => { ok: true; muted: number; state: LocalPlaybackMuteState };
 };
+type LocalPlaybackMuteOptions = boolean | { enabled?: boolean };
 
 /**
  * @typedef {{ record?: (type: string, detail?: any) => void } | null} Diagnostics
@@ -17,13 +18,25 @@ type LocalPlaybackMute = {
 /**
  * @param {Page} page
  * @param {Diagnostics} [diagnostics]
+ * @param {LocalPlaybackMuteOptions} [options]
  */
-export async function installMeetLocalPlaybackMute(page, diagnostics = null) {
+export async function installMeetLocalPlaybackMute(
+  page,
+  diagnostics = null,
+  options: LocalPlaybackMuteOptions = {},
+) {
+  const enabled = typeof options === "boolean" ? options : options.enabled !== false;
+  if (!enabled) {
+    const result = { ok: true, skipped: true, reason: "disabled_for_audio_capture" };
+    diagnostics?.record?.("local_playback_mute", result);
+    return result;
+  }
   const result = await page
     .evaluate(() => {
-      const globalScope = window as Window & typeof globalThis & {
-        __MAB_MEET_LOCAL_PLAYBACK_MUTE?: LocalPlaybackMute;
-      };
+      const globalScope = window as Window &
+        typeof globalThis & {
+          __MAB_MEET_LOCAL_PLAYBACK_MUTE?: LocalPlaybackMute;
+        };
       if (globalScope.__MAB_MEET_LOCAL_PLAYBACK_MUTE) {
         return {
           ok: true,
@@ -83,7 +96,7 @@ export async function installMeetLocalPlaybackMute(page, diagnostics = null) {
       });
       /** @param {unknown} fn */
       const asPatched = (fn) =>
-        /** @type {{ __meetingAvatarPatched?: boolean }} */ (/** @type {any} */ (fn));
+        /** @type {{ __meetingAvatarPatched?: boolean }} */ /** @type {any} */ fn;
       /** @param {{ play?: HTMLMediaElement["play"] } | undefined | null} proto */
       const installPlayGuard = (proto) => {
         if (!proto) return;
@@ -93,13 +106,13 @@ export async function installMeetLocalPlaybackMute(page, diagnostics = null) {
         const wrapped = function patchedPlay(...args) {
           muteElement(this);
           return Reflect.apply(
-            /** @type {(this: HTMLMediaElement, ...args: any[]) => unknown} */ (original),
+            /** @type {(this: HTMLMediaElement, ...args: any[]) => unknown} */ original,
             this,
             args,
           );
         };
         asPatched(wrapped).__meetingAvatarPatched = true;
-        proto.play = /** @type {HTMLMediaElement["play"]} */ (wrapped);
+        proto.play = /** @type {HTMLMediaElement["play"]} */ wrapped;
       };
       try {
         installPlayGuard(window.HTMLMediaElement?.prototype);
