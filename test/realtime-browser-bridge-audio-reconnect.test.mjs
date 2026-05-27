@@ -268,13 +268,16 @@ test("Realtime bridge routes direct participant audio through the mixer", async 
     const result = await page.evaluate(async () => {
       const audioContext = new AudioContext();
       const oscillator = audioContext.createOscillator();
+      const quietGain = audioContext.createGain();
+      quietGain.gain.value = 0.00025;
       const destination = audioContext.createMediaStreamDestination();
-      oscillator.connect(destination);
+      oscillator.connect(quietGain);
+      quietGain.connect(destination);
       oscillator.start();
       const [participantTrack] = destination.stream.getAudioTracks();
 
       window.MAB_REALTIME_CLIENT.registerParticipantAudioStream(destination.stream, {
-        label: "test-participant-audio",
+        label: "quiet-test-participant-audio",
       });
       await window.MAB_REALTIME_CLIENT.connect();
       await new Promise((resolve) => setTimeout(resolve, 350));
@@ -304,6 +307,7 @@ test("Realtime bridge routes direct participant audio through the mixer", async 
     assert.equal(result.connection.pendingMeetAudioTrackCount, 0);
     assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
     assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
+    assert.equal(result.connection.meetAudioInputGain, 48);
     assert.equal(result.connection.meetAudioEnergy.observed, true);
     assert.ok(result.connection.meetAudioEnergy.rms > 0.003);
     assert.ok(result.connection.meetAudioEnergy.peak > 0.01);

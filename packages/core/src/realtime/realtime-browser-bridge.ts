@@ -62,6 +62,21 @@ interface RealtimeBridgeConfig {
   [key: string]: unknown;
 }
 
+const DEFAULT_MEET_AUDIO_INPUT_GAIN = 48;
+const MAX_MEET_AUDIO_INPUT_GAIN = 64;
+
+function normalizeMeetAudioInputGain(value: unknown, fallback = DEFAULT_MEET_AUDIO_INPUT_GAIN) {
+  const gain = Number(value);
+  const fallbackGain = Number(fallback);
+  const selected =
+    Number.isFinite(gain) && gain > 0
+      ? gain
+      : Number.isFinite(fallbackGain) && fallbackGain > 0
+        ? fallbackGain
+        : DEFAULT_MEET_AUDIO_INPUT_GAIN;
+  return Math.max(0.1, Math.min(selected, MAX_MEET_AUDIO_INPUT_GAIN));
+}
+
 const config: RealtimeBridgeConfig = {
   mode: "mock",
   agentRuntime: "agents-sdk",
@@ -79,7 +94,9 @@ const config: RealtimeBridgeConfig = {
   forwardMeetAudioToRealtime: true,
   captureMeetAudioForTranscript: false,
   meetAudioCaptureChunkMs: 5000,
-  meetAudioInputGain: 4,
+  // Google Meet remote receiver tracks can arrive much quieter than browser mic tracks.
+  // Keep this high enough for Realtime VAD while still bounded below clipping.
+  meetAudioInputGain: DEFAULT_MEET_AUDIO_INPUT_GAIN,
   meetAudioEnergyStaleMs: 10000,
   instructions: "",
   tools: [],
@@ -198,7 +215,7 @@ const state = {
     lastRealtimeInputReplaceReason: "",
     lastRealtimeInputReplaceAt: "",
     realtimeInputGateOpen: true,
-    meetAudioInputGain: Math.max(0.1, Math.min(Number(config.meetAudioInputGain || 4), 8)),
+    meetAudioInputGain: normalizeMeetAudioInputGain(config.meetAudioInputGain),
     meetAudioEnergyStaleMs: Math.max(1000, Number(config.meetAudioEnergyStaleMs || 10000)),
     meetAudioForwardingEnabled: config.forwardMeetAudioToRealtime !== false,
     meetAudioContextState: "",
