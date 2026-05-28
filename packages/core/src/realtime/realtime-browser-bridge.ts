@@ -42,6 +42,7 @@ interface RealtimeBridgeConfig {
   workerStatusUrl: string;
   includeParticipantAudio: boolean;
   forwardMeetAudioToRealtime: boolean;
+  meetAudioInputSource?: string;
   allowGenericMediaElementAudioDiscovery?: boolean;
   captureMeetAudioForTranscript?: boolean;
   meetAudioCaptureChunkMs?: number;
@@ -104,6 +105,7 @@ const config: RealtimeBridgeConfig = {
   workerStatusUrl: "/worker/status",
   includeParticipantAudio: false,
   forwardMeetAudioToRealtime: true,
+  meetAudioInputSource: "webrtc",
   captureMeetAudioForTranscript: false,
   meetAudioCaptureChunkMs: 5000,
   // Google Meet remote receiver tracks can arrive much quieter than browser mic tracks.

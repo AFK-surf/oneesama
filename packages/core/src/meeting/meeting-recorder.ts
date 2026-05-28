@@ -4,51 +4,23 @@ import {
   type ChildProcess,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  createRecappiAudioTap,
+  listRecappiShareableApplications,
+  type RecappiAudioCallback,
+} from "../audio/recappi-audio-tap.ts";
 
-const require = createRequire(import.meta.url);
-
-type BrowserContext = import("playwright").BrowserContext;
 type MeetingAudioBackend = "none" | "pulse" | "recappi";
 
 interface MeetingRecorderOptions {
   backend?: MeetingAudioBackend | string;
   recappiSdkPath?: string;
+  recappiTap?: ReturnType<typeof createRecappiAudioTap>;
   runtimeDir?: string;
   sinkName?: string;
-}
-
-export interface ShareableApplication {
-  bundleIdentifier?: string;
-  bundleId?: string;
-  processId?: number;
-  pid?: number;
-  applicationName?: string;
-  localizedName?: string;
-  name?: string;
-  title?: string;
-}
-
-interface ShareableAudioSession {
-  sampleRate?: number;
-  channels?: number;
-  stop?: () => void;
-}
-
-type RecappiAudioCallback = (error: unknown, samples: number[]) => void;
-
-interface ShareableContentApi {
-  applications(): ShareableApplication[];
-  tapAudio(processId: number, callback: RecappiAudioCallback): ShareableAudioSession;
-  tapGlobalAudio(filters: unknown[], callback: RecappiAudioCallback): ShareableAudioSession;
-}
-
-interface RecappiSdkModule {
-  ShareableContent: ShareableContentApi;
 }
 
 function nowIso(): string {
@@ -130,75 +102,8 @@ export function resolveMeetingAudioBackend(
   throw new Error(`Unsupported MAB_MEET_AUDIO_BACKEND=${raw}`);
 }
 
-async function findChromiumAudioPid(
-  context: BrowserContext | null | undefined,
-  shareableContent: ShareableContentApi,
-): Promise<number | null> {
-  try {
-    const browser = context?.browser?.();
-    if (browser?.newBrowserCDPSession) {
-      const session = await browser.newBrowserCDPSession();
-      const { processInfo } = await session.send("SystemInfo.getProcessInfo");
-      const audio = (processInfo || []).find((p) => p.type === "audio.mojom.AudioService");
-      if (audio?.id) return audio.id;
-      const browserProc = (processInfo || []).find((p) => p.type === "browser");
-      if (browserProc?.id) return browserProc.id;
-    }
-  } catch (error) {
-    log(`CDP process lookup failed: ${String(error?.message || error)}`);
-  }
-
-  try {
-    const apps = shareableContent?.applications?.() || [];
-    const chromium = apps.find((app) => {
-      const bundle = String(app.bundleIdentifier || "").toLowerCase();
-      return bundle.includes("chromium") || bundle.includes("chrome");
-    });
-    return chromium?.processId || null;
-  } catch (error) {
-    log(`ScreenCaptureKit app scan failed: ${String(error?.message || error)}`);
-    return null;
-  }
-}
-
-async function loadRecappiSdk(options: MeetingRecorderOptions = {}): Promise<RecappiSdkModule> {
-  try {
-    return require("@recappi/sdk") as RecappiSdkModule;
-  } catch {
-    // Continue into local fallback below. The new repo intentionally keeps
-    // Recappi optional so open-source installs can still run without it.
-  }
-
-  const sdkPath = options.recappiSdkPath || process.env.MAB_RECAPPI_SDK_PATH || "";
-  if (!sdkPath || !existsSync(sdkPath)) {
-    throw new Error("Recappi SDK not found. Set MAB_RECAPPI_SDK_PATH or install @recappi/sdk.");
-  }
-  return require(sdkPath);
-}
-
-function normalizeShareableApplication(app: ShareableApplication, index: number) {
-  const processId = Number(app.processId || app.pid || 0) || 0;
-  const bundleIdentifier = String(app.bundleIdentifier || app.bundleId || "").trim();
-  const applicationName = String(
-    app.applicationName || app.localizedName || app.name || app.title || bundleIdentifier || processId || `app-${index + 1}`,
-  ).trim();
-  return {
-    processId,
-    bundleIdentifier,
-    applicationName,
-    name: applicationName,
-    title: applicationName,
-    source: "recappi_shareable_content",
-  };
-}
-
 export async function listShareableApplications(options: MeetingRecorderOptions = {}) {
-  const { ShareableContent } = await loadRecappiSdk(options);
-  const apps = ShareableContent.applications?.() || [];
-  return apps
-    .map(normalizeShareableApplication)
-    .filter((app) => app.processId || app.bundleIdentifier || app.applicationName)
-    .toSorted((a, b) => a.applicationName.localeCompare(b.applicationName));
+  return await listRecappiShareableApplications(options);
 }
 
 class PulseAudioRecorder {
@@ -338,7 +243,12 @@ export function createMeetingRecorder(options: MeetingRecorderOptions = {}) {
     errors: [],
   };
   let pulse = null;
-  let audioSession = null;
+  const recappiTap =
+    backend === "recappi"
+      ? options.recappiTap || createRecappiAudioTap({ recappiSdkPath: options.recappiSdkPath, log })
+      : null;
+  const ownsRecappiTap = Boolean(recappiTap && !options.recappiTap);
+  let releaseRecappiConsumer: (() => void) | null = null;
   let ffmpegProc = null;
 
   async function prepareLaunchEnv() {
@@ -384,14 +294,14 @@ export function createMeetingRecorder(options: MeetingRecorderOptions = {}) {
 
     if (backend === "recappi") {
       try {
-        const { ShareableContent } = await loadRecappiSdk(options);
-        const chromiumPid = await findChromiumAudioPid(context, ShareableContent);
-        const onAudio = (error, samples) => {
+        if (!recappiTap) throw new Error("recappi_tap_unavailable");
+        const tapState = await recappiTap.start({ context, allowGlobalFallback: true });
+        const onAudio: RecappiAudioCallback = (error, samples) => {
           if (error) {
             state.errors.push({
               ts: nowIso(),
               stage: "recappi_callback",
-              error: String(error?.message || error),
+              error: String((error as Error)?.message || error),
             });
             return;
           }
@@ -404,25 +314,9 @@ export function createMeetingRecorder(options: MeetingRecorderOptions = {}) {
           }
           ffmpegProc.stdin.write(buffer);
         };
-        if (chromiumPid) {
-          try {
-            audioSession = ShareableContent.tapAudio(chromiumPid, onAudio);
-          } catch (error) {
-            state.errors.push({
-              ts: nowIso(),
-              stage: "recappi_tap_audio",
-              error: String(error?.message || error),
-            });
-            log(
-              `per-process Recappi capture failed; falling back to global audio: ${String(error?.message || error)}`,
-            );
-            audioSession = ShareableContent.tapGlobalAudio([], onAudio);
-          }
-        } else {
-          audioSession = ShareableContent.tapGlobalAudio([], onAudio);
-        }
-        state.sampleRate = audioSession.sampleRate || 48000;
-        state.channels = audioSession.channels || 2;
+        releaseRecappiConsumer = recappiTap.addConsumer(onAudio);
+        state.sampleRate = tapState.sampleRate || 48000;
+        state.channels = tapState.channels || 2;
         state.audioPath = join(artifactsDir, "audio.wav");
         state.chunkPattern = join(artifactsDir, "audio_chunk_%03d.mp3");
         ffmpegProc = spawn(
@@ -471,9 +365,14 @@ export function createMeetingRecorder(options: MeetingRecorderOptions = {}) {
         state.errors.push({
           ts: nowIso(),
           stage: "recappi_start",
-          error: String(error?.message || error),
+          error: String((error as Error)?.message || error),
         });
-        return { ok: false, error: String(error?.message || error), backend, state: status() };
+        return {
+          ok: false,
+          error: String((error as Error)?.message || error),
+          backend,
+          state: status(),
+        };
       }
     }
 
@@ -487,7 +386,9 @@ export function createMeetingRecorder(options: MeetingRecorderOptions = {}) {
         await pulse.stop();
       }
       if (backend === "recappi") {
-        audioSession?.stop?.();
+        releaseRecappiConsumer?.();
+        releaseRecappiConsumer = null;
+        if (ownsRecappiTap) recappiTap?.stop();
         if (ffmpegProc?.stdin) ffmpegProc.stdin.end();
         if (ffmpegProc && !(await waitForChildProcessExit(ffmpegProc, 10_000)))
           ffmpegProc.kill("SIGKILL");
@@ -497,14 +398,17 @@ export function createMeetingRecorder(options: MeetingRecorderOptions = {}) {
       state.errors.push({ ts: nowIso(), stage: "stop", error: String(error?.message || error) });
       return { ok: false, error: String(error?.message || error), state: status() };
     } finally {
-      audioSession = null;
       ffmpegProc = null;
       pulse = null;
     }
   }
 
   function status() {
-    return { ...state, recording: Boolean(audioSession || ffmpegProc || pulse?.ffmpegProc) };
+    return {
+      ...state,
+      recording: Boolean(ffmpegProc || pulse?.ffmpegProc),
+      recappiTap: recappiTap?.status?.() || null,
+    };
   }
 
   return { backend, state, prepareLaunchEnv, start, stop, status };

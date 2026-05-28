@@ -174,6 +174,7 @@ async function installRealtimeHarness(page, harnessOptions = {}) {
       sdpUrl: "https://example.test/sdp",
       forwardMeetAudioToRealtime: true,
       includeParticipantAudio: true,
+      meetAudioInputSource: harnessOptions.meetAudioInputSource || "webrtc",
       captureMeetAudioForTranscript: false,
       meetAudioEnergyStaleMs: 1000,
     }),
@@ -302,6 +303,161 @@ test("mock Meet receiver track drives the production Realtime input/output gates
     assert.equal(result.feedback.failureMatrix.audioInput.status, "ok");
     assert.equal(result.feedback.failureMatrix.modelTurn.status, "ok");
     assert.equal(result.feedback.failureMatrix.audioOutput.status, "ok");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Meet receiver routing excludes muted and ended stale tracks from the input mix", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page);
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const createToneTrack = async (gainValue) => {
+        const context = new AudioContext();
+        await context.resume();
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        gain.gain.value = gainValue;
+        const destination = context.createMediaStreamDestination();
+        oscillator.connect(gain);
+        gain.connect(destination);
+        oscillator.start();
+        return { context, oscillator, track: destination.stream.getAudioTracks()[0] };
+      };
+
+      const staleTone = await createToneTrack(0.03);
+      let staleMuted = true;
+      Object.defineProperty(staleTone.track, "muted", {
+        configurable: true,
+        get: () => staleMuted,
+      });
+
+      const endedTone = await createToneTrack(0.03);
+      endedTone.track.stop();
+
+      const liveTone = await createToneTrack(0.03);
+      const meetPeer = new RTCPeerConnection();
+      meetPeer.dispatchFakeEvent("track", {
+        track: staleTone.track,
+        streams: [new MediaStream([staleTone.track])],
+      });
+      meetPeer.dispatchFakeEvent("track", {
+        track: endedTone.track,
+        streams: [new MediaStream([endedTone.track])],
+      });
+      meetPeer.dispatchFakeEvent("track", {
+        track: liveTone.track,
+        streams: [new MediaStream([liveTone.track])],
+      });
+
+      await window.MAB_REALTIME_CLIENT.connect();
+      await wait(450);
+
+      const forwarded = window.MAB_REALTIME_BRIDGE.timeline.filter(
+        (entry) => entry.type === "meet_audio_track_forwarded",
+      );
+      const skipped = window.MAB_REALTIME_BRIDGE.timeline.filter(
+        (entry) =>
+          entry.type === "meet_audio_track_skipped" && entry.detail.reason === "track_ended",
+      );
+      const connected = window.MAB_REALTIME_BRIDGE.timeline.filter(
+        (entry) => entry.type === "meet_audio_source_connected",
+      );
+      const scenarioResult = {
+        staleTrackId: staleTone.track.id,
+        endedTrackId: endedTone.track.id,
+        liveTrackId: liveTone.track.id,
+        forwardedSources: forwarded.map((entry) => ({
+          source: entry.detail.source || "",
+          trackId: entry.detail.trackId || "",
+        })),
+        skippedEndedTrackIds: skipped.map((entry) => entry.detail.trackId || ""),
+        connectedTrackIds: connected.map((entry) => entry.detail.trackId || ""),
+        connection: window.MAB_REALTIME_BRIDGE.connection,
+      };
+
+      staleMuted = false;
+      staleTone.oscillator.stop();
+      liveTone.oscillator.stop();
+      await staleTone.context.close();
+      await endedTone.context.close();
+      await liveTone.context.close();
+      return scenarioResult;
+    });
+
+    assert.deepEqual(result.forwardedSources, [
+      { source: "pc.track", trackId: result.staleTrackId },
+      { source: "pc.track", trackId: result.liveTrackId },
+    ]);
+    assert.deepEqual(result.skippedEndedTrackIds, [result.endedTrackId]);
+    assert.deepEqual(result.connectedTrackIds, [result.liveTrackId]);
+    assert.equal(result.connection.meetAudioTracksForwarded, 2);
+    assert.equal(result.connection.meetAudioSourcesActive, 1);
+    assert.equal(result.connection.meetAudioSourcesUnmuted, 1);
+    const staleState = result.connection.meetAudioTrackStates.find(
+      (entry) => entry.trackId === result.staleTrackId,
+    );
+    const liveState = result.connection.meetAudioTrackStates.find(
+      (entry) => entry.trackId === result.liveTrackId,
+    );
+    assert.equal(staleState?.muted, true);
+    assert.equal(staleState?.connected, false);
+    assert.equal(liveState?.connected, true);
+    assert.equal(result.connection.meetAudioEnergy.observed, true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Recappi process audio input feeds the routing mix without RTC tracks", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, { meetAudioInputSource: "recappi_process_audio" });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      const sampleRate = 48000;
+      const channels = 2;
+      for (let chunk = 0; chunk < 8; chunk += 1) {
+        const frames = 4096;
+        const samples = [];
+        for (let frame = 0; frame < frames; frame += 1) {
+          const value =
+            Math.sin(((chunk * frames + frame) / sampleRate) * Math.PI * 2 * 660) * 0.03;
+          samples.push(value, value);
+        }
+        window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+          source: "recappi_process_audio",
+          sampleRate,
+          channels,
+          samples,
+        });
+      }
+      await wait(750);
+      const forwarded = window.MAB_REALTIME_BRIDGE.timeline.filter(
+        (entry) => entry.type === "meet_audio_track_forwarded",
+      );
+      return {
+        forwardedSources: forwarded.map((entry) => entry.detail.source || ""),
+        connection: window.MAB_REALTIME_BRIDGE.connection,
+        feedback: window.MAB_REALTIME_BRIDGE.feedback,
+      };
+    });
+
+    assert.deepEqual(result.forwardedSources, []);
+    assert.equal(result.connection.recappiAudioInput.connected, true);
+    assert.equal(result.connection.recappiAudioInput.source, "recappi_process_audio");
+    assert.equal(result.connection.currentRealtimeInputSource, "recappi_process_audio_tap");
+    assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
+    assert.equal(result.connection.meetAudioTracksForwarded, 1);
+    assert.equal(result.connection.meetAudioSourcesActive, 1);
+    assert.equal(result.connection.meetAudioSourcesUnmuted, 1);
+    assert.equal(result.connection.meetAudioEnergy.observed, true);
+    assert.equal(result.feedback.failureMatrix.audioInput.status, "ok");
   } finally {
     await browser.close();
   }

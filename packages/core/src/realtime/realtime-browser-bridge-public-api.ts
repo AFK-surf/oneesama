@@ -106,6 +106,7 @@ window.MAB_REALTIME_CLIENT = {
   resetHistory: compactRealtimeHistory,
   discoverParticipantAudioStreams,
   registerParticipantAudioStream,
+  pushRecappiAudioSamples,
   stopMeetAudioCapture,
   injectCaptionTurn,
   injectWorkerResult,

@@ -31,19 +31,123 @@ function ensureMeetAudioRoutingContext() {
   return routingDestination;
 }
 
+function isMeetAudioSourceRoutable(entry) {
+  const track = entry?.track;
+  return (
+    track?.readyState === "live" &&
+    track.muted !== true &&
+    track.enabled !== false &&
+    routingInputGate
+  );
+}
+
+function disconnectMeetAudioSource(entry, reason = "") {
+  if (!entry?.connected) return false;
+  try {
+    entry.source?.disconnect?.();
+  } catch {
+    // Best-effort cleanup; MediaStreamAudioSourceNode may already be detached.
+  }
+  try {
+    entry.gain?.disconnect?.();
+  } catch {
+    // Best-effort cleanup; GainNode may already be detached.
+  }
+  entry.connected = false;
+  entry.disconnectedAt = new Date().toISOString();
+  entry.disconnectReason = reason;
+  recordTimeline("meet_audio_source_disconnected", {
+    trackId: entry.track?.id || "",
+    readyState: entry.track?.readyState || "",
+    muted: entry.track?.muted === true,
+    enabled: entry.track?.enabled !== false,
+    reason,
+    source: entry.detail?.source || "",
+  });
+  return true;
+}
+
+function connectMeetAudioSource(entry, reason = "") {
+  if (!entry || entry.connected || !isMeetAudioSourceRoutable(entry)) return false;
+  try {
+    entry.source.connect(entry.gain);
+    entry.gain.connect(routingInputGate);
+    entry.connected = true;
+    entry.connectedAt = new Date().toISOString();
+    entry.disconnectReason = "";
+    recordTimeline("meet_audio_source_connected", {
+      trackId: entry.track?.id || "",
+      reason,
+      source: entry.detail?.source || "",
+    });
+    return true;
+  } catch (error) {
+    rememberError(error);
+    return false;
+  }
+}
+
+function refreshMeetAudioSourceConnection(entry, reason = "") {
+  if (isMeetAudioSourceRoutable(entry)) return connectMeetAudioSource(entry, reason);
+  return disconnectMeetAudioSource(entry, reason);
+}
+
+function refreshMeetAudioSourceConnections(reason = "refresh") {
+  for (const entry of routedMeetAudioSources) {
+    refreshMeetAudioSourceConnection(entry, reason);
+  }
+}
+
 function refreshMeetAudioTrackStates() {
-  const liveSources = routedMeetAudioSources.filter((entry) => entry.track?.readyState === "live");
-  const unmutedSources = liveSources.filter((entry) => entry.track?.muted !== true);
-  state.connection.meetAudioSourcesActive = liveSources.length;
-  state.connection.meetAudioSourcesUnmuted = unmutedSources.length;
-  state.connection.meetAudioTrackStates = routedMeetAudioSources.slice(-10).map((entry) => ({
+  refreshMeetAudioSourceConnections("track-state-refresh");
+  const liveSources = routedMeetAudioSources.filter(
+    (entry) => entry.connected === true && entry.track?.readyState === "live",
+  );
+  const unmutedSources = liveSources.filter(
+    (entry) => entry.track?.muted !== true && entry.track?.enabled !== false,
+  );
+  const recappiConnected = (state.connection as any).recappiAudioInput?.connected === true;
+  state.connection.meetAudioSourcesActive = liveSources.length + (recappiConnected ? 1 : 0);
+  state.connection.meetAudioSourcesUnmuted = unmutedSources.length + (recappiConnected ? 1 : 0);
+  const trackStates = routedMeetAudioSources.slice(-10).map((entry) => ({
     trackId: entry.track?.id || "",
     readyState: entry.track?.readyState || "",
     enabled: entry.track?.enabled !== false,
     muted: entry.track?.muted === true,
+    connected: entry.connected === true,
+    disconnectReason: entry.disconnectReason || "",
     source: entry.detail?.source || "",
     label: entry.detail?.label || entry.track?.label || "",
   }));
+  if (recappiConnected) {
+    trackStates.push({
+      trackId: "recappi-process-audio",
+      readyState: "live",
+      enabled: true,
+      muted: false,
+      connected: true,
+      disconnectReason: "",
+      source: "recappi_process_audio",
+      label: "Recappi Chrome process audio",
+    });
+  }
+  state.connection.meetAudioTrackStates = trackStates.slice(-10);
+}
+
+function installMeetAudioSourceLifecycle(entry) {
+  const track = entry?.track;
+  if (!track || entry.lifecycleInstalled) return;
+  entry.lifecycleInstalled = true;
+  const refresh = (reason) => {
+    refreshMeetAudioSourceConnection(entry, reason);
+    refreshMeetAudioTrackStates();
+    updateFeedback();
+  };
+  if (typeof track.addEventListener === "function") {
+    track.addEventListener("mute", () => refresh("track-muted"));
+    track.addEventListener("unmute", () => refresh("track-unmuted"));
+    track.addEventListener("ended", () => refresh("track-ended"));
+  }
 }
 
 function sampleMeetAudioEnergy() {
@@ -260,6 +364,22 @@ function replaceRealtimeInputWithRoutingMix(reason = "meet-audio") {
 function forwardMeetAudioTrackToRealtime(track, detail = {}) {
   if (!track || track.kind !== "audio") return false;
   if (!state.connection.meetAudioForwardingEnabled) return false;
+  if (config.meetAudioInputSource === "recappi_process_audio") {
+    recordTimeline("meet_audio_track_skipped", {
+      reason: "recappi_process_audio_selected",
+      trackId: track.id,
+      ...detail,
+    });
+    return false;
+  }
+  if (track.readyState === "ended") {
+    recordTimeline("meet_audio_track_skipped", {
+      reason: "track_ended",
+      trackId: track.id,
+      ...detail,
+    });
+    return false;
+  }
   const avatarTrack = window.MAB_AVATAR_AUDIO_BUS?.track;
   if (avatarTrack && track.id === avatarTrack.id) {
     recordTimeline("meet_audio_track_skipped", {
@@ -283,14 +403,21 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
   try {
     const stream = new MediaStream([track]);
     const source = routingAudioContext.createMediaStreamSource(stream);
-    source.connect(routingInputGate);
-    routedMeetAudioSources.push({
+    const gain = routingAudioContext.createGain();
+    gain.gain.value = 1;
+    const entry = {
       track,
       stream,
       source,
+      gain,
       detail,
       addedAt: new Date().toISOString(),
-    });
+      connected: false,
+      disconnectReason: "",
+    };
+    routedMeetAudioSources.push(entry);
+    installMeetAudioSourceLifecycle(entry);
+    refreshMeetAudioSourceConnection(entry, "track-forwarded");
     refreshMeetAudioTrackStates();
     state.connection.meetAudioTracksForwarded += 1;
     state.connection.lastMeetAudioTrackId = track.id;

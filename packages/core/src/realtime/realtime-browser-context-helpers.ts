@@ -397,6 +397,7 @@
         meetAudioSourcesActive: state.connection.meetAudioSourcesActive || 0,
         meetAudioSourcesUnmuted: state.connection.meetAudioSourcesUnmuted || 0,
         meetAudioTrackStates: state.connection.meetAudioTrackStates || [],
+        recappiAudioInput: (state.connection as any).recappiAudioInput || null,
         meetAudioEnergy: state.connection.meetAudioEnergy,
       };
       if (!checks.meetParticipantAudioExpected && !checks.inputAudioAdded) {
@@ -593,7 +594,8 @@
         realtimeInputPlaceholderAdded: state.connection.realtimeInputPlaceholderAdded === true,
         inputAudioAdded:
           state.connection.participantAudioTracksAdded > 0 ||
-          state.connection.meetAudioTracksForwarded > 0,
+          state.connection.meetAudioTracksForwarded > 0 ||
+          (state.connection as any).recappiAudioInput?.connected === true,
         participantAudioAdded: state.connection.participantAudioTracksAdded > 0,
         meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
         pendingMeetAudioTrackCount: state.connection.pendingMeetAudioTrackCount,
@@ -612,13 +614,15 @@
           state.connection.participantAudioForwardingEnabled === true ||
           state.connection.meetAudioForwardingEnabled === true,
         meetParticipantAudioReady:
+          (state.connection as any).recappiAudioInput?.connected === true ||
           (state.connection.meetAudioTracksForwarded === 0 &&
             state.connection.participantAudioTracksAdded > 0 &&
             state.connection.currentRealtimeInputSource === "direct_participant_audio") ||
           (state.connection.meetAudioTracksForwarded > 0 &&
             state.connection.currentRealtimeInputIsRoutingMix === true),
         meetAudioRoutedToRealtimeInput:
-          state.connection.meetAudioTracksForwarded > 0 &&
+          (state.connection.meetAudioTracksForwarded > 0 ||
+            (state.connection as any).recappiAudioInput?.connected === true) &&
           state.connection.currentRealtimeInputIsRoutingMix === true,
         recvOnlyAudioTransceiverAdded: state.connection.recvOnlyAudioTransceiverAdded === true,
         inboundEvents: state.inbound.length,

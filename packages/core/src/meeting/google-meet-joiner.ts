@@ -13,8 +13,8 @@ import { buildGoogleMeetChromiumArgs } from "./google-meet-launch-args.ts";
 import { ensureMeetCameraOff } from "./meet-camera-controls.ts";
 import { waitForMeetAdmission } from "./meet-admission.ts";
 import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
-import { createMeetingRecorder, listShareableApplications } from "./meeting-recorder.ts";
-import { createWebRTCAudioCaptureSink } from "./webrtc-audio-capture.ts";
+import { listShareableApplications } from "./meeting-recorder.ts";
+import * as audio from "./meeting-audio-inputs.ts";
 import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-prompts.ts";
 import { buildScreenShareInitScript } from "./screen-share-init-builder.ts";
 import {
@@ -35,20 +35,16 @@ import {
   resolveSpeakerIdentity,
   type SpeakerIdentityResolution,
 } from "../realtime/speaker-identity.ts";
-
 const require = createRequire(import.meta.url);
-
 type Page = import("playwright").Page;
 const DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH = 2560;
 const DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT = 1440;
 const DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS = 25;
 const MAX_SYNTHETIC_SCREEN_SHARE_WIDTH = 3840;
 const MAX_SYNTHETIC_SCREEN_SHARE_HEIGHT = 2160;
-
 interface MeetUrlOptions {
   allowNonGoogleMeet?: boolean;
 }
-
 interface VideoStageInput {
   stageTitle?: string;
   title?: string;
@@ -63,7 +59,6 @@ interface VideoStageInput {
   screenShareHeight?: number | string;
   screenShareFps?: number | string;
 }
-
 interface ScreenShareBridgeInput extends VideoStageInput {
   mode?: string;
   screenShareMode?: string;
@@ -75,7 +70,6 @@ interface ScreenShareBridgeInput extends VideoStageInput {
   imagePath?: string;
   framePath?: string;
 }
-
 interface AppShareInput extends ScreenShareBridgeInput {
   windowId?: number | string;
   windowID?: number | string;
@@ -88,7 +82,6 @@ interface AppShareInput extends ScreenShareBridgeInput {
   appName?: string;
   name?: string;
 }
-
 interface MeetChatInput {
   text?: string;
   message?: string;
@@ -2409,6 +2402,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         error: String(error?.message || error),
       });
     }
+    await audio.stopRealtimeRecappiAudioInput(previous);
     try {
       await previous.recorder?.stop();
     } catch (error) {
@@ -2472,13 +2466,16 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const captureCaptions = Boolean(input.captureCaptions ?? config.captureCaptions);
     const captionLanguage = input.captionLanguage || config.captionLanguage || "";
     const artifactsDir = input.artifactsDir || pathJoin(config.meetingArtifactsDir, sessionId);
-    const recorder = createMeetingRecorder({
-      backend: input.meetAudioBackend || config.meetAudioBackend,
-    });
-    const realtimeAudioCapture =
-      recordMeeting && installRealtimeBridge && input.forwardMeetAudioToRealtime !== false
-        ? createWebRTCAudioCaptureSink({ sessionId, artifactsDir })
-        : null;
+    const { recorder, realtimeRecappiAudioInput, realtimeAudioCapture } =
+      audio.createMeetingAudioInputs({
+        input,
+        config,
+        sessionId,
+        artifactsDir,
+        allowNonGoogleMeet,
+        installRealtimeBridge,
+        recordMeeting,
+      });
     const browserUserDataDirInput = input.browserUserDataDir || config.browserUserDataDir || "";
     const meetProfileMode = normalizeMeetProfileMode(
       input.meetProfileMode || config.meetProfileMode,
@@ -2613,6 +2610,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       artifactsDir,
       recorder: recordMeeting ? recorder : null,
       realtimeAudioCapture,
+      realtimeRecappiAudioInput,
       captionCapture: null,
     };
     const browserRecord = await rememberActiveBrowser(browser, sessionId, meetUrl);
@@ -2694,6 +2692,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
         includeParticipantAudio: Boolean(input.includeParticipantAudio),
         forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
+        meetAudioInputSource: realtimeRecappiAudioInput ? "recappi_process_audio" : "webrtc",
         captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
         workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,
         workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,
@@ -2887,6 +2886,12 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     } else if (captureCaptions) {
       diagnostics.record("caption_capture_skipped", { reason: "join_not_confirmed" });
     }
+    await audio.startRealtimeRecappiAudioInput({
+      realtimeRecappiAudioInput,
+      context,
+      page,
+      diagnostics,
+    });
     if (recordMeeting) {
       const recorderStart = await recorder.start({ context, artifactsDir });
       diagnostics.record("recorder_start", recorderStart);
@@ -3006,6 +3011,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       artifactsDir,
       recorder: recordMeeting ? recorder.status() : null,
       realtimeAudioCapture: realtimeAudioCapture?.status() || null,
+      realtimeRecappiAudioInput: realtimeRecappiAudioInput?.status() || null,
       captions: compactCaptionState(captions),
       screenshots: diagnostics.screenshots,
       buttonInventories: diagnostics.buttonInventories,
@@ -4030,6 +4036,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
             avatarAudio: active.avatarAudio || null,
             recorder: active.recorder?.status() || null,
             realtimeAudioCapture: active.realtimeAudioCapture?.status() || null,
+            realtimeRecappiAudioInput: active.realtimeRecappiAudioInput?.status() || null,
             captions: compactCaptionState(active.captions) || null,
             fixtureState: active.fixtureState || null,
             realtimeBridge: active.realtimeBridge || null,
