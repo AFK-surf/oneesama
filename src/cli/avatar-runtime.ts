@@ -74,7 +74,7 @@ import {
   hasCommand,
   parseEnvFile,
   envValue,
-  redactSecret
+  redactSecret,
 } from "./common.js";
 import type {
   RealtimeBridgeWorkerToolCall,
@@ -88,7 +88,7 @@ import type {
   ShadowHookResult,
   ShadowReportEvent,
   EvidenceArtifact,
-  CutoverEvidenceManifest
+  CutoverEvidenceManifest,
 } from "./common.js";
 import {
   shadowTransmitterHook,
@@ -116,7 +116,7 @@ import {
   postSignedSlackCommand,
   buildSlackInteractionForm,
   postSignedSlackInteraction,
-  postSignedSlackJson
+  postSignedSlackJson,
 } from "./support.js";
 
 export async function avatarStateSmoke() {
@@ -350,6 +350,11 @@ export async function avatarVisualSmoke() {
       return {
         snapshots: { neutral, speaking, action },
         hudSnapshots,
+        hudSignals: ((window as any).MAB_AVATAR_HUD_SIGNALS?.() || []) as Array<{
+          label?: string;
+          value?: string;
+          level?: string;
+        }>,
         diffs: { mouthDiff, actionDiff },
         liveHash: visualTest.getLiveHash(),
         avatar: window.MAB_AVATAR_STATE,
@@ -363,6 +368,7 @@ export async function avatarVisualSmoke() {
         action?: AvatarVisualSnapshot;
       };
       hudSnapshots?: AvatarVisualSnapshot[];
+      hudSignals?: Array<{ label?: string; value?: string; level?: string }>;
       diffs?: { mouthDiff?: AvatarVisualDiff; actionDiff?: AvatarVisualDiff };
       liveHash?: string;
       avatar?: AvatarStateSnapshot;
@@ -410,6 +416,13 @@ export async function avatarVisualSmoke() {
         (result.hudSnapshots || []).every((snapshot) => snapshot.status?.nonBackgroundRatio > 0.12),
       "avatar HUD visual smoke did not render all fixed status states",
       result.hudSnapshots,
+    );
+    assertSmoke(
+      ["RT", "Audio", "Voice", "Tool", "Err"].every((label) =>
+        (result.hudSignals || []).some((signal) => signal.label === label),
+      ),
+      "avatar HUD visual smoke did not expose all runtime signal chips",
+      result.hudSignals,
     );
     assertSmoke(
       result.avatar?.mood === "happy",
@@ -1002,4 +1015,3 @@ export async function realtimeSdpSmoke() {
     await rm(dataDir, { recursive: true, force: true });
   }
 }
-

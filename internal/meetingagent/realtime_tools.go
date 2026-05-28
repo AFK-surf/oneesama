@@ -91,11 +91,11 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"muted":    boolSchema(true),
 		})),
 		realtimeTool("stop_video_stage", "Stop the current Google Meet video-stage/screen-share presentation. Use immediately when the user says 停止分享 / stop sharing / 关掉分享 / stop video stage.", objectSchema(nil, map[string]realtimeJSONSchema{})),
-		realtimeTool("list_shareable_windows", "List existing macOS applications/windows that the meeting avatar can share through the native app-share path. Use when the user asks to share a generic category like editor/browser/window/app/design tool, or when a named app has multiple possible matches.", objectSchema(nil, map[string]realtimeJSONSchema{
+		realtimeTool("list_shareable_windows", "List existing macOS applications/windows that the meeting avatar can share through the native app-share path. Use when the user asks to share a generic category like editor/browser/window/app/design tool/应用/窗口/屏幕/设计工具, or when a named app has multiple possible matches.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"session_id": stringSchema("Current meeting session id when known."),
 		})),
-		realtimeTool("share_existing_app_window", "Share a specific existing macOS app/window in the current Meet using the native app-share path. Use immediately when the user names a concrete app/window title such as Pencil, VS Code, Chrome, Notion, Terminal, or Activity Monitor. If the user only says a generic category like editor/browser/window/app/design tool, call list_shareable_windows first instead of guessing. Do not use browser/workspace tools for existing app/window requests.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"applicationName":  stringSchema("Spoken app name to share, e.g. Pencil, Notion, Chrome, Terminal, Activity Monitor."),
+		realtimeTool("share_existing_app_window", "Share a specific existing macOS app/window in the current Meet using the native app-share path. Use immediately when the user says 共享/分享/共享一下/分享一下/共享屏幕/分享屏幕/共享窗口/分享窗口/共享 app/分享 app and names a concrete app/window title such as Pencil/喷手/铅笔, VS Code, Chrome, Notion, Terminal, or Activity Monitor. If the user only says a generic category like editor/browser/window/app/design tool/应用/窗口/屏幕/设计工具, call list_shareable_windows first instead of guessing. Do not use browser/workspace tools for existing app/window requests.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"applicationName":  stringSchema("Spoken app name to share, e.g. Pencil/喷手/铅笔, Notion, Chrome, Terminal, Activity Monitor."),
 			"bundleIdentifier": stringSchema("Optional macOS bundle identifier when known."),
 			"windowTitle":      stringSchema("Optional visible window title when the app has multiple windows."),
 			"processId":        integerSchema("Optional process id from list_shareable_windows.", nil),

@@ -1,4 +1,5 @@
 import { createAvatarAudioBus } from "./hiyori-avatar-audio-bus.js";
+import { createAvatarHud } from "./hiyori-avatar-hud.js";
 import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.js";
 (() => {
   if (window.__meetingAvatarBotInjected) return;
@@ -65,14 +66,6 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
     opening_preview: "Opening preview",
     blocked: "Blocked",
     done: "Done",
-  };
-  const STATUS_COLORS: Record<string, { accent: string; bg: string }> = {
-    idle: { accent: "#64748b", bg: "rgba(15, 23, 42, 0.78)" },
-    thinking: { accent: "#38bdf8", bg: "rgba(15, 23, 42, 0.78)" },
-    writing_code: { accent: "#a78bfa", bg: "rgba(24, 24, 27, 0.82)" },
-    opening_preview: { accent: "#34d399", bg: "rgba(6, 78, 59, 0.82)" },
-    blocked: { accent: "#fb7185", bg: "rgba(127, 29, 29, 0.84)" },
-    done: { accent: "#4ade80", bg: "rgba(20, 83, 45, 0.82)" },
   };
   const EXPRESSION_PRESETS = {
     neutral: {
@@ -366,6 +359,8 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
   }
 
   const avatarController = createAvatarStateController();
+  const avatarHud = createAvatarHud({ config, avatarController });
+  (window as any).MAB_AVATAR_HUD_RECT = avatarHud.rect;
   const rendererState = {
     ok: true,
     renderer: "initializing",
@@ -407,7 +402,9 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
       script.src = policy ? policy.createScriptURL(src) : src;
       script.async = true;
       script.addEventListener("load", resolve, { once: true });
-      script.addEventListener("error", () => reject(new Error(`failed to load ${src}`)), { once: true });
+      script.addEventListener("error", () => reject(new Error(`failed to load ${src}`)), {
+        once: true,
+      });
       document.head.appendChild(script);
     });
   }
@@ -530,43 +527,8 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
     ctx.restore();
   }
 
-  function avatarHudRect() {
-    const { canvasWidth: w, canvasHeight: h } = config;
-    const width = Math.min(760, w * 0.62);
-    const height = 118;
-    return { x: (w - width) / 2, y: Math.min(h - height - 56, h * 0.68), width, height };
-  }
-
-  (window as any).MAB_AVATAR_HUD_RECT = avatarHudRect;
-
   function drawAvatarHud(ctx) {
-    const status = avatarController.visibleStatus();
-    if (!status) return;
-    const colors = STATUS_COLORS[status.kind] || STATUS_COLORS.thinking;
-    const { x, y, width, height } = avatarHudRect();
-    const radius = 28;
-    const label = STATUS_LABELS[status.kind] || "Working";
-    const text = status.text;
-
-    ctx.save();
-    ctx.shadowColor = "rgba(15, 23, 42, 0.28)";
-    ctx.shadowBlur = 24;
-    ctx.shadowOffsetY = 8;
-    ctx.fillStyle = colors.bg;
-    drawRoundRect(ctx, x, y, width, height, radius);
-    ctx.fill();
-    ctx.shadowColor = "transparent";
-    ctx.fillStyle = colors.accent;
-    drawRoundRect(ctx, x + 22, y + 28, 16, height - 56, 8);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
-    ctx.font = "700 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText(label, x + 56, y + 40);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "800 36px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(text, x + 56, y + 86, width - 86);
-    ctx.restore();
+    avatarHud.draw(ctx);
   }
 
   function applyAvatarStateToLive2D(model, frameCount) {
@@ -629,11 +591,7 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
 
   async function loadThreeVRMDeps() {
     const inline = window.MAB_AVATAR_THREE_VRM_DEPS;
-    if (
-      inline?.THREE &&
-      inline?.GLTFLoader &&
-      inline?.VRMLoaderPlugin
-    ) {
+    if (inline?.THREE && inline?.GLTFLoader && inline?.VRMLoaderPlugin) {
       rendererState.vrmDependencySource = "inline_bundle";
       return {
         THREE: inline.THREE,
