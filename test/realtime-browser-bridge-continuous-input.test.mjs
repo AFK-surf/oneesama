@@ -4,7 +4,7 @@ import { chromium } from "playwright";
 
 import { buildRealtimeBrowserInitScript } from "../packages/core/src/realtime/realtime-browser-init-builder.ts";
 
-test("Realtime bridge keeps Meet input gated until output audio buffer stops", async () => {
+test("Realtime bridge keeps Meet input continuous while output audio plays", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -31,14 +31,14 @@ test("Realtime bridge keeps Meet input gated until output audio buffer stops", a
       oscillator.connect(destination);
       oscillator.start();
       window.MAB_REALTIME_CLIENT.registerParticipantAudioStream(destination.stream, {
-        label: "output-gate-test-audio",
+        label: "continuous-input-test-audio",
       });
       await sleep(50);
 
       const inbound = (type) => {
         window.dispatchEvent(
           new CustomEvent("meeting-avatar-realtime-server-event", {
-            detail: { type, response: { id: "resp_output_gate" } },
+            detail: { type, response: { id: "resp_continuous_input" } },
           }),
         );
       };
@@ -47,12 +47,12 @@ test("Realtime bridge keeps Meet input gated until output audio buffer stops", a
       inbound("output_audio_buffer.started");
       inbound("response.output_audio.done");
       inbound("response.done");
-      await sleep(1350);
+      await sleep(100);
       const gateWhileOutputActive = window.MAB_REALTIME_BRIDGE.connection.realtimeInputGateOpen;
       const outputActiveWhileDone = window.MAB_REALTIME_BRIDGE.protection.outputAudioActive;
 
       inbound("output_audio_buffer.stopped");
-      await sleep(1350);
+      await sleep(100);
       const gateAfterOutputStopped = window.MAB_REALTIME_BRIDGE.connection.realtimeInputGateOpen;
       const outputActiveAfterStopped = window.MAB_REALTIME_BRIDGE.protection.outputAudioActive;
 
@@ -64,7 +64,7 @@ test("Realtime bridge keeps Meet input gated until output audio buffer stops", a
         gateAfterOutputStopped,
         outputActiveAfterStopped,
         deferredReasons: window.MAB_REALTIME_BRIDGE.timeline
-          .filter((entry) => entry.type === "realtime_input_gate_open_deferred")
+          .filter((entry) => entry.type === "realtime_output_audio_completion_deferred")
           .map((entry) => entry.detail.reason),
         gateEvents: window.MAB_REALTIME_BRIDGE.timeline
           .filter((entry) => entry.type === "realtime_input_gate")
@@ -72,16 +72,17 @@ test("Realtime bridge keeps Meet input gated until output audio buffer stops", a
       };
     });
 
-    assert.equal(result.gateWhileOutputActive, false);
+    assert.equal(result.gateWhileOutputActive, true);
     assert.equal(result.outputActiveWhileDone, true);
     assert.equal(result.gateAfterOutputStopped, true);
     assert.equal(result.outputActiveAfterStopped, false);
     assert.ok(result.deferredReasons.includes("response.output_audio.done"));
     assert.ok(result.deferredReasons.includes("response.done"));
-    assert.deepEqual(result.gateEvents.at(-1), {
-      open: true,
-      reason: "output_audio_buffer.stopped",
-    });
+    assert.equal(
+      result.gateEvents.some((event) => event.open === false),
+      false,
+      "bot output must not close the Meet input gate",
+    );
   } finally {
     await browser.close();
   }

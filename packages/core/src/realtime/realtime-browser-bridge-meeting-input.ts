@@ -3,7 +3,7 @@ function handleRealtimeServerEvent(detail) {
   const event = detail || {};
   if (event.type === "response.created" && event.response?.id) {
     state.protection.activeResponseId = event.response.id;
-    setRealtimeInputGate(false, "response-created");
+    recordTimeline("realtime_input_continuous", { reason: "response-created" });
   }
   if (
     event.type === "output_audio_buffer.started" ||
@@ -14,7 +14,7 @@ function handleRealtimeServerEvent(detail) {
     if (event.type === "output_audio_buffer.started") {
       state.protection.lastOutputAudioStartedAt = new Date().toISOString();
     }
-    setRealtimeInputGate(false, event.type);
+    recordTimeline("realtime_input_continuous", { reason: event.type });
   }
   if (event.type === "input_audio_buffer.speech_started") {
     state.protection.lastInputSpeechStartedAt = new Date().toISOString();
@@ -32,22 +32,19 @@ function handleRealtimeServerEvent(detail) {
   if (event.type === "output_audio_buffer.stopped") {
     window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
     state.protection.outputAudioActive = false;
-    scheduleRealtimeInputGateOpen(event.type, 1200);
   }
   if (event.type === "response.cancelled" || event.type === "response.failed") {
     window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
     state.protection.outputAudioActive = false;
-    scheduleRealtimeInputGateOpen(event.type, 1200);
   }
   if (event.type === "response.done" || event.type === "response.output_audio.done") {
     if (state.protection.outputAudioActive) {
-      recordTimeline("realtime_input_gate_open_deferred", {
+      recordTimeline("realtime_output_audio_completion_deferred", {
         reason: event.type,
         waitingFor: "output_audio_buffer.stopped",
       });
     } else {
       window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
-      scheduleRealtimeInputGateOpen(event.type, 1200);
     }
   }
   handleLocalToolCallEvent(event);
