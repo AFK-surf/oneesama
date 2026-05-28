@@ -65,6 +65,8 @@ interface RealtimeBridgeConfig {
 }
 
 const DEFAULT_MEET_AUDIO_INPUT_GAIN = 48;
+// Recappi captures normalized Chrome process audio; never reuse the weak WebRTC
+// receiver compensation gain here or the input clips before Realtime VAD.
 const DEFAULT_RECAPPI_PROCESS_AUDIO_INPUT_GAIN = 1;
 const MAX_MEET_AUDIO_INPUT_GAIN = 64;
 

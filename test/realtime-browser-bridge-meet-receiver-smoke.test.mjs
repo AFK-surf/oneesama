@@ -569,6 +569,35 @@ test("avatar visual tool follow-up can be explicitly disabled", async () => {
   }
 });
 
+test("Recappi process audio uses source-specific gain instead of Meet receiver amplification", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, { meetAudioInputSource: "recappi_process_audio" });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+        source: "recappi_process_audio",
+        sampleRate: 48000,
+        channels: 2,
+        samples: [0.01, 0.01, -0.01, -0.01],
+      });
+      await wait(80);
+      return {
+        currentSource: window.MAB_REALTIME_BRIDGE.connection.currentRealtimeInputSource,
+        meetAudioInputGain: window.MAB_REALTIME_BRIDGE.connection.meetAudioInputGain,
+      };
+    });
+
+    assert.equal(result.currentSource, "recappi_process_audio_tap");
+    assert.equal(result.meetAudioInputGain, 1);
+    assert.notEqual(result.meetAudioInputGain, 48);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("Recappi process audio forwards low-level audio to Realtime input", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();

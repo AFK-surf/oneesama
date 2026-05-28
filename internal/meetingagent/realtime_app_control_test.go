@@ -276,6 +276,19 @@ func TestRealtimeSharedAppControlQueuesByDefaultAndStatusCompletes(t *testing.T)
 	if result["summary"] != "queued job finished" {
 		t.Fatalf("result = %#v, want backend result on queued job", result)
 	}
+	poll := performRealtimeJSON(t, router, http.MethodPost, "/worker/poll-realtime", `{"sessionId":"meet_session","markDelivered":false}`, http.StatusOK)
+	jobs := poll["jobs"].([]any)
+	if len(jobs) != 1 {
+		t.Fatalf("poll = %#v, want one app-control completion event", poll)
+	}
+	report := jobs[0].(map[string]any)
+	if report["id"] != jobID || report["status"] != appControlStatusCompleted {
+		t.Fatalf("report = %#v, want completed app-control report for queued job", report)
+	}
+	context := report["context"].(map[string]any)
+	if context["session_kind"] != "meeting_app_control" || context["meeting_session_id"] != "meet_session" {
+		t.Fatalf("context = %#v, want meeting app-control session scope", context)
+	}
 	if got := backend.requestCount(); got != 1 {
 		t.Fatalf("backend requests = %d, want 1", got)
 	}

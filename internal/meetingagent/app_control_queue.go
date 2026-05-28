@@ -2,6 +2,7 @@ package meetingagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -120,6 +121,7 @@ func (s *Service) runQueuedAppControlJob(ctx context.Context, id string) {
 			"duration", elapsed.String(),
 			"error", err.Error(),
 		)
+		s.reportQueuedAppControlJob(ctx, job)
 		return
 	}
 	resultMap := appControlResultMap(result, job.ScreenShare)
@@ -143,6 +145,7 @@ func (s *Service) runQueuedAppControlJob(ctx context.Context, id string) {
 		"error", job.Error,
 		"blocker", job.Blocker,
 	)
+	s.reportQueuedAppControlJob(ctx, job)
 }
 
 func (s *Service) markAppControlJobRunning(id string) (appControlJob, bool) {
@@ -199,4 +202,68 @@ func formatAppControlJobTime(value time.Time) string {
 		return ""
 	}
 	return value.Format(time.RFC3339Nano)
+}
+
+func (s *Service) reportQueuedAppControlJob(ctx context.Context, job appControlJob) {
+	status := queuedAppControlWorkerStatus(job)
+	if status == "" {
+		return
+	}
+	report, err := s.createWorkerReport(ctx, WorkerReportInput{
+		ID:       job.ID,
+		Status:   status,
+		Provider: job.Provider,
+		Mode:     "app_control",
+		Task:     firstNonEmpty(job.Instruction, "app-control job completed"),
+		Context: map[string]any{
+			"session_kind":       "meeting_app_control",
+			"meeting_session_id": job.SessionID,
+			"source":             "meeting-realtime-shared-app-control",
+			"app_control_job_id": job.ID,
+		},
+		Result: queuedAppControlWorkerResult(job),
+		Error:  firstNonEmpty(job.Error, job.Blocker),
+	})
+	if err != nil {
+		s.logger.Warn("app-control worker report create failed", "job_id", job.ID, "error", err)
+		return
+	}
+	s.logger.Info(
+		"realtime app-control worker event queued",
+		"job_id", job.ID,
+		"report_id", report.ID,
+		"status", report.Status,
+		"session_id", job.SessionID,
+	)
+}
+
+func queuedAppControlWorkerStatus(job appControlJob) string {
+	switch strings.TrimSpace(job.Status) {
+	case appControlStatusCompleted:
+		return appControlStatusCompleted
+	case appControlStatusFailed:
+		return appControlStatusFailed
+	case appControlStatusQueued, appControlStatusRunning, "":
+		return ""
+	default:
+		if strings.TrimSpace(job.Error) != "" || strings.TrimSpace(job.Blocker) != "" {
+			return appControlStatusFailed
+		}
+		return appControlStatusCompleted
+	}
+}
+
+func queuedAppControlWorkerResult(job appControlJob) string {
+	if job.Result != nil {
+		if summary := strings.TrimSpace(stringFromAny(job.Result["summary"])); summary != "" {
+			return summary
+		}
+		if raw, err := json.Marshal(job.Result); err == nil {
+			return string(raw)
+		}
+	}
+	if text := strings.TrimSpace(firstNonEmpty(job.Error, job.Blocker)); text != "" {
+		return text
+	}
+	return "App-control job completed."
 }
