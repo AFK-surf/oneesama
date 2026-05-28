@@ -46,6 +46,7 @@
     recordTimeline(type: string, detail?: Record<string, unknown>): void;
     buildWorkerResultChatText(job: any): string;
     shouldSendWorkerResultToMeetChat(job: any): boolean;
+    shouldVoiceAckWorkerResult(job: any): boolean;
     buildWorkerResultVoiceText(job: any, chatDelivery: any): string;
     buildWorkerResultText(job: any): string;
     meetingEvents: MeetingEventHelpers;
@@ -67,6 +68,7 @@
       recordTimeline,
       buildWorkerResultChatText,
       shouldSendWorkerResultToMeetChat,
+      shouldVoiceAckWorkerResult,
       buildWorkerResultVoiceText,
       buildWorkerResultText,
       meetingEvents,
@@ -500,7 +502,9 @@
       if (!scope.ok) return rememberSuppressedWorkerResult(job, scope.reason, scope);
 
       let chatDelivery = null;
-      if (shouldSendWorkerResultToMeetChat(job)) {
+      const sendToMeetChat = shouldSendWorkerResultToMeetChat(job);
+      const voiceAck = shouldVoiceAckWorkerResult(job);
+      if (sendToMeetChat) {
         chatDelivery = await sendMeetChat({ text: buildWorkerResultChatText(job) }).catch(
           (error) => ({
             ok: false,
@@ -509,31 +513,38 @@
         );
       }
       const policy: RealtimeTurnPolicy = {
-        channel: chatDelivery ? "meet_chat" : "voice",
-        autoRespond: config.autoRespondToWorkerResults !== false,
-        reason: chatDelivery ? "worker_result_sent_to_meet_chat" : "worker_result_voice_summary",
+        channel: sendToMeetChat ? "meet_chat" : "voice",
+        autoRespond: voiceAck && config.autoRespondToWorkerResults !== false,
+        reason: sendToMeetChat
+          ? voiceAck
+            ? "worker_result_sent_to_meet_chat"
+            : "app_control_result_sent_to_meet_chat"
+          : "worker_result_voice_summary",
         responseInstructions:
           "Summarize the completed background result proactively in concise Chinese without mentioning internal routing names.",
       };
-      const itemChannel = sendRealtimeEvent({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          metadata: {
-            source: "worker_result",
-            jobId: job.id || "",
-          },
-          content: [
-            {
-              type: "input_text",
-              text: chatDelivery
-                ? buildWorkerResultVoiceText(job, chatDelivery)
-                : buildWorkerResultText(job),
+      let itemChannel = "";
+      if (voiceAck || !sendToMeetChat) {
+        itemChannel = sendRealtimeEvent({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "system",
+            metadata: {
+              source: "worker_result",
+              jobId: job.id || "",
             },
-          ],
-        },
-      });
+            content: [
+              {
+                type: "input_text",
+                text: sendToMeetChat
+                  ? buildWorkerResultVoiceText(job, chatDelivery)
+                  : buildWorkerResultText(job),
+              },
+            ],
+          },
+        });
+      }
       let responseChannel = "";
       if (policy.autoRespond) {
         responseChannel = sendRealtimeEvent({

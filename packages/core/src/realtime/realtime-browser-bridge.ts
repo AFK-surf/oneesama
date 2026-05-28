@@ -151,6 +151,7 @@ const { normalizeToolNames, defaultRealtime2Session, buildSessionUpdateEvent } =
 const {
   buildWorkerResultChatText,
   shouldSendWorkerResultToMeetChat,
+  shouldVoiceAckWorkerResult,
   buildWorkerResultVoiceText,
   buildWorkerResultText,
   isNoActionWorkerJob,

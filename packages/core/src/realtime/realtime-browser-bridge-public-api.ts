@@ -23,7 +23,9 @@ async function injectWorkerResult(job) {
     state.workerResults = state.workerResults.slice(-50);
     return suppressed;
   }
-  const interrupt = cancelActiveResponse("worker_result_ready");
+  const interrupt = shouldVoiceAckWorkerResult(job)
+    ? cancelActiveResponse("worker_result_ready")
+    : { skipped: true, reason: "worker_result_meet_chat_only" };
   const delivery = await deliverWorkerResult(job, { interrupt });
   state.workerResults.push(delivery);
   state.workerResults = state.workerResults.slice(-50);

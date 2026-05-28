@@ -163,6 +163,7 @@ const {
   recordTimeline,
   buildWorkerResultChatText,
   shouldSendWorkerResultToMeetChat,
+  shouldVoiceAckWorkerResult,
   buildWorkerResultVoiceText,
   buildWorkerResultText,
   meetingEvents: meetingEventHelpers,

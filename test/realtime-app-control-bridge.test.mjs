@@ -520,6 +520,80 @@ test("Realtime worker results are posted to Meet chat and only briefly acknowled
   });
 });
 
+test("Realtime app-control worker results are posted to Meet chat without voice confirmation", async () => {
+  await withRealtimeBridge(
+    async (page) => {
+      const delivery = await page.evaluate(() => {
+        window.__MAB_MEET_FIXTURE = { chatMessages: [] };
+        window.MAB_REALTIME_BRIDGE.protection.activeResponseId = "resp_current_turn";
+        window.MAB_REALTIME_BRIDGE.protection.outputAudioActive = true;
+        window.addEventListener("meeting-avatar-meet-chat-send", (event) => {
+          window.__MAB_MEET_FIXTURE.chatMessages.push({ text: event.detail.text });
+        });
+        return window.MAB_REALTIME_CLIENT.injectWorkerResult({
+          id: "app_control_1",
+          status: "completed",
+          mode: "app_control",
+          task: "用 Pencil 画个圆",
+          result: "Pencil 里已经画好了圆。",
+          context: {
+            session_kind: "meeting_app_control",
+            meeting_session_id: "current_session",
+            source: "meeting-realtime-shared-app-control",
+            app_control_job_id: "app_control_1",
+          },
+        });
+      });
+
+      assert.equal(delivery.meetChat?.ok, true);
+      assert.equal(delivery.policy.channel, "meet_chat");
+      assert.equal(delivery.policy.autoRespond, false);
+      assert.equal(delivery.policy.reason, "app_control_result_sent_to_meet_chat");
+      assert.equal(delivery.interrupt.skipped, true);
+      assert.equal(delivery.meetingEvent.type, "worker_result.completed");
+      assert.equal(delivery.meetingEvent.visibility, "meet_chat");
+      assert.equal(delivery.meetingEvent.detail.interruptedResponse, false);
+      assert.equal(delivery.itemChannel, "");
+      assert.equal(delivery.responseChannel, "");
+
+      const state = await page.evaluate(() => ({
+        chatMessages: window.__MAB_MEET_FIXTURE.chatMessages,
+        outbound: window.MAB_REALTIME_BRIDGE.outbound,
+        meetingEvents: window.MAB_REALTIME_BRIDGE.meetingEvents,
+        protection: window.MAB_REALTIME_BRIDGE.protection,
+      }));
+      assert.equal(state.chatMessages.length, 1);
+      assert.match(state.chatMessages[0].text, /Pencil 里已经画好了圆/);
+      assert.equal(
+        state.outbound.some((entry) => entry.event?.type === "response.cancel"),
+        false,
+      );
+      assert.equal(
+        state.outbound.some((entry) => entry.event?.type === "response.create"),
+        false,
+      );
+      assert.equal(
+        state.outbound.some(
+          (entry) =>
+            entry.event?.type === "conversation.item.create" &&
+            entry.event?.item?.metadata?.source === "worker_result",
+        ),
+        false,
+      );
+      assert.equal(state.protection.cancelledResponses, 0);
+      assert.ok(
+        state.meetingEvents.some(
+          (event) =>
+            event.type === "worker_result.completed" &&
+            event.visibility === "meet_chat" &&
+            event.reason === "app_control_result_sent_to_meet_chat",
+        ),
+      );
+    },
+    { config: { sessionId: "current_session" } },
+  );
+});
+
 test("Realtime worker results from a different meeting session stay silent", async () => {
   await withRealtimeBridge(
     async (page) => {

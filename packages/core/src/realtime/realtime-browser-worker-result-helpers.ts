@@ -22,6 +22,26 @@
     return result.trim().length > 0;
   }
 
+  function normalizedToken(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[_\s]+/g, "-");
+  }
+
+  function isMeetingAppControlWorkerJob(job) {
+    const context = job && typeof job.context === "object" ? job.context : {};
+    return (
+      normalizedToken(context.session_kind || context.sessionKind) === "meeting-app-control" ||
+      normalizedToken(context.source) === "meeting-realtime-shared-app-control" ||
+      normalizedToken(job?.mode) === "app-control"
+    );
+  }
+
+  function shouldVoiceAckWorkerResult(job) {
+    return !isMeetingAppControlWorkerJob(job);
+  }
+
   function buildWorkerResultVoiceText(job, chatDelivery) {
     const status = workerResultStatusLabel(job);
     if (chatDelivery?.ok) {
@@ -91,8 +111,10 @@
   (window as any).__MAB_REALTIME_WORKER_RESULT_HELPERS = {
     buildWorkerResultChatText,
     shouldSendWorkerResultToMeetChat,
+    shouldVoiceAckWorkerResult,
     buildWorkerResultVoiceText,
     buildWorkerResultText,
+    isMeetingAppControlWorkerJob,
     isNoActionWorkerJob,
   };
 })();
