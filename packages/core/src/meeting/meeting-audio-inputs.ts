@@ -8,7 +8,7 @@ export function createMeetingAudioInputs({
   config,
   sessionId,
   artifactsDir,
-  allowNonGoogleMeet,
+  meetUrl,
   installRealtimeBridge,
   recordMeeting,
 }) {
@@ -24,10 +24,14 @@ export function createMeetingAudioInputs({
     backend: input.meetAudioBackend || config.meetAudioBackend,
     recappiTap: recappiTap || undefined,
   });
-  const realtimeRecappiAudioInput =
-    realtimeWantsMeetAudio && recorder.backend === "recappi" && !allowNonGoogleMeet && recappiTap
-      ? createRecappiRealtimeAudioInput({ sessionId, recappiTap })
-      : null;
+  const realtimeRecappiAudioInput = shouldUseRecappiRealtimeAudioInput({
+    meetUrl,
+    realtimeWantsMeetAudio,
+    recorderBackend: recorder.backend,
+    recappiTapAvailable: Boolean(recappiTap),
+  })
+    ? createRecappiRealtimeAudioInput({ sessionId, recappiTap })
+    : null;
   const realtimeAudioCapture =
     recordMeeting &&
     installRealtimeBridge &&
@@ -36,6 +40,28 @@ export function createMeetingAudioInputs({
       ? createWebRTCAudioCaptureSink({ sessionId, artifactsDir })
       : null;
   return { recorder, realtimeRecappiAudioInput, realtimeAudioCapture };
+}
+
+export function isGoogleMeetUrlForRealtimeAudio(meetUrl = "") {
+  return /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?#].*)?$/i.test(
+    String(meetUrl || "").trim(),
+  );
+}
+
+export function shouldUseRecappiRealtimeAudioInput({
+  platform = process.platform,
+  meetUrl,
+  realtimeWantsMeetAudio,
+  recorderBackend,
+  recappiTapAvailable,
+}) {
+  return (
+    platform === "darwin" &&
+    Boolean(realtimeWantsMeetAudio) &&
+    recorderBackend === "recappi" &&
+    Boolean(recappiTapAvailable) &&
+    isGoogleMeetUrlForRealtimeAudio(meetUrl)
+  );
 }
 
 export async function startRealtimeRecappiAudioInput({

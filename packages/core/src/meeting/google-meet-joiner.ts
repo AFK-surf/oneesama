@@ -2472,7 +2472,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         config,
         sessionId,
         artifactsDir,
-        allowNonGoogleMeet,
+        meetUrl,
         installRealtimeBridge,
         recordMeeting,
       });
