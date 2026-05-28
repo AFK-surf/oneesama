@@ -223,6 +223,18 @@ MAB_REQUIRE_HIYORI_LIVE2D=1 npm run smoke:hiyori-live2d
 
 Without `MAB_REQUIRE_HIYORI_LIVE2D=1`, this smoke skips cleanly when headless Chromium cannot initialize the true Cubism/PIXI Live2D renderer. With the flag set, it fails unless true Hiyori Live2D pixels render and mood/action state changes alter the captured frame.
 
+For operator-facing avatar/HUD iteration without Google Meet, start the standalone playground:
+
+```bash
+npm run dev:avatar-playground
+```
+
+Open the printed URL (defaults to `http://127.0.0.1:18912/`). The playground loads the avatar fake-camera runtime by itself, shows the HUD on the avatar frame, and lets you switch avatar presets plus runtime state presets (`Listening`, `Thinking`, `Speaking`, `Using Tool`, `Blocked`, `Done`). It is the fast local surface for tuning Live2D/VRM/fallback visuals, HUD placement, and future avatar-preset animation switches. Run the regression smoke with:
+
+```bash
+npm run smoke:avatar-playground
+```
+
 ## 5. Optional Real Integrations
 
 Set these only when you are ready to connect real providers:
