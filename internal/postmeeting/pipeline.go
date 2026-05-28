@@ -120,10 +120,17 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 			if warning != nil {
 				warnings = append(warnings, *warning)
 			}
-			var transcriptText string
-			segments, transcriptProvider, transcriptText = applyAudioASRTranscript(asrTranscript)
-			if transcriptText != "" {
-				summaryInput.TranscriptText = transcriptText
+			if len(segments) > 0 {
+				// Captions are not an ASR fallback, but they remain the speaker/timing
+				// transcript source when audio ASR is available only as review text.
+				transcriptProvider = "caption"
+				summaryInput.TranscriptText = renderTranscriptText(segments)
+			} else {
+				var transcriptText string
+				segments, transcriptProvider, transcriptText = applyAudioASRTranscript(asrTranscript)
+				if transcriptText != "" {
+					summaryInput.TranscriptText = transcriptText
+				}
 			}
 		}
 	}
@@ -312,7 +319,7 @@ func (p *Pipeline) calibrateTranscript(ctx context.Context, captionSegments []No
 		if isContextDone(ctx, err) {
 			return "", nil, err
 		}
-		warning := postProcessWarning("calibration_failed", "Transcript calibration failed; using audio ASR transcript.", err)
+		warning := postProcessWarning("calibration_failed", "Transcript calibration failed; using live captions with audio ASR kept as review source.", err)
 		return "", &warning, nil
 	}
 	return firstNonEmpty(calibrated), nil, nil

@@ -302,7 +302,7 @@ func TestPipelineFallsBackWhenConfiguredLLMSummaryFails(t *testing.T) {
 	assertFileContains(t, result.Artifact.Files.Summary, "Processing Warnings", "summary_failed")
 }
 
-func TestPipelineUsesAudioASRWhenCalibrationFails(t *testing.T) {
+func TestPipelineKeepsCaptionTranscriptWhenCalibrationFails(t *testing.T) {
 	t.Parallel()
 
 	audioPath := writeTestAudioFile(t, "audio.mp3", "fake audio")
@@ -328,10 +328,36 @@ func TestPipelineUsesAudioASRWhenCalibrationFails(t *testing.T) {
 	if len([]rune(result.Warnings[0].Detail)) > 515 {
 		t.Fatalf("warning detail length = %d, want truncated detail", len([]rune(result.Warnings[0].Detail)))
 	}
-	if result.Transcript.Provider != "asr:openai" || !strings.Contains(result.Transcript.Text, "ASR backup") {
-		t.Fatalf("transcript = %#v, want audio ASR fallback", result.Transcript)
+	if result.Transcript.Provider != "caption" || !strings.Contains(result.Transcript.Text, "Caption text survives calibration failure.") {
+		t.Fatalf("transcript = %#v, want caption transcript with speaker labels", result.Transcript)
 	}
-	if len(summarizer.summarizeSegments) != 1 || !strings.Contains(summarizer.summarizeSegments[0].Text, "ASR backup") {
+	if !strings.Contains(summarizer.summarizeInput.ASRTranscriptText, "ASR backup") {
+		t.Fatalf("summary ASR transcript = %q, want audio ASR kept as review source", summarizer.summarizeInput.ASRTranscriptText)
+	}
+	if len(summarizer.summarizeSegments) != 1 || !strings.Contains(summarizer.summarizeSegments[0].Text, "Caption text survives") {
+		t.Fatalf("summary segments = %#v, want caption transcript", summarizer.summarizeSegments)
+	}
+}
+
+func TestPipelineUsesAudioASRWhenNoCaptionTranscriptExists(t *testing.T) {
+	t.Parallel()
+
+	audioPath := writeTestAudioFile(t, "audio.mp3", "fake audio")
+	asr := &fakeASRProvider{
+		transcript: ASRTranscript{Provider: "openai", Text: "Peng: ASR-only transcript"},
+	}
+	summarizer := &fakePipelineSummarizer{
+		summary: Summary{Title: "ASR only", Highlights: []string{"no captions"}},
+	}
+	pipeline := NewPipeline(t.TempDir(), WithASRProvider(asr), WithSummarizer(summarizer))
+	result := mustPostProcess(t, pipeline, PostProcessInput{
+		Title:     "ASR only",
+		AudioPath: audioPath,
+	})
+	if result.Transcript.Provider != "asr:openai" || !strings.Contains(result.Transcript.Text, "ASR-only transcript") {
+		t.Fatalf("transcript = %#v, want audio ASR transcript when captions are absent", result.Transcript)
+	}
+	if len(summarizer.summarizeSegments) != 1 || !strings.Contains(summarizer.summarizeSegments[0].Text, "ASR-only transcript") {
 		t.Fatalf("summary segments = %#v, want audio ASR transcript", summarizer.summarizeSegments)
 	}
 }

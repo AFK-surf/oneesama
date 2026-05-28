@@ -111,7 +111,7 @@ export function buildGoogleMeetRuntimeSessionConfig({
     inputPolicy: {
       audioInputs: installRealtimeBridge ? ["meet_remote_audio"] : ["none"],
       // Caption/event observations may help identify the active speaker. They
-      // must not become transcript text, ASR, or Realtime user input.
+      // must not become Realtime user input or replace audio-derived ASR.
       textInputs: installRealtimeBridge ? ["meet_chat", "worker_internal"] : ["worker_internal"],
       continuousMic: false,
     },

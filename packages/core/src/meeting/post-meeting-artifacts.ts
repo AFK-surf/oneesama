@@ -798,21 +798,30 @@ export function createMeetingArtifactPipeline(options: MeetingArtifactInput = {}
         "audio ASR returned an empty transcript; captions are not allowed as ASR fallback",
       );
     }
-    const transcriptSource = asr.skipped
-      ? {
-          segments: input.segments || input.captions || input.transcript?.segments || [],
-          transcriptText: input.transcriptText || input.transcript?.text || input.text,
-        }
-      : {
-          segments: asr.segments || asr.captions || asr.transcript?.segments || [],
-          transcriptText: asr.text || asr.transcriptText || asr.transcript?.text,
-        };
-    const segments = normalizeSegments(transcriptSource);
+    const captionTranscriptSource = {
+      segments: input.segments || input.captions || input.transcript?.segments || [],
+      transcriptText: input.transcriptText || input.transcript?.text || input.text,
+    };
+    const captionSegments = normalizeSegments(captionTranscriptSource);
+    const audioAsrTranscriptSource = {
+      segments: asr.segments || asr.captions || asr.transcript?.segments || [],
+      transcriptText: asr.text || asr.transcriptText || asr.transcript?.text,
+    };
+    const audioAsrSegments = normalizeSegments(audioAsrTranscriptSource);
+    // Captions are not ASR, but they keep the best speaker labels for the
+    // transcript; audio ASR becomes the transcript only when captions are absent.
+    const segments = asr.skipped
+      ? captionSegments
+      : captionSegments.length
+        ? captionSegments
+        : audioAsrSegments;
     const transcriptProvider = asr.skipped
       ? segments.some((segment) => segment.source.includes("caption"))
         ? "caption"
         : "input"
-      : audioAsrTranscriptProvider(asr, provider);
+      : captionSegments.length
+        ? "caption"
+        : audioAsrTranscriptProvider(asr, provider);
     const transcript = {
       schema: "meeting-avatar-bot.transcript.v1",
       id,
