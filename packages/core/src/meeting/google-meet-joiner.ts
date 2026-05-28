@@ -10,6 +10,7 @@ import { buildAvatarRuntimeInitScripts } from "../avatar-runtime/runtime-init-bu
 import { validateGoogleMeetRuntimeSessionConfig } from "../avatar-runtime/google-meet-surface.ts";
 import { enableMeetCaptions, installMeetCaptionCapture } from "./caption-capture.ts";
 import { buildGoogleMeetChromiumArgs } from "./google-meet-launch-args.ts";
+import { ensureMeetCameraOff } from "./meet-camera-controls.ts";
 import { waitForMeetAdmission } from "./meet-admission.ts";
 import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
 import { createMeetingRecorder, listShareableApplications } from "./meeting-recorder.ts";
@@ -2769,6 +2770,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     }
 
     await collectButtonInventory(page, diagnostics, "pre-join-click");
+    if (!installAvatar) await ensureMeetCameraOff(page, diagnostics, "pre_join");
 
     let clicked = await clickMeetJoinButton(page, diagnostics, 45_000);
     if (!clicked)
@@ -2856,6 +2858,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         };
       }
     }
+    if (!installAvatar) await ensureMeetCameraOff(page, diagnostics, "post_admission");
     const avatarRendererStart =
       installAvatar && clicked
         ? await startAvatarRenderer(page, diagnostics)
