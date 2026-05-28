@@ -238,6 +238,30 @@
       };
     }
 
+    function appControlTargetLabel(args: Record<string, unknown> = {}) {
+      return String(args.applicationName || args.application_name || args.windowTitle || "共享应用")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 32);
+    }
+
+    function appControlResultNeedsPrimitiveFollowup(result: unknown) {
+      const record = recordFromUnknown(result);
+      const nested = recordFromUnknown(record.result);
+      const actions = [record.actions, nested.actions].flatMap((value) =>
+        Array.isArray(value) ? value.map((action) => String(action || "").toLowerCase()) : [],
+      );
+      const text = [record.summary, record.result, nested.summary, nested.reason, nested.error]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase())
+        .join("\n");
+      return (
+        (actions.length > 0 && actions.every((action) => action === "state")) ||
+        text.includes("structured_operations_required") ||
+        text.includes("continue with concrete")
+      );
+    }
+
     async function runLocalWorkspaceTool(name, args = {}) {
       if (!localWorkspaceTools.has(name))
         throw new Error(`unsupported local workspace tool: ${name}`);
@@ -248,10 +272,15 @@
           action: "think",
           holdMs: 30000,
         });
+      } else if (name === "control_shared_app_window") {
+        updateAvatarHudStatus("opening_preview", `正在操作 ${appControlTargetLabel(args)}`, {
+          mood: "thinking",
+          action: "lean_forward",
+          holdMs: 45000,
+        });
       } else if (
         name === "open_shared_browser_surface" ||
         name === "start_demo_surface" ||
-        name === "control_shared_app_window" ||
         name === "control_shared_browser_surface" ||
         name === "control_demo_surface"
       ) {
@@ -276,6 +305,28 @@
             action: "think",
             holdMs: 30000,
           });
+        }
+      }
+      if (name === "control_shared_app_window") {
+        const status = String((result as { status?: unknown })?.status || "")
+          .trim()
+          .toLowerCase();
+        if ((result as { ok?: boolean })?.ok === false) {
+          updateAvatarHudStatus("blocked", "操作受阻", { mood: "sad", action: "shrug" });
+        } else if (["queued", "accepted", "running", "started"].includes(status)) {
+          updateAvatarHudStatus("opening_preview", `正在操作 ${appControlTargetLabel(args)}`, {
+            mood: "thinking",
+            action: "lean_forward",
+            holdMs: 45000,
+          });
+        } else if (appControlResultNeedsPrimitiveFollowup(result)) {
+          updateAvatarHudStatus("thinking", "继续操作应用", {
+            mood: "thinking",
+            action: "think",
+            holdMs: 45000,
+          });
+        } else {
+          updateAvatarHudStatus("done", "操作完成", { mood: "happy", action: "emphasize" });
         }
       }
       return result;

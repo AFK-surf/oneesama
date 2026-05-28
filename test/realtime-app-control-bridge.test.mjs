@@ -594,6 +594,88 @@ test("Realtime app-control worker results are posted to Meet chat without voice 
   );
 });
 
+test("Realtime app-control state-only worker results continue with primitive operations", async () => {
+  await withRealtimeBridge(
+    async (page) => {
+      const delivery = await page.evaluate(() => {
+        window.__MAB_MEET_FIXTURE = { chatMessages: [] };
+        window.MAB_REALTIME_BRIDGE.protection.activeResponseId = "resp_current_turn";
+        window.MAB_REALTIME_BRIDGE.protection.outputAudioActive = true;
+        window.addEventListener("meeting-avatar-meet-chat-send", (event) => {
+          window.__MAB_MEET_FIXTURE.chatMessages.push({ text: event.detail.text });
+        });
+        return window.MAB_REALTIME_CLIENT.injectWorkerResult({
+          id: "app_control_state_only",
+          status: "completed",
+          mode: "app_control",
+          task: "在当前共享的 Pencil 画布上随便涂两笔。",
+          result:
+            "Captured shared app state. Continue with concrete click/type_text/press_key/scroll/drag operations.",
+          context: {
+            session_kind: "meeting_app_control",
+            meeting_session_id: "current_session",
+            source: "meeting-realtime-shared-app-control",
+            app_control_job_id: "app_control_state_only",
+          },
+        });
+      });
+
+      assert.equal(delivery.meetChat, null);
+      assert.equal(delivery.policy.channel, "silent");
+      assert.equal(delivery.policy.autoRespond, true);
+      assert.equal(delivery.policy.reason, "app_control_needs_primitive_followup");
+      assert.equal(delivery.interrupt.skipped, true);
+      assert.equal(delivery.meetingEvent.type, "app_control.running");
+      assert.equal(delivery.meetingEvent.visibility, "silent");
+      assert.equal(delivery.meetingEvent.detail.interruptedResponse, false);
+      assert.ok(delivery.itemChannel);
+      assert.ok(delivery.responseChannel);
+
+      const state = await page.evaluate(() => ({
+        chatMessages: window.__MAB_MEET_FIXTURE.chatMessages,
+        outbound: window.MAB_REALTIME_BRIDGE.outbound,
+        jobs: window.MAB_REALTIME_BRIDGE.turnPolicy.appControlJobs,
+        protection: window.MAB_REALTIME_BRIDGE.protection,
+      }));
+      assert.equal(state.chatMessages.length, 0);
+      assert.equal(
+        state.outbound.some((entry) => entry.event?.type === "response.cancel"),
+        false,
+      );
+      assert.equal(
+        state.outbound.some(
+          (entry) =>
+            entry.event?.type === "conversation.item.create" &&
+            entry.event?.item?.metadata?.source === "app_control" &&
+            entry.event?.item?.content?.[0]?.text?.includes(
+              "Continue by calling control_shared_app_window",
+            ),
+        ),
+        true,
+      );
+      assert.equal(
+        state.outbound.some(
+          (entry) =>
+            entry.event?.type === "response.create" &&
+            entry.event?.metadata?.source === "app_control" &&
+            entry.event?.response?.instructions?.includes(
+              "continue by calling control_shared_app_window",
+            ),
+        ),
+        true,
+      );
+      assert.equal(state.protection.cancelledResponses, 0);
+      assert.equal(state.jobs.app_control_state_only.status, "running");
+      assert.equal(state.jobs.app_control_state_only.visibility, "silent");
+      assert.equal(
+        state.jobs.app_control_state_only.reason,
+        "app_control_needs_primitive_followup",
+      );
+    },
+    { config: { sessionId: "current_session" } },
+  );
+});
+
 test("Realtime worker results from a different meeting session stay silent", async () => {
   await withRealtimeBridge(
     async (page) => {

@@ -122,6 +122,8 @@ export function createAvatarVisualTestHooks(sourceCanvas: HTMLCanvasElement, inp
       statusVisibleUntil: avatarController.state.statusVisibleUntil,
       statusUpdatedAt: avatarController.state.statusUpdatedAt,
     };
+    const hudRect =
+      (window as any).MAB_AVATAR_HUD_RECT?.() || { x: 580, y: 734, width: 760, height: 118 };
     try {
       const now = performance.now();
       avatarController.state.mood = normalizeEnum(snapshotInput.mood, allowedMoods, "neutral");
@@ -153,7 +155,7 @@ export function createAvatarVisualTestHooks(sourceCanvas: HTMLCanvasElement, inp
         hash: hashBytes(compact.data),
         face: metricsFromContext(testCtx, { x: 600, y: 130, width: 720, height: 680 }),
         mouth: metricsFromContext(testCtx, { x: 760, y: 430, width: 400, height: 250 }),
-        status: metricsFromContext(testCtx, { x: 40, y: 860, width: 820, height: 170 }),
+        status: metricsFromContext(testCtx, hudRect),
         dataUrl: snapshotInput.includeDataUrl ? testCanvas.toDataURL("image/png") : undefined,
       };
     } finally {
@@ -197,7 +199,15 @@ export function createAvatarVisualTestHooks(sourceCanvas: HTMLCanvasElement, inp
           hash: hashBytes(compact.data),
           face: metricsFromContext(testCtx, { x: 600, y: 130, width: 720, height: 680 }),
           mouth: metricsFromContext(testCtx, { x: 760, y: 430, width: 400, height: 250 }),
-          status: metricsFromContext(testCtx, { x: 40, y: 860, width: 820, height: 170 }),
+          status: metricsFromContext(
+            testCtx,
+            (window as any).MAB_AVATAR_HUD_RECT?.() || {
+              x: 580,
+              y: 734,
+              width: 760,
+              height: 118,
+            },
+          ),
           dataUrl: captureInput.includeDataUrl ? testCanvas.toDataURL("image/png") : undefined,
         };
       } catch (error) {

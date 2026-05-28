@@ -1,3 +1,21 @@
+function updateAppControlWorkerHud(job, delivery) {
+  if (shouldVoiceAckWorkerResult(job)) return;
+  const status = String(job?.status || "")
+    .trim()
+    .toLowerCase();
+  if (delivery?.policy?.reason === "app_control_needs_primitive_followup") {
+    updateAvatarHudStatus("thinking", "继续操作应用", {
+      mood: "thinking",
+      action: "think",
+      holdMs: 45000,
+    });
+  } else if (status === "failed" || status === "timeout") {
+    updateAvatarHudStatus("blocked", "操作受阻", { mood: "sad", action: "shrug" });
+  } else if (status === "completed") {
+    updateAvatarHudStatus("done", "操作完成", { mood: "happy", action: "emphasize" });
+  }
+}
+
 async function injectWorkerResult(job) {
   const scope = shouldDeliverWorkerResult(job);
   if (!scope.ok) {
@@ -27,6 +45,7 @@ async function injectWorkerResult(job) {
     ? cancelActiveResponse("worker_result_ready")
     : { skipped: true, reason: "worker_result_meet_chat_only" };
   const delivery = await deliverWorkerResult(job, { interrupt });
+  updateAppControlWorkerHud(job, delivery);
   state.workerResults.push(delivery);
   state.workerResults = state.workerResults.slice(-50);
   return delivery;

@@ -530,16 +530,20 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
     ctx.restore();
   }
 
+  function avatarHudRect() {
+    const { canvasWidth: w, canvasHeight: h } = config;
+    const width = Math.min(760, w * 0.62);
+    const height = 118;
+    return { x: (w - width) / 2, y: Math.min(h - height - 56, h * 0.68), width, height };
+  }
+
+  (window as any).MAB_AVATAR_HUD_RECT = avatarHudRect;
+
   function drawAvatarHud(ctx) {
     const status = avatarController.visibleStatus();
     if (!status) return;
-    const { canvasWidth: w, canvasHeight: h } = config;
     const colors = STATUS_COLORS[status.kind] || STATUS_COLORS.thinking;
-    const margin = 56;
-    const maxWidth = Math.min(760, w - margin * 2);
-    const x = margin;
-    const y = h - 174;
-    const height = 118;
+    const { x, y, width, height } = avatarHudRect();
     const radius = 28;
     const label = STATUS_LABELS[status.kind] || "Working";
     const text = status.text;
@@ -549,7 +553,7 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
     ctx.shadowBlur = 24;
     ctx.shadowOffsetY = 8;
     ctx.fillStyle = colors.bg;
-    drawRoundRect(ctx, x, y, maxWidth, height, radius);
+    drawRoundRect(ctx, x, y, width, height, radius);
     ctx.fill();
     ctx.shadowColor = "transparent";
     ctx.fillStyle = colors.accent;
@@ -561,7 +565,7 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
     ctx.fillText(label, x + 56, y + 40);
     ctx.fillStyle = "#ffffff";
     ctx.font = "800 36px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(text, x + 56, y + 86, maxWidth - 86);
+    ctx.fillText(text, x + 56, y + 86, width - 86);
     ctx.restore();
   }
 

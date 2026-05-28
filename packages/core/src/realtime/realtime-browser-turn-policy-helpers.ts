@@ -198,6 +198,71 @@
       );
     }
 
+    function workerResultEnvelope(job: any): Record<string, unknown> {
+      return resultRecord(job?.resultEnvelope || job?.result_envelope);
+    }
+
+    function workerResultMeetingSessionId(job: any): string {
+      const context = resultRecord(job?.context);
+      return firstNonEmptyString(
+        context.meeting_session_id,
+        context.session_id,
+        context.sessionId,
+        job?.session_id,
+        job?.sessionId,
+      );
+    }
+
+    function appControlWorkerNeedsPrimitiveFollowup(job: any): boolean {
+      if (shouldVoiceAckWorkerResult(job)) return false;
+      if (String(job?.status || "").trim().toLowerCase() !== "completed") return false;
+      const envelope = workerResultEnvelope(job);
+      const result = resultRecord(envelope.result);
+      const actions = [job?.actions, envelope.actions, result.actions].flatMap((value) =>
+        Array.isArray(value)
+          ? value
+              .map((action) =>
+                String(action || "")
+                  .trim()
+                  .toLowerCase(),
+              )
+              .filter(Boolean)
+          : [],
+      );
+      const text = [
+        job?.result,
+        job?.error,
+        job?.blocker,
+        job?.summary,
+        envelope.summary,
+        envelope.result,
+        envelope.error,
+        envelope.blocker,
+        result.summary,
+        result.reason,
+        result.error,
+        result.blocker,
+      ]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase())
+        .join("\n");
+      return (
+        (actions.length > 0 && actions.every((action) => action === "state")) ||
+        text.includes("structured_operations_required") ||
+        text.includes("continue with concrete")
+      );
+    }
+
+    function buildAppControlWorkerFollowupText(job: any): string {
+      return [
+        "Queued app-control did not finish the user's requested edit yet.",
+        `Task: ${job?.task || job?.id || "app-control job"}`,
+        "State was captured, but no concrete click/type/press/scroll/drag operation has executed yet.",
+        "Do not summarize this as completed and do not ask the user to perform it.",
+        "Continue by calling control_shared_app_window again with concrete primitive operations such as click, type_text, press_key, scroll, or drag.",
+      ].join("\n");
+    }
+
     function appControlIsAsyncAccepted(result: unknown): boolean {
       return ["accepted", "queued", "running", "started"].includes(resultStatus(result));
     }
@@ -502,7 +567,9 @@
       if (!scope.ok) return rememberSuppressedWorkerResult(job, scope.reason, scope);
 
       let chatDelivery = null;
-      const sendToMeetChat = shouldSendWorkerResultToMeetChat(job);
+      const appControlPrimitiveFollowup = appControlWorkerNeedsPrimitiveFollowup(job);
+      const sendToMeetChat =
+        !appControlPrimitiveFollowup && shouldSendWorkerResultToMeetChat(job);
       const voiceAck = shouldVoiceAckWorkerResult(job);
       if (sendToMeetChat) {
         chatDelivery = await sendMeetChat({ text: buildWorkerResultChatText(job) }).catch(
@@ -513,18 +580,41 @@
         );
       }
       const policy: RealtimeTurnPolicy = {
-        channel: sendToMeetChat ? "meet_chat" : "voice",
-        autoRespond: voiceAck && config.autoRespondToWorkerResults !== false,
-        reason: sendToMeetChat
-          ? voiceAck
-            ? "worker_result_sent_to_meet_chat"
-            : "app_control_result_sent_to_meet_chat"
-          : "worker_result_voice_summary",
-        responseInstructions:
-          "Summarize the completed background result proactively in concise Chinese without mentioning internal routing names.",
+        channel: appControlPrimitiveFollowup ? "silent" : sendToMeetChat ? "meet_chat" : "voice",
+        autoRespond: appControlPrimitiveFollowup
+          ? true
+          : voiceAck && config.autoRespondToWorkerResults !== false,
+        reason: appControlPrimitiveFollowup
+          ? "app_control_needs_primitive_followup"
+          : sendToMeetChat
+            ? voiceAck
+              ? "worker_result_sent_to_meet_chat"
+              : "app_control_result_sent_to_meet_chat"
+            : "worker_result_voice_summary",
+        responseInstructions: appControlPrimitiveFollowup
+          ? "The queued app-control state probe only captured state. Do not speak, do not ask the user to do the action, and continue by calling control_shared_app_window again with concrete primitive operations such as click, type_text, press_key, scroll, or drag."
+          : "Summarize the completed background result proactively in concise Chinese without mentioning internal routing names.",
       };
       let itemChannel = "";
-      if (voiceAck || !sendToMeetChat) {
+      if (appControlPrimitiveFollowup) {
+        itemChannel = sendRealtimeEvent({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "system",
+            metadata: {
+              source: "app_control",
+              jobId: job.id || "",
+            },
+            content: [
+              {
+                type: "input_text",
+                text: buildAppControlWorkerFollowupText(job),
+              },
+            ],
+          },
+        });
+      } else if (voiceAck || !sendToMeetChat) {
         itemChannel = sendRealtimeEvent({
           type: "conversation.item.create",
           item: {
@@ -550,7 +640,7 @@
         responseChannel = sendRealtimeEvent({
           type: "response.create",
           metadata: {
-            source: "worker_result",
+            source: appControlPrimitiveFollowup ? "app_control" : "worker_result",
             reason: policy.reason,
           },
           response: { instructions: policy.responseInstructions },
@@ -567,27 +657,51 @@
         itemChannel,
         responseChannel,
       });
-      const event = meetingEvents.rememberMeetingEvent({
-        type: `worker_result.${String(job.status || "completed").toLowerCase()}`,
-        source: "worker",
-        sessionId: firstNonEmptyString(
-          resultRecord(job.context).meeting_session_id,
-          resultRecord(job.context).session_id,
-          resultRecord(job.context).sessionId,
-          job.session_id,
-          job.sessionId,
-        ),
-        turnId: job.id || "",
-        jobId: job.id || "",
-        status: job.status || "",
-        visibility: policy.channel,
-        interruptible: meetingEvents.eventIsInterruptible(policy.channel),
-        reason: policy.reason,
-        detail: {
-          chatOk: chatDelivery ? chatDelivery.ok === true : false,
-          interruptedResponse: Boolean(options.interrupt && !(options.interrupt as any).skipped),
-        },
-      });
+      const sessionId = workerResultMeetingSessionId(job);
+      const event = appControlPrimitiveFollowup
+        ? meetingEvents.rememberMeetingEvent({
+            type: "app_control.running",
+            source: "app_control",
+            sessionId,
+            turnId: job.id || "",
+            jobId: job.id || "",
+            status: "running",
+            visibility: policy.channel,
+            interruptible: meetingEvents.eventIsInterruptible(policy.channel),
+            reason: policy.reason,
+            detail: {
+              chatOk: false,
+              interruptedResponse: Boolean(options.interrupt && !(options.interrupt as any).skipped),
+              workerStatus: job.status || "",
+            },
+          })
+        : meetingEvents.rememberMeetingEvent({
+            type: `worker_result.${String(job.status || "completed").toLowerCase()}`,
+            source: "worker",
+            sessionId,
+            turnId: job.id || "",
+            jobId: job.id || "",
+            status: job.status || "",
+            visibility: policy.channel,
+            interruptible: meetingEvents.eventIsInterruptible(policy.channel),
+            reason: policy.reason,
+            detail: {
+              chatOk: chatDelivery ? chatDelivery.ok === true : false,
+              interruptedResponse: Boolean(options.interrupt && !(options.interrupt as any).skipped),
+            },
+          });
+      if (appControlPrimitiveFollowup) {
+        meetingEvents.rememberAppControlJob({
+          event,
+          sessionId,
+          callId: "",
+          jobId: job.id || "",
+          status: "running",
+          visibility: policy.channel,
+          interruptible: Boolean(event.interruptible),
+          reason: policy.reason,
+        });
+      }
       return {
         ts: new Date().toISOString(),
         jobId: job.id,
