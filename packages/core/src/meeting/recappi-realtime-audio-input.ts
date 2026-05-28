@@ -136,7 +136,7 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
       source: state.source,
       sampleRate: state.sampleRate || 48000,
       channels: state.channels || 2,
-      samples,
+      samples: Array.from(samples, (sample) => Number(sample || 0)),
     };
     pendingPayloads.push(payload);
     refreshPendingPushes();

@@ -138,11 +138,23 @@ function resampleRecappiSamples(monoSamples: Float32Array, sourceRate: number, t
   return output;
 }
 
+function normalizeRecappiSamples(value: unknown) {
+  if (Array.isArray(value)) return value as number[];
+  const arrayLike = value as any;
+  if (ArrayBuffer.isView(value) && typeof arrayLike.length === "number") {
+    return Array.from(arrayLike as ArrayLike<number>, (sample) => Number(sample || 0));
+  }
+  if (value && typeof value === "object" && typeof arrayLike.length === "number") {
+    return Array.from(arrayLike as ArrayLike<number>, (sample) => Number(sample || 0));
+  }
+  return [];
+}
+
 function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   if (config.meetAudioInputSource !== "recappi_process_audio") {
     return { ok: false, error: "recappi_audio_input_disabled" };
   }
-  const samples = Array.isArray(payload.samples) ? (payload.samples as number[]) : [];
+  const samples = normalizeRecappiSamples(payload.samples);
   if (!samples.length) return { ok: false, error: "empty_recappi_audio_samples" };
   ensureRecappiAudioInputNode(payload);
   const mono = downmixRecappiSamples(samples, payload.channels);
