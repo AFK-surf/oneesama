@@ -50,18 +50,26 @@ function injectCaptionTurn(
   state.connection.captionTurnsObserved = (state.connection.captionTurnsObserved || 0) + 1;
   state.connection.lastCaptionTurnAt = new Date().toISOString();
   state.connection.lastCaptionTurnSpeaker = speaker;
-  state.connection.lastCaptionTurnText = text.slice(0, 500);
-  // Observation only: captions help diagnostics, but they never become ASR or
-  // Realtime model input. The speech path is the Meet audio mix.
+  state.connection.lastCaptionTurnText = "";
+  state.connection.lastCaptionTurnTextChars = text.length;
+  // Observation only: caption/event turns may identify the active speaker, but
+  // their transcript text is not useful Realtime input. The speech path is the
+  // Meet audio mix.
   recordTimeline("meet_caption_turn_observed", {
     speaker,
     streamId,
     chars: text.length,
     ignored: true,
-    reason: "caption_turn_realtime_input_disabled",
+    reason: "caption_turn_speaker_signal_only",
   });
   updateFeedback();
-  return { ok: true, skipped: true, reason: "caption_turn_realtime_input_disabled", streamId };
+  return {
+    ok: true,
+    skipped: true,
+    reason: "caption_turn_speaker_signal_only",
+    streamId,
+    speakerSignal: { name: speaker, streamId },
+  };
 }
 
 async function simulateRealtimeAgentToolCall(name, args = {}) {

@@ -236,7 +236,6 @@ interface MeetSpeakerSignal {
   confidence: "low" | "medium" | "high";
   observedAt: string;
   rawLabel?: string;
-  text?: string;
   identity?: SpeakerIdentityResolution | null;
 }
 
@@ -1606,7 +1605,6 @@ function captionSpeakerSignal(event: any): MeetSpeakerSignal | null {
     source: event?.source || "google-meet-caption-dom",
     confidence: "high",
     observedAt: String(event?.ts || event?.timestamp || nowIso()),
-    text: String(event?.text || "").slice(0, 240),
   };
 }
 
@@ -1832,7 +1830,6 @@ function logMeetingAwarenessDebug(
           source: activeSpeaker.source,
           confidence: activeSpeaker.confidence,
           identity: activeSpeaker.identity || null,
-          text: activeSpeaker.text || "",
         }
       : null,
     pushResult: pushResult || null,

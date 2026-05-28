@@ -276,6 +276,7 @@ const state = {
     lastCaptionTurnAt: "",
     lastCaptionTurnSpeaker: "",
     lastCaptionTurnText: "",
+    lastCaptionTurnTextChars: 0,
     sentDataChannelMessages: [],
     lastTokenError: null as null | Record<string, unknown>,
     lastSdpError: null as null | Record<string, unknown>,

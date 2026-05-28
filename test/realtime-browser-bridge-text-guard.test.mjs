@@ -114,6 +114,8 @@ test("Realtime bridge observes Meet caption turns without using them as model in
         responsesRequested: window.MAB_REALTIME_BRIDGE.responsesRequested,
         captionTurnsObserved: window.MAB_REALTIME_BRIDGE.connection.captionTurnsObserved,
         captionTurnsInjected: window.MAB_REALTIME_BRIDGE.connection.captionTurnsInjected,
+        lastCaptionTurnText: window.MAB_REALTIME_BRIDGE.connection.lastCaptionTurnText,
+        lastCaptionTurnTextChars: window.MAB_REALTIME_BRIDGE.connection.lastCaptionTurnTextChars,
         outbound: window.MAB_REALTIME_BRIDGE.outbound.map((entry) => entry.event),
         wireEvents,
         timeline: window.MAB_REALTIME_BRIDGE.timeline
@@ -123,10 +125,16 @@ test("Realtime bridge observes Meet caption turns without using them as model in
     });
 
     assert.equal(result.skipped.skipped, true);
-    assert.equal(result.skipped.reason, "caption_turn_realtime_input_disabled");
+    assert.equal(result.skipped.reason, "caption_turn_speaker_signal_only");
+    assert.deepEqual(result.skipped.speakerSignal, {
+      name: "Peng Xiao",
+      streamId: "caption-1",
+    });
     assert.equal(result.responsesRequested, 0);
     assert.equal(result.captionTurnsObserved, 1);
     assert.equal(result.captionTurnsInjected, 0);
+    assert.equal(result.lastCaptionTurnText, "");
+    assert.equal(result.lastCaptionTurnTextChars, "现在还是不理我".length);
     assert.deepEqual(result.timeline, ["meet_caption_turn_observed"]);
     assert.equal(result.outbound.length, 0);
     assert.equal(result.wireEvents.length, 0);
@@ -176,7 +184,7 @@ test("Realtime bridge does not resurrect caption fallback for duplicate streams"
     });
 
     assert.equal(result.duplicate.skipped, true);
-    assert.equal(result.duplicate.reason, "caption_turn_realtime_input_disabled");
+    assert.equal(result.duplicate.reason, "caption_turn_speaker_signal_only");
     assert.equal(result.responsesRequested, 0);
     assert.equal(result.captionTurnsObserved, 2);
     assert.equal(result.captionTurnsInjected, 0);
