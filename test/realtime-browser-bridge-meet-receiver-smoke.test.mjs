@@ -175,6 +175,7 @@ async function installRealtimeHarness(page, harnessOptions = {}) {
       forwardMeetAudioToRealtime: true,
       includeParticipantAudio: true,
       meetAudioInputSource: harnessOptions.meetAudioInputSource || "webrtc",
+      recappiInputNoiseGateRms: harnessOptions.recappiInputNoiseGateRms,
       captureMeetAudioForTranscript: false,
       meetAudioEnergyStaleMs: 1000,
     }),
@@ -458,6 +459,78 @@ test("Recappi process audio input feeds the routing mix without RTC tracks", asy
     assert.equal(result.connection.meetAudioSourcesUnmuted, 1);
     assert.equal(result.connection.meetAudioEnergy.observed, true);
     assert.equal(result.feedback.failureMatrix.audioInput.status, "ok");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Recappi process audio drops low-level process noise before Realtime input", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, {
+      meetAudioInputSource: "recappi_process_audio",
+      recappiInputNoiseGateRms: 0.003,
+    });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      const sampleRate = 48000;
+      const channels = 2;
+      const quiet = [];
+      const speech = [];
+      for (let frame = 0; frame < 4096; frame += 1) {
+        const phase = (frame / sampleRate) * Math.PI * 2 * 440;
+        const quietValue = Math.sin(phase) * 0.00001;
+        const speechValue = Math.sin(phase) * 0.05;
+        quiet.push(quietValue, quietValue);
+        speech.push(speechValue, speechValue);
+      }
+
+      let suppressed = null;
+      for (let index = 0; index < 8; index += 1) {
+        suppressed = window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+          source: "recappi_process_audio",
+          sampleRate,
+          channels,
+          samples: quiet,
+        });
+      }
+      await wait(250);
+      const afterNoise = {
+        recappi: { ...window.MAB_REALTIME_BRIDGE.connection.recappiAudioInput },
+        energy: { ...window.MAB_REALTIME_BRIDGE.connection.meetAudioEnergy },
+      };
+
+      let accepted = null;
+      for (let index = 0; index < 8; index += 1) {
+        accepted = window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+          source: "recappi_process_audio",
+          sampleRate,
+          channels,
+          samples: speech,
+        });
+      }
+      await wait(750);
+      return {
+        suppressed,
+        accepted,
+        afterNoise,
+        connection: window.MAB_REALTIME_BRIDGE.connection,
+      };
+    });
+
+    assert.equal(result.suppressed.ok, true);
+    assert.equal(result.suppressed.suppressed, true);
+    assert.equal(result.suppressed.reason, "recappi_audio_below_noise_gate");
+    assert.equal(result.afterNoise.recappi.noiseSuppressedChunks, 8);
+    assert.equal(result.afterNoise.recappi.samplesQueued, 0);
+    assert.equal(result.afterNoise.energy.observed, false);
+    assert.equal(result.accepted.ok, true);
+    assert.equal(result.accepted.suppressed, undefined);
+    assert.equal(result.connection.recappiAudioInput.noiseSuppressedChunks, 8);
+    assert.equal(result.connection.currentRealtimeInputSource, "recappi_process_audio_tap");
+    assert.equal(result.connection.meetAudioEnergy.observed, true);
   } finally {
     await browser.close();
   }

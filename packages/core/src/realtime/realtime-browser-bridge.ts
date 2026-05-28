@@ -47,6 +47,7 @@ interface RealtimeBridgeConfig {
   captureMeetAudioForTranscript?: boolean;
   meetAudioCaptureChunkMs?: number;
   meetAudioInputGain?: number;
+  recappiInputNoiseGateRms?: number;
   meetAudioEnergyStaleMs?: number;
   instructions: string;
   tools: any[];
@@ -111,6 +112,7 @@ const config: RealtimeBridgeConfig = {
   // Google Meet remote receiver tracks can arrive much quieter than browser mic tracks.
   // Keep this high enough for Realtime VAD while still bounded below clipping.
   meetAudioInputGain: DEFAULT_MEET_AUDIO_INPUT_GAIN,
+  recappiInputNoiseGateRms: 0.003,
   meetAudioEnergyStaleMs: 10000,
   instructions: "",
   tools: [],
