@@ -1,21 +1,24 @@
 import { createAvatarPlaygroundServer } from "./avatar-playground.ts";
 
-function envFlag(name: string, defaultValue = false) {
+function optionalEnvFlag(name: string) {
   const value = process.env[name];
-  if (value == null || value === "") return defaultValue;
+  if (value == null || value === "") return undefined;
   return !["0", "false", "no", "off"].includes(value.toLowerCase());
 }
+
+const disableLive2D = optionalEnvFlag("MAB_AVATAR_PLAYGROUND_DISABLE_LIVE2D");
+const avatar = {
+  modelUrl: process.env.MAB_AVATAR_PLAYGROUND_MODEL_URL,
+  vrmModelUrl: process.env.MAB_AVATAR_PLAYGROUND_VRM_MODEL_URL,
+  live2dDepsDir: process.env.MAB_AVATAR_DEPS_DIR,
+  ...(disableLive2D == null ? {} : { disableLive2D }),
+};
 
 const playground = createAvatarPlaygroundServer({
   host: process.env.MAB_AVATAR_PLAYGROUND_HOST || "127.0.0.1",
   port: Number(process.env.MAB_AVATAR_PLAYGROUND_PORT || 18912),
   botName: process.env.MAB_AVATAR_PLAYGROUND_BOT_NAME || "Oneesama",
-  avatar: {
-    modelUrl: process.env.MAB_AVATAR_PLAYGROUND_MODEL_URL,
-    vrmModelUrl: process.env.MAB_AVATAR_PLAYGROUND_VRM_MODEL_URL,
-    live2dDepsDir: process.env.MAB_AVATAR_DEPS_DIR,
-    disableLive2D: envFlag("MAB_AVATAR_PLAYGROUND_DISABLE_LIVE2D", false),
-  },
+  avatar,
 });
 
 const started = await playground.listen();

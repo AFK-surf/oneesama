@@ -36,20 +36,20 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, { accent: string; bg: string }> = {
-  idle: { accent: "#64748b", bg: "rgba(15, 23, 42, 0.78)" },
-  thinking: { accent: "#38bdf8", bg: "rgba(15, 23, 42, 0.78)" },
-  writing_code: { accent: "#a78bfa", bg: "rgba(24, 24, 27, 0.82)" },
-  opening_preview: { accent: "#34d399", bg: "rgba(6, 78, 59, 0.82)" },
-  blocked: { accent: "#fb7185", bg: "rgba(127, 29, 29, 0.84)" },
-  done: { accent: "#4ade80", bg: "rgba(20, 83, 45, 0.82)" },
+  idle: { accent: "#94a3b8", bg: "rgba(9, 13, 18, 0.58)" },
+  thinking: { accent: "#38bdf8", bg: "rgba(9, 13, 18, 0.62)" },
+  writing_code: { accent: "#c084fc", bg: "rgba(9, 13, 18, 0.64)" },
+  opening_preview: { accent: "#2dd4bf", bg: "rgba(9, 13, 18, 0.66)" },
+  blocked: { accent: "#fb7185", bg: "rgba(18, 11, 13, 0.72)" },
+  done: { accent: "#86efac", bg: "rgba(10, 17, 13, 0.64)" },
 };
 
 const SIGNAL_COLORS: Record<HudSignal["level"], { dot: string; bg: string; text: string }> = {
-  ok: { dot: "#4ade80", bg: "rgba(20, 83, 45, 0.64)", text: "#dcfce7" },
-  active: { dot: "#38bdf8", bg: "rgba(14, 116, 144, 0.58)", text: "#e0f2fe" },
-  warn: { dot: "#fbbf24", bg: "rgba(120, 53, 15, 0.58)", text: "#fef3c7" },
-  blocked: { dot: "#fb7185", bg: "rgba(127, 29, 29, 0.62)", text: "#ffe4e6" },
-  idle: { dot: "#94a3b8", bg: "rgba(51, 65, 85, 0.58)", text: "#e2e8f0" },
+  ok: { dot: "#7ddf9b", bg: "rgba(125, 223, 155, 0.12)", text: "#e8fff0" },
+  active: { dot: "#38d5df", bg: "rgba(56, 213, 223, 0.16)", text: "#e6fcff" },
+  warn: { dot: "#f2b84b", bg: "rgba(242, 184, 75, 0.15)", text: "#fff3d6" },
+  blocked: { dot: "#fb7185", bg: "rgba(251, 113, 133, 0.16)", text: "#ffe9ed" },
+  idle: { dot: "#a7b0bf", bg: "rgba(167, 176, 191, 0.11)", text: "#edf2f8" },
 };
 
 function drawRoundRect(
@@ -215,21 +215,24 @@ function drawChip(
   width: number,
 ) {
   const colors = SIGNAL_COLORS[signal.level];
-  drawRoundRect(ctx, x, y, width, 34, 17);
+  drawRoundRect(ctx, x, y, width, 30, 15);
   ctx.fillStyle = colors.bg;
   ctx.fill();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.10)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
   ctx.fillStyle = colors.dot;
   ctx.beginPath();
-  ctx.arc(x + 18, y + 17, 5.5, 0, Math.PI * 2);
+  ctx.arc(x + 15, y + 15, 4.2, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = colors.text;
-  ctx.font = "700 15px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  ctx.textAlign = "left";
-  ctx.fillText(signal.label, x + 31, y + 22);
-  ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
   ctx.font = "700 13px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(signal.label, x + 25, y + 20);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
+  ctx.font = "700 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   ctx.textAlign = "right";
-  ctx.fillText(signal.value, x + width - 12, y + 22);
+  ctx.fillText(signal.value, x + width - 10, y + 20);
 }
 
 export function createAvatarHud(options: {
@@ -240,9 +243,9 @@ export function createAvatarHud(options: {
 
   function rect(): HudRect {
     const { canvasWidth: w, canvasHeight: h } = config;
-    const width = Math.min(820, w * 0.64);
-    const height = 142;
-    return { x: (w - width) / 2, y: Math.min(h - height - 52, h * 0.66), width, height };
+    const width = Math.min(700, w * 0.55);
+    const height = 112;
+    return { x: (w - width) / 2, y: Math.min(h - height - 54, h * 0.68), width, height };
   }
 
   function draw(ctx: CanvasRenderingContext2D) {
@@ -256,28 +259,32 @@ export function createAvatarHud(options: {
     const label = status ? STATUS_LABELS[statusKind] || "Working" : "Realtime";
     const errorSummary = trimHudText(latestErrorSummary(bridgeState()), 52);
     const text = trimHudText(status?.text || errorSummary || "waiting for meeting signal", 78);
-    const chipWidth = (width - 84) / 5;
+    const chipWidth = (width - 68) / 5;
 
     ctx.save();
-    ctx.shadowColor = "rgba(15, 23, 42, 0.30)";
-    ctx.shadowBlur = 24;
-    ctx.shadowOffsetY = 8;
+    ctx.shadowColor = "rgba(0, 0, 0, 0.32)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 10;
     ctx.fillStyle = colors.bg;
-    drawRoundRect(ctx, x, y, width, height, 28);
+    drawRoundRect(ctx, x, y, width, height, 22);
     ctx.fill();
     ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.shadowColor = "transparent";
     ctx.fillStyle = colors.accent;
-    drawRoundRect(ctx, x + 22, y + 24, 16, 70, 8);
+    drawRoundRect(ctx, x + 18, y + 18, 8, 48, 4);
     ctx.fill();
-    ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
-    ctx.font = "700 22px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.70)";
+    ctx.font = "800 17px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText(label, x + 56, y + 39);
+    ctx.fillText(label, x + 40, y + 35);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "800 34px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(text, x + 56, y + 82, width - 86);
+    ctx.font = "800 28px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillText(text, x + 40, y + 70, width - 70);
     signals.forEach((signal, index) => {
-      drawChip(ctx, signal, x + 22 + index * (chipWidth + 10), y + 102, chipWidth);
+      drawChip(ctx, signal, x + 18 + index * (chipWidth + 8), y + 78, chipWidth);
     });
     ctx.restore();
   }

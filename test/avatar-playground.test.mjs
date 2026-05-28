@@ -14,6 +14,8 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
     await page.waitForFunction(() => window.MAB_AVATAR_PLAYGROUND?.state?.ready === true, null, {
       timeout: 10_000,
     });
+    const renderer = await page.evaluate(() => window.MAB_AVATAR_RENDERER?.renderer);
+    assert.equal(renderer, "fallback");
     const listening = await page.evaluate(() =>
       window.MAB_AVATAR_PLAYGROUND.applyPreset("listening"),
     );

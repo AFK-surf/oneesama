@@ -25,6 +25,8 @@ export interface AvatarPlaygroundServer {
 type AvatarPreset = {
   id: string;
   name: string;
+  shortName: string;
+  icon: string;
   note: string;
   avatar: Partial<HiyoriAvatarConfig>;
 };
@@ -32,6 +34,7 @@ type AvatarPreset = {
 type StatePreset = {
   id: string;
   name: string;
+  icon: string;
   description: string;
   mood: string;
   action: string;
@@ -52,27 +55,49 @@ const AVATAR_PRESETS: AvatarPreset[] = [
   {
     id: "hiyori-live2d",
     name: "Hiyori Live2D",
+    shortName: "Hiyori",
+    icon: "H",
     note: "Default Live2D renderer with network/CDN fallback.",
-    avatar: { avatarRenderer: "live2d", disableLive2D: false },
+    avatar: { avatarRenderer: "live2d", disableLive2D: false, background: "#12161d" },
   },
   {
     id: "fallback-canvas",
     name: "Fallback Canvas",
+    shortName: "Fallback",
+    icon: "F",
     note: "Deterministic canvas avatar for fast local iteration.",
-    avatar: { avatarRenderer: "live2d", disableLive2D: true },
+    avatar: { avatarRenderer: "live2d", disableLive2D: true, background: "#e9edf2" },
   },
   {
     id: "vrm-preview",
     name: "VRM Preview",
+    shortName: "VRM",
+    icon: "3D",
     note: "Experimental 3D/VRM renderer; falls back if WebGL/deps are unavailable.",
-    avatar: { avatarRenderer: "vrm", disableLive2D: true },
+    avatar: { avatarRenderer: "vrm", disableLive2D: true, background: "#11161f" },
   },
 ];
 
 const STATE_PRESETS: StatePreset[] = [
   {
+    id: "idle",
+    name: "Idle",
+    icon: "I",
+    description: "Renderer is calm, connected, and waiting.",
+    mood: "neutral",
+    action: "idle",
+    intensity: 0.65,
+    statusKind: "idle",
+    statusText: "",
+    audioSource: "recappi_process_audio_tap",
+    audioStatus: "healthy",
+    voice: "idle",
+    tool: "idle",
+  },
+  {
     id: "listening",
     name: "Listening",
+    icon: "L",
     description: "Connected and waiting for the human voice turn.",
     mood: "thinking",
     action: "idle",
@@ -87,6 +112,7 @@ const STATE_PRESETS: StatePreset[] = [
   {
     id: "thinking",
     name: "Thinking",
+    icon: "T",
     description: "Realtime has heard the user and is preparing a response.",
     mood: "thinking",
     action: "think",
@@ -101,6 +127,7 @@ const STATE_PRESETS: StatePreset[] = [
   {
     id: "speaking",
     name: "Speaking",
+    icon: "S",
     description: "Realtime output audio is active.",
     mood: "happy",
     action: "speak",
@@ -115,6 +142,7 @@ const STATE_PRESETS: StatePreset[] = [
   {
     id: "tool",
     name: "Using Tool",
+    icon: "CU",
     description: "App-control/CU is operating a shared window.",
     mood: "thinking",
     action: "lean_forward",
@@ -129,6 +157,7 @@ const STATE_PRESETS: StatePreset[] = [
   {
     id: "blocked",
     name: "Blocked",
+    icon: "!",
     description: "A tool or runtime blocker needs operator attention.",
     mood: "sad",
     action: "shrug",
@@ -144,6 +173,7 @@ const STATE_PRESETS: StatePreset[] = [
   {
     id: "done",
     name: "Done",
+    icon: "✓",
     description: "Tool completed and user-facing confirmation should stay visual.",
     mood: "happy",
     action: "emphasize",
@@ -154,6 +184,21 @@ const STATE_PRESETS: StatePreset[] = [
     audioStatus: "healthy",
     voice: "ready",
     tool: "done",
+  },
+  {
+    id: "snapshot",
+    name: "Snapshot",
+    icon: "◎",
+    description: "Presentation-ready pose for inspecting composition.",
+    mood: "happy",
+    action: "wave",
+    intensity: 1,
+    statusKind: "done",
+    statusText: "预设快照",
+    audioSource: "recappi_process_audio_tap",
+    audioStatus: "healthy",
+    voice: "ready",
+    tool: "idle",
   },
 ];
 
@@ -219,199 +264,433 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
     <style>
       :root {
         color-scheme: dark;
-        --bg: #0f1115;
-        --panel: rgba(30, 34, 43, 0.82);
-        --panel-strong: #191d25;
-        --ink: #f3f6fb;
-        --muted: #98a2b3;
-        --line: rgba(255,255,255,0.12);
-        --cyan: #4dd0e1;
-        --green: #62d394;
-        --amber: #f1c75b;
-        --red: #ff6f8d;
+        --bg: #0a0e1a;
+        --panel: rgba(10, 14, 26, 0.82);
+        --panel-strong: rgba(255, 255, 255, 0.075);
+        --panel-soft: rgba(255, 255, 255, 0.045);
+        --line: rgba(255, 255, 255, 0.10);
+        --line-strong: rgba(255, 255, 255, 0.18);
+        --ink: #e9ebf3;
+        --muted: rgba(233, 235, 243, 0.62);
+        --faint: rgba(233, 235, 243, 0.42);
+        --accent: #7c8aff;
+        --cyan: #5dade2;
+        --green: #58d68a;
+        --amber: #f4c45a;
+        --red: #ff6b6b;
+        --purple: #b08cff;
       }
-      * { box-sizing: border-box; }
+      * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+      html { height: 100%; }
       body {
         margin: 0;
-        min-height: 100vh;
+        height: 100%;
+        overflow: hidden;
         background:
-          linear-gradient(135deg, rgba(77, 208, 225, 0.12), transparent 36%),
-          repeating-linear-gradient(90deg, rgba(255,255,255,0.024) 0 1px, transparent 1px 96px),
-          repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 72px),
+          linear-gradient(150deg, rgba(124, 138, 255, 0.20), transparent 34%),
+          linear-gradient(315deg, rgba(176, 140, 255, 0.12), transparent 42%),
+          repeating-linear-gradient(90deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 92px),
+          repeating-linear-gradient(0deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 72px),
           var(--bg);
         color: var(--ink);
-        font-family: "Avenir Next", "Helvetica Neue", system-ui, sans-serif;
+        font-family: -apple-system, "PingFang SC", "SF Pro Display", "Helvetica Neue", sans-serif;
+        letter-spacing: -0.01em;
       }
-      main {
+      .app {
         display: grid;
-        grid-template-columns: minmax(520px, 1.35fr) minmax(360px, 0.65fr);
+        grid-template-columns: minmax(680px, 1fr) 360px;
+        height: 100vh;
+        min-height: 720px;
+      }
+      .stage {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .stage::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.04), transparent 20%),
+          linear-gradient(180deg, transparent 62%, rgba(0,0,0,0.38));
+      }
+      .stage-header,
+      .stage-footer {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         gap: 18px;
-        width: min(1320px, calc(100vw - 32px));
-        margin: 0 auto;
-        padding: 18px 0;
+        padding: 24px 32px;
       }
-      header {
-        grid-column: 1 / -1;
+      .brand {
         display: flex;
-        align-items: end;
-        justify-content: space-between;
-        gap: 16px;
-        min-height: 64px;
-      }
-      h1 {
-        margin: 0;
-        font-size: 28px;
-        letter-spacing: 0;
-        line-height: 1.1;
-      }
-      .subtle { color: var(--muted); font-size: 13px; }
-      .stage-wrap,
-      .controls {
-        border: 1px solid var(--line);
-        background: var(--panel);
-        backdrop-filter: blur(18px);
-        border-radius: 8px;
-      }
-      .stage-wrap {
-        padding: 12px;
-        min-width: 0;
-      }
-      video {
-        display: block;
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        border-radius: 6px;
-        background: #f7f8fb;
-        object-fit: contain;
-      }
-      .controls {
-        display: grid;
-        align-content: start;
-        gap: 16px;
-        padding: 16px;
-      }
-      .section-title {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        margin-bottom: 8px;
+        align-items: center;
         gap: 12px;
       }
-      .section-title h2 {
-        margin: 0;
-        font-size: 14px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        color: white;
+        font-size: 13px;
+        font-weight: 900;
+        background: linear-gradient(135deg, var(--accent), var(--purple));
+        box-shadow: 0 8px 24px rgba(124, 138, 255, 0.24);
       }
-      .button-grid {
+      .brand-title {
+        font-size: 15px;
+        font-weight: 720;
+      }
+      .brand-subtitle,
+      .stage-meta,
+      .stage-footer {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .stage-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 28px;
+        padding: 0 12px;
+        border: 1px solid rgba(88, 214, 138, 0.28);
+        border-radius: 999px;
+        background: rgba(88, 214, 138, 0.12);
+        color: var(--green);
+        font-size: 11px;
+        font-weight: 680;
+      }
+      .stage-status::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--green);
+        box-shadow: 0 0 12px var(--green);
+      }
+      .stage-canvas {
+        position: relative;
+        z-index: 1;
+        flex: 1;
+        display: grid;
+        place-items: center;
+        min-height: 0;
+        padding: 0 32px 10px;
+      }
+      .avatar-frame {
+        position: relative;
+        width: min(680px, 72vw);
+        height: min(720px, calc(100vh - 170px));
+        min-height: 540px;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        overflow: hidden;
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.03), transparent),
+          rgba(0,0,0,0.30);
+        backdrop-filter: blur(22px);
+        box-shadow:
+          0 30px 80px rgba(0,0,0,0.42),
+          inset 0 1px 0 rgba(255,255,255,0.05);
+      }
+      .avatar-frame::before {
+        content: "LIVE RENDER";
+        position: absolute;
+        left: 18px;
+        top: 16px;
+        z-index: 2;
+        color: rgba(233,235,243,0.45);
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 0.18em;
+      }
+      .avatar-video {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: #12161d;
+        object-fit: cover;
+      }
+      .action-banner {
+        position: absolute;
+        left: 50%;
+        bottom: 54px;
+        z-index: 3;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 10px;
+        min-height: 38px;
+        padding: 0 16px;
+        border: 1px solid rgba(124,138,255,0.30);
+        border-radius: 12px;
+        background:
+          linear-gradient(135deg, rgba(124,138,255,0.22), rgba(176,140,255,0.18)),
+          rgba(15,18,31,0.68);
+        backdrop-filter: blur(18px) saturate(160%);
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 680;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.34);
+      }
+      .action-banner.active { display: inline-flex; }
+      .action-banner::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--accent);
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.48; transform: scale(1.35); }
+      }
+      .stage-footer {
+        padding-top: 8px;
+      }
+      .footer-readout {
+        max-width: 70%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        color: rgba(233,235,243,0.58);
+      }
+      .panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow-y: auto;
+        border-left: 1px solid var(--line);
+        background: var(--panel);
+        backdrop-filter: blur(22px);
+      }
+      .panel-header,
+      .panel-section,
+      .panel-footer {
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel-title,
+      .section-label {
+        margin: 0;
+        color: var(--faint);
+        font-size: 10px;
+        font-weight: 780;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+      .avatar-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .avatar-card {
+        aspect-ratio: 1;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel-soft);
+        color: var(--muted);
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: transform .15s ease, background .15s ease, border-color .15s ease;
+      }
+      .avatar-card:hover {
+        transform: translateY(-1px);
+        background: var(--panel-strong);
+        border-color: var(--line-strong);
+      }
+      .avatar-card.selected {
+        background: rgba(124,138,255,0.16);
+        border-color: rgba(124,138,255,0.84);
+        color: var(--ink);
+        box-shadow: 0 10px 26px rgba(124,138,255,0.14);
+      }
+      .avatar-icon {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: rgba(255,255,255,0.06);
+        font-size: 12px;
+        font-weight: 900;
+      }
+      .avatar-name {
+        font-size: 10px;
+        font-weight: 680;
+      }
+      .state-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
+        gap: 7px;
+        margin-top: 12px;
       }
-      button,
-      select {
-        min-height: 38px;
+      .state-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 0 11px;
         border: 1px solid var(--line);
-        border-radius: 6px;
+        border-radius: 10px;
+        background: var(--panel-soft);
+        color: var(--muted);
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 680;
+        text-align: left;
+        transition: background .15s ease, border-color .15s ease, color .15s ease;
+      }
+      .state-btn:hover {
         background: var(--panel-strong);
         color: var(--ink);
-        font: inherit;
       }
-      button {
-        cursor: pointer;
-        padding: 8px 10px;
-        font-weight: 700;
+      .state-btn.active {
+        border-color: rgba(124,138,255,0.82);
+        background: rgba(124,138,255,0.16);
+        color: var(--ink);
+        box-shadow: 0 8px 22px rgba(124,138,255,0.12);
       }
-      button.active {
-        border-color: rgba(77, 208, 225, 0.72);
-        box-shadow: inset 0 0 0 1px rgba(77, 208, 225, 0.34);
-        color: #dffbff;
-      }
-      select {
-        width: 100%;
-        padding: 0 10px;
-      }
-      .signals {
+      .state-icon {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 6px;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        background: rgba(255,255,255,0.06);
+        color: var(--ink);
+        font-size: 10px;
+        font-weight: 900;
       }
-      .signal {
-        min-height: 58px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 8px;
-        background: rgba(255,255,255,0.04);
+      .signal-list {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        margin-top: 12px;
       }
-      .signal b {
-        display: block;
-        font-size: 11px;
+      .signal-row {
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 12px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: var(--panel-soft);
+      }
+      .signal-row.active {
+        border-color: var(--line-strong);
+      }
+      .signal-label {
         color: var(--muted);
-        margin-bottom: 5px;
+        font-size: 10px;
+        font-weight: 760;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
       }
-      .signal span {
-        font-size: 14px;
-        font-weight: 800;
+      .signal-value,
+      .footer-readout {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
       }
-      .level-ok span { color: var(--green); }
-      .level-active span { color: var(--cyan); }
-      .level-warn span { color: var(--amber); }
-      .level-blocked span { color: var(--red); }
-      .level-idle span { color: var(--muted); }
-      .readout {
-        min-height: 92px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: rgba(0,0,0,0.22);
-        padding: 10px;
-        color: #d9e2f2;
-        font-size: 13px;
-        line-height: 1.48;
+      .signal-value {
+        font-size: 11px;
+        font-weight: 760;
+      }
+      .level-ok .signal-value { color: var(--green); }
+      .level-active .signal-value { color: var(--cyan); }
+      .level-warn .signal-value { color: var(--amber); }
+      .level-blocked .signal-value { color: var(--red); }
+      .level-idle .signal-value { color: var(--faint); }
+      .panel-footer {
+        margin-top: auto;
+        border-bottom: 0;
+        border-top: 1px solid var(--line);
+        color: var(--faint);
+        font-size: 10px;
+        line-height: 1.6;
+      }
+      .kbd {
+        display: inline-flex;
+        align-items: center;
+        min-height: 18px;
+        padding: 0 6px;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        background: var(--panel-strong);
+        color: var(--muted);
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 9px;
       }
       @media (max-width: 940px) {
-        main { grid-template-columns: 1fr; }
-        header { align-items: start; flex-direction: column; }
+        body { overflow: auto; }
+        .app { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
+        .panel { border-left: 0; border-top: 1px solid var(--line); }
+        .avatar-frame { width: min(620px, calc(100vw - 32px)); height: min(680px, 72vh); }
       }
     </style>
   </head>
   <body>
-    <main>
-      <header>
-        <div>
-          <h1>${escapeHtml(input.botName)} Avatar Playground</h1>
-          <div class="subtle">single-avatar runtime · HUD signal sandbox · no Meet required</div>
+    <main class="app">
+      <section class="stage">
+        <header class="stage-header">
+          <div class="brand">
+            <div class="brand-mark">OS</div>
+            <div>
+              <div class="brand-title">${escapeHtml(input.botName)} Avatar Studio</div>
+              <div class="brand-subtitle">runtime preview · HUD sandbox · no Meet required</div>
+            </div>
+          </div>
+          <div class="stage-meta">
+            <span class="stage-status" id="boot-status">starting</span>
+          </div>
+        </header>
+        <div class="stage-canvas">
+          <div class="avatar-frame">
+            <video class="avatar-video" id="avatar-preview" autoplay muted playsinline></video>
+            <div class="action-banner" id="action-banner"></div>
+          </div>
         </div>
-        <div class="subtle" id="boot-status">starting</div>
-      </header>
-      <section class="stage-wrap">
-        <video id="avatar-preview" autoplay muted playsinline></video>
+        <footer class="stage-footer">
+          <div class="footer-readout" id="readout">Booting avatar runtime…</div>
+          <div id="renderer-readout">runtime</div>
+        </footer>
       </section>
-      <aside class="controls">
-        <section>
-          <div class="section-title">
-            <h2>Avatar preset</h2>
-            <span class="subtle" id="avatar-note"></span>
-          </div>
-          <select id="avatar-select" aria-label="Avatar preset"></select>
+      <aside class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Director</h2>
+        </div>
+        <section class="panel-section">
+          <div class="section-label">Avatar</div>
+          <div class="avatar-grid" id="avatar-cards"></div>
         </section>
-        <section>
-          <div class="section-title">
-            <h2>State preset</h2>
-            <span class="subtle">drives mood/action/HUD</span>
-          </div>
-          <div class="button-grid" id="state-buttons"></div>
+        <section class="panel-section">
+          <div class="section-label">State Preset</div>
+          <div class="state-grid" id="state-buttons"></div>
         </section>
-        <section>
-          <div class="section-title">
-            <h2>HUD signals</h2>
-            <span class="subtle">RT / Audio / Voice / Tool / Err</span>
-          </div>
-          <div class="signals" id="signals"></div>
+        <section class="panel-section">
+          <div class="section-label">Signals</div>
+          <div class="signal-list" id="signals"></div>
         </section>
-        <section>
-          <div class="section-title"><h2>Readout</h2></div>
-          <div class="readout" id="readout"></div>
-        </section>
+        <footer class="panel-footer">
+          <div><span class="kbd">click</span> switch presets · <span class="kbd">live</span> real runtime</div>
+          <div>local 127.0.0.1:18912 · iterate without Meet</div>
+        </footer>
       </aside>
     </main>
     <script>
@@ -422,11 +701,12 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
         const els = {
           boot: document.getElementById("boot-status"),
           preview: document.getElementById("avatar-preview"),
-          avatarSelect: document.getElementById("avatar-select"),
-          avatarNote: document.getElementById("avatar-note"),
+          avatarCards: document.getElementById("avatar-cards"),
           stateButtons: document.getElementById("state-buttons"),
           signals: document.getElementById("signals"),
           readout: document.getElementById("readout"),
+          rendererReadout: document.getElementById("renderer-readout"),
+          actionBanner: document.getElementById("action-banner"),
         };
         const state = { ready: false, activeState: "listening", errors: [] };
 
@@ -475,17 +755,21 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
           };
         }
 
-        function renderAvatarSelect() {
-          els.avatarSelect.innerHTML = "";
+        function renderAvatarCards() {
+          els.avatarCards.innerHTML = "";
           avatarPresets.forEach((preset) => {
-            const option = document.createElement("option");
-            option.value = preset.id;
-            option.textContent = preset.name;
-            option.selected = preset.id === selectedAvatarId;
-            els.avatarSelect.append(option);
+            const card = document.createElement("button");
+            card.type = "button";
+            card.className = "avatar-card" + (preset.id === selectedAvatarId ? " selected" : "");
+            card.innerHTML = "<span class='avatar-icon'></span><span class='avatar-name'></span>";
+            card.querySelector(".avatar-icon").textContent = preset.icon;
+            card.querySelector(".avatar-name").textContent = preset.shortName;
+            card.title = preset.note;
+            card.addEventListener("click", () => {
+              window.location.href = "/?avatar=" + encodeURIComponent(preset.id);
+            });
+            els.avatarCards.append(card);
           });
-          const selected = avatarPresets.find((preset) => preset.id === selectedAvatarId);
-          els.avatarNote.textContent = selected?.note || "";
         }
 
         function renderStateButtons() {
@@ -493,7 +777,10 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
           statePresets.forEach((preset) => {
             const button = document.createElement("button");
             button.type = "button";
-            button.textContent = preset.name;
+            button.className = "state-btn";
+            button.innerHTML = "<span class='state-icon'></span><span></span>";
+            button.querySelector(".state-icon").textContent = preset.icon;
+            button.querySelector("span:last-child").textContent = preset.name;
             button.dataset.stateId = preset.id;
             button.addEventListener("click", () => applyPreset(preset.id));
             els.stateButtons.append(button);
@@ -505,13 +792,29 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
           els.signals.innerHTML = "";
           signals.forEach((signal) => {
             const node = document.createElement("div");
-            node.className = "signal level-" + signal.level;
-            node.innerHTML = "<b></b><span></span>";
-            node.querySelector("b").textContent = signal.label;
-            node.querySelector("span").textContent = signal.value;
+            node.className =
+              "signal-row level-" + signal.level + (signal.level === "idle" ? "" : " active");
+            node.innerHTML = "<span class='signal-label'></span><span class='signal-value'></span>";
+            node.querySelector(".signal-label").textContent = signal.label;
+            node.querySelector(".signal-value").textContent = signal.value;
             els.signals.append(node);
           });
           return signals;
+        }
+
+        function updateActionBanner(preset) {
+          const active = preset.tool !== "idle";
+          els.actionBanner.classList.toggle("active", active);
+          if (!active) {
+            els.actionBanner.textContent = "";
+            return;
+          }
+          els.actionBanner.textContent =
+            preset.tool === "blocked"
+              ? "操作受阻 · 等待人工处理"
+              : preset.tool === "done"
+                ? "操作完成 · chat only"
+                : preset.statusText + " · live CU";
         }
 
         function applyPreset(id) {
@@ -529,6 +832,7 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
           document.querySelectorAll("[data-state-id]").forEach((button) => {
             button.classList.toggle("active", button.dataset.stateId === preset.id);
           });
+          updateActionBanner(preset);
           const signals = renderSignals();
           els.readout.textContent =
             preset.description + "\\n" + signals.map((s) => s.label + "=" + s.value).join(" · ");
@@ -550,11 +854,6 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
           await els.preview.play().catch(() => {});
         }
 
-        els.avatarSelect.addEventListener("change", () => {
-          const next = encodeURIComponent(els.avatarSelect.value);
-          window.location.href = "/?avatar=" + next;
-        });
-
         window.MAB_AVATAR_PLAYGROUND = {
           state,
           avatarPresets,
@@ -565,13 +864,15 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
 
         (async () => {
           try {
-            renderAvatarSelect();
+            renderAvatarCards();
             renderStateButtons();
             await waitForReady();
             await window.MAB_AVATAR_START_RENDERER?.();
             await attachPreview();
             state.ready = true;
             els.boot.textContent = "ready";
+            const renderer = window.MAB_AVATAR_RENDERER?.renderer || "runtime";
+            els.rendererReadout.textContent = renderer;
             applyPreset("listening");
           } catch (error) {
             const message = String(error?.message || error);
