@@ -52,6 +52,8 @@ func TestParseJoinUnwrapsSlackMeetLinks(t *testing.T) {
 	cases := []string{
 		"join <https://meet.google.com/abc-defg-hij>",
 		"join <https://meet.google.com/abc-defg-hij|https://meet.google.com/abc-defg-hij>",
+		"join <http://meet.google.com/abc-defg-hij|meet.google.com/abc-defg-hij>",
+		"join meet.google.com/abc-defg-hij",
 		"join --meet-url <https://meet.google.com/abc-defg-hij>",
 		"join --meet-url=<https://meet.google.com/abc-defg-hij|Join Meet>",
 	}

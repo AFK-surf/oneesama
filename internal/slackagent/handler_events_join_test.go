@@ -100,6 +100,38 @@ func TestHandleEventsJoinPostsCardFromSlackLabeledMeetLink(t *testing.T) {
 	}
 }
 
+func TestHandleEventsJoinPostsCardFromSlackExpandedMeetLinkOnly(t *testing.T) {
+	poster := &recordingPoster{callCh: make(chan struct{}, 4)}
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		t.Fatalf("meeting agent should not be called before join options are selected: %s", request.URL.Path)
+	}))
+	defer meetingAgent.Close()
+	router := newTestRouter(t, Config{
+		MeetingAgentURL:        meetingAgent.URL,
+		DefaultCaptionLanguage: "English",
+		Slack:                  appconfig.SlackConfig{SigningSecret: "secret", BotUserID: "UBOT"},
+		Poster:                 poster,
+		AgentRunner:            appconfig.AgentRunnerConfig{Provider: "codex", DryRun: true},
+	})
+
+	body := `{"type":"event_callback","event_id":"EvJoinCardExpandedLinkOnly","team_id":"T123","event":{"type":"app_mention","user":"U123","text":"<http://meet.google.com/abc-defg-hij|meet.google.com/abc-defg-hij> <@UBOT>","channel":"C123","ts":"123.456"}}`
+	timestamp, signature := signedSlackJSONBody("secret", body)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/events", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Slack-Request-Timestamp", timestamp)
+	request.Header.Set("X-Slack-Signature", signature)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	poster.WaitForCalls(t, 1)
+	if calls := poster.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text, "Join Google Meet") {
+		t.Fatalf("poster calls = %#v, want one join setup card", calls)
+	}
+}
+
 func TestHandleEventsJoinMentionDedupeAcrossAppMentionAndMessage(t *testing.T) {
 	poster := &recordingPoster{callCh: make(chan struct{}, 4)}
 	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
