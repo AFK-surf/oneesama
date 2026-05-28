@@ -13,6 +13,7 @@ function handleRealtimeServerEvent(detail) {
     state.protection.outputAudioActive = true;
     if (event.type === "output_audio_buffer.started") {
       state.protection.lastOutputAudioStartedAt = new Date().toISOString();
+      state.protection.lastOutputAudioStoppedAt = "";
     }
     recordTimeline("realtime_input_continuous", { reason: event.type });
   }
@@ -32,10 +33,12 @@ function handleRealtimeServerEvent(detail) {
   if (event.type === "output_audio_buffer.stopped") {
     window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
     state.protection.outputAudioActive = false;
+    state.protection.lastOutputAudioStoppedAt = new Date().toISOString();
   }
   if (event.type === "response.cancelled" || event.type === "response.failed") {
     window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
     state.protection.outputAudioActive = false;
+    state.protection.lastOutputAudioStoppedAt = new Date().toISOString();
   }
   if (event.type === "response.done" || event.type === "response.output_audio.done") {
     if (state.protection.outputAudioActive) {

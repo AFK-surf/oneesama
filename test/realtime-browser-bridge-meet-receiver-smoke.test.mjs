@@ -463,6 +463,72 @@ test("Recappi process audio input feeds the routing mix without RTC tracks", asy
   }
 });
 
+test("Recappi process audio suppresses bot self-output without closing the input gate", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, { meetAudioInputSource: "recappi_process_audio" });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      const sampleRate = 48000;
+      const channels = 2;
+      const samples = [];
+      for (let frame = 0; frame < 4096; frame += 1) {
+        const value = Math.sin((frame / sampleRate) * Math.PI * 2 * 660) * 0.05;
+        samples.push(value, value);
+      }
+      window.MAB_REALTIME_BRIDGE.protection.outputAudioActive = true;
+      const suppressed = window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+        source: "recappi_process_audio",
+        sampleRate,
+        channels,
+        samples,
+      });
+      await wait(150);
+      const duringOutput = {
+        inputGateOpen: window.MAB_REALTIME_BRIDGE.connection.realtimeInputGateOpen,
+        recappi: { ...window.MAB_REALTIME_BRIDGE.connection.recappiAudioInput },
+        energy: { ...window.MAB_REALTIME_BRIDGE.connection.meetAudioEnergy },
+      };
+      window.MAB_REALTIME_BRIDGE.protection.outputAudioActive = false;
+      window.MAB_REALTIME_BRIDGE.protection.lastOutputAudioStoppedAt = new Date(
+        Date.now() - 1500,
+      ).toISOString();
+      let accepted = null;
+      for (let chunk = 0; chunk < 8; chunk += 1) {
+        accepted = window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+          source: "recappi_process_audio",
+          sampleRate,
+          channels,
+          samples,
+        });
+      }
+      await wait(750);
+      return {
+        suppressed,
+        accepted,
+        duringOutput,
+        connection: window.MAB_REALTIME_BRIDGE.connection,
+      };
+    });
+
+    assert.equal(result.suppressed.ok, true);
+    assert.equal(result.suppressed.suppressed, true);
+    assert.equal(result.duringOutput.inputGateOpen, true);
+    assert.equal(result.duringOutput.recappi.selfOutputSuppressedChunks, 1);
+    assert.equal(result.duringOutput.recappi.samplesQueued, 0);
+    assert.equal(result.duringOutput.energy.observed, false);
+    assert.equal(result.accepted.ok, true);
+    assert.equal(result.accepted.suppressed, undefined);
+    assert.equal(result.connection.currentRealtimeInputSource, "recappi_process_audio_tap");
+    assert.equal(result.connection.recappiAudioInput.selfOutputSuppressedChunks, 1);
+    assert.equal(result.connection.meetAudioEnergy.observed, true);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("mock Meet receiver smoke fails loudly when playback mute silences capture", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();

@@ -170,6 +170,7 @@ const state = {
     activeResponseId: "",
     outputAudioActive: false,
     lastOutputAudioStartedAt: "",
+    lastOutputAudioStoppedAt: "",
     lastInputSpeechStartedAt: "",
     cancelledResponses: 0,
     userSpeechCancels: 0,

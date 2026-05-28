@@ -9,6 +9,8 @@ recappiConnection.recappiAudioInput = recappiConnection.recappiAudioInput || {
   samplesReceived: 0,
   samplesQueued: 0,
   samplesDropped: 0,
+  selfOutputSuppressedChunks: 0,
+  selfOutputSuppressedSamples: 0,
   underflows: 0,
   lastChunkAt: "",
   lastPushAt: "",
@@ -150,6 +152,12 @@ function normalizeRecappiSamples(value: unknown) {
   return [];
 }
 
+function shouldSuppressRecappiSelfOutput() {
+  if (state.protection.outputAudioActive === true) return true;
+  const stoppedAt = Date.parse(String(state.protection.lastOutputAudioStoppedAt || ""));
+  return Number.isFinite(stoppedAt) && Date.now() - stoppedAt < 900;
+}
+
 function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   if (config.meetAudioInputSource !== "recappi_process_audio") {
     return { ok: false, error: "recappi_audio_input_disabled" };
@@ -157,6 +165,28 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   const samples = normalizeRecappiSamples(payload.samples);
   if (!samples.length) return { ok: false, error: "empty_recappi_audio_samples" };
   ensureRecappiAudioInputNode(payload);
+  if (shouldSuppressRecappiSelfOutput()) {
+    recappiConnection.recappiAudioInput = {
+      ...getRecappiAudioInputState(),
+      chunks: Number(getRecappiAudioInputState()?.chunks || 0) + 1,
+      samplesReceived: Number(getRecappiAudioInputState()?.samplesReceived || 0) + samples.length,
+      samplesDropped: Number(getRecappiAudioInputState()?.samplesDropped || 0) + samples.length,
+      selfOutputSuppressedChunks:
+        Number(getRecappiAudioInputState()?.selfOutputSuppressedChunks || 0) + 1,
+      selfOutputSuppressedSamples:
+        Number(getRecappiAudioInputState()?.selfOutputSuppressedSamples || 0) + samples.length,
+      lastChunkAt: new Date().toISOString(),
+      lastPushAt: new Date().toISOString(),
+    };
+    updateFeedback();
+    return {
+      ok: true,
+      source: "recappi_process_audio",
+      suppressed: true,
+      reason: "realtime_output_audio_active",
+      chunks: getRecappiAudioInputState().chunks,
+    };
+  }
   const mono = downmixRecappiSamples(samples, payload.channels);
   const queued = resampleRecappiSamples(
     mono,
