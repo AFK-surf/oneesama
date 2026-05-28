@@ -5,22 +5,33 @@ import { chromium } from "playwright";
 import { installMeetLocalPlaybackMute } from "../packages/core/src/meeting/meet-local-playback-mute.ts";
 import { buildRealtimeBrowserInitScript } from "../packages/core/src/realtime/realtime-browser-init-builder.ts";
 
-async function installRealtimeHarness(page) {
-  await page.setContent("<!doctype html><html><body></body></html>");
+async function installRealtimeHarness(page, harnessOptions = {}) {
+  if (harnessOptions.url) {
+    await page.route(`${harnessOptions.url}**`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: "<!doctype html><html><body></body></html>",
+      });
+    });
+    await page.goto(harnessOptions.url);
+  } else {
+    await page.setContent("<!doctype html><html><body></body></html>");
+  }
   await page.evaluate(() => {
     window.__MAB_FAKE_PEERS = [];
     window.__MAB_FAKE_AVATAR_BUS = {
       streams: [],
       tones: [],
-      addStream(stream, options = {}) {
+      addStream(stream, streamOptions = {}) {
         this.streams.push({
-          label: options.label || "",
+          label: streamOptions.label || "",
           trackIds: stream?.getAudioTracks?.().map((track) => track.id) || [],
         });
         return { ok: true };
       },
-      injectTone(options = {}) {
-        this.tones.push(options);
+      injectTone(toneOptions = {}) {
+        this.tones.push(toneOptions);
         return { ok: true };
       },
       setSyntheticSpeech(active) {
@@ -320,6 +331,81 @@ test("mock Meet receiver smoke fails loudly when playback mute silences capture"
     assert.equal(result.feedback.failureMatrix.modelTurn.status, "waiting");
     assert.equal(result.feedback.failureMatrix.modelTurn.reason, "meet_audio_no_energy_observed");
     assert.equal(result.feedback.failureMatrix.audioOutput.reason, "waiting_for_model_response");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Google Meet pages ignore generic media element audio and keep receiver hook input", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, { url: "https://meet.google.com/fga-dyac-smw" });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const genericContext = new AudioContext();
+      await genericContext.resume();
+      const genericOscillator = genericContext.createOscillator();
+      const genericDestination = genericContext.createMediaStreamDestination();
+      genericOscillator.connect(genericDestination);
+      genericOscillator.start();
+      const genericElement = document.createElement("audio");
+      genericElement.srcObject = genericDestination.stream;
+      document.body.appendChild(genericElement);
+      await wait(1200);
+
+      const meetContext = new AudioContext();
+      await meetContext.resume();
+      const meetOscillator = meetContext.createOscillator();
+      const meetGain = meetContext.createGain();
+      meetGain.gain.value = 0.03;
+      const meetDestination = meetContext.createMediaStreamDestination();
+      meetOscillator.connect(meetGain);
+      meetGain.connect(meetDestination);
+      meetOscillator.start();
+      const [meetTrack] = meetDestination.stream.getAudioTracks();
+      const meetPeer = new RTCPeerConnection();
+      meetPeer.dispatchFakeEvent("track", {
+        track: meetTrack,
+        streams: [meetDestination.stream],
+      });
+      await wait(80);
+      await window.MAB_REALTIME_CLIENT.connect();
+      await wait(450);
+
+      const forwarded = window.MAB_REALTIME_BRIDGE.timeline.filter(
+        (entry) => entry.type === "meet_audio_track_forwarded",
+      );
+      const skipped = window.MAB_REALTIME_BRIDGE.timeline
+        .filter(
+          (entry) =>
+            entry.type === "participant_audio_element_discovery_skipped" ||
+            entry.type === "meet_media_element_audio_discovery_skipped",
+        )
+        .map((entry) => entry.type);
+      const scenarioResult = {
+        forwardedSources: forwarded.map((entry) => entry.detail.source || ""),
+        skipped,
+        connection: window.MAB_REALTIME_BRIDGE.connection,
+      };
+      genericOscillator.stop();
+      meetOscillator.stop();
+      await genericContext.close();
+      await meetContext.close();
+      return scenarioResult;
+    });
+
+    assert.deepEqual(result.forwardedSources, ["pc.track"]);
+    assert.ok(result.skipped.includes("participant_audio_element_discovery_skipped"));
+    assert.ok(result.skipped.includes("meet_media_element_audio_discovery_skipped"));
+    assert.equal(result.connection.participantAudioTracksDiscovered, 0);
+    assert.equal(result.connection.participantAudioElementDiscoverySkipped, true);
+    assert.equal(result.connection.meetMediaElementDiscoverySkipped, true);
+    assert.equal(result.connection.meetMediaElementsScanned, 1);
+    assert.equal(result.connection.meetMediaElementAudioTracksAdded, 0);
+    assert.equal(result.connection.meetAudioTracksForwarded, 1);
+    assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
+    assert.equal(result.connection.meetAudioEnergy.observed, true);
   } finally {
     await browser.close();
   }

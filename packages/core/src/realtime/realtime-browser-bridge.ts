@@ -42,6 +42,7 @@ interface RealtimeBridgeConfig {
   workerStatusUrl: string;
   includeParticipantAudio: boolean;
   forwardMeetAudioToRealtime: boolean;
+  allowGenericMediaElementAudioDiscovery?: boolean;
   captureMeetAudioForTranscript?: boolean;
   meetAudioCaptureChunkMs?: number;
   meetAudioInputGain?: number;
@@ -75,6 +76,17 @@ function normalizeMeetAudioInputGain(value: unknown, fallback = DEFAULT_MEET_AUD
         ? fallbackGain
         : DEFAULT_MEET_AUDIO_INPUT_GAIN;
   return Math.max(0.1, Math.min(selected, MAX_MEET_AUDIO_INPUT_GAIN));
+}
+
+function isGoogleMeetDocument() {
+  return window.location.hostname === "meet.google.com";
+}
+
+function shouldRouteGenericMediaElementAudio() {
+  if (typeof config.allowGenericMediaElementAudioDiscovery === "boolean") {
+    return config.allowGenericMediaElementAudioDiscovery;
+  }
+  return !isGoogleMeetDocument();
 }
 
 const config: RealtimeBridgeConfig = {
@@ -225,6 +237,10 @@ const state = {
     meetMediaElementsScanned: 0,
     meetMediaElementStates: [],
     meetMediaElementAudioTracksAdded: 0,
+    meetMediaElementDiscoverySkipped: false,
+    meetMediaElementDiscoverySkipLogged: false,
+    participantAudioElementDiscoverySkipped: false,
+    participantAudioElementDiscoverySkipLogged: false,
     pendingMeetAudioTrackCount: 0,
     meetAudioSourcesActive: 0,
     meetAudioSourcesUnmuted: 0,

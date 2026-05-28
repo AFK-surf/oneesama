@@ -165,6 +165,17 @@ function registerParticipantAudioStream(
 }
 
 function discoverParticipantAudioStreams() {
+  if (!shouldRouteGenericMediaElementAudio()) {
+    state.connection.participantAudioElementDiscoverySkipped = true;
+    if (!state.connection.participantAudioElementDiscoverySkipLogged) {
+      state.connection.participantAudioElementDiscoverySkipLogged = true;
+      recordTimeline("participant_audio_element_discovery_skipped", {
+        reason: "generic_media_element_audio_disabled_on_google_meet",
+      });
+    }
+    updateFeedback();
+    return state.connection.participantAudioTracksDiscovered;
+  }
   const mediaElements = Array.from(document.querySelectorAll<HTMLMediaElement>("audio, video"));
   for (const element of mediaElements) {
     const provider = element.srcObject;

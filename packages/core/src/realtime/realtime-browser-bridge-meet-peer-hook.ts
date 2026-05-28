@@ -215,6 +215,31 @@ function scanMeetMediaElementAudio() {
     }
   >;
   state.connection.meetMediaElementsScanned = elements.length;
+  if (!shouldRouteGenericMediaElementAudio()) {
+    state.connection.meetMediaElementDiscoverySkipped = true;
+    state.connection.meetMediaElementStates = elements.slice(-12).map((element) => {
+      const srcObject = element.srcObject as MediaStream | null | undefined;
+      return {
+        tagName: String(element.tagName || "").toLowerCase(),
+        muted: element.muted === true,
+        paused: element.paused === true,
+        readyState: element.readyState || 0,
+        volume: element.volume,
+        srcObjectAudioTracks: srcObject?.getAudioTracks?.().length || 0,
+        captureAudioTracks: 0,
+        captureError: "generic_media_element_audio_disabled_on_google_meet",
+      };
+    });
+    if (!state.connection.meetMediaElementDiscoverySkipLogged) {
+      state.connection.meetMediaElementDiscoverySkipLogged = true;
+      recordTimeline("meet_media_element_audio_discovery_skipped", {
+        reason: "generic_media_element_audio_disabled_on_google_meet",
+        elements: elements.length,
+      });
+    }
+    updateFeedback();
+    return;
+  }
   const elementStates = [];
   for (const element of elements) {
     const srcObject = element.srcObject as MediaStream | null | undefined;
