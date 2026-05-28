@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -405,6 +406,54 @@ func TestSocketModeInteractiveJoinSetupAcksBeforeResponseURLUpdate(t *testing.T)
 	case <-responseURLHit:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for async response_url update to start")
+	}
+}
+
+func TestPostSlackInteractionResponseRetriesTransientEOF(t *testing.T) {
+	var attempts atomic.Int32
+	responseBodyCh := make(chan string, 1)
+	responseURLServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		attempt := attempts.Add(1)
+		if attempt == 1 {
+			hijacker, ok := response.(http.Hijacker)
+			if !ok {
+				t.Fatal("response writer does not support hijack")
+			}
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				t.Fatalf("hijack response: %v", err)
+			}
+			_ = conn.Close()
+			return
+		}
+		raw, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read response_url body: %v", err)
+		}
+		responseBodyCh <- string(raw)
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer responseURLServer.Close()
+
+	err := postSlackInteractionResponse(context.Background(), responseURLServer.URL, AvatarCommandResponse{
+		OK:              true,
+		Text:            "Bot is joining *Google Meet*",
+		ReplaceOriginal: true,
+	})
+	if err != nil {
+		t.Fatalf("postSlackInteractionResponse() error = %v, want retry success", err)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
+	}
+	select {
+	case body := <-responseBodyCh:
+		if !strings.Contains(body, `"replace_original":true`) ||
+			!strings.Contains(body, "Bot is joining *Google Meet*") {
+			t.Fatalf("response_url body = %s, want retried interaction payload", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for retried response_url update")
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 )
 
 const slackInteractionResponseLimit = 1 << 20
+const slackInteractionResponseAttempts = 3
 
 type joinSetupInteractionMode string
 
@@ -232,6 +233,25 @@ func postSlackInteractionResponse(ctx context.Context, responseURL string, respo
 	if err != nil {
 		return fmt.Errorf("encode slack interaction response: %w", err)
 	}
+	var lastErr error
+	for attempt := 1; attempt <= slackInteractionResponseAttempts; attempt++ {
+		lastErr = postSlackInteractionResponseOnce(ctx, responseURL, raw)
+		if lastErr == nil {
+			return nil
+		}
+		if attempt == slackInteractionResponseAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond * time.Duration(attempt)):
+		}
+	}
+	return lastErr
+}
+
+func postSlackInteractionResponseOnce(ctx context.Context, responseURL string, raw []byte) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, responseURL, bytes.NewReader(raw))
 	if err != nil {
 		return fmt.Errorf("build slack interaction response request: %w", err)
