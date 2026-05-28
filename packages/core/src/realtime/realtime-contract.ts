@@ -49,7 +49,8 @@ export const realtimeToolSchemas = [
       properties: {
         task: {
           type: "string",
-          description: "Clear task. Include exact URLs/file paths/commands and what to report back.",
+          description:
+            "Clear task. Include exact URLs/file paths/commands and what to report back.",
         },
         context: {
           type: "string",
@@ -194,7 +195,8 @@ export const realtimeToolSchemas = [
         },
         applicationName: {
           type: "string",
-          description: "Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal.",
+          description:
+            "Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal.",
         },
         bundleIdentifier: {
           type: "string",
@@ -222,14 +224,7 @@ export const realtimeToolSchemas = [
             properties: {
               kind: {
                 type: "string",
-                enum: [
-                  "state",
-                  "click",
-                  "type_text",
-                  "press_key",
-                  "scroll",
-                  "drag",
-                ],
+                enum: ["state", "click", "type_text", "press_key", "scroll", "drag"],
               },
               text: { type: "string", description: "Text to type for type_text." },
               key: {
@@ -273,7 +268,8 @@ export const realtimeToolSchemas = [
         url: { type: "string", description: "HTTP(S) URL to open in the bot-owned workspace." },
         goal: {
           type: "string",
-          description: "Short user-facing goal for the shared surface, e.g. 'show the dashboard trend'.",
+          description:
+            "Short user-facing goal for the shared surface, e.g. 'show the dashboard trend'.",
         },
         instruction: {
           type: "string",
@@ -300,7 +296,8 @@ export const realtimeToolSchemas = [
       properties: {
         task: {
           type: "string",
-          description: "The exact user task to execute, preserving wording such as no-planning or show-the-work constraints.",
+          description:
+            "The exact user task to execute, preserving wording such as no-planning or show-the-work constraints.",
         },
         task_url: {
           type: "string",
@@ -308,16 +305,19 @@ export const realtimeToolSchemas = [
         },
         demo_url: {
           type: "string",
-          description: "Optional initial URL to show on the shared surface while the worker starts.",
+          description:
+            "Optional initial URL to show on the shared surface while the worker starts.",
         },
         title: { type: "string", description: "Visible title for the shared surface." },
         issue_id: {
           type: "string",
-          description: "Optional fixture or external issue id. External writes still require approval.",
+          description:
+            "Optional fixture or external issue id. External writes still require approval.",
         },
         issue_url: {
           type: "string",
-          description: "Optional fixture or external issue URL. External writes still require approval.",
+          description:
+            "Optional fixture or external issue URL. External writes still require approval.",
         },
         request_issue_close: { type: "boolean", default: false },
         session_id: { type: "string", description: "Current meeting session id when known." },
@@ -327,7 +327,8 @@ export const realtimeToolSchemas = [
         },
         user_instruction: {
           type: "string",
-          description: "Additional user constraints, e.g. concise, don't narrate, show progress visually.",
+          description:
+            "Additional user constraints, e.g. concise, don't narrate, show progress visually.",
         },
       },
       required: ["task"],
@@ -362,7 +363,8 @@ export const realtimeToolSchemas = [
         },
         text: {
           type: "string",
-          description: "Visible text/ref to highlight or click, or text to type when action is type.",
+          description:
+            "Visible text/ref to highlight or click, or text to type when action is type.",
         },
         session_id: { type: "string", description: "Current meeting session id when known." },
         demo_session_id: {
@@ -383,7 +385,8 @@ export const realtimeToolSchemas = [
         session_id: { type: "string", description: "Current meeting session id when known." },
         demo_session_id: {
           type: "string",
-          description: "Shared-surface session id to cancel. Omit to cancel the active shared surface.",
+          description:
+            "Shared-surface session id to cancel. Omit to cancel the active shared surface.",
         },
         reason: { type: "string", description: "Short cancellation reason." },
       },
@@ -470,7 +473,8 @@ export const realtimeToolSchemas = [
       properties: {
         display_name: {
           type: "string",
-          description: "Raw speaker or participant display name from Meet, captions, Slack, or another surface.",
+          description:
+            "Raw speaker or participant display name from Meet, captions, Slack, or another surface.",
         },
         source: {
           type: "string",
@@ -481,7 +485,8 @@ export const realtimeToolSchemas = [
         workspace: { type: "string" },
         meeting_url: {
           type: "string",
-          description: "Current Google Meet URL when available, used to reconcile calendar attendees.",
+          description:
+            "Current Google Meet URL when available, used to reconcile calendar attendees.",
         },
         calendar_attendees: {
           type: "array",
@@ -1097,6 +1102,10 @@ export function buildRealtimeInstructions({
     "If the user says to stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",
     "Examples: “用 Pencil 演示”, “共享 VS Code 屏幕”, “给我看 Notion” => share the existing app/window. “用编辑器演示” => list shareable windows first. “做一个贪吃蛇然后给我看”, “生成一个 dashboard 页面” => create a shared workspace and present the result.",
     "Caption/event observations in Realtime are only useful as active/recent speaker signals. Do not treat caption text as user speech or as a replacement for audio-derived ASR; spoken turns come from the audio input.",
+    "Spoken-turn priority: answer the newest explicit spoken request first. When a newer correction says “停”, “不是”, “我是说你”, or “介绍你自己”, drop the previous line of thought and answer that correction instead of stale inferred context.",
+    "Voice checks such as “能听见吗”, “听得到吗”, or “有反应吗” require only one short confirmation that you heard the user. Do not expand into microphone, camera, permission, or troubleshooting advice unless asked.",
+    "For “介绍你自己”, “你是谁”, or “说说你自己”, introduce yourself as Onee Sama, the meeting avatar/copilot, in one or two short sentences. Do not answer as the user and do not pivot to the user's camera or self-view.",
+    "If audio contains phrases matching your own recent answers, treat them as room echo unless the latest human instruction clearly asks about those words. Do not continue your own previous answer as if it were a new user request.",
     "If a long-running result is not ready, say you are handling it and will report back automatically. Never pretend it is complete before the result arrives.",
     "When live meeting participants or speaker context is injected, use it as conversation context. Do not recite detection sources, confidence values, or raw context fields unless the user asks for debugging.",
     "For non-trivial spoken answers, adjust the avatar mood/action before or during the answer so the visible avatar matches the conversation.",

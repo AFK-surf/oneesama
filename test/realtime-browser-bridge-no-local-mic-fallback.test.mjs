@@ -143,6 +143,10 @@ test("Realtime bridge does not route browser local mic into the Meet audio mix",
       audioElement.captureStream = () => mediaElementDestination.stream;
       document.body.append(audioElement);
       await new Promise((resolve) => setTimeout(resolve, 1100));
+      const avatarOutputElement = document.createElement("audio");
+      avatarOutputElement.captureStream = () => new MediaStream([window.__MAB_AVATAR_AUDIO_TRACK]);
+      document.body.append(avatarOutputElement);
+      await new Promise((resolve) => setTimeout(resolve, 1100));
       const audioContext = new AudioContext();
       const oscillator = audioContext.createOscillator();
       const destination = audioContext.createMediaStreamDestination();
@@ -167,6 +171,9 @@ test("Realtime bridge does not route browser local mic into the Meet audio mix",
         primarySenderAttachEvents: window.MAB_REALTIME_BRIDGE.timeline.filter(
           (entry) => entry.type === "primary_meet_audio_sender_attached",
         ),
+        feedbackSkips: window.MAB_REALTIME_BRIDGE.timeline.filter(
+          (entry) => entry.type === "meet_audio_track_skipped",
+        ),
         localMicEvents: window.MAB_REALTIME_BRIDGE.timeline.filter((entry) =>
           String(entry.type).startsWith("local_audio"),
         ),
@@ -179,8 +186,11 @@ test("Realtime bridge does not route browser local mic into the Meet audio mix",
     assert.equal(result.meetSenderTrackId, result.avatarAudioTrackId);
     assert.equal(result.connection.primaryMeetAudioSenderUsingAvatarBus, true);
     assert.equal(result.primarySenderAttachEvents.length, 1);
-    assert.equal(result.connection.meetMediaElementsScanned, 1);
+    assert.equal(result.connection.meetMediaElementsScanned, 2);
     assert.equal(result.connection.meetMediaElementAudioTracksAdded, 1);
+    assert.ok(
+      result.feedbackSkips.some((entry) => entry.detail?.reason === "avatar_audio_bus_feedback"),
+    );
     assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
     assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
     assert.deepEqual(result.localMicEvents, []);

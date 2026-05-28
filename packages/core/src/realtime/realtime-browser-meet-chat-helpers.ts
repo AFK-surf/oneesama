@@ -354,20 +354,22 @@
     }
 
     function findMeetChatMessageElements(): HTMLElement[] {
+      const messageSelector = [
+        "[data-message-id]",
+        "[data-message-text]",
+        "[data-message-text-content]",
+        "[role='listitem']",
+        "[role='article']",
+      ].join(",");
       const candidates = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          [
-            "[data-message-id]",
-            "[data-message-text]",
-            "[data-message-text-content]",
-            "[role='listitem']",
-            "[role='article']",
-            "a[href^='http']",
-          ].join(","),
-        ),
+        document.querySelectorAll<HTMLElement>([messageSelector, "a[href^='http']"].join(",")),
       );
       return candidates.filter((element) => {
         if (!isVisibleElement(element)) return false;
+        if (element.matches("a[href^='http']")) {
+          const messageParent = element.closest(messageSelector);
+          if (messageParent && messageParent !== element) return false;
+        }
         const text = String(element.innerText || element.textContent || "").trim();
         const href = (element as HTMLAnchorElement).href || "";
         if (!text && !href) return false;
@@ -382,12 +384,7 @@
             "[aria-label*='Chat'],[aria-label*='chat'],[aria-label*='messages'],[aria-label*='Messages']",
           ),
         );
-        const hasLink = /^https?:\/\//.test(href) || /https?:\/\//.test(text);
-        return (
-          hasChatAncestor ||
-          hasMessageAttribute ||
-          (hasLink && !element.closest("[aria-label*='People'],[aria-label*='people']"))
-        );
+        return hasChatAncestor || hasMessageAttribute;
       });
     }
 

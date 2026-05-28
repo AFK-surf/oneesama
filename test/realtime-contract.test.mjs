@@ -21,9 +21,12 @@ test("Realtime contract preserves structured turn detection overrides", () => {
 });
 
 test("Realtime contract maps fast turn detection preset for browser sessions", () => {
-  const session = buildRealtimeSessionConfig({}, {
-    openaiRealtimeTurnDetection: "fast",
-  });
+  const session = buildRealtimeSessionConfig(
+    {},
+    {
+      openaiRealtimeTurnDetection: "fast",
+    },
+  );
 
   assert.deepEqual(session.audio.input.turn_detection, {
     type: "semantic_vad",
@@ -69,9 +72,12 @@ test("Realtime contract allows explicit truncation override", () => {
 });
 
 test("Realtime contract parses JSON turn detection config strings", () => {
-  const session = buildRealtimeSessionConfig({}, {
-    openaiRealtimeTurnDetection: '{"type":"semantic_vad","eagerness":"low"}',
-  });
+  const session = buildRealtimeSessionConfig(
+    {},
+    {
+      openaiRealtimeTurnDetection: '{"type":"semantic_vad","eagerness":"low"}',
+    },
+  );
 
   assert.deepEqual(session.audio.input.turn_detection, {
     type: "semantic_vad",
@@ -80,23 +86,48 @@ test("Realtime contract parses JSON turn detection config strings", () => {
 });
 
 test("Realtime contract keeps identity data out of product instructions", () => {
-  const session = buildRealtimeSessionConfig({}, {
-    botName: "Onee Sama",
-    currentUserName: "老大",
-    currentUserEnglishName: "Peng Xiao",
-    currentUserEmail: "peng@example.com",
-    currentUserLinear: "pengxiao",
-    currentUserGithub: "pengx17",
-    currentUserRole: "owner",
-    currentUserAliases: ["彭潇", "肖鹏", "Operator"],
-  });
+  const session = buildRealtimeSessionConfig(
+    {},
+    {
+      botName: "Onee Sama",
+      currentUserName: "老大",
+      currentUserEnglishName: "Peng Xiao",
+      currentUserEmail: "peng@example.com",
+      currentUserLinear: "pengxiao",
+      currentUserGithub: "pengx17",
+      currentUserRole: "owner",
+      currentUserAliases: ["彭潇", "肖鹏", "Operator"],
+    },
+  );
 
   assert.equal(session.model, "gpt-realtime-2");
   assert.match(session.instructions, /Identity contract:/);
   assert.match(session.instructions, /status queued or running/);
   assert.match(session.instructions, /Do not claim completion/);
-  assert.doesNotMatch(session.instructions, /老大|Peng Xiao|彭潇|肖鹏|peng@example\.com|pengxiao|pengx17/);
-  assert.doesNotMatch(session.instructions, /Codex|codex|delegate_to_|worker|fetch_url|present_video_stage|send_meet_chat|update_avatar_state/);
+  assert.doesNotMatch(
+    session.instructions,
+    /老大|Peng Xiao|彭潇|肖鹏|peng@example\.com|pengxiao|pengx17/,
+  );
+  assert.doesNotMatch(
+    session.instructions,
+    /Codex|codex|delegate_to_|worker|fetch_url|present_video_stage|send_meet_chat|update_avatar_state/,
+  );
+});
+
+test("Realtime contract keeps short voice checks and self-introductions on topic", () => {
+  const session = buildRealtimeSessionConfig({}, { botName: "Onee Sama" });
+
+  assert.match(session.instructions, /newest explicit spoken request first/);
+  assert.match(session.instructions, /Voice checks such as/);
+  assert.match(session.instructions, /one short confirmation/);
+  assert.match(
+    session.instructions,
+    /Do not expand into microphone, camera, permission, or troubleshooting advice/,
+  );
+  assert.match(session.instructions, /introduce yourself as Onee Sama/);
+  assert.match(session.instructions, /Do not answer as the user/);
+  assert.match(session.instructions, /room echo/);
+  assert.match(session.instructions, /Do not continue your own previous answer/);
 });
 
 test("Realtime contract exposes product identity resolver tool", () => {
