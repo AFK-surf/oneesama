@@ -67,13 +67,25 @@ test("caption-only Meet joins force camera off before and after admission", asyn
   );
 });
 
-test("Meet joins mute local playback by default while keeping an escape hatch", async () => {
+test("Realtime Meet joins keep local playback unmuted for audio capture by default", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
 
   assert.ok(
+    source.includes("function shouldMuteMeetLocalPlayback(input: GoogleMeetJoinInput): boolean {"),
+    "Meet local playback mute policy should be explicit",
+  );
+  assert.ok(
+    source.includes("input.autoConnectRealtime === true"),
+    "Realtime sessions should be treated separately from passive meeting joins",
+  );
+  assert.ok(
+    source.includes("input.includeParticipantAudio === true"),
+    "Realtime audio capture sessions must keep Meet media available",
+  );
+  assert.ok(
     source.includes(
-      "await installMeetLocalPlaybackMute(page, diagnostics, input.muteLocalPlayback !== false);",
+      "await installMeetLocalPlaybackMute(page, diagnostics, shouldMuteMeetLocalPlayback(input));",
     ),
-    "Meet page media playback should be muted unless explicitly disabled for debugging",
+    "Join flow should use the explicit local playback mute policy",
   );
 });
