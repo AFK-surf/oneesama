@@ -123,7 +123,7 @@ export function getRuntimeConfig(env = process.env) {
     recordMeeting: (env.MAB_RECORD_MEETING || "") === "1",
     captureCaptions: (env.MAB_CAPTURE_CAPTIONS || env.MAB_ENABLE_CAPTIONS || "") === "1",
     captionLanguage: env.MAB_CAPTION_LANGUAGE || "",
-    asrProvider: env.MAB_ASR_PROVIDER || "caption",
+    asrProvider: env.MAB_ASR_PROVIDER || "none",
     asrCommand: env.MAB_ASR_COMMAND || "",
     asrHttpUrl: env.MAB_ASR_HTTP_URL || "",
     asrModel: env.MAB_ASR_MODEL || "gpt-4o-mini-transcribe",

@@ -98,8 +98,8 @@ test("runtime init composer keeps representative Meet init script contents stabl
       sha256: "80acdb97ff62938fccd9ba995aab26d2c45d673e0cf5205bbc56a20fdfbb7bd2",
     },
     realtime: {
-      contentLength: 3984873,
-      sha256: "3a3f3eed5e0212a7e690ccfa9efac0ffd0d83b240603148a42d8dd040342372b",
+      contentLength: 3989686,
+      sha256: "251799b1640822e4d854de4622767b163dc9709e067911a7eff45746007e587e",
     },
     local_dialog: {
       contentLength: 9737,

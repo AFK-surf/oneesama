@@ -33,6 +33,8 @@ function isUserInputTextItem(event) {
 function shouldAllowUserInputTextEvent(event) {
   if (!isUserInputTextItem(event)) return { ok: true, source: "" };
   const source = realtimeEventSource(event);
+  // Captions are intentionally absent here: ASR/Realtime speech turns must come
+  // from Meet audio, not from a caption fallback that can drift or echo.
   const allowed = new Set(["manual_text_turn", "meet_chat_observer"]);
   return { ok: allowed.has(source), source };
 }

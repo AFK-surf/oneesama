@@ -110,9 +110,10 @@ export function buildGoogleMeetRuntimeSessionConfig({
     },
     inputPolicy: {
       audioInputs: installRealtimeBridge ? ["meet_remote_audio"] : ["none"],
-      textInputs: installRealtimeBridge
-        ? ["meet_chat", "caption", "worker_internal"]
-        : ["worker_internal"],
+      // Captions remain available as diagnostics/post-meeting artifacts, but
+      // live Realtime/ASR input is audio-only so captions cannot become fallback
+      // speech recognition.
+      textInputs: installRealtimeBridge ? ["meet_chat", "worker_internal"] : ["worker_internal"],
       continuousMic: false,
     },
     outputPolicy: {

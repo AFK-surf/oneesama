@@ -2532,13 +2532,22 @@ function tinyWavBase64() {
   }
   return buffer.toString("base64");
 }
-
 async function postMeetingSmoke() {
   const dataDir = await mkdtemp(pathJoin(tmpdir(), "meeting-avatar-bot-post-meeting-"));
   try {
+    const asrScript = pathJoin(dataDir, "chunk-asr-provider.mjs");
+    await writeFile(
+      asrScript,
+      `let stdin="";process.stdin.on("data",(chunk)=>{stdin+=chunk.toString();});process.stdin.on("end",()=>{const payload=JSON.parse(stdin||"{}");const index=payload.context?.chunkIndex;if(Number.isInteger(index)){const count=payload.context?.chunkCount??0;console.log(JSON.stringify({ok:true,provider:"command",text:"chunk "+index+" of "+count+": decision ship Slack Canvas after the meeting."}));return;}console.log(JSON.stringify({ok:true,provider:"command",segments:[{speaker:"Operator",text:"We decided to use the legacy meeting recording shape.",source:"asr"},{speaker:"Bot",text:"Action item: publish transcript and summary to Slack Canvas after the meeting.",source:"asr"}]}));});`,
+      "utf8",
+    );
     const pipeline = createMeetingArtifactPipeline({
       rootDir: pathJoin(dataDir, "artifacts"),
-      asrProvider: "caption",
+      asrProvider: "command",
+      env: {
+        ...process.env,
+        MAB_ASR_COMMAND: `${JSON.stringify(process.execPath)} ${JSON.stringify(asrScript)}`,
+      },
     });
     const result = await pipeline.postProcessMeeting({
       sessionId: "meet_post_smoke",
@@ -2601,7 +2610,7 @@ async function postMeetingSmoke() {
     );
     assertSmoke(
       result.transcript.segments.length === 2,
-      "post-meeting smoke did not preserve caption segments",
+      "post-meeting smoke did not write audio ASR segments",
       result.transcript,
     );
     assertSmoke(
@@ -2631,25 +2640,6 @@ async function postMeetingSmoke() {
       replayedChat,
     );
 
-    const asrScript = pathJoin(dataDir, "chunk-asr-provider.mjs");
-    await writeFile(
-      asrScript,
-      `
-let stdin = "";
-process.stdin.on("data", (chunk) => { stdin += chunk.toString(); });
-process.stdin.on("end", () => {
-  const payload = JSON.parse(stdin || "{}");
-  const index = payload.context?.chunkIndex ?? -1;
-  const count = payload.context?.chunkCount ?? 0;
-  console.log(JSON.stringify({
-    ok: true,
-    provider: "command",
-    text: "chunk " + index + " of " + count + ": decision ship Slack Canvas after the meeting."
-  }));
-});
-`,
-      "utf8",
-    );
     const recordingDir = pathJoin(dataDir, "recording-source");
     await mkdir(recordingDir, { recursive: true });
     const sourceAudio = pathJoin(recordingDir, "audio.wav");
@@ -3609,8 +3599,16 @@ async function meetingCopilotSmoke() {
       "meeting copilot status did not retain stopped state",
       status,
     );
-    assertSmoke(!state?.priorActions?.length, "disabled meeting copilot should not retain actions", status);
-    assertSmoke(!state?.runs?.length, "disabled meeting copilot should not record queued runs", status);
+    assertSmoke(
+      !state?.priorActions?.length,
+      "disabled meeting copilot should not retain actions",
+      status,
+    );
+    assertSmoke(
+      !state?.runs?.length,
+      "disabled meeting copilot should not record queued runs",
+      status,
+    );
 
     console.log(
       JSON.stringify(
@@ -3638,7 +3636,7 @@ async function canvasPublisherSmoke() {
   try {
     const pipeline = createMeetingArtifactPipeline({
       rootDir: pathJoin(dataDir, "artifacts"),
-      asrProvider: "caption",
+      asrProvider: "none",
     });
     const processed = await pipeline.postProcessMeeting({
       sessionId: "meet_canvas_smoke",
@@ -6966,13 +6964,15 @@ async function realtimeWebrtcSmoke() {
     const workerJobs = await (await fetch("http://127.0.0.1:18888/worker/jobs")).json();
     const bridge = status.active?.realtimeBridge;
     const eventTypes = new Set((bridge?.outbound || []).map((entry) => entry.event?.type));
-    const sentPayloadTypes = new Set((bridge?.connection?.sentDataChannelMessages || []).map((entry) => {
-      try {
-        return JSON.parse(entry.payload).type;
-      } catch {
-        return "";
-      }
-    }));
+    const sentPayloadTypes = new Set(
+      (bridge?.connection?.sentDataChannelMessages || []).map((entry) => {
+        try {
+          return JSON.parse(entry.payload).type;
+        } catch {
+          return "";
+        }
+      }),
+    );
     const deliveredJob = workerJobs.jobs.find((job) => job.id === "job_realtime_webrtc_smoke");
     assertSmoke(
       deliveredJob?.deliveredToRealtime === true,
@@ -8123,9 +8123,9 @@ async function realtimeLiveRoutingSmoke() {
               (bridge?.meetTools?.calls?.length || 0) +
                 (bridge?.workspaceTools?.calls?.length || 0) >
                 0 ||
-                (bridge?.meetTools?.errors?.length || 0) > 0 ||
-                (bridge?.workspaceTools?.errors?.length || 0) > 0 ||
-                (bridge?.errors?.length || 0) > 0,
+              (bridge?.meetTools?.errors?.length || 0) > 0 ||
+              (bridge?.workspaceTools?.errors?.length || 0) > 0 ||
+              (bridge?.errors?.length || 0) > 0,
             );
           },
           null,
@@ -8163,7 +8163,10 @@ async function realtimeLiveRoutingSmoke() {
           avatar: window.MAB_AVATAR_READY,
         }))) as {
           bridge?: RealtimeBridgeSnapshot & {
-            meetTools?: { calls?: Array<{ name?: string; [key: string]: unknown }>; errors?: unknown[] };
+            meetTools?: {
+              calls?: Array<{ name?: string; [key: string]: unknown }>;
+              errors?: unknown[];
+            };
             workspaceTools?: {
               calls?: Array<{ name?: string; [key: string]: unknown }>;
               errors?: unknown[];
@@ -8207,7 +8210,9 @@ async function realtimeLiveRoutingSmoke() {
         if ("requireOperations" in testCase && testCase.requireOperations) {
           const operations = appControlCalls.flatMap((call) => {
             const args = call.arguments as { operations?: unknown } | undefined;
-            return Array.isArray(args?.operations) ? (args.operations as Array<{ kind?: unknown }>) : [];
+            return Array.isArray(args?.operations)
+              ? (args.operations as Array<{ kind?: unknown }>)
+              : [];
           });
           assertSmoke(
             operations.some((operation) => String(operation?.kind || "") !== "state"),
@@ -8534,9 +8539,7 @@ async function avatarVisualSmoke() {
     );
     assertSmoke(
       (result.hudSnapshots || []).length === 5 &&
-        (result.hudSnapshots || []).every(
-          (snapshot) => snapshot.status?.nonBackgroundRatio > 0.12,
-        ),
+        (result.hudSnapshots || []).every((snapshot) => snapshot.status?.nonBackgroundRatio > 0.12),
       "avatar HUD visual smoke did not render all fixed status states",
       result.hudSnapshots,
     );
@@ -10175,7 +10178,8 @@ async function runEvidenceCommand({ name, args, rootDir, required = false }) {
   };
   await writeTextArtifact(pathJoin(rootDir, evidenceCommand.stdoutPath), result.stdout || "");
   await writeTextArtifact(pathJoin(rootDir, evidenceCommand.stderrPath), result.stderr || "");
-  if (required) assertSmoke(evidenceCommand.ok, `evidence command failed: ${name}`, evidenceCommand);
+  if (required)
+    assertSmoke(evidenceCommand.ok, `evidence command failed: ${name}`, evidenceCommand);
   return evidenceCommand;
 }
 

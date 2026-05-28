@@ -89,7 +89,7 @@ func TestHandleAvatarCommandJoinCallsMeetingAgent(t *testing.T) {
 			t.Fatalf("realtime connect fields = %#v, want active meeting bridge", body)
 		}
 		if !body.CaptureCaptions || body.CaptionLanguage != "English" {
-			t.Fatalf("caption flags = %#v, want Realtime join to keep caption fallback available", body)
+			t.Fatalf("caption flags = %#v, want caption capture enabled for artifacts", body)
 		}
 		if !body.RecordMeeting {
 			t.Fatalf("record_meeting = false, want ordinary join to record audio artifact")

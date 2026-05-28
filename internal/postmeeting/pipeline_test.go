@@ -302,7 +302,7 @@ func TestPipelineFallsBackWhenConfiguredLLMSummaryFails(t *testing.T) {
 	assertFileContains(t, result.Artifact.Files.Summary, "Processing Warnings", "summary_failed")
 }
 
-func TestPipelineRecordsASRAndCalibrationFallbackWarnings(t *testing.T) {
+func TestPipelineUsesAudioASRWhenCalibrationFails(t *testing.T) {
 	t.Parallel()
 
 	audioPath := writeTestAudioFile(t, "audio.mp3", "fake audio")
@@ -328,13 +328,20 @@ func TestPipelineRecordsASRAndCalibrationFallbackWarnings(t *testing.T) {
 	if len([]rune(result.Warnings[0].Detail)) > 515 {
 		t.Fatalf("warning detail length = %d, want truncated detail", len([]rune(result.Warnings[0].Detail)))
 	}
-	if result.Transcript.Provider != "caption" || !strings.Contains(result.Transcript.Text, "Caption text survives") {
-		t.Fatalf("transcript = %#v, want caption fallback", result.Transcript)
+	if result.Transcript.Provider != "asr:openai" || !strings.Contains(result.Transcript.Text, "ASR backup") {
+		t.Fatalf("transcript = %#v, want audio ASR fallback", result.Transcript)
 	}
+	if len(summarizer.summarizeSegments) != 1 || !strings.Contains(summarizer.summarizeSegments[0].Text, "ASR backup") {
+		t.Fatalf("summary segments = %#v, want audio ASR transcript", summarizer.summarizeSegments)
+	}
+}
 
-	asr.err = errors.New("asr provider down")
-	asr.transcript = ASRTranscript{}
-	result = mustPostProcess(t, pipeline, PostProcessInput{
+func TestPipelineFailsClosedWhenAudioASRFails(t *testing.T) {
+	t.Parallel()
+
+	audioPath := writeTestAudioFile(t, "audio.mp3", "fake audio")
+	pipeline := NewPipeline(t.TempDir(), WithASRProvider(&fakeASRProvider{err: errors.New("asr provider down")}))
+	_, err := pipeline.PostProcess(context.Background(), PostProcessInput{
 		Title:     "ASR fallback",
 		AudioPath: audioPath,
 		Captions: []TranscriptSegmentInput{{
@@ -342,8 +349,8 @@ func TestPipelineRecordsASRAndCalibrationFallbackWarnings(t *testing.T) {
 			Text:    "Decision: captions still produce summary.",
 		}},
 	})
-	if len(result.Warnings) != 1 || result.Warnings[0].Code != "asr_failed" {
-		t.Fatalf("warnings = %#v, want asr_failed", result.Warnings)
+	if err == nil || !strings.Contains(err.Error(), "captions are not allowed as ASR fallback") {
+		t.Fatalf("PostProcess() error = %v, want captions not allowed ASR fallback", err)
 	}
 }
 

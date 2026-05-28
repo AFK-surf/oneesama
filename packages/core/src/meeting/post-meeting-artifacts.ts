@@ -152,6 +152,7 @@ interface AsrProviderResult {
   error?: string;
   detail?: string;
   debug?: string;
+  skipped?: boolean;
 }
 
 interface AsrProviderResponse extends Partial<Omit<AsrProviderResult, "error">> {
@@ -169,10 +170,32 @@ function slugify(value: unknown, fallback = "meeting"): string {
 }
 
 function normalizeProvider(provider: unknown): string {
-  return String(provider || "caption")
+  return String(provider || "none")
     .trim()
     .toLowerCase()
     .replaceAll("_", "-");
+}
+
+function isAsrDisabledProvider(candidate: string): boolean {
+  return ["none", "off", "disabled"].includes(candidate);
+}
+
+function isCaptionAsrProvider(candidate: string): boolean {
+  return ["caption", "captions", "event"].includes(candidate);
+}
+
+function asrTranscriptHasContent(result: AsrProviderResult): boolean {
+  return Boolean(
+    String(result.text || result.transcriptText || result.transcript?.text || "").trim() ||
+    (result.segments && result.segments.length > 0) ||
+    (result.captions && result.captions.length > 0) ||
+    (result.transcript?.segments && result.transcript.segments.length > 0),
+  );
+}
+
+function audioAsrTranscriptProvider(result: AsrProviderResult, configuredProvider: string): string {
+  const provider = normalizeProvider(result.provider || configuredProvider || "asr");
+  return provider.startsWith("asr:") ? provider : `asr:${provider}`;
 }
 
 function nowIso(): string {
@@ -601,18 +624,20 @@ export function createMeetingArtifactPipeline(options: MeetingArtifactInput = {}
   }
 
   async function runSingleAsr(payload: AsrPayload): Promise<AsrProviderResult> {
-    if (
-      provider === "caption" ||
-      provider === "captions" ||
-      provider === "event" ||
-      provider === "none"
-    ) {
+    if (isAsrDisabledProvider(provider)) {
       return {
         ok: true,
         provider,
+        skipped: true,
         language: payload.language,
-        segments: payload.captions,
-        text: payload.captions.map((segment) => segment.text).join("\n"),
+      };
+    }
+    if (isCaptionAsrProvider(provider)) {
+      return {
+        ok: false,
+        provider,
+        language: payload.language,
+        error: "Captions are not a valid ASR provider; ASR must be derived from recorded audio.",
       };
     }
     if (provider === "command") {
@@ -708,13 +733,19 @@ export function createMeetingArtifactPipeline(options: MeetingArtifactInput = {}
 
   async function runAsr(input: MeetingArtifactInput = {}): Promise<AsrProviderResult> {
     const payload = buildAsrPayload(input);
-    const isCaptionProvider =
-      provider === "caption" ||
-      provider === "captions" ||
-      provider === "event" ||
-      provider === "none";
     const audioChunks = discoverAudioChunks(input);
-    if (!isCaptionProvider && input.useAudioChunks !== false && audioChunks.length) {
+    if (isAsrDisabledProvider(provider)) return await runSingleAsr(payload);
+    if (isCaptionAsrProvider(provider)) return await runSingleAsr(payload);
+    if (!payload.audioPath && audioChunks.length === 0) {
+      return {
+        ok: false,
+        provider,
+        language: payload.language,
+        error:
+          "audioPath or audioChunks are required for ASR; captions are not allowed as ASR fallback.",
+      };
+    }
+    if (input.useAudioChunks !== false && audioChunks.length) {
       return await runChunkedAsr(payload, audioChunks);
     }
 
@@ -753,15 +784,40 @@ export function createMeetingArtifactPipeline(options: MeetingArtifactInput = {}
       dir,
     );
     const asr = await runAsr({ ...input, audioPath, audioChunks, artifactDir: dir });
-    const segments = normalizeSegments({
-      segments: asr.segments || input.segments || input.captions || [],
-      transcriptText: asr.text || asr.transcriptText || input.transcriptText,
-    });
+    if (asr.ok === false) {
+      // ASR is strictly audio-derived. Captions can still be archived as their
+      // own source, but they must not silently replace a failed audio ASR pass.
+      throw new Error(
+        `audio ASR failed; captions are not allowed as ASR fallback: ${
+          asr.error || `provider ${provider} returned ok=false`
+        }`,
+      );
+    }
+    if (!asr.skipped && !asrTranscriptHasContent(asr)) {
+      throw new Error(
+        "audio ASR returned an empty transcript; captions are not allowed as ASR fallback",
+      );
+    }
+    const transcriptSource = asr.skipped
+      ? {
+          segments: input.segments || input.captions || input.transcript?.segments || [],
+          transcriptText: input.transcriptText || input.transcript?.text || input.text,
+        }
+      : {
+          segments: asr.segments || asr.captions || asr.transcript?.segments || [],
+          transcriptText: asr.text || asr.transcriptText || asr.transcript?.text,
+        };
+    const segments = normalizeSegments(transcriptSource);
+    const transcriptProvider = asr.skipped
+      ? segments.some((segment) => segment.source.includes("caption"))
+        ? "caption"
+        : "input"
+      : audioAsrTranscriptProvider(asr, provider);
     const transcript = {
       schema: "meeting-avatar-bot.transcript.v1",
       id,
-      provider: asr.provider || provider,
-      ok: asr.ok !== false,
+      provider: transcriptProvider,
+      ok: true,
       language: asr.language || input.language || config.asrLanguage,
       text: segments.map((segment) => segment.text).join("\n"),
       segments,
@@ -849,7 +905,7 @@ export function createMeetingArtifactPipeline(options: MeetingArtifactInput = {}
     writeFileSync(files.chat, `${JSON.stringify(chat, null, 2)}\n`);
     writeFileSync(files.summary, renderSummaryMarkdown(summary, artifact));
     writeFileSync(files.manifest, `${JSON.stringify(artifact, null, 2)}\n`);
-    return { ok: asr.ok !== false, artifact, transcript, summary, chat, asr };
+    return { ok: true, artifact, transcript, summary, chat, asr };
   }
 
   function getArtifact(id) {

@@ -51,6 +51,8 @@ function injectCaptionTurn(
   state.connection.lastCaptionTurnAt = new Date().toISOString();
   state.connection.lastCaptionTurnSpeaker = speaker;
   state.connection.lastCaptionTurnText = text.slice(0, 500);
+  // Observation only: captions help diagnostics, but they never become ASR or
+  // Realtime model input. The speech path is the Meet audio mix.
   recordTimeline("meet_caption_turn_observed", {
     speaker,
     streamId,

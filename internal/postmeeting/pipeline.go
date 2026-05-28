@@ -91,16 +91,24 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 	transcriptProvider := "caption"
 	summaryInput := input
 	warnings := make([]PostProcessWarning, 0, 3)
+	audioASRRequested := p.audioASRRequested(input, audioChunks)
 	if asrTranscript, err := p.transcribeAudio(ctx, input, dir, participants, audioChunks); err != nil {
 		if isContextDone(ctx, err) {
 			return PostProcessResult{}, err
 		}
-		warnings = append(warnings, postProcessWarning("asr_failed", "ASR transcription failed; using live captions fallback.", err))
-	} else if firstNonEmpty(asrTranscript.Text) != "" {
+		if audioASRRequested {
+			// ASR must be derived from the recorded audio. Live captions are a
+			// separate diagnostic/transcript source and must not mask failed ASR.
+			return PostProcessResult{}, fmt.Errorf("audio ASR failed; captions are not allowed as ASR fallback: %w", err)
+		}
+	} else if audioASRRequested {
+		if !asrTranscriptHasContent(asrTranscript) {
+			return PostProcessResult{}, fmt.Errorf("audio ASR returned an empty transcript; captions are not allowed as ASR fallback")
+		}
 		if len(asrTranscript.AudioChunks) > 0 {
 			audioChunks = asrTranscript.AudioChunks
 		}
-		summaryInput.ASRTranscriptText = firstNonEmpty(asrTranscript.Text)
+		summaryInput.ASRTranscriptText = renderASRTranscriptText(asrTranscript)
 		summaryInput.ASRProvider = asrTranscript.Provider
 		if calibrated, warning, err := p.calibrateTranscript(ctx, segments, asrTranscript); err != nil {
 			return PostProcessResult{}, err
@@ -113,7 +121,7 @@ func (p *Pipeline) PostProcess(ctx context.Context, input PostProcessInput) (Pos
 				warnings = append(warnings, *warning)
 			}
 			var transcriptText string
-			segments, transcriptProvider, transcriptText = applyASRTranscriptFallback(segments, asrTranscript, transcriptProvider)
+			segments, transcriptProvider, transcriptText = applyAudioASRTranscript(asrTranscript)
 			if transcriptText != "" {
 				summaryInput.TranscriptText = transcriptText
 			}
@@ -241,19 +249,31 @@ func validateArtifactID(id string) error {
 	return nil
 }
 
-func applyASRTranscriptFallback(segments []NormalizedSegment, asrTranscript ASRTranscript, provider string) ([]NormalizedSegment, string, string) {
-	if len(segments) != 0 {
-		return segments, provider, ""
-	}
-	segments = asrTranscript.Segments
+func applyAudioASRTranscript(asrTranscript ASRTranscript) ([]NormalizedSegment, string, string) {
+	segments := asrTranscript.Segments
 	if len(segments) == 0 {
 		segments = transcriptSegmentsFromText(asrTranscript.Text, "asr")
 	}
-	provider = "asr"
+	provider := "asr"
 	if asrProvider := firstNonEmpty(asrTranscript.Provider); asrProvider != "" {
 		provider = "asr:" + asrProvider
 	}
 	return segments, provider, renderTranscriptText(segments)
+}
+
+func asrTranscriptHasContent(transcript ASRTranscript) bool {
+	return firstNonEmpty(transcript.Text) != "" || len(transcript.Segments) > 0
+}
+
+func renderASRTranscriptText(transcript ASRTranscript) string {
+	if text := firstNonEmpty(transcript.Text); text != "" {
+		return text
+	}
+	return renderTranscriptText(transcript.Segments)
+}
+
+func (p *Pipeline) audioASRRequested(input PostProcessInput, chunks []string) bool {
+	return p.asr != nil && !input.SkipASR && (firstNonEmpty(input.AudioPath) != "" || len(chunks) > 0)
 }
 
 func (p *Pipeline) transcribeAudio(ctx context.Context, input PostProcessInput, artifactDir string, participants []string, chunks []string) (ASRTranscript, error) {
@@ -283,15 +303,16 @@ func (p *Pipeline) transcribeAudio(ctx context.Context, input PostProcessInput, 
 
 func (p *Pipeline) calibrateTranscript(ctx context.Context, captionSegments []NormalizedSegment, asrTranscript ASRTranscript) (string, *PostProcessWarning, error) {
 	calibrator, ok := p.summarizer.(transcriptCalibrator)
-	if !ok || firstNonEmpty(asrTranscript.Text) == "" || len(captionSegments) == 0 {
+	asrTranscriptText := renderASRTranscriptText(asrTranscript)
+	if !ok || firstNonEmpty(asrTranscriptText) == "" || len(captionSegments) == 0 {
 		return "", nil, nil
 	}
-	calibrated, err := calibrator.Calibrate(ctx, renderTranscriptText(captionSegments), asrTranscript.Text)
+	calibrated, err := calibrator.Calibrate(ctx, renderTranscriptText(captionSegments), asrTranscriptText)
 	if err != nil {
 		if isContextDone(ctx, err) {
 			return "", nil, err
 		}
-		warning := postProcessWarning("calibration_failed", "Transcript calibration failed; using the best available transcript.", err)
+		warning := postProcessWarning("calibration_failed", "Transcript calibration failed; using audio ASR transcript.", err)
 		return "", &warning, nil
 	}
 	return firstNonEmpty(calibrated), nil, nil

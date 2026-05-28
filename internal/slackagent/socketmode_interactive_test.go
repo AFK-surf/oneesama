@@ -125,7 +125,7 @@ func TestSocketModeInteractiveJoinSetupUsesSharedInteractionPath(t *testing.T) {
 		t.Fatalf("join body = %#v, want real join", body)
 	}
 	if !body.CaptureCaptions || body.CaptionLanguage != "Japanese" {
-		t.Fatalf("caption flags = %#v, want Realtime join to keep caption fallback available", body)
+		t.Fatalf("caption flags = %#v, want caption capture enabled for artifacts", body)
 	}
 	if !body.InstallRealtimeBridge || !body.InstallWorkerResultBridge {
 		t.Fatalf("realtime flags = %#v, want realtime bridge pair", body)
