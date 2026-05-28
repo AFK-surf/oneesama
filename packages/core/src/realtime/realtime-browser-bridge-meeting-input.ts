@@ -29,16 +29,26 @@ function handleRealtimeServerEvent(detail) {
   ) {
     state.protection.activeResponseId = "";
   }
-  if (
-    event.type === "response.done" ||
-    event.type === "response.cancelled" ||
-    event.type === "response.failed" ||
-    event.type === "output_audio_buffer.stopped" ||
-    event.type === "response.output_audio.done"
-  ) {
+  if (event.type === "output_audio_buffer.stopped") {
     window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
     state.protection.outputAudioActive = false;
     scheduleRealtimeInputGateOpen(event.type, 1200);
+  }
+  if (event.type === "response.cancelled" || event.type === "response.failed") {
+    window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
+    state.protection.outputAudioActive = false;
+    scheduleRealtimeInputGateOpen(event.type, 1200);
+  }
+  if (event.type === "response.done" || event.type === "response.output_audio.done") {
+    if (state.protection.outputAudioActive) {
+      recordTimeline("realtime_input_gate_open_deferred", {
+        reason: event.type,
+        waitingFor: "output_audio_buffer.stopped",
+      });
+    } else {
+      window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
+      scheduleRealtimeInputGateOpen(event.type, 1200);
+    }
   }
   handleLocalToolCallEvent(event);
 }
