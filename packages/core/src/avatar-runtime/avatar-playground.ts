@@ -418,37 +418,6 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
         background: #12161d;
         object-fit: cover;
       }
-      .action-banner {
-        position: absolute;
-        left: 50%;
-        bottom: 54px;
-        z-index: 3;
-        transform: translateX(-50%);
-        display: none;
-        align-items: center;
-        gap: 10px;
-        min-height: 38px;
-        padding: 0 16px;
-        border: 1px solid rgba(124,138,255,0.30);
-        border-radius: 12px;
-        background:
-          linear-gradient(135deg, rgba(124,138,255,0.22), rgba(176,140,255,0.18)),
-          rgba(15,18,31,0.68);
-        backdrop-filter: blur(18px) saturate(160%);
-        color: var(--ink);
-        font-size: 12px;
-        font-weight: 680;
-        box-shadow: 0 12px 30px rgba(0,0,0,0.34);
-      }
-      .action-banner.active { display: inline-flex; }
-      .action-banner::before {
-        content: "";
-        width: 8px;
-        height: 8px;
-        border-radius: 999px;
-        background: var(--accent);
-        animation: pulse 1.4s ease-in-out infinite;
-      }
       @keyframes pulse {
         0%, 100% { opacity: 1; transform: scale(1); }
         50% { opacity: 0.48; transform: scale(1.35); }
@@ -663,7 +632,6 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
         <div class="stage-canvas">
           <div class="avatar-frame">
             <video class="avatar-video" id="avatar-preview" autoplay muted playsinline></video>
-            <div class="action-banner" id="action-banner"></div>
           </div>
         </div>
         <footer class="stage-footer">
@@ -706,7 +674,6 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
           signals: document.getElementById("signals"),
           readout: document.getElementById("readout"),
           rendererReadout: document.getElementById("renderer-readout"),
-          actionBanner: document.getElementById("action-banner"),
         };
         const state = { ready: false, activeState: "listening", errors: [] };
 
@@ -802,21 +769,6 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
           return signals;
         }
 
-        function updateActionBanner(preset) {
-          const active = preset.tool !== "idle";
-          els.actionBanner.classList.toggle("active", active);
-          if (!active) {
-            els.actionBanner.textContent = "";
-            return;
-          }
-          els.actionBanner.textContent =
-            preset.tool === "blocked"
-              ? "操作受阻 · 等待人工处理"
-              : preset.tool === "done"
-                ? "操作完成 · chat only"
-                : preset.statusText + " · live CU";
-        }
-
         function applyPreset(id) {
           const preset = statePresets.find((candidate) => candidate.id === id) || statePresets[0];
           state.activeState = preset.id;
@@ -832,7 +784,6 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
           document.querySelectorAll("[data-state-id]").forEach((button) => {
             button.classList.toggle("active", button.dataset.stateId === preset.id);
           });
-          updateActionBanner(preset);
           const signals = renderSignals();
           els.readout.textContent =
             preset.description + "\\n" + signals.map((s) => s.label + "=" + s.value).join(" · ");

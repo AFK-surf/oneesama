@@ -26,51 +26,70 @@ type HudSignal = {
   level: "ok" | "active" | "warn" | "blocked" | "idle";
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  idle: "",
-  thinking: "Thinking",
-  writing_code: "Writing code",
-  opening_preview: "App control",
-  blocked: "Blocked",
-  done: "Done",
+type HudCell = {
+  key: string;
+  label: string;
+  level: HudSignal["level"];
+  color: string;
+  pulse: boolean;
 };
 
-const STATUS_COLORS: Record<string, { accent: string; bg: string }> = {
-  idle: { accent: "#94a3b8", bg: "rgba(9, 13, 18, 0.58)" },
-  thinking: { accent: "#38bdf8", bg: "rgba(9, 13, 18, 0.62)" },
-  writing_code: { accent: "#c084fc", bg: "rgba(9, 13, 18, 0.64)" },
-  opening_preview: { accent: "#2dd4bf", bg: "rgba(9, 13, 18, 0.66)" },
-  blocked: { accent: "#fb7185", bg: "rgba(18, 11, 13, 0.72)" },
-  done: { accent: "#86efac", bg: "rgba(10, 17, 13, 0.64)" },
+const CELL_COLORS: Record<string, string> = {
+  rt: "#5ed99d",
+  audio: "#6fbef0",
+  voice: "#c39fff",
+  tool: "#f4c45a",
+  err: "#ff8a8a",
+  done: "#5ed99d",
+  status: "#d7ddff",
 };
 
-const SIGNAL_COLORS: Record<HudSignal["level"], { dot: string; bg: string; text: string }> = {
-  ok: { dot: "#7ddf9b", bg: "rgba(125, 223, 155, 0.12)", text: "#e8fff0" },
-  active: { dot: "#38d5df", bg: "rgba(56, 213, 223, 0.16)", text: "#e6fcff" },
-  warn: { dot: "#f2b84b", bg: "rgba(242, 184, 75, 0.15)", text: "#fff3d6" },
-  blocked: { dot: "#fb7185", bg: "rgba(251, 113, 133, 0.16)", text: "#ffe9ed" },
-  idle: { dot: "#a7b0bf", bg: "rgba(167, 176, 191, 0.11)", text: "#edf2f8" },
+const SIGNAL_LABELS: Record<string, string> = {
+  rt: "RT",
+  audio: "Audio",
+  voice: "Voice",
+  tool: "Tool",
+  err: "Err",
 };
 
-function drawRoundRect(
+const CELL_PRIORITY: Record<string, number> = {
+  err: 0,
+  tool: 1,
+  voice: 2,
+  audio: 3,
+  rt: 4,
+  done: 5,
+  status: 6,
+};
+
+function drawSegmentRect(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   width: number,
   height: number,
-  radius: number,
+  first: boolean,
+  last: boolean,
 ) {
-  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  const radius = 4;
+  const tl = first ? radius : 0;
+  const tr = last ? radius : 0;
+  const br = last ? radius : 0;
+  const bl = first ? radius : 0;
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.moveTo(x + tl, y);
+  ctx.lineTo(x + width - tr, y);
+  if (tr > 0) ctx.quadraticCurveTo(x + width, y, x + width, y + tr);
+  else ctx.lineTo(x + width, y);
+  ctx.lineTo(x + width, y + height - br);
+  if (br > 0) ctx.quadraticCurveTo(x + width, y + height, x + width - br, y + height);
+  else ctx.lineTo(x + width, y + height);
+  ctx.lineTo(x + bl, y + height);
+  if (bl > 0) ctx.quadraticCurveTo(x, y + height, x, y + height - bl);
+  else ctx.lineTo(x, y + height);
+  ctx.lineTo(x, y + tl);
+  if (tl > 0) ctx.quadraticCurveTo(x, y, x + tl, y);
+  else ctx.lineTo(x, y);
   ctx.closePath();
 }
 
@@ -88,12 +107,6 @@ function failureLevel(entry: any): HudSignal["level"] {
   if (entry.status === "waiting" || entry.status === "degraded") return "warn";
   if (entry.status === "healthy") return "ok";
   return "idle";
-}
-
-function latestErrorSummary(bridge: any) {
-  const errors = Array.isArray(bridge?.errors) ? bridge.errors : [];
-  const last = errors.at(-1);
-  return String(last?.message || last?.reason || last?.type || "").trim();
 }
 
 function countAppControlJobs(bridge: any) {
@@ -190,14 +203,7 @@ function collectSignals(): HudSignal[] {
 }
 
 function shouldDrawHud(status: AvatarStatus | null, signals: HudSignal[]) {
-  return Boolean(
-    status ||
-    (window as any).MAB_REALTIME_BRIDGE ||
-    signals.some(
-      (signal) =>
-        signal.level === "blocked" || signal.level === "warn" || signal.level === "active",
-    ),
-  );
+  return visibleCells(status, signals).length > 0;
 }
 
 function trimHudText(value: string, max = 72) {
@@ -207,32 +213,120 @@ function trimHudText(value: string, max = 72) {
   return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}…`;
 }
 
-function drawChip(
+function statusCell(status: AvatarStatus | null): HudCell | null {
+  if (!status || status.kind === "idle") return null;
+  const text = trimHudText(status.text, 24);
+  if (!text) return null;
+  if (status.kind === "thinking") {
+    if (text === "等待输入" || /listening/i.test(text)) {
+      return {
+        key: "audio",
+        label: "Listening",
+        level: "active",
+        color: CELL_COLORS.audio,
+        pulse: true,
+      };
+    }
+    return {
+      key: "voice",
+      label: "Thinking",
+      level: "active",
+      color: CELL_COLORS.voice,
+      pulse: true,
+    };
+  }
+  if (status.kind === "opening_preview") {
+    return { key: "tool", label: "Tool", level: "active", color: CELL_COLORS.tool, pulse: true };
+  }
+  if (status.kind === "blocked") {
+    return { key: "err", label: "Blocked", level: "blocked", color: CELL_COLORS.err, pulse: true };
+  }
+  if (status.kind === "done") {
+    if (/说话|speaking|talk/i.test(text)) {
+      return {
+        key: "voice",
+        label: "Voice",
+        level: "active",
+        color: CELL_COLORS.voice,
+        pulse: true,
+      };
+    }
+    return { key: "done", label: "Done", level: "ok", color: CELL_COLORS.done, pulse: false };
+  }
+  if (status.kind === "writing_code") {
+    return { key: "tool", label: "Working", level: "active", color: CELL_COLORS.tool, pulse: true };
+  }
+  return { key: "status", label: text, level: "active", color: CELL_COLORS.status, pulse: true };
+}
+
+function signalCell(signal: HudSignal): HudCell | null {
+  if (signal.level === "idle" || signal.level === "ok") return null;
+  const label = SIGNAL_LABELS[signal.key] || signal.label;
+  return {
+    key: signal.key,
+    label,
+    level: signal.level,
+    color: CELL_COLORS[signal.key] || CELL_COLORS.status,
+    pulse: true,
+  };
+}
+
+function cellWidth(cell: HudCell) {
+  return Math.max(78, Math.min(150, 32 + cell.label.length * 8));
+}
+
+function visibleCells(status: AvatarStatus | null, signals: HudSignal[]) {
+  const cells: HudCell[] = [];
+  const primary = statusCell(status);
+  if (primary) cells.push(primary);
+  signals
+    .map((signal) => signalCell(signal))
+    .filter((cell): cell is HudCell => Boolean(cell))
+    .toSorted((left, right) => (CELL_PRIORITY[left.key] ?? 99) - (CELL_PRIORITY[right.key] ?? 99))
+    .forEach((next) => {
+      if (cells.some((cell) => cell.key === next.key)) return;
+      cells.push(next);
+    });
+  return cells.slice(0, 3);
+}
+
+function drawCell(
   ctx: CanvasRenderingContext2D,
-  signal: HudSignal,
+  cell: HudCell,
   x: number,
   y: number,
   width: number,
+  first: boolean,
+  last: boolean,
 ) {
-  const colors = SIGNAL_COLORS[signal.level];
-  drawRoundRect(ctx, x, y, width, 30, 15);
-  ctx.fillStyle = colors.bg;
+  const height = 32;
+  drawSegmentRect(ctx, x, y, width, height, first, last);
+  ctx.fillStyle = "rgba(15, 18, 28, 0.72)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.10)";
+  const gradient = ctx.createLinearGradient(0, y, 0, y + height);
+  gradient.addColorStop(0, `${cell.color}22`);
+  gradient.addColorStop(1, `${cell.color}0d`);
+  ctx.fillStyle = gradient;
+  ctx.fill();
+  ctx.strokeStyle =
+    cell.level === "blocked" || cell.level === "warn"
+      ? `${cell.color}66`
+      : "rgba(255, 255, 255, 0.10)";
   ctx.lineWidth = 1;
   ctx.stroke();
-  ctx.fillStyle = colors.dot;
+  const pulse = cell.pulse ? 0.58 + Math.sin(performance.now() / 260) * 0.32 : 0.96;
+  ctx.globalAlpha = Math.max(0.38, pulse);
+  ctx.fillStyle = cell.color;
   ctx.beginPath();
-  ctx.arc(x + 15, y + 15, 4.2, 0, Math.PI * 2);
+  ctx.arc(x + 17, y + 16, 3.6, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = colors.text;
-  ctx.font = "700 13px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.font = "800 11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.textBaseline = "middle";
   ctx.textAlign = "left";
-  ctx.fillText(signal.label, x + 25, y + 20);
-  ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
-  ctx.font = "700 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-  ctx.textAlign = "right";
-  ctx.fillText(signal.value, x + width - 10, y + 20);
+  ctx.fillText(cell.label.toUpperCase(), x + 28, y + 16);
+  ctx.textBaseline = "alphabetic";
 }
 
 export function createAvatarHud(options: {
@@ -242,10 +336,17 @@ export function createAvatarHud(options: {
   const { config, avatarController } = options;
 
   function rect(): HudRect {
+    const status = avatarController.visibleStatus();
+    const signals = collectSignals();
+    const cells = visibleCells(status, signals);
     const { canvasWidth: w, canvasHeight: h } = config;
-    const width = Math.min(700, w * 0.55);
-    const height = 112;
-    return { x: (w - width) / 2, y: Math.min(h - height - 54, h * 0.68), width, height };
+    const gap = 4;
+    const width = Math.max(
+      1,
+      cells.reduce((sum, cell) => sum + cellWidth(cell), 0) + Math.max(0, cells.length - 1) * gap,
+    );
+    const height = cells.length > 0 ? 32 : 1;
+    return { x: (w - width) / 2, y: Math.round(h * 0.68), width, height };
   }
 
   function draw(ctx: CanvasRenderingContext2D) {
@@ -253,38 +354,19 @@ export function createAvatarHud(options: {
     const signals = collectSignals();
     if (!shouldDrawHud(status, signals)) return;
 
-    const { x, y, width, height } = rect();
-    const statusKind = status?.kind || "idle";
-    const colors = STATUS_COLORS[statusKind] || STATUS_COLORS.thinking;
-    const label = status ? STATUS_LABELS[statusKind] || "Working" : "Realtime";
-    const errorSummary = trimHudText(latestErrorSummary(bridgeState()), 52);
-    const text = trimHudText(status?.text || errorSummary || "waiting for meeting signal", 78);
-    const chipWidth = (width - 68) / 5;
+    const cells = visibleCells(status, signals);
+    const { x, y } = rect();
+    const gap = 4;
 
     ctx.save();
-    ctx.shadowColor = "rgba(0, 0, 0, 0.32)";
-    ctx.shadowBlur = 18;
-    ctx.shadowOffsetY = 10;
-    ctx.fillStyle = colors.bg;
-    drawRoundRect(ctx, x, y, width, height, 22);
-    ctx.fill();
-    ctx.shadowColor = "transparent";
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-    ctx.shadowColor = "transparent";
-    ctx.fillStyle = colors.accent;
-    drawRoundRect(ctx, x + 18, y + 18, 8, 48, 4);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255, 255, 255, 0.70)";
-    ctx.font = "800 17px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText(label, x + 40, y + 35);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "800 28px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText(text, x + 40, y + 70, width - 70);
-    signals.forEach((signal, index) => {
-      drawChip(ctx, signal, x + 18 + index * (chipWidth + 8), y + 78, chipWidth);
+    ctx.shadowColor = "rgba(0, 0, 0, 0.34)";
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 6;
+    let cellX = x;
+    cells.forEach((cell, index) => {
+      const width = cellWidth(cell);
+      drawCell(ctx, cell, cellX, y, width, index === 0, index === cells.length - 1);
+      cellX += width + gap;
     });
     ctx.restore();
   }
