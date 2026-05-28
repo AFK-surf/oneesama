@@ -69,17 +69,18 @@ test("caption-only Meet joins force camera off before and after admission", asyn
 
 test("Realtime Meet joins keep local playback unmuted for audio capture by default", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+  const baseSource = await readFile("packages/core/src/meeting/google-meet-joiner-base.ts", "utf8");
 
   assert.ok(
-    source.includes("function shouldMuteMeetLocalPlayback(input: GoogleMeetJoinInput): boolean {"),
+    baseSource.includes("function shouldMuteMeetLocalPlayback(input: GoogleMeetJoinInput): boolean {"),
     "Meet local playback mute policy should be explicit",
   );
   assert.ok(
-    source.includes("input.autoConnectRealtime === true"),
+    baseSource.includes("input.autoConnectRealtime === true"),
     "Realtime sessions should be treated separately from passive meeting joins",
   );
   assert.ok(
-    source.includes("input.includeParticipantAudio === true"),
+    baseSource.includes("input.includeParticipantAudio === true"),
     "Realtime audio capture sessions must keep Meet media available",
   );
   assert.ok(
@@ -87,5 +88,31 @@ test("Realtime Meet joins keep local playback unmuted for audio capture by defau
       "await installMeetLocalPlaybackMute(page, diagnostics, shouldMuteMeetLocalPlayback(input));",
     ),
     "Join flow should use the explicit local playback mute policy",
+  );
+});
+
+test("Realtime Recappi Meet joins keep raw audio on native server VAD", async () => {
+  const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+
+  const recappiSource = 'meetAudioInputSource: realtimeRecappiAudioInput ? "recappi_process_audio"';
+  const oldTranscriptGate = ["gateRealtimeResponsesOn", "InputTranscription"].join("");
+  const oldTranscriptFlag = ["responseAfter", "InputTranscription"].join("");
+
+  assert.ok(
+    !source.includes(oldTranscriptGate),
+    "Recappi Realtime joins must not route raw audio through a transcript gate",
+  );
+  assert.ok(
+    !source.includes(oldTranscriptFlag),
+    "browser runtime must not request responses from transcript-derived events",
+  );
+  assert.ok(
+    source.includes(recappiSource),
+    "Recappi joins must select the process audio tap as the Realtime input source",
+  );
+  assert.ok(
+    source.indexOf("buildRealtimeSessionConfig") <
+      source.indexOf("const runtimeInitScripts = buildAvatarRuntimeInitScripts"),
+    "native Realtime session config must be built before the browser init script",
   );
 });

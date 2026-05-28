@@ -269,14 +269,14 @@ test("Realtime bridge routes participant audio through a single mixer sender", a
       const audioContext = new AudioContext();
       const oscillator = audioContext.createOscillator();
       const quietGain = audioContext.createGain();
-      quietGain.gain.value = 0.00025;
+      quietGain.gain.value = 0.0004;
       const destination = audioContext.createMediaStreamDestination();
       oscillator.connect(quietGain);
       quietGain.connect(destination);
       oscillator.start();
       const secondOscillator = audioContext.createOscillator();
       const secondGain = audioContext.createGain();
-      secondGain.gain.value = 0.00025;
+      secondGain.gain.value = 0.0004;
       const secondDestination = audioContext.createMediaStreamDestination();
       secondOscillator.connect(secondGain);
       secondGain.connect(secondDestination);

@@ -8,21 +8,6 @@ const defaultLimits = {
   script: 1200,
 };
 
-const legacyBaselines = new Map([
-  ["src/cli.ts", 11783],
-  ["packages/core/src/meeting/google-meet-joiner.ts", 4071],
-  ["apps/slack-agent/src/index.ts", 3741],
-  ["packages/core/src/slack/legacy-slack-domain-store.ts", 1720],
-  ["apps/meeting-agent/src/index.ts", 1680],
-  ["packages/core/src/avatar/hiyori-avatar-inject.ts", 1639],
-]);
-
-for (const file of legacyBaselines.keys()) {
-  if (file.endsWith(".go")) {
-    throw new Error(`Go files cannot use legacy line-count baselines: ${file}`);
-  }
-}
-
 const sourceExtensions = new Set([".cjs", ".go", ".js", ".jsx", ".mjs", ".ts", ".tsx"]);
 const ignoredPrefixes = [
   "node_modules/",
@@ -67,8 +52,6 @@ function limitFor(file) {
   if (file.startsWith("packages/core/src/realtime/realtime-browser-bridge")) {
     return { limit: 500, reason: "realtime-bridge-shard" };
   }
-  const baseline = legacyBaselines.get(file);
-  if (baseline) return { limit: baseline, reason: "legacy-baseline" };
   if (file.endsWith("_test.go")) return { limit: defaultLimits.goTest, reason: "go-test" };
   if (file.endsWith(".go")) return { limit: defaultLimits.go, reason: "go" };
   return { limit: defaultLimits.script, reason: "script" };
@@ -90,9 +73,7 @@ if (failures.length > 0) {
       `  ${failure.file}: ${failure.lines} lines > ${failure.limit} (${failure.reason})`,
     );
   }
-  console.error(
-    "\nSplit the file, or lower an existing legacy baseline after reducing the file size.",
-  );
+  console.error("\nSplit the file until it satisfies the configured hard line limit.");
   process.exit(1);
 }
 

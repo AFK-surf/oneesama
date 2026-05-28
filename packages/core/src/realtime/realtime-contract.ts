@@ -130,7 +130,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "list_shareable_windows",
     description:
-      "List existing macOS applications/windows that the meeting avatar can share through the native app-share path. Use when the user asks to share a generic category like editor/browser/window/app/design tool, or when a named app has multiple possible matches.",
+      "List existing macOS applications/windows that the meeting avatar can share through the native app-share path. Use when the user asks to share a generic category like editor/browser/window/app/design tool/应用/窗口/屏幕/设计工具, or when a named app has multiple possible matches.",
     parameters: {
       type: "object",
       properties: {
@@ -143,14 +143,14 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "share_existing_app_window",
     description:
-      "Share a specific existing macOS app/window in the current Meet using the native app-share path. Use immediately when the user names a concrete app/window title such as Pencil, VS Code, Chrome, Notion, Terminal, or Activity Monitor. If the user only says a generic category like editor/browser/window/app/design tool, call list_shareable_windows first instead of guessing. Do not use browser/workspace tools for existing app/window requests.",
+      "Share a specific existing macOS app/window in the current Meet using the native app-share path. Use immediately when the user says 共享/分享/共享一下/分享一下/共享屏幕/分享屏幕/共享窗口/分享窗口/共享 app/分享 app and names a concrete app/window title such as Pencil/喷手/铅笔, VS Code, Chrome, Notion, Terminal, or Activity Monitor. If the user only says a generic category like editor/browser/window/app/design tool/应用/窗口/屏幕/设计工具, call list_shareable_windows first instead of guessing. Do not use browser/workspace tools for existing app/window requests.",
     parameters: {
       type: "object",
       properties: {
         applicationName: {
           type: "string",
           description:
-            "Spoken app name to share, e.g. Pencil, Notion, Chrome, Terminal, Activity Monitor.",
+            "Spoken app name to share, e.g. Pencil/喷手/铅笔, Notion, Chrome, Terminal, Activity Monitor.",
         },
         bundleIdentifier: {
           type: "string",
@@ -1094,6 +1094,7 @@ export function buildRealtimeInstructions({
     "For personal task questions, resolve the current user profile first and use its workspace identifiers.",
     "For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
     "Screen-share routing: if the user names a concrete existing app/window (for example Pencil, VS Code, Chrome, Notion, Terminal, Activity Monitor) and asks to show/share/present/演示 it, share that existing app/window. If the user only gives a category like editor/browser/window/app/design tool, list shareable windows first instead of guessing. Do not create a new workspace and do not invent a URL for the app name.",
+    "Chinese share intent has priority over arithmetic: phrases like “共享一下”, “分享一下”, “共享屏幕”, “分享窗口”, “把 Pencil 共享一下”, “喷手这个 App”, or “Pencil 这个 app” mean screen/app sharing, even if noisy audio sounds like “算一下”. Do not answer with math unless the user explicitly asks a math question with numbers/operators such as “二乘二/2+2/怎么算”.",
     "For visual share actions, only say it is shared after the tool result is ok:true and confirms an active screen-share/postcheck. If the tool result is ok:false or lacks active-share evidence, say one short blocker sentence and stop; do not ask the user to switch views and do not blame the receiver.",
     "App-control routing: after an existing app/window is shared, if the user asks you to operate that app (click, type, draw, edit, scroll, switch tools, or use Pencil/VS Code/Notion), call the app-control action. For direct control, send explicit primitive operations such as state, click, type_text, press_key, scroll, and drag; do not rely on a natural-language instruction alone. If coordinates or tool state are unknown, first request state, then call again with concrete operations. If the action returns structured_operations_required, retry with explicit operations instead of saying the channel is unavailable.",
     "Async task handling: if a tool result says status queued or running, treat it as accepted and in progress, not as a failure. Give at most one short natural acknowledgement if the user needs feedback; do not expose ids, queues, tools, backends, routing, or debug state. Do not claim completion until a later result says completed, and do not poll repeatedly in the same turn unless the user asks for status or the next step truly depends on the result.",

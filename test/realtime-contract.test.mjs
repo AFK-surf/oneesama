@@ -128,6 +128,9 @@ test("Realtime contract keeps short voice checks and self-introductions on topic
   assert.match(session.instructions, /Do not answer as the user/);
   assert.match(session.instructions, /room echo/);
   assert.match(session.instructions, /Do not continue your own previous answer/);
+  assert.match(session.instructions, /Chinese share intent has priority over arithmetic/);
+  assert.match(session.instructions, /“共享一下”/);
+  assert.match(session.instructions, /“Pencil 这个 app”/);
 });
 
 test("Realtime contract exposes product identity resolver tool", () => {
@@ -144,6 +147,9 @@ test("Realtime contract exposes application share tools", () => {
   assert.ok(present);
   assert.ok(control);
   assert.equal(present.parameters.properties.applicationName.type, "string");
+  assert.match(present.description, /共享一下/);
+  assert.match(present.description, /Pencil\/喷手\/铅笔/);
+  assert.match(list.description, /应用\/窗口\/屏幕/);
   assert.deepEqual(control.parameters.required, []);
   assert.match(control.description, /Computer Use/);
   assert.match(control.description, /queues the app-control work asynchronously/);

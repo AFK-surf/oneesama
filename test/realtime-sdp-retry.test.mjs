@@ -87,6 +87,15 @@ test("Realtime browser bridge records SDP 429 details and schedules retry", asyn
             createMediaStreamDestination() {
               return { stream: new MediaStream() };
             }
+            createAnalyser() {
+              return {
+                fftSize: 2048,
+                getFloatTimeDomainData(buffer) {
+                  buffer.fill(0);
+                },
+                connect() {},
+              };
+            }
             createConstantSource() {
               return { offset: { value: 0 }, connect() {}, start() {} };
             }
@@ -233,6 +242,15 @@ test("Realtime browser bridge treats insufficient quota SDP 429 as terminal", as
             createMediaStreamDestination() {
               return { stream: new MediaStream() };
             }
+            createAnalyser() {
+              return {
+                fftSize: 2048,
+                getFloatTimeDomainData(buffer) {
+                  buffer.fill(0);
+                },
+                connect() {},
+              };
+            }
             createConstantSource() {
               return { offset: { value: 0 }, connect() {}, start() {} };
             }
@@ -364,6 +382,15 @@ test("Realtime browser bridge records client-secret failures before SDP", async 
             }
             createMediaStreamDestination() {
               return { stream: new MediaStream() };
+            }
+            createAnalyser() {
+              return {
+                fftSize: 2048,
+                getFloatTimeDomainData(buffer) {
+                  buffer.fill(0);
+                },
+                connect() {},
+              };
             }
             createConstantSource() {
               return { offset: { value: 0 }, connect() {}, start() {} };

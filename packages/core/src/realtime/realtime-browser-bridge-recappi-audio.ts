@@ -144,21 +144,6 @@ function resampleRecappiSamples(monoSamples: Float32Array, sourceRate: number, t
   return output;
 }
 
-function recappiInputNoiseGateRms() {
-  const threshold = Number(config.recappiInputNoiseGateRms ?? 0.003);
-  return Number.isFinite(threshold) && threshold > 0 ? threshold : 0;
-}
-
-function recappiSamplesRms(samples: Float32Array) {
-  if (!samples.length) return 0;
-  let sumSquares = 0;
-  for (const sample of samples) {
-    const value = Number(sample || 0);
-    sumSquares += value * value;
-  }
-  return Math.sqrt(sumSquares / samples.length);
-}
-
 function normalizeRecappiSamples(value: unknown) {
   if (Array.isArray(value)) return value as number[];
   const arrayLike = value as any;
@@ -180,14 +165,10 @@ function shouldSuppressRecappiSelfOutput() {
 function rememberSuppressedRecappiChunk({
   reason,
   samples,
-  scaledRms = 0,
-  noise = false,
   selfOutput = false,
 }: {
   reason: string;
   samples: number;
-  scaledRms?: number;
-  noise?: boolean;
   selfOutput?: boolean;
 }) {
   const current = getRecappiAudioInputState();
@@ -196,13 +177,10 @@ function rememberSuppressedRecappiChunk({
     chunks: Number(current?.chunks || 0) + 1,
     samplesReceived: Number(current?.samplesReceived || 0) + samples,
     samplesDropped: Number(current?.samplesDropped || 0) + samples,
-    noiseSuppressedChunks: Number(current?.noiseSuppressedChunks || 0) + (noise ? 1 : 0),
-    noiseSuppressedSamples: Number(current?.noiseSuppressedSamples || 0) + (noise ? samples : 0),
     selfOutputSuppressedChunks:
       Number(current?.selfOutputSuppressedChunks || 0) + (selfOutput ? 1 : 0),
     selfOutputSuppressedSamples:
       Number(current?.selfOutputSuppressedSamples || 0) + (selfOutput ? samples : 0),
-    lastSuppressedRms: Number(scaledRms.toFixed(6)),
     lastSuppressedReason: reason,
     lastChunkAt: new Date().toISOString(),
     lastPushAt: new Date().toISOString(),
@@ -232,25 +210,6 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
     };
   }
   const mono = downmixRecappiSamples(samples, payload.channels);
-  const scaledRms = recappiSamplesRms(mono) * meetAudioInputGain();
-  const noiseGateRms = recappiInputNoiseGateRms();
-  if (noiseGateRms > 0 && scaledRms < noiseGateRms) {
-    rememberSuppressedRecappiChunk({
-      reason: "recappi_audio_below_noise_gate",
-      samples: samples.length,
-      scaledRms,
-      noise: true,
-    });
-    return {
-      ok: true,
-      source: "recappi_process_audio",
-      suppressed: true,
-      reason: "recappi_audio_below_noise_gate",
-      rms: Number(scaledRms.toFixed(6)),
-      thresholdRms: noiseGateRms,
-      chunks: getRecappiAudioInputState().chunks,
-    };
-  }
   const queued = resampleRecappiSamples(
     mono,
     Number(payload.sampleRate || 0),

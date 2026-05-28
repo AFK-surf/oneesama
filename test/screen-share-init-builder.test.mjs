@@ -23,9 +23,12 @@ test("screen-share init script supports local multipart frame streams", () => {
 
 test("meet runner late screen-share install reuses full image-capable bridge", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+  const uiSource = await readFile("packages/core/src/meeting/google-meet-joiner-ui.ts", "utf8");
   const ensureStart = source.indexOf("async function ensureScreenShareController");
-  const ensureEnd = source.indexOf("async function fillGuestName", ensureStart);
-  const ensureBody = source.slice(ensureStart, ensureEnd);
+  const ensureBody =
+    ensureStart >= 0
+      ? source.slice(ensureStart)
+      : uiSource.slice(uiSource.indexOf("async function ensureScreenShareController"));
 
   assert.match(ensureBody, /buildScreenShareInitScript/);
   assert.match(source, /buildAvatarRuntimeInitScripts/);
@@ -47,7 +50,7 @@ test("meet runner late screen-share install reuses full image-capable bridge", a
     /function ensureVideo\(\)/,
     "late install must not carry a simplified video-only controller that drops app-share image frames",
   );
-  assert.match(source, /screen_share_image_source_not_attached/);
+  assert.match(uiSource, /screen_share_image_source_not_attached/);
 });
 
 test("screen-share bridge draws image sources onto the shared canvas", async () => {

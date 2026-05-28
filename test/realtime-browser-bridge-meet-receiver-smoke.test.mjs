@@ -40,6 +40,20 @@ async function installRealtimeHarness(page, harnessOptions = {}) {
       },
     };
     window.MAB_AVATAR_AUDIO_BUS = window.__MAB_FAKE_AVATAR_BUS;
+    window.MAB_AVATAR_CONTROLLER = {
+      updateState(input = {}) {
+        this.lastUpdate = input;
+        return { ok: true, mood: input.mood || "neutral", action: input.action || "idle" };
+      },
+      setExpression(mood = "neutral") {
+        this.lastExpression = mood;
+        return { ok: true, mood };
+      },
+      setAction(action = "idle") {
+        this.lastAction = action;
+        return { ok: true, action };
+      },
+    };
 
     class FakeRTCPeerConnection {
       constructor() {
@@ -175,7 +189,7 @@ async function installRealtimeHarness(page, harnessOptions = {}) {
       forwardMeetAudioToRealtime: true,
       includeParticipantAudio: true,
       meetAudioInputSource: harnessOptions.meetAudioInputSource || "webrtc",
-      recappiInputNoiseGateRms: harnessOptions.recappiInputNoiseGateRms,
+      autoRespondToAvatarToolCalls: harnessOptions.autoRespondToAvatarToolCalls,
       captureMeetAudioForTranscript: false,
       meetAudioEnergyStaleMs: 1000,
     }),
@@ -219,7 +233,7 @@ async function runMockReceiverScenario(page, options = {}) {
     channel.readyState = "open";
     channel.dispatchFakeEvent("open", {});
     channel.dispatchFakeEvent("message", {
-      data: JSON.stringify({ type: "session.created" }),
+      data: JSON.stringify({ type: "session.created", session: { id: "sess_mock_receiver" } }),
     });
 
     if (scenario.emitSpeechAndResponse) {
@@ -293,6 +307,7 @@ test("mock Meet receiver track drives the production Realtime input/output gates
     assert.equal(result.connection.meetAudioTracksForwarded, 1);
     assert.equal(result.connection.pendingMeetAudioTrackCount, 0);
     assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
+    assert.equal(result.connection.openaiSessionId, "sess_mock_receiver");
     assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
     assert.equal(result.connection.meetAudioEnergy.observed, true);
     assert.ok(result.connection.meetAudioEnergy.rms > 0.003);
@@ -464,14 +479,101 @@ test("Recappi process audio input feeds the routing mix without RTC tracks", asy
   }
 });
 
-test("Recappi process audio drops low-level process noise before Realtime input", async () => {
+test("avatar visual tool output requests a follow-up response by default", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
-    await installRealtimeHarness(page, {
-      meetAudioInputSource: "recappi_process_audio",
-      recappiInputNoiseGateRms: 0.003,
+    await installRealtimeHarness(page);
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      const realtimePeer = window.__MAB_FAKE_PEERS.at(-1);
+      const channel = realtimePeer.dataChannels.at(-1);
+      channel.readyState = "open";
+      channel.dispatchFakeEvent("open", {});
+      channel.dispatchFakeEvent("message", {
+        data: JSON.stringify({
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            name: "update_avatar_state",
+            call_id: "call_avatar_visual",
+            arguments: JSON.stringify({ mood: "happy", action: "wave" }),
+          },
+        }),
+      });
+      await wait(100);
+      return {
+        sent: channel.sent.map((payload) => JSON.parse(payload)),
+        decisions: window.MAB_REALTIME_BRIDGE.turnPolicy.decisions,
+      };
     });
+
+    assert.equal(
+      result.sent.some((event) => event.type === "conversation.item.create"),
+      true,
+    );
+    assert.equal(
+      result.sent.some((event) => event.type === "response.create"),
+      true,
+    );
+    assert.equal(result.decisions.at(-1).scope, "function_tool");
+    assert.equal(result.decisions.at(-1).name, "update_avatar_state");
+    assert.equal(result.decisions.at(-1).autoRespond, true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("avatar visual tool follow-up can be explicitly disabled", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, { autoRespondToAvatarToolCalls: false });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      const realtimePeer = window.__MAB_FAKE_PEERS.at(-1);
+      const channel = realtimePeer.dataChannels.at(-1);
+      channel.readyState = "open";
+      channel.dispatchFakeEvent("open", {});
+      channel.dispatchFakeEvent("message", {
+        data: JSON.stringify({
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            name: "update_avatar_state",
+            call_id: "call_avatar_visual_disabled",
+            arguments: JSON.stringify({ mood: "happy", action: "wave" }),
+          },
+        }),
+      });
+      await wait(100);
+      return {
+        sent: channel.sent.map((payload) => JSON.parse(payload)),
+        decisions: window.MAB_REALTIME_BRIDGE.turnPolicy.decisions,
+      };
+    });
+
+    assert.equal(
+      result.sent.some((event) => event.type === "conversation.item.create"),
+      true,
+    );
+    assert.equal(
+      result.sent.some((event) => event.type === "response.create"),
+      false,
+    );
+    assert.equal(result.decisions.at(-1).autoRespond, false);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Recappi process audio forwards low-level audio to Realtime input", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, { meetAudioInputSource: "recappi_process_audio" });
     const result = await page.evaluate(async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       await window.MAB_REALTIME_CLIENT.connect();
@@ -487,9 +589,9 @@ test("Recappi process audio drops low-level process noise before Realtime input"
         speech.push(speechValue, speechValue);
       }
 
-      let suppressed = null;
+      let quietAccepted = null;
       for (let index = 0; index < 8; index += 1) {
-        suppressed = window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+        quietAccepted = window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
           source: "recappi_process_audio",
           sampleRate,
           channels,
@@ -513,23 +615,21 @@ test("Recappi process audio drops low-level process noise before Realtime input"
       }
       await wait(750);
       return {
-        suppressed,
+        quietAccepted,
         accepted,
         afterNoise,
         connection: window.MAB_REALTIME_BRIDGE.connection,
       };
     });
 
-    assert.equal(result.suppressed.ok, true);
-    assert.equal(result.suppressed.suppressed, true);
-    assert.equal(result.suppressed.reason, "recappi_audio_below_noise_gate");
-    assert.equal(result.afterNoise.recappi.noiseSuppressedChunks, 8);
-    assert.equal(result.afterNoise.recappi.samplesQueued, 0);
-    assert.equal(result.afterNoise.energy.observed, false);
+    assert.equal(result.quietAccepted.ok, true);
+    assert.equal(result.quietAccepted.suppressed, undefined);
+    assert.ok(result.afterNoise.recappi.samplesQueued > 0);
     assert.equal(result.accepted.ok, true);
     assert.equal(result.accepted.suppressed, undefined);
-    assert.equal(result.connection.recappiAudioInput.noiseSuppressedChunks, 8);
+    assert.equal(result.connection.recappiAudioInput.noiseSuppressedChunks, 0);
     assert.equal(result.connection.currentRealtimeInputSource, "recappi_process_audio_tap");
+    assert.equal(result.connection.meetAudioInputGain, 1);
     assert.equal(result.connection.meetAudioEnergy.observed, true);
   } finally {
     await browser.close();

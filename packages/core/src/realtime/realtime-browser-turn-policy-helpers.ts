@@ -132,17 +132,29 @@
       );
     }
 
+    function appControlResultRecords(result: unknown): Record<string, unknown>[] {
+      const record = resultRecord(result);
+      const records = [record];
+      const nested = resultRecord(record.result);
+      if (Object.keys(nested).length > 0) {
+        records.push(nested);
+      }
+      return records;
+    }
+
     function resultActions(result: unknown): string[] {
-      const actions = resultRecord(result).actions;
-      return Array.isArray(actions)
-        ? actions
-            .map((action) =>
-              String(action || "")
-                .trim()
-                .toLowerCase(),
-            )
-            .filter(Boolean)
-        : [];
+      return appControlResultRecords(result).flatMap((record) => {
+        const actions = record.actions;
+        return Array.isArray(actions)
+          ? actions
+              .map((action) =>
+                String(action || "")
+                  .trim()
+                  .toLowerCase(),
+              )
+              .filter(Boolean)
+          : [];
+      });
     }
 
     function resultHasActiveScreenShare(value: unknown): boolean {
@@ -171,9 +183,9 @@
     }
 
     function appControlNeedsPrimitiveFollowup(result: unknown): boolean {
-      const record = resultRecord(result);
-      const actions = resultActions(record);
-      const text = [record.reason, record.error, record.summary]
+      const actions = resultActions(result);
+      const text = appControlResultRecords(result)
+        .flatMap((record) => [record.reason, record.error, record.blocker, record.summary])
         .filter(Boolean)
         .map((value) => String(value).toLowerCase())
         .join("\n");
@@ -387,6 +399,10 @@
       if (policy.autoRespond) {
         responseChannel = sendRealtimeEvent({
           type: "response.create",
+          metadata: {
+            source: "function_tool_output",
+            reason: policy.reason,
+          },
           response: {
             instructions: policy.responseInstructions || "Continue after applying the result.",
           },
@@ -522,6 +538,10 @@
       if (policy.autoRespond) {
         responseChannel = sendRealtimeEvent({
           type: "response.create",
+          metadata: {
+            source: "worker_result",
+            reason: policy.reason,
+          },
           response: { instructions: policy.responseInstructions },
         });
         state.responsesRequested += 1;

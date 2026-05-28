@@ -19,6 +19,64 @@ function updatePrimaryMeetAudioSenderState(sender) {
   updateFeedback();
 }
 
+async function samplePrimaryMeetAudioSenderStats(reason = "interval") {
+  const sender = primaryMeetAudioSender;
+  const now = new Date().toISOString();
+  if (!sender?.getStats) {
+    state.connection.primaryMeetAudioSenderStats = {
+      supported: false,
+      reason: "sender_get_stats_unavailable",
+      checkedAt: now,
+    };
+    updateFeedback();
+    return;
+  }
+  try {
+    const report = await sender.getStats();
+    let selected = null;
+    report?.forEach?.((entry) => {
+      if (selected) return;
+      const kind = entry.kind || entry.mediaType;
+      if (entry.type === "outbound-rtp" && (!kind || kind === "audio")) selected = entry;
+    });
+    const bytesSent = Number(selected?.bytesSent || 0);
+    const packetsSent = Number(selected?.packetsSent || 0);
+    const previous = state.connection.primaryMeetAudioSenderStats || {};
+    state.connection.primaryMeetAudioSenderStats = {
+      supported: true,
+      checkedAt: now,
+      reason,
+      trackId: sender.track?.id || "",
+      trackReadyState: sender.track?.readyState || "",
+      trackEnabled: sender.track?.enabled !== false,
+      trackMuted: sender.track?.muted === true,
+      usingAvatarBus: state.connection.primaryMeetAudioSenderUsingAvatarBus === true,
+      bytesSent,
+      packetsSent,
+      bytesDelta: bytesSent - Number(previous.bytesSent || 0),
+      packetsDelta: packetsSent - Number(previous.packetsSent || 0),
+    };
+    updateFeedback();
+  } catch (error) {
+    state.connection.primaryMeetAudioSenderStats = {
+      supported: false,
+      reason: "sender_get_stats_failed",
+      checkedAt: now,
+      error: String((error && error.message) || error).slice(0, 240),
+    };
+    updateFeedback();
+  }
+}
+
+function ensurePrimaryMeetAudioSenderStatsMonitor(reason = "sender-ready") {
+  if (!primaryMeetAudioSender || primaryMeetAudioSenderStatsTimer) return;
+  samplePrimaryMeetAudioSenderStats(reason);
+  primaryMeetAudioSenderStatsTimer = window.setInterval(
+    () => samplePrimaryMeetAudioSenderStats("interval"),
+    1000,
+  );
+}
+
 function schedulePrimaryMeetAudioAttachRetry(pcId, source) {
   if (primaryMeetAudioSenderAttachRetryTimer) return;
   primaryMeetAudioSenderAttachRetryTimer = window.setTimeout(() => {
@@ -53,6 +111,7 @@ function attachAvatarAudioToPrimaryMeetSender(sender, pcId, source) {
         source,
         trackId: avatarTrack.id,
       });
+      ensurePrimaryMeetAudioSenderStatsMonitor("avatar-bus-attached");
       return updateFeedback();
     })
     .catch((error) => {
@@ -84,6 +143,7 @@ function handleMeetOutboundAudioSender(pc, pcId, sender, track, source) {
   if (!primaryMeetAudioSender) {
     primaryMeetAudioSender = sender;
     recordTimeline("primary_meet_audio_sender_selected", { pcId, source, trackId: track.id });
+    ensurePrimaryMeetAudioSenderStatsMonitor("primary-selected");
     attachAvatarAudioToPrimaryMeetSender(sender, pcId, source);
     return;
   }

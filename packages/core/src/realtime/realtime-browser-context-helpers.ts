@@ -1,6 +1,8 @@
 (() => {
   interface RealtimeEventSummary {
     type: string;
+    source?: string;
+    reason?: string;
     responseId?: string;
     itemType?: string;
     name?: string;
@@ -261,6 +263,9 @@
       const summary: RealtimeEventSummary = {
         type: (eventObj.type as string | undefined) || typeof event,
       };
+      const metadata = eventObj.metadata as { source?: string; reason?: string } | undefined;
+      if (metadata?.source) summary.source = String(metadata.source).slice(0, 120);
+      if (metadata?.reason) summary.reason = String(metadata.reason).slice(0, 200);
       const response = eventObj.response as { id?: string } | undefined;
       if (response?.id) summary.responseId = response.id;
       const item = eventObj.item as { type?: string } | undefined;
@@ -290,31 +295,14 @@
         if (text) {
           state.transcripts.output.push({
             ts: new Date().toISOString(),
+            responseId: String(event.response_id || event.responseId || ""),
+            itemId: String(event.item_id || event.itemId || ""),
             text: text.slice(0, 2000),
           });
           state.transcripts.output = state.transcripts.output.slice(-10);
         }
         state.transcripts.currentOutput = "";
         return;
-      }
-      if (
-        type === "conversation.item.input_audio_transcription.delta" &&
-        typeof event.delta === "string"
-      ) {
-        state.transcripts.currentInput += event.delta;
-        state.transcripts.currentInput = state.transcripts.currentInput.slice(-4000);
-        return;
-      }
-      if (type === "conversation.item.input_audio_transcription.completed") {
-        const text = String(event.transcript || state.transcripts.currentInput || "").trim();
-        if (text) {
-          state.transcripts.input.push({
-            ts: new Date().toISOString(),
-            text: text.slice(0, 2000),
-          });
-          state.transcripts.input = state.transcripts.input.slice(-10);
-        }
-        state.transcripts.currentInput = "";
       }
     }
 
@@ -521,7 +509,6 @@
         return matrixCell("ok", "response_events_observed", {
           inboundEvents: checks.inboundEvents,
           responseEvents: checks.responseEvents,
-          inputTranscriptChars: checks.inputTranscriptChars,
           outputTranscriptChars: checks.outputTranscriptChars,
         });
       })();
@@ -639,10 +626,6 @@
         appControlJobsPending: appControlJobs.pending,
         appControlJobsStale: appControlJobs.stale,
         appControlJobsBlocked: appControlJobs.blocked,
-        inputTranscriptChars: state.transcripts.input.reduce(
-          (sum, entry) => sum + String(entry.text || "").length,
-          0,
-        ),
         outputTranscriptChars: state.transcripts.output.reduce(
           (sum, entry) => sum + String(entry.text || "").length,
           0,

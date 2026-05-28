@@ -1,8 +1,9 @@
+import { createAvatarAudioBus } from "./hiyori-avatar-audio-bus.js";
+import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.js";
 (() => {
   if (window.__meetingAvatarBotInjected) return;
   if (window.top !== window) return;
   window.__meetingAvatarBotInjected = true;
-
   const DEFAULT_HIYORI_MODEL_URL =
     "https://fastly.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json";
   const DEFAULT_HIYORI_MODEL_FALLBACK_URLS = [
@@ -36,7 +37,6 @@
     enableVisualTestHooks: false,
     ...window.MAB_AVATAR_CONFIG,
   };
-
   const log = (...args) => console.log("[meeting-avatar]", ...args);
   const ALLOWED_MOODS = ["neutral", "happy", "surprised", "thinking", "sad", "shy"];
   const ALLOWED_ACTIONS = [
@@ -141,20 +141,16 @@
     shrug: 1200,
     speak: 1800,
   };
-
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, Number(value) || 0));
   }
-
   function clamp01(value) {
     return clamp(value, 0, 1);
   }
-
   function normalizeEnum(value, allowed, fallback) {
     const normalized = String(value || fallback);
     return allowed.includes(normalized) ? normalized : fallback;
   }
-
   function setLive2DParam(core, id, value) {
     try {
       core.setParameterValueById(id, value);
@@ -162,7 +158,6 @@
       // Hiyori variants may not expose every parameter; missing ids are fine.
     }
   }
-
   function createAvatarStateController() {
     const state = {
       ok: true,
@@ -568,238 +563,6 @@
     ctx.font = "800 36px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillText(text, x + 56, y + 86, maxWidth - 86);
     ctx.restore();
-  }
-
-  function createAvatarVisualTestHooks(sourceCanvas) {
-    const testCanvas = document.createElement("canvas");
-    testCanvas.width = config.canvasWidth;
-    testCanvas.height = config.canvasHeight;
-    const testCtx = testCanvas.getContext("2d", { willReadFrequently: true });
-    const sampleCanvas = document.createElement("canvas");
-    sampleCanvas.width = 96;
-    sampleCanvas.height = 54;
-    const sampleCtx = sampleCanvas.getContext("2d", { willReadFrequently: true });
-
-    function hashBytes(bytes) {
-      let hash = 2166136261;
-      for (let i = 0; i < bytes.length; i += 1) {
-        hash ^= bytes[i];
-        hash = Math.imul(hash, 16777619);
-      }
-      return (hash >>> 0).toString(16).padStart(8, "0");
-    }
-
-    function metricsFromContext(ctx, rect) {
-      const image = ctx.getImageData(rect.x, rect.y, rect.width, rect.height);
-      let nonBackground = 0;
-      let ink = 0;
-      let minX = rect.width;
-      let minY = rect.height;
-      let maxX = 0;
-      let maxY = 0;
-      for (let i = 0; i < image.data.length; i += 4) {
-        const r = image.data[i];
-        const g = image.data[i + 1];
-        const b = image.data[i + 2];
-        const alpha = image.data[i + 3];
-        const delta = Math.abs(r - 247) + Math.abs(g - 248) + Math.abs(b - 251);
-        if (alpha > 10 && delta > 36) {
-          const pixel = i / 4;
-          const x = pixel % rect.width;
-          const y = Math.floor(pixel / rect.width);
-          nonBackground += 1;
-          ink += delta;
-          minX = Math.min(minX, x);
-          minY = Math.min(minY, y);
-          maxX = Math.max(maxX, x);
-          maxY = Math.max(maxY, y);
-        }
-      }
-      const total = rect.width * rect.height;
-      return {
-        hash: hashBytes(image.data),
-        nonBackgroundRatio: nonBackground / total,
-        meanInk: ink / total,
-        bounds: nonBackground ? { minX, minY, maxX, maxY } : null,
-      };
-    }
-
-    function pixelDifference(left, right, rect) {
-      const a = left.getImageData(rect.x, rect.y, rect.width, rect.height).data;
-      const b = right.getImageData(rect.x, rect.y, rect.width, rect.height).data;
-      let changed = 0;
-      let totalDelta = 0;
-      for (let i = 0; i < a.length; i += 4) {
-        const delta =
-          Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
-        totalDelta += delta;
-        if (delta > 30) changed += 1;
-      }
-      const pixels = rect.width * rect.height;
-      return {
-        changedRatio: changed / pixels,
-        meanDelta: totalDelta / pixels,
-      };
-    }
-
-    interface RenderSnapshotInput {
-      mood?: string;
-      action?: string;
-      intensity?: number;
-      actionElapsedMs?: number;
-      actionRemainingMs?: number;
-      statusKind?: string;
-      statusText?: string;
-      statusHoldMs?: number;
-      timeMs?: number;
-      label?: string;
-      includeDataUrl?: boolean;
-    }
-
-    function renderSnapshot(input: RenderSnapshotInput = {}) {
-      const saved = {
-        mood: avatarController.state.mood,
-        action: avatarController.state.action,
-        intensity: avatarController.state.intensity,
-        actionStartedAt: avatarController.state.actionStartedAt,
-        actionEndsAt: avatarController.state.actionEndsAt,
-        actionHoldUntil: avatarController.state.actionHoldUntil,
-        expressionHoldUntil: avatarController.state.expressionHoldUntil,
-        statusKind: avatarController.state.statusKind,
-        statusText: avatarController.state.statusText,
-        statusVisibleUntil: avatarController.state.statusVisibleUntil,
-        statusUpdatedAt: avatarController.state.statusUpdatedAt,
-      };
-      try {
-        const now = performance.now();
-        avatarController.state.mood = normalizeEnum(input.mood, ALLOWED_MOODS, "neutral");
-        avatarController.state.action = normalizeEnum(input.action, ALLOWED_ACTIONS, "idle");
-        avatarController.state.intensity = clamp(input.intensity ?? 0.9, 0.2, 1.8);
-        avatarController.state.actionStartedAt = now - Number(input.actionElapsedMs ?? 500);
-        avatarController.state.actionEndsAt = now + Number(input.actionRemainingMs ?? 500);
-        avatarController.state.actionHoldUntil = now + 1000;
-        avatarController.state.expressionHoldUntil = now + 1000;
-        if (input.statusKind || input.statusText) {
-          avatarController.setStatus(
-            String(input.statusKind || "thinking"),
-            String(input.statusText || ""),
-            Number(input.statusHoldMs || 12000),
-          );
-        }
-        drawFallback(testCtx, Number(input.timeMs ?? 1200));
-        drawAvatarHud(testCtx);
-        sampleCtx.clearRect(0, 0, sampleCanvas.width, sampleCanvas.height);
-        sampleCtx.drawImage(
-          testCanvas,
-          600,
-          130,
-          720,
-          680,
-          0,
-          0,
-          sampleCanvas.width,
-          sampleCanvas.height,
-        );
-        const face = metricsFromContext(testCtx, { x: 600, y: 130, width: 720, height: 680 });
-        const mouth = metricsFromContext(testCtx, { x: 760, y: 430, width: 400, height: 250 });
-        const status = metricsFromContext(testCtx, { x: 40, y: 860, width: 820, height: 170 });
-        const compact = sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
-        return {
-          label: input.label || `${avatarController.state.mood}-${avatarController.state.action}`,
-          mood: avatarController.state.mood,
-          action: avatarController.state.action,
-          intensity: avatarController.state.intensity,
-          statusKind: avatarController.state.statusKind,
-          statusText: avatarController.state.statusText,
-          hash: hashBytes(compact.data),
-          face,
-          mouth,
-          status,
-          dataUrl: input.includeDataUrl ? testCanvas.toDataURL("image/png") : undefined,
-        };
-      } finally {
-        Object.assign(avatarController.state, saved);
-      }
-    }
-
-    function compareSnapshots(
-      leftInput: RenderSnapshotInput,
-      rightInput: RenderSnapshotInput,
-      rect = { x: 760, y: 430, width: 400, height: 250 },
-    ) {
-      renderSnapshot(leftInput);
-      const left = testCtx.getImageData(0, 0, testCanvas.width, testCanvas.height);
-      const leftCanvas = document.createElement("canvas");
-      leftCanvas.width = testCanvas.width;
-      leftCanvas.height = testCanvas.height;
-      const leftCtx = leftCanvas.getContext("2d", { willReadFrequently: true });
-      leftCtx.putImageData(left, 0, 0);
-      renderSnapshot(rightInput);
-      return pixelDifference(leftCtx, testCtx, rect);
-    }
-
-    return {
-      sourceCanvas,
-      renderSnapshot,
-      compareSnapshots,
-      captureSourceSnapshot(input: { label?: string; includeDataUrl?: boolean } = {}) {
-        try {
-          testCtx.clearRect(0, 0, testCanvas.width, testCanvas.height);
-          testCtx.drawImage(sourceCanvas, 0, 0, testCanvas.width, testCanvas.height);
-          sampleCtx.clearRect(0, 0, sampleCanvas.width, sampleCanvas.height);
-          sampleCtx.drawImage(
-            testCanvas,
-            600,
-            130,
-            720,
-            680,
-            0,
-            0,
-            sampleCanvas.width,
-            sampleCanvas.height,
-          );
-          const compact = sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
-          return {
-            ok: true,
-            label: input.label || "source",
-            renderer: rendererState.renderer,
-            live2dLoaded: rendererState.live2dLoaded,
-            live2dParameterFrames: avatarController.state.live2dParameterFrames,
-            hash: hashBytes(compact.data),
-            face: metricsFromContext(testCtx, { x: 600, y: 130, width: 720, height: 680 }),
-            mouth: metricsFromContext(testCtx, { x: 760, y: 430, width: 400, height: 250 }),
-            status: metricsFromContext(testCtx, { x: 40, y: 860, width: 820, height: 170 }),
-            dataUrl: input.includeDataUrl ? testCanvas.toDataURL("image/png") : undefined,
-          };
-        } catch (error) {
-          return {
-            ok: false,
-            label: input.label || "source",
-            renderer: rendererState.renderer,
-            live2dLoaded: rendererState.live2dLoaded,
-            live2dParameterFrames: avatarController.state.live2dParameterFrames,
-            error: String(error?.message || error),
-          };
-        }
-      },
-      getLiveHash() {
-        sampleCtx.clearRect(0, 0, sampleCanvas.width, sampleCanvas.height);
-        sampleCtx.drawImage(
-          sourceCanvas,
-          600,
-          130,
-          720,
-          680,
-          0,
-          0,
-          sampleCanvas.width,
-          sampleCanvas.height,
-        );
-        return hashBytes(
-          sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height).data,
-        );
-      },
-    };
   }
 
   function applyAvatarStateToLive2D(model, frameCount) {
@@ -1283,223 +1046,6 @@
     return canvas;
   }
 
-  function createAvatarAudioBus() {
-    const AudioContextImpl = window.AudioContext || window.webkitAudioContext;
-    const audioContext = new AudioContextImpl({ sampleRate: 48000 });
-    const destination = audioContext.createMediaStreamDestination();
-    const masterGain = audioContext.createGain();
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.18;
-    const waveform = new Uint8Array(analyser.fftSize);
-    let smoothedMouthLevel = 0;
-    let syntheticSpeechActive = false;
-    let syntheticSpeechUntil = 0;
-    masterGain.gain.value = Number((config as Record<string, unknown>).fakeMicGain ?? 1);
-    masterGain.connect(destination);
-    masterGain.connect(analyser);
-
-    const state = {
-      ok: true,
-      sampleRate: audioContext.sampleRate,
-      outputTrackId: destination.stream.getAudioTracks()[0]?.id || "",
-      lipSyncEnabled: true,
-      mouthLevel: 0,
-      mouthRms: 0,
-      syntheticSpeechActive: false,
-      routedStreams: 0,
-      routedElements: 0,
-      routedBuffers: 0,
-      injectedTones: 0,
-      lastRoute: null,
-      errors: [],
-    };
-
-    function rememberError(error: unknown): void {
-      const err = error as { message?: string };
-      state.errors.push({
-        ts: new Date().toISOString(),
-        message: String((err && err.message) || error).slice(0, 300),
-      });
-      state.errors = state.errors.slice(-20);
-    }
-
-    function touch(kind: string, detail: Record<string, unknown> = {}): void {
-      state.lastRoute = { ts: new Date().toISOString(), kind, ...detail };
-      audioContext.resume?.().catch(() => {});
-    }
-
-    interface StreamOptions {
-      label?: string;
-      gain?: number;
-    }
-
-    function addStream(stream: MediaStream | null | undefined, options: StreamOptions = {}) {
-      try {
-        if (!stream || !stream.getAudioTracks || stream.getAudioTracks().length === 0) {
-          throw new Error("stream has no audio tracks");
-        }
-        const source = audioContext.createMediaStreamSource(stream);
-        const gain = audioContext.createGain();
-        gain.gain.value = Number(options.gain ?? 1);
-        source.connect(gain);
-        gain.connect(masterGain);
-        state.routedStreams += 1;
-        touch("stream", {
-          label: options.label || "",
-          trackIds: stream.getAudioTracks().map((track) => track.id),
-        });
-        return { ok: true };
-      } catch (error) {
-        rememberError(error);
-        return { ok: false, error: String((error && error.message) || error) };
-      }
-    }
-
-    function getMouthLevel() {
-      try {
-        analyser.getByteTimeDomainData(waveform);
-        let sumSquares = 0;
-        for (const sample of waveform) {
-          const centered = (sample - 128) / 128;
-          sumSquares += centered * centered;
-        }
-        const rms = Math.sqrt(sumSquares / waveform.length);
-        const gated = Math.max(0, rms - 0.012);
-        const syntheticActive = syntheticSpeechActive || performance.now() < syntheticSpeechUntil;
-        const t = performance.now() / 1000;
-        const synthetic = syntheticActive
-          ? 0.2 +
-            0.24 * (0.5 + 0.5 * Math.sin(t * 18)) +
-            0.16 * (0.5 + 0.5 * Math.sin(t * 31 + 0.8))
-          : 0;
-        const target = clamp01(Math.max(gated * 5.8, synthetic));
-        const coefficient = target > smoothedMouthLevel ? 0.52 : 0.22;
-        smoothedMouthLevel += (target - smoothedMouthLevel) * coefficient;
-        state.mouthRms = Number(rms.toFixed(4));
-        state.mouthLevel = Number(smoothedMouthLevel.toFixed(4));
-        state.syntheticSpeechActive = syntheticActive;
-        return smoothedMouthLevel;
-      } catch (error) {
-        rememberError(error);
-        return 0;
-      }
-    }
-
-    function setSyntheticSpeech(active: boolean, options: { holdMs?: number } = {}) {
-      syntheticSpeechActive = Boolean(active);
-      syntheticSpeechUntil = syntheticSpeechActive
-        ? performance.now() + Number(options.holdMs ?? 1600)
-        : 0;
-      state.syntheticSpeechActive = syntheticSpeechActive;
-      return { ok: true, active: syntheticSpeechActive };
-    }
-
-    function addElement(audioElement: HTMLMediaElement, options: StreamOptions = {}) {
-      try {
-        const source = audioContext.createMediaElementSource(audioElement);
-        const gain = audioContext.createGain();
-        gain.gain.value = Number(options.gain ?? 1);
-        source.connect(gain);
-        gain.connect(masterGain);
-        state.routedElements += 1;
-        touch("element", { label: options.label || "" });
-        return { ok: true };
-      } catch (error) {
-        rememberError(error);
-        const err = error as { message?: string };
-        return { ok: false, error: String((err && err.message) || error) };
-      }
-    }
-
-    interface InjectToneOptions {
-      label?: string;
-      frequency?: number;
-      gain?: number;
-      durationMs?: number;
-    }
-
-    function injectTone(options: InjectToneOptions = {}) {
-      try {
-        const oscillator = audioContext.createOscillator();
-        const gain = audioContext.createGain();
-        oscillator.frequency.value = Number(options.frequency ?? 440);
-        gain.gain.value = Number(options.gain ?? 0.0001);
-        oscillator.connect(gain);
-        gain.connect(masterGain);
-        oscillator.start();
-        oscillator.stop(audioContext.currentTime + Number(options.durationMs ?? 120) / 1000);
-        state.injectedTones += 1;
-        touch("tone", { label: options.label || "mock-remote-audio" });
-        return { ok: true };
-      } catch (error) {
-        rememberError(error);
-        const err = error as { message?: string };
-        return { ok: false, error: String((err && err.message) || error) };
-      }
-    }
-
-    async function playAudioDataUrl(audioDataUrl: string, options: StreamOptions = {}) {
-      try {
-        const response = await fetch(audioDataUrl);
-        const arrayBuffer = await response.arrayBuffer();
-        const decoded = await audioContext.decodeAudioData(arrayBuffer.slice(0));
-        const source = audioContext.createBufferSource();
-        const gain = audioContext.createGain();
-        source.buffer = decoded;
-        gain.gain.value = Number(options.gain ?? 1);
-        source.connect(gain);
-        gain.connect(masterGain);
-        source.start();
-        state.routedBuffers += 1;
-        touch("buffer", {
-          label: options.label || "",
-          durationMs: Math.round(decoded.duration * 1000),
-        });
-        return { ok: true, durationMs: Math.round(decoded.duration * 1000) };
-      } catch (error) {
-        rememberError(error);
-        const err = error as { message?: string };
-        return { ok: false, error: String((err && err.message) || error) };
-      }
-    }
-
-    const keeper = audioContext.createConstantSource();
-    const keeperGain = audioContext.createGain();
-    keeper.offset.value = 0;
-    keeperGain.gain.value = 0;
-    keeper.connect(keeperGain);
-    keeperGain.connect(masterGain);
-    keeper.start();
-
-    const bus = {
-      state,
-      audioContext,
-      stream: destination.stream,
-      track: destination.stream.getAudioTracks()[0],
-      addStream,
-      addElement,
-      playAudioDataUrl,
-      injectTone,
-      getMouthLevel,
-      setSyntheticSpeech,
-    };
-    window.MAB_AVATAR_AUDIO_BUS = bus;
-    window.MAB_AVATAR_AUDIO = state;
-
-    window.addEventListener("meeting-avatar-audio-stream", (event: Event) => {
-      const detail = (event as CustomEvent).detail as
-        | { stream?: MediaStream; label?: string; gain?: number }
-        | undefined;
-      addStream(detail?.stream, {
-        label: detail?.label || "meeting-avatar-audio-stream",
-        gain: detail?.gain,
-      });
-    });
-
-    return bus;
-  }
-
   function installMediaDeviceOverride(videoTrack: MediaStreamTrack, audioTrack: MediaStreamTrack) {
     const mediaDevicesAny = (navigator.mediaDevices || ({} as MediaDevices)) as MediaDevices & {
       getUserMedia?: (constraints?: MediaStreamConstraints) => Promise<MediaStream>;
@@ -1556,7 +1102,7 @@
     const videoTrack = canvas
       .captureStream(Math.max(1, Number(config.captureFps || 30)))
       .getVideoTracks()[0];
-    const audioBus = createAvatarAudioBus();
+    const audioBus = createAvatarAudioBus({ config, clamp01 });
     const audioTrack = audioBus.track;
     installMediaDeviceOverride(videoTrack, audioTrack);
     window.MAB_AVATAR_READY = {
@@ -1606,7 +1152,17 @@
           rendererStartedAt: new Date().toISOString(),
         });
         if (config.enableVisualTestHooks) {
-          window.MAB_AVATAR_VISUAL_TEST = createAvatarVisualTestHooks(canvas);
+          window.MAB_AVATAR_VISUAL_TEST = createAvatarVisualTestHooks(canvas, {
+            config,
+            avatarController,
+            rendererState,
+            normalizeEnum,
+            allowedMoods: ALLOWED_MOODS,
+            allowedActions: ALLOWED_ACTIONS,
+            clamp,
+            drawFallback,
+            drawAvatarHud,
+          });
         }
         log("avatar renderer ready", window.MAB_AVATAR_READY);
         return window.MAB_AVATAR_READY;

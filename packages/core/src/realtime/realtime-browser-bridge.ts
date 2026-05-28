@@ -47,7 +47,6 @@ interface RealtimeBridgeConfig {
   captureMeetAudioForTranscript?: boolean;
   meetAudioCaptureChunkMs?: number;
   meetAudioInputGain?: number;
-  recappiInputNoiseGateRms?: number;
   meetAudioEnergyStaleMs?: number;
   instructions: string;
   tools: any[];
@@ -66,7 +65,14 @@ interface RealtimeBridgeConfig {
 }
 
 const DEFAULT_MEET_AUDIO_INPUT_GAIN = 48;
+const DEFAULT_RECAPPI_PROCESS_AUDIO_INPUT_GAIN = 1;
 const MAX_MEET_AUDIO_INPUT_GAIN = 64;
+
+function defaultMeetAudioInputGainForSource(source: unknown) {
+  return source === "recappi_process_audio"
+    ? DEFAULT_RECAPPI_PROCESS_AUDIO_INPUT_GAIN
+    : DEFAULT_MEET_AUDIO_INPUT_GAIN;
+}
 
 function normalizeMeetAudioInputGain(value: unknown, fallback = DEFAULT_MEET_AUDIO_INPUT_GAIN) {
   const gain = Number(value);
@@ -91,6 +97,8 @@ function shouldRouteGenericMediaElementAudio() {
   return !isGoogleMeetDocument();
 }
 
+const rawBridgeConfig = window.MAB_REALTIME_BRIDGE_CONFIG || {};
+
 const config: RealtimeBridgeConfig = {
   mode: "mock",
   agentRuntime: "agents-sdk",
@@ -109,10 +117,7 @@ const config: RealtimeBridgeConfig = {
   meetAudioInputSource: "webrtc",
   captureMeetAudioForTranscript: false,
   meetAudioCaptureChunkMs: 5000,
-  // Google Meet remote receiver tracks can arrive much quieter than browser mic tracks.
-  // Keep this high enough for Realtime VAD while still bounded below clipping.
-  meetAudioInputGain: DEFAULT_MEET_AUDIO_INPUT_GAIN,
-  recappiInputNoiseGateRms: 0.003,
+  meetAudioInputGain: undefined,
   meetAudioEnergyStaleMs: 10000,
   instructions: "",
   tools: [],
@@ -122,8 +127,12 @@ const config: RealtimeBridgeConfig = {
   autoRespondToMeetToolCalls: true,
   observeMeetChat: true,
   botName: "Meeting Avatar Bot",
-  ...window.MAB_REALTIME_BRIDGE_CONFIG,
+  ...rawBridgeConfig,
 };
+config.meetAudioInputGain = normalizeMeetAudioInputGain(
+  (rawBridgeConfig as Record<string, unknown>).meetAudioInputGain,
+  defaultMeetAudioInputGainForSource(config.meetAudioInputSource),
+);
 const {
   realtimeReconnectDelayMs,
   formatRealtimeErrorValue,
@@ -278,6 +287,7 @@ const state = {
     duplicateMeetAudioSendersMuted: 0,
     primaryMeetAudioSenderTrackId: "",
     primaryMeetAudioSenderUsingAvatarBus: false,
+    primaryMeetAudioSenderStats: null as null | Record<string, unknown>,
     primaryMeetAudioSenderAttachAttempts: 0,
     lastPrimaryMeetAudioAttachAt: "",
     lastPrimaryMeetAudioAttachError: "",
@@ -286,6 +296,7 @@ const state = {
     participantAudioForwardingEnabled: Boolean(config.includeParticipantAudio),
     participantAudioSources: [],
     dataChannelMessagesReceived: 0,
+    openaiSessionId: "",
     lastInboundEventAt: "",
     lastInboundEventType: "",
     lastOutboundEventAt: "",
@@ -308,9 +319,7 @@ const state = {
   },
   transcripts: {
     currentOutput: "",
-    currentInput: "",
     output: [],
-    input: [],
   },
   inbound: [],
   timeline: [],
@@ -386,6 +395,7 @@ let routingAudioResumeListenersInstalled = false;
 let silentMeetAudioTrack = null;
 let realtimeInputGateReopenTimer = 0;
 let primaryMeetAudioSender = null;
+let primaryMeetAudioSenderStatsTimer = 0;
 let primaryMeetAudioSenderAttachRetryTimer = 0;
 const primaryMeetAudioSenderAttachInFlight = new WeakSet();
 let peerConnectionHookInstalled = false;

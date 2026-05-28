@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
-import { readBrowserInitSource } from "../browser-init-source.ts";
 import type { HiyoriAvatarConfig } from "../browser-runtime-types.ts";
 
 interface AvatarInitScriptConfig extends HiyoriAvatarConfig {
@@ -102,6 +101,24 @@ function buildInlineVRMDeps() {
   return cachedInlineVRMDeps;
 }
 
+let cachedAvatarRuntimeSource = "";
+
+function buildAvatarRuntimeSource() {
+  if (cachedAvatarRuntimeSource) return cachedAvatarRuntimeSource;
+  const result = buildSync({
+    entryPoints: [fileURLToPath(new URL("./hiyori-avatar-inject.ts", import.meta.url))],
+    bundle: true,
+    format: "iife",
+    logLevel: "silent",
+    platform: "browser",
+    target: "es2020",
+    write: false,
+  });
+  cachedAvatarRuntimeSource = result.outputFiles?.[0]?.text || "";
+  if (!cachedAvatarRuntimeSource) throw new Error("build avatar runtime bundle produced no output");
+  return cachedAvatarRuntimeSource;
+}
+
 export function buildAvatarInitScript(config: AvatarInitScriptConfig = {}) {
   const runtimeConfig = { ...config };
   const depsDir =
@@ -109,11 +126,7 @@ export function buildAvatarInitScript(config: AvatarInitScriptConfig = {}) {
   delete runtimeConfig.live2dDepsDir;
   delete runtimeConfig.depsDir;
 
-  const source = readBrowserInitSource(
-    import.meta.url,
-    "./hiyori-avatar-inject.js",
-    "./hiyori-avatar-inject.ts",
-  );
+  const source = buildAvatarRuntimeSource();
   return [
     buildInlineLive2DDeps(depsDir),
     shouldInlineVRMDeps(runtimeConfig) ? buildInlineVRMDeps() : "",

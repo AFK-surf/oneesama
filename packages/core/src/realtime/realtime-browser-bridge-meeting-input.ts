@@ -1,6 +1,10 @@
 /* eslint-disable no-unused-vars */
 function handleRealtimeServerEvent(detail) {
   const event = detail || {};
+  if (event.type === "session.created" && event.session?.id) {
+    state.connection.openaiSessionId = event.session.id;
+    recordTimeline("realtime_session_created", { openaiSessionId: event.session.id });
+  }
   if (event.type === "response.created" && event.response?.id) {
     state.protection.activeResponseId = event.response.id;
     recordTimeline("realtime_input_continuous", { reason: "response-created" });
@@ -19,8 +23,16 @@ function handleRealtimeServerEvent(detail) {
   }
   if (event.type === "input_audio_buffer.speech_started") {
     state.protection.lastInputSpeechStartedAt = new Date().toISOString();
-    const result = cancelActiveResponse("user_speech_started");
-    if (!result.skipped) state.protection.userSpeechCancels += 1;
+    if (state.protection.outputAudioActive === true) {
+      const result = cancelActiveResponse("user_speech_started");
+      if (!result.skipped) state.protection.userSpeechCancels += 1;
+    } else {
+      recordTimeline("realtime_input_speech_started", {
+        cancelSkipped: true,
+        reason: "no_output_audio_active",
+        activeResponseId: state.protection.activeResponseId || "",
+      });
+    }
     setRealtimeInputGate(true, "user-speech-started");
   }
   if (
