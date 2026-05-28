@@ -66,3 +66,14 @@ test("caption-only Meet joins force camera off before and after admission", asyn
     "camera must be re-checked before final join state is captured",
   );
 });
+
+test("Meet joins mute local playback by default while keeping an escape hatch", async () => {
+  const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+
+  assert.ok(
+    source.includes(
+      "await installMeetLocalPlaybackMute(page, diagnostics, input.muteLocalPlayback !== false);",
+    ),
+    "Meet page media playback should be muted unless explicitly disabled for debugging",
+  );
+});

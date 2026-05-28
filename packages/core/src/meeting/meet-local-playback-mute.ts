@@ -31,6 +31,7 @@ export async function installMeetLocalPlaybackMute(
     diagnostics?.record?.("local_playback_mute", result);
     return result;
   }
+  await page.evaluate("window.__name = window.__name || ((fn) => fn)");
   const result = await page
     .evaluate(() => {
       const globalScope = window as Window &
