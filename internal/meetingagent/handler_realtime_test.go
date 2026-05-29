@@ -629,6 +629,7 @@ func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
 	if !strings.Contains(stringFromAny(configBody["instructions"]), "做一个贪吃蛇") ||
 		!strings.Contains(stringFromAny(configBody["instructions"]), "create a shared workspace") ||
 		!strings.Contains(stringFromAny(configBody["instructions"]), "共享 VS Code 屏幕") ||
+		!strings.Contains(stringFromAny(configBody["instructions"]), "把 Pencil 共享一下") ||
 		!strings.Contains(stringFromAny(configBody["instructions"]), "用编辑器演示") {
 		t.Fatalf("instructions = %q, want semantic shared-workspace routing examples", stringFromAny(configBody["instructions"]))
 	}

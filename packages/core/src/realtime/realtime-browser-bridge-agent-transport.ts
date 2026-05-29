@@ -193,34 +193,57 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
 }
 
 function installRealtimeAgentSDKEventHandlers(session, transport) {
-  const record = (type) => (event) => {
-    const eventType = event?.type || type;
-    recordTimeline(`realtime_agent_sdk_${type}`, {
-      eventType,
-      agent: event?.agent?.name || event?.agent || "",
-      tool: event?.tool?.name || event?.name || "",
-      handoff: event?.handoff?.targetAgent?.name || event?.handoff || "",
-    });
-    rememberInboundEvent({ type: `agents_sdk.${eventType}` }, "agents-sdk");
-    if (type === "history_updated") {
-      const history = Array.isArray(event) ? event : currentHistorySnapshot();
-      updateContextHealthFromHistory(history);
-      maybeCompactRealtimeHistory("history_updated");
-    }
-    updateFeedback();
-  };
+  const nameOf = (value) =>
+    typeof value === "string" ? value : value?.name || value?.config?.name || "";
+  const record =
+    (type) =>
+    (...args) => {
+      const event = args.length === 1 ? args[0] : {};
+      const agent = nameOf(args.length > 1 ? args[1] : event?.agent);
+      const tool = nameOf(
+        type === "agent_tool_start" || type === "agent_tool_end"
+          ? args[2]
+          : event?.tool || event?.name,
+      );
+      const handoff = nameOf(
+        type === "agent_handoff" ? args[2] : event?.handoff?.targetAgent || event?.handoff,
+      );
+      const toolDetailsIndex = type === "agent_tool_end" ? 4 : 3;
+      const toolCall =
+        type === "agent_tool_start" || type === "agent_tool_end"
+          ? args[toolDetailsIndex]?.toolCall || args[toolDetailsIndex]?.tool_call || {}
+          : {};
+      const eventType = event?.type || type;
+      recordTimeline(`realtime_agent_sdk_${type}`, {
+        eventType,
+        agent,
+        tool,
+        handoff,
+        callId: toolCall?.callId || toolCall?.call_id || "",
+      });
+      rememberInboundEvent({ type: `agents_sdk.${eventType}` }, "agents-sdk");
+      if (type === "history_updated") {
+        const history = Array.isArray(args[0]) ? args[0] : currentHistorySnapshot();
+        updateContextHealthFromHistory(history);
+        maybeCompactRealtimeHistory("history_updated");
+      }
+      updateFeedback();
+    };
   for (const eventName of [
     "agent_start",
     "agent_end",
     "agent_handoff",
-    "tool_start",
-    "tool_end",
+    "agent_tool_start",
+    "agent_tool_end",
     "error",
     "audio_start",
     "audio_stopped",
     "audio_interrupted",
     "history_updated",
     "history_added",
+    // Older local fakes used these names; keep them for compatibility.
+    "tool_start",
+    "tool_end",
   ]) {
     session?.on?.(eventName, record(eventName));
   }

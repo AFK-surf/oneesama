@@ -435,8 +435,8 @@ test("Realtime Agents SDK audio lifecycle does not gate local input", async () =
                 return this;
               }
 
-              emit(type, event = {}) {
-                for (const callback of this.listeners.get(type) || []) callback(event);
+              emit(type, ...args) {
+                for (const callback of this.listeners.get(type) || []) callback(...args);
               }
 
               async connect() {}
@@ -481,6 +481,49 @@ test("Realtime Agents SDK audio lifecycle does not gate local input", async () =
       });
       assert.equal(removedOutputGateKey in stopped.protection, false);
       assert.ok(stopped.timelineTypes.includes("realtime_agent_sdk_audio_stopped"));
+
+      const toolEvents = await page.evaluate(() => {
+        window.__MAB_FAKE_SDK_SESSION.emit(
+          "agent_tool_start",
+          {},
+          { name: "Onee-sama" },
+          { name: "share_existing_app_window" },
+          { toolCall: { callId: "call_share_pencil" } },
+        );
+        window.__MAB_FAKE_SDK_SESSION.emit(
+          "agent_tool_end",
+          {},
+          { name: "Onee-sama" },
+          { name: "share_existing_app_window" },
+          "ok",
+          { toolCall: { callId: "call_share_pencil" } },
+        );
+        return window.MAB_REALTIME_BRIDGE.timeline.filter((entry) =>
+          entry.type.startsWith("realtime_agent_sdk_agent_tool_"),
+        );
+      });
+      assert.deepEqual(
+        toolEvents.map((entry) => ({
+          type: entry.type,
+          agent: entry.detail.agent,
+          tool: entry.detail.tool,
+          callId: entry.detail.callId,
+        })),
+        [
+          {
+            type: "realtime_agent_sdk_agent_tool_start",
+            agent: "Onee-sama",
+            tool: "share_existing_app_window",
+            callId: "call_share_pencil",
+          },
+          {
+            type: "realtime_agent_sdk_agent_tool_end",
+            agent: "Onee-sama",
+            tool: "share_existing_app_window",
+            callId: "call_share_pencil",
+          },
+        ],
+      );
     } finally {
       await browser.close();
     }

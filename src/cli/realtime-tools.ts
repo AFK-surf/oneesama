@@ -897,9 +897,11 @@ export async function realtimeLiveRoutingSmoke() {
           ({ text, tools }) => {
             window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
               type: "conversation.item.create",
+              metadata: { source: "manual_text_turn" },
               item: {
                 type: "message",
                 role: "user",
+                metadata: { source: "manual_text_turn" },
                 content: [{ type: "input_text", text }],
               },
             });
