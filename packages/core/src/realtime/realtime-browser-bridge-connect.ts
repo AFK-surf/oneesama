@@ -275,6 +275,7 @@ async function connectRealtime(options = {}) {
       clearRecoveredConnectionErrors();
       recordTimeline("data_channel_open", { label: dataChannel.label || "" });
       configureRealtimeSession();
+      scheduleRealtimeSessionRenewal("data_channel_open");
       installMeetChatObserver().catch((error) => {
         state.meetChat.errors.push({
           ts: new Date().toISOString(),

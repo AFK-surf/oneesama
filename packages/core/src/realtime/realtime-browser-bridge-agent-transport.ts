@@ -1,4 +1,38 @@
 /* eslint-disable no-unused-vars */
+let realtimeSessionRenewalTimer = 0;
+
+function realtimeSessionRenewalMs() {
+  const value = Number((config as Record<string, unknown>).realtimeSessionRenewalMs);
+  if (value === 0) return 0;
+  return Math.max(1000, Number.isFinite(value) && value > 0 ? value : 28 * 60 * 1000);
+}
+
+function clearRealtimeSessionRenewalTimer() {
+  if (!realtimeSessionRenewalTimer) return;
+  window.clearTimeout(realtimeSessionRenewalTimer);
+  realtimeSessionRenewalTimer = 0;
+}
+
+function scheduleRealtimeSessionRenewal(reason = "connected") {
+  clearRealtimeSessionRenewalTimer();
+  const delayMs = realtimeSessionRenewalMs();
+  if (delayMs <= 0 || state.connection.mode === "mock" || state.connection.mode === "webrtc-mock") {
+    return { ok: false, skipped: true, reason: "session_renewal_disabled" };
+  }
+  const renewalAt = new Date(Date.now() + delayMs).toISOString();
+  Object.assign(state.connection as Record<string, unknown>, {
+    sessionRenewalAt: renewalAt,
+    sessionRenewalReason: reason,
+  });
+  recordTimeline("realtime_session_renewal_scheduled", { reason, delayMs, renewalAt });
+  realtimeSessionRenewalTimer = window.setTimeout(() => {
+    realtimeSessionRenewalTimer = 0;
+    scheduleRealtimeReconnect("session_renewal", 0);
+  }, delayMs);
+  updateFeedback();
+  return { ok: true, scheduled: true, reason, delayMs, renewalAt };
+}
+
 function createMockRealtimeAgentTransport() {
   const listeners = new Map();
   const emit = (type, event = {}) => {
@@ -244,6 +278,7 @@ async function connectRealtimeAgentSDK(connectionConfig) {
     tools: state.session.toolNames,
     sdkVersion: state.agentRuntime.sdkVersion,
   });
+  scheduleRealtimeSessionRenewal("agents_sdk_connected");
   installMeetChatObserver().catch((error) => {
     state.meetChat.errors.push({
       ts: new Date().toISOString(),
@@ -262,6 +297,7 @@ async function connectRealtimeAgentSDK(connectionConfig) {
 
 function cleanupRealtimeConnection(reason = "cleanup") {
   reconnectGeneration += 1;
+  clearRealtimeSessionRenewalTimer();
   clearRealtimeOutputAudioActivity(`realtime_connection_${reason}`);
   if (realtimeInputGateReopenTimer) {
     window.clearTimeout(realtimeInputGateReopenTimer);
