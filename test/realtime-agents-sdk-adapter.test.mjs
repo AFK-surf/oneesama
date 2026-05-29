@@ -333,6 +333,117 @@ test("Realtime Agents SDK local tool failures use the shared blocked turn policy
   });
 });
 
+test("Realtime Agents SDK audio lifecycle uses the shared output protection state", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: `
+          window.MAB_AVATAR_AUDIO_BUS = {
+            syntheticSpeechActive: false,
+            setSyntheticSpeech(active) {
+              this.syntheticSpeechActive = active === true;
+            },
+            debugState() {
+              return { syntheticSpeechActive: this.syntheticSpeechActive };
+            },
+          };
+          window.OpenAIAgentsRealtime = {
+            tool(config) {
+              return config;
+            },
+            RealtimeAgent: function RealtimeAgent(config) {
+              this.config = config;
+            },
+            RealtimeSession: class RealtimeSession {
+              constructor() {
+                this.listeners = new Map();
+                window.__MAB_FAKE_SDK_SESSION = this;
+              }
+
+              on(type, callback) {
+                const callbacks = this.listeners.get(type) || [];
+                callbacks.push(callback);
+                this.listeners.set(type, callbacks);
+                return this;
+              }
+
+              emit(type, event = {}) {
+                for (const callback of this.listeners.get(type) || []) callback(event);
+              }
+
+              async connect() {}
+
+              close() {}
+            },
+          };
+        `,
+      });
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk-mock",
+          agentRuntime: "raw",
+          sessionId: "sdk-audio-lifecycle-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          outputAudioStaleFallbackMs: 50,
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.agentRuntime?.sdkConnected === true,
+      );
+
+      const started = await page.evaluate(() => {
+        window.__MAB_FAKE_SDK_SESSION.emit("audio_start", { type: "audio_start" });
+        return {
+          protection: { ...window.MAB_REALTIME_BRIDGE.protection },
+          syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
+          timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
+        };
+      });
+      assert.equal(started.protection.outputAudioActive, true);
+      assert.equal(started.syntheticSpeechActive, true);
+      assert.ok(started.timelineTypes.includes("realtime_agent_sdk_audio_start"));
+
+      const stopped = await page.evaluate(() => {
+        window.__MAB_FAKE_SDK_SESSION.emit("audio_stopped", { type: "audio_stopped" });
+        return {
+          protection: { ...window.MAB_REALTIME_BRIDGE.protection },
+          syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
+          clearReasons: window.MAB_REALTIME_BRIDGE.timeline
+            .filter((entry) => entry.type === "realtime_output_audio_cleared")
+            .map((entry) => entry.detail.reason),
+        };
+      });
+      assert.equal(stopped.protection.outputAudioActive, false);
+      assert.equal(stopped.syntheticSpeechActive, false);
+      assert.ok(stopped.clearReasons.includes("agents_sdk.audio_stopped"));
+
+      await page.evaluate(() => {
+        window.__MAB_FAKE_SDK_SESSION.emit("audio_start", { type: "audio_start" });
+      });
+      await page.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.protection?.outputAudioActive === false,
+      );
+      const fallback = await page.evaluate(() => ({
+        protection: { ...window.MAB_REALTIME_BRIDGE.protection },
+        syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
+        clearReasons: window.MAB_REALTIME_BRIDGE.timeline
+          .filter((entry) => entry.type === "realtime_output_audio_cleared")
+          .map((entry) => entry.detail.reason),
+      }));
+      assert.equal(fallback.protection.outputAudioActive, false);
+      assert.equal(fallback.syntheticSpeechActive, false);
+      assert.ok(fallback.clearReasons.includes("agents_sdk.audio_start_stale_fallback"));
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
 test("Realtime Agents SDK local app-control tools record silent turn policy", async () => {
   await withToolServer(async ({ baseUrl }) => {
     const browser = await chromium.launch({ headless: true });

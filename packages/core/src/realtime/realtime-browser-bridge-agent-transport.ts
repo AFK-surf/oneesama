@@ -190,6 +190,17 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
 }
 
 function installRealtimeAgentSDKEventHandlers(session, transport) {
+  const handleAudioLifecycle = (type, eventType) => {
+    const reason = `agents_sdk.${eventType || type}`;
+    if (type === "audio_start") {
+      markRealtimeOutputAudioActive(reason);
+      recordTimeline("realtime_input_continuous", { reason });
+      return;
+    }
+    if (type === "audio_stopped" || type === "audio_interrupted") {
+      clearRealtimeOutputAudioActivity(reason);
+    }
+  };
   const record = (type) => (event) => {
     const eventType = event?.type || type;
     recordTimeline(`realtime_agent_sdk_${type}`, {
@@ -204,6 +215,7 @@ function installRealtimeAgentSDKEventHandlers(session, transport) {
       updateContextHealthFromHistory(history);
       maybeCompactRealtimeHistory("history_updated");
     }
+    handleAudioLifecycle(type, eventType);
     updateFeedback();
   };
   for (const eventName of [
