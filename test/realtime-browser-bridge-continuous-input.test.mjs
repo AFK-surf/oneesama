@@ -87,3 +87,106 @@ test("Realtime bridge keeps Meet input continuous while output audio plays", asy
     await browser.close();
   }
 });
+
+test("Realtime bridge clears stale output audio when the stopped event is missing", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.setContent("<!doctype html><html><body></body></html>");
+    await page.addScriptTag({
+      content: buildRealtimeBrowserInitScript({
+        mode: "webrtc",
+        agentRuntime: "raw",
+        autoConnect: false,
+        tokenUrl: "https://example.test/token",
+        sdpUrl: "https://example.test/sdp",
+        forwardMeetAudioToRealtime: true,
+        includeParticipantAudio: true,
+        captureMeetAudioForTranscript: false,
+        sendSessionUpdateOnConnect: false,
+        outputAudioDoneFallbackMs: 60,
+        outputAudioStaleFallbackMs: 200,
+      }),
+    });
+
+    const result = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const inbound = (type) => {
+        window.dispatchEvent(
+          new CustomEvent("meeting-avatar-realtime-server-event", {
+            detail: { type, response: { id: "resp_missing_stopped" } },
+          }),
+        );
+      };
+
+      inbound("response.created");
+      inbound("output_audio_buffer.started");
+      inbound("response.output_audio.done");
+      inbound("response.done");
+      const activeBeforeFallback = window.MAB_REALTIME_BRIDGE.protection.outputAudioActive;
+      await sleep(140);
+
+      return {
+        activeBeforeFallback,
+        protection: window.MAB_REALTIME_BRIDGE.protection,
+        syntheticSpeechActive:
+          window.MAB_AVATAR_AUDIO_BUS?.debugState?.().syntheticSpeechActive ?? false,
+        clearReasons: window.MAB_REALTIME_BRIDGE.timeline
+          .filter((entry) => entry.type === "realtime_output_audio_cleared")
+          .map((entry) => entry.detail.reason),
+      };
+    });
+
+    assert.equal(result.activeBeforeFallback, true);
+    assert.equal(result.protection.outputAudioActive, false);
+    assert.ok(result.protection.lastOutputAudioStoppedAt);
+    assert.equal(result.syntheticSpeechActive, false);
+    assert.ok(result.clearReasons.includes("response.done_fallback"));
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Realtime bridge clears output audio state during connection cleanup", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.setContent("<!doctype html><html><body></body></html>");
+    await page.addScriptTag({
+      content: buildRealtimeBrowserInitScript({
+        mode: "webrtc",
+        agentRuntime: "raw",
+        autoConnect: false,
+        tokenUrl: "https://example.test/token",
+        sdpUrl: "https://example.test/sdp",
+        forwardMeetAudioToRealtime: true,
+        includeParticipantAudio: true,
+        captureMeetAudioForTranscript: false,
+        sendSessionUpdateOnConnect: false,
+      }),
+    });
+
+    const result = await page.evaluate(() => {
+      window.dispatchEvent(
+        new CustomEvent("meeting-avatar-realtime-server-event", {
+          detail: { type: "output_audio_buffer.started" },
+        }),
+      );
+      const activeBeforeCleanup = window.MAB_REALTIME_BRIDGE.protection.outputAudioActive;
+      window.MAB_REALTIME_CLIENT.disconnect("data_channel_close");
+      return {
+        activeBeforeCleanup,
+        protection: window.MAB_REALTIME_BRIDGE.protection,
+        clearReasons: window.MAB_REALTIME_BRIDGE.timeline
+          .filter((entry) => entry.type === "realtime_output_audio_cleared")
+          .map((entry) => entry.detail.reason),
+      };
+    });
+
+    assert.equal(result.activeBeforeCleanup, true);
+    assert.equal(result.protection.outputAudioActive, false);
+    assert.ok(result.clearReasons.includes("realtime_connection_data_channel_close"));
+  } finally {
+    await browser.close();
+  }
+});

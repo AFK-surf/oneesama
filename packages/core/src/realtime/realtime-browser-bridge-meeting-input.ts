@@ -1,4 +1,97 @@
 /* eslint-disable no-unused-vars */
+let outputAudioGeneration = 0;
+let outputAudioCompletionTimer: number | null = null;
+let outputAudioStaleTimer: number | null = null;
+
+function normalizedOutputAudioTimerMs(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function outputAudioDoneFallbackMs() {
+  return normalizedOutputAudioTimerMs(
+    (config as Record<string, unknown>).outputAudioDoneFallbackMs,
+    4000,
+  );
+}
+
+function outputAudioStaleFallbackMs() {
+  return normalizedOutputAudioTimerMs(
+    (config as Record<string, unknown>).outputAudioStaleFallbackMs,
+    20000,
+  );
+}
+
+function clearOutputAudioCompletionTimer() {
+  if (outputAudioCompletionTimer === null) return;
+  window.clearTimeout(outputAudioCompletionTimer);
+  outputAudioCompletionTimer = null;
+}
+
+function clearOutputAudioStaleTimer() {
+  if (outputAudioStaleTimer === null) return;
+  window.clearTimeout(outputAudioStaleTimer);
+  outputAudioStaleTimer = null;
+}
+
+function clearOutputAudioTimers() {
+  clearOutputAudioCompletionTimer();
+  clearOutputAudioStaleTimer();
+}
+
+function clearRealtimeOutputAudioActivity(reason = "output_audio_cleared") {
+  const wasActive = state.protection.outputAudioActive === true;
+  outputAudioGeneration += 1;
+  clearOutputAudioTimers();
+  window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
+  state.protection.outputAudioActive = false;
+  state.protection.lastOutputAudioStoppedAt = new Date().toISOString();
+  if (wasActive) {
+    recordTimeline("realtime_output_audio_cleared", {
+      reason,
+      activeResponseId: state.protection.activeResponseId || "",
+    });
+    updateFeedback();
+  }
+  return wasActive;
+}
+
+function scheduleOutputAudioCompletionFallback(reason: string) {
+  clearOutputAudioCompletionTimer();
+  const generation = outputAudioGeneration;
+  const delayMs = outputAudioDoneFallbackMs();
+  outputAudioCompletionTimer = window.setTimeout(() => {
+    outputAudioCompletionTimer = null;
+    if (generation !== outputAudioGeneration) return;
+    if (state.protection.outputAudioActive !== true) return;
+    clearRealtimeOutputAudioActivity(`${reason}_fallback`);
+  }, delayMs);
+}
+
+function scheduleOutputAudioStaleFallback(reason: string) {
+  clearOutputAudioStaleTimer();
+  const generation = outputAudioGeneration;
+  const delayMs = outputAudioStaleFallbackMs();
+  outputAudioStaleTimer = window.setTimeout(() => {
+    outputAudioStaleTimer = null;
+    if (generation !== outputAudioGeneration) return;
+    if (state.protection.outputAudioActive !== true) return;
+    clearRealtimeOutputAudioActivity(`${reason}_stale_fallback`);
+  }, delayMs);
+}
+
+function markRealtimeOutputAudioActive(reason: string) {
+  if (state.protection.outputAudioActive !== true) outputAudioGeneration += 1;
+  clearOutputAudioCompletionTimer();
+  window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(true);
+  state.protection.outputAudioActive = true;
+  if (reason === "output_audio_buffer.started" || !state.protection.lastOutputAudioStartedAt) {
+    state.protection.lastOutputAudioStartedAt = new Date().toISOString();
+    state.protection.lastOutputAudioStoppedAt = "";
+  }
+  scheduleOutputAudioStaleFallback(reason);
+}
+
 function handleRealtimeServerEvent(detail) {
   const event = detail || {};
   if (event.type === "session.created" && event.session?.id) {
@@ -13,12 +106,7 @@ function handleRealtimeServerEvent(detail) {
     event.type === "output_audio_buffer.started" ||
     event.type === "response.output_audio.delta"
   ) {
-    window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(true);
-    state.protection.outputAudioActive = true;
-    if (event.type === "output_audio_buffer.started") {
-      state.protection.lastOutputAudioStartedAt = new Date().toISOString();
-      state.protection.lastOutputAudioStoppedAt = "";
-    }
+    markRealtimeOutputAudioActive(event.type);
     recordTimeline("realtime_input_continuous", { reason: event.type });
   }
   if (event.type === "input_audio_buffer.speech_started") {
@@ -43,20 +131,18 @@ function handleRealtimeServerEvent(detail) {
     state.protection.activeResponseId = "";
   }
   if (event.type === "output_audio_buffer.stopped") {
-    window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
-    state.protection.outputAudioActive = false;
-    state.protection.lastOutputAudioStoppedAt = new Date().toISOString();
+    clearRealtimeOutputAudioActivity("output_audio_buffer.stopped");
   }
   if (event.type === "response.cancelled" || event.type === "response.failed") {
-    window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);
-    state.protection.outputAudioActive = false;
-    state.protection.lastOutputAudioStoppedAt = new Date().toISOString();
+    clearRealtimeOutputAudioActivity(event.type);
   }
   if (event.type === "response.done" || event.type === "response.output_audio.done") {
     if (state.protection.outputAudioActive) {
+      scheduleOutputAudioCompletionFallback(event.type);
       recordTimeline("realtime_output_audio_completion_deferred", {
         reason: event.type,
         waitingFor: "output_audio_buffer.stopped",
+        fallbackMs: outputAudioDoneFallbackMs(),
       });
     } else {
       window.MAB_AVATAR_AUDIO_BUS?.setSyntheticSpeech?.(false);

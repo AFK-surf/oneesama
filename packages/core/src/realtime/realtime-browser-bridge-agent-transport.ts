@@ -262,6 +262,7 @@ async function connectRealtimeAgentSDK(connectionConfig) {
 
 function cleanupRealtimeConnection(reason = "cleanup") {
   reconnectGeneration += 1;
+  clearRealtimeOutputAudioActivity(`realtime_connection_${reason}`);
   if (realtimeInputGateReopenTimer) {
     window.clearTimeout(realtimeInputGateReopenTimer);
     realtimeInputGateReopenTimer = 0;
@@ -374,6 +375,6 @@ function cancelActiveResponse(reason = "interrupt", options: { force?: boolean }
   state.protection.cancelledResponses += 1;
   const cancelledResponseId = responseId;
   state.protection.activeResponseId = "";
-  state.protection.outputAudioActive = false;
+  clearRealtimeOutputAudioActivity(`response_cancel_${reason}`);
   return { ok: true, channel, responseId: cancelledResponseId, reason };
 }

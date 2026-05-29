@@ -29,6 +29,7 @@ type HudSignal = {
 type HudCell = {
   key: string;
   label: string;
+  value: string;
   level: HudSignal["level"];
   color: string;
   pulse: boolean;
@@ -222,6 +223,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
       return {
         key: "audio",
         label: "Listening",
+        value: "",
         level: "active",
         color: CELL_COLORS.audio,
         pulse: true,
@@ -230,33 +232,70 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
     return {
       key: "voice",
       label: "Thinking",
+      value: "",
       level: "active",
       color: CELL_COLORS.voice,
       pulse: true,
     };
   }
   if (status.kind === "opening_preview") {
-    return { key: "tool", label: "Tool", level: "active", color: CELL_COLORS.tool, pulse: true };
+    return {
+      key: "tool",
+      label: "Tool",
+      value: "",
+      level: "active",
+      color: CELL_COLORS.tool,
+      pulse: true,
+    };
   }
   if (status.kind === "blocked") {
-    return { key: "err", label: "Blocked", level: "blocked", color: CELL_COLORS.err, pulse: true };
+    return {
+      key: "err",
+      label: "Blocked",
+      value: "",
+      level: "blocked",
+      color: CELL_COLORS.err,
+      pulse: true,
+    };
   }
   if (status.kind === "done") {
     if (/说话|speaking|talk/i.test(text)) {
       return {
         key: "voice",
         label: "Voice",
+        value: "",
         level: "active",
         color: CELL_COLORS.voice,
         pulse: true,
       };
     }
-    return { key: "done", label: "Done", level: "ok", color: CELL_COLORS.done, pulse: false };
+    return {
+      key: "done",
+      label: "Done",
+      value: "",
+      level: "ok",
+      color: CELL_COLORS.done,
+      pulse: false,
+    };
   }
   if (status.kind === "writing_code") {
-    return { key: "tool", label: "Working", level: "active", color: CELL_COLORS.tool, pulse: true };
+    return {
+      key: "tool",
+      label: "Working",
+      value: "",
+      level: "active",
+      color: CELL_COLORS.tool,
+      pulse: true,
+    };
   }
-  return { key: "status", label: text, level: "active", color: CELL_COLORS.status, pulse: true };
+  return {
+    key: "status",
+    label: text,
+    value: "",
+    level: "active",
+    color: CELL_COLORS.status,
+    pulse: true,
+  };
 }
 
 function signalCell(signal: HudSignal): HudCell | null {
@@ -265,14 +304,19 @@ function signalCell(signal: HudSignal): HudCell | null {
   return {
     key: signal.key,
     label,
+    value: signal.value,
     level: signal.level,
     color: CELL_COLORS[signal.key] || CELL_COLORS.status,
     pulse: true,
   };
 }
 
+function cellText(cell: HudCell) {
+  return [cell.label, cell.value].filter(Boolean).join(" ");
+}
+
 function cellWidth(cell: HudCell) {
-  return Math.max(78, Math.min(150, 32 + cell.label.length * 8));
+  return Math.max(116, Math.min(240, 46 + cellText(cell).length * 10));
 }
 
 function visibleCells(status: AvatarStatus | null, signals: HudSignal[]) {
@@ -299,33 +343,33 @@ function drawCell(
   first: boolean,
   last: boolean,
 ) {
-  const height = 32;
+  const height = 46;
   drawSegmentRect(ctx, x, y, width, height, first, last);
-  ctx.fillStyle = "rgba(15, 18, 28, 0.72)";
+  ctx.fillStyle = "rgba(13, 16, 25, 0.82)";
   ctx.fill();
   const gradient = ctx.createLinearGradient(0, y, 0, y + height);
-  gradient.addColorStop(0, `${cell.color}22`);
-  gradient.addColorStop(1, `${cell.color}0d`);
+  gradient.addColorStop(0, `${cell.color}33`);
+  gradient.addColorStop(1, `${cell.color}14`);
   ctx.fillStyle = gradient;
   ctx.fill();
   ctx.strokeStyle =
     cell.level === "blocked" || cell.level === "warn"
-      ? `${cell.color}66`
-      : "rgba(255, 255, 255, 0.10)";
-  ctx.lineWidth = 1;
+      ? `${cell.color}aa`
+      : "rgba(255, 255, 255, 0.18)";
+  ctx.lineWidth = 1.5;
   ctx.stroke();
   const pulse = cell.pulse ? 0.58 + Math.sin(performance.now() / 260) * 0.32 : 0.96;
   ctx.globalAlpha = Math.max(0.38, pulse);
   ctx.fillStyle = cell.color;
   ctx.beginPath();
-  ctx.arc(x + 17, y + 16, 3.6, 0, Math.PI * 2);
+  ctx.arc(x + 21, y + 23, 5.3, 0, Math.PI * 2);
   ctx.fill();
   ctx.globalAlpha = 1;
   ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
-  ctx.font = "800 11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.font = "800 15px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
-  ctx.fillText(cell.label.toUpperCase(), x + 28, y + 16);
+  ctx.fillText(cellText(cell).toUpperCase(), x + 38, y + 23);
   ctx.textBaseline = "alphabetic";
 }
 
@@ -340,13 +384,13 @@ export function createAvatarHud(options: {
     const signals = collectSignals();
     const cells = visibleCells(status, signals);
     const { canvasWidth: w, canvasHeight: h } = config;
-    const gap = 4;
+    const gap = 5;
     const width = Math.max(
       1,
       cells.reduce((sum, cell) => sum + cellWidth(cell), 0) + Math.max(0, cells.length - 1) * gap,
     );
-    const height = cells.length > 0 ? 32 : 1;
-    return { x: (w - width) / 2, y: Math.round(h * 0.68), width, height };
+    const height = cells.length > 0 ? 46 : 1;
+    return { x: (w - width) / 2, y: Math.round(h * 0.66), width, height };
   }
 
   function draw(ctx: CanvasRenderingContext2D) {
@@ -356,7 +400,7 @@ export function createAvatarHud(options: {
 
     const cells = visibleCells(status, signals);
     const { x, y } = rect();
-    const gap = 4;
+    const gap = 5;
 
     ctx.save();
     ctx.shadowColor = "rgba(0, 0, 0, 0.34)";
