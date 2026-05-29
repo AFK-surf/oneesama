@@ -125,23 +125,32 @@ test("Realtime bridge clears stale output audio when the stopped event is missin
       inbound("response.done");
       const activeBeforeFallback = window.MAB_REALTIME_BRIDGE.protection.outputAudioActive;
       await sleep(140);
+      inbound("input_audio_buffer.speech_started");
+      await sleep(20);
 
       return {
         activeBeforeFallback,
         protection: window.MAB_REALTIME_BRIDGE.protection,
+        gateAfterFallbackSpeech: window.MAB_REALTIME_BRIDGE.connection.realtimeInputGateOpen,
         syntheticSpeechActive:
           window.MAB_AVATAR_AUDIO_BUS?.debugState?.().syntheticSpeechActive ?? false,
         clearReasons: window.MAB_REALTIME_BRIDGE.timeline
           .filter((entry) => entry.type === "realtime_output_audio_cleared")
           .map((entry) => entry.detail.reason),
+        speechAfterFallback: window.MAB_REALTIME_BRIDGE.timeline.find(
+          (entry) => entry.type === "realtime_input_speech_started",
+        )?.detail,
       };
     });
 
     assert.equal(result.activeBeforeFallback, true);
     assert.equal(result.protection.outputAudioActive, false);
     assert.ok(result.protection.lastOutputAudioStoppedAt);
+    assert.equal(result.gateAfterFallbackSpeech, true);
     assert.equal(result.syntheticSpeechActive, false);
     assert.ok(result.clearReasons.includes("response.done_fallback"));
+    assert.equal(result.speechAfterFallback.cancelSkipped, true);
+    assert.equal(result.speechAfterFallback.reason, "no_output_audio_active");
   } finally {
     await browser.close();
   }
