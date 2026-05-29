@@ -74,7 +74,7 @@ import {
   hasCommand,
   parseEnvFile,
   envValue,
-  redactSecret
+  redactSecret,
 } from "./common.js";
 import type {
   RealtimeBridgeWorkerToolCall,
@@ -88,7 +88,7 @@ import type {
   ShadowHookResult,
   ShadowReportEvent,
   EvidenceArtifact,
-  CutoverEvidenceManifest
+  CutoverEvidenceManifest,
 } from "./common.js";
 import {
   shadowTransmitterHook,
@@ -116,7 +116,7 @@ import {
   postSignedSlackCommand,
   buildSlackInteractionForm,
   postSignedSlackInteraction,
-  postSignedSlackJson
+  postSignedSlackJson,
 } from "./support.js";
 
 export async function realtimeSessionUpdateSmoke() {
@@ -142,7 +142,7 @@ export async function realtimeSessionUpdateSmoke() {
       }),
     });
     const page = await context.newPage();
-    await page.goto("about:blank");
+    await page.goto("data:text/html,<html><body>realtime session update smoke</body></html>");
     await page.waitForFunction(
       () => {
         const bridge = window.MAB_REALTIME_BRIDGE as
@@ -1057,4 +1057,3 @@ export async function realtimeLiveRoutingSmoke() {
     await rm(dataDir, { recursive: true, force: true });
   }
 }
-
