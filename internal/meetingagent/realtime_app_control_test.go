@@ -136,6 +136,60 @@ func TestRealtimeSharedAppControlRoutesConfiguredKWWKGoalToComputerUseExecutor(t
 	}
 }
 
+func TestRealtimeSharedAppControlStandaloneSkipsActiveJoin(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeDemoCodexRunner{
+		startJob: agentrunner.Job{
+			ID:       "job_standalone_app_control",
+			Provider: "codex",
+			Status:   agentrunner.StatusCompleted,
+			Result:   `{"ok":true,"summary":"Observed the Pencil canvas without changing it.","actions":["observed Pencil window","verified no mutation"],"confidence":0.9,"blocker":""}`,
+		},
+	}
+	rootDir := t.TempDir()
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		OpenAI: appconfig.OpenAIConfig{
+			RealtimeModel: "gpt-realtime-2",
+			BotName:       "Meeting Avatar Bot",
+		},
+		Runner: runner,
+	})
+
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"standalone":true,"session_id":"cu_case_probe_1","applicationName":"Pencil","instruction":"only observe Pencil; do not edit anything","wait":true}`, http.StatusOK)
+
+	if body["ok"] != true || body["provider"] != "codex" || body["summary"] != "Observed the Pencil canvas without changing it." {
+		t.Fatalf("body = %#v, want standalone app-control handled without active join", body)
+	}
+	screenShare := body["screenShare"].(map[string]any)
+	if screenShare["standalone"] != true || screenShare["session_id"] != "cu_case_probe_1" {
+		t.Fatalf("screenShare = %#v, want synthetic standalone status", screenShare)
+	}
+	if runner.startCount != 1 {
+		t.Fatalf("startCount = %d, want 1", runner.startCount)
+	}
+	if !strings.Contains(runner.startInput.Task, "standalone Computer Use validation") {
+		t.Fatalf("task = %q, want standalone app-control task prompt", runner.startInput.Task)
+	}
+	if runner.startInput.Context["source"] != "standalone-app-control" || runner.startInput.Context["standalone"] != true {
+		t.Fatalf("context = %#v, want standalone app-control context", runner.startInput.Context)
+	}
+}
+
+func TestRealtimeSharedAppControlStandaloneRequiresTarget(t *testing.T) {
+	t.Parallel()
+
+	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{RealtimeModel: "gpt-realtime-2"})
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"standalone":true,"instruction":"observe the active app"}`, http.StatusOK)
+	if body["ok"] != false || body["error"] != "app_control_target_required" {
+		t.Fatalf("body = %#v, want app_control_target_required", body)
+	}
+}
+
 func TestRealtimeSharedAppControlPropagatesWorkerBlocker(t *testing.T) {
 	t.Parallel()
 

@@ -52,12 +52,19 @@ type AppControlResult struct {
 }
 
 func appControlRequestFromRealtime(input RealtimeSharedAppControlRequest, sessionID string, status map[string]any) AppControlRequest {
+	context := cloneMap(input.Context)
+	if context == nil {
+		context = map[string]any{}
+	}
+	if input.Standalone {
+		context["standalone_app_control"] = true
+	}
 	return AppControlRequest{
 		SessionID:   strings.TrimSpace(sessionID),
 		Instruction: strings.TrimSpace(input.Instruction),
 		Target:      appControlTargetFromRealtime(input, status),
 		Operations:  append([]KWWKAppControlOperation(nil), input.Operations...),
-		Context:     cloneMap(input.Context),
+		Context:     context,
 		Timeout:     realtimeAppControlTimeout(input.TimeoutMs),
 	}
 }

@@ -92,6 +92,7 @@ func realtimeRequestFromAppControl(req AppControlRequest) RealtimeSharedAppContr
 	return RealtimeSharedAppControlRequest{
 		SessionID:        req.SessionID,
 		Instruction:      req.Instruction,
+		Standalone:       req.Context["standalone_app_control"] == true,
 		ApplicationName:  req.Target.ApplicationName,
 		BundleIdentifier: req.Target.BundleIdentifier,
 		WindowTitle:      req.Target.WindowTitle,

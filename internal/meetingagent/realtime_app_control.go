@@ -3,6 +3,7 @@ package meetingagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ type RealtimeSharedAppControlRequest struct {
 	SessionID        string                    `json:"session_id,omitempty"`
 	JobID            string                    `json:"job_id,omitempty"`
 	Instruction      string                    `json:"instruction,omitempty"`
+	Standalone       bool                      `json:"standalone,omitempty"`
 	ApplicationName  string                    `json:"applicationName,omitempty"`
 	BundleIdentifier string                    `json:"bundleIdentifier,omitempty"`
 	WindowTitle      string                    `json:"windowTitle,omitempty"`
@@ -45,14 +47,28 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 			"error": "instruction_required",
 		}
 	}
-	sessionID, err := s.resolveScreenShareSessionID(ctx, input.SessionID)
-	if err != nil {
-		return map[string]any{
-			"ok":    false,
-			"error": err.Error(),
+	sessionID := strings.TrimSpace(input.SessionID)
+	var status map[string]any
+	if input.Standalone {
+		if err := validateStandaloneAppControlTarget(input); err != nil {
+			return map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			}
 		}
+		sessionID = firstNonEmpty(sessionID, "standalone_app_control")
+		status = standaloneRealtimeAppControlStatus(input, sessionID)
+	} else {
+		resolvedSessionID, err := s.resolveScreenShareSessionID(ctx, sessionID)
+		if err != nil {
+			return map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			}
+		}
+		sessionID = resolvedSessionID
+		status = s.realtimeAppControlStatus(ctx, sessionID)
 	}
-	status := s.realtimeAppControlStatus(ctx, sessionID)
 	request := appControlRequestFromRealtime(input, sessionID, status)
 	if request.Instruction == "" {
 		request.Instruction = "execute structured app-control operations"
@@ -121,9 +137,57 @@ func (s *Service) shouldUseHighLevelAppControlExecutor(req AppControlRequest) bo
 	return strings.TrimSpace(req.Instruction) != "" && len(req.Operations) == 0
 }
 
+func validateStandaloneAppControlTarget(input RealtimeSharedAppControlRequest) error {
+	if strings.TrimSpace(input.ApplicationName) != "" ||
+		strings.TrimSpace(input.BundleIdentifier) != "" ||
+		strings.TrimSpace(input.WindowTitle) != "" ||
+		input.WindowID != 0 ||
+		input.ProcessID != 0 {
+		return nil
+	}
+	return errAppControlTargetRequired()
+}
+
+func errAppControlTargetRequired() error {
+	return errors.New("app_control_target_required")
+}
+
+func standaloneRealtimeAppControlStatus(input RealtimeSharedAppControlRequest, sessionID string) map[string]any {
+	target := map[string]any{
+		"active":     true,
+		"session_id": strings.TrimSpace(sessionID),
+		"standalone": true,
+		"source":     "standalone_app_control",
+	}
+	if value := strings.TrimSpace(input.ApplicationName); value != "" {
+		target["applicationName"] = value
+	}
+	if value := strings.TrimSpace(input.BundleIdentifier); value != "" {
+		target["bundleIdentifier"] = value
+	}
+	if value := strings.TrimSpace(input.WindowTitle); value != "" {
+		target["windowTitle"] = value
+		target["title"] = value
+	}
+	if input.WindowID != 0 {
+		target["windowId"] = input.WindowID
+	}
+	if input.ProcessID != 0 {
+		target["processId"] = input.ProcessID
+	}
+	return map[string]any{
+		"ok":          true,
+		"active":      true,
+		"session_id":  strings.TrimSpace(sessionID),
+		"standalone":  true,
+		"screenShare": target,
+	}
+}
+
 func buildRealtimeAppControlTask(input RealtimeSharedAppControlRequest, status map[string]any) string {
 	payload, _ := json.MarshalIndent(map[string]any{
 		"instruction":        strings.TrimSpace(input.Instruction),
+		"standalone":         input.Standalone,
 		"applicationName":    strings.TrimSpace(input.ApplicationName),
 		"bundleIdentifier":   strings.TrimSpace(input.BundleIdentifier),
 		"windowTitle":        strings.TrimSpace(input.WindowTitle),
@@ -132,8 +196,12 @@ func buildRealtimeAppControlTask(input RealtimeSharedAppControlRequest, status m
 		"operations":         input.Operations,
 		"currentShareStatus": status,
 	}, "", "  ")
+	scope := "Operate the currently shared macOS app/window for the live meeting."
+	if input.Standalone {
+		scope = "Operate the target macOS app/window for standalone Computer Use validation."
+	}
 	return strings.Join([]string{
-		"Operate the currently shared macOS app/window for the live meeting.",
+		scope,
 		"Use the high-level Computer Use capability exposed by the runtime. Keep the observe -> plan -> act -> verify loop inside this executor, including unfamiliar apps. Do not ask the foreground Realtime model or the user for click/drag primitives.",
 		"Observe the current shared window first when needed, plan a short bounded action sequence, act through Computer Use, then verify the visible outcome with the app/window state or screenshot before returning success.",
 		"Do not implement low-level CGEvent, AppleScript, shell, or repository-code UI automation.",
@@ -149,6 +217,10 @@ func realtimeAppControlContext(input RealtimeSharedAppControlRequest, sessionID 
 		context = map[string]any{}
 	}
 	context["source"] = "meeting-realtime-shared-app-control"
+	if input.Standalone {
+		context["source"] = "standalone-app-control"
+		context["standalone"] = true
+	}
 	context["meeting_session_id"] = strings.TrimSpace(sessionID)
 	context["application_name"] = strings.TrimSpace(input.ApplicationName)
 	context["bundle_identifier"] = strings.TrimSpace(input.BundleIdentifier)
