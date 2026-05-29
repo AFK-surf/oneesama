@@ -157,15 +157,18 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
     sourceTrackStates: sourceTracks.map((track) => track.readyState || ""),
     clonedTrackIds: clonedTracks.map((track) => track.id),
   });
-  const baseUrl =
-    String(connectionConfig.openaiRealtimeBaseUrl || "").trim() ||
-    String(connectionConfig.sdpUrl || "https://api.openai.com/v1/realtime/calls").replace(
-      /\/realtime\/calls\/?$/,
-      "",
-    );
+  const endpointUrl = (() => {
+    const sdpUrl = String(connectionConfig.sdpUrl || "").trim();
+    if (sdpUrl) return sdpUrl;
+    const baseUrl = String(connectionConfig.openaiRealtimeBaseUrl || "").trim();
+    if (!baseUrl) return "https://api.openai.com/v1/realtime/calls";
+    if (/\/realtime\/calls\/?$/i.test(baseUrl)) return baseUrl;
+    if (/\/realtime\/?$/i.test(baseUrl)) return `${baseUrl.replace(/\/+$/, "")}/calls`;
+    return `${baseUrl.replace(/\/+$/, "")}/realtime/calls`;
+  })();
   const transport = new namespace.OpenAIRealtimeWebRTC({
     mediaStream: new MediaStream(clonedTracks),
-    baseUrl: baseUrl.replace(/\/realtime\/?$/, ""),
+    baseUrl: endpointUrl,
     changePeerConnection: async (pc) => {
       activePeerConnection = pc;
       window.MAB_REALTIME_PEER_CONNECTION = pc;

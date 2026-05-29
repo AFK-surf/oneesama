@@ -286,6 +286,81 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
   });
 });
 
+test("Realtime Agents SDK WebRTC transport uses the full SDP endpoint URL", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: `
+          window.OpenAIAgentsRealtime = {
+            tool(config) {
+              return config;
+            },
+            RealtimeAgent: function RealtimeAgent(config) {
+              this.config = config;
+            },
+            OpenAIRealtimeWebRTC: class OpenAIRealtimeWebRTC {
+              constructor(options) {
+                this.options = options;
+                this.listeners = new Map();
+                window.__MAB_FAKE_WEBRTC_TRANSPORT_OPTIONS = {
+                  baseUrl: options?.baseUrl || "",
+                };
+              }
+
+              on(type, callback) {
+                const callbacks = this.listeners.get(type) || [];
+                callbacks.push(callback);
+                this.listeners.set(type, callbacks);
+                return this;
+              }
+
+              close() {}
+            },
+            RealtimeSession: class RealtimeSession {
+              constructor(_agent, options) {
+                this.options = options;
+                this.listeners = new Map();
+              }
+
+              on(type, callback) {
+                const callbacks = this.listeners.get(type) || [];
+                callbacks.push(callback);
+                this.listeners.set(type, callbacks);
+                return this;
+              }
+
+              async connect() {}
+
+              close() {}
+            },
+          };
+        `,
+      });
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk",
+          agentRuntime: "test-sdk",
+          sessionId: "sdk-endpoint-url-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          openaiRealtimeBaseUrl: "https://api.openai.com/v1",
+          sdpUrl: "https://api.openai.com/v1/realtime/calls",
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(() => window.__MAB_FAKE_WEBRTC_TRANSPORT_OPTIONS);
+
+      const options = await page.evaluate(() => window.__MAB_FAKE_WEBRTC_TRANSPORT_OPTIONS);
+      assert.equal(options.baseUrl, "https://api.openai.com/v1/realtime/calls");
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
 test("Realtime Agents SDK local tool failures use the shared blocked turn policy", async () => {
   await withToolServer(async ({ baseUrl }) => {
     const browser = await chromium.launch({ headless: true });
