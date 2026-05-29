@@ -171,10 +171,10 @@ export async function evaluateMeetAccessibilityState(page: Page): Promise<MeetPa
     /Your camera is on/i.test(text),
     /Your microphone is on/i.test(text),
     /Call controls/i.test(text),
-    /Leave call|Leave meeting/i.test(text),
-    /Present now|Share screen/i.test(text),
+    /Leave call|Leave meeting|退出通话|离开通话|退出会议|离开会议/i.test(text),
+    /Present now|Share screen|共享屏幕|展示/i.test(text),
     buttons.some((button) =>
-      /Leave call|Leave meeting|Turn off microphone|Turn on microphone|Turn off camera|Turn on camera|Raise hand|More options|Share screen|Present now/i.test(
+      /Leave call|Leave meeting|退出通话|离开通话|退出会议|离开会议|Turn off microphone|Turn on microphone|Turn off camera|Turn on camera|Raise hand|举手|More options|Share screen|Present now|共享屏幕|与所有人聊天|会议工具|发送回应/i.test(
         button.label,
       ),
     ),
@@ -193,7 +193,7 @@ export async function evaluateMeetAccessibilityState(page: Page): Promise<MeetPa
     title: "",
     inMeeting,
     waitingForAdmit,
-    preJoin: /Join now|Ask to join|Getting ready/i.test(text),
+    preJoin: /Join now|Ask to join|Getting ready|立即加入|申请加入|你的姓名/i.test(text),
     signIn: /Forgot email|Create account|Use your Google Account/i.test(text),
     cannotJoin,
     textHead: text.slice(0, 1000),

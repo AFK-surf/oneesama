@@ -5,10 +5,7 @@ import {
   type SpeakerIdentityResolution,
 } from "../realtime/speaker-identity.ts";
 import type { RealtimeCurrentUser } from "../realtime/realtime-contract.ts";
-import {
-  evaluateMeetAccessibilityState,
-  withTimeout,
-} from "./google-meet-joiner-ui.ts";
+import { evaluateMeetAccessibilityState, withTimeout } from "./google-meet-joiner-ui.ts";
 import {
   nowIso,
   type Diagnostics,
@@ -971,13 +968,12 @@ export async function evaluateMeetPageState(page: Page): Promise<MeetPageState> 
         );
       const inMeetingSignals = [
         /You have joined the call/i.test(text),
-        /Leave call/i.test(text),
-        /Leave meeting/i.test(text),
-        /Present now/i.test(text),
-        /Share screen/i.test(text),
-        /People/i.test(text) && /Chat/i.test(text),
+        /Leave call|退出通话|离开通话/i.test(text),
+        /Leave meeting|退出会议|离开会议/i.test(text),
+        /Present now|Share screen|共享屏幕|展示/i.test(text),
+        /People|参与者|用户/i.test(text) && /Chat|聊天|通话期间的消息/i.test(text),
         buttons.some((button) =>
-          /Leave call|Leave meeting|Turn off microphone|Turn on microphone|Turn off camera|Turn on camera|Raise hand|More options|Share screen|Present now/i.test(
+          /Leave call|Leave meeting|退出通话|离开通话|退出会议|离开会议|Turn off microphone|Turn on microphone|Turn off camera|Turn on camera|Raise hand|举手|More options|Share screen|Present now|共享屏幕|与所有人聊天|会议工具|发送回应/i.test(
             button.label,
           ),
         ),
@@ -986,6 +982,7 @@ export async function evaluateMeetPageState(page: Page): Promise<MeetPageState> 
         /Join now/i.test(text),
         /Ask to join/i.test(text),
         /Getting ready/i.test(text),
+        /立即加入|申请加入|你的姓名/i.test(text),
       ];
       const signInSignals = [
         /Forgot email/i.test(text),
