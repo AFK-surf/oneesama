@@ -453,12 +453,6 @@
             retryScheduled: Boolean(state.connection.reconnecting),
           });
         }
-        if (state.connection.lastSdpError && !checks.peerConnected) {
-          return matrixCell("blocked", "sdp_exchange_failed", {
-            status: state.connection.lastSdpError.status || "",
-            retryScheduled: Boolean(state.connection.reconnecting),
-          });
-        }
         if (!checks.peerConnected) {
           return matrixCell("blocked", "peer_not_connected", {
             peerConnectionState: state.connection.peerConnectionState || "",
@@ -654,20 +648,6 @@
           blockers.push(
             tokenStatus === 429 ? "realtime_token_rate_limited" : "realtime_token_failed",
           );
-        }
-      } else if (state.connection.lastSdpError && !checks.peerConnected) {
-        const sdpStatus = Number(state.connection.lastSdpError.status || 0);
-        const sdpReason = String(state.connection.lastSdpError.reason || "");
-        status = "blocked";
-        if (sdpReason === "realtime_sdp_insufficient_quota") {
-          summary = "Realtime SDP exchange is blocked by OpenAI quota/billing.";
-          blockers.push("realtime_sdp_insufficient_quota");
-        } else {
-          summary =
-            sdpStatus === 429
-              ? "Realtime SDP exchange is rate limited; reconnect retry is scheduled."
-              : "Realtime SDP exchange failed before the peer connection opened.";
-          blockers.push(sdpStatus === 429 ? "realtime_sdp_rate_limited" : "realtime_sdp_failed");
         }
       } else if (checks.errors) {
         status = "error";

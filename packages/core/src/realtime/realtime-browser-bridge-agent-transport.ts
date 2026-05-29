@@ -190,25 +190,6 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
 }
 
 function installRealtimeAgentSDKEventHandlers(session, transport) {
-  const handleAudioLifecycle = (type, eventType) => {
-    const reason = `agents_sdk.${eventType || type}`;
-    if (type === "audio_start") {
-      markRealtimeOutputAudioActive(reason);
-      rememberRealtimeValidationCheckpoint("lastOutputAudioStarted", reason, {
-        openaiSessionId: state.connection.openaiSessionId || "",
-        activeResponseId: state.protection.activeResponseId || "",
-      });
-      recordTimeline("realtime_input_continuous", { reason });
-      return;
-    }
-    if (type === "audio_stopped" || type === "audio_interrupted") {
-      rememberRealtimeValidationCheckpoint("lastOutputAudioStopped", reason, {
-        openaiSessionId: state.connection.openaiSessionId || "",
-        activeResponseId: state.protection.activeResponseId || "",
-      });
-      clearRealtimeOutputAudioActivity(reason);
-    }
-  };
   const record = (type) => (event) => {
     const eventType = event?.type || type;
     recordTimeline(`realtime_agent_sdk_${type}`, {
@@ -223,7 +204,6 @@ function installRealtimeAgentSDKEventHandlers(session, transport) {
       updateContextHealthFromHistory(history);
       maybeCompactRealtimeHistory("history_updated");
     }
-    handleAudioLifecycle(type, eventType);
     updateFeedback();
   };
   for (const eventName of [
@@ -318,11 +298,6 @@ async function connectRealtimeAgentSDK(connectionConfig) {
 function cleanupRealtimeConnection(reason = "cleanup") {
   reconnectGeneration += 1;
   clearRealtimeSessionRenewalTimer();
-  clearRealtimeOutputAudioActivity(`realtime_connection_${reason}`);
-  if (realtimeInputGateReopenTimer) {
-    window.clearTimeout(realtimeInputGateReopenTimer);
-    realtimeInputGateReopenTimer = 0;
-  }
   if (realtimeAudioSenderStatsTimer) {
     window.clearInterval(realtimeAudioSenderStatsTimer);
     realtimeAudioSenderStatsTimer = 0;
@@ -382,8 +357,9 @@ function cleanupRealtimeConnection(reason = "cleanup") {
 function scheduleRealtimeReconnect(reason = "peer_connection_failed", delayMs = 750) {
   if (config.autoReconnect === false)
     return { ok: false, skipped: true, reason: "auto_reconnect_disabled" };
-  if (state.connection.mode === "mock" || state.connection.mode === "webrtc-mock")
+  if (state.connection.mode === "mock" || state.connection.mode === "webrtc-mock") {
     return { ok: false, skipped: true, reason: "mock_mode" };
+  }
   if (reconnectTimer || state.connection.reconnecting || state.connecting) {
     return { ok: true, scheduled: Boolean(reconnectTimer), reason: "already_reconnecting" };
   }
@@ -423,14 +399,14 @@ function rememberInjectedWorkerJob(jobId) {
 
 function cancelActiveResponse(reason = "interrupt", options: { force?: boolean } = {}) {
   const responseId = state.protection.activeResponseId;
-  if (!responseId && !state.protection.outputAudioActive && !options.force)
+  if (!responseId && !options.force) {
     return { ok: true, skipped: true, reason: "no_active_response" };
+  }
   const event: Record<string, unknown> = { type: "response.cancel" };
   if (responseId) event.response_id = responseId;
   const channel = sendRealtimeEvent(event);
   state.protection.cancelledResponses += 1;
   const cancelledResponseId = responseId;
   state.protection.activeResponseId = "";
-  clearRealtimeOutputAudioActivity(`response_cancel_${reason}`);
   return { ok: true, channel, responseId: cancelledResponseId, reason };
 }

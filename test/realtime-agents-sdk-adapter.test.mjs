@@ -333,22 +333,13 @@ test("Realtime Agents SDK local tool failures use the shared blocked turn policy
   });
 });
 
-test("Realtime Agents SDK audio lifecycle uses the shared output protection state", async () => {
+test("Realtime Agents SDK audio lifecycle does not gate local input", async () => {
   await withToolServer(async ({ baseUrl }) => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     try {
       await page.addInitScript({
         content: `
-          window.MAB_AVATAR_AUDIO_BUS = {
-            syntheticSpeechActive: false,
-            setSyntheticSpeech(active) {
-              this.syntheticSpeechActive = active === true;
-            },
-            debugState() {
-              return { syntheticSpeechActive: this.syntheticSpeechActive };
-            },
-          };
           window.OpenAIAgentsRealtime = {
             tool(config) {
               return config;
@@ -383,12 +374,11 @@ test("Realtime Agents SDK audio lifecycle uses the shared output protection stat
       await page.addInitScript({
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk-mock",
-          agentRuntime: "raw",
+          agentRuntime: "test-sdk",
           sessionId: "sdk-audio-lifecycle-session",
           botName: "Onee-sama",
           autoConnect: true,
           tokenUrl: `${baseUrl}/realtime/client-secret`,
-          outputAudioStaleFallbackMs: 50,
         }),
       });
       await page.goto(`${baseUrl}/`);
@@ -400,57 +390,22 @@ test("Realtime Agents SDK audio lifecycle uses the shared output protection stat
         window.__MAB_FAKE_SDK_SESSION.emit("audio_start", { type: "audio_start" });
         return {
           protection: { ...window.MAB_REALTIME_BRIDGE.protection },
-          syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
-          checkpoints: window.MAB_REALTIME_BRIDGE.connection.validationCheckpoints,
           timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
         };
       });
-      assert.equal(started.protection.outputAudioActive, true);
-      assert.equal(started.syntheticSpeechActive, true);
-      assert.equal(started.checkpoints.lastOutputAudioStarted.type, "agents_sdk.audio_start");
+      const removedOutputGateKey = ["output", "AudioActive"].join("");
+      assert.equal(removedOutputGateKey in started.protection, false);
       assert.ok(started.timelineTypes.includes("realtime_agent_sdk_audio_start"));
 
       const stopped = await page.evaluate(() => {
         window.__MAB_FAKE_SDK_SESSION.emit("audio_stopped", { type: "audio_stopped" });
         return {
           protection: { ...window.MAB_REALTIME_BRIDGE.protection },
-          syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
-          checkpoints: window.MAB_REALTIME_BRIDGE.connection.validationCheckpoints,
-          clearReasons: window.MAB_REALTIME_BRIDGE.timeline
-            .filter((entry) => entry.type === "realtime_output_audio_cleared")
-            .map((entry) => entry.detail.reason),
+          timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
         };
       });
-      assert.equal(stopped.protection.outputAudioActive, false);
-      assert.equal(stopped.syntheticSpeechActive, false);
-      assert.equal(stopped.checkpoints.lastOutputAudioStopped.type, "agents_sdk.audio_stopped");
-      assert.equal(
-        stopped.checkpoints.lastOutputAudioCleared.detail.reason,
-        "agents_sdk.audio_stopped",
-      );
-      assert.ok(stopped.clearReasons.includes("agents_sdk.audio_stopped"));
-
-      await page.evaluate(() => {
-        window.__MAB_FAKE_SDK_SESSION.emit("audio_start", { type: "audio_start" });
-      });
-      await page.waitForFunction(
-        () => window.MAB_REALTIME_BRIDGE?.protection?.outputAudioActive === false,
-      );
-      const fallback = await page.evaluate(() => ({
-        protection: { ...window.MAB_REALTIME_BRIDGE.protection },
-        syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
-        checkpoints: window.MAB_REALTIME_BRIDGE.connection.validationCheckpoints,
-        clearReasons: window.MAB_REALTIME_BRIDGE.timeline
-          .filter((entry) => entry.type === "realtime_output_audio_cleared")
-          .map((entry) => entry.detail.reason),
-      }));
-      assert.equal(fallback.protection.outputAudioActive, false);
-      assert.equal(fallback.syntheticSpeechActive, false);
-      assert.equal(
-        fallback.checkpoints.lastOutputAudioCleared.detail.reason,
-        "agents_sdk.audio_start_stale_fallback",
-      );
-      assert.ok(fallback.clearReasons.includes("agents_sdk.audio_start_stale_fallback"));
+      assert.equal(removedOutputGateKey in stopped.protection, false);
+      assert.ok(stopped.timelineTypes.includes("realtime_agent_sdk_audio_stopped"));
     } finally {
       await browser.close();
     }

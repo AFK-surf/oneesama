@@ -931,22 +931,22 @@ export async function runtimeAcceptanceSmoke() {
   }
 }
 
-export async function realtimeSdpSmoke() {
+export async function realtimeSdkSmoke() {
   const config = getRuntimeConfig();
-  const shouldRunLive = shouldRunOptionalSmoke("MAB_RUN_REALTIME_SDP", "MAB_REQUIRE_REALTIME_SDP");
+  const shouldRunLive = shouldRunOptionalSmoke("MAB_RUN_REALTIME_SDK", "MAB_REQUIRE_REALTIME_SDK");
   if (!config.openaiApiKey || !shouldRunLive) {
     const skipped = {
       ok: true,
       skipped: true,
       reason: config.openaiApiKey
-        ? "MAB_RUN_REALTIME_SDP not enabled"
+        ? "MAB_RUN_REALTIME_SDK not enabled"
         : "MAB_OPENAI_API_KEY/OPENAI_API_KEY missing",
-      note: "Set MAB_RUN_REALTIME_SDP=1 to run this optional smoke. Set MAB_REQUIRE_REALTIME_SDP=1 to make it mandatory.",
+      note: "Set MAB_RUN_REALTIME_SDK=1 to run this optional smoke. Set MAB_REQUIRE_REALTIME_SDK=1 to make it mandatory.",
     };
-    if (process.env.MAB_REQUIRE_REALTIME_SDP === "1") {
+    if (process.env.MAB_REQUIRE_REALTIME_SDK === "1") {
       assertSmoke(
         false,
-        "MAB_OPENAI_API_KEY or OPENAI_API_KEY is required when MAB_REQUIRE_REALTIME_SDP=1",
+        "MAB_OPENAI_API_KEY or OPENAI_API_KEY is required when MAB_REQUIRE_REALTIME_SDK=1",
         skipped,
       );
     }
@@ -954,7 +954,7 @@ export async function realtimeSdpSmoke() {
     return;
   }
 
-  const dataDir = await mkdtemp(pathJoin(tmpdir(), "meeting-avatar-bot-realtime-sdp-"));
+  const dataDir = await mkdtemp(pathJoin(tmpdir(), "meeting-avatar-bot-realtime-sdk-"));
   const env = {
     MAB_MEETING_PORT: "18889",
     MAB_MEETING_AGENT_URL: "http://127.0.0.1:18889",
@@ -967,21 +967,22 @@ export async function realtimeSdpSmoke() {
   try {
     await waitForHealth("http://127.0.0.1:18889/healthz");
     const join = await postJson("http://127.0.0.1:18889/join/google-meet", {
-      sessionId: "realtime_sdp_smoke",
+      sessionId: "realtime_sdk_smoke",
       meetUrl: fixture.url,
-      botName: "Realtime SDP Bot",
+      botName: "Realtime SDK Bot",
       dryRun: false,
       allowNonGoogleMeet: true,
       collectFixtureState: true,
       disableLive2D: true,
       installWorkerResultBridge: false,
       installRealtimeBridge: true,
-      realtimeBridgeMode: "webrtc",
+      realtimeBridgeMode: "agents-sdk",
+      realtimeAgentRuntime: "agents-sdk",
       autoConnectRealtime: true,
     });
     assertSmoke(
       join.result?.fixtureState?.joined === true,
-      "realtime sdp smoke did not join fixture",
+      "Realtime SDK smoke did not join fixture",
       join,
     );
 
@@ -993,21 +994,26 @@ export async function realtimeSdpSmoke() {
       20_000,
     );
     const bridge = status.active?.realtimeBridge;
-    assertSmoke(bridge?.errors?.length === 0, "Realtime SDP bridge reported errors", bridge);
+    assertSmoke(bridge?.errors?.length === 0, "Realtime SDK bridge reported errors", bridge);
     assertSmoke(
       bridge?.connection?.dataChannelOpen === true,
       "Realtime data channel did not open",
       bridge,
     );
     assertSmoke(
+      bridge?.agentRuntime?.sdkConnected === true,
+      "Realtime Agents SDK session did not connect",
+      bridge,
+    );
+    assertSmoke(
       bridge?.connection?.realtimeInputPlaceholderAdded === true,
-      "Realtime SDP bridge did not add an input sender placeholder",
+      "Realtime SDK bridge did not add an input sender placeholder",
       bridge?.connection,
     );
 
     console.log(JSON.stringify({ ok: true, join, status }, null, 2));
   } finally {
-    await postJson("http://127.0.0.1:18889/join/stop", { reason: "realtime_sdp_smoke_done" }).catch(
+    await postJson("http://127.0.0.1:18889/join/stop", { reason: "realtime_sdk_smoke_done" }).catch(
       () => {},
     );
     meeting.child.kill("SIGTERM");
@@ -1015,3 +1021,5 @@ export async function realtimeSdpSmoke() {
     await rm(dataDir, { recursive: true, force: true });
   }
 }
+
+export const realtimeSdpSmoke = realtimeSdkSmoke;

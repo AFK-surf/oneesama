@@ -84,7 +84,6 @@ export function buildRealtimeBrowserInitScript(config = {}) {
   ];
   const bridgeSources = [
     "./realtime-browser-bridge",
-    "./realtime-browser-bridge-validation-checkpoints",
     "./realtime-browser-bridge-audio-routing",
     "./realtime-browser-bridge-recappi-audio",
     "./realtime-browser-bridge-audio-capture",

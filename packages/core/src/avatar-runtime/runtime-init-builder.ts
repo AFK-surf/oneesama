@@ -42,8 +42,7 @@ const CATEGORY_SUMMARIES: Record<InitScriptCategory, string> = {
 const REALTIME_MODE_TRANSPORTS: Record<string, ConversationTransport> = {
   mock: "mock",
   "webrtc-mock": "webrtc_mock",
-  webrtc: "raw_webrtc",
-  "raw-webrtc": "raw_webrtc",
+  webrtc: "agents_sdk",
   "agents-sdk": "agents_sdk",
   "agents-sdk-mock": "agents_sdk",
 };

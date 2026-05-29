@@ -11,7 +11,7 @@ import {
 test("runtime init builder infers conversation transport from realtime mode", () => {
   assert.equal(inferConversationTransportFromRealtimeMode("mock"), "mock");
   assert.equal(inferConversationTransportFromRealtimeMode("webrtc-mock"), "webrtc_mock");
-  assert.equal(inferConversationTransportFromRealtimeMode("webrtc"), "raw_webrtc");
+  assert.equal(inferConversationTransportFromRealtimeMode("webrtc"), "agents_sdk");
   assert.equal(inferConversationTransportFromRealtimeMode("agents-sdk"), "agents_sdk");
   assert.equal(inferConversationTransportFromRealtimeMode("agents-sdk-mock"), "agents_sdk");
 });
@@ -94,12 +94,12 @@ test("runtime init composer keeps representative Meet init script contents stabl
 
   assert.deepEqual(actual, {
     avatar: {
-      contentLength: 60377,
-      sha256: "61a4101bc6ab9fb91005ab9a375029a660a9a05c591c069903f26a64f13ee9c8",
+      contentLength: 70238,
+      sha256: "f15bdb3ff9a4855781770ba135969e979bd62fbdd26d80ff7a71dc99674c70eb",
     },
     realtime: {
-      contentLength: 4011224,
-      sha256: "e3510d336b8aca575acb3f249450624332645682c91d58a698d59b23eec083b8",
+      contentLength: 4000606,
+      sha256: "bd506aee02288701fb1bd43ba9f3fbff36b0e2ac2c1332db2a7b3eb86d8a0877",
     },
     local_dialog: {
       contentLength: 9737,
@@ -166,7 +166,7 @@ test("runtime init events summarize scripts without exposing raw script content"
     sessionId: "runtime-init-redaction-test",
     botName: "Hiyori",
     surfaceKind: "google_meet",
-    conversationTransport: "raw_webrtc",
+    conversationTransport: "agents_sdk",
     avatar: {
       avatarRenderer: "live2d",
       modelUrl: "https://example.test/hiyori.model3.json",

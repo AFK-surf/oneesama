@@ -34,7 +34,7 @@
 - [x] Fixture-level runtime acceptance combines join, participant audio discovery, Realtime session state, worker-result delivery, worker tool calls, and avatar state.
 - [x] Local dialog bridge smoke proves synthetic local-STT utterance -> selected AgentRunner provider -> response text -> TTS fake-mic route -> Hiyori `speak` action.
 - [x] Optional real Meet local-dialog smoke can join a real room and run the same provider/TTS/avatar loop without requiring an OpenAI key.
-- [x] Optional real OpenAI Realtime SDP smoke exists and skips cleanly without `MAB_OPENAI_API_KEY` / `OPENAI_API_KEY`.
+- [x] Optional real OpenAI Agents SDK Realtime smoke exists and skips cleanly without `MAB_OPENAI_API_KEY` / `OPENAI_API_KEY`.
 - [x] Optional real OpenAI Realtime live tool smoke exists and skips cleanly without `MAB_OPENAI_API_KEY` / `OPENAI_API_KEY`; with a key it verifies `delegate_to_worker` reaches Meeting Agent.
 - [x] Agent runner provider seam supports dry-run, Codex, Claude Code, Ollama, Slack Agent D bridge, shell-command, and HTTP backends.
 - [x] Optional live AgentRunner real-task smoke can ask selected providers to summarize a transcript, verify acceptance keywords, and write reports for the cutover evidence bundle.
@@ -90,7 +90,7 @@
 - [x] Shadow-transmitter smoke covers old-stack mirror payload construction, receiver auth, private-field stripping, side-effect suppression, and report recording.
 - [x] Cutover-evidence smoke covers fixture-safe evidence bundle generation and manifest/artifact checks.
 - [x] Agent-provider smoke covers dry-run, command, HTTP, Claude Code, Ollama, and Slack Agent D bridge runner contracts.
-- [x] Realtime SDP smoke can be run against real OpenAI Realtime or a compatible Realtime endpoint when `MAB_OPENAI_API_KEY` / `OPENAI_API_KEY` is present, without making public CI depend on secrets.
+- [x] Realtime Agents SDK smoke can be run against real OpenAI Realtime or a compatible Realtime endpoint when `MAB_OPENAI_API_KEY` / `OPENAI_API_KEY` is present, without making public CI depend on secrets.
 - [x] Realtime live-tool smoke can be run against real OpenAI Realtime or a compatible Realtime endpoint when `MAB_OPENAI_API_KEY` / `OPENAI_API_KEY` is present, without making public CI depend on secrets.
 - [x] Slack live-capability smoke can validate a separate bot key via `auth.test`
       and optional Socket Mode URL issuance without touching the existing

@@ -12,7 +12,7 @@ test("Realtime bridge blocks untagged user text turns from internal streams", as
     await page.addScriptTag({
       content: buildRealtimeBrowserInitScript({
         mode: "mock",
-        agentRuntime: "raw",
+        agentRuntime: "agents-sdk",
         autoConnect: false,
         forwardMeetAudioToRealtime: true,
         includeParticipantAudio: false,
@@ -87,7 +87,7 @@ test("Realtime bridge observes Meet caption turns without using them as model in
     await page.addScriptTag({
       content: buildRealtimeBrowserInitScript({
         mode: "mock",
-        agentRuntime: "raw",
+        agentRuntime: "agents-sdk",
         autoConnect: false,
         botName: "Onee Sama",
         forwardMeetAudioToRealtime: true,
@@ -151,7 +151,7 @@ test("Realtime bridge does not resurrect caption fallback for duplicate streams"
     await page.addScriptTag({
       content: buildRealtimeBrowserInitScript({
         mode: "mock",
-        agentRuntime: "raw",
+        agentRuntime: "agents-sdk",
         autoConnect: false,
         botName: "Onee Sama",
         forwardMeetAudioToRealtime: true,

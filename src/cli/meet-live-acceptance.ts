@@ -51,13 +51,9 @@ function parseOptions(): AcceptanceOptions {
     optionValue("--require-silence-ms") || process.env.MAB_MEET_ACCEPTANCE_SILENCE_MS || 0,
   );
   const waitNewerThan =
-    optionValue("--wait-newer-than") ||
-    process.env.MAB_MEET_ACCEPTANCE_WAIT_NEWER_THAN ||
-    "";
+    optionValue("--wait-newer-than") || process.env.MAB_MEET_ACCEPTANCE_WAIT_NEWER_THAN || "";
   const waitTimeoutMs = Number(
-    optionValue("--wait-timeout-ms") ||
-      process.env.MAB_MEET_ACCEPTANCE_WAIT_TIMEOUT_MS ||
-      0,
+    optionValue("--wait-timeout-ms") || process.env.MAB_MEET_ACCEPTANCE_WAIT_TIMEOUT_MS || 0,
   );
   const pollMs = Number(
     optionValue("--poll-ms") || process.env.MAB_MEET_ACCEPTANCE_POLL_MS || 1000,
@@ -70,7 +66,9 @@ function parseOptions(): AcceptanceOptions {
   const defaultForbidden = useDefaultForbidden
     ? ["assignment", "sky[- ]?blue", "why.*sky.*blue", "天空.*蓝", "瑞利散射", "\\bmath\\b"]
     : [];
-  const forbidden = [...defaultForbidden, ...forbidValues].map((pattern) => new RegExp(pattern, "i"));
+  const forbidden = [...defaultForbidden, ...forbidValues].map(
+    (pattern) => new RegExp(pattern, "i"),
+  );
   const expectedInput = process.argv
     .filter((arg) => arg.startsWith("--expect-input="))
     .map((arg) => new RegExp(arg.slice("--expect-input=".length), "i"));
@@ -143,14 +141,10 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function waitForNewerDiagnostics(options: Pick<
-  AcceptanceOptions,
-  "diagnosticsDir" | "waitNewerThan" | "waitTimeoutMs" | "pollMs"
->) {
-  const thresholdMs = await diagnosticsThresholdMs(
-    options.waitNewerThan,
-    options.diagnosticsDir,
-  );
+export async function waitForNewerDiagnostics(
+  options: Pick<AcceptanceOptions, "diagnosticsDir" | "waitNewerThan" | "waitTimeoutMs" | "pollMs">,
+) {
+  const thresholdMs = await diagnosticsThresholdMs(options.waitNewerThan, options.diagnosticsDir);
   const deadline = Date.now() + Math.max(0, options.waitTimeoutMs || 0);
   const pollMs = Math.max(50, options.pollMs || 1000);
   do {
@@ -221,7 +215,8 @@ export function buildChecks(
   const counts = summarizeCounts(realtime);
 
   addCheck(checks, "diagnostics_has_runtime_state", Boolean(runtimeEvent), {
-    runtimeStateRefreshCount: events.filter((event) => event.type === "runtime_state_refresh").length,
+    runtimeStateRefreshCount: events.filter((event) => event.type === "runtime_state_refresh")
+      .length,
   });
   addCheck(checks, "realtime_transport_ready", Boolean(realtime?.connected), {
     connected: realtime?.connected,
@@ -232,19 +227,35 @@ export function buildChecks(
     dataChannelOpen: connection.dataChannelOpen,
     peerConnectionState: connection.peerConnectionState,
   });
-  addCheck(checks, "recappi_process_tap_is_input", connection.currentRealtimeInputSource === "recappi_process_audio_tap", {
-    currentRealtimeInputSource: connection.currentRealtimeInputSource,
-    lastRealtimeInputReplaceReason: connection.lastRealtimeInputReplaceReason,
-  });
-  addCheck(checks, "recappi_audio_flowing", recappi.connected === true && Number(recappi.chunks || 0) > 0, {
-    connected: recappi.connected,
-    chunks: recappi.chunks,
-    samplesReceived: recappi.samplesReceived,
-  });
-  addCheck(checks, "gate_and_self_suppression_observed", Number(recappi.noiseSuppressedChunks || 0) > 0 && Number(recappi.selfOutputSuppressedChunks || 0) > 0, {
-    noiseSuppressedChunks: recappi.noiseSuppressedChunks,
-    selfOutputSuppressedChunks: recappi.selfOutputSuppressedChunks,
-  });
+  addCheck(
+    checks,
+    "recappi_process_tap_is_input",
+    connection.currentRealtimeInputSource === "recappi_process_audio_tap",
+    {
+      currentRealtimeInputSource: connection.currentRealtimeInputSource,
+      lastRealtimeInputReplaceReason: connection.lastRealtimeInputReplaceReason,
+    },
+  );
+  addCheck(
+    checks,
+    "recappi_audio_flowing",
+    recappi.connected === true && Number(recappi.chunks || 0) > 0,
+    {
+      connected: recappi.connected,
+      chunks: recappi.chunks,
+      samplesReceived: recappi.samplesReceived,
+    },
+  );
+  addCheck(
+    checks,
+    "recappi_audio_forwarded_without_local_output_suppression",
+    Number(recappi.chunks || 0) > 0 && Number(recappi.samplesReceived || 0) > 0,
+    {
+      chunks: recappi.chunks,
+      samplesReceived: recappi.samplesReceived,
+      samplesDropped: recappi.samplesDropped,
+    },
+  );
   addCheck(checks, "openai_session_id_recorded", Boolean(connection.openaiSessionId), {
     openaiSessionId: connection.openaiSessionId || "",
   });
@@ -263,15 +274,25 @@ export function buildChecks(
       },
     );
   }
-  addCheck(checks, "captions_not_injected_as_input", counts.captionTurnsInjected === 0 && counts.blockedUserTextEvents === 0, counts);
-  addCheck(checks, "outputs_have_raw_audio_turns", counts.outputTurns === 0 || counts.rawAudioInputTurns > 0, counts);
-  addCheck(checks, "one_response_per_raw_audio_turn", counts.outputTurns <= counts.rawAudioInputTurns, counts);
   addCheck(
     checks,
-    "no_client_transcript_gate_responses",
-    counts.responsesRequested === 0,
+    "captions_not_injected_as_input",
+    counts.captionTurnsInjected === 0 && counts.blockedUserTextEvents === 0,
     counts,
   );
+  addCheck(
+    checks,
+    "outputs_have_raw_audio_turns",
+    counts.outputTurns === 0 || counts.rawAudioInputTurns > 0,
+    counts,
+  );
+  addCheck(
+    checks,
+    "one_response_per_raw_audio_turn",
+    counts.outputTurns <= counts.rawAudioInputTurns,
+    counts,
+  );
+  addCheck(checks, "no_client_transcript_gate_responses", counts.responsesRequested === 0, counts);
   if (options.requireSilenceMs > 0) {
     const silenceMs = Number(connection.meetAudioEnergy?.silenceMs || 0);
     addCheck(checks, "required_silence_window_observed", silenceMs >= options.requireSilenceMs, {
@@ -310,18 +331,14 @@ export function buildChecks(
 
 export async function meetLiveAcceptance() {
   const options = parseOptions();
-  const waitedDiagnosticsPath = options.waitNewerThan
-    ? await waitForNewerDiagnostics(options)
-    : "";
+  const waitedDiagnosticsPath = options.waitNewerThan ? await waitForNewerDiagnostics(options) : "";
   const requestedDiagnosticsPath = waitedDiagnosticsPath
     ? options.diagnosticsPath || "latest"
     : options.diagnosticsPath;
-  const diagnosticsPath = waitedDiagnosticsPath && requestedDiagnosticsPath === "latest"
-    ? waitedDiagnosticsPath
-    : await resolveDiagnosticsPath(
-        requestedDiagnosticsPath,
-        options.diagnosticsDir,
-      );
+  const diagnosticsPath =
+    waitedDiagnosticsPath && requestedDiagnosticsPath === "latest"
+      ? waitedDiagnosticsPath
+      : await resolveDiagnosticsPath(requestedDiagnosticsPath, options.diagnosticsDir);
   const previousDiagnosticsPath = options.previousDiagnosticsPath
     ? await resolveDiagnosticsPath(
         options.previousDiagnosticsPath,

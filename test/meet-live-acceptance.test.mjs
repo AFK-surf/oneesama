@@ -34,7 +34,6 @@ function runtimeDiagnostics(realtimeOverrides = {}) {
         chunks: 1200,
         samplesReceived: 1228800,
         noiseSuppressedChunks: 50,
-        selfOutputSuppressedChunks: 25,
       },
     },
     responsesRequested: 0,
@@ -103,7 +102,6 @@ test("meet live acceptance rejects spontaneous stale-topic output without raw au
         chunks: 1200,
         samplesReceived: 1228800,
         noiseSuppressedChunks: 50,
-        selfOutputSuppressedChunks: 25,
       },
     },
     responsesRequested: 0,
@@ -174,7 +172,6 @@ test("meet live acceptance accepts fresh OpenAI sessions across joins", () => {
         chunks: 1200,
         samplesReceived: 1228800,
         noiseSuppressedChunks: 50,
-        selfOutputSuppressedChunks: 25,
       },
     },
   });
@@ -221,11 +218,7 @@ test("meet live acceptance waits for a newer diagnostics artifact", async () => 
     const baseline = pathJoin(dir, "baseline-diagnostics.json");
     const next = pathJoin(dir, "next-diagnostics.json");
     await writeFile(baseline, "{}\n");
-    await utimes(
-      baseline,
-      new Date("2026-05-28T09:00:00Z"),
-      new Date("2026-05-28T09:00:00Z"),
-    );
+    await utimes(baseline, new Date("2026-05-28T09:00:00Z"), new Date("2026-05-28T09:00:00Z"));
     const pending = waitForNewerDiagnostics({
       diagnosticsDir: dir,
       waitNewerThan: String(new Date("2026-05-28T09:00:00Z").getTime()),
@@ -233,11 +226,7 @@ test("meet live acceptance waits for a newer diagnostics artifact", async () => 
       pollMs: 50,
     });
     await writeFile(next, "{}\n");
-    await utimes(
-      next,
-      new Date("2026-05-28T10:00:00Z"),
-      new Date("2026-05-28T10:00:00Z"),
-    );
+    await utimes(next, new Date("2026-05-28T10:00:00Z"), new Date("2026-05-28T10:00:00Z"));
 
     assert.equal(await pending, next);
   } finally {

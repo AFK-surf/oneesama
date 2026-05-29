@@ -8,7 +8,6 @@ import { realtimeToolSchemas } from "../packages/core/src/realtime/realtime-cont
 
 const controlTool = realtimeToolSchemas.find((tool) => tool.name === "control_shared_app_window");
 const shareTool = realtimeToolSchemas.find((tool) => tool.name === "share_existing_app_window");
-const avatarTool = realtimeToolSchemas.find((tool) => tool.name === "update_avatar_state");
 
 test("Realtime bridge skips auto-connect in the initial about:blank document", async () => {
   const browser = await chromium.launch({ headless: true });
@@ -298,12 +297,12 @@ test("Realtime app-control terminal job status updates the typed state machine",
                       actions: ["state"],
                     },
                   }
-              : {
-                  ok: true,
-                  status: "completed",
-                  job_id: "app_job_done",
-                  result: { summary: "queued job finished" },
-                },
+                : {
+                    ok: true,
+                    status: "completed",
+                    job_id: "app_job_done",
+                    result: { summary: "queued job finished" },
+                  },
           ),
         });
       });
@@ -358,125 +357,6 @@ test("Realtime app-control terminal job status updates the typed state machine",
   );
 });
 
-test("Realtime bridge cancels output when user speech starts even without a tracked response id", async () => {
-  await withRealtimeBridge(async (page) => {
-    await page.evaluate(() => {
-      window.dispatchEvent(
-        new CustomEvent("meeting-avatar-realtime-server-event", {
-          detail: { type: "output_audio_buffer.started" },
-        }),
-      );
-      window.dispatchEvent(
-        new CustomEvent("meeting-avatar-realtime-server-event", {
-          detail: { type: "input_audio_buffer.speech_started" },
-        }),
-      );
-    });
-
-    await page.waitForFunction(() =>
-      window.MAB_REALTIME_BRIDGE?.outbound?.some(
-        (entry) => entry.event?.type === "response.cancel",
-      ),
-    );
-
-    const protection = await page.evaluate(() => window.MAB_REALTIME_BRIDGE.protection);
-    assert.equal(protection.userSpeechCancels, 1);
-    assert.equal(protection.outputAudioActive, false);
-  });
-});
-
-test("Realtime bridge does not cancel a response before output audio starts", async () => {
-  await withRealtimeBridge(async (page) => {
-    await page.evaluate(() => {
-      window.dispatchEvent(
-        new CustomEvent("meeting-avatar-realtime-server-event", {
-          detail: { type: "response.created", response: { id: "resp_pending_no_audio" } },
-        }),
-      );
-      window.dispatchEvent(
-        new CustomEvent("meeting-avatar-realtime-server-event", {
-          detail: { type: "input_audio_buffer.speech_started" },
-        }),
-      );
-    });
-
-    await page.waitForFunction(
-      () => window.MAB_REALTIME_BRIDGE?.protection?.lastInputSpeechStartedAt,
-    );
-
-    const result = await page.evaluate(() => ({
-      outbound: window.MAB_REALTIME_BRIDGE.outbound,
-      protection: window.MAB_REALTIME_BRIDGE.protection,
-      timeline: window.MAB_REALTIME_BRIDGE.timeline,
-    }));
-    assert.equal(
-      result.outbound.some((entry) => entry.event?.type === "response.cancel"),
-      false,
-    );
-    assert.equal(result.protection.userSpeechCancels, 0);
-    assert.equal(result.protection.activeResponseId, "resp_pending_no_audio");
-    assert.equal(
-      result.timeline.some(
-        (entry) =>
-          entry.type === "realtime_input_speech_started" &&
-          entry.detail?.reason === "no_output_audio_active",
-      ),
-      true,
-    );
-  });
-});
-
-test("Realtime raw tool errors are delivered through the central turn policy", async () => {
-  await withRealtimeBridge(
-    async (page) => {
-      await page.evaluate(() => {
-        window.dispatchEvent(
-          new CustomEvent("meeting-avatar-realtime-server-event", {
-            detail: {
-              type: "response.function_call_arguments.done",
-              name: "update_avatar_state",
-              call_id: "call_avatar_missing",
-              arguments: JSON.stringify({ mood: "happy" }),
-            },
-          }),
-        );
-      });
-
-      await page.waitForFunction(() =>
-        window.MAB_REALTIME_BRIDGE?.outbound?.some(
-          (entry) => entry.event?.item?.call_id === "call_avatar_missing",
-        ),
-      );
-
-      const state = await page.evaluate(() => ({
-        errors: window.MAB_REALTIME_BRIDGE.avatarTools.errors,
-        outbound: window.MAB_REALTIME_BRIDGE.outbound,
-        decisions: window.MAB_REALTIME_BRIDGE.turnPolicy.decisions,
-        events: window.MAB_REALTIME_BRIDGE.meetingEvents,
-      }));
-      const output = state.outbound
-        .map((entry) => entry.event?.item)
-        .find((item) => item?.call_id === "call_avatar_missing");
-      assert.equal(output.type, "function_call_output");
-      assert.match(output.output, /avatar controller is not available/);
-      assert.ok(
-        state.outbound.some(
-          (entry) =>
-            entry.event?.type === "response.create" &&
-            entry.event?.response?.instructions?.includes("exact blocker"),
-        ),
-      );
-      assert.equal(state.decisions.at(-1).channel, "blocked");
-      assert.equal(state.decisions.at(-1).reason, "avatar_tool_blocked");
-      assert.equal(state.events.at(-1).visibility, "blocked");
-      assert.equal(state.errors.length, 1);
-    },
-    {
-      tools: avatarTool ? [avatarTool] : [],
-    },
-  );
-});
-
 test("Realtime worker results are posted to Meet chat and only briefly acknowledged by voice", async () => {
   await withRealtimeBridge(async (page) => {
     const delivery = await page.evaluate(() => {
@@ -526,7 +406,6 @@ test("Realtime app-control worker results are posted to Meet chat without voice 
       const delivery = await page.evaluate(() => {
         window.__MAB_MEET_FIXTURE = { chatMessages: [] };
         window.MAB_REALTIME_BRIDGE.protection.activeResponseId = "resp_current_turn";
-        window.MAB_REALTIME_BRIDGE.protection.outputAudioActive = true;
         window.addEventListener("meeting-avatar-meet-chat-send", (event) => {
           window.__MAB_MEET_FIXTURE.chatMessages.push({ text: event.detail.text });
         });
@@ -600,7 +479,6 @@ test("Realtime app-control state-only worker results continue with primitive ope
       const delivery = await page.evaluate(() => {
         window.__MAB_MEET_FIXTURE = { chatMessages: [] };
         window.MAB_REALTIME_BRIDGE.protection.activeResponseId = "resp_current_turn";
-        window.MAB_REALTIME_BRIDGE.protection.outputAudioActive = true;
         window.addEventListener("meeting-avatar-meet-chat-send", (event) => {
           window.__MAB_MEET_FIXTURE.chatMessages.push({ text: event.detail.text });
         });
@@ -681,7 +559,6 @@ test("Realtime worker results from a different meeting session stay silent", asy
     async (page) => {
       const delivery = await page.evaluate(() => {
         window.MAB_REALTIME_BRIDGE.protection.activeResponseId = "resp_current_session";
-        window.MAB_REALTIME_BRIDGE.protection.outputAudioActive = true;
         return window.MAB_REALTIME_CLIENT.injectWorkerResult({
           id: "job_other_session",
           status: "completed",

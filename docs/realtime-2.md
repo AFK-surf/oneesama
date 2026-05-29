@@ -50,11 +50,11 @@ MAB_CURRENT_USER_ALIASES=Operator
 ```
 
 Endpoint overrides remain available for OpenAI-compatible gateways that support
-Realtime client-secret and SDP call routes:
+Realtime client-secret routes and the Agents SDK WebRTC transport:
 
 ```bash
 MAB_OPENAI_REALTIME_CLIENT_SECRETS_URL=https://your-gateway.example/v1/realtime/client_secrets
-MAB_OPENAI_REALTIME_SDP_URL=https://your-gateway.example/v1/realtime/calls
+MAB_OPENAI_BASE_URL=https://your-gateway.example/v1
 ```
 
 Use `MAB_OPENAI_REALTIME_SESSION_SCHEMA=legacy` only when a compatible endpoint
@@ -88,7 +88,7 @@ Default local CI does not require an OpenAI key:
 ```bash
 npm run smoke:realtime
 npm run smoke:realtime-session-update
-npm run smoke:realtime-sdp
+npm run smoke:realtime-sdk
 npm run smoke:realtime-live-tool
 ```
 
@@ -98,9 +98,9 @@ two skip unless an OpenAI-compatible key is present.
 Live checks:
 
 ```bash
-MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_SDP=1 npm run smoke:realtime-sdp
+MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_SDK=1 npm run smoke:realtime-sdk
 MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_LIVE_TOOL=1 npm run smoke:realtime-live-tool
 ```
 
-These smokes verify the actual WebRTC SDP/data-channel path and the
+These smokes verify the actual Agents SDK Realtime connection and the
 `delegate_to_worker` tool loop.

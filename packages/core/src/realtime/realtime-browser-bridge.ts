@@ -136,9 +136,7 @@ config.meetAudioInputGain = normalizeMeetAudioInputGain(
   defaultMeetAudioInputGainForSource(config.meetAudioInputSource),
 );
 const {
-  realtimeReconnectDelayMs,
   formatRealtimeErrorValue,
-  shouldRetryRealtimeConnectStatus,
   classifyRealtimeConnectFailure,
   readResponseText,
   parseJsonObject,
@@ -163,7 +161,7 @@ const state = {
   sessionId: String(config.sessionId || ""),
   agentRuntime: {
     requested: String(config.agentRuntime || ""),
-    active: config.mode === "mock" ? "raw" : "",
+    active: config.mode === "mock" ? "mock" : "",
     sdkVersion: String(config.agentSDKVersion || ""),
     bundleGlobal: "",
     sdkConnected: false,
@@ -182,12 +180,8 @@ const state = {
     handledLocalToolCallIds: [],
     duplicateLocalToolCallsSkipped: 0,
     activeResponseId: "",
-    outputAudioActive: false,
-    lastOutputAudioStartedAt: "",
-    lastOutputAudioStoppedAt: "",
     lastInputSpeechStartedAt: "",
     cancelledResponses: 0,
-    userSpeechCancels: 0,
   },
   avatarTools: {
     calls: [],
@@ -229,6 +223,7 @@ const state = {
   },
   connection: {
     mode: config.mode,
+    requestedMode: config.mode,
     tokenUrl: config.tokenUrl,
     sdpUrl: config.sdpUrl,
     dataChannelOpen: config.mode === "mock",
@@ -245,7 +240,6 @@ const state = {
     realtimeAgentSDKInputTrackIds: [],
     lastRealtimeInputReplaceReason: "",
     lastRealtimeInputReplaceAt: "",
-    realtimeInputGateOpen: true,
     meetAudioInputGain: normalizeMeetAudioInputGain(config.meetAudioInputGain),
     meetAudioEnergyStaleMs: Math.max(1000, Number(config.meetAudioEnergyStaleMs || 10000)),
     meetAudioForwardingEnabled: config.forwardMeetAudioToRealtime !== false,
@@ -314,12 +308,10 @@ const state = {
     lastCaptionTurnTextChars: 0,
     sentDataChannelMessages: [],
     lastTokenError: null as null | Record<string, unknown>,
-    lastSdpError: null as null | Record<string, unknown>,
     reconnectAttempts: 0,
     reconnecting: false,
     lastReconnectAt: "",
     lastReconnectReason: "",
-    validationCheckpoints: null as null | Record<string, unknown>,
   },
   transcripts: {
     currentOutput: "",
@@ -376,7 +368,6 @@ const state = {
 };
 const participantStreams = [];
 const participantTrackIds = new Set();
-const addedParticipantTrackIds = new Set();
 const injectedWorkerJobIds = new Set();
 const handledLocalToolCallIds = new Set();
 let activePeerConnection = null;
@@ -397,7 +388,6 @@ let meetAudioCaptureSequence = 0;
 let routingSilenceSource = null;
 let routingAudioResumeListenersInstalled = false;
 let silentMeetAudioTrack = null;
-let realtimeInputGateReopenTimer = 0;
 let primaryMeetAudioSender = null;
 let primaryMeetAudioSenderStatsTimer = 0;
 let primaryMeetAudioSenderAttachRetryTimer = 0;
@@ -427,45 +417,12 @@ function rememberError(error) {
   updateFeedback();
 }
 
-function rememberSdpError(detail: Record<string, unknown>) {
-  state.connection.lastSdpError = {
-    ts: new Date().toISOString(),
-    ...detail,
-  };
-  recordTimeline("realtime_sdp_error", state.connection.lastSdpError);
-  updateFeedback();
-}
-
 function clearRecoveredConnectionErrors() {
   state.connection.lastTokenError = null;
-  state.connection.lastSdpError = null;
   state.errors = state.errors.filter((entry) => {
     const message = String(entry?.message || "");
-    return (
-      !message.startsWith("Realtime SDP exchange failed:") &&
-      !message.startsWith("Realtime client secret")
-    );
+    return !message.startsWith("Realtime client secret");
   });
-}
-
-function scheduleConnectFailureRetry(error) {
-  const detail = error?.realtimeSdpError || error?.realtimeTokenError;
-  if (!detail || detail.retryable !== true) return false;
-  const status = Number(detail.status || 0);
-  const delayMs = realtimeReconnectDelayMs(
-    status,
-    Number(detail.retryAfterMs || 0),
-    Number(state.connection.reconnectAttempts || 0) + 1,
-  );
-  recordTimeline("realtime_connect_retry_requested", {
-    reason: detail.reason || "sdp_exchange_failed",
-    status,
-    delayMs,
-  });
-  window.setTimeout(() => {
-    scheduleRealtimeReconnect(String(detail.reason || "sdp_exchange_failed"), delayMs);
-  }, 0);
-  return true;
 }
 
 function recordTimeline(type, detail = {}) {
@@ -475,7 +432,6 @@ function recordTimeline(type, detail = {}) {
     detail: { session_id: state.sessionId || String(config.sessionId || ""), ...detail },
   };
   state.timeline.push(entry);
-  rememberTimelineValidationCheckpoint(entry);
   state.timeline = state.timeline.slice(-120);
 }
 

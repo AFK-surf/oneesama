@@ -1,6 +1,6 @@
 export type SurfaceKind = "google_meet" | "local_browser" | "embedded";
 
-export type ConversationTransport = "agents_sdk" | "raw_webrtc" | "mock" | "webrtc_mock";
+export type ConversationTransport = "agents_sdk" | "mock" | "webrtc_mock";
 
 export type RuntimeAudioInput = "meet_remote_audio" | "local_mic" | "synthetic" | "none";
 export type RuntimeTextInput = "meet_chat" | "caption" | "local_text" | "worker_internal";
@@ -175,9 +175,7 @@ const TRANSPORT_ALIASES: Record<string, ConversationTransport> = {
   "agents-sdk": "agents_sdk",
   "openai-agents": "agents_sdk",
   "openai-agents-sdk": "agents_sdk",
-  raw_webrtc: "raw_webrtc",
-  "raw-webrtc": "raw_webrtc",
-  webrtc: "raw_webrtc",
+  webrtc: "agents_sdk",
   mock: "mock",
   webrtc_mock: "webrtc_mock",
   "webrtc-mock": "webrtc_mock",

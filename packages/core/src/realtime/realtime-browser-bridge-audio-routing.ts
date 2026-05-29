@@ -12,9 +12,7 @@ function ensureMeetAudioRoutingContext() {
   state.connection.meetAudioContextState = routingAudioContext.state || "";
   routingInputGate = routingInputGate || routingAudioContext.createGain();
   state.connection.meetAudioInputGain = meetAudioInputGain();
-  routingInputGate.gain.value = state.connection.realtimeInputGateOpen
-    ? state.connection.meetAudioInputGain
-    : 0;
+  routingInputGate.gain.value = state.connection.meetAudioInputGain;
   routingDestination = routingDestination || routingAudioContext.createMediaStreamDestination();
   routingInputGate.connect(routingDestination);
   ensureMeetAudioEnergyMonitor();
@@ -305,37 +303,6 @@ function ensureRealtimeAudioSenderStatsMonitor(reason = "sender-ready") {
     () => sampleRealtimeAudioSenderStats("interval"),
     1000,
   );
-}
-
-function setRealtimeInputGate(open, reason = "") {
-  if (!routingInputGate || !routingAudioContext) return;
-  if (!open && realtimeInputGateReopenTimer) {
-    window.clearTimeout(realtimeInputGateReopenTimer);
-    realtimeInputGateReopenTimer = 0;
-  }
-  state.connection.meetAudioInputGain = meetAudioInputGain();
-  const target = open ? state.connection.meetAudioInputGain : 0;
-  try {
-    routingInputGate.gain.setTargetAtTime(target, routingAudioContext.currentTime, 0.015);
-  } catch {
-    routingInputGate.gain.value = target;
-  }
-  state.connection.realtimeInputGateOpen = open;
-  recordTimeline("realtime_input_gate", { open, reason });
-  updateFeedback();
-}
-
-function scheduleRealtimeInputGateOpen(reason = "", delayMs = 1200) {
-  if (realtimeInputGateReopenTimer) window.clearTimeout(realtimeInputGateReopenTimer);
-  realtimeInputGateReopenTimer = window.setTimeout(
-    () => {
-      realtimeInputGateReopenTimer = 0;
-      setRealtimeInputGate(true, reason || "delayed-open");
-    },
-    Math.max(0, delayMs),
-  );
-  recordTimeline("realtime_input_gate_open_scheduled", { reason, delayMs });
-  updateFeedback();
 }
 
 function replaceRealtimeInputWithRoutingMix(reason = "meet-audio") {

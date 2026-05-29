@@ -11,8 +11,6 @@ recappiConnection.recappiAudioInput = recappiConnection.recappiAudioInput || {
   samplesDropped: 0,
   noiseSuppressedChunks: 0,
   noiseSuppressedSamples: 0,
-  selfOutputSuppressedChunks: 0,
-  selfOutputSuppressedSamples: 0,
   lastSuppressedRms: 0,
   lastSuppressedReason: "",
   underflows: 0,
@@ -156,38 +154,6 @@ function normalizeRecappiSamples(value: unknown) {
   return [];
 }
 
-function shouldSuppressRecappiSelfOutput() {
-  if (state.protection.outputAudioActive === true) return true;
-  const stoppedAt = Date.parse(String(state.protection.lastOutputAudioStoppedAt || ""));
-  return Number.isFinite(stoppedAt) && Date.now() - stoppedAt < 900;
-}
-
-function rememberSuppressedRecappiChunk({
-  reason,
-  samples,
-  selfOutput = false,
-}: {
-  reason: string;
-  samples: number;
-  selfOutput?: boolean;
-}) {
-  const current = getRecappiAudioInputState();
-  recappiConnection.recappiAudioInput = {
-    ...current,
-    chunks: Number(current?.chunks || 0) + 1,
-    samplesReceived: Number(current?.samplesReceived || 0) + samples,
-    samplesDropped: Number(current?.samplesDropped || 0) + samples,
-    selfOutputSuppressedChunks:
-      Number(current?.selfOutputSuppressedChunks || 0) + (selfOutput ? 1 : 0),
-    selfOutputSuppressedSamples:
-      Number(current?.selfOutputSuppressedSamples || 0) + (selfOutput ? samples : 0),
-    lastSuppressedReason: reason,
-    lastChunkAt: new Date().toISOString(),
-    lastPushAt: new Date().toISOString(),
-  };
-  updateFeedback();
-}
-
 function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   if (config.meetAudioInputSource !== "recappi_process_audio") {
     return { ok: false, error: "recappi_audio_input_disabled" };
@@ -195,20 +161,6 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   const samples = normalizeRecappiSamples(payload.samples);
   if (!samples.length) return { ok: false, error: "empty_recappi_audio_samples" };
   ensureRecappiAudioInputNode(payload);
-  if (shouldSuppressRecappiSelfOutput()) {
-    rememberSuppressedRecappiChunk({
-      reason: "realtime_output_audio_active",
-      samples: samples.length,
-      selfOutput: true,
-    });
-    return {
-      ok: true,
-      source: "recappi_process_audio",
-      suppressed: true,
-      reason: "realtime_output_audio_active",
-      chunks: getRecappiAudioInputState().chunks,
-    };
-  }
   const mono = downmixRecappiSamples(samples, payload.channels);
   const queued = resampleRecappiSamples(
     mono,

@@ -704,7 +704,6 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
               currentRealtimeInputSource: preset.audioSource,
               responseEvents: preset.voice === "idle" ? 0 : 1,
             },
-            protection: { outputAudioActive: preset.voice === "talk" },
             turnPolicy: { appControlJobs: toolJobs },
             errors: preset.error ? [{ message: preset.error, type: "playground" }] : [],
             feedback: {

@@ -37,13 +37,13 @@ test("surface and transport aliases normalize independently", () => {
   const result = validateRuntimeSessionConfig(
     baseConfig({
       surfaceKind: "local",
-      conversationTransport: "raw-webrtc",
+      conversationTransport: "webrtc",
     }),
   );
 
   assert.equal(result.ok, true);
   assert.equal(result.config.surfaceKind, "local_browser");
-  assert.equal(result.config.conversationTransport, "raw_webrtc");
+  assert.equal(result.config.conversationTransport, "agents_sdk");
 });
 
 test("google_meet rejects local_mic and local_speaker", () => {

@@ -49,7 +49,7 @@ This verifies:
 - shadow parity smoke that mirrors join/work/status/stop across an old-stack fixture and the new repo
 - shadow tap smoke that verifies an old-stack transmitter can mirror commands into `/shadow/slack-command` while the new repo records/parses them with side effects suppressed
 - shadow transmitter smoke that verifies sanitized old-stack mirror payloads can be built and posted to the receiver without leaking Slack secrets or creating side effects
-- optional real OpenAI Realtime SDP smoke when `MAB_OPENAI_API_KEY` or `OPENAI_API_KEY` is present
+- optional real OpenAI Agents SDK Realtime smoke when `MAB_OPENAI_API_KEY` or `OPENAI_API_KEY` is present
 - optional real OpenAI Realtime live tool smoke that requires the model to trigger `delegate_to_worker`
 - Realtime background work prompt/tool contract
 - Slack control-plane commands against a local Meeting Agent, including Slack signing-secret verification

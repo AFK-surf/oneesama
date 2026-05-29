@@ -146,7 +146,8 @@ Commands:
   shadow-transmitter-hook Mirror one old-stack Slack command to the shadow tap receiver from stdin
   cutover-evidence-bundle Generate a fixture-safe cutover evidence tarball
   cutover-evidence-smoke Verify the cutover evidence bundle generator
-  realtime-sdp-smoke Verify optional real OpenAI-compatible Realtime SDP handshake when a key is set
+  realtime-sdk-smoke Verify optional real OpenAI Agents SDK Realtime connection when a key is set
+  realtime-sdp-smoke Legacy alias for realtime-sdk-smoke
   meet-live-acceptance Validate a real Meet diagnostics JSON against Realtime HITL criteria
   realtime-smoke Verify realtime config + worker completion polling
   slack-smoke   Verify Slack control-plane commands against Meeting Agent
@@ -329,7 +330,9 @@ export interface CutoverEvidenceManifest {
   artifacts: EvidenceArtifact[];
 }
 
-export function collectRealtimeSentEvents(bridge: RealtimeBridgeSnapshot): Record<string, unknown>[] {
+export function collectRealtimeSentEvents(
+  bridge: RealtimeBridgeSnapshot,
+): Record<string, unknown>[] {
   const outboundEvents = (bridge?.outbound || []).map((entry) => entry.event || {});
   const dataChannelEvents = (bridge?.connection?.sentDataChannelMessages || []).map((entry) => {
     try {
@@ -387,7 +390,6 @@ export function redactSecret(value = "") {
   if (raw.length <= 12) return `${raw.slice(0, 3)}...`;
   return `${raw.slice(0, 8)}...${raw.slice(-4)}`;
 }
-
 
 export {
   existsSync,
@@ -455,6 +457,6 @@ export {
   shouldCompactDailyNote,
   assertNoPrivateSlackFields,
   createShadowTapPayload,
-  postShadowTap
+  postShadowTap,
 };
 export type { ShadowTapInput };

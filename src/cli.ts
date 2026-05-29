@@ -11,7 +11,7 @@ import { slackDomainStoreSmoke, slackTriageFlowSmoke } from "./cli/slack-domain-
 import { avatarSmoke, realtimeSmoke, meetSmoke, meetContractSmoke, screenShareSmoke, realMeetSmoke, persistenceSmoke } from "./cli/runtime-basic.js";
 import { stateProviderSmoke, workerBridgeSmoke, realtimeBrowserSmoke, realtimeWebrtcSmoke, realtimeAudioRouteSmoke, realtimeParticipantAudioSmoke, realtimeRepeatGuardSmoke } from "./cli/realtime-basic.js";
 import { realtimeSessionUpdateSmoke, realtimeWorkerToolSmoke, realtimeLiveToolSmoke, realtimeLiveRoutingSmoke } from "./cli/realtime-tools.js";
-import { avatarStateSmoke, avatarVisualSmoke, avatarVRMSmoke, hiyoriLive2dSmoke, runtimeAcceptanceSmoke, realtimeSdpSmoke } from "./cli/avatar-runtime.js";
+import { avatarStateSmoke, avatarVisualSmoke, avatarVRMSmoke, hiyoriLive2dSmoke, runtimeAcceptanceSmoke, realtimeSdkSmoke, realtimeSdpSmoke } from "./cli/avatar-runtime.js";
 import { slackResultSmoke, slackPostingSmoke, cutoverShadowSmoke, cutoverRollbackSmoke, shadowParitySmoke, shadowTapSmoke, shadowTransmitterSmoke } from "./cli/slack-cutover.js";
 import { shadowTransmitterHook, cutoverEvidenceBundle, cutoverEvidenceSmoke } from "./cli/support.js";
 import { slackContractSmoke } from "./cli/slack-contract.js";
@@ -83,6 +83,7 @@ const commands: Record<string, () => Promise<void> | void> = {
   "shadow-transmitter-hook": shadowTransmitterHook,
   "cutover-evidence-bundle": cutoverEvidenceBundle,
   "cutover-evidence-smoke": cutoverEvidenceSmoke,
+  "realtime-sdk-smoke": realtimeSdkSmoke,
   "realtime-sdp-smoke": realtimeSdpSmoke,
   "slack-smoke": slackSmoke,
   "meet-live-acceptance": meetLiveAcceptance,

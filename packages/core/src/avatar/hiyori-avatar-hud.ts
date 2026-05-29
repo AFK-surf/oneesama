@@ -160,9 +160,6 @@ function voiceSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.audioOutput || failures.modelTurn);
   if (level === "blocked" || level === "warn")
     return { key: "voice", label: "Voice", value: "check", level };
-  if (bridge?.protection?.outputAudioActive === true) {
-    return { key: "voice", label: "Voice", value: "talk", level: "active" };
-  }
   const events = Number(bridge?.connection?.responseEvents || bridge?.responseEvents || 0);
   return events > 0
     ? { key: "voice", label: "Voice", value: "ready", level: "ok" }

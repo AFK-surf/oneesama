@@ -151,16 +151,26 @@ window.addEventListener("meeting-avatar-worker-result", (event: Event) => {
 });
 
 window.addEventListener("meeting-avatar-realtime-server-event", (event: Event) => {
-  const detail = (event as CustomEvent).detail as { __meetingAvatarInboundRecorded?: boolean };
+  const detail = (event as CustomEvent).detail as Record<string, any> & {
+    __meetingAvatarInboundRecorded?: boolean;
+  };
   if (detail?.__meetingAvatarInboundRecorded !== true) {
     rememberInboundEvent(detail, "custom-event");
   }
-  handleRealtimeServerEvent(detail);
+  if (detail?.type === "session.created") {
+    state.connection.openaiSessionId = String((detail as any).session?.id || "");
+    updateFeedback();
+  }
+  if (detail?.type === "input_audio_buffer.speech_started") {
+    state.protection.lastInputSpeechStartedAt = new Date().toISOString();
+    updateFeedback();
+  }
+  handleLocalToolCallEvent(detail).catch(rememberError);
 });
 
 window.addEventListener("meeting-avatar-user-speech-started", () => {
-  const result = cancelActiveResponse("user_speech_started");
-  if (!result.skipped) state.protection.userSpeechCancels += 1;
+  state.protection.lastInputSpeechStartedAt = new Date().toISOString();
+  recordTimeline("realtime_input_speech_started", { source: "meeting-avatar-user-speech-started" });
 });
 
 installParticipantAudioDiscovery();
