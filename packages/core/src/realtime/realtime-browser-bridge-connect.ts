@@ -316,14 +316,34 @@ async function connectRealtime(options = {}) {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    const sdpResponse = await fetch(state.connection.sdpUrl, {
-      method: "POST",
-      body: offer.sdp,
-      headers: {
-        authorization: `Bearer ${ephemeralKey}`,
-        "content-type": "application/sdp",
-      },
-    });
+    let sdpResponse;
+    try {
+      sdpResponse = await fetch(state.connection.sdpUrl, {
+        method: "POST",
+        body: offer.sdp,
+        headers: {
+          authorization: `Bearer ${ephemeralKey}`,
+          "content-type": "application/sdp",
+        },
+      });
+    } catch (sdpFetchError) {
+      const detail = {
+        status: 0,
+        ok: false,
+        retryable: true,
+        terminal: false,
+        retryAfter: "",
+        retryAfterMs: 0,
+        requestId: "",
+        error: String((sdpFetchError && sdpFetchError.message) || sdpFetchError).slice(0, 500),
+        reason: "realtime_sdp_fetch_failed",
+      };
+      rememberSdpError(detail);
+      const error = new Error(`Realtime SDP fetch failed: ${detail.error}`);
+      const typedError = error as Error & { realtimeSdpError?: Record<string, unknown> };
+      typedError.realtimeSdpError = detail;
+      throw error;
+    }
     if (!sdpResponse.ok) {
       const responseText = await readResponseText(sdpResponse);
       const retry = retryAfterDetail(sdpResponse);
