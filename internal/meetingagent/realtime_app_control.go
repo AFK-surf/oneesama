@@ -45,12 +45,6 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 			"error": "instruction_required",
 		}
 	}
-	if err := requireAppControlBackend(s.appControlBackend); err != nil {
-		return map[string]any{
-			"ok":    false,
-			"error": err.Error(),
-		}
-	}
 	sessionID, err := s.resolveScreenShareSessionID(ctx, input.SessionID)
 	if err != nil {
 		return map[string]any{
@@ -63,20 +57,27 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 	if request.Instruction == "" {
 		request.Instruction = "execute structured app-control operations"
 	}
+	backend := s.appControlBackendForRequest(request)
+	if err := requireAppControlBackend(backend); err != nil {
+		return map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		}
+	}
 	if !input.Wait {
-		queued, err := s.enqueueAppControlJob(request, status)
+		queued, err := s.enqueueAppControlJob(request, status, backend)
 		if err != nil {
 			queued["screenShare"] = status
 		}
 		return queued
 	}
 	start := time.Now()
-	result, err := s.appControlBackend.ControlSharedApp(ctx, request)
+	result, err := backend.ControlSharedApp(ctx, request)
 	elapsed := time.Since(start)
 	if err != nil {
 		s.logger.Warn(
 			"realtime app-control backend error",
-			"provider", s.appControlBackend.Name(),
+			"provider", backend.Name(),
 			"session_id", sessionID,
 			"duration", elapsed.String(),
 			"error", err.Error(),
@@ -84,14 +85,14 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 		return map[string]any{
 			"ok":          false,
 			"error":       err.Error(),
-			"provider":    s.appControlBackend.Name(),
+			"provider":    backend.Name(),
 			"status":      appControlStatusFailed,
 			"screenShare": status,
 		}
 	}
 	s.logger.Info(
 		"realtime app-control backend result",
-		"provider", firstNonEmpty(result.Provider, s.appControlBackend.Name()),
+		"provider", firstNonEmpty(result.Provider, backend.Name()),
 		"session_id", sessionID,
 		"ok", result.OK,
 		"status", result.Status,
@@ -101,6 +102,23 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 		"actions", strings.Join(result.Actions, ","),
 	)
 	return appControlResultMap(result, status)
+}
+
+func (s *Service) appControlBackendForRequest(req AppControlRequest) AppControlBackend {
+	if s == nil {
+		return nil
+	}
+	if s.shouldUseHighLevelAppControlExecutor(req) {
+		return NewCodexAppControlBackend(s)
+	}
+	return s.appControlBackend
+}
+
+func (s *Service) shouldUseHighLevelAppControlExecutor(req AppControlRequest) bool {
+	if s == nil || s.appControlCustom || s.runner == nil {
+		return false
+	}
+	return strings.TrimSpace(req.Instruction) != "" && len(req.Operations) == 0
 }
 
 func buildRealtimeAppControlTask(input RealtimeSharedAppControlRequest, status map[string]any) string {
@@ -116,9 +134,11 @@ func buildRealtimeAppControlTask(input RealtimeSharedAppControlRequest, status m
 	}, "", "  ")
 	return strings.Join([]string{
 		"Operate the currently shared macOS app/window for the live meeting.",
-		"Use the high-level Computer Use capability exposed by the runtime (Codex or KWWK). Do not implement low-level CGEvent, AppleScript, shell, or repository-code UI automation.",
+		"Use the high-level Computer Use capability exposed by the runtime. Keep the observe -> plan -> act -> verify loop inside this executor, including unfamiliar apps. Do not ask the foreground Realtime model or the user for click/drag primitives.",
+		"Observe the current shared window first when needed, plan a short bounded action sequence, act through Computer Use, then verify the visible outcome with the app/window state or screenshot before returning success.",
+		"Do not implement low-level CGEvent, AppleScript, shell, or repository-code UI automation.",
 		"Keep the operation bounded to the target app/window. If you cannot access the app or the requested action is unsafe/destructive, return a blocker instead of improvising.",
-		`Return exactly one JSON object: {"ok":true,"summary":"what changed or what blocker you hit","actions":["short action list"],"confidence":0.0,"blocker":""}.`,
+		`Return exactly one JSON object: {"ok":true,"summary":"what changed or what blocker you hit","actions":["short action list"],"confidence":0.0,"blocker":""}. Use ok:false with a concise blocker if verification fails.`,
 		"Request:\n" + string(payload),
 	}, "\n\n")
 }

@@ -88,7 +88,7 @@ async function dispatchToolCall(page, callId, args) {
   );
 }
 
-test("Realtime app-control dry-run state result asks the model to continue with primitive operations", async () => {
+test("Realtime app-control dry-run state result stays inside the executor loop", async () => {
   await withRealtimeBridge(async (page) => {
     await dispatchToolCall(page, "call_state_probe", {
       applicationName: "Pencil",
@@ -103,15 +103,35 @@ test("Realtime app-control dry-run state result asks the model to continue with 
     );
     assert.equal(stateCall.result.ok, true);
     assert.deepEqual(stateCall.result.actions, ["state"]);
-    assert.match(stateCall.result.summary, /Continue with concrete click\/type_text/);
+    assert.match(stateCall.result.summary, /executor running/);
     assert.equal(stateCall.delivery.policy.channel, "silent");
-    assert.equal(stateCall.delivery.policy.reason, "app_control_needs_primitive_followup");
-    assert.ok(stateCall.delivery.responseChannel);
+    assert.equal(stateCall.delivery.policy.reason, "app_control_executor_running");
+    assert.equal(stateCall.delivery.responseChannel, "");
     assert.equal(stateCall.delivery.meetingEvent.type, "app_control.running");
     assert.equal(stateCall.delivery.meetingEvent.visibility, "silent");
     assert.equal(stateCall.delivery.meetingEvent.turnId, "call_state_probe");
 
-    const responseCreate = await page.evaluate(() =>
+    const foregroundFollowup = await page.evaluate(() =>
+      window.MAB_REALTIME_BRIDGE.connection.sentDataChannelMessages
+        .map((entry) => {
+          try {
+            return typeof entry.payload === "string" ? JSON.parse(entry.payload) : entry.payload;
+          } catch {
+            return entry.payload;
+          }
+        })
+        .some(
+          (event) =>
+            event.type === "response.create" &&
+            event.response?.instructions?.includes("Continue by calling control_shared_app_window"),
+        ),
+    );
+    assert.equal(
+      foregroundFollowup,
+      false,
+      "state-only app-control result must not ask the foreground model for primitive operations",
+    );
+    const functionOutput = await page.evaluate(() =>
       window.MAB_REALTIME_BRIDGE.connection.sentDataChannelMessages
         .map((entry) => {
           try {
@@ -122,11 +142,15 @@ test("Realtime app-control dry-run state result asks the model to continue with 
         })
         .find(
           (event) =>
-            event.type === "response.create" &&
-            event.response?.instructions?.includes("Continue by calling control_shared_app_window"),
+            event.type === "conversation.item.create" &&
+            event.item?.type === "function_call_output" &&
+            event.item?.call_id === "call_state_probe",
         ),
     );
-    assert.ok(responseCreate, "state-only app-control result should prompt a follow-up tool call");
+    const visibleOutput = JSON.parse(functionOutput.item.output);
+    assert.equal(visibleOutput.status, "running");
+    assert.match(visibleOutput.summary, /observing, planning, acting, or verifying/);
+    assert.doesNotMatch(visibleOutput.summary, /Continue by calling/);
 
     await dispatchToolCall(page, "call_direct_ops", {
       applicationName: "Pencil",
@@ -146,7 +170,7 @@ test("Realtime app-control dry-run state result asks the model to continue with 
     );
     assert.equal(directCall.result.ok, true);
     assert.deepEqual(directCall.result.actions, ["click", "drag", "type_text"]);
-    assert.match(directCall.result.summary, /executed primitive app-control operations/i);
+    assert.match(directCall.result.summary, /executed low-level app-control operations/i);
     assert.equal(directCall.delivery.policy.channel, "voice");
     assert.equal(directCall.delivery.meetingEvent.type, "app_control.completed");
     assert.equal(directCall.delivery.meetingEvent.interruptible, true);
@@ -327,7 +351,8 @@ test("Realtime app-control terminal job status updates the typed state machine",
       assert.equal(stateOnly.delivery.meetingEvent.type, "app_control.running");
       assert.equal(stateOnly.delivery.meetingEvent.jobId, "app_job_state_only");
       assert.equal(stateOnly.delivery.policy.channel, "silent");
-      assert.equal(stateOnly.delivery.policy.reason, "app_control_needs_primitive_followup");
+      assert.equal(stateOnly.delivery.policy.reason, "app_control_executor_running");
+      assert.equal(stateOnly.delivery.responseChannel, "");
 
       const jobs = await page.evaluate(() => window.MAB_REALTIME_BRIDGE.turnPolicy.appControlJobs);
       assert.equal(jobs.app_job_done.status, "completed");
@@ -346,7 +371,7 @@ test("Realtime app-control terminal job status updates the typed state machine",
             ),
         ),
       );
-      assert.equal(responseCreate, true);
+      assert.equal(responseCreate, false);
     },
     {
       config: {
@@ -473,7 +498,7 @@ test("Realtime app-control worker results are posted to Meet chat without voice 
   );
 });
 
-test("Realtime app-control state-only worker results continue with primitive operations", async () => {
+test("Realtime app-control state-only worker results stay silent inside executor contract", async () => {
   await withRealtimeBridge(
     async (page) => {
       const delivery = await page.evaluate(() => {
@@ -500,14 +525,14 @@ test("Realtime app-control state-only worker results continue with primitive ope
 
       assert.equal(delivery.meetChat, null);
       assert.equal(delivery.policy.channel, "silent");
-      assert.equal(delivery.policy.autoRespond, true);
-      assert.equal(delivery.policy.reason, "app_control_needs_primitive_followup");
+      assert.equal(delivery.policy.autoRespond, false);
+      assert.equal(delivery.policy.reason, "app_control_executor_running");
       assert.equal(delivery.interrupt.skipped, true);
       assert.equal(delivery.meetingEvent.type, "app_control.running");
       assert.equal(delivery.meetingEvent.visibility, "silent");
       assert.equal(delivery.meetingEvent.detail.interruptedResponse, false);
-      assert.ok(delivery.itemChannel);
-      assert.ok(delivery.responseChannel);
+      assert.equal(delivery.itemChannel, "");
+      assert.equal(delivery.responseChannel, "");
 
       const state = await page.evaluate(() => ({
         chatMessages: window.__MAB_MEET_FIXTURE.chatMessages,
@@ -529,7 +554,7 @@ test("Realtime app-control state-only worker results continue with primitive ope
               "Continue by calling control_shared_app_window",
             ),
         ),
-        true,
+        false,
       );
       assert.equal(
         state.outbound.some(
@@ -540,15 +565,12 @@ test("Realtime app-control state-only worker results continue with primitive ope
               "continue by calling control_shared_app_window",
             ),
         ),
-        true,
+        false,
       );
       assert.equal(state.protection.cancelledResponses, 0);
       assert.equal(state.jobs.app_control_state_only.status, "running");
       assert.equal(state.jobs.app_control_state_only.visibility, "silent");
-      assert.equal(
-        state.jobs.app_control_state_only.reason,
-        "app_control_needs_primitive_followup",
-      );
+      assert.equal(state.jobs.app_control_state_only.reason, "app_control_executor_running");
     },
     { config: { sessionId: "current_session" } },
   );

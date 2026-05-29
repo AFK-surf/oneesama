@@ -84,6 +84,58 @@ func TestRealtimeSharedAppControlStartsComputerUseWorker(t *testing.T) {
 	}
 }
 
+func TestRealtimeSharedAppControlRoutesConfiguredKWWKGoalToComputerUseExecutor(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeDemoCodexRunner{
+		startJob: agentrunner.Job{
+			ID:       "job_app_control_goal",
+			Provider: "codex",
+			Status:   agentrunner.StatusCompleted,
+			Result:   `{"ok":true,"summary":"Explored Pencil and drew a circle.","actions":["observed canvas","selected a shape tool","drew circle","verified result"],"confidence":0.82,"blocker":""}`,
+		},
+	}
+	rootDir := t.TempDir()
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		AppControl: appconfig.AppControlConfig{
+			Provider:      "kwwk",
+			CodexFallback: false,
+			KWWK:          appconfig.KWWKAppControlConfig{Command: "missing-kwwk-helper"},
+		},
+		OpenAI: appconfig.OpenAIConfig{
+			RealtimeModel: "gpt-realtime-2",
+			BotName:       "Meeting Avatar Bot",
+		},
+		Runner: runner,
+		MeetRunner: fakeMeetRunnerWithRuntime{
+			statusActive: map[string]any{
+				"sessionId": "meet_session",
+				"screenShare": map[string]any{
+					"active":          true,
+					"applicationName": "Pencil",
+				},
+			},
+		},
+	})
+
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a circle without telling me which tool to use","wait":true}`, http.StatusOK)
+
+	if body["ok"] != true || body["provider"] != "codex" || body["summary"] != "Explored Pencil and drew a circle." {
+		t.Fatalf("body = %#v, want instruction-only app-control goal handled by Computer Use executor", body)
+	}
+	if runner.startCount != 1 {
+		t.Fatalf("startCount = %d, want 1", runner.startCount)
+	}
+	if len(runner.startInput.Context["operations"].([]KWWKAppControlOperation)) != 0 {
+		t.Fatalf("context = %#v, natural-language app-control goals must not require primitive operations", runner.startInput.Context)
+	}
+}
+
 func TestRealtimeSharedAppControlPropagatesWorkerBlocker(t *testing.T) {
 	t.Parallel()
 

@@ -3,8 +3,8 @@ function updateAppControlWorkerHud(job, delivery) {
   const status = String(job?.status || "")
     .trim()
     .toLowerCase();
-  if (delivery?.policy?.reason === "app_control_needs_primitive_followup") {
-    updateAvatarHudStatus("thinking", "继续操作应用", {
+  if (delivery?.policy?.reason === "app_control_executor_running") {
+    updateAvatarHudStatus("thinking", "正在操作应用", {
       mood: "thinking",
       action: "think",
       holdMs: 45000,

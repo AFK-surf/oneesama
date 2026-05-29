@@ -23,6 +23,7 @@ type appControlJob struct {
 	Error       string
 	Blocker     string
 	Request     AppControlRequest
+	Backend     AppControlBackend
 	ScreenShare map[string]any
 	Result      map[string]any
 	CreatedAt   time.Time
@@ -47,19 +48,26 @@ func (s *Service) startAppControlQueue() {
 	})
 }
 
-func (s *Service) enqueueAppControlJob(req AppControlRequest, screenShare map[string]any) (map[string]any, error) {
+func (s *Service) enqueueAppControlJob(req AppControlRequest, screenShare map[string]any, backend AppControlBackend) (map[string]any, error) {
 	if s == nil {
 		return nil, fmt.Errorf("service_unavailable")
+	}
+	if backend == nil {
+		backend = s.appControlBackendForRequest(req)
+	}
+	if err := requireAppControlBackend(backend); err != nil {
+		return nil, err
 	}
 	id := fmt.Sprintf("app_control_%d", atomic.AddUint64(&s.appControlJobSeq, 1))
 	now := time.Now().UTC()
 	job := appControlJob{
 		ID:          id,
-		Provider:    s.appControlBackend.Name(),
+		Provider:    backend.Name(),
 		SessionID:   req.SessionID,
 		Instruction: req.Instruction,
 		Status:      appControlStatusQueued,
 		Request:     req,
+		Backend:     backend,
 		ScreenShare: screenShare,
 		CreatedAt:   now,
 	}
@@ -104,8 +112,23 @@ func (s *Service) runQueuedAppControlJob(ctx context.Context, id string) {
 	if !ok {
 		return
 	}
+	backend := job.Backend
+	if backend == nil {
+		backend = s.appControlBackendForRequest(job.Request)
+		if err := requireAppControlBackend(backend); err != nil {
+			job.Status = appControlStatusFailed
+			job.Error = err.Error()
+			job.Blocker = err.Error()
+			job.FinishedAt = time.Now().UTC()
+			s.storeAppControlJob(job)
+			s.reportQueuedAppControlJob(ctx, job)
+			return
+		}
+		job.Backend = backend
+		job.Provider = backend.Name()
+	}
 	start := time.Now()
-	result, err := s.appControlBackend.ControlSharedApp(ctx, job.Request)
+	result, err := backend.ControlSharedApp(ctx, job.Request)
 	elapsed := time.Since(start)
 	if err != nil {
 		job.Status = appControlStatusFailed

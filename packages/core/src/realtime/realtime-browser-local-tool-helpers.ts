@@ -220,8 +220,8 @@
         tool: name,
         arguments: args,
         summary: hasDirectOperation
-          ? "Dry-run executed primitive app-control operations."
-          : "Dry-run captured shared app state. Continue with concrete click/type_text/press_key/scroll/drag operations to perform the requested edit.",
+          ? "Dry-run executed low-level app-control operations."
+          : "Dry-run kept the app-control executor running after the first state observation.",
         actions,
         metadata: {
           state: {
@@ -245,9 +245,10 @@
         .slice(0, 32);
     }
 
-    function appControlResultNeedsPrimitiveFollowup(result: unknown) {
+    function appControlExecutorStillWorking(result: unknown) {
       const record = recordFromUnknown(result);
       const nested = recordFromUnknown(record.result);
+      if (record.ok === false || nested.ok === false) return false;
       const actions = [record.actions, nested.actions].flatMap((value) =>
         Array.isArray(value) ? value.map((action) => String(action || "").toLowerCase()) : [],
       );
@@ -319,8 +320,8 @@
             action: "lean_forward",
             holdMs: 45000,
           });
-        } else if (appControlResultNeedsPrimitiveFollowup(result)) {
-          updateAvatarHudStatus("thinking", "继续操作应用", {
+        } else if (appControlExecutorStillWorking(result)) {
+          updateAvatarHudStatus("thinking", "正在操作应用", {
             mood: "thinking",
             action: "think",
             holdMs: 45000,

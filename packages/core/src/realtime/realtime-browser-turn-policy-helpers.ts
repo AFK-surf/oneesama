@@ -184,7 +184,9 @@
       );
     }
 
-    function appControlNeedsPrimitiveFollowup(result: unknown): boolean {
+    function appControlExecutorStillWorking(result: unknown): boolean {
+      if (resultStatus(result) === "running") return true;
+      if (appControlResultRecords(result).some((record) => record.ok === false)) return false;
       const actions = resultActions(result);
       const text = appControlResultRecords(result)
         .flatMap((record) => [record.reason, record.error, record.blocker, record.summary])
@@ -213,9 +215,14 @@
       );
     }
 
-    function appControlWorkerNeedsPrimitiveFollowup(job: any): boolean {
+    function appControlWorkerExecutorStillWorking(job: any): boolean {
       if (shouldVoiceAckWorkerResult(job)) return false;
-      if (String(job?.status || "").trim().toLowerCase() !== "completed") return false;
+      if (
+        String(job?.status || "")
+          .trim()
+          .toLowerCase() !== "completed"
+      )
+        return false;
       const envelope = workerResultEnvelope(job);
       const result = resultRecord(envelope.result);
       const actions = [job?.actions, envelope.actions, result.actions].flatMap((value) =>
@@ -253,16 +260,6 @@
       );
     }
 
-    function buildAppControlWorkerFollowupText(job: any): string {
-      return [
-        "Queued app-control did not finish the user's requested edit yet.",
-        `Task: ${job?.task || job?.id || "app-control job"}`,
-        "State was captured, but no concrete click/type/press/scroll/drag operation has executed yet.",
-        "Do not summarize this as completed and do not ask the user to perform it.",
-        "Continue by calling control_shared_app_window again with concrete primitive operations such as click, type_text, press_key, scroll, or drag.",
-      ].join("\n");
-    }
-
     function appControlIsAsyncAccepted(result: unknown): boolean {
       return ["accepted", "queued", "running", "started"].includes(resultStatus(result));
     }
@@ -273,7 +270,7 @@
     ): AppControlEventStatus {
       const status = resultStatus(result);
       if (policy.channel === "blocked" || resultIsBlocked(result)) return "blocked";
-      if (policy.reason === "app_control_needs_primitive_followup") return "running";
+      if (policy.reason === "app_control_executor_running") return "running";
       if (["queued", "accepted", "started"].includes(status)) return "accepted";
       if (status === "running") return "running";
       if (["completed", "done", "success", "succeeded"].includes(status)) return "completed";
@@ -345,13 +342,12 @@
                 "The app-control result failed or is blocked. State the exact blocker in one short Chinese sentence. Do not mention ids, queues, tools, backends, routing names, or debug state.",
             };
           }
-          if (appControlNeedsPrimitiveFollowup(result)) {
+          if (appControlExecutorStillWorking(result)) {
             return {
               channel: "silent",
-              autoRespond: true,
-              reason: "app_control_needs_primitive_followup",
-              responseInstructions:
-                "The app-control result only captured state or requires structured operations. Do not summarize yet; Continue by calling control_shared_app_window again with concrete primitive operations such as click, type_text, press_key, scroll, or drag.",
+              autoRespond: false,
+              reason: "app_control_executor_running",
+              responseInstructions: "",
             };
           }
           if (appControlIsAsyncAccepted(result)) {
@@ -447,6 +443,27 @@
       return "tool_result.voice";
     }
 
+    function appControlVisibleModelResult(
+      input: FunctionToolPolicyInput,
+      policy: RealtimeTurnPolicy,
+    ) {
+      if (
+        input.name !== "control_shared_app_window" ||
+        policy.reason !== "app_control_executor_running"
+      ) {
+        return input.result;
+      }
+      const jobId = resultJobId(input.result);
+      const visible: Record<string, unknown> = {
+        ok: true,
+        status: "running",
+        summary:
+          "App-control executor is still observing, planning, acting, or verifying internally. Do not summarize completion yet.",
+      };
+      if (jobId) visible.job_id = jobId;
+      return visible;
+    }
+
     function sendFunctionCallOutput(callId: string, result: unknown, policy: RealtimeTurnPolicy) {
       if (!callId) return { ok: true, skipped: true, reason: "missing_call_id" };
       const outputChannel = sendRealtimeEvent({
@@ -480,9 +497,10 @@
     }
 
     function functionToolModelResult(input: FunctionToolPolicyInput, policy: RealtimeTurnPolicy) {
+      const result = appControlVisibleModelResult(input, policy);
       return {
-        ok: resultRecord(input.result).ok !== false,
-        result: input.result,
+        ok: resultRecord(result).ok !== false,
+        result,
         turnPolicy: {
           channel: policy.channel,
           autoRespond: policy.autoRespond,
@@ -497,10 +515,11 @@
       options: FunctionToolDeliveryOptions = {},
     ) {
       const policy = functionToolPolicy(input);
+      const outputResult = appControlVisibleModelResult(input, policy);
       const delivery =
         options.sendOutput === false
           ? { ok: true, skipped: true, reason: "caller_handles_function_call_output" }
-          : sendFunctionCallOutput(input.callId, input.result, policy);
+          : sendFunctionCallOutput(input.callId, outputResult, policy);
       const event =
         input.name === "control_shared_app_window"
           ? rememberAppControlEvent(input, policy)
@@ -567,9 +586,8 @@
       if (!scope.ok) return rememberSuppressedWorkerResult(job, scope.reason, scope);
 
       let chatDelivery = null;
-      const appControlPrimitiveFollowup = appControlWorkerNeedsPrimitiveFollowup(job);
-      const sendToMeetChat =
-        !appControlPrimitiveFollowup && shouldSendWorkerResultToMeetChat(job);
+      const appControlExecutorRunning = appControlWorkerExecutorStillWorking(job);
+      const sendToMeetChat = !appControlExecutorRunning && shouldSendWorkerResultToMeetChat(job);
       const voiceAck = shouldVoiceAckWorkerResult(job);
       if (sendToMeetChat) {
         chatDelivery = await sendMeetChat({ text: buildWorkerResultChatText(job) }).catch(
@@ -580,41 +598,23 @@
         );
       }
       const policy: RealtimeTurnPolicy = {
-        channel: appControlPrimitiveFollowup ? "silent" : sendToMeetChat ? "meet_chat" : "voice",
-        autoRespond: appControlPrimitiveFollowup
-          ? true
+        channel: appControlExecutorRunning ? "silent" : sendToMeetChat ? "meet_chat" : "voice",
+        autoRespond: appControlExecutorRunning
+          ? false
           : voiceAck && config.autoRespondToWorkerResults !== false,
-        reason: appControlPrimitiveFollowup
-          ? "app_control_needs_primitive_followup"
+        reason: appControlExecutorRunning
+          ? "app_control_executor_running"
           : sendToMeetChat
             ? voiceAck
               ? "worker_result_sent_to_meet_chat"
               : "app_control_result_sent_to_meet_chat"
             : "worker_result_voice_summary",
-        responseInstructions: appControlPrimitiveFollowup
-          ? "The queued app-control state probe only captured state. Do not speak, do not ask the user to do the action, and continue by calling control_shared_app_window again with concrete primitive operations such as click, type_text, press_key, scroll, or drag."
+        responseInstructions: appControlExecutorRunning
+          ? ""
           : "Summarize the completed background result proactively in concise Chinese without mentioning internal routing names.",
       };
       let itemChannel = "";
-      if (appControlPrimitiveFollowup) {
-        itemChannel = sendRealtimeEvent({
-          type: "conversation.item.create",
-          item: {
-            type: "message",
-            role: "system",
-            metadata: {
-              source: "app_control",
-              jobId: job.id || "",
-            },
-            content: [
-              {
-                type: "input_text",
-                text: buildAppControlWorkerFollowupText(job),
-              },
-            ],
-          },
-        });
-      } else if (voiceAck || !sendToMeetChat) {
+      if (!appControlExecutorRunning && (voiceAck || !sendToMeetChat)) {
         itemChannel = sendRealtimeEvent({
           type: "conversation.item.create",
           item: {
@@ -640,7 +640,7 @@
         responseChannel = sendRealtimeEvent({
           type: "response.create",
           metadata: {
-            source: appControlPrimitiveFollowup ? "app_control" : "worker_result",
+            source: appControlExecutorRunning ? "app_control" : "worker_result",
             reason: policy.reason,
           },
           response: { instructions: policy.responseInstructions },
@@ -658,7 +658,7 @@
         responseChannel,
       });
       const sessionId = workerResultMeetingSessionId(job);
-      const event = appControlPrimitiveFollowup
+      const event = appControlExecutorRunning
         ? meetingEvents.rememberMeetingEvent({
             type: "app_control.running",
             source: "app_control",
@@ -671,7 +671,9 @@
             reason: policy.reason,
             detail: {
               chatOk: false,
-              interruptedResponse: Boolean(options.interrupt && !(options.interrupt as any).skipped),
+              interruptedResponse: Boolean(
+                options.interrupt && !(options.interrupt as any).skipped,
+              ),
               workerStatus: job.status || "",
             },
           })
@@ -687,10 +689,12 @@
             reason: policy.reason,
             detail: {
               chatOk: chatDelivery ? chatDelivery.ok === true : false,
-              interruptedResponse: Boolean(options.interrupt && !(options.interrupt as any).skipped),
+              interruptedResponse: Boolean(
+                options.interrupt && !(options.interrupt as any).skipped,
+              ),
             },
           });
-      if (appControlPrimitiveFollowup) {
+      if (appControlExecutorRunning) {
         meetingEvents.rememberAppControlJob({
           event,
           sessionId,

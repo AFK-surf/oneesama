@@ -798,7 +798,8 @@ export async function realtimeLiveRoutingSmoke() {
       id: "control_shared_pencil",
       text: "Pencil 已经在屏幕共享里了，请在 Pencil 里画一个贪食蛇 mockup",
       expectedTools: ["control_shared_app_window"],
-      requireOperations: true,
+      requireInstruction: true,
+      forbidOperations: true,
     },
     {
       id: "ambiguous_app_editor",
@@ -964,6 +965,33 @@ export async function realtimeLiveRoutingSmoke() {
             { timeout: 45_000 },
           );
         }
+        if ("requireInstruction" in testCase && testCase.requireInstruction) {
+          await page.waitForFunction(
+            () => {
+              const calls =
+                (
+                  window.MAB_REALTIME_BRIDGE as
+                    | {
+                        workspaceTools?: {
+                          calls?: Array<{
+                            name?: string;
+                            arguments?: { instruction?: unknown };
+                          }>;
+                        };
+                      }
+                    | null
+                    | undefined
+                )?.workspaceTools?.calls || [];
+              return calls.some(
+                (call) =>
+                  call.name === "control_shared_app_window" &&
+                  String(call.arguments?.instruction || "").trim().length > 0,
+              );
+            },
+            null,
+            { timeout: 45_000 },
+          );
+        }
 
         const result = (await page.evaluate(() => ({
           bridge: window.MAB_REALTIME_BRIDGE,
@@ -1004,7 +1032,9 @@ export async function realtimeLiveRoutingSmoke() {
           { text: testCase.text, actualTools, calls, bridge: result.bridge },
         );
         const appControlCalls =
-          "requireOperations" in testCase && testCase.requireOperations
+          "requireOperations" in testCase ||
+          "requireInstruction" in testCase ||
+          "forbidOperations" in testCase
             ? calls.filter((call) => call.name === "control_shared_app_window")
             : [];
         const directOperationCall = appControlCalls.find((call) => {
@@ -1024,6 +1054,31 @@ export async function realtimeLiveRoutingSmoke() {
           assertSmoke(
             operations.some((operation) => String(operation?.kind || "") !== "state"),
             `Realtime routing case ${testCase.id} did not continue with direct app-control operations after state`,
+            { text: testCase.text, actualTools, appControlCalls, bridge: result.bridge },
+          );
+        }
+        if ("requireInstruction" in testCase && testCase.requireInstruction) {
+          assertSmoke(
+            appControlCalls.some(
+              (call) =>
+                String(
+                  (call.arguments as { instruction?: unknown } | undefined)?.instruction || "",
+                ).trim().length > 0,
+            ),
+            `Realtime routing case ${testCase.id} did not preserve a goal instruction`,
+            { text: testCase.text, actualTools, appControlCalls, bridge: result.bridge },
+          );
+        }
+        if ("forbidOperations" in testCase && testCase.forbidOperations) {
+          const operations = appControlCalls.flatMap((call) => {
+            const args = call.arguments as { operations?: unknown } | undefined;
+            return Array.isArray(args?.operations)
+              ? (args.operations as Array<{ kind?: unknown }>)
+              : [];
+          });
+          assertSmoke(
+            operations.length === 0,
+            `Realtime routing case ${testCase.id} should hand off the goal, not foreground primitives`,
             { text: testCase.text, actualTools, appControlCalls, bridge: result.bridge },
           );
         }

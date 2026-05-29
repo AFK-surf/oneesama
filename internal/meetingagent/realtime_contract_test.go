@@ -114,8 +114,8 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"prefer the visual channel",
 		"If the user says stop planning",
 		"Ignore obvious self-echo",
-		"send explicit primitive operations",
-		"structured_operations_required",
+		"Do not invent click/drag primitives",
+		"observe -> plan -> act -> verify",
 		"status queued or running",
 		"Do not claim completion",
 	} {

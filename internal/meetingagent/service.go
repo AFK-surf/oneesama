@@ -80,6 +80,7 @@ type Service struct {
 	httpClient          *http.Client
 	demoBridge          *RealtimeDemoBridge
 	appControlBackend   AppControlBackend
+	appControlCustom    bool
 	appControlQueue     chan appControlQueuedJob
 	appControlJobsMu    sync.Mutex
 	appControlJobs      map[string]appControlJob
@@ -143,6 +144,7 @@ func NewService(cfg Config) *Service {
 		httpClient:         cfg.HTTPClient,
 		demoBridge:         cfg.DemoBridge,
 		appControlBackend:  cfg.AppControlBackend,
+		appControlCustom:   cfg.AppControlBackend != nil,
 		appControlQueue:    make(chan appControlQueuedJob, 32),
 		appControlJobs:     map[string]appControlJob{},
 		meetdWake:          make(chan struct{}, 1),

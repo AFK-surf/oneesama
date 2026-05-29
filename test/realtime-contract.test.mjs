@@ -153,13 +153,14 @@ test("Realtime contract exposes application share tools", () => {
   assert.deepEqual(control.parameters.required, []);
   assert.match(control.description, /Computer Use/);
   assert.match(control.description, /queues the app-control work asynchronously/);
-  assert.match(control.description, /Structured operations are required/);
+  assert.match(control.description, /observe -> plan -> act -> verify/);
+  assert.match(control.description, /Do not invent click\/drag primitives/);
   assert.equal(control.parameters.properties.job_id.type, "string");
   assert.equal(control.parameters.properties.wait.default, false);
   assert.equal(control.parameters.properties.operations.type, "array");
   assert.match(
     control.parameters.properties.operations.description,
-    /instead of sending only a natural-language instruction/,
+    /Optional low-level app-control operations/,
   );
   assert.deepEqual(control.parameters.properties.operations.items.required, ["kind"]);
   assert.ok(control.parameters.properties.operations.items.properties.kind.enum.includes("drag"));
