@@ -194,10 +194,18 @@ function installRealtimeAgentSDKEventHandlers(session, transport) {
     const reason = `agents_sdk.${eventType || type}`;
     if (type === "audio_start") {
       markRealtimeOutputAudioActive(reason);
+      rememberRealtimeValidationCheckpoint("lastOutputAudioStarted", reason, {
+        openaiSessionId: state.connection.openaiSessionId || "",
+        activeResponseId: state.protection.activeResponseId || "",
+      });
       recordTimeline("realtime_input_continuous", { reason });
       return;
     }
     if (type === "audio_stopped" || type === "audio_interrupted") {
+      rememberRealtimeValidationCheckpoint("lastOutputAudioStopped", reason, {
+        openaiSessionId: state.connection.openaiSessionId || "",
+        activeResponseId: state.protection.activeResponseId || "",
+      });
       clearRealtimeOutputAudioActivity(reason);
     }
   };

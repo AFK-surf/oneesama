@@ -96,10 +96,17 @@ function handleRealtimeServerEvent(detail) {
   const event = detail || {};
   if (event.type === "session.created" && event.session?.id) {
     state.connection.openaiSessionId = event.session.id;
+    rememberRealtimeValidationCheckpoint("lastSessionCreated", "session.created", {
+      openaiSessionId: event.session.id,
+    });
     recordTimeline("realtime_session_created", { openaiSessionId: event.session.id });
   }
   if (event.type === "response.created" && event.response?.id) {
     state.protection.activeResponseId = event.response.id;
+    rememberRealtimeValidationCheckpoint("lastResponseCreated", "response.created", {
+      responseId: event.response.id,
+      openaiSessionId: state.connection.openaiSessionId || "",
+    });
     recordTimeline("realtime_input_continuous", { reason: "response-created" });
   }
   if (
@@ -107,10 +114,25 @@ function handleRealtimeServerEvent(detail) {
     event.type === "response.output_audio.delta"
   ) {
     markRealtimeOutputAudioActive(event.type);
+    rememberRealtimeValidationCheckpoint(
+      event.type === "output_audio_buffer.started"
+        ? "lastOutputAudioStarted"
+        : "lastOutputAudioDelta",
+      event.type,
+      {
+        activeResponseId: state.protection.activeResponseId || "",
+        openaiSessionId: state.connection.openaiSessionId || "",
+      },
+    );
     recordTimeline("realtime_input_continuous", { reason: event.type });
   }
   if (event.type === "input_audio_buffer.speech_started") {
     state.protection.lastInputSpeechStartedAt = new Date().toISOString();
+    rememberRealtimeValidationCheckpoint("lastInputSpeechStarted", event.type, {
+      activeResponseId: state.protection.activeResponseId || "",
+      openaiSessionId: state.connection.openaiSessionId || "",
+      outputAudioActive: state.protection.outputAudioActive === true,
+    });
     if (state.protection.outputAudioActive === true) {
       const result = cancelActiveResponse("user_speech_started");
       if (!result.skipped) state.protection.userSpeechCancels += 1;
@@ -131,6 +153,10 @@ function handleRealtimeServerEvent(detail) {
     state.protection.activeResponseId = "";
   }
   if (event.type === "output_audio_buffer.stopped") {
+    rememberRealtimeValidationCheckpoint("lastOutputAudioStopped", event.type, {
+      activeResponseId: state.protection.activeResponseId || "",
+      openaiSessionId: state.connection.openaiSessionId || "",
+    });
     clearRealtimeOutputAudioActivity("output_audio_buffer.stopped");
   }
   if (event.type === "response.cancelled" || event.type === "response.failed") {

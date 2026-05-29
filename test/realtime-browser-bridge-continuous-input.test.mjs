@@ -156,6 +156,69 @@ test("Realtime bridge clears stale output audio when the stopped event is missin
   }
 });
 
+test("Realtime validation checkpoints retain output recovery evidence after timeline churn", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.setContent("<!doctype html><html><body></body></html>");
+    await page.addScriptTag({
+      content: buildRealtimeBrowserInitScript({
+        mode: "webrtc",
+        agentRuntime: "raw",
+        autoConnect: false,
+        tokenUrl: "https://example.test/token",
+        sdpUrl: "https://example.test/sdp",
+        forwardMeetAudioToRealtime: true,
+        includeParticipantAudio: true,
+        captureMeetAudioForTranscript: false,
+        sendSessionUpdateOnConnect: false,
+        outputAudioDoneFallbackMs: 40,
+        outputAudioStaleFallbackMs: 200,
+      }),
+    });
+
+    const result = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const inbound = (type) => {
+        window.dispatchEvent(
+          new CustomEvent("meeting-avatar-realtime-server-event", {
+            detail: { type, response: { id: "resp_checkpoint_churn" } },
+          }),
+        );
+      };
+
+      inbound("response.created");
+      inbound("output_audio_buffer.started");
+      inbound("response.done");
+      await sleep(90);
+      inbound("input_audio_buffer.speech_started");
+      for (let index = 0; index < 150; index += 1) {
+        window.MAB_REALTIME_CLIENT.injectCaptionTurn({
+          speaker: "Peng",
+          streamId: `caption-${index}`,
+          text: `timeline churn ${index}`,
+        });
+      }
+
+      return {
+        timelineLength: window.MAB_REALTIME_BRIDGE.timeline.length,
+        timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
+        checkpoints: window.MAB_REALTIME_BRIDGE.connection.validationCheckpoints,
+      };
+    });
+
+    assert.equal(result.timelineLength, 120);
+    assert.equal(result.timelineTypes.includes("realtime_output_audio_cleared"), false);
+    assert.equal(result.timelineTypes.includes("realtime_input_speech_started"), false);
+    assert.equal(result.checkpoints.lastResponseCreated.detail.responseId, "resp_checkpoint_churn");
+    assert.equal(result.checkpoints.lastOutputAudioStarted.type, "output_audio_buffer.started");
+    assert.equal(result.checkpoints.lastOutputAudioCleared.detail.reason, "response.done_fallback");
+    assert.equal(result.checkpoints.lastInputSpeechStarted.detail.outputAudioActive, false);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("Realtime bridge clears output audio state during connection cleanup", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();

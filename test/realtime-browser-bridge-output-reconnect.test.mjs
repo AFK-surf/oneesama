@@ -248,6 +248,23 @@ test("Realtime reconnect keeps avatar bus attached to Meet sender and clears sta
     assert.equal(result.avatarBusStreams.length, 1);
     assert.ok(result.timelineTypes.includes("realtime_connection_cleanup"));
     assert.ok(result.timelineTypes.includes("remote_audio_route"));
+    assert.equal(
+      result.connection.validationCheckpoints.lastReconnectScheduled.detail.reason,
+      "data_channel_close",
+    );
+    assert.equal(
+      result.connection.validationCheckpoints.lastConnectionCleanup.detail.reason,
+      "data_channel_close",
+    );
+    assert.equal(
+      result.connection.validationCheckpoints.lastOutputAudioCleared.detail.reason,
+      "realtime_connection_data_channel_close",
+    );
+    assert.equal(
+      result.connection.validationCheckpoints.lastOutputAudioDelta.type,
+      "response.output_audio.delta",
+    );
+    assert.equal(result.connection.validationCheckpoints.lastRemoteAudioRoute.detail.ok, true);
     assert.ok(
       result.statsAfterOutput.bytesSent > result.statsBeforeOutput.bytesSent,
       `expected Meet outbound bytes to grow after reconnect; before=${result.statsBeforeOutput.bytesSent} after=${result.statsAfterOutput.bytesSent}`,

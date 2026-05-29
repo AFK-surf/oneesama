@@ -401,11 +401,13 @@ test("Realtime Agents SDK audio lifecycle uses the shared output protection stat
         return {
           protection: { ...window.MAB_REALTIME_BRIDGE.protection },
           syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
+          checkpoints: window.MAB_REALTIME_BRIDGE.connection.validationCheckpoints,
           timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
         };
       });
       assert.equal(started.protection.outputAudioActive, true);
       assert.equal(started.syntheticSpeechActive, true);
+      assert.equal(started.checkpoints.lastOutputAudioStarted.type, "agents_sdk.audio_start");
       assert.ok(started.timelineTypes.includes("realtime_agent_sdk_audio_start"));
 
       const stopped = await page.evaluate(() => {
@@ -413,6 +415,7 @@ test("Realtime Agents SDK audio lifecycle uses the shared output protection stat
         return {
           protection: { ...window.MAB_REALTIME_BRIDGE.protection },
           syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
+          checkpoints: window.MAB_REALTIME_BRIDGE.connection.validationCheckpoints,
           clearReasons: window.MAB_REALTIME_BRIDGE.timeline
             .filter((entry) => entry.type === "realtime_output_audio_cleared")
             .map((entry) => entry.detail.reason),
@@ -420,6 +423,11 @@ test("Realtime Agents SDK audio lifecycle uses the shared output protection stat
       });
       assert.equal(stopped.protection.outputAudioActive, false);
       assert.equal(stopped.syntheticSpeechActive, false);
+      assert.equal(stopped.checkpoints.lastOutputAudioStopped.type, "agents_sdk.audio_stopped");
+      assert.equal(
+        stopped.checkpoints.lastOutputAudioCleared.detail.reason,
+        "agents_sdk.audio_stopped",
+      );
       assert.ok(stopped.clearReasons.includes("agents_sdk.audio_stopped"));
 
       await page.evaluate(() => {
@@ -431,12 +439,17 @@ test("Realtime Agents SDK audio lifecycle uses the shared output protection stat
       const fallback = await page.evaluate(() => ({
         protection: { ...window.MAB_REALTIME_BRIDGE.protection },
         syntheticSpeechActive: window.MAB_AVATAR_AUDIO_BUS.syntheticSpeechActive,
+        checkpoints: window.MAB_REALTIME_BRIDGE.connection.validationCheckpoints,
         clearReasons: window.MAB_REALTIME_BRIDGE.timeline
           .filter((entry) => entry.type === "realtime_output_audio_cleared")
           .map((entry) => entry.detail.reason),
       }));
       assert.equal(fallback.protection.outputAudioActive, false);
       assert.equal(fallback.syntheticSpeechActive, false);
+      assert.equal(
+        fallback.checkpoints.lastOutputAudioCleared.detail.reason,
+        "agents_sdk.audio_start_stale_fallback",
+      );
       assert.ok(fallback.clearReasons.includes("agents_sdk.audio_start_stale_fallback"));
     } finally {
       await browser.close();
@@ -492,10 +505,7 @@ test("Realtime Agents SDK local app-control tools record silent turn policy", as
       assert.equal(toolResult.delivery.policy.reason, "app_control_async_accepted");
       assert.equal(toolResult.delivery.policy.autoRespond, false);
       assert.equal(bridge.turnPolicy.decisions.at(-1).reason, "app_control_async_accepted");
-      assert.equal(
-        bridge.turnPolicy.events.at(-1).type,
-        "app_control.accepted",
-      );
+      assert.equal(bridge.turnPolicy.events.at(-1).type, "app_control.accepted");
       assert.equal(
         bridge.turnPolicy.appControlJobs.job_sdk_app_control_queued.visibility,
         "silent",

@@ -319,6 +319,7 @@ const state = {
     reconnecting: false,
     lastReconnectAt: "",
     lastReconnectReason: "",
+    validationCheckpoints: null as null | Record<string, unknown>,
   },
   transcripts: {
     currentOutput: "",
@@ -468,14 +469,13 @@ function scheduleConnectFailureRetry(error) {
 }
 
 function recordTimeline(type, detail = {}) {
-  state.timeline.push({
+  const entry = {
     ts: new Date().toISOString(),
     type,
-    detail: {
-      session_id: state.sessionId || String(config.sessionId || ""),
-      ...detail,
-    },
-  });
+    detail: { session_id: state.sessionId || String(config.sessionId || ""), ...detail },
+  };
+  state.timeline.push(entry);
+  rememberTimelineValidationCheckpoint(entry);
   state.timeline = state.timeline.slice(-120);
 }
 
