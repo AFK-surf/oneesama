@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 )
 
 const (
@@ -157,8 +159,12 @@ func appControlResultMap(result AppControlResult, screenShare map[string]any) ma
 			status = appControlStatusFailed
 		}
 	}
+	ok := result.OK
+	if status == string(agentrunner.StatusTimeout) {
+		ok = false
+	}
 	out := map[string]any{
-		"ok":          result.OK,
+		"ok":          ok,
 		"provider":    provider,
 		"status":      status,
 		"screenShare": screenShare,
