@@ -17,6 +17,9 @@ Source of decision: `notes/avatar-state-machine-kickoff.md`.
 5. **Identity**: use Peng's provided photorealistic portrait reference. Keep
    face, hair, glasses, blazer, shirt, and pearl necklace consistent across
    generated clips.
+6. **Production order**: Image2 keyframes come before Seedance. Identity,
+   framing, lighting, and mouth-state consistency must be approved on still
+   frames before any video task runs.
 
 ## Runtime Contract
 
@@ -56,29 +59,46 @@ use `idle` and let the HUD communicate non-speaking state.
 | Canvas target    | 16:9, 1280x720 minimum                                                      | 16:9, 1280x720 minimum                                                          |
 | Fallback         | Static reference frame or fallback canvas                                   | Crossfade to idle/static frame if missing                                       |
 
-## Seedance / Generation Brief
+## Image2 Keyframe Gate
 
-Use the same portrait reference and same identity prompt for both clips.
+Seedance must not be the first identity-control step. First generate and review
+still keyframes from the shared portrait reference:
 
-### Shared Identity Prompt
+| State      | Required first frame                | Optional last frame                | Review gate                                                                              |
+| ---------- | ----------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| `idle`     | `oneesama-video-idle-first.png`     | `oneesama-video-idle-last.png`     | Mouth naturally closed; same face, glasses, hair, outfit, lighting, background, and crop |
+| `speaking` | `oneesama-video-speaking-first.png` | `oneesama-video-speaking-last.png` | Mouth slightly open; everything except mouth state matches idle                          |
+
+For v1 seamless loops, prefer one approved canonical keyframe per state and
+reuse/copy it as the last frame if the video backend needs an explicit end
+frame. If separate last frames are generated, they must be nearly identical to
+their matching first frames. Do not send a frame to Seedance if the identity or
+composition drifts at the still-image stage.
+
+### Shared Image2 Identity Prompt
 
 Photorealistic on-camera female meeting avatar, black hair with bangs,
 black-framed glasses, navy blazer, white shirt, pearl necklace, warm intelligent
 presence, clean studio lighting, simple meeting-friendly background, centered
 chest-up framing, no subtitles, no text, no logos, no extra people.
 
+## Seedance / Generation Brief
+
+Use the approved Image2 keyframes, not the raw portrait reference, as the video
+first/last frames.
+
 ### `idle` Motion Prompt
 
-Neutral warm smile, gentle breathing, natural blinking, very small head and
-shoulder movement, attentive but not talking. First and last frames should match
-closely for a seamless loop.
+Animate the approved idle keyframe with gentle breathing, natural blinking, very
+small head and shoulder movement, attentive but not talking. Return to the
+approved last frame if present; otherwise return to the first keyframe.
 
 ### `speaking` Motion Prompt
 
-Same identity and framing. Low-amplitude generic talking mouth movement, subtle
-head motion, friendly expression. The mouth should not be exaggerated and should
-not look like precise lip-sync. First and last frames should match closely for a
-seamless loop.
+Animate the approved speaking keyframe with low-amplitude generic talking mouth
+movement, subtle head motion, and calm focused expression. The mouth should not
+be exaggerated and should not look like precise lip-sync. Return to the approved
+last frame if present; otherwise return to the first keyframe.
 
 ## Implementation Requirements
 
@@ -133,6 +153,7 @@ Run after playground acceptance.
 
 - Peng accepts this matrix as the video-avatar v1 source of truth.
 - `idle` and `speaking` clips exist locally and match the identity reference.
+- Image2 keyframes for `idle` and `speaking` were reviewed before Seedance ran.
 - Video preset loads in the avatar playground.
 - Playground smoke covers video preset selection, audio-active switching, HUD
   coexistence, and fallback.

@@ -251,17 +251,37 @@ ONEESAMA_AVATAR_ASSET_ROOT=tmp/avatar-video npm run dev:avatar-playground
 
 Then open `http://127.0.0.1:18912/?avatar=oneesama-video`.
 
-To generate the two Seedance clips, provide the portrait reference and a
+Production video assets use a two-stage flow: Image2 first, Seedance second.
+Generate and review still keyframes before any video task runs:
+
+```bash
+npm run avatar:video:keyframes -- --ref /path/to/ref.png --out-dir tmp/avatar-video/keyframes
+```
+
+The command writes Image2 prompt files, a manifest, and `REVIEW.md`. Save the
+approved Image2 outputs as:
+
+- `tmp/avatar-video/keyframes/oneesama-video-idle-first.png`
+- `tmp/avatar-video/keyframes/oneesama-video-speaking-first.png`
+- optional `oneesama-video-idle-last.png` and
+  `oneesama-video-speaking-last.png`
+
+For v1 loops, the approved first frame can be reused as the last frame. The gate
+is identity and composition consistency: face, glasses, hair, outfit, lighting,
+background, and crop must match before the frames go to Seedance.
+
+To generate the two Seedance clips, provide approved keyframes plus a
 server-side Seedance/ModelArk key. The script prints only key presence/status,
 never the secret value:
 
 ```bash
-SEEDANCE_API_KEY=... npm run avatar:video:seedance -- --ref /path/to/ref.png --out-dir tmp/avatar-video
+SEEDANCE_API_KEY=... npm run avatar:video:seedance -- --keyframe-dir tmp/avatar-video/keyframes --out-dir tmp/avatar-video
 ```
 
 `ARK_API_KEY` is accepted as a fallback. If the key is missing, the script exits
 before calling the network so the renderer can still be tested with local
-placeholder clips.
+placeholder clips. Direct portrait-reference animation is prototype-only and
+requires the explicit `--allow-ref-direct --ref /path/to/ref.png` flags.
 
 ## 5. Optional Real Integrations
 
