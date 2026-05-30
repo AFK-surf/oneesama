@@ -246,6 +246,23 @@ export interface HiyoriAvatarConfig {
   modelUrl?: string;
   modelFallbackUrls?: string[];
   avatarRenderer?: "live2d" | "vrm" | "3d" | "fallback" | string;
+  videoSources?: Array<{
+    id?: string;
+    label?: string;
+    url?: string;
+    state?: "idle" | "speaking" | string;
+    action?: string;
+    mood?: string;
+    default?: boolean;
+    objectFit?: "cover" | "contain" | string;
+    background?: string;
+  }>;
+  videoIdleUrl?: string;
+  videoSpeakingUrl?: string;
+  videoObjectFit?: "cover" | "contain" | string;
+  videoCrossfadeMs?: number;
+  videoSpeakingDebounceMs?: number;
+  videoMuted?: boolean;
   vrmModelUrl?: string;
   vrmModelFallbackUrls?: string[];
   threeModuleUrl?: string;

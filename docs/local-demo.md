@@ -240,6 +240,29 @@ For the video-avatar replacement direction, use
 source of truth for required states, assets, lip-sync policy, and playground/live
 acceptance.
 
+The v1 video preset is `oneesama-video`. It expects two muted clips named
+`oneesama-video-idle-loop.mp4` and `oneesama-video-speaking-loop.mp4`. For local
+iteration, keep generated/private clips out of git and point the playground at
+an asset directory:
+
+```bash
+ONEESAMA_AVATAR_ASSET_ROOT=tmp/avatar-video npm run dev:avatar-playground
+```
+
+Then open `http://127.0.0.1:18912/?avatar=oneesama-video`.
+
+To generate the two Seedance clips, provide the portrait reference and a
+server-side Seedance/ModelArk key. The script prints only key presence/status,
+never the secret value:
+
+```bash
+SEEDANCE_API_KEY=... npm run avatar:video:seedance -- --ref /path/to/ref.png --out-dir tmp/avatar-video
+```
+
+`ARK_API_KEY` is accepted as a fallback. If the key is missing, the script exits
+before calling the network so the renderer can still be tested with local
+placeholder clips.
+
 ## 5. Optional Real Integrations
 
 Set these only when you are ready to connect real providers:

@@ -1,5 +1,9 @@
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { extname, relative, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { HiyoriAvatarConfig } from "../browser-runtime-types.ts";
 import { buildAvatarInitScript } from "../avatar/init-script-builder.ts";
 
@@ -50,6 +54,9 @@ type StatePreset = {
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 18912;
+const DEFAULT_AVATAR_ASSET_ROOT = fileURLToPath(new URL("../../assets/avatar/", import.meta.url));
+const VIDEO_IDLE_URL = "/assets/avatar/oneesama-video-idle-loop.mp4";
+const VIDEO_SPEAKING_URL = "/assets/avatar/oneesama-video-speaking-loop.mp4";
 
 const AVATAR_PRESETS: AvatarPreset[] = [
   {
@@ -75,6 +82,40 @@ const AVATAR_PRESETS: AvatarPreset[] = [
     icon: "3D",
     note: "Experimental 3D/VRM renderer; falls back if WebGL/deps are unavailable.",
     avatar: { avatarRenderer: "vrm", disableLive2D: true, background: "#11161f" },
+  },
+  {
+    id: "oneesama-video",
+    name: "Oneesama Video",
+    shortName: "Video",
+    icon: "V",
+    note: "Two-state muted video avatar: idle loop plus coarse speaking loop.",
+    avatar: {
+      avatarRenderer: "video",
+      background: "#0b1018",
+      videoObjectFit: "cover",
+      videoMuted: true,
+      videoCrossfadeMs: 220,
+      videoSpeakingDebounceMs: 220,
+      videoSources: [
+        {
+          id: "idle",
+          label: "Idle loop",
+          state: "idle",
+          url: VIDEO_IDLE_URL,
+          objectFit: "cover",
+          background: "#0b1018",
+          default: true,
+        },
+        {
+          id: "speaking",
+          label: "Speaking loop",
+          state: "speaking",
+          url: VIDEO_SPEAKING_URL,
+          objectFit: "cover",
+          background: "#0b1018",
+        },
+      ],
+    },
   },
 ];
 
@@ -232,6 +273,48 @@ function jsResponse(res: ServerResponse, source: string) {
     "cache-control": "no-store",
   });
   res.end(source);
+}
+
+function avatarAssetRoots() {
+  return [
+    process.env.ONEESAMA_AVATAR_ASSET_ROOT,
+    process.env.MAB_AVATAR_ASSET_ROOT,
+    DEFAULT_AVATAR_ASSET_ROOT,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .map((value) => resolvePath(value));
+}
+
+function videoContentType(filePath: string) {
+  switch (extname(filePath).toLowerCase()) {
+    case ".webm":
+      return "video/webm";
+    case ".mov":
+      return "video/quicktime";
+    default:
+      return "video/mp4";
+  }
+}
+
+async function assetResponse(res: ServerResponse, pathname: string) {
+  const relativePath = decodeURIComponent(pathname.replace(/^\/assets\/avatar\/+/, ""));
+  for (const root of avatarAssetRoots()) {
+    const filePath = resolvePath(root, relativePath);
+    const rel = relative(root, filePath);
+    if (!rel || rel.startsWith("..") || rel.includes("..")) continue;
+    const info = await stat(filePath).catch(() => null);
+    if (!info?.isFile()) continue;
+    res.writeHead(200, {
+      "content-type": videoContentType(filePath),
+      "content-length": String(info.size),
+      "cache-control": "public, max-age=60",
+      "accept-ranges": "bytes",
+    });
+    createReadStream(filePath).pipe(res);
+    return;
+  }
+  return jsonResponse(res, 404, { ok: false, error: "avatar_asset_not_found" });
 }
 
 function selectedAvatarPreset(id: string | null | undefined) {
@@ -855,6 +938,9 @@ export function createAvatarPlaygroundServer(
       }
       if (req.method === "GET" && url.pathname === "/runtime/init.js") {
         return jsResponse(res, buildInitSource(options, avatarPreset));
+      }
+      if (req.method === "GET" && url.pathname.startsWith("/assets/avatar/")) {
+        return assetResponse(res, url.pathname);
       }
       if (req.method === "GET" && url.pathname === "/runtime/status") {
         return jsonResponse(res, 200, {

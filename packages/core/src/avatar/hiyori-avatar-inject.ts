@@ -1,6 +1,7 @@
 import { createAvatarAudioBus } from "./hiyori-avatar-audio-bus.js";
 import { createAvatarHud } from "./hiyori-avatar-hud.js";
 import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.js";
+import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
 (() => {
   if (window.__meetingAvatarBotInjected) return;
   if (window.top !== window) return;
@@ -33,6 +34,13 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
     background: "#f7f8fb",
     layout: "face",
     avatarRenderer: "live2d",
+    videoSources: [],
+    videoIdleUrl: "",
+    videoSpeakingUrl: "",
+    videoObjectFit: "cover",
+    videoCrossfadeMs: 220,
+    videoSpeakingDebounceMs: 180,
+    videoMuted: true,
     disableLive2D: false,
     deferRendererUntilExplicitStart: false,
     enableVisualTestHooks: false,
@@ -366,6 +374,11 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
     renderer: "initializing",
     live2dLoaded: false,
     vrmLoaded: false,
+    videoLoaded: false,
+    videoFrames: 0,
+    videoState: "idle",
+    videoSources: [],
+    videoMouthLevel: 0,
     fallbackReason: "",
     modelUrl: config.modelUrl,
     vrmModelUrl: config.vrmModelUrl,
@@ -586,7 +599,7 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
   function normalizeRenderer(value) {
     const renderer = String(value || "live2d").toLowerCase();
     if (renderer === "3d") return "vrm";
-    return ["live2d", "vrm", "fallback"].includes(renderer) ? renderer : "live2d";
+    return ["live2d", "vrm", "video", "fallback"].includes(renderer) ? renderer : "live2d";
   }
 
   async function loadThreeVRMDeps() {
@@ -908,12 +921,28 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
     const requestedRenderer = normalizeRenderer(config.avatarRenderer);
     let live2dLoaded = false;
     let vrmLoaded = false;
+    let videoLoaded = false;
     let fallbackReason =
       requestedRenderer === "fallback"
         ? "fallback_requested"
         : config.disableLive2D && requestedRenderer === "live2d"
           ? "disabled_by_config"
           : "";
+
+    if (requestedRenderer === "video") {
+      try {
+        await createVideoAvatarRenderer(canvas, {
+          config,
+          avatarController,
+          rendererState,
+          drawFallback,
+        });
+        videoLoaded = true;
+      } catch (error) {
+        fallbackReason = String(error?.message || error);
+        log("Video avatar load failed; using fallback canvas", error?.message);
+      }
+    }
 
     if (requestedRenderer === "vrm") {
       try {
@@ -990,11 +1019,12 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
       }
     }
 
-    if (!live2dLoaded && !vrmLoaded) {
+    if (!live2dLoaded && !vrmLoaded && !videoLoaded) {
       Object.assign(rendererState, {
         renderer: "fallback",
         live2dLoaded: false,
         vrmLoaded: false,
+        videoLoaded: false,
         fallbackReason: fallbackReason || "live2d_not_loaded",
       });
       const ctx = canvas.getContext("2d");
@@ -1078,6 +1108,7 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
       rendererMode: window.MAB_AVATAR_RENDERER.renderer,
       live2dLoaded: window.MAB_AVATAR_RENDERER.live2dLoaded,
       vrmLoaded: window.MAB_AVATAR_RENDERER.vrmLoaded,
+      videoLoaded: window.MAB_AVATAR_RENDERER.videoLoaded,
       fallbackReason: window.MAB_AVATAR_RENDERER.fallbackReason,
       modelUrl: config.modelUrl,
       vrmModelUrl: config.vrmModelUrl,
@@ -1107,6 +1138,7 @@ import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.j
           rendererMode: window.MAB_AVATAR_RENDERER.renderer,
           live2dLoaded: window.MAB_AVATAR_RENDERER.live2dLoaded,
           vrmLoaded: window.MAB_AVATAR_RENDERER.vrmLoaded,
+          videoLoaded: window.MAB_AVATAR_RENDERER.videoLoaded,
           fallbackReason: window.MAB_AVATAR_RENDERER.fallbackReason,
           modelUrl: config.modelUrl,
           vrmModelUrl: config.vrmModelUrl,

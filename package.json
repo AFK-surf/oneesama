@@ -67,6 +67,7 @@
     "smoke:local-browser-surface": "node --import tsx --test --test-reporter=spec test/local-browser-surface.test.mjs",
     "smoke:caption-local-dialog": "tsx src/cli.ts caption-local-dialog-smoke",
     "smoke:avatar": "tsx src/cli.ts avatar-smoke",
+    "avatar:video:seedance": "node scripts/avatar-video-seedance-generate.mjs",
     "smoke:avatar-playground": "node --import tsx --test --test-reporter=spec test/avatar-playground.test.mjs",
     "smoke:meet": "tsx src/cli.ts meet-smoke",
     "smoke:meet-contract": "tsx src/cli.ts meet-contract-smoke",

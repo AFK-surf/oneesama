@@ -16,6 +16,8 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
     });
     const renderer = await page.evaluate(() => window.MAB_AVATAR_RENDERER?.renderer);
     assert.equal(renderer, "fallback");
+    const status = await (await fetch(`${started.url}runtime/status`)).json();
+    assert.ok(status.avatars.some((avatar) => avatar.id === "oneesama-video"));
     const listening = await page.evaluate(() =>
       window.MAB_AVATAR_PLAYGROUND.applyPreset("listening"),
     );
