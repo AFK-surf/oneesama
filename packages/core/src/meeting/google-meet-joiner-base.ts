@@ -1,8 +1,9 @@
 import { createServer, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { resolve as pathResolve } from "node:path";
+import { extname, isAbsolute, relative, resolve as pathResolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ScreenShareState } from "../browser-runtime-types.ts";
 import type { SpeakerIdentityResolution } from "../realtime/speaker-identity.ts";
@@ -405,6 +406,171 @@ export interface LocalMultipartFrameServer {
   framePath: string;
   stop: () => void;
   clientCount: () => number;
+}
+
+export interface LocalStaticAssetServer {
+  baseUrl: string;
+  port: number;
+  token: string;
+  root: string;
+  urlFor: (relativePath: string) => string;
+  stop: () => void;
+}
+
+function mediaTypeForPath(pathname: string) {
+  switch (extname(pathname).toLowerCase()) {
+    case ".mp4":
+      return "video/mp4";
+    case ".webm":
+      return "video/webm";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function safeStaticAssetPath(root: string, relativePath: string) {
+  const clean = decodeURIComponent(relativePath).replace(/^\/+/, "");
+  const absolute = pathResolve(root, clean);
+  const fromRoot = relative(root, absolute);
+  if (!fromRoot || fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
+    throw new Error("asset_path_outside_root");
+  }
+  return { absolute, relative: fromRoot.split(sep).join("/") };
+}
+
+function parseRangeHeader(header: string | undefined, size: number) {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return null;
+  const startRaw = match[1] || "";
+  const endRaw = match[2] || "";
+  let start = startRaw ? Number.parseInt(startRaw, 10) : 0;
+  let end = endRaw ? Number.parseInt(endRaw, 10) : size - 1;
+  if (!startRaw && endRaw) {
+    const suffixLength = Math.max(0, Number.parseInt(endRaw, 10) || 0);
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+    return null;
+  }
+  return {
+    start: Math.min(start, size - 1),
+    end: Math.min(end, size - 1),
+  };
+}
+
+export async function startLocalStaticAssetServer(input: {
+  root: string;
+  pathPrefix?: string;
+}): Promise<LocalStaticAssetServer> {
+  const root = pathResolve(input.root);
+  const rootInfo = await stat(root);
+  if (!rootInfo.isDirectory()) {
+    throw new Error(`Avatar asset root is not a directory: ${root}`);
+  }
+  const token = randomUUID();
+  const prefix = `${input.pathPrefix || "/avatar-assets"}/${token}`;
+  let stopped = false;
+
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url || "/", "http://127.0.0.1");
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "Range",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, corsHeaders);
+      res.end();
+      return;
+    }
+    if ((req.method !== "GET" && req.method !== "HEAD") || !url.pathname.startsWith(prefix)) {
+      res.writeHead(404, corsHeaders);
+      res.end("not found");
+      return;
+    }
+    try {
+      const { absolute, relative: relativePath } = safeStaticAssetPath(
+        root,
+        url.pathname.slice(prefix.length),
+      );
+      const info = await stat(absolute);
+      if (!info.isFile()) {
+        res.writeHead(404, corsHeaders);
+        res.end("not found");
+        return;
+      }
+      const range = parseRangeHeader(req.headers.range, info.size);
+      const contentType = mediaTypeForPath(relativePath);
+      if (range) {
+        const length = range.end - range.start + 1;
+        res.writeHead(206, {
+          ...corsHeaders,
+          "Accept-Ranges": "bytes",
+          "Content-Type": contentType,
+          "Content-Length": length,
+          "Content-Range": `bytes ${range.start}-${range.end}/${info.size}`,
+        });
+        if (req.method === "HEAD") {
+          res.end();
+          return;
+        }
+        createReadStream(absolute, { start: range.start, end: range.end }).pipe(res);
+        return;
+      }
+      res.writeHead(200, {
+        ...corsHeaders,
+        "Accept-Ranges": "bytes",
+        "Content-Type": contentType,
+        "Content-Length": info.size,
+      });
+      if (req.method === "HEAD") {
+        res.end();
+        return;
+      }
+      createReadStream(absolute).pipe(res);
+    } catch {
+      res.writeHead(404, corsHeaders);
+      res.end("not found");
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const baseUrl = `http://127.0.0.1:${port}${prefix}`;
+  return {
+    baseUrl,
+    port,
+    token,
+    root,
+    urlFor: (relativePath: string) => {
+      const safe = safeStaticAssetPath(root, relativePath).relative;
+      return `${baseUrl}/${safe
+        .split("/")
+        .map((part) => encodeURIComponent(part))
+        .join("/")}`;
+    },
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      server.close();
+    },
+  };
 }
 
 export async function startLocalMultipartFrameServer(input: {

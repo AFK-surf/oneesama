@@ -11,7 +11,7 @@ import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
 import * as audio from "./meeting-audio-inputs.ts";
 import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-prompts.ts";
 import { buildRealtimeInstructions, buildRealtimeSessionConfig, type RealtimeCurrentUser, realtimeToolSchemas } from "../realtime/realtime-contract.ts";
-import { DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS, DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT, DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH, assertMeetUrl, createDiagnostics, gotoMeetWithRetry, installPageDiagnostics, loadPlaywright, normalizeMeetProfileMode, nowIso, saveDiagnostics, shouldMuteMeetLocalPlayback, takeScreenshot, type GoogleMeetJoinInput, type GoogleMeetJoinerOptions, type LocalMultipartFrameServer, type MeetChatInput } from "./google-meet-joiner-base.ts";
+import { DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS, DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT, DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH, assertMeetUrl, createDiagnostics, gotoMeetWithRetry, installPageDiagnostics, loadPlaywright, normalizeMeetProfileMode, nowIso, saveDiagnostics, shouldMuteMeetLocalPlayback, startLocalStaticAssetServer, takeScreenshot, type GoogleMeetJoinInput, type GoogleMeetJoinerOptions, type LocalMultipartFrameServer, type LocalStaticAssetServer, type MeetChatInput } from "./google-meet-joiner-base.ts";
 import { clickFirstVisible, collectButtonInventory } from "./google-meet-joiner-ui.ts";
 import { buildMeetingAwarenessState, clickMeetJoinButton, compactCaptionState, compactRuntimeState, evaluateAvatarAudio, evaluateAvatarReady, evaluateFixtureState, evaluateLocalDialogState, evaluateMeetPageState, evaluateRealtimeBridgeState, evaluateScreenShareState, evaluateWorkerResultBridgeState, fillGuestName, logMeetingAwarenessDebug, meetingAwarenessSignature, openMeetPeoplePanelForAwareness, publishMeetingAwarenessToPage, startAvatarRenderer } from "./google-meet-joiner-runtime-state.ts";
 import { createGoogleMeetShareActions } from "./google-meet-joiner-share-actions.ts";
@@ -128,6 +128,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const previous = active;
     active = null;
     stopActiveMacWindowCapture(reason);
+    previous.avatarAssetServer?.stop();
     previous.diagnostics?.record("stop", { reason });
     try {
       const browserStop = previous.page?.isClosed?.()
@@ -362,6 +363,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       recorder: recordMeeting ? recorder : null,
       realtimeAudioCapture,
       realtimeRecappiAudioInput,
+      avatarAssetServer: null as LocalStaticAssetServer | null,
       captionCapture: null,
     };
     const browserRecord = await rememberActiveBrowser(browser, sessionId, meetUrl);
@@ -403,6 +405,77 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           config,
         );
     }
+    const requestedAvatarRenderer = input.avatarRenderer || config.avatarRenderer;
+    const avatarConfig = {
+      modelUrl: input.avatarModelUrl || config.avatarModelUrl,
+      modelFallbackUrls: config.avatarModelFallbackUrls,
+      avatarRenderer: requestedAvatarRenderer,
+      vrmModelUrl: input.avatarVRMModelUrl || config.avatarVRMModelUrl,
+      vrmModelFallbackUrls: config.avatarVRMModelFallbackUrls,
+      live2dDepsDir: input.avatarDepsDir || config.avatarDepsDir,
+      layout: input.avatarLayout || config.avatarLayout,
+      botName,
+      disableLive2D: Boolean(input.disableLive2D),
+      deferRendererUntilExplicitStart:
+        input.deferAvatarRendererUntilJoined !== false && installAvatar,
+      canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1920),
+      canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 1080),
+      captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 30),
+    };
+    if (String(requestedAvatarRenderer || "").toLowerCase() === "video" && installAvatar) {
+      const assetServer = await startLocalStaticAssetServer({
+        root: config.avatarAssetRoot,
+        pathPrefix: "/avatar-assets",
+      });
+      active = {
+        ...active,
+        avatarAssetServer: assetServer,
+      };
+      Object.assign(avatarConfig, {
+        background: "#0b1018",
+        videoObjectFit: "cover",
+        videoMuted: true,
+        videoCrossfadeMs: 220,
+        videoSpeakingDebounceMs: 220,
+        videoChromaKey: {
+          enabled: true,
+          keyColor: "#00ff00",
+          similarity: 0.22,
+          smoothness: 0.06,
+          minGreen: 45,
+          minDominance: 18,
+          spill: 0.82,
+          spillSoftness: 10,
+          matteErodePx: 1,
+          matteFeatherPx: 1,
+        },
+        videoSources: [
+          {
+            id: "idle",
+            label: "Idle loop",
+            state: "idle",
+            url: assetServer.urlFor(config.avatarVideoIdlePath),
+            objectFit: "cover",
+            background: "#0b1018",
+            default: true,
+          },
+          {
+            id: "speaking",
+            label: "Speaking loop",
+            state: "speaking",
+            url: assetServer.urlFor(config.avatarVideoSpeakingPath),
+            objectFit: "cover",
+            background: "#0b1018",
+          },
+        ],
+      });
+      diagnostics.record("avatar_video_assets", {
+        root: assetServer.root,
+        port: assetServer.port,
+        idlePath: config.avatarVideoIdlePath,
+        speakingPath: config.avatarVideoSpeakingPath,
+      });
+    }
     const runtimeInitScripts = buildAvatarRuntimeInitScripts({
       sessionId,
       botName,
@@ -413,22 +486,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       installLocalDialogBridge,
       installScreenShareBridge,
       installWorkerResultBridge,
-      avatar: {
-        modelUrl: input.avatarModelUrl || config.avatarModelUrl,
-        modelFallbackUrls: config.avatarModelFallbackUrls,
-        avatarRenderer: input.avatarRenderer || config.avatarRenderer,
-        vrmModelUrl: input.avatarVRMModelUrl || config.avatarVRMModelUrl,
-        vrmModelFallbackUrls: config.avatarVRMModelFallbackUrls,
-        live2dDepsDir: input.avatarDepsDir || config.avatarDepsDir,
-        layout: input.avatarLayout || config.avatarLayout,
-        botName,
-        disableLive2D: Boolean(input.disableLive2D),
-        deferRendererUntilExplicitStart:
-          input.deferAvatarRendererUntilJoined !== false && installAvatar,
-        canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1920),
-        canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 1080),
-        captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 30),
-      },
+      avatar: avatarConfig,
       realtime: {
         mode: realtimeBridgeMode,
         agentRuntime: input.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime,

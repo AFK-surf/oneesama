@@ -1,3 +1,9 @@
+import { fileURLToPath } from "node:url";
+
+const DEFAULT_AVATAR_ASSET_ROOT = fileURLToPath(new URL("../assets/avatar/", import.meta.url));
+const DEFAULT_VIDEO_IDLE_PATH = "v1-green/oneesama-video-idle-loop-subtle.mp4";
+const DEFAULT_VIDEO_SPEAKING_PATH = "v1-green/oneesama-video-speaking-loop-slit.mp4";
+
 export function getRuntimeConfig(env = process.env) {
   const splitList = (value = "") =>
     String(value || "")
@@ -168,13 +174,15 @@ export function getRuntimeConfig(env = process.env) {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    avatarRenderer: env.MAB_AVATAR_RENDERER || "live2d",
+    avatarRenderer: env.MAB_AVATAR_RENDERER || "video",
     avatarVRMModelUrl:
       env.MAB_AVATAR_VRM_MODEL_URL ||
       "https://raw.githubusercontent.com/trinhtanphat/AMI-Chat-AI/main/public/models/3d/Sendagaya_Shibu.vrm",
     avatarVRMModelFallbackUrls: splitList(env.MAB_AVATAR_VRM_MODEL_FALLBACK_URLS || ""),
     avatarDepsDir: env.MAB_AVATAR_DEPS_DIR || "",
-    avatarAssetRoot: env.MAB_AVATAR_ASSET_ROOT || "",
+    avatarAssetRoot: env.MAB_AVATAR_ASSET_ROOT || DEFAULT_AVATAR_ASSET_ROOT,
+    avatarVideoIdlePath: env.MAB_AVATAR_VIDEO_IDLE_PATH || DEFAULT_VIDEO_IDLE_PATH,
+    avatarVideoSpeakingPath: env.MAB_AVATAR_VIDEO_SPEAKING_PATH || DEFAULT_VIDEO_SPEAKING_PATH,
     avatarLayout: env.MAB_AVATAR_LAYOUT || "face",
     avatarCanvasWidth: Number(env.MAB_AVATAR_CANVAS_WIDTH || 1920),
     avatarCanvasHeight: Number(env.MAB_AVATAR_CANVAS_HEIGHT || 1080),
