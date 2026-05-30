@@ -235,6 +235,11 @@ Open the printed URL (defaults to `http://127.0.0.1:18912/`). The playground loa
 npm run smoke:avatar-playground
 ```
 
+For the video-avatar replacement direction, use
+[`docs/avatar-video-state-matrix.md`](./avatar-video-state-matrix.md) as the
+source of truth for required states, assets, lip-sync policy, and playground/live
+acceptance.
+
 ## 5. Optional Real Integrations
 
 Set these only when you are ready to connect real providers:
