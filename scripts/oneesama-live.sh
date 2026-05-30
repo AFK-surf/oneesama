@@ -9,9 +9,9 @@ Usage:
 Options:
   --env <path>          Source an env file with allexport enabled. Repeatable.
                         Defaults to ONEESAMA_LIVE_ENV_FILES, or:
-                        /private/tmp/oneesama-r24-a-window/live-env.sh
-                        /tmp/oneesama-live-env-from-proc.sh
-                        /tmp/oneesama-workspace-triage-policy.sh
+                        ${XDG_CONFIG_HOME:-$HOME/.config}/oneesama/live-env/oneesama-r24-a-window/live-env.sh
+                        ${XDG_CONFIG_HOME:-$HOME/.config}/oneesama/live-env/oneesama-live-env-from-proc.sh
+                        ${XDG_CONFIG_HOME:-$HOME/.config}/oneesama/live-env/oneesama-workspace-triage-policy.sh
   --bin <path>          oneesama binary path. Default: ./oneesama
   --preflight-only      Load env and validate required exported tokens, then exit.
   --check-pid <pid>     Verify the already-started process still has required env.
@@ -93,7 +93,16 @@ if [[ ${#env_files[@]} -eq 0 ]]; then
     # shellcheck disable=SC2206
     env_files=(${ONEESAMA_LIVE_ENV_FILES})
   else
-    default_env_dir="${ONEESAMA_LIVE_DEFAULT_ENV_DIR:-/tmp}"
+    if [[ -n "${ONEESAMA_LIVE_DEFAULT_ENV_DIR:-}" ]]; then
+      default_env_dir="${ONEESAMA_LIVE_DEFAULT_ENV_DIR}"
+    else
+      config_home="${XDG_CONFIG_HOME:-${HOME:-}}"
+      [[ -n "$config_home" ]] || die "HOME or XDG_CONFIG_HOME is required to locate default live env files"
+      if [[ -z "${XDG_CONFIG_HOME:-}" ]]; then
+        config_home="${config_home}/.config"
+      fi
+      default_env_dir="${config_home}/oneesama/live-env"
+    fi
     env_files=(
       "${default_env_dir}/oneesama-r24-a-window/live-env.sh"
       "${default_env_dir}/oneesama-live-env-from-proc.sh"

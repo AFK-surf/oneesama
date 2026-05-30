@@ -89,6 +89,46 @@ func TestOneesamaLivePreflightLoadsDefaultWorkspacePolicyFile(t *testing.T) {
 	}
 }
 
+func TestOneesamaLivePreflightDefaultsToPersistentConfigEnvDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	defaultEnvDir := filepath.Join(home, ".config", "oneesama", "live-env")
+	if err := os.MkdirAll(filepath.Join(defaultEnvDir, "oneesama-r24-a-window"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(defaultEnvDir, "oneesama-r24-a-window", "live-env.sh"), strings.Join([]string{
+		"SLACK_BOT_TOKEN=xoxb-test",
+		"SLACK_APP_TOKEN=xapp-test",
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_PERSONA_RUNTIME=oneesama-pi",
+		"ONEESAMA_PERSONA_RUNTIME_MODE=live",
+		"ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=false",
+		"ONEESAMA_PI_API_KEY=test-key",
+		"",
+	}, "\n"))
+	writeFile(t, filepath.Join(defaultEnvDir, "oneesama-workspace-triage-policy.sh"), strings.Join([]string{
+		"ONEESAMA_SLACK_TRIAGE_FOREGROUND_CHAIN=pi_first_live",
+		"ONEESAMA_SLACK_TRIAGE_WORKSPACE_POLICY='AI agent news gets concise workspace-aware comments'",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScriptWithEnv(t, []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+	}, "--preflight-only", "slack-agent")
+	if err != nil {
+		t.Fatalf("oneesama-live preflight failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "source env file with allexport: "+filepath.Join(defaultEnvDir, "oneesama-workspace-triage-policy.sh")) {
+		t.Fatalf("output = %s, want persistent default env dir", output)
+	}
+	if strings.Contains(output, "/tmp/oneesama-") || strings.Contains(output, "/private/tmp/oneesama-") {
+		t.Fatalf("output = %s, should not use tmp defaults", output)
+	}
+}
+
 func TestOneesamaLivePreflightFailsMissingProviderToken(t *testing.T) {
 	t.Parallel()
 

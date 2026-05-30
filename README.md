@@ -82,6 +82,11 @@ scripts/oneesama-live.sh --preflight-only slack-agent
 scripts/oneesama-live.sh --check-pid "$PID" slack-agent
 ```
 
+By default the wrapper looks for live env files under the persistent repo-external
+directory `${XDG_CONFIG_HOME:-$HOME/.config}/oneesama/live-env/`, not `/tmp`.
+Use `ONEESAMA_LIVE_DEFAULT_ENV_DIR` or repeated `--env <path>` only for an
+explicit override.
+
 Minimal live Slack env:
 
 ```bash
