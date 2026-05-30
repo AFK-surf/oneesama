@@ -263,6 +263,18 @@ export interface HiyoriAvatarConfig {
   videoCrossfadeMs?: number;
   videoSpeakingDebounceMs?: number;
   videoMuted?: boolean;
+  videoChromaKey?: {
+    enabled?: boolean;
+    keyColor?: string;
+    similarity?: number;
+    smoothness?: number;
+    minGreen?: number;
+    minDominance?: number;
+    spill?: number;
+    spillSoftness?: number;
+    matteErodePx?: number;
+    matteFeatherPx?: number;
+  };
   vrmModelUrl?: string;
   vrmModelFallbackUrls?: string[];
   threeModuleUrl?: string;

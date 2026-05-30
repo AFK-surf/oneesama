@@ -240,9 +240,10 @@ For the video-avatar replacement direction, use
 source of truth for required states, assets, lip-sync policy, and playground/live
 acceptance.
 
-The v1 video preset is `oneesama-video`. It expects two muted clips named
-`oneesama-video-idle-loop.mp4` and `oneesama-video-speaking-loop.mp4`. For local
-iteration, keep generated/private clips out of git and point the playground at
+The v1 video preset is `oneesama-video`. It points at two muted green-screen
+clips under `v1-green/`: `oneesama-video-idle-loop-subtle.mp4` and
+`oneesama-video-speaking-loop-slit.mp4`. The renderer chroma-keys those clips at
+runtime, so keep generated/private clips out of git and point the playground at
 an asset directory:
 
 ```bash

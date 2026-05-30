@@ -55,8 +55,8 @@ type StatePreset = {
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 18912;
 const DEFAULT_AVATAR_ASSET_ROOT = fileURLToPath(new URL("../../assets/avatar/", import.meta.url));
-const VIDEO_IDLE_URL = "/assets/avatar/oneesama-video-idle-loop.mp4";
-const VIDEO_SPEAKING_URL = "/assets/avatar/oneesama-video-speaking-loop.mp4";
+const VIDEO_IDLE_URL = "/assets/avatar/v1-green/oneesama-video-idle-loop-subtle.mp4";
+const VIDEO_SPEAKING_URL = "/assets/avatar/v1-green/oneesama-video-speaking-loop-slit.mp4";
 
 const AVATAR_PRESETS: AvatarPreset[] = [
   {
@@ -96,6 +96,18 @@ const AVATAR_PRESETS: AvatarPreset[] = [
       videoMuted: true,
       videoCrossfadeMs: 220,
       videoSpeakingDebounceMs: 220,
+      videoChromaKey: {
+        enabled: true,
+        keyColor: "#00ff00",
+        similarity: 0.22,
+        smoothness: 0.06,
+        minGreen: 45,
+        minDominance: 18,
+        spill: 0.82,
+        spillSoftness: 10,
+        matteErodePx: 1,
+        matteFeatherPx: 1,
+      },
       videoSources: [
         {
           id: "idle",

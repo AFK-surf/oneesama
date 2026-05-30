@@ -15,12 +15,62 @@ type VideoRendererOptions = {
   drawFallback(ctx: CanvasRenderingContext2D, t?: number): void;
 };
 
+type RGB = { r: number; g: number; b: number };
+type PixelData = Uint8ClampedArray<ArrayBufferLike>;
+
+type VideoChromaKeyConfig = {
+  enabled: boolean;
+  keyColor: RGB;
+  similarity: number;
+  smoothness: number;
+  minGreen: number;
+  minDominance: number;
+  spill: number;
+  spillSoftness: number;
+  matteErodePx: number;
+  matteFeatherPx: number;
+};
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Number(value) || 0));
 }
 
+function parseColor(value: unknown, fallback: RGB): RGB {
+  const text = String(value || "").trim();
+  const hex = text.startsWith("#") ? text.slice(1) : text;
+  if (/^[0-9a-f]{6}$/iu.test(hex)) {
+    return {
+      r: Number.parseInt(hex.slice(0, 2), 16),
+      g: Number.parseInt(hex.slice(2, 4), 16),
+      b: Number.parseInt(hex.slice(4, 6), 16),
+    };
+  }
+  return fallback;
+}
+
+function smoothstep(edge0: number, edge1: number, value: number) {
+  const t = clamp((value - edge0) / Math.max(0.0001, edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 function normalizeObjectFit(value: unknown): "cover" | "contain" {
   return String(value || "cover").toLowerCase() === "contain" ? "contain" : "cover";
+}
+
+function normalizeChromaKeyConfig(config: Record<string, any>): VideoChromaKeyConfig {
+  const raw = config.videoChromaKey || {};
+  return {
+    enabled: Boolean(raw.enabled),
+    keyColor: parseColor(raw.keyColor || raw.color || "#00ff00", { r: 0, g: 255, b: 0 }),
+    similarity: clamp(raw.similarity ?? 0.22, 0.01, 0.8),
+    smoothness: clamp(raw.smoothness ?? 0.06, 0.001, 0.4),
+    minGreen: clamp(raw.minGreen ?? 45, 0, 255),
+    minDominance: clamp(raw.minDominance ?? 18, 0, 255),
+    spill: clamp(raw.spill ?? 0.78, 0, 1),
+    spillSoftness: clamp(raw.spillSoftness ?? 10, 0, 80),
+    matteErodePx: Math.round(clamp(raw.matteErodePx ?? 1, 0, 3)),
+    matteFeatherPx: Math.round(clamp(raw.matteFeatherPx ?? 1, 0, 3)),
+  };
 }
 
 function normalizeVideoSources(config: Record<string, any>): VideoAvatarSource[] {
@@ -53,12 +103,120 @@ function normalizeVideoSources(config: Record<string, any>): VideoAvatarSource[]
   return sources;
 }
 
+function erodeAlpha(source: PixelData, width: number, height: number, radius: number) {
+  if (radius <= 0) return source;
+  const next = new Uint8ClampedArray(source);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let min = 255;
+      for (let yy = Math.max(0, y - radius); yy <= Math.min(height - 1, y + radius); yy += 1) {
+        const row = yy * width;
+        for (let xx = Math.max(0, x - radius); xx <= Math.min(width - 1, x + radius); xx += 1) {
+          const value = source[(row + xx) * 4 + 3] || 0;
+          if (value < min) min = value;
+        }
+      }
+      next[(y * width + x) * 4 + 3] = min;
+    }
+  }
+  return next;
+}
+
+function featherAlpha(source: PixelData, width: number, height: number, radius: number) {
+  if (radius <= 0) return source;
+  const next = new Uint8ClampedArray(source);
+  const diameter = radius * 2 + 1;
+  const maxSamples = diameter * diameter;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let sum = 0;
+      let count = 0;
+      for (let yy = Math.max(0, y - radius); yy <= Math.min(height - 1, y + radius); yy += 1) {
+        const row = yy * width;
+        for (let xx = Math.max(0, x - radius); xx <= Math.min(width - 1, x + radius); xx += 1) {
+          sum += source[(row + xx) * 4 + 3] || 0;
+          count += 1;
+        }
+      }
+      next[(y * width + x) * 4 + 3] = Math.round(sum / Math.max(1, Math.min(maxSamples, count)));
+    }
+  }
+  return next;
+}
+
+function applyChromaKey(
+  image: ImageData,
+  chroma: VideoChromaKeyConfig,
+  rendererState: Record<string, any>,
+) {
+  const { data, width, height } = image;
+  const { keyColor } = chroma;
+  const maxDistance = Math.sqrt(255 * 255 * 3);
+  let transparentPixels = 0;
+  let edgePixels = 0;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const r = data[index] || 0;
+    const g = data[index + 1] || 0;
+    const b = data[index + 2] || 0;
+    const distance =
+      Math.sqrt((r - keyColor.r) ** 2 + (g - keyColor.g) ** 2 + (b - keyColor.b) ** 2) /
+      maxDistance;
+    const dominance = g - Math.max(r, b);
+    const isGreenish = g >= chroma.minGreen && dominance >= chroma.minDominance;
+    const distanceAlpha = smoothstep(
+      chroma.similarity,
+      chroma.similarity + chroma.smoothness,
+      distance,
+    );
+    const dominanceAlpha = isGreenish
+      ? smoothstep(chroma.minDominance, chroma.minDominance + chroma.spillSoftness, dominance)
+      : 0;
+    const alpha = isGreenish ? Math.min(distanceAlpha, 1 - dominanceAlpha) : 1;
+    const nextAlpha = Math.round(255 * clamp(alpha, 0, 1));
+    data[index + 3] = nextAlpha;
+    if (nextAlpha < 12) transparentPixels += 1;
+    else if (nextAlpha < 245) edgePixels += 1;
+
+    if (isGreenish) {
+      const neutralGreen = Math.max(r, b) + 4;
+      const despillAmount = chroma.spill * clamp((dominance - chroma.minDominance) / 80, 0, 1);
+      data[index + 1] = Math.round(g + (Math.min(g, neutralGreen) - g) * despillAmount);
+    }
+  }
+
+  if (chroma.matteErodePx > 0 || chroma.matteFeatherPx > 0) {
+    let alphaData: PixelData = new Uint8ClampedArray(data);
+    alphaData = erodeAlpha(alphaData, width, height, chroma.matteErodePx);
+    alphaData = featherAlpha(alphaData, width, height, chroma.matteFeatherPx);
+    for (let index = 3; index < data.length; index += 4) {
+      data[index] = alphaData[index] || 0;
+    }
+  }
+
+  transparentPixels = 0;
+  edgePixels = 0;
+  for (let index = 3; index < data.length; index += 4) {
+    const alpha = data[index] || 0;
+    if (alpha < 12) transparentPixels += 1;
+    else if (alpha < 245) edgePixels += 1;
+  }
+
+  const pixels = Math.max(1, width * height);
+  rendererState.videoChromaTransparentRatio = Number((transparentPixels / pixels).toFixed(4));
+  rendererState.videoChromaEdgeRatio = Number((edgePixels / pixels).toFixed(4));
+  return image;
+}
+
 function drawVideoFrame(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
   source: VideoAvatarSource,
   alpha: number,
   config: Record<string, any>,
+  chroma: VideoChromaKeyConfig,
+  scratch: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D },
+  rendererState: Record<string, any>,
 ) {
   if (!video || video.readyState < 2) return false;
   const canvasW = Number(config.canvasWidth);
@@ -75,7 +233,17 @@ function drawVideoFrame(
   const dy = (canvasH - drawH) / 2;
   ctx.save();
   ctx.globalAlpha = clamp(alpha, 0, 1);
-  ctx.drawImage(video, dx, dy, drawW, drawH);
+  if (chroma.enabled) {
+    if (scratch.canvas.width !== canvasW) scratch.canvas.width = canvasW;
+    if (scratch.canvas.height !== canvasH) scratch.canvas.height = canvasH;
+    scratch.ctx.clearRect(0, 0, canvasW, canvasH);
+    scratch.ctx.drawImage(video, dx, dy, drawW, drawH);
+    const image = scratch.ctx.getImageData(0, 0, canvasW, canvasH);
+    scratch.ctx.putImageData(applyChromaKey(image, chroma, rendererState), 0, 0);
+    ctx.drawImage(scratch.canvas, 0, 0);
+  } else {
+    ctx.drawImage(video, dx, dy, drawW, drawH);
+  }
   ctx.restore();
   return true;
 }
@@ -139,6 +307,11 @@ export async function createVideoAvatarRenderer(
 
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("video avatar canvas context unavailable");
+  const scratchCanvas = document.createElement("canvas");
+  const scratchCtx = scratchCanvas.getContext("2d", { willReadFrequently: true });
+  if (!scratchCtx) throw new Error("video avatar chroma-key canvas context unavailable");
+  const scratch = { canvas: scratchCanvas, ctx: scratchCtx };
+  const chroma = normalizeChromaKeyConfig(config);
   const idleVideo = createVideoElement(idleSource, config);
   const speakingVideo =
     speakingSource.url === idleSource.url ? idleVideo : createVideoElement(speakingSource, config);
@@ -170,6 +343,7 @@ export async function createVideoAvatarRenderer(
     videoState: currentState,
     fallbackReason: "",
     layout: config.layout,
+    videoChromaKeyed: chroma.enabled,
   });
 
   function updateTargetState(now: number) {
@@ -199,6 +373,9 @@ export async function createVideoAvatarRenderer(
         sourceByState[previousState],
         1 - fade,
         config,
+        chroma,
+        scratch,
+        rendererState,
       );
     }
     const drew = drawVideoFrame(
@@ -207,6 +384,9 @@ export async function createVideoAvatarRenderer(
       sourceByState[currentState],
       fade,
       config,
+      chroma,
+      scratch,
+      rendererState,
     );
     if (!drew) drawFallback(ctx, now);
     rendererState.videoFrames += 1;

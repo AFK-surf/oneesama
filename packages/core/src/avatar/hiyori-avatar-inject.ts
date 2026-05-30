@@ -41,6 +41,7 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
     videoCrossfadeMs: 220,
     videoSpeakingDebounceMs: 180,
     videoMuted: true,
+    videoChromaKey: { enabled: false },
     disableLive2D: false,
     deferRendererUntilExplicitStart: false,
     enableVisualTestHooks: false,
