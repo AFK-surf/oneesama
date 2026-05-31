@@ -3,7 +3,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "delegate_to_worker",
     description:
-      "Start a background workspace job only for async workspace/code/research/debug/planning work. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo or otherwise requests work that should continue outside the short voice turn. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, memory lookup, or GitHub/Linear/Meet-chat search requests that have dedicated tools.",
+      "Start a background workspace job only for async workspace/code/research/debug/planning work. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo or otherwise requests work that should continue outside the short voice turn. For vague file batches or missing details, still start the background job with the user's wording instead of staying silent or asking for every file up front. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, memory lookup, or GitHub/Linear/Meet-chat search requests that have dedicated tools.",
     parameters: {
       type: "object",
       properties: {
@@ -48,7 +48,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "delegate_to_codex",
     description:
-      "Deprecated compatibility alias for delegate_to_worker. Use only if the user explicitly says Codex/codex and asks for legacy background workspace/code/research/debug/planning work. Prefer delegate_to_worker for new background jobs. Never use for app/window share, browser/Pencil UI control, avatar visuals, GitHub/Linear/Meet-chat search, or immediate meeting actions.",
+      "Deprecated compatibility alias for delegate_to_worker. If the user explicitly says Codex/codex and asks to write a script, handle files, debug code, inspect a repo, or run background workspace work, call delegate_to_worker or this alias; do not stay silent and do not answer from memory. Never use for app/window share, browser/Pencil UI control, avatar visuals, GitHub/Linear/Meet-chat search, or immediate meeting actions.",
     parameters: {
       type: "object",
       properties: {
@@ -528,7 +528,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "linear_user_issues",
     description:
-      "List incomplete Linear issues assigned to a user. Use for 'my Linear issues', 'my tasks', 'tasks on someone's plate', or assignee questions. If the user says 我/my and no resolved identity is already available, first call current_user_identity, then continue with this tool using the resolved workspace identifier. If the user names a person, use the name/email/handle directly or search_team_members if ambiguous.",
+      "List incomplete Linear issues assigned to a user. Use for 'my Linear issues', 'my tasks', 'tasks on someone's plate', or assignee questions. If the user says 我/my and no resolved identity is already available, first call current_user_identity as the functional first step, then continue with this tool using the resolved workspace identifier. Never satisfy Linear task questions with avatar-only tools. If the user names a person, use the name/email/handle directly or search_team_members if ambiguous.",
     parameters: {
       type: "object",
       properties: {
@@ -599,7 +599,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "github_search",
     description:
-      "Search GitHub issues, repos, or code. Use immediately when the user says GitHub/github/GH/仓库/repo/issue/PR/code search/搜一下这个仓库; do not delegate or answer from memory for direct GitHub lookup requests.",
+      "Search GitHub issues, repos, or code. Use immediately when the user says GitHub/github/GH/仓库/repo/issue/PR/code search/搜一下这个仓库, even if the repository is only implied by the current workspace. Preserve the user's words as query. Do not delegate, stay silent, use memory, or use avatar-only tools for direct GitHub lookup requests.",
     parameters: {
       type: "object",
       properties: {
@@ -651,7 +651,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "set_avatar_expression",
     description:
-      "Visual-only avatar control: set the on-camera mood. This never shares windows, controls apps, delegates work, searches, changes browser/workspace state, or satisfies a user request by itself unless the request is only to change the avatar expression.",
+      "Visual-only avatar control: set the on-camera mood. This never shares windows, controls apps, delegates work, searches, checks status, reads chat, changes browser/workspace state, or satisfies a user request by itself unless the request is only to change the avatar expression.",
     parameters: {
       type: "object",
       properties: {
@@ -664,7 +664,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "set_avatar_action",
     description:
-      "Visual-only avatar control: trigger a visible head/body action. Use nod for agreement, shake for disagreement, wave for greetings, think for reasoning, speak while talking, and emphasize for conclusions. This never shares windows, controls apps, delegates work, searches, or changes browser/workspace state.",
+      "Visual-only avatar control: trigger a visible head/body action. Use nod for agreement, shake for disagreement, wave for greetings, think for reasoning, speak while talking, and emphasize for conclusions. This never shares windows, controls apps, delegates work, searches, checks status, reads chat, or changes browser/workspace state.",
     parameters: {
       type: "object",
       properties: {
@@ -691,7 +691,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "update_avatar_state",
     description:
-      "Visual-only avatar/HUD control: set mood/action and optional on-frame status. This never shares windows, controls apps, delegates work, searches, changes browser/workspace state, or satisfies app-control/share requests. For app/window share, click, type, draw, scroll, switch-account, stuck-browser, code, or research requests, call the correct functional tool first; use this only as visual progress if useful.",
+      "Visual-only avatar/HUD control: set mood/action and optional on-frame status. This never shares windows, controls apps, delegates work, searches, checks worker status, reads chat, changes browser/workspace state, or satisfies app-control/share/GitHub/Linear/meeting-chat/delegation requests. For app/window share, click, type, draw, scroll, switch-account, stuck-browser, code, research, status, search, or task lookup requests, call the correct functional tool first; use this only as visual progress if useful.",
     parameters: {
       type: "object",
       properties: {
@@ -1119,8 +1119,8 @@ export function buildRealtimeInstructions({
     "Do not proactively offer capabilities the user has not asked for. Avoid phrases like “I can also help with...” unless the user asks what you can do.",
     "When asked what you can do, describe capabilities in user-facing terms: listen and respond in the meeting, understand who is speaking, read meeting chat or shared links, help with workspace lookup, summarize, plan, research, and follow up.",
     "When the user asks you to do complex work, use the appropriate internal action. Only say a one-line transition if the user needs visible confirmation, and do not narrate the internal mechanism.",
-    "For progress, intent, or in-flight status, prefer the visual channel: update avatar mood/action/status HUD or shared-surface state instead of speaking. Speech is for answers, user-facing questions, and blockers.",
-    "Tool disambiguation: avatar visual tools only change the on-camera avatar/HUD. They never satisfy share, app-control, browser, workspace, code, research, search, or delegation requests. Delegate tools are only for async workspace/code/research/debug/planning jobs, never for immediate meeting window sharing or app control.",
+    "For progress, intent, or in-flight status, prefer the visual channel only after the requested functional action has started. Speech is for answers, user-facing questions, and blockers.",
+    "Tool disambiguation: avatar visual tools only change the on-camera avatar/HUD. They never satisfy share, app-control, browser, workspace, code, research, search, status, Linear, GitHub, meeting-chat, or delegation requests. If a request maps to any functional action, call that functional action first; visual tools may only follow it as progress decoration.",
     "Workspace tool routing: if the newest user request asks for background research, reports, scripts, code investigation, tests, repo changes, or other work that should continue outside the short voice turn, use the dedicated background-job action instead of memory or avatar-only actions. If the user asks job progress, status, completion, or result, use the dedicated background-job status action even when no job id is known. If the user asks for GitHub/GH/repo/issue/PR/code search, use the dedicated GitHub search action. If the user asks what meeting chat said or what links were posted, use the meeting-chat reader. If the user asks about their Linear tasks, resolve the current user identity first when needed, then continue with the Linear assignee lookup.",
     "Identity contract: live speaker identity is provided by runtime context or identity lookup. If active speaker context marks someone as current_user, treat first-person wording like “我/我的/我是谁” as that identity. If identity is uncertain, ask a short clarification instead of guessing.",
     "Addressing contract: use the resolved profile's preferred spoken name. Treat aliases and honorifics as recognition hints, not as names to say aloud; if an English name is present, prefer it over a role-like nickname.",
