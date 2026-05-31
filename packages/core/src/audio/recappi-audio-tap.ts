@@ -1,5 +1,8 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
@@ -38,6 +41,7 @@ export interface RecappiAudioTapOptions {
   recappiSdkPath?: string;
   log?: (message: string) => void;
   shareableContent?: ShareableContentApi;
+  useHelperProcess?: boolean;
 }
 
 export interface RecappiAudioTapStartOptions {
@@ -211,6 +215,7 @@ export function createRecappiAudioTap(options: RecappiAudioTapOptions = {}) {
     errors: [] as Array<{ ts: string; stage: string; error: string }>,
   };
   let audioSession: ShareableAudioSession | null = null;
+  let helperProcess: ChildProcessWithoutNullStreams | null = null;
   let startPromise: Promise<ReturnType<typeof status>> | null = null;
 
   async function probe(startOptions: RecappiAudioTapStartOptions = {}) {
@@ -254,6 +259,107 @@ export function createRecappiAudioTap(options: RecappiAudioTapOptions = {}) {
     for (const consumer of consumers) consumer(null, samples);
   };
 
+  function helperScriptPath() {
+    return resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../../../scripts/recappi-process-audio-helper.mjs",
+    );
+  }
+
+  function decodeHelperSamples(payload: string): number[] {
+    const buffer = Buffer.from(payload, "base64");
+    const floats = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
+    return Array.from(floats);
+  }
+
+  function startAudioHelper(processId: number): Promise<ShareableAudioSession> {
+    return new Promise((resolveStart, rejectStart) => {
+      const child = spawn(process.execPath, [helperScriptPath(), `--pid=${processId}`], {
+        cwd: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."),
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      helperProcess = child;
+      let stdoutBuffer = "";
+      let settled = false;
+
+      const rejectOnce = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        helperProcess = null;
+        rejectStart(error instanceof Error ? error : new Error(String(error)));
+      };
+
+      const handleMessage = (message: any) => {
+        if (message?.type === "started") {
+          state.source = "recappi_process_audio";
+          state.processId = Number(message.processId || processId);
+          state.startedAt = state.startedAt || nowIso();
+          state.stoppedAt = "";
+          state.sampleRate = Number(message.sampleRate || 48000);
+          state.channels = Number(message.channels || 2);
+          if (!settled) {
+            settled = true;
+            const stopHelper = () => {
+              if (helperProcess === child && !child.killed) {
+                child.kill("SIGTERM");
+              }
+            };
+            resolveStart({
+              sampleRate: state.sampleRate,
+              channels: state.channels,
+              stop: stopHelper,
+            });
+          }
+          return;
+        }
+        if (message?.type === "audio") {
+          onAudio(null, decodeHelperSamples(String(message.samples || "")));
+          return;
+        }
+        if (message?.type === "callback_error") {
+          onAudio(new Error(String(message.error || "recappi_callback_error")), []);
+          return;
+        }
+        if (message?.type === "error") {
+          rejectOnce(new Error(String(message.error || "recappi_helper_failed")));
+        }
+      };
+
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        stdoutBuffer += chunk;
+        while (stdoutBuffer.includes("\n")) {
+          const index = stdoutBuffer.indexOf("\n");
+          const line = stdoutBuffer.slice(0, index).trim();
+          stdoutBuffer = stdoutBuffer.slice(index + 1);
+          if (!line) continue;
+          try {
+            handleMessage(JSON.parse(line));
+          } catch (error) {
+            rememberError("recappi_helper_parse", error);
+          }
+        }
+      });
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        const message = chunk.trim();
+        if (message) log(`recappi_helper_stderr: ${message}`);
+      });
+      child.once("error", rejectOnce);
+      child.once("exit", (code, signal) => {
+        if (helperProcess === child) helperProcess = null;
+        audioSession = null;
+        if (!settled && !state.stoppedAt) {
+          rejectOnce(new Error(`recappi_helper_exit:${code ?? signal ?? "unknown"}`));
+          return;
+        }
+        if (!state.stoppedAt) {
+          rememberError("recappi_helper_exit", `code=${code ?? ""} signal=${signal ?? ""}`);
+        }
+      });
+    });
+  }
+
   async function start(startOptions: RecappiAudioTapStartOptions = {}) {
     if (audioSession) return status();
     if (startPromise) return startPromise;
@@ -263,13 +369,17 @@ export function createRecappiAudioTap(options: RecappiAudioTapOptions = {}) {
       if (!processId) {
         throw new Error("chromium_audio_process_not_found");
       }
-      audioSession = ShareableContent.tapAudio(processId, onAudio);
-      state.source = "recappi_process_audio";
-      state.processId = processId;
-      state.startedAt = state.startedAt || nowIso();
-      state.stoppedAt = "";
-      state.sampleRate = audioSession?.sampleRate || 48000;
-      state.channels = audioSession?.channels || 2;
+      if (options.shareableContent || options.useHelperProcess === false) {
+        audioSession = ShareableContent.tapAudio(processId, onAudio);
+        state.source = "recappi_process_audio";
+        state.processId = processId;
+        state.startedAt = state.startedAt || nowIso();
+        state.stoppedAt = "";
+        state.sampleRate = audioSession?.sampleRate || 48000;
+        state.channels = audioSession?.channels || 2;
+      } else {
+        audioSession = await startAudioHelper(processId);
+      }
       return status();
     })();
     try {
@@ -289,9 +399,11 @@ export function createRecappiAudioTap(options: RecappiAudioTapOptions = {}) {
   }
 
   function stop() {
-    if (audioSession?.stop) audioSession.stop();
-    audioSession = null;
     state.stoppedAt = nowIso();
+    if (audioSession?.stop) audioSession.stop();
+    if (helperProcess && !helperProcess.killed) helperProcess.kill("SIGTERM");
+    helperProcess = null;
+    audioSession = null;
     return status();
   }
 
