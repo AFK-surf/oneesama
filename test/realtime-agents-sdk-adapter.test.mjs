@@ -223,7 +223,7 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
           length: compacted.length,
           first: compacted[0],
           last: compacted.at(-1),
-          health: window.MAB_REALTIME_CLIENT.contextHealth(),
+          health: window.MAB_REALTIME_BRIDGE.contextHealth,
         };
       });
       assert.equal(compact.length, 21);
@@ -232,6 +232,8 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
       assert.match(compact.first.content[0].text, /当前用户/);
       assert.equal(compact.last.itemId, "item_204");
       assert.equal(compact.health.enabled, true);
+      assert.equal(compact.health.lastHistoryTail.at(-1).text, "history item 204");
+      assert.equal(compact.health.lastHistoryTail.at(-1).role, "user");
 
       const lifecycle = await page.evaluate(() => {
         const first = window.MAB_REALTIME_CLIENT.pushSessionContext({

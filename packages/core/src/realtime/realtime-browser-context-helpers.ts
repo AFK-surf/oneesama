@@ -56,6 +56,30 @@
       return Math.ceil(JSON.stringify(history || []).length / 4);
     }
 
+    function textFromHistoryContent(content: unknown): string {
+      if (typeof content === "string") return content;
+      if (!Array.isArray(content)) return "";
+      return content
+        .map((part) => {
+          const item = (part || {}) as Record<string, unknown>;
+          return String(item.text || item.transcript || item.content || "").trim();
+        })
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 500);
+    }
+
+    function summarizeHistoryItem(item: unknown) {
+      const entry = (item || {}) as Record<string, unknown>;
+      return {
+        type: String(entry.type || ""),
+        role: String(entry.role || ""),
+        name: String(entry.name || entry.tool_name || ""),
+        callId: String(entry.call_id || entry.callId || ""),
+        text: textFromHistoryContent(entry.content || entry.output || entry.text),
+      };
+    }
+
     function currentHistorySnapshot(): unknown[] {
       const history = getRealtimeAgentSession()?.history;
       return Array.isArray(history) ? history : [];
@@ -68,6 +92,7 @@
       state.contextHealth.tokenEstimate = estimateHistoryTokens(history);
       state.contextHealth.nextCompactThreshold = lifecycle.compactTokenThreshold;
       state.contextHealth.recentItemsRetained = lifecycle.recentItems;
+      state.contextHealth.lastHistoryTail = history.slice(-8).map(summarizeHistoryItem);
       return state.contextHealth;
     }
 
@@ -143,6 +168,7 @@
     function buildCompactedHistory(history: unknown[] = [], reason = "manual") {
       const lifecycle = contextLifecycleConfig();
       const recentItems = Array.isArray(history) ? history.slice(-lifecycle.recentItems) : [];
+      updateContextHealthFromHistory(history);
       return [makeContextSummaryItem(reason), ...recentItems];
     }
 

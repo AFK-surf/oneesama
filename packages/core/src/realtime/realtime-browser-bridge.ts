@@ -366,6 +366,7 @@ const state = {
     lastSummaryChars: 0,
     lastSignature: "",
     lastSignatureAt: 0,
+    lastHistoryTail: [],
     cache: {
       identity: null,
       meetingAwareness: null,
