@@ -276,6 +276,8 @@ export interface HiyoriAvatarConfig {
     spillSoftness?: number;
     matteErodePx?: number;
     matteFeatherPx?: number;
+    maxProcessingWidth?: number;
+    maxProcessingHeight?: number;
   };
   vrmModelUrl?: string;
   vrmModelFallbackUrls?: string[];

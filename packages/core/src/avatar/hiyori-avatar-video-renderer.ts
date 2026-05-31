@@ -29,6 +29,8 @@ type VideoChromaKeyConfig = {
   spillSoftness: number;
   matteErodePx: number;
   matteFeatherPx: number;
+  maxProcessingWidth: number;
+  maxProcessingHeight: number;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -92,6 +94,8 @@ function normalizeChromaKeyConfig(config: Record<string, any>): VideoChromaKeyCo
     spillSoftness: clamp(raw.spillSoftness ?? 10, 0, 80),
     matteErodePx: Math.round(clamp(raw.matteErodePx ?? 1, 0, 3)),
     matteFeatherPx: Math.round(clamp(raw.matteFeatherPx ?? 1, 0, 3)),
+    maxProcessingWidth: Math.round(clamp(raw.maxProcessingWidth ?? 640, 64, 1920)),
+    maxProcessingHeight: Math.round(clamp(raw.maxProcessingHeight ?? 360, 64, 1080)),
   };
 }
 
@@ -258,13 +262,30 @@ function drawVideoFrame(
   ctx.save();
   ctx.globalAlpha = clamp(alpha, 0, 1);
   if (chroma.enabled) {
-    if (scratch.canvas.width !== canvasW) scratch.canvas.width = canvasW;
-    if (scratch.canvas.height !== canvasH) scratch.canvas.height = canvasH;
-    scratch.ctx.clearRect(0, 0, canvasW, canvasH);
-    scratch.ctx.drawImage(video, dx, dy, drawW, drawH);
-    const image = scratch.ctx.getImageData(0, 0, canvasW, canvasH);
+    const processingScale = Math.min(
+      1,
+      chroma.maxProcessingWidth / Math.max(1, canvasW),
+      chroma.maxProcessingHeight / Math.max(1, canvasH),
+    );
+    const processingW = Math.max(1, Math.round(canvasW * processingScale));
+    const processingH = Math.max(1, Math.round(canvasH * processingScale));
+    if (scratch.canvas.width !== processingW) scratch.canvas.width = processingW;
+    if (scratch.canvas.height !== processingH) scratch.canvas.height = processingH;
+    scratch.ctx.clearRect(0, 0, processingW, processingH);
+    scratch.ctx.drawImage(
+      video,
+      dx * processingScale,
+      dy * processingScale,
+      drawW * processingScale,
+      drawH * processingScale,
+    );
+    const image = scratch.ctx.getImageData(0, 0, processingW, processingH);
     scratch.ctx.putImageData(applyChromaKey(image, chroma, rendererState), 0, 0);
-    ctx.drawImage(scratch.canvas, 0, 0);
+    rendererState.videoChromaProcessingWidth = processingW;
+    rendererState.videoChromaProcessingHeight = processingH;
+    rendererState.videoChromaProcessingScale = Number(processingScale.toFixed(4));
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(scratch.canvas, 0, 0, processingW, processingH, 0, 0, canvasW, canvasH);
   } else {
     ctx.drawImage(video, dx, dy, drawW, drawH);
   }
@@ -369,6 +390,8 @@ export async function createVideoAvatarRenderer(
     fallbackReason: "",
     layout: config.layout,
     videoChromaKeyed: chroma.enabled,
+    videoFallbackFrames: 0,
+    videoSkippedFrames: 0,
   });
 
   function updateTargetState(now: number) {
@@ -394,6 +417,18 @@ export async function createVideoAvatarRenderer(
     }
     lastRenderedAt = now;
     updateTargetState(now);
+    const currentVideo = videoByState[currentState];
+    if (!currentVideo || currentVideo.readyState < 2) {
+      if (rendererState.videoFrames > 0) {
+        rendererState.videoSkippedFrames += 1;
+        requestAnimationFrame(tick);
+        return;
+      }
+      drawFallback(ctx, now);
+      rendererState.videoFallbackFrames += 1;
+      requestAnimationFrame(tick);
+      return;
+    }
     const background = sourceByState[currentState]?.background || sourceByState.idle.background;
     ctx.fillStyle = background;
     ctx.fillRect(0, 0, Number(config.canvasWidth), Number(config.canvasHeight));
@@ -420,7 +455,10 @@ export async function createVideoAvatarRenderer(
       scratch,
       rendererState,
     );
-    if (!drew) drawFallback(ctx, now);
+    if (!drew) {
+      drawFallback(ctx, now);
+      rendererState.videoFallbackFrames += 1;
+    }
     rendererState.videoFrames += 1;
     requestAnimationFrame(tick);
   }

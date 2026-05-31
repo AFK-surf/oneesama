@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_AVATAR_ASSET_ROOT = fileURLToPath(new URL("../assets/avatar/", import.meta.url));
-const DEFAULT_VIDEO_IDLE_PATH = "v1-green/oneesama-video-idle-loop-subtle.mp4";
-const DEFAULT_VIDEO_SPEAKING_PATH = "v1-green/oneesama-video-speaking-loop-slit.mp4";
+const DEFAULT_VIDEO_IDLE_PATH = "v1-green/oneesama-video-idle-loop-subtle-alpha.webm";
+const DEFAULT_VIDEO_SPEAKING_PATH = "v1-green/oneesama-video-speaking-loop-slit-alpha.webm";
 
 export function getRuntimeConfig(env = process.env) {
   const splitList = (value = "") =>
@@ -186,7 +186,7 @@ export function getRuntimeConfig(env = process.env) {
     avatarLayout: env.MAB_AVATAR_LAYOUT || "face",
     avatarCanvasWidth: Number(env.MAB_AVATAR_CANVAS_WIDTH || 1280),
     avatarCanvasHeight: Number(env.MAB_AVATAR_CANVAS_HEIGHT || 720),
-    avatarCaptureFps: Number(env.MAB_AVATAR_CAPTURE_FPS || 24),
+    avatarCaptureFps: Number(env.MAB_AVATAR_CAPTURE_FPS || 12),
     avatarUseSwiftShader: ["1", "true", "yes"].includes(
       String(env.MAB_AVATAR_USE_SWIFTSHADER || "").toLowerCase(),
     ),

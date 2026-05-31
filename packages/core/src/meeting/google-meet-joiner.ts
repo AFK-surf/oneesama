@@ -18,6 +18,13 @@ import { createGoogleMeetShareActions } from "./google-meet-joiner-share-actions
 
 export { buildMeetingAwarenessState, meetingAwarenessContextText } from "./google-meet-joiner-runtime-state.ts";
 
+function videoMimeType(relativePath: string): string {
+  const normalized = String(relativePath || "").toLowerCase();
+  if (normalized.endsWith(".webm")) return "video/webm";
+  if (normalized.endsWith(".mov")) return "video/quicktime";
+  return "video/mp4";
+}
+
 export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   const config = getRuntimeConfig();
   let active = null;
@@ -406,6 +413,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         );
     }
     const requestedAvatarRenderer = input.avatarRenderer || config.avatarRenderer;
+    const avatarRendererIsVideo = String(requestedAvatarRenderer || "").toLowerCase() === "video";
     const avatarConfig = {
       modelUrl: input.avatarModelUrl || config.avatarModelUrl,
       modelFallbackUrls: config.avatarModelFallbackUrls,
@@ -420,15 +428,18 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         input.deferAvatarRendererUntilJoined !== false && installAvatar,
       canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1280),
       canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 720),
-      captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 24),
+      captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 12),
     };
-    if (String(requestedAvatarRenderer || "").toLowerCase() === "video" && installAvatar) {
+    if (avatarRendererIsVideo && installAvatar) {
+      const videoUsesAlpha =
+        /\.webm$/iu.test(String(config.avatarVideoIdlePath || "")) &&
+        /\.webm$/iu.test(String(config.avatarVideoSpeakingPath || ""));
       const loadInlineVideoSource = async (relativePath: string) => {
         const assetPath = pathJoin(config.avatarAssetRoot, relativePath);
         const data = await readFile(assetPath);
         return {
           inlineBase64: data.toString("base64"),
-          mimeType: "video/mp4",
+          mimeType: videoMimeType(relativePath),
         };
       };
       const idleInlineSource = await loadInlineVideoSource(config.avatarVideoIdlePath);
@@ -437,10 +448,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         background: "#0b1018",
         videoObjectFit: "cover",
         videoMuted: true,
-        videoCrossfadeMs: 220,
+        videoCrossfadeMs: 0,
         videoSpeakingDebounceMs: 220,
         videoChromaKey: {
-          enabled: true,
+          enabled: !videoUsesAlpha,
           keyColor: "#00ff00",
           similarity: 0.22,
           smoothness: 0.06,
@@ -448,8 +459,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           minDominance: 18,
           spill: 0.82,
           spillSoftness: 10,
-          matteErodePx: 1,
-          matteFeatherPx: 1,
+          matteErodePx: 0,
+          matteFeatherPx: 0,
+          maxProcessingWidth: 640,
+          maxProcessingHeight: 360,
         },
         videoSources: [
           {
@@ -476,6 +489,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         delivery: "inline_blob",
         idlePath: config.avatarVideoIdlePath,
         speakingPath: config.avatarVideoSpeakingPath,
+        alpha: videoUsesAlpha,
       });
     }
     const runtimeInitScripts = buildAvatarRuntimeInitScripts({

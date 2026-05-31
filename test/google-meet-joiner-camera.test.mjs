@@ -104,8 +104,26 @@ test("Meet avatar camera defaults avoid 1080p chroma-key CPU burn", async () => 
     "Meet avatar canvas should default to the native 720p video asset height",
   );
   assert.ok(
-    envSource.includes("MAB_AVATAR_CAPTURE_FPS || 24"),
-    "video avatar capture should default to the source asset frame rate",
+    envSource.includes("MAB_AVATAR_CAPTURE_FPS || 12"),
+    "video avatar capture should default to a CPU-safe live frame rate",
+  );
+  assert.ok(
+    envSource.includes("oneesama-video-idle-loop-subtle-alpha.webm") &&
+      envSource.includes("oneesama-video-speaking-loop-slit-alpha.webm"),
+    "live video avatar should default to offline-keyed alpha clips",
+  );
+  assert.ok(
+    source.includes("mimeType: videoMimeType(relativePath)") &&
+      source.includes("enabled: !videoUsesAlpha"),
+    "alpha video clips should bypass runtime chroma keying",
+  );
+  assert.ok(
+    source.includes("maxProcessingWidth: 640") && source.includes("maxProcessingHeight: 360"),
+    "non-alpha chroma-key fallback should process a downscaled matte instead of full 720p frames",
+  );
+  assert.ok(
+    source.includes("videoCrossfadeMs: 0"),
+    "live video avatar should avoid double chroma work during state transitions",
   );
 });
 
