@@ -121,6 +121,12 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"Screen-share action mandate:",
 		"first action in that turn must be list_shareable_windows or share_existing_app_window",
 		"Do not answer that a window list is processing",
+		"App-control identity boundary:",
+		"bot's host Mac",
+		"这台 Mac mini",
+		"“你用电脑控制”",
+		"call control_shared_app_window",
+		"Do not tell the human to share Chrome to you",
 	} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("instructions missing %q:\n%s", want, instructions)

@@ -134,6 +134,12 @@ test("Realtime contract keeps short voice checks and self-introductions on topic
   assert.match(session.instructions, /Screen-share action mandate:/);
   assert.match(session.instructions, /first action in that turn must be list_shareable_windows or share_existing_app_window/);
   assert.match(session.instructions, /Do not answer that a window list is processing/);
+  assert.match(session.instructions, /App-control identity boundary:/);
+  assert.match(session.instructions, /bot's host Mac/);
+  assert.match(session.instructions, /这台 Mac mini/);
+  assert.match(session.instructions, /“你用电脑控制”/);
+  assert.match(session.instructions, /call control_shared_app_window/);
+  assert.match(session.instructions, /Do not tell the human to share Chrome to you/);
 });
 
 test("Realtime contract exposes product identity resolver tool", () => {
@@ -155,6 +161,9 @@ test("Realtime contract exposes application share tools", () => {
   assert.match(list.description, /应用\/窗口\/屏幕/);
   assert.deepEqual(control.parameters.required, []);
   assert.match(control.description, /Computer Use/);
+  assert.match(control.description, /bot host's shared window/);
+  assert.match(control.description, /not the human's personal computer/);
+  assert.match(control.description, /switch accounts/);
   assert.match(control.description, /queues the app-control work asynchronously/);
   assert.match(control.description, /observe -> plan -> act -> verify/);
   assert.match(control.description, /Do not invent click\/drag primitives/);
