@@ -49,6 +49,7 @@ test("Recappi realtime input serializes typed-array chunks for browser push", as
   const page = {
     isClosed: () => false,
     evaluate: async (_fn, payload) => {
+      if (payload === undefined) return { ok: true };
       pushed.push(payload);
       assert.equal(Array.isArray(payload.samples), true);
       return { ok: true };
@@ -94,6 +95,7 @@ test("Recappi realtime input coalesces bursty chunks before browser push", async
   const page = {
     isClosed: () => false,
     evaluate: async (_fn, payload) => {
+      if (payload === undefined) return { ok: true };
       pushed.push(payload);
       return { ok: true };
     },
@@ -158,17 +160,22 @@ test("Recappi realtime input rejects global Recappi fallback source", async () =
   assert.deepEqual(startOptions, { context: {} });
 });
 
-test("Recappi realtime input probe starts only process-level tap", async () => {
-  let startOptions = null;
+test("Recappi realtime input probe inspects process-level tap without starting capture", async () => {
+  let probeOptions = null;
+  let startCalled = false;
   const recappiTap = {
-    start: async (options) => {
-      startOptions = options;
+    probe: async (options) => {
+      probeOptions = options;
       return {
         source: "recappi_process_audio",
         sampleRate: 48000,
         channels: 2,
         processId: 4321,
       };
+    },
+    start: async () => {
+      startCalled = true;
+      throw new Error("tapAudio should not be started during probe");
     },
     addConsumer: () => () => {},
     status: () => ({
@@ -184,18 +191,24 @@ test("Recappi realtime input probe starts only process-level tap", async () => {
   const input = createRecappiRealtimeAudioInput({ sessionId: "session_test", recappiTap });
   const result = await input.probe({ context: {} });
 
-  assert.deepEqual(startOptions, { context: {} });
+  assert.deepEqual(probeOptions, { context: {} });
+  assert.equal(startCalled, false);
   assert.equal(result.ok, true);
   assert.equal(result.source, "recappi_process_audio");
   assert.equal(result.processId, 4321);
 });
 
 test("Recappi realtime input probe reports process-tap blocker before runtime init", async () => {
-  let startOptions = null;
+  let probeOptions = null;
+  let startCalled = false;
   const recappiTap = {
-    start: async (options) => {
-      startOptions = options;
+    probe: async (options) => {
+      probeOptions = options;
       throw new Error("chromium_audio_process_not_found");
+    },
+    start: async () => {
+      startCalled = true;
+      throw new Error("tapAudio should not be started during probe");
     },
     addConsumer: () => () => {},
     status: () => ({
@@ -211,8 +224,76 @@ test("Recappi realtime input probe reports process-tap blocker before runtime in
   const input = createRecappiRealtimeAudioInput({ sessionId: "session_test", recappiTap });
   const result = await input.probe({ context: {} });
 
-  assert.deepEqual(startOptions, { context: {} });
+  assert.deepEqual(probeOptions, { context: {} });
+  assert.equal(startCalled, false);
   assert.equal(result.ok, false);
   assert.equal(result.error, "chromium_audio_process_not_found");
   assert.equal(result.source, "");
+});
+
+test("Recappi realtime input primes browser audio and retries tap startup", async () => {
+  let consumer = null;
+  let attempts = 0;
+  const evaluations = [];
+  const recappiTap = {
+    start: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("Application not found or not available for audio tapping");
+      }
+      return {
+        source: "recappi_process_audio",
+        sampleRate: 44100,
+        channels: 2,
+        processId: 2468,
+      };
+    },
+    addConsumer: (callback) => {
+      consumer = callback;
+      return () => {
+        consumer = null;
+      };
+    },
+    status: () => ({
+      ok: true,
+      running: true,
+      source: "recappi_process_audio",
+      sampleRate: 44100,
+      channels: 2,
+      processId: 2468,
+    }),
+  };
+  const diagnostics = {
+    events: [],
+    record(type, detail) {
+      this.events.push({ type, detail });
+    },
+  };
+  const page = {
+    isClosed: () => false,
+    evaluate: async () => {
+      evaluations.push("evaluate");
+      return { ok: true };
+    },
+  };
+
+  const input = createRecappiRealtimeAudioInput({
+    sessionId: "session_test",
+    recappiTap,
+    startTimeoutMs: 500,
+    startRetryDelayMs: 10,
+  });
+  const result = await input.start({ context: {}, page, diagnostics });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state.processId, 2468);
+  assert.equal(attempts, 2);
+  assert.equal(typeof consumer, "function");
+  assert.ok(evaluations.length >= 2);
+  assert.ok(
+    diagnostics.events.some((event) => event.type === "recappi_realtime_audio_start_attempt_failed"),
+  );
+  assert.ok(
+    diagnostics.events.some((event) => event.type === "recappi_realtime_audio_start_retry_succeeded"),
+  );
 });

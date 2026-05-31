@@ -11,6 +11,8 @@ interface RecappiRealtimeAudioInputOptions {
   sessionId: string;
   recappiTap: ReturnType<typeof createRecappiAudioTap>;
   maxPendingPushes?: number;
+  startTimeoutMs?: number;
+  startRetryDelayMs?: number;
 }
 
 interface RecappiAudioPayload {
@@ -23,6 +25,10 @@ interface RecappiAudioPayload {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInputOptions) {
@@ -53,6 +59,8 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
   let pushFlushScheduled = false;
   const pendingPayloads: RecappiAudioPayload[] = [];
   const maxPendingPushes = Math.max(1, options.maxPendingPushes || 64);
+  const startTimeoutMs = Math.max(0, options.startTimeoutMs ?? 5000);
+  const startRetryDelayMs = Math.max(50, options.startRetryDelayMs ?? 250);
 
   function rememberError(stage: string, error: unknown) {
     state.ok = false;
@@ -164,6 +172,93 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     schedulePushFlush();
   };
 
+  async function startBrowserAudioPrime(target: Page, diagnostics?: DiagnosticsLike | null) {
+    const result = await target
+      .evaluate(`(async () => {
+        const globalScope = window;
+        if (globalScope.__MAB_RECAPPI_AUDIO_PRIME?.active) {
+          return { ok: true, reused: true };
+        }
+        const AudioContextCtor = globalScope.AudioContext || globalScope.webkitAudioContext;
+        if (!AudioContextCtor) return { ok: false, error: "audio_context_unavailable" };
+        const audioContext = new AudioContextCtor();
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        gain.gain.value = 0;
+        oscillator.frequency.value = 440;
+        oscillator.connect(gain).connect(audioContext.destination);
+        oscillator.start();
+        if (audioContext.state === "suspended") await audioContext.resume();
+        globalScope.__MAB_RECAPPI_AUDIO_PRIME = {
+          active: true,
+          stop: async () => {
+            try { oscillator.stop(); } catch {}
+            try { oscillator.disconnect(); } catch {}
+            try { gain.disconnect(); } catch {}
+            try { await audioContext.close(); } catch {}
+            globalScope.__MAB_RECAPPI_AUDIO_PRIME = null;
+          },
+        };
+        return { ok: true, reused: false, state: audioContext.state };
+      })()`)
+      .catch((error) => ({ ok: false, error: String((error as Error)?.message || error) }));
+    diagnostics?.record?.("recappi_realtime_audio_prime", result as Record<string, unknown>);
+    return async () => {
+      await target
+        .evaluate(`(async () => {
+          const prime = window.__MAB_RECAPPI_AUDIO_PRIME;
+          if (!prime?.stop) return { ok: true, stopped: false };
+          await prime.stop();
+          return { ok: true, stopped: true };
+        })()`)
+        .catch((error) => {
+          diagnostics?.record?.("recappi_realtime_audio_prime_stop_error", {
+            error: String((error as Error)?.message || error),
+          });
+        });
+    };
+  }
+
+  async function startTapWithRetry({
+    context,
+    diagnostics,
+  }: {
+    context: BrowserContext;
+    diagnostics?: DiagnosticsLike | null;
+  }) {
+    const deadline = Date.now() + startTimeoutMs;
+    let attempt = 0;
+    let lastError: unknown = null;
+    while (true) {
+      attempt += 1;
+      try {
+        const tapState: any = await options.recappiTap.start({ context });
+        if ((tapState.source || "") !== "recappi_process_audio") {
+          throw new Error(`unexpected_recappi_tap_source:${tapState.source || "unknown"}`);
+        }
+        if (attempt > 1) {
+          diagnostics?.record?.("recappi_realtime_audio_start_retry_succeeded", { attempt });
+        }
+        return tapState;
+      } catch (error) {
+        lastError = error;
+        const message = String((error as Error)?.message || error);
+        const retry = Date.now() < deadline && !message.startsWith("unexpected_recappi_tap_source:");
+        diagnostics?.record?.("recappi_realtime_audio_start_attempt_failed", {
+          attempt,
+          error: message,
+          retry,
+        });
+        if (!retry) break;
+        await sleep(startRetryDelayMs);
+      }
+    }
+    rememberError("recappi_start", lastError);
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(String(lastError || "recappi_start_failed"));
+  }
+
   async function start({
     context,
     page: targetPage,
@@ -174,9 +269,12 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     diagnostics?: DiagnosticsLike | null;
   }) {
     page = targetPage;
-    const tapState = await options.recappiTap.start({ context });
-    if ((tapState.source || "") !== "recappi_process_audio") {
-      throw new Error(`unexpected_recappi_tap_source:${tapState.source || "unknown"}`);
+    const stopPrime = await startBrowserAudioPrime(targetPage, diagnostics);
+    let tapState: any;
+    try {
+      tapState = await startTapWithRetry({ context, diagnostics });
+    } finally {
+      await stopPrime();
     }
     state.startedAt = state.startedAt || nowIso();
     state.stoppedAt = "";
@@ -191,7 +289,10 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
 
   async function probe({ context }: { context: BrowserContext }) {
     try {
-      const tapState = await options.recappiTap.start({ context });
+      const tapState: any =
+        typeof options.recappiTap?.probe === "function"
+          ? await options.recappiTap.probe({ context })
+          : await options.recappiTap.start({ context });
       if ((tapState.source || "") !== "recappi_process_audio") {
         return {
           ok: false,
