@@ -37,7 +37,7 @@
     },
     {
       "id": "github_search_zh",
-      "utterance": "在 github 上搜一下这个仓库的相关 issue",
+      "utterance": "在 github 上搜一下 AFK-surf/oneesama 仓库里关于 realtime 的 issue",
       "expectedToolNames": ["github_search"]
     },
     {
