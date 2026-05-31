@@ -791,6 +791,17 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
               visibility: "silent",
             };
           }
+          const toolCallTs = new Date().toISOString();
+          const toolCalls =
+            preset.tool === "idle"
+              ? { meet: [], workspace: [] }
+              : {
+                  meet: [
+                    { ts: toolCallTs, name: "list_shareable_windows" },
+                    { ts: toolCallTs, name: "share_existing_app_window" },
+                  ],
+                  workspace: [{ ts: toolCallTs, name: "control_shared_app_window" }],
+                };
           return {
             connected: true,
             connection: {
@@ -800,6 +811,9 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
               responseEvents: preset.voice === "idle" ? 0 : 1,
             },
             turnPolicy: { appControlJobs: toolJobs },
+            meetTools: { calls: toolCalls.meet, errors: [] },
+            workspaceTools: { calls: toolCalls.workspace, errors: [] },
+            workerTools: { calls: [], errors: [] },
             errors: preset.error ? [{ message: preset.error, type: "playground" }] : [],
             feedback: {
               failureMatrix: {

@@ -24,6 +24,7 @@ type HudSignal = {
   label: string;
   value: string;
   level: "ok" | "active" | "warn" | "blocked" | "idle";
+  visibleWhenOk?: boolean;
 };
 
 type HudCell = {
@@ -38,7 +39,8 @@ type HudCell = {
 const CELL_COLORS: Record<string, string> = {
   rt: "#5ed99d",
   audio: "#6fbef0",
-  voice: "#c39fff",
+  think: "#c39fff",
+  speak: "#9fe8ff",
   tool: "#f4c45a",
   err: "#ff8a8a",
   done: "#5ed99d",
@@ -47,8 +49,9 @@ const CELL_COLORS: Record<string, string> = {
 
 const SIGNAL_LABELS: Record<string, string> = {
   rt: "RT",
-  audio: "Audio",
-  voice: "Voice",
+  audio: "Input",
+  think: "Think",
+  speak: "Speak",
   tool: "Tool",
   err: "Err",
 };
@@ -56,8 +59,9 @@ const SIGNAL_LABELS: Record<string, string> = {
 const CELL_PRIORITY: Record<string, number> = {
   err: 0,
   tool: 1,
-  voice: 2,
-  audio: 3,
+  think: 2,
+  speak: 3,
+  audio: 4,
   rt: 4,
   done: 5,
   status: 6,
@@ -106,7 +110,7 @@ function failureLevel(entry: any): HudSignal["level"] {
   if (!entry?.status) return "idle";
   if (entry.status === "blocked") return "blocked";
   if (entry.status === "waiting" || entry.status === "degraded") return "warn";
-  if (entry.status === "healthy") return "ok";
+  if (entry.status === "healthy" || entry.status === "ok") return "ok";
   return "idle";
 }
 
@@ -123,6 +127,47 @@ function countAppControlJobs(bridge: any) {
     },
     { active: 0, blocked: 0, completed: 0 },
   );
+}
+
+function millisSinceIso(value: unknown) {
+  const time = Date.parse(String(value || ""));
+  if (!Number.isFinite(time)) return Number.POSITIVE_INFINITY;
+  return Date.now() - time;
+}
+
+function toolStepLabel(name: unknown) {
+  const text = String(name || "");
+  if (text === "list_shareable_windows") return "list";
+  if (text === "share_existing_app_window") return "share";
+  if (text === "control_shared_app_window") return "control";
+  if (text === "delegate_to_worker") return "worker";
+  if (text === "worker_status") return "status";
+  if (text === "read_meet_chat") return "chat";
+  if (text === "send_meet_chat") return "send";
+  if (text === "present_video_stage") return "video";
+  if (text === "stop_video_stage") return "stop";
+  return (
+    text
+      .replace(/_window$/, "")
+      .replace(/_/g, " ")
+      .slice(0, 14) || "tool"
+  );
+}
+
+function allToolCalls(bridge: any) {
+  const sources = [
+    ...(Array.isArray(bridge?.meetTools?.calls) ? bridge.meetTools.calls : []),
+    ...(Array.isArray(bridge?.workspaceTools?.calls) ? bridge.workspaceTools.calls : []),
+    ...(Array.isArray(bridge?.workerTools?.calls) ? bridge.workerTools.calls : []),
+  ];
+  return sources
+    .filter((call: any) => call?.name)
+    .toSorted((left: any, right: any) => Date.parse(left.ts || "") - Date.parse(right.ts || ""));
+}
+
+function latestToolChain(bridge: any) {
+  const recent = allToolCalls(bridge).filter((call: any) => millisSinceIso(call.ts) < 45_000);
+  return recent.slice(-3).map((call: any) => toolStepLabel(call.name));
 }
 
 function realtimeSignal(bridge: any, failures: any): HudSignal {
@@ -142,28 +187,50 @@ function realtimeSignal(bridge: any, failures: any): HudSignal {
 function audioSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.audioInput);
   if (level === "blocked" || level === "warn")
-    return { key: "audio", label: "Audio", value: "check", level };
+    return { key: "audio", label: "Input", value: "wait", level };
   const source = String(bridge?.connection?.currentRealtimeInputSource || "").trim();
   if (source.includes("recappi"))
-    return { key: "audio", label: "Audio", value: "tap", level: "ok" };
+    return { key: "audio", label: "Input", value: "tap", level: "ok" };
   if (source.includes("meet_audio_mix"))
-    return { key: "audio", label: "Audio", value: "meet", level: "ok" };
+    return { key: "audio", label: "Input", value: "meet", level: "ok" };
   return {
     key: "audio",
-    label: "Audio",
+    label: "Input",
     value: source ? "on" : "wait",
     level: source ? "ok" : "warn",
   };
 }
 
-function voiceSignal(bridge: any, failures: any): HudSignal {
-  const level = failureLevel(failures.audioOutput || failures.modelTurn);
+function thinkingSignal(bridge: any, failures: any): HudSignal {
+  const level = failureLevel(failures.modelTurn);
   if (level === "blocked" || level === "warn")
-    return { key: "voice", label: "Voice", value: "check", level };
+    return { key: "think", label: "Think", value: "wait", level };
+  const speechMs = millisSinceIso(bridge?.protection?.lastInputSpeechStartedAt);
   const events = Number(bridge?.connection?.responseEvents || bridge?.responseEvents || 0);
+  if (speechMs < 10_000 && events === 0) {
+    return { key: "think", label: "Think", value: "turn", level: "active" };
+  }
   return events > 0
-    ? { key: "voice", label: "Voice", value: "ready", level: "ok" }
-    : { key: "voice", label: "Voice", value: "idle", level: "idle" };
+    ? { key: "think", label: "Think", value: "seen", level: "ok" }
+    : { key: "think", label: "Think", value: "idle", level: "idle" };
+}
+
+function speakingSignal(bridge: any, failures: any): HudSignal {
+  const level = failureLevel(failures.audioOutput);
+  if (level === "blocked" || level === "warn")
+    return { key: "speak", label: "Speak", value: "wait", level };
+  const avatarAudio = (window as any).MAB_AVATAR_AUDIO || {};
+  const output = avatarAudio.outputEnergy || {};
+  const rms = Number(output.rms || 0);
+  const recent = millisSinceIso(output.lastEnergyAt) < 1_500;
+  const threshold = Math.max(0.003, Number(output.thresholdRms || 0));
+  if (recent && rms >= threshold) {
+    return { key: "speak", label: "Speak", value: "audio", level: "active" };
+  }
+  if (output.observed || bridge?.feedback?.checks?.avatarAudioOutputObserved) {
+    return { key: "speak", label: "Speak", value: "ready", level: "ok" };
+  }
+  return { key: "speak", label: "Speak", value: "idle", level: "idle" };
 }
 
 function toolSignal(bridge: any, failures: any): HudSignal {
@@ -172,9 +239,21 @@ function toolSignal(bridge: any, failures: any): HudSignal {
   if (jobs.blocked > 0 || level === "blocked") {
     return { key: "tool", label: "Tool", value: "block", level: "blocked" };
   }
+  const chain = latestToolChain(bridge);
+  const chainValue = chain.length > 0 ? chain.join("→") : "";
   if (jobs.active > 0)
-    return { key: "tool", label: "Tool", value: `${jobs.active} run`, level: "active" };
-  if (jobs.completed > 0) return { key: "tool", label: "Tool", value: "done", level: "ok" };
+    return {
+      key: "tool",
+      label: "Tool",
+      value: chainValue || `${jobs.active} run`,
+      level: "active",
+      visibleWhenOk: true,
+    };
+  if (chainValue) {
+    return { key: "tool", label: "Tool", value: chainValue, level: "active", visibleWhenOk: true };
+  }
+  if (jobs.completed > 0)
+    return { key: "tool", label: "Tool", value: "done", level: "ok", visibleWhenOk: true };
   return { key: "tool", label: "Tool", value: "idle", level: "idle" };
 }
 
@@ -194,7 +273,8 @@ function collectSignals(): HudSignal[] {
   return [
     realtimeSignal(bridge, failures),
     audioSignal(bridge, failures),
-    voiceSignal(bridge, failures),
+    thinkingSignal(bridge, failures),
+    speakingSignal(bridge, failures),
     toolSignal(bridge, failures),
     errorSignal(bridge, failures),
   ];
@@ -227,11 +307,11 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
       };
     }
     return {
-      key: "voice",
+      key: "think",
       label: "Thinking",
       value: "",
       level: "active",
-      color: CELL_COLORS.voice,
+      color: CELL_COLORS.think,
       pulse: true,
     };
   }
@@ -258,11 +338,11 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
   if (status.kind === "done") {
     if (/说话|speaking|talk/i.test(text)) {
       return {
-        key: "voice",
-        label: "Voice",
+        key: "speak",
+        label: "Speak",
         value: "",
         level: "active",
-        color: CELL_COLORS.voice,
+        color: CELL_COLORS.speak,
         pulse: true,
       };
     }
@@ -296,7 +376,8 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
 }
 
 function signalCell(signal: HudSignal): HudCell | null {
-  if (signal.level === "idle" || signal.level === "ok") return null;
+  if (signal.level === "idle") return null;
+  if (signal.level === "ok" && !signal.visibleWhenOk) return null;
   const label = SIGNAL_LABELS[signal.key] || signal.label;
   return {
     key: signal.key,

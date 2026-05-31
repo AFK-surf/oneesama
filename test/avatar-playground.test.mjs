@@ -23,12 +23,16 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
     );
     assert.deepEqual(
       listening.signals.map((signal) => signal.label),
-      ["RT", "Audio", "Voice", "Tool", "Err"],
+      ["RT", "Input", "Think", "Speak", "Tool", "Err"],
     );
-    assert.equal(listening.signals.find((signal) => signal.label === "Audio")?.value, "tap");
+    assert.equal(listening.signals.find((signal) => signal.label === "Input")?.value, "tap");
 
     const tool = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("tool"));
     assert.equal(tool.signals.find((signal) => signal.label === "Tool")?.level, "active");
+    assert.equal(
+      tool.signals.find((signal) => signal.label === "Tool")?.value,
+      "list→share→control",
+    );
 
     const blocked = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("blocked"));
     assert.equal(blocked.signals.find((signal) => signal.label === "Err")?.level, "blocked");

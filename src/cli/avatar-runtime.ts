@@ -418,7 +418,7 @@ export async function avatarVisualSmoke() {
       result.hudSnapshots,
     );
     assertSmoke(
-      ["RT", "Audio", "Voice", "Tool", "Err"].every((label) =>
+      ["RT", "Input", "Think", "Speak", "Tool", "Err"].every((label) =>
         (result.hudSignals || []).some((signal) => signal.label === label),
       ),
       "avatar HUD visual smoke did not expose all runtime signal chips",
