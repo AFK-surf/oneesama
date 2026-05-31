@@ -43,6 +43,7 @@ interface RealtimeBridgeConfig {
   includeParticipantAudio: boolean;
   forwardMeetAudioToRealtime: boolean;
   meetAudioInputSource?: string;
+  allowRecappiReceiverFallback?: boolean;
   allowGenericMediaElementAudioDiscovery?: boolean;
   captureMeetAudioForTranscript?: boolean;
   meetAudioCaptureChunkMs?: number;
@@ -117,6 +118,7 @@ const config: RealtimeBridgeConfig = {
   includeParticipantAudio: false,
   forwardMeetAudioToRealtime: true,
   meetAudioInputSource: "webrtc",
+  allowRecappiReceiverFallback: false,
   captureMeetAudioForTranscript: false,
   meetAudioCaptureChunkMs: 5000,
   meetAudioInputGain: undefined,
@@ -237,6 +239,8 @@ const state = {
     currentRealtimeInputTrackId: "",
     currentRealtimeInputSource: "",
     currentRealtimeInputIsRoutingMix: false,
+    recappiReceiverFallbackActive: false,
+    recappiReceiverFallbackDisconnectedAt: "",
     realtimeAudioSenderStats: null as null | Record<string, unknown>,
     realtimeAgentSDKInputTrackIds: [],
     realtimeAgentSDKInputSenderTrackId: "",

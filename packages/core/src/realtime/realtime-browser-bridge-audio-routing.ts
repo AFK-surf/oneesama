@@ -9,12 +9,6 @@ const {
   getRealtimeAudioSender: () => realtimeAudioSender,
 });
 
-function meetAudioInputGain() {
-  return normalizeMeetAudioInputGain(
-    state.connection.meetAudioInputGain || config.meetAudioInputGain,
-  );
-}
-
 function ensureMeetAudioRoutingContext() {
   if (routingDestination) return routingDestination;
   const AudioContextImpl = window.AudioContext || window.webkitAudioContext;
@@ -65,6 +59,9 @@ function ensureRealtimeInputDestination(reason = "realtime-input") {
 
 function isMeetAudioSourceRoutable(entry) {
   const track = entry?.track;
+  if (config.meetAudioInputSource === "recappi_process_audio" && recappiProcessAudioConnected()) {
+    return false;
+  }
   return (
     track?.readyState === "live" &&
     track.muted !== true &&
@@ -367,7 +364,8 @@ function replaceRealtimeInputWithRoutingMix(reason = "meet-audio") {
 function forwardMeetAudioTrackToRealtime(track, detail = {}) {
   if (!track || track.kind !== "audio") return false;
   if (!state.connection.meetAudioForwardingEnabled) return false;
-  if (config.meetAudioInputSource === "recappi_process_audio") {
+  const useRecappiReceiverFallback = shouldUseMeetReceiverFallbackForRecappi();
+  if (config.meetAudioInputSource === "recappi_process_audio" && !useRecappiReceiverFallback) {
     recordTimeline("meet_audio_track_skipped", {
       reason: "recappi_process_audio_selected",
       trackId: track.id,
@@ -375,7 +373,7 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
     });
     return false;
   }
-  if (config.meetAudioInputSource !== "webrtc") {
+  if (config.meetAudioInputSource !== "webrtc" && !useRecappiReceiverFallback) {
     recordTimeline("meet_audio_track_skipped", {
       reason: "meet_audio_input_source_not_webrtc",
       source: config.meetAudioInputSource || "",
@@ -412,6 +410,17 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
   if (routedMeetAudioTrackIds.has(track.id)) return false;
   routedMeetAudioTrackIds.add(track.id);
   ensureMeetAudioRoutingContext();
+  if (useRecappiReceiverFallback) {
+    state.connection.recappiReceiverFallbackActive = true;
+    updateRoutingInputGain(configuredMeetReceiverInputGain(), "recappi-receiver-fallback");
+    recordTimeline("meet_audio_receiver_fallback_active", {
+      reason: "recappi_process_audio_unavailable",
+      trackId: track.id,
+      source: config.meetAudioInputSource || "",
+      fallbackGain: state.connection.meetAudioInputGain,
+      ...detail,
+    });
+  }
   try {
     const stream = new MediaStream([track]);
     const source = routingAudioContext.createMediaStreamSource(stream);

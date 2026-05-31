@@ -31,7 +31,31 @@ let recappiAudioQueuedSamples = 0;
 function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
   const source = String(payload.source || "recappi_process_audio");
   const label =
-    source === "recappi_global_audio" ? "Recappi global system audio" : "Recappi Chrome process audio";
+    source === "recappi_global_audio"
+      ? "Recappi global system audio"
+      : "Recappi Chrome process audio";
+  if (source === "recappi_process_audio") {
+    updateRoutingInputGain(configuredRecappiProcessInputGain(), "recappi-process-audio-connected");
+    let disconnectedFallbackSources = 0;
+    for (const entry of routedMeetAudioSources || []) {
+      if (entry.connected === true) {
+        disconnectedFallbackSources += disconnectMeetAudioSource(
+          entry,
+          "recappi-process-audio-connected",
+        )
+          ? 1
+          : 0;
+      }
+    }
+    if (disconnectedFallbackSources > 0 || state.connection.recappiReceiverFallbackActive) {
+      state.connection.recappiReceiverFallbackActive = false;
+      state.connection.recappiReceiverFallbackDisconnectedAt = new Date().toISOString();
+      recordTimeline("meet_audio_receiver_fallback_disconnected", {
+        reason: "recappi_process_audio_connected",
+        disconnectedSources: disconnectedFallbackSources,
+      });
+    }
+  }
   recappiConnection.recappiAudioInput = {
     ...getRecappiAudioInputState(),
     enabled: true,
@@ -74,6 +98,7 @@ function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
       lastRealtimeInputReplaceAt: new Date().toISOString(),
     });
   }
+  refreshMeetAudioTrackStates();
 }
 
 function fillRecappiAudioOutput(output: Float32Array) {

@@ -186,8 +186,8 @@ function realtimeSignal(bridge: any, failures: any): HudSignal {
 
 function audioSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.audioInput);
-  if (level === "blocked" || level === "warn")
-    return { key: "audio", label: "音频", value: "听不到", level };
+  if (level === "blocked") return { key: "audio", label: "音频", value: "卡住", level };
+  if (level === "warn") return { key: "audio", label: "音频", value: "接音频", level };
   const source = String(bridge?.connection?.currentRealtimeInputSource || "").trim();
   if (source.includes("recappi"))
     return { key: "audio", label: "音频", value: "有输入", level: "ok" };

@@ -397,7 +397,20 @@
       return { status, reason, signals };
     }
 
+    function millisSinceIso(value: unknown) {
+      const parsed = Date.parse(String(value || ""));
+      if (!Number.isFinite(parsed)) return 0;
+      return Math.max(0, Date.now() - parsed);
+    }
+
     function classifyAudioInput(checks): AudioInputPolicy {
+      const missingInputSince =
+        state.connection.lastRealtimeInputReplaceAt ||
+        state.connection.lastInboundEventAt ||
+        state.connection.lastOutboundEventAt ||
+        "";
+      const missingInputMs = millisSinceIso(missingInputSince);
+      const missingInputBlockAfterMs = 15_000;
       const signals = {
         participantAudioTracksAdded: state.connection.participantAudioTracksAdded,
         meetAudioTracksForwarded: state.connection.meetAudioTracksForwarded,
@@ -413,6 +426,9 @@
         meetAudioTrackStates: state.connection.meetAudioTrackStates || [],
         recappiAudioInput: (state.connection as any).recappiAudioInput || null,
         meetAudioEnergy: state.connection.meetAudioEnergy,
+        inputAudioMissingSince: missingInputSince,
+        inputAudioMissingMs: missingInputMs,
+        inputAudioMissingBlockAfterMs: missingInputBlockAfterMs,
       };
       if (!checks.meetParticipantAudioExpected && !checks.inputAudioAdded) {
         return {
@@ -426,9 +442,10 @@
         };
       }
       if (checks.meetParticipantAudioExpected && !checks.meetParticipantAudioReady) {
+        const blocked = missingInputMs >= missingInputBlockAfterMs;
         if (checks.meetAudioTracksForwarded > 0 && !checks.meetAudioRoutedToRealtimeInput) {
           return {
-            status: "waiting",
+            status: blocked ? "blocked" : "waiting",
             reason: "meet_audio_not_routed_to_realtime_input",
             ready: false,
             expected: true,
@@ -439,7 +456,7 @@
         }
         if (checks.realtimeInputPlaceholderAdded) {
           return {
-            status: "waiting",
+            status: blocked ? "blocked" : "waiting",
             reason: "silent_input_placeholder_only",
             ready: false,
             expected: true,
@@ -450,8 +467,10 @@
         }
       }
       if (!checks.inputAudioAdded) {
+        const blocked =
+          checks.meetParticipantAudioExpected && missingInputMs >= missingInputBlockAfterMs;
         return {
-          status: "waiting",
+          status: blocked ? "blocked" : "waiting",
           reason: "input_audio_not_configured",
           ready: false,
           expected: checks.meetParticipantAudioExpected,
@@ -732,9 +751,11 @@
         !audioInputPolicy.ready &&
         audioInputPolicy.blockers.length
       ) {
-        status = "waiting_for_turn";
-        summary =
-          "Realtime is connected with a silent input placeholder; waiting for Meet participant audio.";
+        const audioInputBlocked = audioInputPolicy.status === "blocked";
+        status = audioInputBlocked ? "blocked" : "waiting_for_turn";
+        summary = audioInputBlocked
+          ? "Realtime is connected, but required Meet/Recappi audio input never became available."
+          : "Realtime is connected with a silent input placeholder; waiting for Meet participant audio.";
         blockers.push(...audioInputPolicy.blockers);
       } else if (appControlJobs.blocked > 0) {
         status = "tool_blocked";
@@ -784,7 +805,8 @@
         blockers.push("meet_audio_energy_stale");
       } else if (!checks.modelTurnEvents) {
         status = "waiting_for_response";
-        summary = "Realtime server events are arriving, but no model turn activity has been observed.";
+        summary =
+          "Realtime server events are arriving, but no model turn activity has been observed.";
         blockers.push("no_model_turn_events");
       } else if (!checks.remoteAudioAttached) {
         status = "output_blocked";

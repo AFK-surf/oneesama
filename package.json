@@ -76,6 +76,7 @@
     "smoke:screen-share": "tsx src/cli.ts screen-share-smoke",
     "smoke:real-meet": "tsx src/cli.ts real-meet-smoke",
     "smoke:real-meet-synthetic-speaker": "node --import tsx scripts/real-meet-synthetic-speaker-smoke.mjs",
+    "smoke:recappi-chrome-audio": "node --import tsx scripts/recappi-chrome-audio-smoke.mjs",
     "smoke:real-local-dialog": "tsx src/cli.ts real-local-dialog-smoke",
     "smoke:persistence": "tsx src/cli.ts persistence-smoke",
     "smoke:worker-bridge": "tsx src/cli.ts worker-bridge-smoke",
