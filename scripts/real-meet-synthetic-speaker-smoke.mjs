@@ -15,8 +15,19 @@ function envMs(name, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function envInt(name, fallback) {
-  const parsed = Number.parseInt(process.env[name] || "", 10);
+function argValue(name) {
+  const inlinePrefix = `${name}=`;
+  const inline = process.argv.find((entry) => entry.startsWith(inlinePrefix));
+  if (inline) return inline.slice(inlinePrefix.length);
+  const index = process.argv.indexOf(name);
+  if (index >= 0 && process.argv[index + 1] && !process.argv[index + 1].startsWith("--")) {
+    return process.argv[index + 1];
+  }
+  return "";
+}
+
+function envOrArgInt(envName, argName, fallback) {
+  const parsed = Number.parseInt(argValue(argName) || process.env[envName] || "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
@@ -318,8 +329,7 @@ function gateStatus(compact, options = {}) {
   const avatarOutputObserved = compact.avatarAudio?.outputEnergyObserved === true;
   const toolNames = compact.toolCalls?.all || [];
   const expectedToolCalled =
-    expectedToolNames.length === 0 ||
-    expectedToolNames.some((name) => toolNames.includes(name));
+    expectedToolNames.length === 0 || expectedToolNames.some((name) => toolNames.includes(name));
   return {
     participantPresent:
       Number(compact.participantCount || 0) >= 2 || Boolean(compact.activeSpeaker),
@@ -330,8 +340,7 @@ function gateStatus(compact, options = {}) {
     meetEnergyOk,
     speechStarted,
     responseSeen,
-    outputRouted:
-      responseSeen && avatarOutputObserved,
+    outputRouted: responseSeen && avatarOutputObserved,
     expectedToolCalled,
   };
 }
@@ -346,7 +355,7 @@ function applyLocalFixtureToolShareSmokeDefaults() {
   process.env.MAB_REALTIME_SYNTHETIC_REQUIRE_TOOL =
     process.env.MAB_REALTIME_SYNTHETIC_REQUIRE_TOOL || "1";
   process.env.MAB_REALTIME_SYNTHETIC_SPEECH_START_DELAY_MS =
-    process.env.MAB_REALTIME_SYNTHETIC_SPEECH_START_DELAY_MS || "12000";
+    process.env.MAB_REALTIME_SYNTHETIC_SPEECH_START_DELAY_MS || "30000";
 }
 
 async function runSpeakerWorker() {
@@ -658,7 +667,11 @@ function compactSyntheticResult(result) {
 
 async function runLocalFixtureToolShareSmokeMain() {
   applyLocalFixtureToolShareSmokeDefaults();
-  const iterations = envInt("MAB_REALTIME_SYNTHETIC_ITERATIONS", 3);
+  const cliTimeoutMs = argValue("--timeout-ms");
+  if (cliTimeoutMs) {
+    process.env.MAB_REALTIME_SYNTHETIC_SPEECH_WAIT_MS = cliTimeoutMs;
+  }
+  const iterations = envOrArgInt("MAB_REALTIME_SYNTHETIC_ITERATIONS", "--iterations", 3);
   const originalSessionId = process.env.MAB_REALTIME_SYNTHETIC_SESSION_ID || "";
   const results = [];
   try {
