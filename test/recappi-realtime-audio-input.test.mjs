@@ -114,3 +114,52 @@ test("Recappi realtime input coalesces bursty chunks before browser push", async
   assert.deepEqual(pushed[0].samples.slice(0, 6), [0, 0, 1, -1, 2, -2]);
   assert.deepEqual(pushed[0].samples.slice(-4), [18, -18, 19, -19]);
 });
+
+test("Recappi realtime input accepts global Recappi fallback source", async () => {
+  let startOptions = null;
+  let consumer = null;
+  const pushed = [];
+  const recappiTap = {
+    start: async (options) => {
+      startOptions = options;
+      return {
+        source: "recappi_global_audio",
+        sampleRate: 48000,
+        channels: 2,
+        processId: 0,
+      };
+    },
+    addConsumer: (callback) => {
+      consumer = callback;
+      return () => {
+        consumer = null;
+      };
+    },
+    status: () => ({
+      ok: true,
+      running: true,
+      source: "recappi_global_audio",
+      sampleRate: 48000,
+      channels: 2,
+      processId: 0,
+    }),
+  };
+  const page = {
+    isClosed: () => false,
+    evaluate: async (_fn, payload) => {
+      pushed.push(payload);
+      return { ok: true };
+    },
+  };
+
+  const input = createRecappiRealtimeAudioInput({ sessionId: "session_test", recappiTap });
+  await input.start({ context: {}, page, diagnostics: null });
+  assert.equal(startOptions.allowGlobalFallback, true);
+  assert.equal(input.status().source, "recappi_global_audio");
+  assert.equal(typeof consumer, "function");
+
+  consumer(null, Float32Array.from([0.1, 0.1]));
+
+  await waitFor(() => pushed.length > 0);
+  assert.equal(pushed[0].source, "recappi_global_audio");
+});

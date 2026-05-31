@@ -466,6 +466,43 @@ test("Recappi process audio input feeds the routing mix without RTC tracks", asy
   }
 });
 
+test("Recappi global audio fallback preserves source telemetry", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, { meetAudioInputSource: "recappi_process_audio" });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      const accepted = window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+        source: "recappi_global_audio",
+        sampleRate: 48000,
+        channels: 2,
+        samples: [0.02, 0.02, -0.02, -0.02],
+      });
+      await wait(100);
+      return {
+        accepted,
+        recappi: { ...window.MAB_REALTIME_BRIDGE.connection.recappiAudioInput },
+        trackStates: window.MAB_REALTIME_BRIDGE.connection.meetAudioTrackStates,
+      };
+    });
+
+    assert.equal(result.accepted.ok, true);
+    assert.equal(result.accepted.source, "recappi_global_audio");
+    assert.equal(result.recappi.connected, true);
+    assert.equal(result.recappi.source, "recappi_global_audio");
+    const recappiTrackStates = result.trackStates.filter((entry) =>
+      ["recappi_process_audio", "recappi_global_audio"].includes(entry.source),
+    );
+    assert.equal(recappiTrackStates.length, 1);
+    assert.equal(recappiTrackStates[0].source, "recappi_global_audio");
+    assert.equal(recappiTrackStates[0].label, "Recappi global system audio");
+  } finally {
+    await browser.close();
+  }
+});
+
 test("avatar visual tool output requests a follow-up response by default", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();

@@ -29,13 +29,16 @@ const recappiAudioInputQueue = [];
 let recappiAudioQueuedSamples = 0;
 
 function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
+  const source = String(payload.source || "recappi_process_audio");
+  const label =
+    source === "recappi_global_audio" ? "Recappi global system audio" : "Recappi Chrome process audio";
   recappiConnection.recappiAudioInput = {
     ...getRecappiAudioInputState(),
     enabled: true,
     connected: true,
     sampleRate: Number(payload.sampleRate || getRecappiAudioInputState()?.sampleRate || 0),
     channels: Number(payload.channels || getRecappiAudioInputState()?.channels || 0),
-    source: String(payload.source || "recappi_process_audio"),
+    source,
   };
   state.connection.meetAudioTracksForwarded = Math.max(
     1,
@@ -51,7 +54,7 @@ function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
   );
   state.connection.meetAudioTrackStates = [
     ...(state.connection.meetAudioTrackStates || []).filter(
-      (entry) => entry.source !== "recappi_process_audio",
+      (entry) => !["recappi_process_audio", "recappi_global_audio"].includes(entry.source),
     ),
     {
       trackId: "recappi-process-audio",
@@ -60,8 +63,8 @@ function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
       muted: false,
       connected: true,
       disconnectReason: "",
-      source: "recappi_process_audio",
-      label: "Recappi Chrome process audio",
+      source,
+      label,
     },
   ].slice(-10);
   if (routingDestination) {
@@ -198,7 +201,7 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   updateFeedback();
   return {
     ok: true,
-    source: "recappi_process_audio",
+    source: String(payload.source || "recappi_process_audio"),
     queuedSamples: recappiAudioQueuedSamples,
     chunks: getRecappiAudioInputState().chunks,
   };

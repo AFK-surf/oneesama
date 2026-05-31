@@ -174,12 +174,13 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     diagnostics?: DiagnosticsLike | null;
   }) {
     page = targetPage;
-    const tapState = await options.recappiTap.start({ context, allowGlobalFallback: false });
-    if (tapState.source !== "recappi_process_audio") {
+    const tapState = await options.recappiTap.start({ context, allowGlobalFallback: true });
+    if (!["recappi_process_audio", "recappi_global_audio"].includes(tapState.source || "")) {
       throw new Error(`unexpected_recappi_tap_source:${tapState.source || "unknown"}`);
     }
     state.startedAt = state.startedAt || nowIso();
     state.stoppedAt = "";
+    state.source = tapState.source || "recappi_process_audio";
     state.sampleRate = tapState.sampleRate || 48000;
     state.channels = tapState.channels || 2;
     state.processId = tapState.processId || 0;

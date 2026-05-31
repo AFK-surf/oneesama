@@ -26,6 +26,7 @@ export type RecappiAudioCallback = (error: unknown, samples: number[]) => void;
 
 interface ShareableContentApi {
   applications(): ShareableApplication[];
+  applicationWithProcessId?: (processId: number) => ShareableApplication | null;
   tapAudio(processId: number, callback: RecappiAudioCallback): ShareableAudioSession;
   tapGlobalAudio(filters: unknown[], callback: RecappiAudioCallback): ShareableAudioSession;
 }
@@ -37,6 +38,7 @@ interface RecappiSdkModule {
 export interface RecappiAudioTapOptions {
   recappiSdkPath?: string;
   log?: (message: string) => void;
+  shareableContent?: ShareableContentApi;
 }
 
 export interface RecappiAudioTapStartOptions {
@@ -53,6 +55,9 @@ function defaultLog(message: string): void {
 }
 
 async function loadRecappiSdk(options: RecappiAudioTapOptions = {}): Promise<RecappiSdkModule> {
+  if (options.shareableContent) {
+    return { ShareableContent: options.shareableContent };
+  }
   try {
     return require("@recappi/sdk") as RecappiSdkModule;
   } catch {
@@ -67,36 +72,84 @@ async function loadRecappiSdk(options: RecappiAudioTapOptions = {}): Promise<Rec
   return require(sdkPath);
 }
 
+function chromiumAppText(app: ShareableApplication): { bundle: string; name: string } {
+  const bundle = String(app.bundleIdentifier || app.bundleId || "").toLowerCase();
+  const name = String(
+    app.applicationName || app.localizedName || app.name || app.title || "",
+  ).toLowerCase();
+  return { bundle, name };
+}
+
+function isChromiumApp(app: ShareableApplication): boolean {
+  const { bundle, name } = chromiumAppText(app);
+  return bundle.includes("chromium") || bundle.includes("chrome") || name.includes("chrom");
+}
+
+function isHelperApp(app: ShareableApplication): boolean {
+  const { bundle, name } = chromiumAppText(app);
+  return bundle.includes(".helper") || name.includes("helper");
+}
+
 async function findChromiumAudioPid(
   context: BrowserContext | null | undefined,
   shareableContent: ShareableContentApi,
   log: (message: string) => void,
 ): Promise<number | null> {
+  let apps: ShareableApplication[] = [];
+  try {
+    apps = shareableContent?.applications?.() || [];
+  } catch (error) {
+    log(`Recappi app scan failed: ${String((error as Error)?.message || error)}`);
+  }
+
+  const chromiumApps = apps.filter(isChromiumApp);
+
+  let checkedCdpBrowser = false;
   try {
     const browser = context?.browser?.();
     if (browser?.newBrowserCDPSession) {
+      checkedCdpBrowser = true;
       const session = await browser.newBrowserCDPSession();
       const { processInfo } = await session.send("SystemInfo.getProcessInfo");
-      const audio = (processInfo || []).find((p) => p.type === "audio.mojom.AudioService");
-      if (audio?.id) return audio.id;
+      const cdpPids = new Set((processInfo || []).map((p) => Number(p.id || 0)).filter(Boolean));
+      const matchedApps = chromiumApps.filter((app) =>
+        cdpPids.has(Number(app.processId || app.pid)),
+      );
+      const matchedApp = matchedApps.find((app) => !isHelperApp(app)) || matchedApps[0];
+      if (matchedApp?.processId || matchedApp?.pid) {
+        return Number(matchedApp.processId || matchedApp.pid);
+      }
+
       const browserProc = (processInfo || []).find((p) => p.type === "browser");
-      if (browserProc?.id) return browserProc.id;
+      const browserPid = Number(browserProc?.id || 0);
+      if (browserPid && shareableContent.applicationWithProcessId) {
+        const app = shareableContent.applicationWithProcessId(browserPid);
+        if (app?.processId || app?.pid) return Number(app.processId || app.pid);
+      }
+
+      const audio = (processInfo || []).find((p) => p.type === "audio.mojom.AudioService");
+      if (audio?.id) {
+        log(
+          `CDP audio service pid ${audio.id} is not a Recappi shareable application; using global fallback if no app PID is available`,
+        );
+      }
     }
   } catch (error) {
     log(`CDP process lookup failed: ${String((error as Error)?.message || error)}`);
   }
 
-  try {
-    const apps = shareableContent?.applications?.() || [];
-    const chromium = apps.find((app) => {
-      const bundle = String(app.bundleIdentifier || "").toLowerCase();
-      return bundle.includes("chromium") || bundle.includes("chrome");
-    });
-    return chromium?.processId || null;
-  } catch (error) {
-    log(`Recappi app scan failed: ${String((error as Error)?.message || error)}`);
-    return null;
+  if (checkedCdpBrowser) return null;
+
+  const nonHelperChromium = chromiumApps.find((app) => {
+    return !isHelperApp(app);
+  });
+  if (nonHelperChromium?.processId || nonHelperChromium?.pid) {
+    return Number(nonHelperChromium.processId || nonHelperChromium.pid);
   }
+  if (chromiumApps.length === 1 && (chromiumApps[0].processId || chromiumApps[0].pid)) {
+    return Number(chromiumApps[0].processId || chromiumApps[0].pid);
+  }
+  return null;
 }
 
 function normalizeShareableApplication(app: ShareableApplication, index: number) {

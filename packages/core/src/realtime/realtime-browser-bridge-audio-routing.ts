@@ -104,7 +104,8 @@ function refreshMeetAudioTrackStates() {
   const unmutedSources = liveSources.filter(
     (entry) => entry.track?.muted !== true && entry.track?.enabled !== false,
   );
-  const recappiConnected = (state.connection as any).recappiAudioInput?.connected === true;
+  const recappiInputState = (state.connection as any).recappiAudioInput || {};
+  const recappiConnected = recappiInputState.connected === true;
   state.connection.meetAudioSourcesActive = liveSources.length + (recappiConnected ? 1 : 0);
   state.connection.meetAudioSourcesUnmuted = unmutedSources.length + (recappiConnected ? 1 : 0);
   const trackStates = routedMeetAudioSources.slice(-10).map((entry) => ({
@@ -118,6 +119,7 @@ function refreshMeetAudioTrackStates() {
     label: entry.detail?.label || entry.track?.label || "",
   }));
   if (recappiConnected) {
+    const recappiSource = String(recappiInputState.source || "recappi_process_audio");
     trackStates.push({
       trackId: "recappi-process-audio",
       readyState: "live",
@@ -125,8 +127,11 @@ function refreshMeetAudioTrackStates() {
       muted: false,
       connected: true,
       disconnectReason: "",
-      source: "recappi_process_audio",
-      label: "Recappi Chrome process audio",
+      source: recappiSource,
+      label:
+        recappiSource === "recappi_global_audio"
+          ? "Recappi global system audio"
+          : "Recappi Chrome process audio",
     });
   }
   state.connection.meetAudioTrackStates = trackStates.slice(-10);
