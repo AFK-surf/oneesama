@@ -11,7 +11,8 @@ Options:
                         Defaults to ONEESAMA_LIVE_ENV_FILES, or:
                         ${XDG_CONFIG_HOME:-$HOME/.config}/oneesama/live-env/oneesama-r24-a-window/live-env.sh
                         ${XDG_CONFIG_HOME:-$HOME/.config}/oneesama/live-env/oneesama-live-env-from-proc.sh
-                        ${XDG_CONFIG_HOME:-$HOME/.config}/oneesama/live-env/oneesama-workspace-triage-policy.sh
+                        meeting-agent: oneesama-openai-live.sh, oneesama-app-control-live.sh
+                        slack-agent: oneesama-workspace-triage-policy.sh, oneesama-slack-env.sh
   --bin <path>          oneesama binary path. Default: ./oneesama
   --preflight-only      Load env and validate required exported tokens, then exit.
   --check-pid <pid>     Verify the already-started process still has required env.
@@ -106,8 +107,19 @@ if [[ ${#env_files[@]} -eq 0 ]]; then
     env_files=(
       "${default_env_dir}/oneesama-r24-a-window/live-env.sh"
       "${default_env_dir}/oneesama-live-env-from-proc.sh"
-      "${default_env_dir}/oneesama-workspace-triage-policy.sh"
     )
+    if [[ "$subcommand" == "meeting-agent" ]]; then
+      env_files+=(
+        "${default_env_dir}/oneesama-openai-live.sh"
+        "${default_env_dir}/oneesama-app-control-live.sh"
+      )
+    fi
+    if [[ "$subcommand" == "slack-agent" ]]; then
+      env_files+=(
+        "${default_env_dir}/oneesama-workspace-triage-policy.sh"
+        "${default_env_dir}/oneesama-slack-env.sh"
+      )
+    fi
   fi
 fi
 
@@ -468,6 +480,8 @@ preflight_env() {
         log "ok: Oneesama Pi model = ${ONEESAMA_PI_MODEL:-${PI_MODEL_ID:-}}"
       fi
     fi
+  elif [[ "$subcommand" == "meeting-agent" ]]; then
+    require_env_any "OpenAI Realtime API key" MAB_OPENAI_API_KEY OPENAI_API_KEY
   fi
 	local required_codex_env
 	required_codex_env="$(codex_required_env_key || true)"

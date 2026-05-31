@@ -576,7 +576,11 @@ func TestOneesamaLivePreflightSkipsSlackTokensForMeetingAgent(t *testing.T) {
 
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, "live-env.sh")
-	writeFile(t, envFile, "ONEESAMA_AGENT_RUNNER=dry-run\n")
+	writeFile(t, envFile, strings.Join([]string{
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"MAB_OPENAI_API_KEY=test-openai-key",
+		"",
+	}, "\n"))
 
 	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "meeting-agent")
 	if err != nil {
@@ -584,6 +588,22 @@ func TestOneesamaLivePreflightSkipsSlackTokensForMeetingAgent(t *testing.T) {
 	}
 	if strings.Contains(output, "Slack bot token is required") {
 		t.Fatalf("output = %s, should not require Slack tokens for meeting-agent", output)
+	}
+}
+
+func TestOneesamaLivePreflightRequiresOpenAIForMeetingAgent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, "ONEESAMA_AGENT_RUNNER=dry-run\n")
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "meeting-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live meeting-agent preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "OpenAI Realtime API key is required") {
+		t.Fatalf("output = %s, want missing OpenAI Realtime API key", output)
 	}
 }
 
