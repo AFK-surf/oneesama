@@ -468,7 +468,11 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         recappiRealtimeProbe,
       };
     }
-    const realtimeMeetAudioInputSource = realtimeRecappiAudioInput ? "recappi_process_audio" : "none";
+    const realtimeMeetAudioInputSource = realtimeRecappiAudioInput
+      ? "recappi_process_audio"
+      : realtimeRequiresRecappi
+        ? "none"
+        : "webrtc";
     const requestedAvatarRenderer = input.avatarRenderer || config.avatarRenderer;
     const avatarRendererIsVideo = String(requestedAvatarRenderer || "").toLowerCase() === "video";
     const avatarConfig = {
