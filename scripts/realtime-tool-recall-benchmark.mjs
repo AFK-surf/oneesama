@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { WebSocket } from "ws";
 
 const DEFAULT_FIXTURE = "scripts/fixtures/realtime-tool-recall-cases.json";
@@ -126,6 +127,38 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function textFromContent(content) {
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => part?.text || part?.transcript || "")
+    .filter(Boolean)
+    .join("");
+}
+
+function textFromEvent(event) {
+  const responseOutputContent = Array.isArray(event.response?.output)
+    ? event.response.output.flatMap((item) => item?.content || [])
+    : [];
+  return (
+    event.delta ||
+    event.text ||
+    event.transcript ||
+    event.part?.text ||
+    event.part?.transcript ||
+    event.item?.text ||
+    textFromContent(event.item?.content) ||
+    textFromContent(responseOutputContent) ||
+    ""
+  );
+}
+
+function compactText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
 function pickTools(allTools, variant) {
   if (variant.toolNames === "*") return allTools;
   const allowed = new Set(variant.toolNames || []);
@@ -174,11 +207,29 @@ async function mintSecret({ meetingAgentUrl, tools, config, variantName, caseId,
 function runRealtimeTurn({ url, secret, utterance, timeoutMs, instructions, tools }) {
   return new Promise((resolve, reject) => {
     const calls = [];
+    const callEvents = [];
+    const textEvents = [];
     const errors = [];
     const ws = new WebSocket(url, {
       headers: { Authorization: `Bearer ${secret}` },
     });
     let settled = false;
+    let sequence = 0;
+    const recordCall = (name, type) => {
+      calls.push(name);
+      callEvents.push({ name, type, sequence });
+    };
+    const recordText = (event) => {
+      const text = textFromEvent(event);
+      if (!text) return;
+      const type = event.type || "";
+      textEvents.push({
+        type,
+        mode: type.endsWith(".delta") ? "delta" : "full",
+        text: compactText(text),
+        sequence,
+      });
+    };
     const finish = () => {
       if (settled) return;
       settled = true;
@@ -188,7 +239,18 @@ function runRealtimeTurn({ url, secret, utterance, timeoutMs, instructions, tool
       } catch {
         // Best-effort close.
       }
-      resolve({ calls: unique(calls), errors });
+      const deltaText = textEvents
+        .filter((event) => event.mode === "delta")
+        .map((event) => event.text)
+        .join("");
+      const fallbackText = textEvents.map((event) => event.text).join("");
+      resolve({
+        calls: unique(calls),
+        callEvents,
+        assistantText: compactText(deltaText || fallbackText),
+        textEvents,
+        errors,
+      });
     };
     const timer = setTimeout(finish, timeoutMs);
     ws.on("open", () => {
@@ -223,11 +285,25 @@ function runRealtimeTurn({ url, secret, utterance, timeoutMs, instructions, tool
       } catch {
         return;
       }
+      sequence += 1;
       if (event.type === "response.function_call_arguments.done" && event.name) {
-        calls.push(event.name);
+        recordCall(event.name, event.type);
       }
       if (event.type === "response.output_item.added" && event.item?.type === "function_call") {
-        calls.push(event.item.name);
+        recordCall(event.item.name, event.type);
+      }
+      if (
+        event.type === "response.text.delta" ||
+        event.type === "response.text.done" ||
+        event.type === "response.output_text.delta" ||
+        event.type === "response.output_text.done" ||
+        event.type === "response.audio_transcript.delta" ||
+        event.type === "response.audio_transcript.done" ||
+        event.type === "response.content_part.added" ||
+        event.type === "response.output_item.done" ||
+        event.type === "response.done"
+      ) {
+        recordText(event);
       }
       if (event.type === "error") errors.push(event.error || event);
       if (event.type === "response.done") finish();
@@ -241,13 +317,31 @@ function runRealtimeTurn({ url, secret, utterance, timeoutMs, instructions, tool
   });
 }
 
-function scoreCase(testCase, calls) {
+export function scoreCase(testCase, result) {
+  const calls = result.calls || [];
   const expected = testCase.expectedToolNames || [];
   const disallowed = testCase.disallowedToolNames || [];
   if (expected.length > 0) {
-    return { ok: calls.some((name) => expected.includes(name)), kind: "positive" };
+    const matched = calls.some((name) => expected.includes(name));
+    const fakeExecution = !matched && Boolean(result.assistantText);
+    return {
+      ok: matched,
+      kind: "positive",
+      reason: matched
+        ? "expected_tool_called"
+        : fakeExecution
+          ? "assistant_text_without_expected_tool"
+          : "expected_tool_missing",
+      fakeExecution,
+    };
   }
-  return { ok: !calls.some((name) => disallowed.includes(name)), kind: "negative" };
+  const disallowedCalled = calls.some((name) => disallowed.includes(name));
+  return {
+    ok: !disallowedCalled,
+    kind: "negative",
+    reason: disallowedCalled ? "disallowed_tool_called" : "no_disallowed_tool_called",
+    fakeExecution: false,
+  };
 }
 
 async function runCase(args, config, variant, tools, testCase, iteration) {
@@ -267,14 +361,18 @@ async function runCase(args, config, variant, tools, testCase, iteration) {
     instructions: config.instructions,
     tools,
   });
-  const score = scoreCase(testCase, result.calls);
+  const score = scoreCase(testCase, result);
   return {
     id: testCase.id,
     iteration,
     attempts: 1,
     kind: score.kind,
     ok: score.ok,
+    reason: score.reason,
+    fakeExecution: score.fakeExecution,
     calls: result.calls,
+    callEvents: result.callEvents,
+    assistantText: result.assistantText,
     expectedToolNames: testCase.expectedToolNames || [],
     disallowedToolNames: testCase.disallowedToolNames || [],
     errors: result.errors.map((error) => ({
@@ -364,7 +462,11 @@ async function main() {
             attempts: args.retries + 1,
             kind: (testCase.expectedToolNames || []).length ? "positive" : "negative",
             ok: false,
+            reason: "benchmark_error",
+            fakeExecution: false,
             calls: [],
+            callEvents: [],
+            assistantText: "",
             expectedToolNames: testCase.expectedToolNames || [],
             disallowedToolNames: testCase.disallowedToolNames || [],
             errors: [{ message: String(error?.message || error).slice(0, 240) }],
@@ -408,14 +510,22 @@ function printReport(report) {
         ? ` errors=${row.errors.map((e) => e.message).join(" | ")}`
         : "";
       const attempts = row.attempts > 1 ? ` attempts=${row.attempts}` : "";
+      const reason = row.reason ? ` reason=${row.reason}` : "";
+      const fake = row.fakeExecution ? " fakeExecution=true" : "";
+      const text =
+        row.assistantText && (!row.ok || row.fakeExecution)
+          ? ` assistantText=${JSON.stringify(row.assistantText)}`
+          : "";
       console.log(
-        `  ${row.ok ? "ok " : "BAD"} ${row.id}#${row.iteration}: calls=[${row.calls.join(",") || "none"}] ${expectation}${attempts}${errors}`,
+        `  ${row.ok ? "ok " : "BAD"} ${row.id}#${row.iteration}: calls=[${row.calls.join(",") || "none"}] ${expectation}${attempts}${reason}${fake}${errors}${text}`,
       );
     }
   }
 }
 
-await main().catch((error) => {
-  console.error(`realtime-tool-recall-benchmark failed: ${error?.message || error}`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main().catch((error) => {
+    console.error(`realtime-tool-recall-benchmark failed: ${error?.message || error}`);
+    process.exit(1);
+  });
+}

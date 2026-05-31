@@ -136,6 +136,9 @@ test("Realtime contract keeps short voice checks and self-introductions on topic
   assert.match(session.instructions, /“共享一下”/);
   assert.match(session.instructions, /“Pencil 这个 app”/);
   assert.match(session.instructions, /Screen-share action mandate:/);
+  assert.match(session.instructions, /Fake-execution ban:/);
+  assert.match(session.instructions, /before emitting the corresponding tool call/);
+  assert.match(session.instructions, /结果出来告诉你/);
   assert.match(
     session.instructions,
     /first action in that turn must be list_shareable_windows or share_existing_app_window/,

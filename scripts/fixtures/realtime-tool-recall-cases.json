@@ -31,6 +31,11 @@
       "expectedToolNames": ["share_existing_app_window", "list_shareable_windows"]
     },
     {
+      "id": "share_browser_realroom_zh",
+      "utterance": "请共享这台 Mac mini 上的浏览器窗口。",
+      "expectedToolNames": ["share_existing_app_window", "list_shareable_windows"]
+    },
+    {
       "id": "share_pencil_zh",
       "utterance": "把 Pencil 这个 app 共享一下。",
       "expectedToolNames": ["share_existing_app_window", "list_shareable_windows"]
