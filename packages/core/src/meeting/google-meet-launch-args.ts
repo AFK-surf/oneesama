@@ -19,6 +19,7 @@ export function buildGoogleMeetChromiumArgs(input: {
     "--auto-select-tab-capture-source-by-title=Meeting Avatar Bot",
     "--no-sandbox",
     "--disable-dev-shm-usage",
+    "--disable-features=AudioServiceOutOfProcess",
     ...(input.avatarUseSwiftShader
       ? ["--use-angle=swiftshader", "--use-gl=angle", "--enable-unsafe-swiftshader"]
       : ["--use-angle=default", "--enable-gpu-rasterization"]),
