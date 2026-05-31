@@ -102,7 +102,7 @@ test("Realtime bridge observes Meet caption turns without using them as model in
       window.addEventListener("meeting-avatar-realtime-event", (event) => {
         wireEvents.push(event.detail);
       });
-      const skipped = window.MAB_REALTIME_CLIENT.injectCaptionTurn({
+      const skipped = window.MAB_REALTIME_CLIENT.observeCaptionSpeakerSignal({
         ts: "2026-05-27T02:10:00.000Z",
         speaker: "Peng Xiao",
         text: "现在还是不理我",
@@ -113,7 +113,11 @@ test("Realtime bridge observes Meet caption turns without using them as model in
         skipped,
         responsesRequested: window.MAB_REALTIME_BRIDGE.responsesRequested,
         captionTurnsObserved: window.MAB_REALTIME_BRIDGE.connection.captionTurnsObserved,
-        captionTurnsInjected: window.MAB_REALTIME_BRIDGE.connection.captionTurnsInjected,
+        hasMisleadingInjectedCaptionMetric: Object.keys(
+          window.MAB_REALTIME_BRIDGE.connection,
+        ).some(
+          (key) => key.toLowerCase().includes("caption") && key.toLowerCase().includes("inject"),
+        ),
         lastCaptionTurnText: window.MAB_REALTIME_BRIDGE.connection.lastCaptionTurnText,
         lastCaptionTurnTextChars: window.MAB_REALTIME_BRIDGE.connection.lastCaptionTurnTextChars,
         outbound: window.MAB_REALTIME_BRIDGE.outbound.map((entry) => entry.event),
@@ -132,7 +136,7 @@ test("Realtime bridge observes Meet caption turns without using them as model in
     });
     assert.equal(result.responsesRequested, 0);
     assert.equal(result.captionTurnsObserved, 1);
-    assert.equal(result.captionTurnsInjected, 0);
+    assert.equal(result.hasMisleadingInjectedCaptionMetric, false);
     assert.equal(result.lastCaptionTurnText, "");
     assert.equal(result.lastCaptionTurnTextChars, "现在还是不理我".length);
     assert.deepEqual(result.timeline, ["meet_caption_turn_observed"]);
@@ -162,13 +166,13 @@ test("Realtime bridge does not resurrect caption fallback for duplicate streams"
     });
 
     const result = await page.evaluate(async () => {
-      window.MAB_REALTIME_CLIENT.injectCaptionTurn({
+      window.MAB_REALTIME_CLIENT.observeCaptionSpeakerSignal({
         ts: "2026-05-27T13:43:33.548Z",
         speaker: "Peng Xiao",
         text: "No. Hello. Hello.",
         streamId: "caption-1",
       });
-      const duplicate = window.MAB_REALTIME_CLIENT.injectCaptionTurn({
+      const duplicate = window.MAB_REALTIME_CLIENT.observeCaptionSpeakerSignal({
         ts: "2026-05-27T13:43:33.548Z",
         speaker: "Peng Xiao",
         text: "No. Hello. Hello.",
@@ -178,7 +182,11 @@ test("Realtime bridge does not resurrect caption fallback for duplicate streams"
         duplicate,
         responsesRequested: window.MAB_REALTIME_BRIDGE.responsesRequested,
         captionTurnsObserved: window.MAB_REALTIME_BRIDGE.connection.captionTurnsObserved,
-        captionTurnsInjected: window.MAB_REALTIME_BRIDGE.connection.captionTurnsInjected,
+        hasMisleadingInjectedCaptionMetric: Object.keys(
+          window.MAB_REALTIME_BRIDGE.connection,
+        ).some(
+          (key) => key.toLowerCase().includes("caption") && key.toLowerCase().includes("inject"),
+        ),
         outbound: window.MAB_REALTIME_BRIDGE.outbound.map((entry) => entry.event),
       };
     });
@@ -187,7 +195,7 @@ test("Realtime bridge does not resurrect caption fallback for duplicate streams"
     assert.equal(result.duplicate.reason, "caption_turn_speaker_signal_only");
     assert.equal(result.responsesRequested, 0);
     assert.equal(result.captionTurnsObserved, 2);
-    assert.equal(result.captionTurnsInjected, 0);
+    assert.equal(result.hasMisleadingInjectedCaptionMetric, false);
     assert.equal(result.outbound.filter((event) => event.type === "response.create").length, 0);
   } finally {
     await browser.close();

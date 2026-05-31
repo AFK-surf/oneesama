@@ -300,8 +300,6 @@ const state = {
     lastOutboundEventType: "",
     blockedUserTextEvents: 0,
     captionTurnsObserved: 0,
-    captionTurnsInjected: 0,
-    captionTurnsPending: 0,
     lastCaptionTurnAt: "",
     lastCaptionTurnSpeaker: "",
     lastCaptionTurnText: "",

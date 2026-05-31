@@ -24,7 +24,6 @@ function runtimeDiagnostics(realtimeOverrides = {}) {
       lastRealtimeInputReplaceReason: "recappi-process-audio",
       openaiSessionId: "sess_live_ok",
       captionTurnsObserved: 2,
-      captionTurnsInjected: 0,
       blockedUserTextEvents: 0,
       meetAudioEnergy: {
         silenceMs: 300000,
@@ -94,7 +93,6 @@ test("meet live acceptance rejects spontaneous stale-topic output without raw au
       lastRealtimeInputReplaceReason: "recappi-process-audio",
       openaiSessionId: "",
       captionTurnsObserved: 2,
-      captionTurnsInjected: 0,
       blockedUserTextEvents: 0,
       meetAudioEnergy: { silenceMs: 1000 },
       recappiAudioInput: {
@@ -164,7 +162,6 @@ test("meet live acceptance accepts fresh OpenAI sessions across joins", () => {
       lastRealtimeInputReplaceReason: "recappi-process-audio",
       openaiSessionId: "sess_previous",
       captionTurnsObserved: 2,
-      captionTurnsInjected: 0,
       blockedUserTextEvents: 0,
       meetAudioEnergy: { silenceMs: 300000 },
       recappiAudioInput: {

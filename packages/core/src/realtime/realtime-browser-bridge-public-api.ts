@@ -61,7 +61,7 @@ function normalizeCaptionTurnText(value) {
     .trim();
 }
 
-function injectCaptionTurn(
+function observeCaptionSpeakerSignal(
   rawEvent: { text?: unknown; speaker?: unknown; streamId?: unknown; ts?: unknown } = {},
 ) {
   const text = normalizeCaptionTurnText(rawEvent.text || "");
@@ -129,7 +129,7 @@ window.MAB_REALTIME_CLIENT = {
   registerParticipantAudioStream,
   pushRecappiAudioSamples,
   stopMeetAudioCapture,
-  injectCaptionTurn,
+  observeCaptionSpeakerSignal,
   injectWorkerResult,
   sendWorkerResult: injectWorkerResult,
 };

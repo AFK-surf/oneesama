@@ -246,7 +246,7 @@ async function runMockReceiverScenario(page, options = {}) {
         response_id: "resp_mock",
       });
     } else {
-      window.MAB_REALTIME_CLIENT.injectCaptionTurn({
+      window.MAB_REALTIME_CLIENT.observeCaptionSpeakerSignal({
         speaker: "Peng Xiao",
         text: "你好你好你好",
         streamId: "mock-caption-stream",
