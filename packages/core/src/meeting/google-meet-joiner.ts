@@ -11,7 +11,7 @@ import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
 import * as audio from "./meeting-audio-inputs.ts";
 import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-prompts.ts";
 import { buildRealtimeInstructions, buildRealtimeSessionConfig, type RealtimeCurrentUser, realtimeToolSchemas } from "../realtime/realtime-contract.ts";
-import { DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS, DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT, DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH, assertMeetUrl, createDiagnostics, gotoMeetWithRetry, installPageDiagnostics, loadPlaywright, normalizeMeetProfileMode, nowIso, saveDiagnostics, shouldMuteMeetLocalPlayback, startLocalStaticAssetServer, takeScreenshot, type GoogleMeetJoinInput, type GoogleMeetJoinerOptions, type LocalMultipartFrameServer, type LocalStaticAssetServer, type MeetChatInput } from "./google-meet-joiner-base.ts";
+import { DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS, DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT, DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH, assertMeetUrl, createDiagnostics, gotoMeetWithRetry, installPageDiagnostics, loadPlaywright, normalizeMeetProfileMode, nowIso, saveDiagnostics, shouldMuteMeetLocalPlayback, takeScreenshot, type GoogleMeetJoinInput, type GoogleMeetJoinerOptions, type LocalMultipartFrameServer, type LocalStaticAssetServer, type MeetChatInput } from "./google-meet-joiner-base.ts";
 import { clickFirstVisible, collectButtonInventory } from "./google-meet-joiner-ui.ts";
 import { buildMeetingAwarenessState, clickMeetJoinButton, compactCaptionState, compactRuntimeState, evaluateAvatarAudio, evaluateAvatarReady, evaluateFixtureState, evaluateLocalDialogState, evaluateMeetPageState, evaluateRealtimeBridgeState, evaluateScreenShareState, evaluateWorkerResultBridgeState, fillGuestName, logMeetingAwarenessDebug, meetingAwarenessSignature, openMeetPeoplePanelForAwareness, publishMeetingAwarenessToPage, startAvatarRenderer } from "./google-meet-joiner-runtime-state.ts";
 import { createGoogleMeetShareActions } from "./google-meet-joiner-share-actions.ts";
@@ -423,14 +423,16 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 30),
     };
     if (String(requestedAvatarRenderer || "").toLowerCase() === "video" && installAvatar) {
-      const assetServer = await startLocalStaticAssetServer({
-        root: config.avatarAssetRoot,
-        pathPrefix: "/avatar-assets",
-      });
-      active = {
-        ...active,
-        avatarAssetServer: assetServer,
+      const loadInlineVideoSource = async (relativePath: string) => {
+        const assetPath = pathJoin(config.avatarAssetRoot, relativePath);
+        const data = await readFile(assetPath);
+        return {
+          inlineBase64: data.toString("base64"),
+          mimeType: "video/mp4",
+        };
       };
+      const idleInlineSource = await loadInlineVideoSource(config.avatarVideoIdlePath);
+      const speakingInlineSource = await loadInlineVideoSource(config.avatarVideoSpeakingPath);
       Object.assign(avatarConfig, {
         background: "#0b1018",
         videoObjectFit: "cover",
@@ -454,7 +456,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
             id: "idle",
             label: "Idle loop",
             state: "idle",
-            url: assetServer.urlFor(config.avatarVideoIdlePath),
+            ...idleInlineSource,
             objectFit: "cover",
             background: "#0b1018",
             default: true,
@@ -463,15 +465,15 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
             id: "speaking",
             label: "Speaking loop",
             state: "speaking",
-            url: assetServer.urlFor(config.avatarVideoSpeakingPath),
+            ...speakingInlineSource,
             objectFit: "cover",
             background: "#0b1018",
           },
         ],
       });
       diagnostics.record("avatar_video_assets", {
-        root: assetServer.root,
-        port: assetServer.port,
+        root: config.avatarAssetRoot,
+        delivery: "inline_blob",
         idlePath: config.avatarVideoIdlePath,
         speakingPath: config.avatarVideoSpeakingPath,
       });

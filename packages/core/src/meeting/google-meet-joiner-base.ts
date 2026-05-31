@@ -552,7 +552,7 @@ export async function startLocalStaticAssetServer(input: {
   });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
-  const baseUrl = `http://127.0.0.1:${port}${prefix}`;
+  const baseUrl = `http://localhost:${port}${prefix}`;
   return {
     baseUrl,
     port,

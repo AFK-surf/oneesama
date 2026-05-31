@@ -57,6 +57,28 @@ function normalizeObjectFit(value: unknown): "cover" | "contain" {
   return String(value || "cover").toLowerCase() === "contain" ? "contain" : "cover";
 }
 
+function createBlobUrlFromBase64(value: unknown, mimeType: unknown): string {
+  const base64 = String(value || "").trim();
+  if (!base64) return "";
+  try {
+    const binary = atob(base64);
+    const chunks: BlobPart[] = [];
+    const chunkSize = 32_768;
+    for (let offset = 0; offset < binary.length; offset += chunkSize) {
+      const slice = binary.slice(offset, offset + chunkSize);
+      const bytes = new Uint8Array(slice.length);
+      for (let index = 0; index < slice.length; index += 1) bytes[index] = slice.charCodeAt(index);
+      chunks.push((bytes.buffer as ArrayBuffer).slice(0));
+    }
+    return URL.createObjectURL(
+      new Blob(chunks, { type: String(mimeType || "video/mp4") || "video/mp4" }),
+    );
+  } catch (error) {
+    console.warn("[meeting-avatar-video] failed to create inline video blob", error);
+    return "";
+  }
+}
+
 function normalizeChromaKeyConfig(config: Record<string, any>): VideoChromaKeyConfig {
   const raw = config.videoChromaKey || {};
   return {
@@ -77,7 +99,9 @@ function normalizeVideoSources(config: Record<string, any>): VideoAvatarSource[]
   const sources: VideoAvatarSource[] = [];
   const seen = new Set<string>();
   const addSource = (source: Record<string, any> | undefined, fallbackState?: string) => {
-    const url = String(source?.url || "").trim();
+    const url =
+      String(source?.url || "").trim() ||
+      createBlobUrlFromBase64(source?.inlineBase64, source?.mimeType);
     if (!url || seen.has(url)) return;
     const state = String(source?.state || fallbackState || source?.action || "idle")
       .toLowerCase()

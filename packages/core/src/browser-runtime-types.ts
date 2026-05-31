@@ -250,6 +250,8 @@ export interface HiyoriAvatarConfig {
     id?: string;
     label?: string;
     url?: string;
+    inlineBase64?: string;
+    mimeType?: string;
     state?: "idle" | "speaking" | string;
     action?: string;
     mood?: string;
