@@ -1,3 +1,5 @@
+import { drawVideoHoldFrame, startSuppressedVideoHoldRenderer } from "./hiyori-avatar-video-hold.js";
+
 type VideoAvatarSource = {
   id: string;
   label: string;
@@ -12,11 +14,13 @@ type VideoRendererOptions = {
   config: Record<string, any>;
   avatarController: Record<string, any>;
   rendererState: Record<string, any>;
-  drawFallback(ctx: CanvasRenderingContext2D, t?: number): void;
 };
 
 type RGB = { r: number; g: number; b: number };
 type PixelData = Uint8ClampedArray<ArrayBufferLike>;
+type VideoLoadResult =
+  | { ok: true; source: VideoAvatarSource }
+  | { ok: false; source: VideoAvatarSource; error: string };
 
 type VideoChromaKeyConfig = {
   enabled: boolean;
@@ -338,9 +342,21 @@ async function loadVideoElement(video: HTMLVideoElement, source: VideoAvatarSour
   return video;
 }
 
+async function safeLoadVideoElement(
+  video: HTMLVideoElement,
+  source: VideoAvatarSource,
+): Promise<VideoLoadResult> {
+  try {
+    await loadVideoElement(video, source);
+    return { ok: true, source };
+  } catch (error) {
+    return { ok: false, source, error: String((error as { message?: string })?.message || error) };
+  }
+}
+
 export async function createVideoAvatarRenderer(
   canvas: HTMLCanvasElement,
-  { config, avatarController, rendererState, drawFallback }: VideoRendererOptions,
+  { config, avatarController, rendererState }: VideoRendererOptions,
 ) {
   const sources = normalizeVideoSources(config);
   const idleSource = sources.find((source) => source.state === "idle") || sources[0];
@@ -348,24 +364,60 @@ export async function createVideoAvatarRenderer(
     sources.find((source) => source.state === "speaking") ||
     sources.find((source) => source.default) ||
     idleSource;
-  if (!idleSource?.url) throw new Error("video avatar has no idle source");
-
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("video avatar canvas context unavailable");
   const scratchCanvas = document.createElement("canvas");
   const scratchCtx = scratchCanvas.getContext("2d", { willReadFrequently: true });
   if (!scratchCtx) throw new Error("video avatar chroma-key canvas context unavailable");
+  const lastGoodCanvas = document.createElement("canvas");
+  lastGoodCanvas.width = Number(config.canvasWidth);
+  lastGoodCanvas.height = Number(config.canvasHeight);
+  const lastGoodCtx = lastGoodCanvas.getContext("2d");
+  if (!lastGoodCtx) throw new Error("video avatar hold-frame canvas context unavailable");
   const scratch = { canvas: scratchCanvas, ctx: scratchCtx };
   const chroma = normalizeChromaKeyConfig(config);
+  if (!idleSource?.url) {
+    startSuppressedVideoHoldRenderer(ctx, config, rendererState, {
+      videoSources: sources.map(({ id, label, url, state }) => ({ id, label, url, state })),
+      videoState: "idle",
+      layout: config.layout,
+      videoChromaKeyed: chroma.enabled,
+      videoHoldReason: "missing_video_source",
+      videoSkippedFrames: 0,
+    });
+    return;
+  }
+  const captureLastGoodFrame = () => {
+    lastGoodCtx.clearRect(0, 0, lastGoodCanvas.width, lastGoodCanvas.height);
+    lastGoodCtx.drawImage(canvas, 0, 0, lastGoodCanvas.width, lastGoodCanvas.height);
+  };
+  const restoreLastGoodFrame = () => {
+    if (rendererState.videoRenderedFrames > 0) {
+      ctx.clearRect(0, 0, Number(config.canvasWidth), Number(config.canvasHeight));
+      ctx.drawImage(lastGoodCanvas, 0, 0, Number(config.canvasWidth), Number(config.canvasHeight));
+      rendererState.videoRestoredFrames += 1;
+      return;
+    }
+    drawVideoHoldFrame(ctx, config);
+    rendererState.videoHoldFrames += 1;
+  };
   const idleVideo = createVideoElement(idleSource, config);
   const speakingVideo =
     speakingSource.url === idleSource.url ? idleVideo : createVideoElement(speakingSource, config);
-  await Promise.all([
-    loadVideoElement(idleVideo, idleSource),
+  const idleLoad = await safeLoadVideoElement(idleVideo, idleSource);
+  const speakingLoad =
     speakingVideo === idleVideo
-      ? Promise.resolve(idleVideo)
-      : loadVideoElement(speakingVideo, speakingSource),
-  ]);
+      ? ({ ...idleLoad, source: speakingSource } as VideoLoadResult)
+      : await safeLoadVideoElement(speakingVideo, speakingSource);
+  const loadedStates: Array<VideoAvatarSource["state"]> = [];
+  const loadErrors: Array<{ id: string; state: VideoAvatarSource["state"]; error: string }> = [];
+  for (const result of [idleLoad, speakingLoad]) {
+    if ("error" in result) {
+      loadErrors.push({ id: result.source.id, state: result.source.state, error: result.error });
+    } else {
+      loadedStates.push(result.source.state);
+    }
+  }
 
   const videoByState = {
     idle: idleVideo,
@@ -384,13 +436,19 @@ export async function createVideoAvatarRenderer(
     renderer: "video",
     live2dLoaded: false,
     vrmLoaded: false,
-    videoLoaded: true,
+    videoLoaded: loadedStates.length > 0,
+    videoLoadedStates: loadedStates,
+    videoLoadErrors: loadErrors,
     videoSources: sources.map(({ id, label, url, state }) => ({ id, label, url, state })),
     videoState: currentState,
     fallbackReason: "",
     layout: config.layout,
     videoChromaKeyed: chroma.enabled,
     videoFallbackFrames: 0,
+    videoFallbackSuppressed: true,
+    videoHoldFrames: 0,
+    videoRestoredFrames: 0,
+    videoRenderedFrames: 0,
     videoSkippedFrames: 0,
   });
 
@@ -419,13 +477,13 @@ export async function createVideoAvatarRenderer(
     updateTargetState(now);
     const currentVideo = videoByState[currentState];
     if (!currentVideo || currentVideo.readyState < 2) {
-      if (rendererState.videoFrames > 0) {
+      if (rendererState.videoRenderedFrames > 0) {
         rendererState.videoSkippedFrames += 1;
         requestAnimationFrame(tick);
         return;
       }
-      drawFallback(ctx, now);
-      rendererState.videoFallbackFrames += 1;
+      drawVideoHoldFrame(ctx, config);
+      rendererState.videoHoldFrames += 1;
       requestAnimationFrame(tick);
       return;
     }
@@ -456,10 +514,13 @@ export async function createVideoAvatarRenderer(
       rendererState,
     );
     if (!drew) {
-      drawFallback(ctx, now);
-      rendererState.videoFallbackFrames += 1;
+      restoreLastGoodFrame();
+      requestAnimationFrame(tick);
+      return;
     }
     rendererState.videoFrames += 1;
+    rendererState.videoRenderedFrames += 1;
+    captureLastGoodFrame();
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);

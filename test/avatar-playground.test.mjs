@@ -42,3 +42,49 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
     await playground.close();
   }
 });
+
+test("video avatar suppresses fallback drawings when sources are unavailable", async () => {
+  const playground = createAvatarPlaygroundServer({
+    port: 0,
+    botName: "Video Failure Smoke",
+    avatar: {
+      avatarRenderer: "video",
+      background: "#0b1018",
+      videoChromaKey: { enabled: false },
+      videoSources: [
+        {
+          id: "broken-idle",
+          label: "Broken idle",
+          state: "idle",
+          url: "/assets/avatar/missing-video-source.webm",
+          background: "#0b1018",
+        },
+      ],
+    },
+  });
+  const started = await playground.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ permissions: ["microphone", "camera"] });
+    const page = await context.newPage();
+    await page.goto(`${started.url}?avatar=oneesama-video`);
+    await page.waitForFunction(
+      () => {
+        const renderer = window.MAB_AVATAR_RENDERER;
+        return renderer?.renderer === "video" && Number(renderer.videoHoldFrames || 0) > 0;
+      },
+      null,
+      { timeout: 10_000 },
+    );
+    const renderer = await page.evaluate(() => window.MAB_AVATAR_RENDERER);
+    assert.equal(renderer.renderer, "video");
+    assert.equal(renderer.videoLoaded, false);
+    assert.equal(renderer.videoFallbackSuppressed, true);
+    assert.equal(renderer.videoFallbackFrames, 0);
+    assert.match(renderer.videoHoldReason || renderer.videoLoadErrors?.[0]?.error || "", /video/i);
+    assert.equal(renderer.fallbackReason, "");
+  } finally {
+    await browser.close();
+    await playground.close();
+  }
+});

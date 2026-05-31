@@ -1,6 +1,7 @@
 import { createAvatarAudioBus } from "./hiyori-avatar-audio-bus.js";
 import { createAvatarHud } from "./hiyori-avatar-hud.js";
 import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.js";
+import * as videoHold from "./hiyori-avatar-video-hold.js";
 import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
 (() => {
   if (window.__meetingAvatarBotInjected) return;
@@ -922,7 +923,7 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
     const requestedRenderer = normalizeRenderer(config.avatarRenderer);
     let live2dLoaded = false;
     let vrmLoaded = false;
-    let videoLoaded = false;
+    let videoRendererStarted = false;
     let fallbackReason =
       requestedRenderer === "fallback"
         ? "fallback_requested"
@@ -936,12 +937,11 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
           config,
           avatarController,
           rendererState,
-          drawFallback,
         });
-        videoLoaded = true;
+        videoRendererStarted = true;
       } catch (error) {
         fallbackReason = String(error?.message || error);
-        log("Video avatar load failed; using fallback canvas", error?.message);
+        log("Video avatar load failed; suppressing fallback canvas", error?.message);
       }
     }
 
@@ -1020,7 +1020,13 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
       }
     }
 
-    if (!live2dLoaded && !vrmLoaded && !videoLoaded) {
+    if (!live2dLoaded && !vrmLoaded && !videoRendererStarted) {
+      if (requestedRenderer === "video") {
+        videoHold.startSuppressedVideoHoldRenderer(canvas.getContext("2d"), config, rendererState, {
+          videoHoldReason: fallbackReason || "video_renderer_not_loaded",
+        });
+        return canvas;
+      }
       Object.assign(rendererState, {
         renderer: "fallback",
         live2dLoaded: false,
@@ -1085,10 +1091,10 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
   async function start() {
     const canvas = createHiddenAvatarCanvas();
     const bootCtx = canvas.getContext("2d")!;
-    drawFallback(bootCtx, performance.now());
+    videoHold.drawVideoBootFrame(bootCtx, config, drawFallback, performance.now());
     const bootFallbackTick = (t: number) => {
       if (rendererState.renderer !== "initializing") return;
-      drawFallback(bootCtx, t);
+      videoHold.drawVideoBootFrame(bootCtx, config, drawFallback, t);
       requestAnimationFrame(bootFallbackTick);
     };
     requestAnimationFrame(bootFallbackTick);
