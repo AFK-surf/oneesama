@@ -307,6 +307,11 @@ export function createGoogleMeetShareActions(ctx: any) {
   }
 
   function matchesShareableApp(app, input: AppShareInput) {
+    const hasStableTarget =
+      Number(input.windowId || input.windowID || 0) ||
+      Number(input.processId || input.pid || 0) ||
+      String(input.bundleIdentifier || input.bundleId || "").trim();
+    if (hasStableTarget) return matchesMacOSWindowCaptureTarget(app, input);
     if (matchesMacOSWindowCaptureTarget(app, input)) return true;
     const windowTitle = String(input.windowTitle || "")
       .trim()

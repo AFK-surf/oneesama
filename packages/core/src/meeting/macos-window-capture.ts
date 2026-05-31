@@ -341,11 +341,14 @@ export function matchesMacOSWindowCaptureTarget(
   target: MacOSWindowCaptureTarget = {},
 ) {
   const windowId = Number(target.windowId || target.windowID || 0) || 0;
-  if (windowId && Number(window.windowId || window.windowID || 0) === windowId) return true;
   const processId = Number(target.processId || target.pid || 0) || 0;
-  if (processId && Number(window.processId || window.pid || 0) === processId) return true;
   const bundle = text(target.bundleIdentifier || target.bundleId);
-  if (bundle && text(window.bundleIdentifier) === bundle) return true;
+  if (windowId || processId || bundle) {
+    if (windowId && Number(window.windowId || window.windowID || 0) !== windowId) return false;
+    if (processId && Number(window.processId || window.pid || 0) !== processId) return false;
+    if (bundle && text(window.bundleIdentifier) !== bundle) return false;
+    return true;
+  }
   const name = text(target.applicationName || target.appName || target.name || target.title);
   if (!name) return false;
   return [window.applicationName, window.name, window.title]

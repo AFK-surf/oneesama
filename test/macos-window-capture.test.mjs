@@ -42,6 +42,28 @@ test("macOS window capture target matching rejects unrelated apps", () => {
   assert.equal(matchesMacOSWindowCaptureTarget(safariWindow, { applicationName: "Code" }), false);
 });
 
+test("macOS window capture target matching does not fuzzy-match when exact metadata is supplied", () => {
+  const meetChrome = {
+    windowId: 1012,
+    title: "Meet - dwb-jaiz-tad",
+    name: "Meet - dwb-jaiz-tad",
+    applicationName: "Google Chrome for Testing",
+    bundleIdentifier: "com.google.chrome.for.testing",
+    processId: 87353,
+    source: "macos_screencapturekit",
+  };
+
+  assert.equal(
+    matchesMacOSWindowCaptureTarget(meetChrome, {
+      applicationName: "Google Chrome",
+      bundleIdentifier: "com.google.Chrome",
+      processId: 1305,
+      windowId: 94,
+    }),
+    false,
+  );
+});
+
 test("macOS window capture dimensions support PNG, JPEG, and WebP frames", () => {
   const dir = mkdtempSync(join(tmpdir(), "oneesama-macos-capture-test-"));
   const pngPath = join(dir, "frame.png");
