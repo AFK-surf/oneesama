@@ -49,8 +49,8 @@ const CELL_COLORS: Record<string, string> = {
 
 const SIGNAL_LABELS: Record<string, string> = {
   rt: "连接",
-  audio: "听",
-  think: "状态",
+  audio: "音频",
+  think: "回合",
   speak: "说",
   tool: "工具",
   err: "错误",
@@ -187,36 +187,36 @@ function realtimeSignal(bridge: any, failures: any): HudSignal {
 function audioSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.audioInput);
   if (level === "blocked" || level === "warn")
-    return { key: "audio", label: "听", value: "听不到", level };
+    return { key: "audio", label: "音频", value: "听不到", level };
   const source = String(bridge?.connection?.currentRealtimeInputSource || "").trim();
   if (source.includes("recappi"))
-    return { key: "audio", label: "听", value: "在听", level: "ok" };
+    return { key: "audio", label: "音频", value: "有输入", level: "ok" };
   if (source.includes("meet_audio_mix"))
-    return { key: "audio", label: "听", value: "在听", level: "ok" };
+    return { key: "audio", label: "音频", value: "有输入", level: "ok" };
   return {
     key: "audio",
-    label: "听",
-    value: source ? "在听" : "没音频",
+    label: "音频",
+    value: source ? "有输入" : "没音频",
     level: source ? "ok" : "warn",
   };
 }
 
 function thinkingSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.modelTurn);
-  if (level === "blocked") return { key: "think", label: "状态", value: "卡住", level };
+  if (level === "blocked") return { key: "think", label: "回合", value: "卡住", level };
   if (level === "warn") {
     const reason = String(failures.modelTurn?.reason || "");
-    const value = reason.includes("audio") || reason.includes("energy") ? "在听" : "在想";
-    return { key: "think", label: "状态", value, level };
+    const value = reason.includes("audio") || reason.includes("energy") ? "等语音" : "等回应";
+    return { key: "think", label: "回合", value, level };
   }
   const speechMs = millisSinceIso(bridge?.protection?.lastInputSpeechStartedAt);
   const events = Number(bridge?.connection?.responseEvents || bridge?.responseEvents || 0);
   if (speechMs < 10_000 && events === 0) {
-    return { key: "think", label: "状态", value: "在想", level: "active" };
+    return { key: "think", label: "回合", value: "思考中", level: "active" };
   }
   return events > 0
-    ? { key: "think", label: "状态", value: "已回应", level: "ok" }
-    : { key: "think", label: "状态", value: "空闲", level: "idle" };
+    ? { key: "think", label: "回合", value: "已回应", level: "ok" }
+    : { key: "think", label: "回合", value: "空闲", level: "idle" };
 }
 
 function speakingSignal(bridge: any, failures: any): HudSignal {
@@ -310,7 +310,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
     if (text === "等待输入" || /listening/i.test(text)) {
       return {
         key: "audio",
-        label: "在听",
+        label: "听语音",
         value: "",
         level: "active",
         color: CELL_COLORS.audio,

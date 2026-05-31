@@ -23,9 +23,9 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
     );
     assert.deepEqual(
       listening.signals.map((signal) => signal.label),
-      ["连接", "听", "状态", "说", "工具", "错误"],
+      ["连接", "音频", "回合", "说", "工具", "错误"],
     );
-    assert.equal(listening.signals.find((signal) => signal.label === "听")?.value, "在听");
+    assert.equal(listening.signals.find((signal) => signal.label === "音频")?.value, "有输入");
 
     const tool = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("tool"));
     assert.equal(tool.signals.find((signal) => signal.label === "工具")?.level, "active");
