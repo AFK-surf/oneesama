@@ -63,24 +63,24 @@ func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
 
 func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 	return []realtimeToolSchema{
-		realtimeTool("delegate_to_worker", "Start a background workspace job only for async workspace/code/research/debug/planning work that cannot be completed inside the voice turn. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, or simple spoken answers; use the share/control tools or answer directly instead.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
+		realtimeTool("delegate_to_worker", "Start a background workspace job only for async workspace/code/research/debug/planning work. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo or otherwise requests work that should continue outside the short voice turn. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, memory lookup, or GitHub/Linear/Meet-chat search requests that have dedicated tools.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
 			"task":             stringSchema("Clear task, including URLs, file paths, expected output, and any user wording that matters."),
 			"context":          stringSchema("Useful meeting/workspace context. Include Meet chat links or prior results when relevant."),
 			"mode":             enumStringSchema("analysis", "analysis", "code", "research", "debug", "plan"),
 			"allowCodeChanges": boolSchema(false),
 		})),
-		realtimeTool("worker_status", "Check status/result of a background workspace job.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"jobId": {Type: "string"},
+		realtimeTool("worker_status", "Check status/result of a background workspace job. Use when the user asks 进度/状态/做完了吗/结果呢/那个活儿怎么样/codex 那个活儿, even if the job id is not known; omit jobId or pass null to query the latest relevant worker job.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"jobId": stringSchema("Known worker job id. Omit/null when the user refers to the latest or previous background job."),
 		})),
-		realtimeTool("delegate_to_codex", "Deprecated compatibility alias for delegate_to_worker. Use only for legacy background workspace/code/research/debug/planning jobs. Never use for app/window share, browser/Pencil UI control, avatar visuals, or immediate meeting actions.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
+		realtimeTool("delegate_to_codex", "Deprecated compatibility alias for delegate_to_worker. Use only if the user explicitly says Codex/codex and asks for legacy background workspace/code/research/debug/planning work. Prefer delegate_to_worker for new background jobs. Never use for app/window share, browser/Pencil UI control, avatar visuals, GitHub/Linear/Meet-chat search, or immediate meeting actions.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
 			"task":               stringSchema("Clear task. Include exact URLs/file paths/commands and what to report back."),
 			"context":            stringSchema("Useful meeting/workspace context. Include Meet chat links or prior results when relevant."),
 			"mode":               enumStringSchema("analysis", "analysis", "code", "research", "debug", "plan"),
 			"allow_code_changes": boolSchema(false),
 			"wait_for_result":    boolSchema(false),
 		})),
-		realtimeTool("delegate_status", "Compatibility alias for checking status/result of a background workspace job.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"job_id": {Type: "string"},
+		realtimeTool("delegate_status", "Compatibility alias for checking status/result of a background workspace job. Use for legacy references to Codex/delegate job progress; omit/null job_id when the user refers to the latest job.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"job_id": stringSchema("Known worker job id. Omit/null when checking the latest or previous delegate job."),
 		})),
 		realtimeTool("send_meet_chat", "Send a short visible message into the current Google Meet chat.", objectSchema([]string{"text"}, map[string]realtimeJSONSchema{
 			"text": stringSchema("The exact chat message to send to the current Meet."),
@@ -151,7 +151,7 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"demo_session_id": stringSchema("Shared-surface session id to cancel. Omit to cancel the active shared surface."),
 			"reason":          stringSchema("Short cancellation reason."),
 		})),
-		realtimeTool("read_meet_chat", "Read recent visible Google Meet chat messages and links from the current meeting.", objectSchema(nil, map[string]realtimeJSONSchema{
+		realtimeTool("read_meet_chat", "Read recent visible Google Meet chat messages and links from the current meeting. Use immediately when the user asks what meeting chat said, what links people posted, or to read/检查/看看/总结最近的会议聊天; do not answer from memory or use avatar-only tools.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"limit":     integerSchema("", float64(10)),
 			"onlyLinks": boolSchema(false),
 		})),
@@ -198,7 +198,7 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"query": {Type: "string"},
 			"limit": integerSchema("", float64(5)),
 		})),
-		realtimeTool("linear_user_issues", "List incomplete Linear issues assigned to a user. Use for 'my tasks', 'tasks on someone's plate', or assignee questions.", objectSchema([]string{"user"}, map[string]realtimeJSONSchema{
+		realtimeTool("linear_user_issues", "List incomplete Linear issues assigned to a user. Use for 'my Linear issues', 'my tasks', 'tasks on someone's plate', or assignee questions. If the user says 我/my and no resolved identity is already available, first call current_user_identity, then continue with this tool using the resolved workspace identifier. If the user names a person, use the name/email/handle directly or search_team_members if ambiguous.", objectSchema([]string{"user"}, map[string]realtimeJSONSchema{
 			"user": stringSchema("Email, display name, handle, or username. Prefer the current workspace user's email when available, for example user@example.com."),
 		})),
 		realtimeTool("google_calendar", "Search Google Calendar events.", objectSchema(nil, map[string]realtimeJSONSchema{
@@ -216,7 +216,7 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 		realtimeTool("notion_search", "Search Cue Notion documents.", objectSchema([]string{"query"}, map[string]realtimeJSONSchema{
 			"query": {Type: "string"},
 		})),
-		realtimeTool("github_search", "Search GitHub issues, repos, or code.", objectSchema([]string{"query"}, map[string]realtimeJSONSchema{
+		realtimeTool("github_search", "Search GitHub issues, repos, or code. Use immediately when the user says GitHub/github/GH/仓库/repo/issue/PR/code search/搜一下这个仓库; do not delegate or answer from memory for direct GitHub lookup requests.", objectSchema([]string{"query"}, map[string]realtimeJSONSchema{
 			"query": {Type: "string"},
 			"kind":  enumStringSchema("issues", "issues", "repos", "code"),
 		})),

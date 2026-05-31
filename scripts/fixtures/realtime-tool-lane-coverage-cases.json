@@ -1,0 +1,49 @@
+{
+  "schema": "oneesama.realtime-tool-recall-cases.v1",
+  "description": "Supplemental Realtime lane-router coverage for non-share foreground tools. Linear personal-task cases assert the first routing step only; identity-to-Linear continuation needs a multi-step benchmark.",
+  "variants": [
+    {
+      "name": "full",
+      "toolNames": "*",
+      "minRecall": 0.8,
+      "maxDisallowedRate": 0
+    }
+  ],
+  "cases": [
+    {
+      "id": "delegate_to_worker_research_zh",
+      "utterance": "帮我后台跑个调研，把这个竞品分析写成报告",
+      "expectedToolNames": ["delegate_to_worker"]
+    },
+    {
+      "id": "delegate_to_codex_script_zh",
+      "utterance": "用 codex 帮我写个脚本处理这批文件",
+      "expectedToolNames": ["delegate_to_worker", "delegate_to_codex"]
+    },
+    {
+      "id": "delegate_status_codex_zh",
+      "utterance": "codex 那个活儿进度到哪了",
+      "expectedToolNames": ["worker_status", "delegate_status"]
+    },
+    {
+      "id": "worker_status_result_zh",
+      "utterance": "刚才那个后台任务做完了吗，结果呢",
+      "expectedToolNames": ["worker_status", "delegate_status"]
+    },
+    {
+      "id": "read_meet_chat_zh",
+      "utterance": "会议聊天里大家刚说了啥",
+      "expectedToolNames": ["read_meet_chat"]
+    },
+    {
+      "id": "github_search_zh",
+      "utterance": "在 github 上搜一下这个仓库的相关 issue",
+      "expectedToolNames": ["github_search"]
+    },
+    {
+      "id": "linear_user_issues_first_step_zh",
+      "utterance": "我在 linear 上还有哪些没做完的 issue",
+      "expectedToolNames": ["current_user_identity", "linear_user_issues", "linear_query"]
+    }
+  ]
+}
