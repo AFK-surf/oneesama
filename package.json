@@ -86,6 +86,7 @@
     "smoke:realtime-meet-receiver": "node --import tsx --test --test-reporter=spec test/realtime-browser-bridge-meet-receiver-smoke.test.mjs",
     "smoke:realtime-audio-route": "tsx src/cli.ts realtime-audio-route-smoke",
     "smoke:realtime-synthetic-speech": "node --import tsx scripts/real-meet-synthetic-speaker-smoke.mjs --local-fixture",
+    "benchmark:realtime-synthetic-share": "node --import tsx scripts/real-meet-synthetic-speaker-smoke.mjs --local-fixture-tool-share-smoke",
     "benchmark:realtime-turn-formation": "node --import tsx scripts/real-meet-synthetic-speaker-smoke.mjs --local-fixture",
     "benchmark:realtime-tool-recall": "node --import tsx scripts/realtime-tool-recall-benchmark.mjs",
     "benchmark:realtime-tool-lanes": "node --import tsx scripts/realtime-tool-recall-benchmark.mjs --fixture scripts/fixtures/realtime-tool-lane-coverage-cases.json",
