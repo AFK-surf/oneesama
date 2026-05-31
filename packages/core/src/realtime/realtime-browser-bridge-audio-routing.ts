@@ -332,12 +332,28 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
   if (!track || track.kind !== "audio") return false;
   if (!state.connection.meetAudioForwardingEnabled) return false;
   if (config.meetAudioInputSource === "recappi_process_audio") {
-    recordTimeline("meet_audio_track_skipped", {
-      reason: "recappi_process_audio_selected",
+    const recappiInput = (state.connection as any).recappiAudioInput || {};
+    const recappiReady =
+      recappiInput.connected === true &&
+      (Number(recappiInput.chunks || 0) > 0 ||
+        Number(recappiInput.samplesReceived || 0) > 0 ||
+        Boolean(recappiInput.lastChunkAt || recappiInput.lastPushAt));
+    if (recappiReady) {
+      recordTimeline("meet_audio_track_skipped", {
+        reason: "recappi_process_audio_ready",
+        trackId: track.id,
+        ...detail,
+      });
+      return false;
+    }
+    recordTimeline("meet_audio_track_recappi_fallback", {
+      reason:
+        recappiInput.connected === true
+          ? "recappi_process_audio_not_ready"
+          : "recappi_process_audio_not_connected",
       trackId: track.id,
       ...detail,
     });
-    return false;
   }
   if (track.readyState === "ended") {
     recordTimeline("meet_audio_track_skipped", {
