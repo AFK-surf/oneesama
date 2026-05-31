@@ -117,6 +117,59 @@ test("Recappi realtime input coalesces bursty chunks before browser push", async
   assert.deepEqual(pushed[0].samples.slice(-4), [18, -18, 19, -19]);
 });
 
+test("Recappi realtime input suppresses prime pulse audio before browser push", async () => {
+  let consumer = null;
+  let primeEvaluations = 0;
+  const pushed = [];
+  const recappiTap = {
+    start: async () => ({
+      source: "recappi_process_audio",
+      sampleRate: 44100,
+      channels: 2,
+      processId: 1234,
+    }),
+    addConsumer: (callback) => {
+      consumer = callback;
+      return () => {
+        consumer = null;
+      };
+    },
+    status: () => ({
+      ok: true,
+      running: true,
+      source: "recappi_process_audio",
+      sampleRate: 44100,
+      channels: 2,
+      processId: 1234,
+    }),
+  };
+  const page = {
+    isClosed: () => false,
+    evaluate: async (_fn, payload) => {
+      if (payload !== undefined) {
+        pushed.push(payload);
+        return { ok: true };
+      }
+      primeEvaluations += 1;
+      return primeEvaluations > 1 ? { ok: true, durationMs: 5 } : { ok: true };
+    },
+  };
+
+  const input = createRecappiRealtimeAudioInput({ sessionId: "session_test", recappiTap });
+  await input.start({ context: {}, page, diagnostics: null });
+  assert.equal(typeof consumer, "function");
+
+  consumer(null, Float32Array.from([0.75, -0.75]));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pushed.length, 0);
+  assert.equal(input.status().droppedChunks, 1);
+
+  await new Promise((resolve) => setTimeout(resolve, 420));
+  consumer(null, Float32Array.from([0.5, -0.5]));
+  await waitFor(() => pushed.length === 1);
+  assert.deepEqual(pushed[0].samples, [0.5, -0.5]);
+});
+
 test("Recappi realtime input rejects global Recappi fallback source", async () => {
   let startOptions = null;
   let consumer = null;
@@ -291,10 +344,14 @@ test("Recappi realtime input primes browser audio and retries tap startup", asyn
   assert.equal(typeof consumer, "function");
   assert.ok(evaluations.length >= 2);
   assert.ok(
-    diagnostics.events.some((event) => event.type === "recappi_realtime_audio_start_attempt_failed"),
+    diagnostics.events.some(
+      (event) => event.type === "recappi_realtime_audio_start_attempt_failed",
+    ),
   );
   assert.ok(
-    diagnostics.events.some((event) => event.type === "recappi_realtime_audio_start_retry_succeeded"),
+    diagnostics.events.some(
+      (event) => event.type === "recappi_realtime_audio_start_retry_succeeded",
+    ),
   );
 });
 

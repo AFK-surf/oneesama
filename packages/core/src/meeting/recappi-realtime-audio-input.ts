@@ -33,6 +33,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const PRIME_PULSE_GAIN = 0.08;
+const PRIME_PULSE_FREQUENCY_HZ = 880;
+const PRIME_PULSE_MS = 450;
+const PRIME_SUPPRESS_EXTRA_MS = 350;
+
 export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInputOptions) {
   const state = {
     ok: true,
@@ -70,6 +75,7 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
   let stopped = false;
   let backgroundRetryLoop: Promise<void> | null = null;
   let activePrimeStop: (() => Promise<void>) | null = null;
+  let primeSuppressUntil = 0;
 
   function isRetryableStartError(error: unknown): boolean {
     const message = String((error as Error)?.message || error || "");
@@ -167,6 +173,10 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
       rememberError("recappi_callback", error);
       return;
     }
+    if (Date.now() < primeSuppressUntil) {
+      state.droppedChunks += 1;
+      return;
+    }
     state.chunks += 1;
     state.samples += samples.length;
     state.lastChunkAt = nowIso();
@@ -191,10 +201,12 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
 
   async function startBrowserAudioPrime(target: Page, diagnostics?: DiagnosticsLike | null) {
     const result = await target
-      .evaluate(`(async () => {
+      .evaluate(
+        `(async () => {
         const globalScope = window;
         if (globalScope.__MAB_RECAPPI_AUDIO_PRIME?.active) {
-          return { ok: true, reused: true };
+          const pulse = await globalScope.__MAB_RECAPPI_AUDIO_PRIME.pulse?.();
+          return { ok: true, reused: true, pulse };
         }
         const AudioContextCtor = globalScope.AudioContext || globalScope.webkitAudioContext;
         if (!AudioContextCtor) return { ok: false, error: "audio_context_unavailable" };
@@ -202,12 +214,30 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
         const oscillator = audioContext.createOscillator();
         const gain = audioContext.createGain();
         gain.gain.value = 0;
-        oscillator.frequency.value = 440;
+        oscillator.frequency.value = ${PRIME_PULSE_FREQUENCY_HZ};
         oscillator.connect(gain).connect(audioContext.destination);
         oscillator.start();
         if (audioContext.state === "suspended") await audioContext.resume();
+        const pulse = () => {
+          const now = audioContext.currentTime;
+          const durationSeconds = ${PRIME_PULSE_MS} / 1000;
+          const primeGain = ${PRIME_PULSE_GAIN};
+          try {
+            gain.gain.cancelScheduledValues(now);
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(primeGain, now + 0.02);
+            gain.gain.linearRampToValueAtTime(0, now + durationSeconds);
+          } catch {
+            gain.gain.value = primeGain;
+            setTimeout(() => {
+              try { gain.gain.value = 0; } catch {}
+            }, ${PRIME_PULSE_MS});
+          }
+          return { ok: true, gain: primeGain, frequencyHz: ${PRIME_PULSE_FREQUENCY_HZ}, durationMs: ${PRIME_PULSE_MS} };
+        };
         globalScope.__MAB_RECAPPI_AUDIO_PRIME = {
           active: true,
+          pulse,
           stop: async () => {
             try { oscillator.stop(); } catch {}
             try { oscillator.disconnect(); } catch {}
@@ -216,18 +246,22 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
             globalScope.__MAB_RECAPPI_AUDIO_PRIME = null;
           },
         };
-        return { ok: true, reused: false, state: audioContext.state };
-      })()`)
+        const pulseResult = pulse();
+        return { ok: true, reused: false, state: audioContext.state, pulse: pulseResult };
+      })()`,
+      )
       .catch((error) => ({ ok: false, error: String((error as Error)?.message || error) }));
     diagnostics?.record?.("recappi_realtime_audio_prime", result as Record<string, unknown>);
     return async () => {
       await target
-        .evaluate(`(async () => {
+        .evaluate(
+          `(async () => {
           const prime = window.__MAB_RECAPPI_AUDIO_PRIME;
           if (!prime?.stop) return { ok: true, stopped: false };
           await prime.stop();
           return { ok: true, stopped: true };
-        })()`)
+        })()`,
+        )
         .catch((error) => {
           diagnostics?.record?.("recappi_realtime_audio_prime_stop_error", {
             error: String((error as Error)?.message || error),
@@ -236,11 +270,31 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     };
   }
 
+  async function pulseBrowserAudioPrime(target: Page | null, diagnostics?: DiagnosticsLike | null) {
+    if (!target || target.isClosed()) return;
+    const result = await target
+      .evaluate(
+        `(async () => {
+        const prime = window.__MAB_RECAPPI_AUDIO_PRIME;
+        if (!prime?.pulse) return { ok: false, reason: "prime_missing" };
+        return await prime.pulse();
+      })()`,
+      )
+      .catch((error) => ({ ok: false, error: String((error as Error)?.message || error) }));
+    const durationMs = Number((result as { durationMs?: unknown })?.durationMs || 0);
+    if ((result as { ok?: boolean })?.ok && durationMs > 0) {
+      primeSuppressUntil = Date.now() + durationMs + PRIME_SUPPRESS_EXTRA_MS;
+    }
+    diagnostics?.record?.("recappi_realtime_audio_prime_pulse", result as Record<string, unknown>);
+  }
+
   async function startTapWithRetry({
     context,
+    page: targetPage,
     diagnostics,
   }: {
     context: BrowserContext;
+    page: Page | null;
     diagnostics?: DiagnosticsLike | null;
   }) {
     const deadline = Date.now() + startTimeoutMs;
@@ -249,6 +303,7 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     while (true) {
       attempt += 1;
       try {
+        await pulseBrowserAudioPrime(targetPage, diagnostics);
         const tapState: any = await options.recappiTap.start({ context });
         if ((tapState.source || "") !== "recappi_process_audio") {
           throw new Error(`unexpected_recappi_tap_source:${tapState.source || "unknown"}`);
@@ -260,7 +315,8 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
       } catch (error) {
         lastError = error;
         const message = String((error as Error)?.message || error);
-        const retry = Date.now() < deadline && !message.startsWith("unexpected_recappi_tap_source:");
+        const retry =
+          Date.now() < deadline && !message.startsWith("unexpected_recappi_tap_source:");
         diagnostics?.record?.("recappi_realtime_audio_start_attempt_failed", {
           attempt,
           error: message,
@@ -295,9 +351,11 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
 
   function scheduleBackgroundRetry({
     context,
+    page: targetPage,
     diagnostics,
   }: {
     context: BrowserContext;
+    page: Page | null;
     diagnostics?: DiagnosticsLike | null;
   }) {
     if (backgroundRetryLoop) return;
@@ -313,7 +371,7 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
         attempt += 1;
         state.lastRetryAt = nowIso();
         try {
-          const tapState = await startTapWithRetry({ context, diagnostics });
+          const tapState = await startTapWithRetry({ context, page: targetPage, diagnostics });
           if (stopped) break;
           diagnostics?.record?.("recappi_realtime_audio_background_retry_succeeded", { attempt });
           activateTap(tapState, diagnostics);
@@ -356,14 +414,14 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     activePrimeStop = stopPrime;
     let tapState: any;
     try {
-      tapState = await startTapWithRetry({ context, diagnostics });
+      tapState = await startTapWithRetry({ context, page: targetPage, diagnostics });
     } catch (error) {
       if (!isRetryableStartError(error)) {
         await stopPrime();
         activePrimeStop = null;
         throw error;
       }
-      scheduleBackgroundRetry({ context, diagnostics });
+      scheduleBackgroundRetry({ context, page: targetPage, diagnostics });
       return { ok: false, pending: true, state: status() };
     }
     if (activePrimeStop === stopPrime) activePrimeStop = null;
