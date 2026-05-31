@@ -23,19 +23,19 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
     );
     assert.deepEqual(
       listening.signals.map((signal) => signal.label),
-      ["RT", "Input", "Think", "Speak", "Tool", "Err"],
+      ["连接", "听", "状态", "说", "工具", "错误"],
     );
-    assert.equal(listening.signals.find((signal) => signal.label === "Input")?.value, "tap");
+    assert.equal(listening.signals.find((signal) => signal.label === "听")?.value, "在听");
 
     const tool = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("tool"));
-    assert.equal(tool.signals.find((signal) => signal.label === "Tool")?.level, "active");
+    assert.equal(tool.signals.find((signal) => signal.label === "工具")?.level, "active");
     assert.equal(
-      tool.signals.find((signal) => signal.label === "Tool")?.value,
-      "list→share→control",
+      tool.signals.find((signal) => signal.label === "工具")?.value,
+      "列窗口→共享→控制",
     );
 
     const blocked = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("blocked"));
-    assert.equal(blocked.signals.find((signal) => signal.label === "Err")?.level, "blocked");
+    assert.equal(blocked.signals.find((signal) => signal.label === "错误")?.level, "blocked");
 
     const snapshot = await page.evaluate(() =>
       window.MAB_AVATAR_VISUAL_TEST.captureSourceSnapshot({ label: "playground" }),

@@ -119,6 +119,12 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     realtimeBridgeMode: options.realtimeBridgeMode,
     realtimeAgentRuntime: options.realtimeAgentRuntime,
     realtimeToolCallbackToken: params.realtime_tool_callback_token,
+    realtimeInstructions: params.realtime_instructions,
+    realtimeTools: Array.isArray(params.realtime_tools) ? params.realtime_tools : undefined,
+    realtimeSession:
+      params.realtime_session && typeof params.realtime_session === "object"
+        ? params.realtime_session
+        : undefined,
     autoConnectRealtime: options.autoConnectRealtime,
     sendRealtimeSessionUpdate: options.sendRealtimeSessionUpdate,
     includeParticipantAudio: options.includeParticipantAudio,

@@ -35,6 +35,16 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 		}
 	}
 	captureCaptions := input.CaptureCaptions || input.InstallRealtimeBridge
+	realtimeCurrentUser := s.realtimeCurrentUser()
+	realtimeTools := s.realtimeServerToolSchemas()
+	realtimeOptions := RealtimeSessionOptions{
+		BotName:     s.openai.BotName,
+		CurrentUser: realtimeCurrentUser,
+		Tools:       realtimeTools,
+	}
+	realtimeInstructions := buildRealtimeInstructions(realtimeOptions, s.openai)
+	realtimeSession := buildRealtimeSessionConfig(realtimeOptions, s.openai)
+	realtimeToolSchemaHash, _ := RealtimeToolSchemaStableHash(s.demoBridge != nil)
 	prepare, err := s.meetRunner.PrepareGoogleMeet(ctx, meetrunner.PrepareGoogleMeetInput{
 		SessionID:                  sessionID,
 		MeetingURL:                 strings.TrimSpace(input.MeetingURL),
@@ -52,6 +62,9 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 		RealtimeBridgeMode:         strings.TrimSpace(input.RealtimeBridgeMode),
 		RealtimeAgentRuntime:       firstNonEmpty(strings.TrimSpace(input.RealtimeAgentRuntime), s.openai.RealtimeAgentRuntime),
 		RealtimeToolCallbackToken:  s.internalAuthKey,
+		RealtimeInstructions:       realtimeInstructions,
+		RealtimeTools:              realtimeTools,
+		RealtimeSession:            realtimeSession,
 		AutoConnectRealtime:        input.AutoConnectRealtime,
 		SendRealtimeSessionUpdate:  input.SendRealtimeSessionUpdate,
 		IncludeParticipantAudio:    input.IncludeParticipantAudio,
@@ -100,6 +113,8 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 			"realtime_join":                  input.InstallRealtimeBridge,
 			"realtime_bridge_mode":           strings.TrimSpace(input.RealtimeBridgeMode),
 			"realtime_agent_runtime":         firstNonEmpty(strings.TrimSpace(input.RealtimeAgentRuntime), s.openai.RealtimeAgentRuntime),
+			"realtime_tool_count":            len(realtimeTools),
+			"realtime_tool_schema_hash":      realtimeToolSchemaHash,
 			"auto_connect_realtime":          input.AutoConnectRealtime,
 			"send_realtime_session_update":   input.SendRealtimeSessionUpdate,
 			"include_participant_audio":      input.IncludeParticipantAudio,

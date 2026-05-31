@@ -25,6 +25,17 @@ function videoMimeType(relativePath: string): string {
   return "video/mp4";
 }
 
+const demoSurfaceRealtimeTools = new Set([
+  "open_shared_browser_surface",
+  "create_shared_workspace",
+  "control_shared_browser_surface",
+  "stop_shared_browser_surface",
+]);
+
+export function defaultGoogleMeetRealtimeTools() {
+  return realtimeToolSchemas.filter((tool) => !demoSurfaceRealtimeTools.has(tool.name));
+}
+
 export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   const config = getRuntimeConfig();
   let active = null;
@@ -389,7 +400,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       `,
     });
     const realtimeCurrentUser = buildConfiguredRealtimeCurrentUser();
-    const realtimeTools = input.realtimeTools || realtimeToolSchemas;
+    const realtimeTools = input.realtimeTools || defaultGoogleMeetRealtimeTools();
     let realtimeInstructions = "",
       realtimeSession = null;
     if (installRealtimeBridge) {

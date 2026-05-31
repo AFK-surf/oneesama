@@ -34,6 +34,9 @@ export type PrepareJoinParams = {
   realtime_bridge_mode?: string;
   realtime_agent_runtime?: string;
   realtime_tool_callback_token?: string;
+  realtime_instructions?: string;
+  realtime_tools?: unknown[];
+  realtime_session?: Record<string, unknown>;
   auto_connect_realtime?: boolean;
   send_realtime_session_update?: boolean;
   include_participant_audio?: boolean;

@@ -48,12 +48,12 @@ const CELL_COLORS: Record<string, string> = {
 };
 
 const SIGNAL_LABELS: Record<string, string> = {
-  rt: "RT",
-  audio: "Input",
-  think: "Think",
-  speak: "Speak",
-  tool: "Tool",
-  err: "Err",
+  rt: "连接",
+  audio: "听",
+  think: "状态",
+  speak: "说",
+  tool: "工具",
+  err: "错误",
 };
 
 const CELL_PRIORITY: Record<string, number> = {
@@ -137,15 +137,15 @@ function millisSinceIso(value: unknown) {
 
 function toolStepLabel(name: unknown) {
   const text = String(name || "");
-  if (text === "list_shareable_windows") return "list";
-  if (text === "share_existing_app_window") return "share";
-  if (text === "control_shared_app_window") return "control";
-  if (text === "delegate_to_worker") return "worker";
-  if (text === "worker_status") return "status";
-  if (text === "read_meet_chat") return "chat";
-  if (text === "send_meet_chat") return "send";
-  if (text === "present_video_stage") return "video";
-  if (text === "stop_video_stage") return "stop";
+  if (text === "list_shareable_windows") return "列窗口";
+  if (text === "share_existing_app_window") return "共享";
+  if (text === "control_shared_app_window") return "控制";
+  if (text === "delegate_to_worker") return "后台";
+  if (text === "worker_status") return "查进度";
+  if (text === "read_meet_chat") return "读聊天";
+  if (text === "send_meet_chat") return "发聊天";
+  if (text === "present_video_stage") return "放视频";
+  if (text === "stop_video_stage") return "停视频";
   return (
     text
       .replace(/_window$/, "")
@@ -173,98 +173,109 @@ function latestToolChain(bridge: any) {
 function realtimeSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.realtimeConnection || failures.transport);
   if (level === "blocked" || level === "warn") {
-    return { key: "rt", label: "RT", value: "block", level };
+    return { key: "rt", label: "连接", value: "卡住", level };
   }
   const connected =
     bridge?.connected === true ||
     bridge?.connection?.peerConnectionState === "connected" ||
     bridge?.connection?.dataChannelReadyState === "open";
   return connected
-    ? { key: "rt", label: "RT", value: "on", level: "ok" }
-    : { key: "rt", label: "RT", value: "wait", level: "warn" };
+    ? { key: "rt", label: "连接", value: "在线", level: "ok" }
+    : { key: "rt", label: "连接", value: "连接中", level: "warn" };
 }
 
 function audioSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.audioInput);
   if (level === "blocked" || level === "warn")
-    return { key: "audio", label: "Input", value: "wait", level };
+    return { key: "audio", label: "听", value: "听不到", level };
   const source = String(bridge?.connection?.currentRealtimeInputSource || "").trim();
   if (source.includes("recappi"))
-    return { key: "audio", label: "Input", value: "tap", level: "ok" };
+    return { key: "audio", label: "听", value: "在听", level: "ok" };
   if (source.includes("meet_audio_mix"))
-    return { key: "audio", label: "Input", value: "meet", level: "ok" };
+    return { key: "audio", label: "听", value: "在听", level: "ok" };
   return {
     key: "audio",
-    label: "Input",
-    value: source ? "on" : "wait",
+    label: "听",
+    value: source ? "在听" : "没音频",
     level: source ? "ok" : "warn",
   };
 }
 
 function thinkingSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.modelTurn);
-  if (level === "blocked" || level === "warn")
-    return { key: "think", label: "Think", value: "wait", level };
+  if (level === "blocked") return { key: "think", label: "状态", value: "卡住", level };
+  if (level === "warn") {
+    const reason = String(failures.modelTurn?.reason || "");
+    const value = reason.includes("audio") || reason.includes("energy") ? "在听" : "在想";
+    return { key: "think", label: "状态", value, level };
+  }
   const speechMs = millisSinceIso(bridge?.protection?.lastInputSpeechStartedAt);
   const events = Number(bridge?.connection?.responseEvents || bridge?.responseEvents || 0);
   if (speechMs < 10_000 && events === 0) {
-    return { key: "think", label: "Think", value: "turn", level: "active" };
+    return { key: "think", label: "状态", value: "在想", level: "active" };
   }
   return events > 0
-    ? { key: "think", label: "Think", value: "seen", level: "ok" }
-    : { key: "think", label: "Think", value: "idle", level: "idle" };
+    ? { key: "think", label: "状态", value: "已回应", level: "ok" }
+    : { key: "think", label: "状态", value: "空闲", level: "idle" };
 }
 
 function speakingSignal(bridge: any, failures: any): HudSignal {
   const level = failureLevel(failures.audioOutput);
-  if (level === "blocked" || level === "warn")
-    return { key: "speak", label: "Speak", value: "wait", level };
+  if (level === "blocked") return { key: "speak", label: "说", value: "卡住", level };
+  if (level === "warn") {
+    const reason = String(failures.audioOutput?.reason || "");
+    const events = Number(bridge?.connection?.responseEvents || bridge?.responseEvents || 0);
+    if (reason === "waiting_for_model_response" && events === 0) {
+      return { key: "speak", label: "说", value: "没开口", level: "idle" };
+    }
+    return { key: "speak", label: "说", value: "没出声", level };
+  }
   const avatarAudio = (window as any).MAB_AVATAR_AUDIO || {};
   const output = avatarAudio.outputEnergy || {};
   const rms = Number(output.rms || 0);
   const recent = millisSinceIso(output.lastEnergyAt) < 1_500;
   const threshold = Math.max(0.003, Number(output.thresholdRms || 0));
   if (recent && rms >= threshold) {
-    return { key: "speak", label: "Speak", value: "audio", level: "active" };
+    return { key: "speak", label: "说", value: "在说", level: "active" };
   }
   if (output.observed || bridge?.feedback?.checks?.avatarAudioOutputObserved) {
-    return { key: "speak", label: "Speak", value: "ready", level: "ok" };
+    return { key: "speak", label: "说", value: "可出声", level: "ok" };
   }
-  return { key: "speak", label: "Speak", value: "idle", level: "idle" };
+  return { key: "speak", label: "说", value: "安静", level: "idle" };
 }
 
 function toolSignal(bridge: any, failures: any): HudSignal {
   const jobs = countAppControlJobs(bridge);
   const level = failureLevel(failures.toolTurns);
   if (jobs.blocked > 0 || level === "blocked") {
-    return { key: "tool", label: "Tool", value: "block", level: "blocked" };
+    return { key: "tool", label: "工具", value: "卡住", level: "blocked" };
   }
   const chain = latestToolChain(bridge);
   const chainValue = chain.length > 0 ? chain.join("→") : "";
   if (jobs.active > 0)
     return {
       key: "tool",
-      label: "Tool",
-      value: chainValue || `${jobs.active} run`,
+      label: "工具",
+      value: chainValue || "运行中",
       level: "active",
       visibleWhenOk: true,
     };
   if (chainValue) {
-    return { key: "tool", label: "Tool", value: chainValue, level: "active", visibleWhenOk: true };
+    return { key: "tool", label: "工具", value: chainValue, level: "active", visibleWhenOk: true };
   }
   if (jobs.completed > 0)
-    return { key: "tool", label: "Tool", value: "done", level: "ok", visibleWhenOk: true };
-  return { key: "tool", label: "Tool", value: "idle", level: "idle" };
+    return { key: "tool", label: "工具", value: "完成", level: "ok", visibleWhenOk: true };
+  return { key: "tool", label: "工具", value: "空闲", level: "idle" };
 }
 
 function errorSignal(bridge: any, failures: any): HudSignal {
   const blockers = Object.values(failures).filter(
     (entry: any) => entry?.status === "blocked",
   ).length;
-  if (blockers > 0) return { key: "err", label: "Err", value: `${blockers}`, level: "blocked" };
+  if (blockers > 0) return { key: "err", label: "错误", value: `${blockers}`, level: "blocked" };
   const errors = Array.isArray(bridge?.errors) ? bridge.errors.length : 0;
-  if (errors > 0) return { key: "err", label: "Err", value: "seen", level: "warn" };
-  return { key: "err", label: "Err", value: "ok", level: "ok" };
+  if (errors > 0) return { key: "err", label: "错误", value: "有错误", level: "warn" };
+  return { key: "err", label: "错误", value: "正常", level: "ok" };
 }
 
 function collectSignals(): HudSignal[] {
@@ -299,7 +310,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
     if (text === "等待输入" || /listening/i.test(text)) {
       return {
         key: "audio",
-        label: "Listening",
+        label: "在听",
         value: "",
         level: "active",
         color: CELL_COLORS.audio,
@@ -308,7 +319,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
     }
     return {
       key: "think",
-      label: "Thinking",
+      label: "在想",
       value: "",
       level: "active",
       color: CELL_COLORS.think,
@@ -318,7 +329,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
   if (status.kind === "opening_preview") {
     return {
       key: "tool",
-      label: "Tool",
+      label: "工具",
       value: "",
       level: "active",
       color: CELL_COLORS.tool,
@@ -328,7 +339,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
   if (status.kind === "blocked") {
     return {
       key: "err",
-      label: "Blocked",
+      label: "卡住",
       value: "",
       level: "blocked",
       color: CELL_COLORS.err,
@@ -339,7 +350,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
     if (/说话|speaking|talk/i.test(text)) {
       return {
         key: "speak",
-        label: "Speak",
+        label: "在说",
         value: "",
         level: "active",
         color: CELL_COLORS.speak,
@@ -348,7 +359,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
     }
     return {
       key: "done",
-      label: "Done",
+      label: "完成",
       value: "",
       level: "ok",
       color: CELL_COLORS.done,
@@ -358,7 +369,7 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
   if (status.kind === "writing_code") {
     return {
       key: "tool",
-      label: "Working",
+      label: "在做",
       value: "",
       level: "active",
       color: CELL_COLORS.tool,
