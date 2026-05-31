@@ -372,7 +372,7 @@ function buildRealtimeAgentSDKTools(namespace, tools = []) {
         name,
         description: toolConfig.description || `Local ${name} tool`,
         parameters: toolConfig.parameters || { type: "object", properties: {}, required: [] },
-        strict: false,
+        strict: toolConfig.strict === true,
         execute: async (input, _context, details) => {
           const callId =
             details?.toolCall?.callId ||

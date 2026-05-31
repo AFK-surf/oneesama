@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 )
 
 type realtimeToolSchema struct {
@@ -11,6 +12,7 @@ type realtimeToolSchema struct {
 	Name        string
 	Description string
 	Parameters  realtimeJSONSchema
+	Strict      bool
 }
 
 type realtimeJSONSchema struct {
@@ -62,7 +64,7 @@ func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
 
 func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 	return []realtimeToolSchema{
-		realtimeTool("delegate_to_worker", "Start a background workspace job for complex work that should not be improvised in the realtime voice conversation.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
+		realtimeTool("delegate_to_worker", "Start a background workspace job only for async workspace/code/research/debug/planning work that cannot be completed inside the voice turn. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, or simple spoken answers; use the share/control tools or answer directly instead.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
 			"task":             stringSchema("Clear task, including URLs, file paths, expected output, and any user wording that matters."),
 			"context":          stringSchema("Useful meeting/workspace context. Include Meet chat links or prior results when relevant."),
 			"mode":             enumStringSchema("analysis", "analysis", "code", "research", "debug", "plan"),
@@ -71,7 +73,7 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 		realtimeTool("worker_status", "Check status/result of a background workspace job.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"jobId": {Type: "string"},
 		})),
-		realtimeTool("delegate_to_codex", "Compatibility alias for starting a background workspace job for links, files, code, debugging, planning, or multi-step research.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
+		realtimeTool("delegate_to_codex", "Deprecated compatibility alias for delegate_to_worker. Use only for legacy background workspace/code/research/debug/planning jobs. Never use for app/window share, browser/Pencil UI control, avatar visuals, or immediate meeting actions.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
 			"task":               stringSchema("Clear task. Include exact URLs/file paths/commands and what to report back."),
 			"context":            stringSchema("Useful meeting/workspace context. Include Meet chat links or prior results when relevant."),
 			"mode":               enumStringSchema("analysis", "analysis", "code", "research", "debug", "plan"),
@@ -235,24 +237,24 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 		})),
 		realtimeTool("memory_write", "Write session memory for this meeting avatar.", objectSchema([]string{"key"}, map[string]realtimeJSONSchema{
 			"key":   {Type: "string"},
-			"value": {},
+			"value": stringSchema("Session memory value as concise text or a JSON string."),
 		})),
 		realtimeTool("memory_read", "Read session memory. Omit key to return all memory.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"key": {Type: "string"},
 		})),
 		realtimeTool("now", "Return the current date/time in Asia/Shanghai.", objectSchema(nil, map[string]realtimeJSONSchema{})),
-		realtimeTool("set_avatar_expression", "Set the Live2D avatar's visible mood before or during an answer.", objectSchema([]string{"mood"}, map[string]realtimeJSONSchema{
+		realtimeTool("set_avatar_expression", "Visual-only avatar control: set the on-camera mood. This never shares windows, controls apps, delegates work, searches, changes browser/workspace state, or satisfies a user request by itself unless the request is only to change the avatar expression.", objectSchema([]string{"mood"}, map[string]realtimeJSONSchema{
 			"mood": enumStringSchema("", "neutral", "happy", "surprised", "thinking", "sad", "shy"),
 		})),
-		realtimeTool("set_avatar_action", "Trigger a visible Live2D head/body action. Use nod for agreement, shake for disagreement, wave for greetings, think for reasoning, speak while talking, and emphasize for conclusions.", objectSchema([]string{"action"}, map[string]realtimeJSONSchema{
+		realtimeTool("set_avatar_action", "Visual-only avatar control: trigger a visible head/body action. Use nod for agreement, shake for disagreement, wave for greetings, think for reasoning, speak while talking, and emphasize for conclusions. This never shares windows, controls apps, delegates work, searches, or changes browser/workspace state.", objectSchema([]string{"action"}, map[string]realtimeJSONSchema{
 			"action":    enumStringSchema("", "idle", "nod", "shake", "wave", "think", "lean_forward", "emphasize", "shrug", "speak"),
 			"intensity": numberSchema("0.2 to 1.2 is the normal visible range."),
 		})),
-		realtimeTool("update_avatar_state", "Set the avatar mood/action and optional visual HUD status together. Use status_text/status_kind for progress that should be visible but not spoken. Never use this as the only tool for app/window share, click, type, draw, scroll, switch-account, or stuck-browser requests; call the share/control tool first.", objectSchema(nil, map[string]realtimeJSONSchema{
+		realtimeTool("update_avatar_state", "Visual-only avatar/HUD control: set mood/action and optional on-frame status. This never shares windows, controls apps, delegates work, searches, changes browser/workspace state, or satisfies app-control/share requests. For app/window share, click, type, draw, scroll, switch-account, stuck-browser, code, or research requests, call the correct functional tool first; use this only as visual progress if useful.", objectSchema(nil, map[string]realtimeJSONSchema{
 			"mood":           enumStringSchema("", "neutral", "happy", "surprised", "thinking", "sad", "shy"),
 			"action":         enumStringSchema("", "idle", "nod", "shake", "wave", "think", "lean_forward", "emphasize", "shrug", "speak"),
 			"intensity":      numberSchema("0.2 to 1.2 is the normal visible range."),
-			"status_text":    stringSchema("Short visual-only status shown on the avatar video frame, e.g. 'Writing code'. Do not include internal logs, tool names, or secrets."),
+			"status_text":    stringSchema("Short visual-only status shown on the avatar video frame, e.g. 'Thinking' or 'Working'. Do not include internal logs, tool names, backend names, or secrets."),
 			"status_kind":    enumStringSchema("thinking", "thinking", "writing_code", "opening_preview", "blocked", "done", "idle"),
 			"status_hold_ms": integerSchema("How long to keep the visual status visible.", float64(12000)),
 		})),
@@ -268,6 +270,7 @@ func realtimeTool(name, description string, parameters realtimeJSONSchema) realt
 		Name:        name,
 		Description: description,
 		Parameters:  parameters,
+		Strict:      true,
 	}
 }
 
@@ -329,38 +332,85 @@ func realtimeToolSchemasAsMaps(schemas []realtimeToolSchema) []map[string]any {
 			"type":        schema.Type,
 			"name":        schema.Name,
 			"description": schema.Description,
-			"parameters":  schema.Parameters.Map(),
+			"parameters":  schema.Parameters.StrictMap(true),
+			"strict":      schema.Strict,
 		})
 	}
 	return out
 }
 
 func (s realtimeJSONSchema) Map() map[string]any {
+	return s.mapWithOptions(true, false)
+}
+
+func (s realtimeJSONSchema) StrictMap(requiredByParent bool) map[string]any {
+	return s.mapWithOptions(requiredByParent, true)
+}
+
+func (s realtimeJSONSchema) mapWithOptions(requiredByParent bool, strict bool) map[string]any {
 	out := map[string]any{}
 	if s.Type != "" {
-		out["type"] = s.Type
+		out["type"] = strictSchemaType(s.Type, requiredByParent, strict)
 	}
 	if s.Description != "" {
 		out["description"] = s.Description
 	}
 	if len(s.Enum) > 0 {
-		out["enum"] = stringListAsAny(s.Enum)
+		out["enum"] = enumListAsAny(s.Enum, !requiredByParent && strict)
 	}
 	if s.HasDefault {
 		out["default"] = s.Default
 	}
 	if s.Properties != nil {
 		properties := make(map[string]any, len(s.Properties))
-		for key, value := range s.Properties {
-			properties[key] = value.Map()
+		requiredSet := stringSet(s.Required)
+		keys := sortedSchemaKeys(s.Properties)
+		for _, key := range keys {
+			properties[key] = s.Properties[key].mapWithOptions(requiredSet[key], strict)
 		}
 		out["properties"] = properties
+		if strict {
+			out["additionalProperties"] = false
+			out["required"] = stringListAsAny(keys)
+		}
 	}
-	if s.Required != nil {
+	if !strict && s.Required != nil {
 		out["required"] = stringListAsAny(s.Required)
 	}
 	if s.Items != nil {
-		out["items"] = s.Items.Map()
+		out["items"] = s.Items.mapWithOptions(true, strict)
+	}
+	return out
+}
+
+func strictSchemaType(value string, requiredByParent bool, strict bool) any {
+	if strict && !requiredByParent && value != "null" {
+		return []any{value, "null"}
+	}
+	return value
+}
+
+func enumListAsAny(values []string, includeNull bool) []any {
+	out := stringListAsAny(values)
+	if includeNull {
+		out = append(out, nil)
+	}
+	return out
+}
+
+func sortedSchemaKeys(values map[string]realtimeJSONSchema) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func stringSet(values []string) map[string]bool {
+	out := make(map[string]bool, len(values))
+	for _, value := range values {
+		out[value] = true
 	}
 	return out
 }

@@ -1,9 +1,9 @@
-export const realtimeToolSchemas = [
+const rawRealtimeToolSchemas = [
   {
     type: "function",
     name: "delegate_to_worker",
     description:
-      "Start a background workspace job for complex work that should not be improvised in the realtime voice conversation.",
+      "Start a background workspace job only for async workspace/code/research/debug/planning work that cannot be completed inside the voice turn. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, or simple spoken answers; use the share/control tools or answer directly instead.",
     parameters: {
       type: "object",
       properties: {
@@ -43,7 +43,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "delegate_to_codex",
     description:
-      "Compatibility alias for starting a background workspace job for links, files, code, debugging, planning, or multi-step research.",
+      "Deprecated compatibility alias for delegate_to_worker. Use only for legacy background workspace/code/research/debug/planning jobs. Never use for app/window share, browser/Pencil UI control, avatar visuals, or immediate meeting actions.",
     parameters: {
       type: "object",
       properties: {
@@ -644,7 +644,10 @@ export const realtimeToolSchemas = [
       type: "object",
       properties: {
         key: { type: "string" },
-        value: {},
+        value: {
+          type: "string",
+          description: "Session memory value as concise text or a JSON string.",
+        },
       },
       required: ["key"],
     },
@@ -674,7 +677,8 @@ export const realtimeToolSchemas = [
   {
     type: "function",
     name: "set_avatar_expression",
-    description: "Set the Live2D avatar's visible mood before or during an answer.",
+    description:
+      "Visual-only avatar control: set the on-camera mood. This never shares windows, controls apps, delegates work, searches, changes browser/workspace state, or satisfies a user request by itself unless the request is only to change the avatar expression.",
     parameters: {
       type: "object",
       properties: {
@@ -687,7 +691,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "set_avatar_action",
     description:
-      "Trigger a visible Live2D head/body action. Use nod for agreement, shake for disagreement, wave for greetings, think for reasoning, speak while talking, and emphasize for conclusions.",
+      "Visual-only avatar control: trigger a visible head/body action. Use nod for agreement, shake for disagreement, wave for greetings, think for reasoning, speak while talking, and emphasize for conclusions. This never shares windows, controls apps, delegates work, searches, or changes browser/workspace state.",
     parameters: {
       type: "object",
       properties: {
@@ -714,7 +718,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "update_avatar_state",
     description:
-      "Set the avatar mood/action and optional visual HUD status together. Use status_text/status_kind for progress that should be visible but not spoken. Never use this as the only tool for app/window share, click, type, draw, scroll, switch-account, or stuck-browser requests; call the share/control tool first.",
+      "Visual-only avatar/HUD control: set mood/action and optional on-frame status. This never shares windows, controls apps, delegates work, searches, changes browser/workspace state, or satisfies app-control/share requests. For app/window share, click, type, draw, scroll, switch-account, stuck-browser, code, or research requests, call the correct functional tool first; use this only as visual progress if useful.",
     parameters: {
       type: "object",
       properties: {
@@ -737,7 +741,7 @@ export const realtimeToolSchemas = [
         status_text: {
           type: "string",
           description:
-            "Short visual-only status shown on the avatar video frame, e.g. 'Writing code'. Do not include internal logs, tool names, or secrets.",
+            "Short visual-only status shown on the avatar video frame, e.g. 'Thinking' or 'Working'. Do not include internal logs, tool names, backend names, or secrets.",
         },
         status_kind: {
           type: "string",
@@ -754,6 +758,41 @@ export const realtimeToolSchemas = [
     },
   },
 ];
+
+function strictifyRealtimeToolSchemas(tools) {
+  return tools.map((tool) => ({
+    ...tool,
+    parameters: strictifyJSONSchema(tool.parameters, true),
+    strict: true,
+  }));
+}
+
+function strictifyJSONSchema(schema, requiredByParent) {
+  const out = { ...schema };
+  if (out.type && !requiredByParent && out.type !== "null") {
+    out.type = [out.type, "null"];
+  }
+  if (Array.isArray(out.enum) && !requiredByParent) {
+    out.enum = [...out.enum, null];
+  }
+  if (out.properties && typeof out.properties === "object" && !Array.isArray(out.properties)) {
+    const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+    const propertyEntries = Object.entries(out.properties).toSorted(([left], [right]) =>
+      left.localeCompare(right),
+    );
+    out.properties = Object.fromEntries(
+      propertyEntries.map(([key, value]) => [key, strictifyJSONSchema(value, required.has(key))]),
+    );
+    out.required = propertyEntries.map(([key]) => key);
+    out.additionalProperties = false;
+  }
+  if (out.items) {
+    out.items = strictifyJSONSchema(out.items, true);
+  }
+  return out;
+}
+
+export const realtimeToolSchemas = strictifyRealtimeToolSchemas(rawRealtimeToolSchemas);
 
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
 export const DEFAULT_REALTIME_VOICE = "marin";
@@ -1109,6 +1148,7 @@ export function buildRealtimeInstructions({
     "When asked what you can do, describe capabilities in user-facing terms: listen and respond in the meeting, understand who is speaking, read meeting chat or shared links, help with workspace lookup, summarize, plan, research, and follow up.",
     "When the user asks you to do complex work, use the appropriate internal action. Only say a one-line transition if the user needs visible confirmation, and do not narrate the internal mechanism.",
     "For progress, intent, or in-flight status, prefer the visual channel: update avatar mood/action/status HUD or shared-surface state instead of speaking. Speech is for answers, user-facing questions, and blockers.",
+    "Tool disambiguation: avatar visual tools only change the on-camera avatar/HUD. They never satisfy share, app-control, browser, workspace, code, research, search, or delegation requests. Delegate tools are only for async workspace/code/research/debug/planning jobs, never for immediate meeting window sharing or app control.",
     "Identity contract: live speaker identity is provided by runtime context or identity lookup. If active speaker context marks someone as current_user, treat first-person wording like “我/我的/我是谁” as that identity. If identity is uncertain, ask a short clarification instead of guessing.",
     "Addressing contract: use the resolved profile's preferred spoken name. Treat aliases and honorifics as recognition hints, not as names to say aloud; if an English name is present, prefer it over a role-like nickname.",
     "Project context: AFK AI, Inc. builds oneesama as a meeting avatar and workspace automation framework.",

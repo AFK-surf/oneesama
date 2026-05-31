@@ -156,7 +156,10 @@ test("Realtime contract keeps short voice checks and self-introductions on topic
 test("Realtime contract exposes product identity resolver tool", () => {
   const resolver = realtimeToolSchemas.find((tool) => tool.name === "resolve_speaker_identity");
   assert.ok(resolver);
-  assert.deepEqual(resolver.parameters.required, ["display_name"]);
+  assert.equal(resolver.strict, true);
+  assert.ok(resolver.parameters.required.includes("display_name"));
+  assert.equal(resolver.parameters.properties.display_name.type, "string");
+  assert.deepEqual(resolver.parameters.properties.channel.type, ["string", "null"]);
 });
 
 test("Realtime contract exposes application share tools", () => {
@@ -166,11 +169,14 @@ test("Realtime contract exposes application share tools", () => {
   assert.ok(list);
   assert.ok(present);
   assert.ok(control);
-  assert.equal(present.parameters.properties.applicationName.type, "string");
+  assert.deepEqual(present.parameters.properties.applicationName.type, ["string", "null"]);
   assert.match(present.description, /共享一下/);
   assert.match(present.description, /Pencil\/喷手\/铅笔/);
   assert.match(list.description, /应用\/窗口\/屏幕/);
-  assert.deepEqual(control.parameters.required, []);
+  assert.equal(control.strict, true);
+  assert.equal(control.parameters.additionalProperties, false);
+  assert.ok(control.parameters.required.includes("instruction"));
+  assert.ok(control.parameters.required.includes("operations"));
   assert.match(control.description, /Computer Use/);
   assert.match(control.description, /bot host's shared window/);
   assert.match(control.description, /not the human's personal computer/);
@@ -179,14 +185,15 @@ test("Realtime contract exposes application share tools", () => {
   assert.match(control.description, /queues the app-control work asynchronously/);
   assert.match(control.description, /observe -> plan -> act -> verify/);
   assert.match(control.description, /Do not invent click\/drag primitives/);
-  assert.equal(control.parameters.properties.job_id.type, "string");
+  assert.deepEqual(control.parameters.properties.job_id.type, ["string", "null"]);
   assert.equal(control.parameters.properties.wait.default, false);
-  assert.equal(control.parameters.properties.operations.type, "array");
+  assert.deepEqual(control.parameters.properties.operations.type, ["array", "null"]);
   assert.match(
     control.parameters.properties.operations.description,
     /Optional low-level app-control operations/,
   );
-  assert.deepEqual(control.parameters.properties.operations.items.required, ["kind"]);
+  assert.equal(control.parameters.properties.operations.items.additionalProperties, false);
+  assert.ok(control.parameters.properties.operations.items.required.includes("kind"));
   assert.ok(control.parameters.properties.operations.items.properties.kind.enum.includes("drag"));
   assert.ok(
     !control.parameters.properties.operations.items.properties.kind.enum.includes(
@@ -194,3 +201,54 @@ test("Realtime contract exposes application share tools", () => {
     ),
   );
 });
+
+test("Realtime tool schemas are strict-compatible", () => {
+  for (const tool of realtimeToolSchemas) {
+    assert.equal(tool.strict, true, `${tool.name} should enable strict mode`);
+    assertStrictObjectSchema(tool.parameters, `${tool.name}.parameters`);
+  }
+});
+
+test("Realtime tool descriptions fence off visual and delegation tools", () => {
+  const worker = realtimeToolSchemas.find((tool) => tool.name === "delegate_to_worker");
+  const legacyWorker = realtimeToolSchemas.find((tool) => tool.name === "delegate_to_codex");
+  const avatarState = realtimeToolSchemas.find((tool) => tool.name === "update_avatar_state");
+  const avatarExpression = realtimeToolSchemas.find(
+    (tool) => tool.name === "set_avatar_expression",
+  );
+
+  assert.match(worker.description, /only for async workspace\/code\/research\/debug\/planning/);
+  assert.match(worker.description, /Do not use for direct meeting app share/);
+  assert.match(legacyWorker.description, /Deprecated compatibility alias/);
+  assert.match(legacyWorker.description, /Never use for app\/window share/);
+  assert.match(avatarState.description, /Visual-only avatar\/HUD control/);
+  assert.match(avatarState.description, /call the correct functional tool first/);
+  assert.match(avatarExpression.description, /Visual-only avatar control/);
+  assert.match(avatarExpression.description, /never shares windows/);
+  assert.match(
+    avatarState.parameters.properties.status_text.description,
+    /Do not include internal logs, tool names, backend names, or secrets/,
+  );
+});
+
+function assertStrictObjectSchema(schema, path) {
+  assert.ok(
+    schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object")),
+    `${path}.type`,
+  );
+  assert.equal(schema.additionalProperties, false, `${path}.additionalProperties`);
+  const propertyNames = Object.keys(schema.properties || {}).toSorted();
+  assert.deepEqual(schema.required, propertyNames, `${path}.required`);
+  for (const [name, child] of Object.entries(schema.properties || {})) {
+    assertStrictChildSchema(child, `${path}.properties.${name}`);
+  }
+}
+
+function assertStrictChildSchema(schema, path) {
+  if (schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object"))) {
+    assertStrictObjectSchema(schema, path);
+  }
+  if (schema.items) {
+    assertStrictChildSchema(schema.items, `${path}.items`);
+  }
+}

@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	wantRealtimeToolHashWithoutDemoSurface = "71e49799c83b8a70b9c376e2143badcd2df15433ea74caa7453c76df48c22f28"
-	wantRealtimeToolHashWithDemoSurface    = "a35f6cc695b458c67235c076db7b2e82d87ab2fef4ef6b543d5ce44a34efb599"
+	wantRealtimeToolHashWithoutDemoSurface = "8b8af007f509c6b48ce84be9acb820ae84ce95c18d03c531521588b0d1bdab52"
+	wantRealtimeToolHashWithDemoSurface    = "c86f87a03e7b5171a635cfb9abf1b6d01a18c2815515f05e5dc4630334698996"
 )
 
 func TestRealtimeToolSchemaStableHashIsDeterministic(t *testing.T) {
@@ -68,4 +68,82 @@ func TestRealtimeToolSchemaStableHashesAreDocumented(t *testing.T) {
 			t.Fatalf("foreground tool inventory note does not document realtime tool hash %s", hash)
 		}
 	}
+}
+
+func TestRealtimeToolSchemasAreStrictCompatible(t *testing.T) {
+	for _, tool := range defaultRealtimeToolSchemas() {
+		name, _ := tool["name"].(string)
+		if tool["strict"] != true {
+			t.Fatalf("%s strict = %#v, want true", name, tool["strict"])
+		}
+		parameters, ok := tool["parameters"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s parameters = %#v, want object", name, tool["parameters"])
+		}
+		assertStrictRealtimeObjectSchema(t, name+".parameters", parameters)
+	}
+}
+
+func assertStrictRealtimeObjectSchema(t *testing.T, path string, schema map[string]any) {
+	t.Helper()
+	if !schemaTypeIncludes(schema["type"], "object") {
+		t.Fatalf("%s.type = %#v, want object", path, schema["type"])
+	}
+	if schema["additionalProperties"] != false {
+		t.Fatalf("%s.additionalProperties = %#v, want false", path, schema["additionalProperties"])
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	required := anyStringList(schema["required"])
+	if len(required) != len(properties) {
+		t.Fatalf("%s.required = %#v, want all %d properties", path, required, len(properties))
+	}
+	for key := range properties {
+		if !stringSliceContains(required, key) {
+			t.Fatalf("%s.required = %#v, missing property %q", path, required, key)
+		}
+	}
+	for key, value := range properties {
+		child, _ := value.(map[string]any)
+		if child == nil {
+			continue
+		}
+		if schemaTypeIncludes(child["type"], "object") {
+			assertStrictRealtimeObjectSchema(t, path+".properties."+key, child)
+		}
+		if items, _ := child["items"].(map[string]any); items != nil && schemaTypeIncludes(items["type"], "object") {
+			assertStrictRealtimeObjectSchema(t, path+".properties."+key+".items", items)
+		}
+	}
+}
+
+func schemaTypeIncludes(value any, want string) bool {
+	if text, ok := value.(string); ok {
+		return text == want
+	}
+	for _, item := range anyStringList(value) {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func anyStringList(value any) []string {
+	values, _ := value.([]any)
+	out := make([]string, 0, len(values))
+	for _, item := range values {
+		if text, ok := item.(string); ok {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
