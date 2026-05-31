@@ -56,13 +56,13 @@ async function loadRecappiSdk(options: RecappiAudioTapOptions = {}): Promise<Rec
   try {
     return require("@recappi/sdk") as RecappiSdkModule;
   } catch {
-    // Continue into local fallback below. The new repo intentionally keeps
-    // Recappi optional so open-source installs can still run without it.
+    // Continue into the local fallback below. Production installs should get
+    // Recappi from package.json; the path override is only for local SDK work.
   }
 
   const sdkPath = options.recappiSdkPath || process.env.MAB_RECAPPI_SDK_PATH || "";
   if (!sdkPath || !existsSync(sdkPath)) {
-    throw new Error("Recappi SDK not found. Set MAB_RECAPPI_SDK_PATH or install @recappi/sdk.");
+    throw new Error("Recappi SDK not found. Install @recappi/sdk or set MAB_RECAPPI_SDK_PATH.");
   }
   return require(sdkPath);
 }
