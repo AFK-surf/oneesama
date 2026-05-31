@@ -161,6 +161,9 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   if (config.meetAudioInputSource !== "recappi_process_audio") {
     return { ok: false, error: "recappi_audio_input_disabled" };
   }
+  if (String(payload.source || "") === "recappi_global_audio") {
+    return { ok: false, error: "recappi_global_audio_rejected" };
+  }
   const samples = normalizeRecappiSamples(payload.samples);
   if (!samples.length) return { ok: false, error: "empty_recappi_audio_samples" };
   ensureRecappiAudioInputNode(payload);

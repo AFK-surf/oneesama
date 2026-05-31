@@ -28,7 +28,6 @@ interface ShareableContentApi {
   applications(): ShareableApplication[];
   applicationWithProcessId?: (processId: number) => ShareableApplication | null;
   tapAudio(processId: number, callback: RecappiAudioCallback): ShareableAudioSession;
-  tapGlobalAudio(filters: unknown[], callback: RecappiAudioCallback): ShareableAudioSession;
 }
 
 interface RecappiSdkModule {
@@ -43,7 +42,6 @@ export interface RecappiAudioTapOptions {
 
 export interface RecappiAudioTapStartOptions {
   context?: BrowserContext | null;
-  allowGlobalFallback?: boolean;
 }
 
 function nowIso(): string {
@@ -122,7 +120,7 @@ async function findChromiumAudioPid(
       }
       if (matchedHelperApp?.processId || matchedHelperApp?.pid) {
         log(
-          `Ignoring Recappi Chromium helper pid ${matchedHelperApp.processId || matchedHelperApp.pid}; using global fallback if no app PID is available`,
+          `Ignoring Recappi Chromium helper pid ${matchedHelperApp.processId || matchedHelperApp.pid}; process audio tap remains unavailable`,
         );
       }
 
@@ -135,7 +133,7 @@ async function findChromiumAudioPid(
         }
         if (app?.processId || app?.pid) {
           log(
-            `Ignoring Recappi browser process lookup because it resolved to helper pid ${app.processId || app.pid}; using global fallback if no app PID is available`,
+            `Ignoring Recappi browser process lookup because it resolved to helper pid ${app.processId || app.pid}; process audio tap remains unavailable`,
           );
         }
       }
@@ -143,7 +141,7 @@ async function findChromiumAudioPid(
       const audio = (processInfo || []).find((p) => p.type === "audio.mojom.AudioService");
       if (audio?.id) {
         log(
-          `CDP audio service pid ${audio.id} is not a Recappi shareable application; using global fallback if no app PID is available`,
+          `CDP audio service pid ${audio.id} is not a Recappi shareable application; process audio tap remains unavailable`,
         );
       }
     }
@@ -215,6 +213,24 @@ export function createRecappiAudioTap(options: RecappiAudioTapOptions = {}) {
   let audioSession: ShareableAudioSession | null = null;
   let startPromise: Promise<ReturnType<typeof status>> | null = null;
 
+  async function probe(startOptions: RecappiAudioTapStartOptions = {}) {
+    const { ShareableContent } = await loadRecappiSdk(options);
+    const processId = await findChromiumAudioPid(startOptions.context, ShareableContent, log);
+    if (processId) {
+      return {
+        ok: true,
+        source: "recappi_process_audio",
+        processId,
+      };
+    }
+    return {
+      ok: false,
+      source: "",
+      processId: 0,
+      error: "chromium_audio_process_not_found",
+    };
+  }
+
   function rememberError(stage: string, error: unknown) {
     state.ok = false;
     const entry = {
@@ -244,26 +260,12 @@ export function createRecappiAudioTap(options: RecappiAudioTapOptions = {}) {
     startPromise = (async () => {
       const { ShareableContent } = await loadRecappiSdk(options);
       const processId = await findChromiumAudioPid(startOptions.context, ShareableContent, log);
-      if (!processId && !startOptions.allowGlobalFallback) {
+      if (!processId) {
         throw new Error("chromium_audio_process_not_found");
       }
-      try {
-        if (processId) {
-          audioSession = ShareableContent.tapAudio(processId, onAudio);
-          state.source = "recappi_process_audio";
-          state.processId = processId;
-        } else {
-          audioSession = ShareableContent.tapGlobalAudio([], onAudio);
-          state.source = "recappi_global_audio";
-          state.processId = 0;
-        }
-      } catch (error) {
-        if (!startOptions.allowGlobalFallback || !processId) throw error;
-        rememberError("recappi_tap_audio", error);
-        audioSession = ShareableContent.tapGlobalAudio([], onAudio);
-        state.source = "recappi_global_audio";
-        state.processId = 0;
-      }
+      audioSession = ShareableContent.tapAudio(processId, onAudio);
+      state.source = "recappi_process_audio";
+      state.processId = processId;
       state.startedAt = state.startedAt || nowIso();
       state.stoppedAt = "";
       state.sampleRate = audioSession?.sampleRate || 48000;
@@ -303,6 +305,7 @@ export function createRecappiAudioTap(options: RecappiAudioTapOptions = {}) {
 
   return {
     addConsumer,
+    probe,
     start,
     stop,
     status,

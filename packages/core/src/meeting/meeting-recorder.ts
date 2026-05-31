@@ -295,7 +295,7 @@ export function createMeetingRecorder(options: MeetingRecorderOptions = {}) {
     if (backend === "recappi") {
       try {
         if (!recappiTap) throw new Error("recappi_tap_unavailable");
-        const tapState = await recappiTap.start({ context, allowGlobalFallback: true });
+        const tapState = await recappiTap.start({ context });
         const onAudio: RecappiAudioCallback = (error, samples) => {
           if (error) {
             state.errors.push({

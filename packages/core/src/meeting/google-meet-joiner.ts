@@ -230,7 +230,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const captureCaptions = Boolean(input.captureCaptions ?? config.captureCaptions);
     const captionLanguage = input.captionLanguage || config.captionLanguage || "";
     const artifactsDir = input.artifactsDir || pathJoin(config.meetingArtifactsDir, sessionId);
-    const { recorder, realtimeRecappiAudioInput, realtimeAudioCapture } =
+    const realtimeWantsMeetAudio =
+      installRealtimeBridge &&
+      input.forwardMeetAudioToRealtime !== false &&
+      Boolean(input.includeParticipantAudio);
+    const realtimeRequiresRecappi =
+      realtimeWantsMeetAudio && audio.isGoogleMeetUrlForRealtimeAudio(meetUrl);
+    const { recorder, realtimeAudioCapture, realtimeRecappiAudioInput: initialRecappiAudioInput } =
       audio.createMeetingAudioInputs({
         input,
         config,
@@ -240,6 +246,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         installRealtimeBridge,
         recordMeeting,
       });
+    let realtimeRecappiAudioInput = initialRecappiAudioInput;
     const browserUserDataDirInput = input.browserUserDataDir || config.browserUserDataDir || "";
     const meetProfileMode = normalizeMeetProfileMode(
       input.meetProfileMode || config.meetProfileMode,
@@ -367,6 +374,23 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     if (realtimeAudioCaptureExpose) {
       diagnostics.record("realtime_audio_capture_expose", realtimeAudioCaptureExpose);
     }
+    if (realtimeRequiresRecappi && !realtimeRecappiAudioInput) {
+      diagnostics.record("recappi_realtime_audio_required_missing", {
+        meetUrl,
+        recorderBackend: recorder.backend,
+        realtimeWantsMeetAudio,
+      });
+      await saveDiagnostics(diagnostics);
+      await context.close().catch(() => {});
+      if (browser && typeof browser.close === "function") await browser.close().catch(() => {});
+      await clearActiveBrowserRecord();
+      return {
+        ok: false,
+        error: "recappi_realtime_audio_required",
+        sessionId,
+        diagnosticsPath: diagnostics.jsonPath,
+      };
+    }
     active = {
       sessionId,
       browser,
@@ -423,6 +447,28 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           config,
         );
     }
+    const recappiRealtimeProbe = await audio.probeRealtimeRecappiAudioInput({
+      realtimeRecappiAudioInput,
+      context,
+      diagnostics,
+    });
+    if (realtimeRecappiAudioInput && recappiRealtimeProbe?.source !== "recappi_process_audio") {
+      diagnostics.record("recappi_realtime_audio_disabled", {
+        reason: recappiRealtimeProbe?.error || "recappi_process_audio_unavailable",
+        probe: recappiRealtimeProbe,
+        fallback: "none",
+      });
+      await saveDiagnostics(diagnostics);
+      await stop("recappi_realtime_audio_unavailable").catch(() => {});
+      return {
+        ok: false,
+        error: "recappi_realtime_audio_unavailable",
+        sessionId,
+        diagnosticsPath: diagnostics.jsonPath,
+        recappiRealtimeProbe,
+      };
+    }
+    const realtimeMeetAudioInputSource = realtimeRecappiAudioInput ? "recappi_process_audio" : "none";
     const requestedAvatarRenderer = input.avatarRenderer || config.avatarRenderer;
     const avatarRendererIsVideo = String(requestedAvatarRenderer || "").toLowerCase() === "video";
     const avatarConfig = {
@@ -529,7 +575,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
         includeParticipantAudio: Boolean(input.includeParticipantAudio),
         forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
-        meetAudioInputSource: realtimeRecappiAudioInput ? "recappi_process_audio" : "webrtc",
+        meetAudioInputSource: realtimeMeetAudioInputSource,
         meetAudioInputGain: input.meetAudioInputGain,
         captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
         workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,

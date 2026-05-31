@@ -481,7 +481,7 @@ test("Recappi process audio input feeds the routing mix without RTC tracks", asy
   }
 });
 
-test("Recappi global audio fallback preserves source telemetry", async () => {
+test("Recappi global audio fallback is rejected for Realtime input", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -503,16 +503,14 @@ test("Recappi global audio fallback preserves source telemetry", async () => {
       };
     });
 
-    assert.equal(result.accepted.ok, true);
-    assert.equal(result.accepted.source, "recappi_global_audio");
-    assert.equal(result.recappi.connected, true);
-    assert.equal(result.recappi.source, "recappi_global_audio");
+    assert.equal(result.accepted.ok, false);
+    assert.equal(result.accepted.error, "recappi_global_audio_rejected");
+    assert.equal(result.recappi.connected, false);
+    assert.equal(result.recappi.source, "");
     const recappiTrackStates = result.trackStates.filter((entry) =>
       ["recappi_process_audio", "recappi_global_audio"].includes(entry.source),
     );
-    assert.equal(recappiTrackStates.length, 1);
-    assert.equal(recappiTrackStates[0].source, "recappi_global_audio");
-    assert.equal(recappiTrackStates[0].label, "Recappi global system audio");
+    assert.equal(recappiTrackStates.length, 0);
   } finally {
     await browser.close();
   }

@@ -174,8 +174,8 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     diagnostics?: DiagnosticsLike | null;
   }) {
     page = targetPage;
-    const tapState = await options.recappiTap.start({ context, allowGlobalFallback: true });
-    if (!["recappi_process_audio", "recappi_global_audio"].includes(tapState.source || "")) {
+    const tapState = await options.recappiTap.start({ context });
+    if ((tapState.source || "") !== "recappi_process_audio") {
       throw new Error(`unexpected_recappi_tap_source:${tapState.source || "unknown"}`);
     }
     state.startedAt = state.startedAt || nowIso();
@@ -187,6 +187,34 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     releaseConsumer = options.recappiTap.addConsumer(onAudio);
     diagnostics?.record?.("recappi_realtime_audio_start", status());
     return { ok: true, state: status() };
+  }
+
+  async function probe({ context }: { context: BrowserContext }) {
+    try {
+      const tapState = await options.recappiTap.start({ context });
+      if ((tapState.source || "") !== "recappi_process_audio") {
+        return {
+          ok: false,
+          source: tapState.source || "",
+          processId: tapState.processId || 0,
+          error: `unexpected_recappi_tap_source:${tapState.source || "unknown"}`,
+        };
+      }
+      return {
+        ok: true,
+        source: "recappi_process_audio",
+        processId: tapState.processId || 0,
+        sampleRate: tapState.sampleRate || 48000,
+        channels: tapState.channels || 2,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        source: "",
+        processId: 0,
+        error: String((error as Error)?.message || error),
+      };
+    }
   }
 
   async function stop() {
@@ -206,6 +234,7 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
   }
 
   return {
+    probe,
     start,
     stop,
     status,

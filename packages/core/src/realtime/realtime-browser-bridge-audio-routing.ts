@@ -375,6 +375,15 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
     });
     return false;
   }
+  if (config.meetAudioInputSource !== "webrtc") {
+    recordTimeline("meet_audio_track_skipped", {
+      reason: "meet_audio_input_source_not_webrtc",
+      source: config.meetAudioInputSource || "",
+      trackId: track.id,
+      ...detail,
+    });
+    return false;
+  }
   if (track.readyState === "ended") {
     recordTimeline("meet_audio_track_skipped", {
       reason: "track_ended",
