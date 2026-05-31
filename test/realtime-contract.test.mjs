@@ -156,7 +156,7 @@ test("Realtime contract keeps short voice checks and self-introductions on topic
 test("Realtime contract exposes product identity resolver tool", () => {
   const resolver = realtimeToolSchemas.find((tool) => tool.name === "resolve_speaker_identity");
   assert.ok(resolver);
-  assert.equal(resolver.strict, true);
+  assert.equal(resolver.strict, undefined);
   assert.ok(resolver.parameters.required.includes("display_name"));
   assert.equal(resolver.parameters.properties.display_name.type, "string");
   assert.deepEqual(resolver.parameters.properties.channel.type, ["string", "null"]);
@@ -173,7 +173,7 @@ test("Realtime contract exposes application share tools", () => {
   assert.match(present.description, /共享一下/);
   assert.match(present.description, /Pencil\/喷手\/铅笔/);
   assert.match(list.description, /应用\/窗口\/屏幕/);
-  assert.equal(control.strict, true);
+  assert.equal(control.strict, undefined);
   assert.equal(control.parameters.additionalProperties, false);
   assert.ok(control.parameters.required.includes("instruction"));
   assert.ok(control.parameters.required.includes("operations"));
@@ -204,7 +204,7 @@ test("Realtime contract exposes application share tools", () => {
 
 test("Realtime tool schemas are strict-compatible", () => {
   for (const tool of realtimeToolSchemas) {
-    assert.equal(tool.strict, true, `${tool.name} should enable strict mode`);
+    assert.equal(tool.strict, undefined, `${tool.name} must not send unsupported Realtime strict`);
     assertStrictObjectSchema(tool.parameters, `${tool.name}.parameters`);
   }
 });

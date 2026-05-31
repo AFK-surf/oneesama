@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	wantRealtimeToolHashWithoutDemoSurface = "8b8af007f509c6b48ce84be9acb820ae84ce95c18d03c531521588b0d1bdab52"
-	wantRealtimeToolHashWithDemoSurface    = "c86f87a03e7b5171a635cfb9abf1b6d01a18c2815515f05e5dc4630334698996"
+	wantRealtimeToolHashWithoutDemoSurface = "f1894a5e8fa25733459e7866d2e43a869badd5e7e020490c59da603c2eef3a48"
+	wantRealtimeToolHashWithDemoSurface    = "79be724dfa72f061ecc52e857e093e866a9efa39944a0b53c923676301dd0502"
 )
 
 func TestRealtimeToolSchemaStableHashIsDeterministic(t *testing.T) {
@@ -73,8 +73,8 @@ func TestRealtimeToolSchemaStableHashesAreDocumented(t *testing.T) {
 func TestRealtimeToolSchemasAreStrictCompatible(t *testing.T) {
 	for _, tool := range defaultRealtimeToolSchemas() {
 		name, _ := tool["name"].(string)
-		if tool["strict"] != true {
-			t.Fatalf("%s strict = %#v, want true", name, tool["strict"])
+		if _, ok := tool["strict"]; ok {
+			t.Fatalf("%s strict = %#v, Realtime session tools do not accept strict", name, tool["strict"])
 		}
 		parameters, ok := tool["parameters"].(map[string]any)
 		if !ok {

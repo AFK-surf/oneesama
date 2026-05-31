@@ -763,7 +763,6 @@ function strictifyRealtimeToolSchemas(tools) {
   return tools.map((tool) => ({
     ...tool,
     parameters: strictifyJSONSchema(tool.parameters, true),
-    strict: true,
   }));
 }
 

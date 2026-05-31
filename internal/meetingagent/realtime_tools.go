@@ -12,7 +12,6 @@ type realtimeToolSchema struct {
 	Name        string
 	Description string
 	Parameters  realtimeJSONSchema
-	Strict      bool
 }
 
 type realtimeJSONSchema struct {
@@ -270,7 +269,6 @@ func realtimeTool(name, description string, parameters realtimeJSONSchema) realt
 		Name:        name,
 		Description: description,
 		Parameters:  parameters,
-		Strict:      true,
 	}
 }
 
@@ -333,7 +331,6 @@ func realtimeToolSchemasAsMaps(schemas []realtimeToolSchema) []map[string]any {
 			"name":        schema.Name,
 			"description": schema.Description,
 			"parameters":  schema.Parameters.StrictMap(true),
-			"strict":      schema.Strict,
 		})
 	}
 	return out
