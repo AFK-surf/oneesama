@@ -13,6 +13,8 @@ interface RecappiRealtimeAudioInputOptions {
   maxPendingPushes?: number;
   startTimeoutMs?: number;
   startRetryDelayMs?: number;
+  backgroundRetryTimeoutMs?: number;
+  backgroundRetryDelayMs?: number;
 }
 
 interface RecappiAudioPayload {
@@ -47,6 +49,8 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     pushedChunks: 0,
     droppedChunks: 0,
     pendingPushes: 0,
+    retrying: false,
+    lastRetryAt: "",
     lastChunkAt: "",
     lastPushAt: "",
     lastError: "",
@@ -61,6 +65,19 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
   const maxPendingPushes = Math.max(1, options.maxPendingPushes || 64);
   const startTimeoutMs = Math.max(0, options.startTimeoutMs ?? 5000);
   const startRetryDelayMs = Math.max(50, options.startRetryDelayMs ?? 250);
+  const backgroundRetryTimeoutMs = Math.max(0, options.backgroundRetryTimeoutMs ?? 120_000);
+  const backgroundRetryDelayMs = Math.max(100, options.backgroundRetryDelayMs ?? 1000);
+  let stopped = false;
+  let backgroundRetryLoop: Promise<void> | null = null;
+  let activePrimeStop: (() => Promise<void>) | null = null;
+
+  function isRetryableStartError(error: unknown): boolean {
+    const message = String((error as Error)?.message || error || "");
+    return (
+      message.includes("Application not found or not available for audio tapping") ||
+      message.includes("chromium_audio_process_not_found")
+    );
+  }
 
   function rememberError(stage: string, error: unknown) {
     state.ok = false;
@@ -259,6 +276,71 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
       : new Error(String(lastError || "recappi_start_failed"));
   }
 
+  function activateTap(tapState: any, diagnostics?: DiagnosticsLike | null) {
+    stopped = false;
+    state.ok = true;
+    state.retrying = false;
+    state.lastRetryAt = "";
+    state.lastError = "";
+    state.startedAt = state.startedAt || nowIso();
+    state.stoppedAt = "";
+    state.source = tapState.source || "recappi_process_audio";
+    state.sampleRate = tapState.sampleRate || 48000;
+    state.channels = tapState.channels || 2;
+    state.processId = tapState.processId || 0;
+    releaseConsumer ??= options.recappiTap.addConsumer(onAudio);
+    diagnostics?.record?.("recappi_realtime_audio_start", status());
+    return { ok: true, state: status() };
+  }
+
+  function scheduleBackgroundRetry({
+    context,
+    diagnostics,
+  }: {
+    context: BrowserContext;
+    diagnostics?: DiagnosticsLike | null;
+  }) {
+    if (backgroundRetryLoop) return;
+    state.retrying = true;
+    diagnostics?.record?.("recappi_realtime_audio_background_retry_scheduled", {
+      timeoutMs: backgroundRetryTimeoutMs,
+      delayMs: backgroundRetryDelayMs,
+    });
+    backgroundRetryLoop = (async () => {
+      const deadline = Date.now() + backgroundRetryTimeoutMs;
+      let attempt = 0;
+      while (!stopped && Date.now() <= deadline) {
+        attempt += 1;
+        state.lastRetryAt = nowIso();
+        try {
+          const tapState = await startTapWithRetry({ context, diagnostics });
+          if (stopped) break;
+          diagnostics?.record?.("recappi_realtime_audio_background_retry_succeeded", { attempt });
+          activateTap(tapState, diagnostics);
+          await activePrimeStop?.();
+          activePrimeStop = null;
+          return;
+        } catch (error) {
+          const message = String((error as Error)?.message || error);
+          const retry = isRetryableStartError(error) && Date.now() < deadline && !stopped;
+          diagnostics?.record?.("recappi_realtime_audio_background_retry_failed", {
+            attempt,
+            error: message,
+            retry,
+          });
+          if (!retry) break;
+          await sleep(backgroundRetryDelayMs);
+        }
+      }
+      state.retrying = false;
+      await activePrimeStop?.();
+      activePrimeStop = null;
+    })().finally(() => {
+      backgroundRetryLoop = null;
+      if (!releaseConsumer) state.retrying = false;
+    });
+  }
+
   async function start({
     context,
     page: targetPage,
@@ -268,23 +350,28 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     page: Page;
     diagnostics?: DiagnosticsLike | null;
   }) {
+    stopped = false;
     page = targetPage;
     const stopPrime = await startBrowserAudioPrime(targetPage, diagnostics);
+    activePrimeStop = stopPrime;
     let tapState: any;
     try {
       tapState = await startTapWithRetry({ context, diagnostics });
+    } catch (error) {
+      if (!isRetryableStartError(error)) {
+        await stopPrime();
+        activePrimeStop = null;
+        throw error;
+      }
+      scheduleBackgroundRetry({ context, diagnostics });
+      return { ok: false, pending: true, state: status() };
+    }
+    if (activePrimeStop === stopPrime) activePrimeStop = null;
+    try {
+      return activateTap(tapState, diagnostics);
     } finally {
       await stopPrime();
     }
-    state.startedAt = state.startedAt || nowIso();
-    state.stoppedAt = "";
-    state.source = tapState.source || "recappi_process_audio";
-    state.sampleRate = tapState.sampleRate || 48000;
-    state.channels = tapState.channels || 2;
-    state.processId = tapState.processId || 0;
-    releaseConsumer = options.recappiTap.addConsumer(onAudio);
-    diagnostics?.record?.("recappi_realtime_audio_start", status());
-    return { ok: true, state: status() };
   }
 
   async function probe({ context }: { context: BrowserContext }) {
@@ -319,8 +406,12 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
   }
 
   async function stop() {
+    stopped = true;
     releaseConsumer?.();
     releaseConsumer = null;
+    state.retrying = false;
+    await activePrimeStop?.();
+    activePrimeStop = null;
     state.stoppedAt = nowIso();
     await flushPushQueue();
     return { ok: true, state: status() };

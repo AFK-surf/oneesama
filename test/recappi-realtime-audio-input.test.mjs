@@ -297,3 +297,71 @@ test("Recappi realtime input primes browser audio and retries tap startup", asyn
     diagnostics.events.some((event) => event.type === "recappi_realtime_audio_start_retry_succeeded"),
   );
 });
+
+test("Recappi realtime input keeps retrying in background after early app audio unavailable", async () => {
+  let consumer = null;
+  let attempts = 0;
+  const recappiTap = {
+    start: async () => {
+      attempts += 1;
+      if (attempts < 4) {
+        throw new Error("Application not found or not available for audio tapping");
+      }
+      return {
+        source: "recappi_process_audio",
+        sampleRate: 44100,
+        channels: 2,
+        processId: 8642,
+      };
+    },
+    addConsumer: (callback) => {
+      consumer = callback;
+      return () => {
+        consumer = null;
+      };
+    },
+    status: () => ({
+      ok: true,
+      running: Boolean(consumer),
+      source: consumer ? "recappi_process_audio" : "",
+      sampleRate: consumer ? 44100 : 0,
+      channels: consumer ? 2 : 0,
+      processId: consumer ? 8642 : 0,
+    }),
+  };
+  const diagnostics = {
+    events: [],
+    record(type, detail) {
+      this.events.push({ type, detail });
+    },
+  };
+  const page = {
+    isClosed: () => false,
+    evaluate: async () => ({ ok: true }),
+  };
+
+  const input = createRecappiRealtimeAudioInput({
+    sessionId: "session_test",
+    recappiTap,
+    startTimeoutMs: 1,
+    startRetryDelayMs: 50,
+    backgroundRetryTimeoutMs: 1000,
+    backgroundRetryDelayMs: 10,
+  });
+  const result = await input.start({ context: {}, page, diagnostics });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.pending, true);
+  assert.equal(input.status().retrying, true);
+  assert.equal(consumer, null);
+
+  await waitFor(() => input.status().recording === true, 1000);
+  assert.equal(input.status().ok, true);
+  assert.equal(input.status().processId, 8642);
+  assert.equal(typeof consumer, "function");
+  assert.ok(
+    diagnostics.events.some(
+      (event) => event.type === "recappi_realtime_audio_background_retry_succeeded",
+    ),
+  );
+});
