@@ -15,7 +15,7 @@
       "steps": [
         {
           "expectedToolNames": ["current_user_identity"],
-          "responseInstructions": "Summarize the result in concise Chinese. If it failed, state the exact blocker without mentioning internal routing names.",
+          "responseInstructions": "If the prior user request only asked who they are, answer with the resolved identity in concise Chinese. If the prior user request asked for their own workspace data, tasks, issues, GitHub, Linear, Slack, Notion, calendar, docs, URL, or repo lookup, continue by starting the appropriate background job using the resolved identity context instead of stopping after identity.",
           "output": {
             "ok": true,
             "current_user": {
@@ -32,7 +32,7 @@
           }
         },
         {
-          "expectedToolNames": ["linear_user_issues"]
+          "expectedToolNames": ["delegate_to_worker"]
         }
       ]
     }

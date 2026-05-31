@@ -332,6 +332,15 @@
       }
 
       if (kind === "workspace") {
+        if (name === "current_user_identity") {
+          return {
+            channel: "voice",
+            autoRespond: true,
+            reason: "workspace_identity_resolved",
+            responseInstructions:
+              "If the prior user request only asked who they are, answer with the resolved identity in concise Chinese. If the prior user request asked for their own workspace data, tasks, issues, GitHub, Linear, Slack, Notion, calendar, docs, URL, or repo lookup, continue by starting the appropriate background job using the resolved identity context instead of stopping after identity.",
+          };
+        }
         if (name === "control_shared_app_window") {
           if (resultIsBlocked(result)) {
             return {

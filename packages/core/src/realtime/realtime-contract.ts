@@ -3,7 +3,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "delegate_to_worker",
     description:
-      "Start a background workspace job only for async workspace/code/research/debug/planning work. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo or otherwise requests work that should continue outside the short voice turn. For vague file batches or missing details, still start the background job with the user's wording instead of staying silent or asking for every file up front. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, memory lookup, or GitHub/Linear/Meet-chat search requests that have dedicated tools.",
+      "Start a background workspace job for async workspace/code/research/debug/planning work or external workspace lookup that is not handled by a live meeting tool. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo/GitHub/Linear/Slack/Notion/calendar/docs/URL lookup or otherwise requests work that should continue outside the short voice turn. For vague file batches or missing details, still start the background job with the user's wording instead of staying silent or asking for every file up front. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, or direct Meet-chat read/send requests.",
     parameters: {
       type: "object",
       properties: {
@@ -39,52 +39,6 @@ const rawRealtimeToolSchemas = [
           type: "string",
           description:
             "Known worker job id. Omit/null when the user refers to the latest or previous background job.",
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    type: "function",
-    name: "delegate_to_codex",
-    description:
-      "Deprecated compatibility alias for delegate_to_worker. If the user explicitly says Codex/codex and asks to write a script, handle files, debug code, inspect a repo, or run background workspace work, call delegate_to_worker or this alias; do not stay silent and do not answer from memory. Never use for app/window share, browser/Pencil UI control, avatar visuals, GitHub/Linear/Meet-chat search, or immediate meeting actions.",
-    parameters: {
-      type: "object",
-      properties: {
-        task: {
-          type: "string",
-          description:
-            "Clear task. Include exact URLs/file paths/commands and what to report back.",
-        },
-        context: {
-          type: "string",
-          description:
-            "Useful meeting/workspace context. Include Meet chat links or prior results when relevant.",
-        },
-        mode: {
-          type: "string",
-          enum: ["analysis", "code", "research", "debug", "plan"],
-          default: "analysis",
-        },
-        allow_code_changes: { type: "boolean", default: false },
-        wait_for_result: { type: "boolean", default: false },
-      },
-      required: ["task"],
-    },
-  },
-  {
-    type: "function",
-    name: "delegate_status",
-    description:
-      "Compatibility alias for checking status/result of a background workspace job. Use for legacy references to Codex/delegate job progress; omit/null job_id when the user refers to the latest job.",
-    parameters: {
-      type: "object",
-      properties: {
-        job_id: {
-          type: "string",
-          description:
-            "Known worker job id. Omit/null when checking the latest or previous delegate job.",
         },
       },
       required: [],
@@ -195,7 +149,8 @@ const rawRealtimeToolSchemas = [
       properties: {
         job_id: {
           type: "string",
-          description: "Existing app-control job id to check. When set, instruction is not required.",
+          description:
+            "Existing app-control job id to check. When set, instruction is not required.",
         },
         instruction: {
           type: "string",
@@ -403,29 +358,6 @@ const rawRealtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "fetch_url",
-    description:
-      "Read a public URL and return extracted text/markdown. Uses a reader service by default, which is useful for X/Twitter links and pages that are hard to read directly. If this fails or the request needs deeper browsing, continue in the background.",
-    parameters: {
-      type: "object",
-      properties: {
-        url: { type: "string", description: "The exact http(s) URL to read." },
-        useJina: {
-          type: "boolean",
-          default: true,
-          description: "Use the Jina reader service instead of direct fetch.",
-        },
-        maxChars: {
-          type: "integer",
-          default: 8000,
-          description: "Maximum returned text characters.",
-        },
-      },
-      required: ["url"],
-    },
-  },
-  {
-    type: "function",
     name: "current_user_identity",
     description:
       "Return the current meeting speaker/user identity. Use whenever the user asks who they are, says 'my/me/I', or asks for their own workspace data.",
@@ -499,64 +431,6 @@ const rawRealtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "search_team_members",
-    description:
-      "Search Linear users/team members and return fuzzy candidates. Use before assignee-specific Linear lookups if the spoken name is ambiguous.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Name, nickname, email, or spoken partial name." },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    type: "function",
-    name: "linear_query",
-    description:
-      "Search Linear issues by free text in title/description. Use for issue keyword lookups.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-        limit: { type: "integer", default: 5 },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    type: "function",
-    name: "linear_user_issues",
-    description:
-      "List incomplete Linear issues assigned to a user. Use for 'my Linear issues', 'my tasks', 'tasks on someone's plate', or assignee questions. If the user says 我/my and no resolved identity is already available, first call current_user_identity as the functional first step, then continue with this tool using the resolved workspace identifier. Never satisfy Linear task questions with avatar-only tools. If the user names a person, use the name/email/handle directly or search_team_members if ambiguous.",
-    parameters: {
-      type: "object",
-      properties: {
-        user: {
-          type: "string",
-          description:
-            "Email, display name, handle, or username. Prefer the current workspace user's email when available, for example user@example.com.",
-        },
-      },
-      required: ["user"],
-    },
-  },
-  {
-    type: "function",
-    name: "google_calendar",
-    description: "Search Google Calendar events.",
-    parameters: {
-      type: "object",
-      properties: {
-        time_min: { type: "string" },
-        time_max: { type: "string" },
-        max_results: { type: "integer", default: 10 },
-      },
-      required: [],
-    },
-  },
-  {
-    type: "function",
     name: "calendar_attendees",
     description: "Look up the calendar event matching the current Meet URL and return attendees.",
     parameters: {
@@ -572,119 +446,12 @@ const rawRealtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "slack_search",
-    description: "Search Cue Slack messages.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-        count: { type: "integer", default: 5 },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    type: "function",
-    name: "notion_search",
-    description: "Search Cue Notion documents.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    type: "function",
-    name: "github_search",
-    description:
-      "Search GitHub issues, repos, or code. Use immediately when the user says GitHub/github/GH/仓库/repo/issue/PR/code search/搜一下这个仓库, even if the repository is only implied by the current workspace. Preserve the user's words as query. Do not delegate, stay silent, use memory, or use avatar-only tools for direct GitHub lookup requests.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-        kind: { type: "string", enum: ["issues", "repos", "code"], default: "issues" },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    type: "function",
-    name: "memory_write",
-    description: "Write session memory for this meeting avatar.",
-    parameters: {
-      type: "object",
-      properties: {
-        key: { type: "string" },
-        value: {
-          type: "string",
-          description: "Session memory value as concise text or a JSON string.",
-        },
-      },
-      required: ["key"],
-    },
-  },
-  {
-    type: "function",
-    name: "memory_read",
-    description: "Read session memory. Omit key to return all memory.",
-    parameters: {
-      type: "object",
-      properties: {
-        key: { type: "string" },
-      },
-      required: [],
-    },
-  },
-  {
-    type: "function",
     name: "now",
     description: "Return the current date/time in Asia/Shanghai.",
     parameters: {
       type: "object",
       properties: {},
       required: [],
-    },
-  },
-  {
-    type: "function",
-    name: "set_avatar_expression",
-    description:
-      "Visual-only avatar control: set the on-camera mood. This never shares windows, controls apps, delegates work, searches, checks status, reads chat, changes browser/workspace state, or satisfies a user request by itself unless the request is only to change the avatar expression.",
-    parameters: {
-      type: "object",
-      properties: {
-        mood: { type: "string", enum: ["neutral", "happy", "surprised", "thinking", "sad", "shy"] },
-      },
-      required: ["mood"],
-    },
-  },
-  {
-    type: "function",
-    name: "set_avatar_action",
-    description:
-      "Visual-only avatar control: trigger a visible head/body action. Use nod for agreement, shake for disagreement, wave for greetings, think for reasoning, speak while talking, and emphasize for conclusions. This never shares windows, controls apps, delegates work, searches, checks status, reads chat, or changes browser/workspace state.",
-    parameters: {
-      type: "object",
-      properties: {
-        action: {
-          type: "string",
-          enum: [
-            "idle",
-            "nod",
-            "shake",
-            "wave",
-            "think",
-            "lean_forward",
-            "emphasize",
-            "shrug",
-            "speak",
-          ],
-        },
-        intensity: { type: "number", description: "0.2 to 1.2 is the normal visible range." },
-      },
-      required: ["action"],
     },
   },
   {
@@ -1121,7 +888,7 @@ export function buildRealtimeInstructions({
     "When the user asks you to do complex work, use the appropriate internal action. Only say a one-line transition if the user needs visible confirmation, and do not narrate the internal mechanism.",
     "For progress, intent, or in-flight status, prefer the visual channel only after the requested functional action has started. Speech is for answers, user-facing questions, and blockers.",
     "Tool disambiguation: avatar visual tools only change the on-camera avatar/HUD. They never satisfy share, app-control, browser, workspace, code, research, search, status, Linear, GitHub, meeting-chat, or delegation requests. If a request maps to any functional action, call that functional action first; visual tools may only follow it as progress decoration.",
-    "Workspace tool routing: if the newest user request asks for background research, reports, scripts, code investigation, tests, repo changes, or other work that should continue outside the short voice turn, use the dedicated background-job action instead of memory or avatar-only actions. If the user asks job progress, status, completion, or result, use the dedicated background-job status action even when no job id is known. If the user asks for GitHub/GH/repo/issue/PR/code search, use the dedicated GitHub search action. If the user asks what meeting chat said or what links were posted, use the meeting-chat reader. If the user asks about their Linear tasks, resolve the current user identity first when needed, then continue with the Linear assignee lookup.",
+    "Workspace tool routing: if the newest user request asks for background research, reports, scripts, code investigation, tests, repo changes, GitHub/GH/repo/issue/PR/code search, Linear/Slack/Notion/calendar/document lookup, URL reading, or other work that should continue outside the short voice turn, use the dedicated background-job action instead of memory or avatar-only actions. If the user asks job progress, status, completion, or result, use the dedicated background-job status action even when no job id is known. If the user asks what meeting chat said or what links were posted, use the meeting-chat reader. If the user asks about their own workspace data, resolve the current user identity first when needed, then continue with the background-job action using the resolved identity context.",
     "Identity contract: live speaker identity is provided by runtime context or identity lookup. If active speaker context marks someone as current_user, treat first-person wording like “我/我的/我是谁” as that identity. If identity is uncertain, ask a short clarification instead of guessing.",
     "Addressing contract: use the resolved profile's preferred spoken name. Treat aliases and honorifics as recognition hints, not as names to say aloud; if an English name is present, prefer it over a role-like nickname.",
     "Project context: AFK AI, Inc. builds oneesama as a meeting avatar and workspace automation framework.",

@@ -54,15 +54,15 @@ func TestRealtimeForegroundToolInventoryRespectsDemoSurfaceGate(t *testing.T) {
 	}
 }
 
-func TestRealtimeForegroundToolInventoryPinsDeprecatedAliases(t *testing.T) {
+func TestRealtimeForegroundToolInventoryHidesDeprecatedAliases(t *testing.T) {
 	inventory := RealtimeForegroundToolInventory(true)
 	classes := make(map[string]string, len(inventory))
 	for _, item := range inventory {
 		classes[item.Name] = item.Class
 	}
 	for _, name := range []string{"delegate_to_codex", "delegate_status"} {
-		if classes[name] != RealtimeToolClassDeprecatedAlias {
-			t.Fatalf("tool %q class = %q, want %q", name, classes[name], RealtimeToolClassDeprecatedAlias)
+		if _, ok := classes[name]; ok {
+			t.Fatalf("deprecated alias %q is still exposed in foreground inventory", name)
 		}
 	}
 	if classes["delegate_to_worker"] != RealtimeToolClassStableForeground {

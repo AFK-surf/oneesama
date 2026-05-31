@@ -18,17 +18,17 @@
     {
       "id": "delegate_to_codex_script_zh",
       "utterance": "用 codex 帮我写个脚本处理这批文件",
-      "expectedToolNames": ["delegate_to_worker", "delegate_to_codex"]
+      "expectedToolNames": ["delegate_to_worker"]
     },
     {
       "id": "delegate_status_codex_zh",
       "utterance": "codex 那个活儿进度到哪了",
-      "expectedToolNames": ["worker_status", "delegate_status"]
+      "expectedToolNames": ["worker_status"]
     },
     {
       "id": "worker_status_result_zh",
       "utterance": "刚才那个后台任务做完了吗，结果呢",
-      "expectedToolNames": ["worker_status", "delegate_status"]
+      "expectedToolNames": ["worker_status"]
     },
     {
       "id": "read_meet_chat_zh",
@@ -38,12 +38,12 @@
     {
       "id": "github_search_zh",
       "utterance": "在 github 上搜一下 AFK-surf/oneesama 仓库里关于 realtime 的 issue",
-      "expectedToolNames": ["github_search"]
+      "expectedToolNames": ["delegate_to_worker"]
     },
     {
       "id": "linear_user_issues_first_step_zh",
       "utterance": "我在 linear 上还有哪些没做完的 issue",
-      "expectedToolNames": ["current_user_identity", "linear_user_issues", "linear_query"]
+      "expectedToolNames": ["current_user_identity"]
     }
   ]
 }

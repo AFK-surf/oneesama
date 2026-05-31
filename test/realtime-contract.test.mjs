@@ -202,36 +202,45 @@ test("Realtime tool schemas are strict-compatible", () => {
 
 test("Realtime tool descriptions fence off visual and delegation tools", () => {
   const worker = realtimeToolSchemas.find((tool) => tool.name === "delegate_to_worker");
-  const legacyWorker = realtimeToolSchemas.find((tool) => tool.name === "delegate_to_codex");
   const avatarState = realtimeToolSchemas.find((tool) => tool.name === "update_avatar_state");
-  const avatarExpression = realtimeToolSchemas.find(
-    (tool) => tool.name === "set_avatar_expression",
-  );
 
-  assert.match(worker.description, /only for async workspace\/code\/research\/debug\/planning/);
+  assert.match(worker.description, /external workspace lookup/);
   assert.match(worker.description, /后台任务/);
   assert.match(worker.description, /写脚本/);
-  assert.match(worker.description, /GitHub\/Linear\/Meet-chat search/);
-  assert.match(legacyWorker.description, /Deprecated compatibility alias/);
-  assert.match(legacyWorker.description, /explicitly says Codex\/codex/);
+  assert.match(worker.description, /GitHub\/Linear\/Slack\/Notion/);
   const workerStatus = realtimeToolSchemas.find((tool) => tool.name === "worker_status");
   const meetChat = realtimeToolSchemas.find((tool) => tool.name === "read_meet_chat");
-  const githubSearch = realtimeToolSchemas.find((tool) => tool.name === "github_search");
-  const linearUserIssues = realtimeToolSchemas.find((tool) => tool.name === "linear_user_issues");
   assert.match(workerStatus.description, /codex 那个活儿/);
   assert.match(workerStatus.parameters.properties.jobId.description, /latest or previous/);
   assert.match(meetChat.description, /会议聊天/);
-  assert.match(githubSearch.description, /GitHub\/github\/GH/);
-  assert.match(linearUserIssues.description, /current_user_identity/);
-  assert.match(linearUserIssues.description, /continue with this tool/);
   assert.match(avatarState.description, /Visual-only avatar\/HUD control/);
   assert.match(avatarState.description, /call the correct functional tool first/);
-  assert.match(avatarExpression.description, /Visual-only avatar control/);
-  assert.match(avatarExpression.description, /never shares windows/);
   assert.match(
     avatarState.parameters.properties.status_text.description,
     /Do not include internal logs, tool names, backend names, or secrets/,
   );
+});
+
+test("Realtime foreground tool surface hides unwired and legacy fine-grained tools", () => {
+  const names = new Set(realtimeToolSchemas.map((tool) => tool.name));
+  for (const hidden of [
+    "delegate_to_codex",
+    "delegate_status",
+    "fetch_url",
+    "search_team_members",
+    "linear_query",
+    "linear_user_issues",
+    "google_calendar",
+    "slack_search",
+    "notion_search",
+    "github_search",
+    "memory_write",
+    "memory_read",
+    "set_avatar_expression",
+    "set_avatar_action",
+  ]) {
+    assert.equal(names.has(hidden), false, `${hidden} should stay behind the foreground surface`);
+  }
 });
 
 function assertStrictObjectSchema(schema, path) {
