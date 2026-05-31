@@ -1,5 +1,5 @@
-import { createRecappiAudioTap, isRecappiAudioTapAvailable } from "../audio/recappi-audio-tap.ts";
-import { createMeetingRecorder, resolveMeetingAudioBackend } from "./meeting-recorder.ts";
+import { createRecappiAudioTap } from "../audio/recappi-audio-tap.ts";
+import { createMeetingRecorder } from "./meeting-recorder.ts";
 import { createRecappiRealtimeAudioInput } from "./recappi-realtime-audio-input.ts";
 import { createWebRTCAudioCaptureSink } from "./webrtc-audio-capture.ts";
 
@@ -16,23 +16,12 @@ export function createMeetingAudioInputs({
     installRealtimeBridge &&
     input.forwardMeetAudioToRealtime !== false &&
     Boolean(input.includeParticipantAudio);
-  const requestedRecorderBackend = input.meetAudioBackend || config.meetAudioBackend;
-  const resolvedRecorderBackend = requestedRecorderBackend
-    ? resolveMeetingAudioBackend({ MAB_MEET_AUDIO_BACKEND: requestedRecorderBackend }, process.platform)
-    : resolveMeetingAudioBackend();
-  const recappiAvailable =
-    resolvedRecorderBackend === "recappi" && isRecappiAudioTapAvailable();
   const recappiTap =
-    process.platform === "darwin" &&
-    resolvedRecorderBackend === "recappi" &&
-    recappiAvailable &&
-    (recordMeeting || realtimeWantsMeetAudio)
+    process.platform === "darwin" && (recordMeeting || realtimeWantsMeetAudio)
       ? createRecappiAudioTap({ log: (message) => console.error(`[meeting-recorder] ${message}`) })
       : null;
-  const recorderBackend =
-    resolvedRecorderBackend === "recappi" && !recappiAvailable ? "none" : resolvedRecorderBackend;
   const recorder = createMeetingRecorder({
-    backend: recorderBackend,
+    backend: input.meetAudioBackend || config.meetAudioBackend,
     recappiTap: recappiTap || undefined,
   });
   const realtimeRecappiAudioInput = shouldUseRecappiRealtimeAudioInput({
@@ -82,19 +71,9 @@ export async function startRealtimeRecappiAudioInput({
   diagnostics,
 }) {
   if (!realtimeRecappiAudioInput) return null;
-  try {
-    const started = await realtimeRecappiAudioInput.start({ context, page, diagnostics });
-    diagnostics.record("recappi_realtime_audio_ready", started);
-    return started;
-  } catch (error) {
-    const failed = {
-      ok: false,
-      error: String(error?.message || error),
-      fallback: "webrtc_receiver_audio",
-    };
-    diagnostics.record("recappi_realtime_audio_failed", failed);
-    return failed;
-  }
+  const started = await realtimeRecappiAudioInput.start({ context, page, diagnostics });
+  diagnostics.record("recappi_realtime_audio_ready", started);
+  return started;
 }
 
 export async function stopRealtimeRecappiAudioInput(active) {

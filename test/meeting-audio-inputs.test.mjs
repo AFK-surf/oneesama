@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
-import { isRecappiAudioTapAvailable } from "../packages/core/src/audio/recappi-audio-tap.ts";
 import {
   createMeetingAudioInputs,
   isGoogleMeetUrlForRealtimeAudio,
@@ -39,18 +35,6 @@ test("Recappi realtime input stays off for non-Google fixtures", () => {
   );
 });
 
-test("Recappi tap availability requires an installed package or explicit SDK path", async () => {
-  const root = await mkdtemp(join(tmpdir(), "oneesama-recappi-sdk-"));
-  const sdkPath = join(root, "fake-recappi-sdk.cjs");
-  try {
-    assert.equal(isRecappiAudioTapAvailable({ recappiSdkPath: join(root, "missing.cjs") }), false);
-    await writeFile(sdkPath, "module.exports = { ShareableContent: {} };\n");
-    assert.equal(isRecappiAudioTapAvailable({ recappiSdkPath: sdkPath }), true);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 test("permissive runner mode still uses Recappi realtime input for real Meet URLs", () => {
   const result = createMeetingAudioInputs({
     input: {
@@ -67,12 +51,11 @@ test("permissive runner mode still uses Recappi realtime input for real Meet URL
     recordMeeting: true,
   });
 
-  if (process.platform === "darwin" && isRecappiAudioTapAvailable()) {
+  if (process.platform === "darwin") {
     assert.ok(result.realtimeRecappiAudioInput, "real Google Meet joins should get Recappi input");
     assert.equal(result.realtimeAudioCapture, null);
   } else {
     assert.equal(result.realtimeRecappiAudioInput, null);
-    assert.ok(result.realtimeAudioCapture, "missing Recappi SDK should fall back to WebRTC capture");
   }
 });
 

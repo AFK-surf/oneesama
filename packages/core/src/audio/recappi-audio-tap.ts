@@ -52,19 +52,6 @@ function defaultLog(message: string): void {
   console.error(`[recappi-audio-tap] ${message}`);
 }
 
-export function isRecappiAudioTapAvailable(options: RecappiAudioTapOptions = {}): boolean {
-  try {
-    require.resolve("@recappi/sdk");
-    return true;
-  } catch {
-    // Continue into local fallback below. The new repo intentionally keeps
-    // Recappi optional so open-source installs can still run without it.
-  }
-
-  const sdkPath = options.recappiSdkPath || process.env.MAB_RECAPPI_SDK_PATH || "";
-  return Boolean(sdkPath && existsSync(sdkPath));
-}
-
 async function loadRecappiSdk(options: RecappiAudioTapOptions = {}): Promise<RecappiSdkModule> {
   try {
     return require("@recappi/sdk") as RecappiSdkModule;

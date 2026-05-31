@@ -311,35 +311,6 @@ test("mock Meet receiver track drives the production Realtime input/output route
   }
 });
 
-test("Recappi-selected bridge falls back to WebRTC receiver audio until Recappi connects", async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  try {
-    await installRealtimeHarness(page, { meetAudioInputSource: "recappi_process_audio" });
-    const result = await runMockReceiverScenario(page, {
-      sourceGain: 0.03,
-      mutedElementSilencesCapture: false,
-      emitSpeechAndResponse: true,
-    });
-    const fallbackReasons = await page.evaluate(() =>
-      window.MAB_REALTIME_BRIDGE.timeline
-        .filter((entry) => entry.type === "meet_audio_track_recappi_fallback")
-        .map((entry) => entry.detail.reason),
-    );
-
-    assert.deepEqual(result.forwardedSources, ["pc.track"]);
-    assert.deepEqual(fallbackReasons, ["recappi_process_audio_not_connected"]);
-    assert.equal(result.connection.recappiAudioInput.connected, false);
-    assert.equal(result.connection.meetAudioTracksForwarded, 1);
-    assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
-    assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
-    assert.equal(result.connection.meetAudioEnergy.observed, true);
-    assert.equal(result.feedback.failureMatrix.audioInput.status, "ok");
-  } finally {
-    await browser.close();
-  }
-});
-
 test("Meet receiver routing excludes muted and ended stale tracks from the input mix", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
