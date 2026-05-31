@@ -304,7 +304,9 @@ function scanMeetMediaElementAudio() {
   for (const element of elements) {
     const srcObject = element.srcObject as MediaStream | null | undefined;
     const srcObjectAudioTracks = srcObject?.getAudioTracks?.() || [];
-    const captured = routedMeetMediaElements.has(element)
+    const participantStreamAlreadyDispatched =
+      element.dataset?.meetingAvatarParticipantStreamDispatched === "1";
+    const captured = routedMeetMediaElements.has(element) || participantStreamAlreadyDispatched
       ? { stream: null, error: "already_routed" }
       : captureStreamFromMediaElement(element);
     const captureAudioTracks =
@@ -319,7 +321,7 @@ function scanMeetMediaElementAudio() {
       captureAudioTracks: captureAudioTracks.length,
       captureError: captured.error || "",
     });
-    if (routedMeetMediaElements.has(element)) continue;
+    if (routedMeetMediaElements.has(element) || participantStreamAlreadyDispatched) continue;
     const stream = captured.stream;
     const tracks = captureAudioTracks;
     if (!tracks.length) continue;

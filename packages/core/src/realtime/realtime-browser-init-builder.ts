@@ -48,6 +48,21 @@ export function buildRealtimeBrowserInitScript(config = {}) {
     ),
     readBrowserInitSource(
       import.meta.url,
+      "./realtime-browser-agent-audio-helpers.js",
+      "./realtime-browser-agent-audio-helpers.ts",
+    ),
+    readBrowserInitSource(
+      import.meta.url,
+      "./realtime-browser-audio-sender-stats-helpers.js",
+      "./realtime-browser-audio-sender-stats-helpers.ts",
+    ),
+    readBrowserInitSource(
+      import.meta.url,
+      "./realtime-browser-agent-transport-helpers.js",
+      "./realtime-browser-agent-transport-helpers.ts",
+    ),
+    readBrowserInitSource(
+      import.meta.url,
       "./realtime-browser-local-tool-helpers.js",
       "./realtime-browser-local-tool-helpers.ts",
     ),

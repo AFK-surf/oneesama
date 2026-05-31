@@ -519,6 +519,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         includeParticipantAudio: Boolean(input.includeParticipantAudio),
         forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
         meetAudioInputSource: realtimeRecappiAudioInput ? "recappi_process_audio" : "webrtc",
+        meetAudioInputGain: input.meetAudioInputGain,
         captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
         workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,
         workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,

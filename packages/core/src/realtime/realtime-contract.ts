@@ -179,7 +179,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "control_shared_app_window",
     description:
-      "Operate the currently shared existing macOS app/window through the host Computer Use executor. Use when the user asks you to click, type, draw, edit, scroll, switch tools, switch accounts, handle a stuck Chrome/browser window, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. This tool operates the bot host's shared window, not the human's personal computer. Pass the user's goal as instruction; the host executor owns the observe -> plan -> act -> verify loop, including unfamiliar apps. By default this queues the app-control work asynchronously and returns a job_id immediately so voice turns do not block; call again with job_id to check status. Do not invent click/drag primitives in the foreground Realtime turn, do not ask the user to share/control their own computer, and do not use this to create a new browser workspace.",
+      "Operate the currently shared existing macOS app/window through the host Computer Use executor. Use when the user asks you to click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle a stuck Chrome/browser window, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. Treat Chinese shorthand such as “你用电脑控制”, “你来操作”, “切到第三个账号”, “在搜索框输入”, and “处理 Chrome 卡住” as app-control requests even when the target app is implied by the current shared window. This tool operates the bot host's shared window, not the human's personal computer. Pass the user's goal as instruction; the host executor owns the observe -> plan -> act -> verify loop, including unfamiliar apps. By default this queues the app-control work asynchronously and returns a job_id immediately so voice turns do not block; call again with job_id to check status. Do not invent click/drag primitives in the foreground Realtime turn, do not ask the user to share/control their own computer, and do not use this to create a new browser workspace.",
     parameters: {
       type: "object",
       properties: {
@@ -714,7 +714,7 @@ export const realtimeToolSchemas = [
     type: "function",
     name: "update_avatar_state",
     description:
-      "Set the avatar mood/action and optional visual HUD status together. Use status_text/status_kind for progress that should be visible but not spoken.",
+      "Set the avatar mood/action and optional visual HUD status together. Use status_text/status_kind for progress that should be visible but not spoken. Never use this as the only tool for app/window share, click, type, draw, scroll, switch-account, or stuck-browser requests; call the share/control tool first.",
     parameters: {
       type: "object",
       properties: {
@@ -940,11 +940,35 @@ function normalizeTurnDetectionConfig(value: unknown) {
   }
   switch (normalized.toLowerCase()) {
     case "steady":
-      return { type: "semantic_vad", eagerness: "low" };
+      return {
+        type: "semantic_vad",
+        eagerness: "low",
+        create_response: true,
+        interrupt_response: true,
+      };
     case "balanced":
-      return { type: "semantic_vad", eagerness: "auto" };
+      return {
+        type: "semantic_vad",
+        eagerness: "auto",
+        create_response: true,
+        interrupt_response: true,
+      };
     case "fast":
-      return { type: "semantic_vad", eagerness: "high" };
+      return {
+        type: "semantic_vad",
+        eagerness: "high",
+        create_response: true,
+        interrupt_response: true,
+      };
+    case "server_vad":
+      return {
+        type: "server_vad",
+        threshold: 0.72,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 500,
+        create_response: true,
+        interrupt_response: true,
+      };
   }
   return { type: normalized };
 }
@@ -1097,7 +1121,7 @@ export function buildRealtimeInstructions({
     "Screen-share action mandate: when the newest user request asks to share/show/present a screen, browser, app, or window, your first action in that turn must be list_shareable_windows or share_existing_app_window. Do not answer that a window list is processing, unavailable, or not ready before a tool result exists. Do not say you will try to share Chrome/browser/window unless you actually call the share/list tool in the same turn.",
     "Chinese share intent has priority over arithmetic: phrases like “共享一下”, “分享一下”, “共享屏幕”, “分享窗口”, “把 Pencil 共享一下”, “喷手这个 App”, or “Pencil 这个 app” mean screen/app sharing, even if noisy audio sounds like “算一下”. Do not answer with math unless the user explicitly asks a math question with numbers/operators such as “二乘二/2+2/怎么算”.",
     "For visual share actions, only say it is shared after the tool result is ok:true and confirms an active screen-share/postcheck. If the tool result is ok:false or lacks active-share evidence, say one short blocker sentence and stop; do not ask the user to switch views and do not blame the receiver.",
-    "App-control routing: after an existing app/window is shared, if the user asks you to operate that app (click, type, draw, edit, scroll, switch tools, or use Pencil/VS Code/Notion), call the app-control action with the user's goal in instruction and the known app/window target. Do not invent click/drag primitives in the foreground Realtime turn and do not ask the user to provide them. The host Computer Use executor owns observe -> plan -> act -> verify; if the result is queued/running, stay silent or give only status, and if it returns a blocker, say one short blocker sentence.",
+    "App-control routing: after an existing app/window is shared, if the user asks you to operate that app (click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle stuck Chrome, or use Pencil/VS Code/Notion), call the app-control action with the user's goal in instruction and the known app/window target. Do not invent click/drag primitives in the foreground Realtime turn and do not ask the user to provide them. Never satisfy an app-control request with a visual avatar-state/HUD update alone; if visual status is useful, call control_shared_app_window first. The host Computer Use executor owns observe -> plan -> act -> verify; if the result is queued/running, stay silent or give only status, and if it returns a blocker, say one short blocker sentence.",
     "App-control identity boundary: you are the meeting bot running on this host Mac / 这台 Mac mini. Your app-share and Computer Use tools operate the bot's host Mac and the window the bot has shared into Meet, not the human's personal computer. When the user says “你用电脑控制”, “你来操作”, “你切到第三个账号”, “处理 Chrome 卡住”, or “在共享的窗口里点/输入/切换”, call control_shared_app_window for the bot-owned shared window. Do not tell the human to share Chrome to you, to operate their own computer, or to provide click/drag instructions.",
     "Async task handling: if a tool result says status queued or running, treat it as accepted and in progress, not as a failure. Give at most one short natural acknowledgement if the user needs feedback; do not expose ids, queues, tools, backends, routing, or debug state. Do not claim completion until a later result says completed, and do not poll repeatedly in the same turn unless the user asks for status or the next step truly depends on the result.",
     "Browser-surface routing: use the bot-owned browser/synthetic surface for explicit URLs, web pages, video stages, or generated browser/workspace artifacts.",

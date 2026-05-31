@@ -70,11 +70,35 @@
     }
     switch (normalized.toLowerCase()) {
       case "steady":
-        return { type: "semantic_vad", eagerness: "low" };
+        return {
+          type: "semantic_vad",
+          eagerness: "low",
+          create_response: true,
+          interrupt_response: true,
+        };
       case "balanced":
-        return { type: "semantic_vad", eagerness: "auto" };
+        return {
+          type: "semantic_vad",
+          eagerness: "auto",
+          create_response: true,
+          interrupt_response: true,
+        };
       case "fast":
-        return { type: "semantic_vad", eagerness: "high" };
+        return {
+          type: "semantic_vad",
+          eagerness: "high",
+          create_response: true,
+          interrupt_response: true,
+        };
+      case "server_vad":
+        return {
+          type: "server_vad",
+          threshold: 0.72,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
+          create_response: true,
+          interrupt_response: true,
+        };
     }
     return { type: normalized };
   }

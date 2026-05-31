@@ -38,6 +38,7 @@ export type PrepareJoinParams = {
   send_realtime_session_update?: boolean;
   include_participant_audio?: boolean;
   forward_meet_audio_to_realtime?: boolean;
+  meet_audio_input_gain?: number | string;
   realtime_fallback_to_local_mic?: boolean;
   install_local_dialog_bridge?: boolean;
   install_worker_result_bridge?: boolean;

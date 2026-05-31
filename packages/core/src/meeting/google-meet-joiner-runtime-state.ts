@@ -679,6 +679,7 @@ export function compactRuntimeState({
           outputTrackMuted: avatarAudio.outputTrackMuted === true,
           mouthLevel: avatarAudio.mouthLevel || 0,
           mouthRms: avatarAudio.mouthRms || 0,
+          outputEnergy: avatarAudio.outputEnergy || null,
           syntheticSpeechActive: avatarAudio.syntheticSpeechActive === true,
           lastResumeAt: avatarAudio.lastResumeAt || "",
           lastResumeError: avatarAudio.lastResumeError || "",

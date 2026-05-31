@@ -148,7 +148,12 @@ function fixtureHtml() {
           const audio = document.createElement("audio");
           audio.autoplay = true;
           audio.loop = params.get("participantSpeechLoop") === "1";
+          const startDelayMs = Math.max(
+            0,
+            Number.parseInt(params.get("participantSpeechStartDelayMs") || "0", 10) || 0,
+          );
           audio.dataset.meetingAvatarParticipant = "fixture-participant-speech";
+          audio.dataset.meetingAvatarParticipantStreamDispatched = "1";
           audio.src = "/fixture-participant-audio.wav";
           document.body.appendChild(audio);
           const attach = () => {
@@ -176,8 +181,16 @@ function fixtureHtml() {
             }));
           };
           audio.addEventListener("canplay", () => {
-            audio.play().catch((error) => record("participant_speech_play_failed", { error: String(error && error.message || error) }));
-            attach();
+            const playAndAttach = () => {
+              audio.play().catch((error) => record("participant_speech_play_failed", { error: String(error && error.message || error) }));
+              attach();
+            };
+            if (startDelayMs > 0) {
+              record("participant_speech_play_delayed", { startDelayMs });
+              window.setTimeout(playAndAttach, startDelayMs);
+            } else {
+              playAndAttach();
+            }
           }, { once: true });
           audio.load();
           return;

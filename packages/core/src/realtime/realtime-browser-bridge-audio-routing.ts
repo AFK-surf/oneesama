@@ -1,4 +1,14 @@
 /* eslint-disable no-unused-vars */
+const {
+  clearRealtimeAudioSenderStatsMonitor,
+  ensureRealtimeAudioSenderStatsMonitor,
+  sampleRealtimeAudioSenderStats,
+} = (window as any).__MAB_REALTIME_AUDIO_SENDER_STATS_HELPERS.create({
+  state,
+  updateFeedback,
+  getRealtimeAudioSender: () => realtimeAudioSender,
+});
+
 function meetAudioInputGain() {
   return normalizeMeetAudioInputGain(
     state.connection.meetAudioInputGain || config.meetAudioInputGain,
@@ -14,8 +24,12 @@ function ensureMeetAudioRoutingContext() {
   state.connection.meetAudioInputGain = meetAudioInputGain();
   routingInputGate.gain.value = state.connection.meetAudioInputGain;
   routingDestination = routingDestination || routingAudioContext.createMediaStreamDestination();
+  realtimeInputDestination =
+    realtimeInputDestination || routingAudioContext.createMediaStreamDestination();
   routingInputGate.connect(routingDestination);
+  routingInputGate.connect(realtimeInputDestination);
   ensureMeetAudioEnergyMonitor();
+  ensureRealtimeInputEnergyMonitor();
   routingSilenceSource = routingSilenceSource || routingAudioContext.createConstantSource();
   routingSilenceSource.offset.value = 0;
   routingSilenceSource.connect(routingInputGate);
@@ -27,6 +41,26 @@ function ensureMeetAudioRoutingContext() {
   installMeetAudioResumeListeners();
   resumeMeetAudioRoutingContext("routing-ready");
   return routingDestination;
+}
+
+function ensureRealtimeInputDestination(reason = "realtime-input") {
+  ensureMeetAudioRoutingContext();
+  const [track] = realtimeInputDestination?.stream?.getAudioTracks?.() || [];
+  if (track && track.readyState !== "ended") {
+    ensureRealtimeInputEnergyMonitor();
+    return realtimeInputDestination;
+  }
+  realtimeInputDestination = routingAudioContext.createMediaStreamDestination();
+  routingInputGate.connect(realtimeInputDestination);
+  realtimeInputAnalyser = null;
+  realtimeInputAnalyserBuffer = null;
+  realtimeInputMonitorSource = null;
+  ensureRealtimeInputEnergyMonitor();
+  recordTimeline("meet_audio_realtime_input_destination_ready", {
+    reason,
+    outputTrackId: realtimeInputDestination.stream.getAudioTracks()[0]?.id || "",
+  });
+  return realtimeInputDestination;
 }
 
 function isMeetAudioSourceRoutable(entry) {
@@ -208,6 +242,52 @@ function ensureMeetAudioEnergyMonitor() {
   sampleMeetAudioEnergy();
 }
 
+function sampleRealtimeInputEnergy() {
+  if (!realtimeInputAnalyser || !realtimeInputAnalyserBuffer) return;
+  realtimeInputAnalyser.getFloatTimeDomainData(realtimeInputAnalyserBuffer);
+  let sumSquares = 0;
+  let peak = 0;
+  for (const sample of realtimeInputAnalyserBuffer) {
+    const abs = Math.abs(sample);
+    if (abs > peak) peak = abs;
+    sumSquares += sample * sample;
+  }
+  const rms = Math.sqrt(sumSquares / realtimeInputAnalyserBuffer.length);
+  const now = new Date();
+  const energetic = rms >= 0.003 || peak >= 0.01;
+  state.connection.realtimeInputEnergy = {
+    rms,
+    peak,
+    observed: Boolean(state.connection.realtimeInputEnergy?.observed || energetic),
+    lastEnergyAt: energetic
+      ? now.toISOString()
+      : String(state.connection.realtimeInputEnergy?.lastEnergyAt || ""),
+    lastCheckedAt: now.toISOString(),
+  };
+  updateFeedback();
+}
+
+function ensureRealtimeInputEnergyMonitor() {
+  if (!routingAudioContext || !realtimeInputDestination || realtimeInputAnalyser) return;
+  try {
+    realtimeInputMonitorSource = routingAudioContext.createMediaStreamSource(
+      realtimeInputDestination.stream,
+    );
+    realtimeInputAnalyser = routingAudioContext.createAnalyser();
+    realtimeInputAnalyser.fftSize = 2048;
+    realtimeInputAnalyserBuffer = new Float32Array(realtimeInputAnalyser.fftSize);
+    realtimeInputMonitorSource.connect(realtimeInputAnalyser);
+    if (!realtimeInputEnergyTimer) {
+      realtimeInputEnergyTimer = window.setInterval(sampleRealtimeInputEnergy, 250);
+    }
+    sampleRealtimeInputEnergy();
+  } catch (error) {
+    recordTimeline("realtime_input_energy_monitor_failed", {
+      error: String((error && error.message) || error).slice(0, 240),
+    });
+  }
+}
+
 function resumeMeetAudioRoutingContext(reason = "") {
   if (!routingAudioContext) return;
   state.connection.meetAudioContextState = routingAudioContext.state || "";
@@ -241,7 +321,10 @@ function installMeetAudioResumeListeners() {
 
 function isRealtimeRoutingMixTrack(track) {
   if (!track || !routingDestination) return false;
-  return routingDestination.stream.getAudioTracks().includes(track);
+  return (
+    routingDestination.stream.getAudioTracks().includes(track) ||
+    realtimeInputDestination?.stream?.getAudioTracks?.().includes(track)
+  );
 }
 
 function rememberRealtimeInputTrack(source, track, detail = {}) {
@@ -251,68 +334,16 @@ function rememberRealtimeInputTrack(source, track, detail = {}) {
   Object.assign(state.connection, detail);
 }
 
-async function sampleRealtimeAudioSenderStats(reason = "interval") {
-  const sender = realtimeAudioSender;
-  const now = new Date().toISOString();
-  if (!sender?.getStats) {
-    state.connection.realtimeAudioSenderStats = {
-      supported: false,
-      reason: "sender_get_stats_unavailable",
-      checkedAt: now,
-    };
-    updateFeedback();
-    return;
-  }
-  try {
-    const report = await sender.getStats();
-    let selected = null;
-    report?.forEach?.((entry) => {
-      if (selected) return;
-      const kind = entry.kind || entry.mediaType;
-      if (entry.type === "outbound-rtp" && (!kind || kind === "audio")) selected = entry;
-    });
-    const bytesSent = Number(selected?.bytesSent || 0);
-    const packetsSent = Number(selected?.packetsSent || 0);
-    const previous = state.connection.realtimeAudioSenderStats || {};
-    state.connection.realtimeAudioSenderStats = {
-      supported: true,
-      checkedAt: now,
-      reason,
-      trackId: sender.track?.id || "",
-      trackReadyState: sender.track?.readyState || "",
-      trackEnabled: sender.track?.enabled !== false,
-      trackMuted: sender.track?.muted === true,
-      currentRealtimeInputSource: state.connection.currentRealtimeInputSource || "",
-      currentRealtimeInputIsRoutingMix: state.connection.currentRealtimeInputIsRoutingMix === true,
-      bytesSent,
-      packetsSent,
-      bytesDelta: bytesSent - Number(previous.bytesSent || 0),
-      packetsDelta: packetsSent - Number(previous.packetsSent || 0),
-    };
-    updateFeedback();
-  } catch (error) {
-    state.connection.realtimeAudioSenderStats = {
-      supported: false,
-      reason: "sender_get_stats_failed",
-      checkedAt: now,
-      error: String((error && error.message) || error).slice(0, 240),
-    };
-    updateFeedback();
-  }
-}
-
-function ensureRealtimeAudioSenderStatsMonitor(reason = "sender-ready") {
-  if (!realtimeAudioSender || realtimeAudioSenderStatsTimer) return;
-  sampleRealtimeAudioSenderStats(reason);
-  realtimeAudioSenderStatsTimer = window.setInterval(
-    () => sampleRealtimeAudioSenderStats("interval"),
-    1000,
-  );
+function preferredRealtimeInputMixTrack() {
+  const [realtimeTrack] = realtimeInputDestination?.stream?.getAudioTracks?.() || [];
+  if (realtimeTrack && realtimeTrack.readyState !== "ended") return realtimeTrack;
+  const [routingTrack] = routingDestination?.stream?.getAudioTracks?.() || [];
+  return routingTrack || null;
 }
 
 function replaceRealtimeInputWithRoutingMix(reason = "meet-audio") {
   if (!realtimeAudioSender || !routingDestination) return false;
-  const [mixedTrack] = routingDestination.stream.getAudioTracks();
+  const mixedTrack = preferredRealtimeInputMixTrack();
   if (!mixedTrack) return false;
   realtimeAudioSender
     .replaceTrack(mixedTrack)

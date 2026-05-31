@@ -1,0 +1,84 @@
+{
+  "schema": "oneesama.realtime-tool-recall-cases.v1",
+  "description": "Stable Realtime prompt/tool-selection benchmark cases for meeting app share and Computer Use routing.",
+  "variants": [
+    {
+      "name": "full",
+      "toolNames": "*",
+      "minRecall": 0.8,
+      "maxDisallowedRate": 0
+    },
+    {
+      "name": "share-control-only",
+      "toolNames": [
+        "list_shareable_windows",
+        "share_existing_app_window",
+        "control_shared_app_window"
+      ],
+      "minRecall": 1,
+      "maxDisallowedRate": 0
+    }
+  ],
+  "cases": [
+    {
+      "id": "share_chrome_zh",
+      "utterance": "把 Chrome 共享到会议里给大家看。",
+      "expectedToolNames": ["share_existing_app_window", "list_shareable_windows"]
+    },
+    {
+      "id": "share_browser_zh",
+      "utterance": "你把这个浏览器窗口分享一下。",
+      "expectedToolNames": ["share_existing_app_window", "list_shareable_windows"]
+    },
+    {
+      "id": "share_pencil_zh",
+      "utterance": "把 Pencil 这个 app 共享一下。",
+      "expectedToolNames": ["share_existing_app_window", "list_shareable_windows"]
+    },
+    {
+      "id": "generic_window_share_zh",
+      "utterance": "共享一下你的窗口。",
+      "expectedToolNames": ["list_shareable_windows", "share_existing_app_window"]
+    },
+    {
+      "id": "control_shared_browser_input_zh",
+      "utterance": "你用电脑控制共享的浏览器，在搜索框输入 hello 然后回车。",
+      "expectedToolNames": ["control_shared_app_window"]
+    },
+    {
+      "id": "control_switch_account_zh",
+      "utterance": "你来操作，切到第三个账号。",
+      "expectedToolNames": ["control_shared_app_window"]
+    },
+    {
+      "id": "control_chrome_stuck_zh",
+      "utterance": "处理一下 Chrome 卡住的问题。",
+      "expectedToolNames": ["control_shared_app_window"]
+    },
+    {
+      "id": "control_pencil_draw_circle_zh",
+      "utterance": "用 Pencil 帮我画个圆。",
+      "expectedToolNames": ["control_shared_app_window", "share_existing_app_window"]
+    },
+    {
+      "id": "negative_time_zh",
+      "utterance": "现在几点了？",
+      "expectedToolNames": [],
+      "disallowedToolNames": [
+        "list_shareable_windows",
+        "share_existing_app_window",
+        "control_shared_app_window"
+      ]
+    },
+    {
+      "id": "negative_intro_zh",
+      "utterance": "介绍一下你自己。",
+      "expectedToolNames": [],
+      "disallowedToolNames": [
+        "list_shareable_windows",
+        "share_existing_app_window",
+        "control_shared_app_window"
+      ]
+    }
+  ]
+}

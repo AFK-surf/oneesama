@@ -39,6 +39,16 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     lipSyncEnabled: true,
     mouthLevel: 0,
     mouthRms: 0,
+    outputEnergy: {
+      observed: false,
+      rms: 0,
+      peak: 0,
+      maxRms: 0,
+      lastEnergyAt: "",
+      lastCheckedAt: "",
+      thresholdRms: 0.012,
+      thresholdPeak: 0.03,
+    },
     syntheticSpeechActive: false,
     routedStreams: 0,
     routedElements: 0,
@@ -87,7 +97,14 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
       if (!stream || !stream.getAudioTracks || stream.getAudioTracks().length === 0) {
         throw new Error("stream has no audio tracks");
       }
-      const source = audioContext.createMediaStreamSource(stream);
+      const track = stream.getAudioTracks()[0];
+      const audioContextWithTrackSource = audioContext as AudioContext & {
+        createMediaStreamTrackSource?: (track: MediaStreamTrack) => MediaStreamAudioSourceNode;
+      };
+      const source =
+        track && typeof audioContextWithTrackSource.createMediaStreamTrackSource === "function"
+          ? audioContextWithTrackSource.createMediaStreamTrackSource(track)
+          : audioContext.createMediaStreamSource(stream);
       const gain = audioContext.createGain();
       gain.gain.value = Number(options.gain ?? 1);
       source.connect(gain);
@@ -95,7 +112,7 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
       state.routedStreams += 1;
       touch("stream", {
         label: options.label || "",
-        trackIds: stream.getAudioTracks().map((track) => track.id),
+        trackIds: stream.getAudioTracks().map((entry) => entry.id),
       });
       return { ok: true };
     } catch (error) {
@@ -104,15 +121,41 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     }
   }
 
+  function sampleOutputEnergy() {
+    analyser.getByteTimeDomainData(waveform);
+    let sumSquares = 0;
+    let peak = 0;
+    for (const sample of waveform) {
+      const centered = (sample - 128) / 128;
+      const abs = Math.abs(centered);
+      if (abs > peak) peak = abs;
+      sumSquares += centered * centered;
+    }
+    const rms = Math.sqrt(sumSquares / waveform.length);
+    const now = new Date();
+    const thresholdRms = state.outputEnergy.thresholdRms;
+    const thresholdPeak = state.outputEnergy.thresholdPeak;
+    const energetic = rms >= thresholdRms || peak >= thresholdPeak;
+    const lastEnergyAt = energetic ? now.toISOString() : state.outputEnergy.lastEnergyAt;
+    const maxRms = Math.max(Number(state.outputEnergy.maxRms || 0), rms);
+    state.audioContextState = audioContext.state || "";
+    state.mouthRms = Number(rms.toFixed(4));
+    state.outputEnergy = {
+      observed: Boolean(state.outputEnergy.observed || energetic),
+      rms: Number(rms.toFixed(5)),
+      peak: Number(peak.toFixed(5)),
+      maxRms: Number(maxRms.toFixed(5)),
+      lastEnergyAt,
+      lastCheckedAt: now.toISOString(),
+      thresholdRms,
+      thresholdPeak,
+    };
+    return { rms, peak };
+  }
+
   function getMouthLevel() {
     try {
-      analyser.getByteTimeDomainData(waveform);
-      let sumSquares = 0;
-      for (const sample of waveform) {
-        const centered = (sample - 128) / 128;
-        sumSquares += centered * centered;
-      }
-      const rms = Math.sqrt(sumSquares / waveform.length);
+      const { rms } = sampleOutputEnergy();
       const gated = Math.max(0, rms - 0.012);
       const syntheticActive = syntheticSpeechActive || performance.now() < syntheticSpeechUntil;
       const t = performance.now() / 1000;
@@ -122,8 +165,6 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
       const target = clamp01(Math.max(gated * 5.8, synthetic));
       const coefficient = target > smoothedMouthLevel ? 0.52 : 0.22;
       smoothedMouthLevel += (target - smoothedMouthLevel) * coefficient;
-      state.audioContextState = audioContext.state || "";
-      state.mouthRms = Number(rms.toFixed(4));
       state.mouthLevel = Number(smoothedMouthLevel.toFixed(4));
       state.syntheticSpeechActive = syntheticActive;
       return smoothedMouthLevel;
@@ -207,6 +248,7 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
   keeper.connect(keeperGain);
   keeperGain.connect(masterGain);
   keeper.start();
+  window.setInterval(sampleOutputEnergy, 250);
 
   const bus = {
     state,
@@ -218,6 +260,7 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     playAudioDataUrl,
     injectTone,
     getMouthLevel,
+    sampleOutputEnergy,
     setSyntheticSpeech,
   };
   window.MAB_AVATAR_AUDIO_BUS = bus;

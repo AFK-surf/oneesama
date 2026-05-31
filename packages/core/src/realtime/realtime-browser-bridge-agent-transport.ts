@@ -1,5 +1,19 @@
 /* eslint-disable no-unused-vars */
 let realtimeSessionRenewalTimer = 0;
+const {
+  clearRealtimeRemoteAudioTrackStats,
+  createRealtimeAgentSDKDecodeElement,
+  monitorRealtimeRemoteAudioTrack,
+} = (window as any).__MAB_REALTIME_AGENT_AUDIO_HELPERS.create({
+  state,
+  updateFeedback,
+});
+const { createMockRealtimeAgentTransport } = (
+  window as any
+).__MAB_REALTIME_AGENT_TRANSPORT_HELPERS.create({
+  state,
+  recordTimeline,
+});
 
 function realtimeSessionRenewalMs() {
   const value = Number((config as Record<string, unknown>).realtimeSessionRenewalMs);
@@ -33,129 +47,101 @@ function scheduleRealtimeSessionRenewal(reason = "connected") {
   return { ok: true, scheduled: true, reason, delayMs, renewalAt };
 }
 
-function createMockRealtimeAgentTransport() {
-  const listeners = new Map();
-  const emit = (type, event = {}) => {
-    const callbacks = listeners.get(type) || [];
-    for (const callback of callbacks) callback(event);
+function realtimeAgentSDKSessionConfig(session: Record<string, any> = {}) {
+  const audio = (session.audio || {}) as Record<string, any>;
+  const input = (audio.input || {}) as Record<string, any>;
+  const output = (audio.output || {}) as Record<string, any>;
+  const outputModalities =
+    session.outputModalities || session.output_modalities || session.modalities || undefined;
+  return {
+    ...session,
+    outputModalities,
+    audio: {
+      ...audio,
+      input: {
+        ...input,
+        noiseReduction:
+          input.noiseReduction !== undefined ? input.noiseReduction : input.noise_reduction,
+        turnDetection:
+          input.turnDetection !== undefined ? input.turnDetection : input.turn_detection,
+      },
+      output: {
+        ...output,
+        voice: output.voice || session.voice,
+      },
+    },
   };
-  const transport = {
-    status: "disconnected",
-    muted: false,
-    on(type, callback) {
-      const callbacks = listeners.get(type) || [];
-      callbacks.push(callback);
-      listeners.set(type, callbacks);
-      return this;
-    },
-    off(type, callback) {
-      const callbacks = listeners.get(type) || [];
-      listeners.set(
-        type,
-        callbacks.filter((entry) => entry !== callback),
-      );
-      return this;
-    },
-    once(type, callback) {
-      const wrapped = (event) => {
-        transport.off(type, wrapped);
-        callback(event);
-      };
-      transport.on(type, wrapped);
-      return this;
-    },
-    emit,
-    async connect(options) {
-      transport.status = "connecting";
-      recordTimeline("realtime_agent_sdk_mock_connecting", {
-        model: options?.model || "",
-        hasApiKey: Boolean(options?.apiKey),
-      });
-      transport.status = "connected";
-      emit("transport_event", { type: "connected", model: options?.model || "" });
-    },
-    close() {
-      transport.status = "disconnected";
-      emit("transport_event", { type: "disconnected" });
-    },
-    sendEvent(event) {
-      state.connection.sentDataChannelMessages.push({
-        ts: new Date().toISOString(),
-        payload: JSON.stringify(event),
-        runtime: "agents-sdk",
-      });
-      state.connection.sentDataChannelMessages =
-        state.connection.sentDataChannelMessages.slice(-100);
-      emit("transport_event", event);
-    },
-    requestResponse(response = {}) {
-      transport.sendEvent({ type: "response.create", response: response || {} });
-    },
-    sendMessage(message, otherEventData = {}, options: { triggerResponse?: boolean } = {}) {
-      transport.sendEvent({ type: "conversation.item.create", message, ...otherEventData });
-      if (options.triggerResponse) transport.requestResponse();
-    },
-    addImage(image) {
-      transport.sendEvent({ type: "conversation.item.create", image });
-    },
-    sendAudio(_audio, options: { commit?: boolean } = {}) {
-      transport.sendEvent({ type: "input_audio_buffer.append", commit: options.commit === true });
-    },
-    updateSessionConfig(sessionConfig) {
-      transport.sendEvent({ type: "session.update", session: sessionConfig || {} });
-    },
-    sendFunctionCallOutput(toolCall, output, startResponse) {
-      transport.sendEvent({
-        type: "conversation.item.create",
-        item: {
-          type: "function_call_output",
-          call_id: toolCall?.callId || toolCall?.call_id || "",
-          output,
-        },
-      });
-      if (startResponse) transport.requestResponse();
-    },
-    mute(muted) {
-      transport.muted = Boolean(muted);
-    },
-    interrupt() {
-      transport.sendEvent({ type: "response.cancel" });
-    },
-    resetHistory(oldHistory = [], newHistory = []) {
-      state.connection.sentDataChannelMessages.push({
-        ts: new Date().toISOString(),
-        payload: JSON.stringify({
-          type: "mock.reset_history",
-          oldItems: Array.isArray(oldHistory) ? oldHistory.length : 0,
-          newItems: Array.isArray(newHistory) ? newHistory.length : 0,
-        }),
-        runtime: "agents-sdk",
-      });
-      state.connection.sentDataChannelMessages =
-        state.connection.sentDataChannelMessages.slice(-100);
-      emit("transport_event", {
-        type: "history_updated",
-        oldItems: Array.isArray(oldHistory) ? oldHistory.length : 0,
-        newItems: Array.isArray(newHistory) ? newHistory.length : 0,
-      });
-    },
-    sendMcpResponse() {},
+}
+
+function attachRealtimeAgentSDKInputSender(pc, reason = "agents-sdk-peer-connection") {
+  const senders = typeof pc?.getSenders === "function" ? pc.getSenders() || [] : [];
+  const audioSenders = senders.filter((sender) => sender?.track?.kind === "audio");
+  const sender =
+    audioSenders.find((entry) => entry.track?.readyState !== "ended") || audioSenders[0] || null;
+  if (!sender?.track) {
+    recordTimeline("realtime_agent_sdk_input_sender_missing", {
+      reason,
+      senderCount: senders.length,
+      audioSenderCount: audioSenders.length,
+    });
+    return false;
+  }
+  const alreadyAttached = realtimeAudioSender === sender;
+  realtimeAudioSender = sender;
+  state.connection.realtimeAgentSDKInputSenderTrackId = sender.track.id || "";
+  rememberRealtimeInputTrack("meet_audio_mix", sender.track, {
+    lastRealtimeInputReplaceReason: "agents-sdk-media-stream",
+    lastRealtimeInputReplaceAt: new Date().toISOString(),
+    currentRealtimeInputIsRoutingMix: true,
+  });
+  if (pendingMeetAudioTracks.length) {
+    pendingMeetAudioTracks.splice(0);
+    state.connection.pendingMeetAudioTrackCount = 0;
+  }
+  recordTimeline("realtime_agent_sdk_input_sender_attached", {
+    reason,
+    trackId: sender.track.id || "",
+    trackReadyState: sender.track.readyState || "",
+    trackEnabled: sender.track.enabled !== false,
+    senderCount: senders.length,
+    audioSenderCount: audioSenders.length,
+    alreadyAttached,
+  });
+  ensureRealtimeAudioSenderStatsMonitor("agents-sdk-media-stream");
+  if (alreadyAttached) sampleRealtimeAudioSenderStats("agents-sdk-input-sender-refresh");
+  updateFeedback();
+  return true;
+}
+
+function captureRealtimeAgentSDKInputSender(pc, reason = "agents-sdk-peer-connection") {
+  if (attachRealtimeAgentSDKInputSender(pc, reason)) return;
+  const retry = (retryReason) => {
+    if (realtimeAudioSender) return;
+    attachRealtimeAgentSDKInputSender(pc, retryReason);
   };
-  return transport;
+  if (typeof window.queueMicrotask === "function") {
+    window.queueMicrotask(() => retry(`${reason}:microtask`));
+  }
+  window.setTimeout(() => retry(`${reason}:timeout-0`), 0);
+  window.setTimeout(() => retry(`${reason}:timeout-250`), 250);
 }
 
 function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
   if (connectionConfig.mode === "agents-sdk-mock") return createMockRealtimeAgentTransport();
-  ensureMeetAudioRoutingContext();
-  const sourceTracks = routingDestination?.stream?.getAudioTracks?.() || [];
-  const clonedTracks = sourceTracks
-    .filter((track) => track.readyState !== "ended")
-    .map((track) => track.clone());
-  state.connection.realtimeAgentSDKInputTrackIds = clonedTracks.map((track) => track.id);
-  recordTimeline("realtime_agent_sdk_input_stream_cloned", {
-    sourceTrackIds: sourceTracks.map((track) => track.id),
-    sourceTrackStates: sourceTracks.map((track) => track.readyState || ""),
-    clonedTrackIds: clonedTracks.map((track) => track.id),
+  const inputDestination = ensureRealtimeInputDestination("agents-sdk-connect");
+  const inputTracks = inputDestination?.stream?.getAudioTracks?.() || [];
+  const inputTrack = inputTracks.find((track) => track.readyState !== "ended");
+  state.connection.realtimeAgentSDKInputTrackIds = inputTracks.map((track) => track.id);
+  if (inputTrack) {
+    rememberRealtimeInputTrack("meet_audio_mix", inputTrack, {
+      lastRealtimeInputReplaceReason: "agents-sdk-media-stream",
+      lastRealtimeInputReplaceAt: new Date().toISOString(),
+      currentRealtimeInputIsRoutingMix: true,
+    });
+  }
+  recordTimeline("realtime_agent_sdk_input_stream_attached", {
+    inputTrackIds: inputTracks.map((track) => track.id),
+    inputTrackStates: inputTracks.map((track) => track.readyState || ""),
   });
   const endpointUrl = (() => {
     const sdpUrl = String(connectionConfig.sdpUrl || "").trim();
@@ -167,22 +153,30 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
     return `${baseUrl.replace(/\/+$/, "")}/realtime/calls`;
   })();
   const transport = new namespace.OpenAIRealtimeWebRTC({
-    mediaStream: new MediaStream(clonedTracks),
+    mediaStream: inputDestination?.stream || new MediaStream(),
+    audioElement: createRealtimeAgentSDKDecodeElement(),
     baseUrl: endpointUrl,
     changePeerConnection: async (pc) => {
       activePeerConnection = pc;
       window.MAB_REALTIME_PEER_CONNECTION = pc;
       state.connection.peerConnectionState = pc.connectionState || "new";
+      captureRealtimeAgentSDKInputSender(pc, "change-peer-connection");
       recordTimeline("realtime_agent_sdk_peer_connection", {
         state: state.connection.peerConnectionState,
       });
       pc.addEventListener("connectionstatechange", () => {
         state.connection.peerConnectionState = pc.connectionState;
         state.connected = pc.connectionState === "connected" || pc.connectionState === "completed";
+        if (!realtimeAudioSender) {
+          captureRealtimeAgentSDKInputSender(pc, "connectionstatechange");
+        }
         recordTimeline("realtime_agent_sdk_peer_connection", { state: pc.connectionState });
         updateFeedback();
       });
+      const sdkOnTrack = pc.ontrack;
       pc.ontrack = (event) => {
+        sdkOnTrack?.call(pc, event);
+        monitorRealtimeRemoteAudioTrack(pc, event.track, "agents-sdk-ontrack");
         routeRemoteAudioStream(event.streams?.[0]).catch(rememberError);
         updateFeedback();
       };
@@ -195,6 +189,7 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
 function installRealtimeAgentSDKEventHandlers(session, transport) {
   const nameOf = (value) =>
     typeof value === "string" ? value : value?.name || value?.config?.name || "";
+  const textOf = (value) => (typeof value === "string" ? value.slice(0, 500) : "");
   const record =
     (type) =>
     (...args) => {
@@ -214,14 +209,16 @@ function installRealtimeAgentSDKEventHandlers(session, transport) {
           ? args[toolDetailsIndex]?.toolCall || args[toolDetailsIndex]?.tool_call || {}
           : {};
       const eventType = event?.type || type;
-      recordTimeline(`realtime_agent_sdk_${type}`, {
+      const detail = {
         eventType,
         agent,
         tool,
         handoff,
         callId: toolCall?.callId || toolCall?.call_id || "",
-      });
-      rememberInboundEvent({ type: `agents_sdk.${eventType}` }, "agents-sdk");
+        text: type === "agent_end" ? textOf(args[2]) : textOf(event?.text),
+      };
+      recordTimeline(`realtime_agent_sdk_${type}`, detail);
+      rememberInboundEvent({ type: `agents_sdk.${eventType}`, ...detail }, "agents-sdk");
       if (type === "history_updated") {
         const history = Array.isArray(args[0]) ? args[0] : currentHistorySnapshot();
         updateContextHealthFromHistory(history);
@@ -247,12 +244,19 @@ function installRealtimeAgentSDKEventHandlers(session, transport) {
   ]) {
     session?.on?.(eventName, record(eventName));
   }
-  transport?.on?.("transport_event", (event) => {
+  const recordedTransportEvents = new WeakSet();
+  const recordTransportEvent = (event) => {
+    if (event && typeof event === "object") {
+      if (recordedTransportEvents.has(event)) return;
+      recordedTransportEvents.add(event);
+    }
     recordTimeline("realtime_agent_sdk_transport_event", summarizeRealtimeEvent(event));
     if (event && typeof event === "object") {
       rememberInboundEvent({ ...event, __meetingAvatarInboundRecorded: true }, "agents-sdk");
     }
-  });
+  };
+  session?.on?.("transport_event", recordTransportEvent);
+  transport?.on?.("transport_event", recordTransportEvent);
 }
 
 async function connectRealtimeAgentSDK(connectionConfig) {
@@ -274,7 +278,7 @@ async function connectRealtimeAgentSDK(connectionConfig) {
   const session = new namespace.RealtimeSession(agent, {
     model: connectionConfig.session?.model || "gpt-realtime-2",
     transport,
-    config: defaultRealtime2Session(connectionConfig.session || {}),
+    config: realtimeAgentSDKSessionConfig(defaultRealtime2Session(connectionConfig.session || {})),
     historyStoreAudio: false,
     context: {
       session_id: state.sessionId || String(config.sessionId || ""),
@@ -324,10 +328,8 @@ async function connectRealtimeAgentSDK(connectionConfig) {
 function cleanupRealtimeConnection(reason = "cleanup") {
   reconnectGeneration += 1;
   clearRealtimeSessionRenewalTimer();
-  if (realtimeAudioSenderStatsTimer) {
-    window.clearInterval(realtimeAudioSenderStatsTimer);
-    realtimeAudioSenderStatsTimer = 0;
-  }
+  clearRealtimeAudioSenderStatsMonitor();
+  clearRealtimeRemoteAudioTrackStats();
   try {
     activeRealtimeAgentSession?.close?.();
   } catch {
@@ -349,7 +351,7 @@ function cleanupRealtimeConnection(reason = "cleanup") {
       if (
         sender.track &&
         sender.track !== silentMeetAudioTrack &&
-        !isRoutingDestinationTrack(sender.track)
+        !isRealtimeRoutingMixTrack(sender.track)
       ) {
         sender.track.stop?.();
       }

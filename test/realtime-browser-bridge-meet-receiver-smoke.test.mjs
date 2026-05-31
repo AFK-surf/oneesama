@@ -20,6 +20,7 @@ async function installRealtimeHarness(page, harnessOptions = {}) {
   }
   await page.evaluate(() => {
     window.__MAB_FAKE_PEERS = [];
+    window.MAB_AVATAR_AUDIO = { outputEnergy: {} };
     window.__MAB_FAKE_AVATAR_BUS = {
       streams: [],
       tones: [],
@@ -28,10 +29,24 @@ async function installRealtimeHarness(page, harnessOptions = {}) {
           label: streamOptions.label || "",
           trackIds: stream?.getAudioTracks?.().map((track) => track.id) || [],
         });
+        window.MAB_AVATAR_AUDIO.outputEnergy = {
+          observed: true,
+          rms: 0.05,
+          peak: 0.12,
+          maxRms: 0.05,
+          lastEnergyAt: new Date().toISOString(),
+        };
         return { ok: true };
       },
       injectTone(toneOptions = {}) {
         this.tones.push(toneOptions);
+        window.MAB_AVATAR_AUDIO.outputEnergy = {
+          observed: true,
+          rms: 0.05,
+          peak: 0.12,
+          maxRms: 0.05,
+          lastEnergyAt: new Date().toISOString(),
+        };
         return { ok: true };
       },
       setSyntheticSpeech(active) {

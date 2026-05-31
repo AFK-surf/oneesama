@@ -525,7 +525,20 @@
         if (!checks.remoteAudioAttached) return matrixCell("blocked", "remote_audio_not_attached");
         if (!checks.remoteAudioRoutedToAvatarBus)
           return matrixCell("blocked", "remote_audio_not_routed");
-        return matrixCell("ok", "remote_audio_routed_to_avatar_bus");
+        if (!checks.avatarAudioOutputObserved) {
+          const reason = checks.realtimeRemoteAudioTrackObserved
+            ? "avatar_bus_silent_despite_remote_audio"
+            : "remote_audio_routed_but_silent";
+          return matrixCell("waiting", reason, {
+            maxRms: checks.avatarAudioOutputMaxRms,
+            remoteAudioObserved: checks.realtimeRemoteAudioTrackObserved,
+            remoteAudioEnergy: checks.realtimeRemoteAudioTrackEnergy,
+            remoteAudioBytes: checks.realtimeRemoteAudioTrackBytes,
+          });
+        }
+        return matrixCell("ok", "avatar_audio_energy_observed", {
+          maxRms: checks.avatarAudioOutputMaxRms,
+        });
       })();
 
       return {
@@ -563,6 +576,9 @@
 
     function classifyRealtimeFeedback() {
       const appControlJobs = summarizeAppControlJobs();
+      const avatarAudio = (window as any).MAB_AVATAR_AUDIO || {};
+      const avatarOutputEnergy = avatarAudio.outputEnergy || {};
+      const remoteAudioTrackStats = state.connection.realtimeRemoteAudioTrackStats || {};
       const checks = {
         peerConnected:
           state.connected === true ||
@@ -612,6 +628,11 @@
         ).length,
         remoteAudioAttached: state.connection.remoteAudioAttached === true,
         remoteAudioRoutedToAvatarBus: state.connection.remoteAudioRoutedToAvatarBus === true,
+        realtimeRemoteAudioTrackObserved: remoteAudioTrackStats.observed === true,
+        realtimeRemoteAudioTrackEnergy: Number(remoteAudioTrackStats.totalAudioEnergy || 0),
+        realtimeRemoteAudioTrackBytes: Number(remoteAudioTrackStats.bytesReceived || 0),
+        avatarAudioOutputObserved: avatarOutputEnergy.observed === true,
+        avatarAudioOutputMaxRms: Number(avatarOutputEnergy.maxRms || 0),
         avatarToolCalls: state.avatarTools.calls.length,
         workerToolCalls: state.workerTools.calls.length,
         meetToolCalls: state.meetTools.calls.length,

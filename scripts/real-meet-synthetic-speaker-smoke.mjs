@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,7 +65,48 @@ async function waitFor(label, probe, timeoutMs, intervalMs = 1000) {
   throw error;
 }
 
-function generateSpeakerWav(tmpDir) {
+async function appendSilenceToPcmWav(filePath, silenceMs = 3000) {
+  const wav = await readFile(filePath);
+  if (wav.toString("ascii", 0, 4) !== "RIFF" || wav.toString("ascii", 8, 12) !== "WAVE") {
+    throw new Error(`not a WAVE file: ${filePath}`);
+  }
+  let offset = 12;
+  let fmt = null;
+  let data = null;
+  while (offset + 8 <= wav.length) {
+    const id = wav.toString("ascii", offset, offset + 4);
+    const size = wav.readUInt32LE(offset + 4);
+    const bodyOffset = offset + 8;
+    if (id === "fmt ") {
+      fmt = {
+        audioFormat: wav.readUInt16LE(bodyOffset),
+        channels: wav.readUInt16LE(bodyOffset + 2),
+        sampleRate: wav.readUInt32LE(bodyOffset + 4),
+        bitsPerSample: wav.readUInt16LE(bodyOffset + 14),
+      };
+    } else if (id === "data") {
+      data = { offset, bodyOffset, size };
+      break;
+    }
+    offset = bodyOffset + size + (size % 2);
+  }
+  if (!fmt || !data || fmt.audioFormat !== 1 || fmt.bitsPerSample !== 16) {
+    throw new Error(`unsupported WAVE shape for silence padding: ${filePath}`);
+  }
+  const bytesPerFrame = Math.max(1, fmt.channels * (fmt.bitsPerSample / 8));
+  const frames = Math.ceil((fmt.sampleRate * silenceMs) / 1000);
+  const silence = Buffer.alloc(frames * bytesPerFrame);
+  const beforeDataSize = wav.subarray(0, data.offset + 4);
+  const dataSize = Buffer.alloc(4);
+  dataSize.writeUInt32LE(data.size + silence.length, 0);
+  const dataBytes = wav.subarray(data.bodyOffset, data.bodyOffset + data.size);
+  const afterData = wav.subarray(data.bodyOffset + data.size);
+  const padded = Buffer.concat([beforeDataSize, dataSize, dataBytes, silence, afterData]);
+  padded.writeUInt32LE(padded.length - 8, 4);
+  await writeFile(filePath, padded);
+}
+
+async function generateSpeakerWav(tmpDir) {
   const provided = process.env.MAB_SYNTHETIC_SPEAKER_WAV || "";
   if (provided) {
     if (!existsSync(provided)) throw new Error(`MAB_SYNTHETIC_SPEAKER_WAV not found: ${provided}`);
@@ -94,6 +135,7 @@ function generateSpeakerWav(tmpDir) {
   if (convert.status !== 0) {
     throw new Error(`afconvert failed: ${(convert.stderr || convert.stdout || "").trim()}`);
   }
+  await appendSilenceToPcmWav(wavPath);
   return wavPath;
 }
 
@@ -105,7 +147,12 @@ function compactBridgeStatus(status) {
   const bridge = active?.realtimeBridge || null;
   const connection = bridge?.connection || {};
   const meetAudioEnergy = connection.meetAudioEnergy || {};
+  const realtimeInputEnergy = connection.realtimeInputEnergy || {};
   const senderStats = connection.realtimeAudioSenderStats || {};
+  const primaryMeetAudioSenderStats = connection.primaryMeetAudioSenderStats || {};
+  const remoteAudioTrackStats = connection.realtimeRemoteAudioTrackStats || {};
+  const avatarAudio = active?.avatarAudio || {};
+  const avatarOutputEnergy = avatarAudio.outputEnergy || {};
   const timelineTypes = Array.isArray(bridge?.timeline)
     ? bridge.timeline
         .slice(-20)
@@ -126,9 +173,13 @@ function compactBridgeStatus(status) {
     bridgeConnected: bridge?.connected === true,
     dataChannelOpen: connection.dataChannelOpen === true,
     currentRealtimeInputSource: connection.currentRealtimeInputSource || "",
+    meetAudioInputGain: Number(connection.meetAudioInputGain || 0),
     senderTrackReadyState: senderStats.trackReadyState || "",
     senderBytesSent: Number(senderStats.bytesSent || 0),
     senderPacketsSent: Number(senderStats.packetsSent || 0),
+    senderSourceAudioLevel: Number(senderStats.sourceAudioLevel || 0),
+    senderSourceTotalAudioEnergy: Number(senderStats.sourceTotalAudioEnergy || 0),
+    senderSourceTotalSamplesDuration: Number(senderStats.sourceTotalSamplesDuration || 0),
     meetAudioTracksForwarded: Number(connection.meetAudioTracksForwarded || 0),
     meetAudioSourcesActive: Number(connection.meetAudioSourcesActive || 0),
     meetAudioEnergy: {
@@ -139,11 +190,56 @@ function compactBridgeStatus(status) {
       thresholdPeak: Number(meetAudioEnergy.thresholdPeak || 0.01),
       lastEnergyAt: meetAudioEnergy.lastEnergyAt || "",
     },
+    realtimeInputEnergy: {
+      observed: realtimeInputEnergy.observed === true,
+      rms: Number(realtimeInputEnergy.rms || 0),
+      peak: Number(realtimeInputEnergy.peak || 0),
+      lastEnergyAt: realtimeInputEnergy.lastEnergyAt || "",
+    },
     lastInboundEventType: connection.lastInboundEventType || "",
     lastInputSpeechStartedAt: bridge?.protection?.lastInputSpeechStartedAt || "",
     responsesRequested: Number(bridge?.responsesRequested || 0),
     remoteAudioRoutedToAvatarBus: connection.remoteAudioRoutedToAvatarBus === true,
     primaryMeetAudioSenderUsingAvatarBus: connection.primaryMeetAudioSenderUsingAvatarBus === true,
+    realtimeRemoteAudioTrackStats: {
+      supported: remoteAudioTrackStats.supported === true,
+      observed: remoteAudioTrackStats.observed === true,
+      trackReadyState: remoteAudioTrackStats.trackReadyState || "",
+      trackMuted: remoteAudioTrackStats.trackMuted === true,
+      audioLevel: Number(remoteAudioTrackStats.audioLevel || 0),
+      totalAudioEnergy: Number(remoteAudioTrackStats.totalAudioEnergy || 0),
+      energyDelta: Number(remoteAudioTrackStats.energyDelta || 0),
+      bytesReceived: Number(remoteAudioTrackStats.bytesReceived || 0),
+      bytesDelta: Number(remoteAudioTrackStats.bytesDelta || 0),
+      packetsReceived: Number(remoteAudioTrackStats.packetsReceived || 0),
+      packetsDelta: Number(remoteAudioTrackStats.packetsDelta || 0),
+    },
+    primaryMeetAudioSenderStats: {
+      supported: primaryMeetAudioSenderStats.supported === true,
+      usingAvatarBus: primaryMeetAudioSenderStats.usingAvatarBus === true,
+      trackReadyState: primaryMeetAudioSenderStats.trackReadyState || "",
+      bytesSent: Number(primaryMeetAudioSenderStats.bytesSent || 0),
+      bytesDelta: Number(primaryMeetAudioSenderStats.bytesDelta || 0),
+      packetsSent: Number(primaryMeetAudioSenderStats.packetsSent || 0),
+      packetsDelta: Number(primaryMeetAudioSenderStats.packetsDelta || 0),
+    },
+    avatarAudio: {
+      ok: avatarAudio.ok === true,
+      audioContextState: avatarAudio.audioContextState || "",
+      lastResumeAt: avatarAudio.lastResumeAt || "",
+      lastResumeError: avatarAudio.lastResumeError || "",
+      routedStreams: Number(avatarAudio.routedStreams || 0),
+      routedElements: Number(avatarAudio.routedElements || 0),
+      routedBuffers: Number(avatarAudio.routedBuffers || 0),
+      mouthLevel: Number(avatarAudio.mouthLevel || 0),
+      mouthRms: Number(avatarAudio.mouthRms || 0),
+      outputEnergyObserved: avatarOutputEnergy.observed === true,
+      outputEnergyRms: Number(avatarOutputEnergy.rms || 0),
+      outputEnergyPeak: Number(avatarOutputEnergy.peak || 0),
+      outputEnergyMaxRms: Number(avatarOutputEnergy.maxRms || 0),
+      outputEnergyLastAt: avatarOutputEnergy.lastEnergyAt || "",
+      lastRouteKind: avatarAudio.lastRoute?.kind || "",
+    },
     outputTranscriptCount: Array.isArray(bridge?.transcripts?.output)
       ? bridge.transcripts.output.length
       : 0,
@@ -159,11 +255,6 @@ function gateStatus(compact) {
     energy.observed === true ||
     energy.rms >= Math.max(energy.thresholdRms || 0.003, 0.003) ||
     energy.peak >= Math.max(energy.thresholdPeak || 0.01, 0.01);
-  const speechStarted =
-    Boolean(compact.lastInputSpeechStartedAt) ||
-    compact.lastInboundEventType === "input_audio_buffer.speech_started" ||
-    compact.timelineTypes.includes("input_audio_buffer.speech_started") ||
-    compact.inboundTypes.includes("input_audio_buffer.speech_started");
   const responseSeen =
     compact.responsesRequested > 0 ||
     compact.outputTranscriptCount > 0 ||
@@ -171,6 +262,15 @@ function gateStatus(compact) {
     compact.timelineTypes.some((type) => String(type).startsWith("response.")) ||
     Number(compact.feedback?.checks?.responseEvents || 0) > 0 ||
     compact.feedback?.failureMatrix?.modelTurn?.status === "ok";
+  const speechStarted =
+    responseSeen ||
+    Boolean(compact.lastInputSpeechStartedAt) ||
+    compact.lastInboundEventType === "input_audio_buffer.speech_started" ||
+    compact.timelineTypes.includes("input_audio_buffer.speech_started") ||
+    compact.inboundTypes.includes("input_audio_buffer.speech_started") ||
+    compact.timelineTypes.includes("agents_sdk.agent_start") ||
+    compact.inboundTypes.includes("agents_sdk.agent_start");
+  const avatarOutputObserved = compact.avatarAudio?.outputEnergyObserved === true;
   return {
     participantPresent:
       Number(compact.participantCount || 0) >= 2 || Boolean(compact.activeSpeaker),
@@ -182,9 +282,7 @@ function gateStatus(compact) {
     speechStarted,
     responseSeen,
     outputRouted:
-      compact.remoteAudioRoutedToAvatarBus === true ||
-      compact.primaryMeetAudioSenderUsingAvatarBus === true ||
-      compact.feedback?.failureMatrix?.audioOutput?.status === "ok",
+      responseSeen && avatarOutputObserved,
   };
 }
 
@@ -269,7 +367,7 @@ async function runMain() {
   const timeoutMs = envMs("MAB_REAL_MEET_SYNTHETIC_WAIT_MS", 120_000);
   const speakerJoinTimeoutMs = envMs("MAB_SYNTHETIC_SPEAKER_JOIN_TIMEOUT_MS", 120_000);
   const tmpDir = await mkdtemp(pathJoin(tmpdir(), "oneesama-real-meet-speaker-"));
-  const wavPath = generateSpeakerWav(tmpDir);
+  const wavPath = await generateSpeakerWav(tmpDir);
   const sessionId = process.env.MAB_REAL_MEET_SESSION_ID || `real_meet_synthetic_${Date.now()}`;
   const speakerSessionId = `${sessionId}_speaker`;
   const speakerDataDir = pathJoin(tmpDir, "speaker-data");
@@ -317,6 +415,8 @@ async function runMain() {
       include_participant_audio: true,
       forwardMeetAudioToRealtime: true,
       forward_meet_audio_to_realtime: true,
+      meetAudioInputGain: 1,
+      meet_audio_input_gain: 1,
       captureCaptions: false,
       capture_captions: false,
     });
@@ -370,9 +470,10 @@ async function runLocalFixtureMain() {
   );
   const timeoutMs = envMs("MAB_REALTIME_SYNTHETIC_SPEECH_WAIT_MS", 90_000);
   const tmpDir = await mkdtemp(pathJoin(tmpdir(), "oneesama-realtime-speech-"));
-  const wavPath = generateSpeakerWav(tmpDir);
+  const wavPath = await generateSpeakerWav(tmpDir);
   const fixture = await startLocalMeetFixtureServer({ participantAudioFile: wavPath });
-  const fixtureUrl = `${fixture.url}?participantSpeech=1`;
+  const speechStartDelayMs = envMs("MAB_REALTIME_SYNTHETIC_SPEECH_START_DELAY_MS", 35000);
+  const fixtureUrl = `${fixture.url}?participantSpeech=1&participantSpeechStartDelayMs=${speechStartDelayMs}`;
   const sessionId =
     process.env.MAB_REALTIME_SYNTHETIC_SESSION_ID || `realtime_speech_${Date.now()}`;
   try {
@@ -407,6 +508,8 @@ async function runLocalFixtureMain() {
       include_participant_audio: true,
       forwardMeetAudioToRealtime: true,
       forward_meet_audio_to_realtime: true,
+      meetAudioInputGain: 1,
+      meet_audio_input_gain: 1,
       captureCaptions: false,
       capture_captions: false,
     });

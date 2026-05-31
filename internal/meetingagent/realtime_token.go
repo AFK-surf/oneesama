@@ -128,23 +128,40 @@ func realtimeTuningGuide() map[string]any {
 		},
 		"presets": map[string]any{
 			"steady": map[string]any{
-				"turnDetection": map[string]any{"type": "semantic_vad", "eagerness": "low"},
+				"turnDetection": map[string]any{
+					"type":               "semantic_vad",
+					"eagerness":          "low",
+					"create_response":    true,
+					"interrupt_response": true,
+				},
 				"note":          "least interrupt-prone; lets the user take time before chunking.",
 			},
 			"balanced": map[string]any{
-				"turnDetection": map[string]any{"type": "semantic_vad", "eagerness": "auto"},
+				"turnDetection": map[string]any{
+					"type":               "semantic_vad",
+					"eagerness":          "auto",
+					"create_response":    true,
+					"interrupt_response": true,
+				},
 				"note":          "default human-loop starting point.",
 			},
 			"fast": map[string]any{
-				"turnDetection": map[string]any{"type": "semantic_vad", "eagerness": "high"},
+				"turnDetection": map[string]any{
+					"type":               "semantic_vad",
+					"eagerness":          "high",
+					"create_response":    true,
+					"interrupt_response": true,
+				},
 				"note":          "faster responses; more likely to cut short pauses.",
 			},
 			"server_vad": map[string]any{
 				"turnDetection": map[string]any{
 					"type":                "server_vad",
-					"threshold":           0.5,
+					"threshold":           0.72,
 					"prefix_padding_ms":   300,
 					"silence_duration_ms": 500,
+					"create_response":     true,
+					"interrupt_response":  true,
 				},
 				"note": "silence-based baseline for noisy rooms.",
 			},

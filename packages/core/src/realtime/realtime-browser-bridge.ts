@@ -230,6 +230,7 @@ const state = {
     peerConnectionState: "",
     remoteAudioAttached: false,
     remoteAudioRoutedToAvatarBus: false,
+    realtimeRemoteAudioTrackStats: null as null | Record<string, unknown>,
     mockRemoteAudioInjected: false,
     recvOnlyAudioTransceiverAdded: false,
     realtimeInputPlaceholderAdded: false,
@@ -238,6 +239,7 @@ const state = {
     currentRealtimeInputIsRoutingMix: false,
     realtimeAudioSenderStats: null as null | Record<string, unknown>,
     realtimeAgentSDKInputTrackIds: [],
+    realtimeAgentSDKInputSenderTrackId: "",
     lastRealtimeInputReplaceReason: "",
     lastRealtimeInputReplaceAt: "",
     meetAudioInputGain: normalizeMeetAudioInputGain(config.meetAudioInputGain),
@@ -265,6 +267,13 @@ const state = {
       silenceMs: 0,
       thresholdRms: 0.003,
       thresholdPeak: 0.01,
+    },
+    realtimeInputEnergy: {
+      rms: 0,
+      peak: 0,
+      observed: false,
+      lastEnergyAt: "",
+      lastCheckedAt: "",
     },
     meetAudioEnergyLogged: false,
     lastMeetAudioTrackId: "",
@@ -375,10 +384,14 @@ let realtimeAudioSender = null;
 let routingAudioContext = null;
 let routingInputGate = null;
 let routingDestination = null;
+let realtimeInputDestination = null;
 let routingAnalyser = null;
 let routingAnalyserBuffer = null;
 let routingEnergyTimer = 0;
-let realtimeAudioSenderStatsTimer = 0;
+let realtimeInputAnalyser = null;
+let realtimeInputAnalyserBuffer = null;
+let realtimeInputEnergyTimer = 0;
+let realtimeInputMonitorSource = null;
 let meetAudioRecorder = null;
 let meetAudioRecorderStopResolve = null;
 let meetAudioCaptureUploadChain = Promise.resolve();

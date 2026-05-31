@@ -17,6 +17,7 @@ export type BrowserIslandOptions = {
   sendRealtimeSessionUpdate: boolean;
   includeParticipantAudio: boolean;
   forwardMeetAudioToRealtime: boolean;
+  meetAudioInputGain?: number;
   realtimeFallbackToLocalMic: boolean;
   installLocalDialogBridge: boolean;
   installWorkerResultBridge: boolean;
@@ -48,6 +49,7 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
     sendRealtimeSessionUpdate: installRealtimeBridge && params.send_realtime_session_update !== false,
     includeParticipantAudio: Boolean(params.include_participant_audio),
     forwardMeetAudioToRealtime: installRealtimeBridge && params.forward_meet_audio_to_realtime !== false,
+    meetAudioInputGain: Number(params.meet_audio_input_gain) || undefined,
     realtimeFallbackToLocalMic: Boolean(params.realtime_fallback_to_local_mic),
     installLocalDialogBridge: Boolean(params.install_local_dialog_bridge),
     installWorkerResultBridge: Boolean(params.install_worker_result_bridge),
@@ -79,6 +81,7 @@ export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
     send_realtime_session_update: options.sendRealtimeSessionUpdate,
     include_participant_audio: options.includeParticipantAudio,
     forward_meet_audio_to_realtime: options.forwardMeetAudioToRealtime,
+    meet_audio_input_gain: options.meetAudioInputGain,
     realtime_fallback_to_local_mic: options.realtimeFallbackToLocalMic,
     install_local_dialog_bridge: options.installLocalDialogBridge,
     install_worker_result_bridge: options.installWorkerResultBridge,

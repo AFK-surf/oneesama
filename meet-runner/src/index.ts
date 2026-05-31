@@ -123,6 +123,7 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     sendRealtimeSessionUpdate: options.sendRealtimeSessionUpdate,
     includeParticipantAudio: options.includeParticipantAudio,
     forwardMeetAudioToRealtime: options.forwardMeetAudioToRealtime,
+    meetAudioInputGain: options.meetAudioInputGain,
     realtimeFallbackToLocalMic: options.realtimeFallbackToLocalMic,
     installLocalDialogBridge: options.installLocalDialogBridge,
     installWorkerResultBridge: options.installWorkerResultBridge,

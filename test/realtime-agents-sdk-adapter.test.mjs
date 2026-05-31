@@ -361,6 +361,432 @@ test("Realtime Agents SDK WebRTC transport uses the full SDP endpoint URL", asyn
   });
 });
 
+test("Realtime Agents SDK WebRTC transport preserves SDK decode sink while routing remote audio", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: `
+          window.__MAB_FAKE_ORIGINAL_ONTRACK_CALLS = 0;
+          window.OpenAIAgentsRealtime = {
+            tool(config) {
+              return config;
+            },
+            RealtimeAgent: function RealtimeAgent(config) {
+              this.config = config;
+            },
+            OpenAIRealtimeWebRTC: class OpenAIRealtimeWebRTC {
+              constructor(options) {
+                this.options = options;
+                window.__MAB_FAKE_DECODE_ELEMENT_PROPS = {
+                  autoplay: options.audioElement?.autoplay === true,
+                  muted: options.audioElement?.muted === true,
+                  volume: options.audioElement?.volume,
+                  isConnected: options.audioElement?.isConnected === true,
+                  decodeOnly:
+                    options.audioElement?.getAttribute(
+                      "data-meeting-avatar-realtime-decode-only",
+                    ) === "1",
+                  ariaHidden: options.audioElement?.getAttribute("aria-hidden") === "true",
+                };
+                const remoteTrack = {
+                  id: "remote_audio_track",
+                  kind: "audio",
+                  readyState: "live",
+                  muted: false,
+                };
+                const receiver = {
+                  track: remoteTrack,
+                  getStats: async () =>
+                    new Map([
+                      [
+                        "inbound_audio",
+                        {
+                          type: "inbound-rtp",
+                          kind: "audio",
+                          bytesReceived: 4096,
+                          packetsReceived: 24,
+                          totalAudioEnergy: 0.42,
+                          audioLevel: 0.12,
+                        },
+                      ],
+                    ]),
+                };
+                const pc = {
+                  connectionState: "connected",
+                  ontrack() {
+                    window.__MAB_FAKE_ORIGINAL_ONTRACK_CALLS += 1;
+                  },
+                  getReceivers: () => [receiver],
+                  getSenders: () => [],
+                  addEventListener() {},
+                  close() {},
+                };
+                window.__MAB_FAKE_WEBRTC_PC = pc;
+                window.__MAB_FAKE_REMOTE_TRACK = remoteTrack;
+                options.changePeerConnection(pc);
+              }
+
+              on() {
+                return this;
+              }
+
+              close() {}
+            },
+            RealtimeSession: class RealtimeSession {
+              constructor() {
+                this.listeners = new Map();
+              }
+
+              on(type, callback) {
+                const callbacks = this.listeners.get(type) || [];
+                callbacks.push(callback);
+                this.listeners.set(type, callbacks);
+                return this;
+              }
+
+              async connect() {}
+
+              close() {}
+            },
+          };
+        `,
+      });
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk",
+          agentRuntime: "test-sdk",
+          sessionId: "sdk-decode-sink-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          openaiRealtimeBaseUrl: "https://api.openai.com/v1",
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(() => window.__MAB_FAKE_WEBRTC_PC);
+
+      const result = await page.evaluate(async () => {
+        window.__MAB_FAKE_AUDIO_BUS_CALLS = [];
+        window.MAB_AVATAR_AUDIO_BUS = {
+          addStream(stream, options) {
+            window.__MAB_FAKE_AUDIO_BUS_CALLS.push({
+              label: options?.label || "",
+              trackIds: stream?.getAudioTracks?.().map((track) => track.id) || [],
+            });
+            return { ok: true };
+          },
+        };
+        const context = new AudioContext();
+        const stream = context.createMediaStreamDestination().stream;
+        window.__MAB_FAKE_WEBRTC_PC.ontrack({
+          track: window.__MAB_FAKE_REMOTE_TRACK,
+          streams: [stream],
+        });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await context.close();
+        return {
+          decode: window.__MAB_FAKE_DECODE_ELEMENT_PROPS,
+          originalOnTrackCalls: window.__MAB_FAKE_ORIGINAL_ONTRACK_CALLS,
+          busCalls: window.__MAB_FAKE_AUDIO_BUS_CALLS,
+          connection: window.MAB_REALTIME_BRIDGE.connection,
+          timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
+        };
+      });
+
+      assert.equal(result.decode.autoplay, true);
+      assert.equal(result.decode.muted, true);
+      assert.equal(result.decode.volume, 0);
+      assert.equal(result.decode.isConnected, false);
+      assert.equal(result.decode.decodeOnly, true);
+      assert.equal(result.decode.ariaHidden, true);
+      assert.equal(result.originalOnTrackCalls, 1);
+      assert.equal(result.busCalls.length, 1);
+      assert.equal(result.busCalls[0].label, "openai-realtime-remote-audio");
+      assert.equal(result.connection.remoteAudioRoutedToAvatarBus, true);
+      assert.equal(result.connection.realtimeRemoteAudioTrackStats.observed, true);
+      assert.equal(result.connection.realtimeRemoteAudioTrackStats.totalAudioEnergy, 0.42);
+      assert.ok(result.timelineTypes.includes("remote_audio_route"));
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+test("Realtime Agents SDK config preserves GA turn detection controls", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: `
+          window.OpenAIAgentsRealtime = {
+            tool(config) {
+              return config;
+            },
+            RealtimeAgent: function RealtimeAgent(config) {
+              this.config = config;
+            },
+            OpenAIRealtimeWebRTC: class OpenAIRealtimeWebRTC {
+              constructor(options) {
+                this.options = options;
+              }
+
+              on() {
+                return this;
+              }
+
+              close() {}
+            },
+            RealtimeSession: class RealtimeSession {
+              constructor(_agent, options) {
+                window.__MAB_FAKE_REALTIME_SESSION_OPTIONS = options;
+                this.listeners = new Map();
+              }
+
+              on(type, callback) {
+                const callbacks = this.listeners.get(type) || [];
+                callbacks.push(callback);
+                this.listeners.set(type, callbacks);
+                return this;
+              }
+
+              async connect() {}
+
+              close() {}
+            },
+          };
+        `,
+      });
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk",
+          agentRuntime: "test-sdk",
+          sessionId: "sdk-turn-detection-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          session: {
+            type: "realtime",
+            model: "gpt-realtime-2",
+            output_modalities: ["audio"],
+            audio: {
+              input: {
+                turn_detection: {
+                  type: "semantic_vad",
+                  eagerness: "high",
+                  create_response: true,
+                  interrupt_response: true,
+                },
+              },
+              output: { voice: "marin" },
+            },
+          },
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(() => window.__MAB_FAKE_REALTIME_SESSION_OPTIONS);
+
+      const options = await page.evaluate(() => window.__MAB_FAKE_REALTIME_SESSION_OPTIONS);
+      assert.deepEqual(options.config.outputModalities, ["audio"]);
+      assert.deepEqual(options.config.audio.input.turnDetection, {
+        type: "semantic_vad",
+        eagerness: "high",
+        create_response: true,
+        interrupt_response: true,
+      });
+      assert.equal(options.config.audio.output.voice, "marin");
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+test("Realtime Agents SDK records session transport response events as model turns", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: `
+          window.OpenAIAgentsRealtime = {
+            tool(config) {
+              return config;
+            },
+            RealtimeAgent: function RealtimeAgent(config) {
+              this.config = config;
+            },
+            OpenAIRealtimeWebRTC: class OpenAIRealtimeWebRTC {
+              constructor(options) {
+                this.options = options;
+              }
+
+              on() {
+                return this;
+              }
+
+              close() {}
+            },
+            RealtimeSession: class RealtimeSession {
+              constructor() {
+                this.listeners = new Map();
+                window.__MAB_FAKE_REALTIME_SESSION = this;
+              }
+
+              on(type, callback) {
+                const callbacks = this.listeners.get(type) || [];
+                callbacks.push(callback);
+                this.listeners.set(type, callbacks);
+                return this;
+              }
+
+              emit(type, event) {
+                for (const callback of this.listeners.get(type) || []) callback(event);
+              }
+
+              async connect() {}
+
+              close() {}
+            },
+          };
+        `,
+      });
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk",
+          agentRuntime: "test-sdk",
+          sessionId: "sdk-response-event-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          openaiRealtimeBaseUrl: "https://api.openai.com/v1",
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(() => window.__MAB_FAKE_REALTIME_SESSION);
+
+      const feedback = await page.evaluate(() => {
+        window.__MAB_FAKE_REALTIME_SESSION.emit("transport_event", {
+          type: "response.created",
+          response: { id: "resp_fixture" },
+        });
+        return window.MAB_REALTIME_BRIDGE.feedback;
+      });
+
+      assert.equal(feedback.checks.responseEvents, 1);
+      assert.equal(feedback.failureMatrix.modelTurn.status, "ok");
+      assert.equal(feedback.failureMatrix.modelTurn.reason, "response_events_observed");
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
+test("Realtime Agents SDK WebRTC transport captures the outbound audio sender", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: `
+          window.OpenAIAgentsRealtime = {
+            tool(config) {
+              return config;
+            },
+            RealtimeAgent: function RealtimeAgent(config) {
+              this.config = config;
+            },
+            OpenAIRealtimeWebRTC: class OpenAIRealtimeWebRTC {
+              constructor(options) {
+                this.options = options;
+                const track = options.mediaStream.getAudioTracks()[0];
+                const sender = {
+                  track,
+                  getStats: async () =>
+                    new Map([
+                      [
+                        "outbound_audio",
+                        {
+                          type: "outbound-rtp",
+                          kind: "audio",
+                          bytesSent: 4096,
+                          packetsSent: 32,
+                        },
+                      ],
+                    ]),
+                };
+                const pc = {
+                  connectionState: "new",
+                  getSenders: () => [sender],
+                  addEventListener() {},
+                  close() {},
+                };
+                options.changePeerConnection(pc);
+              }
+
+              on() {
+                return this;
+              }
+
+              close() {}
+            },
+            RealtimeSession: class RealtimeSession {
+              constructor() {
+                this.listeners = new Map();
+              }
+
+              on(type, callback) {
+                const callbacks = this.listeners.get(type) || [];
+                callbacks.push(callback);
+                this.listeners.set(type, callbacks);
+                return this;
+              }
+
+              async connect() {}
+
+              close() {}
+            },
+          };
+        `,
+      });
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk",
+          agentRuntime: "test-sdk",
+          sessionId: "sdk-sender-diagnostics-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          openaiRealtimeBaseUrl: "https://api.openai.com/v1",
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.connection?.realtimeAudioSenderStats?.bytesSent === 4096,
+      );
+
+      const bridge = await page.evaluate(() => window.MAB_REALTIME_BRIDGE);
+      assert.equal(bridge.connection.currentRealtimeInputSource, "meet_audio_mix");
+      assert.equal(bridge.connection.currentRealtimeInputIsRoutingMix, true);
+      assert.equal(
+        bridge.connection.realtimeAgentSDKInputSenderTrackId,
+        bridge.connection.currentRealtimeInputTrackId,
+      );
+      assert.equal(bridge.connection.realtimeAudioSenderStats.trackReadyState, "live");
+      assert.equal(bridge.connection.realtimeAudioSenderStats.bytesSent, 4096);
+      assert.equal(bridge.connection.realtimeAudioSenderStats.packetsSent, 32);
+      assert.ok(
+        bridge.timeline.some(
+          (entry) => entry.type === "realtime_agent_sdk_input_sender_attached",
+        ),
+      );
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
 test("Realtime Agents SDK local tool failures use the shared blocked turn policy", async () => {
   await withToolServer(async ({ baseUrl }) => {
     const browser = await chromium.launch({ headless: true });

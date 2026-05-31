@@ -266,6 +266,7 @@ export interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   sendRealtimeSessionUpdate?: boolean;
   includeParticipantAudio?: boolean;
   forwardMeetAudioToRealtime?: boolean;
+  meetAudioInputGain?: number | string;
   workerDelegateUrl?: string;
   workerStatusUrl?: string;
   autoConnectRealtime?: boolean;

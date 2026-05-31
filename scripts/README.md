@@ -20,6 +20,7 @@ below in the same commit. Task #277.
 | Script | Purpose | Notes |
 |---|---|---|
 | `docker-meeting-surfaces-smoke.sh` | Docker-based smoke test for the meeting-agent's caption / audio / lifecycle surfaces. | Use before shipping changes that touch `internal/meetingagent`. |
+| `realtime-tool-recall-benchmark.mjs` | Headless Realtime prompt/tool-selection benchmark for share/app-control recall. | Uses the live meeting-agent `/realtime/config` + `/realtime/client-secret` contract and fixture cases in `scripts/fixtures/realtime-tool-recall-cases.json`; no Meet room required. |
 | `r22-cutover-regression.sh` | r22 cutover regression bundle (Slack triage parity + meeting agent surfaces). | Use as the pre-merge "did I break the cueboard parity" check. |
 
 ## Go tests under scripts/

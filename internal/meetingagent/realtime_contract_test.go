@@ -126,6 +126,7 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"这台 Mac mini",
 		"“你用电脑控制”",
 		"call control_shared_app_window",
+		"Never satisfy an app-control request with a visual avatar-state/HUD update alone",
 		"Do not tell the human to share Chrome to you",
 	} {
 		if !strings.Contains(instructions, want) {
@@ -144,7 +145,8 @@ func TestBuildRealtimeSessionMapsFastTurnDetectionPreset(t *testing.T) {
 	audio := session["audio"].(map[string]any)
 	input := audio["input"].(map[string]any)
 	turn := input["turn_detection"].(map[string]any)
-	if turn["type"] != "semantic_vad" || turn["eagerness"] != "high" {
+	if turn["type"] != "semantic_vad" || turn["eagerness"] != "high" ||
+		turn["create_response"] != true || turn["interrupt_response"] != true {
 		t.Fatalf("turn_detection = %#v, want fast semantic_vad preset", turn)
 	}
 }
@@ -159,7 +161,8 @@ func TestBuildRealtimeSessionDefaultsToSteadyTurnDetection(t *testing.T) {
 	audio := session["audio"].(map[string]any)
 	input := audio["input"].(map[string]any)
 	turn := input["turn_detection"].(map[string]any)
-	if turn["type"] != "semantic_vad" || turn["eagerness"] != "low" {
+	if turn["type"] != "semantic_vad" || turn["eagerness"] != "low" ||
+		turn["create_response"] != true || turn["interrupt_response"] != true {
 		t.Fatalf("turn_detection = %#v, want steady semantic_vad preset", turn)
 	}
 }
