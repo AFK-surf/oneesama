@@ -9,6 +9,9 @@ recappiConnection.recappiAudioInput = recappiConnection.recappiAudioInput || {
   samplesReceived: 0,
   samplesQueued: 0,
   samplesDropped: 0,
+  lastRawRms: 0,
+  lastRawPeak: 0,
+  adaptiveGain: 0,
   noiseSuppressedChunks: 0,
   noiseSuppressedSamples: 0,
   lastSuppressedRms: 0,
@@ -27,6 +30,48 @@ let recappiAudioInputProcessor = null;
 let recappiAudioInputSource = null;
 const recappiAudioInputQueue = [];
 let recappiAudioQueuedSamples = 0;
+
+const RECAPPI_PROCESS_AUDIO_TARGET_RMS = 0.025;
+const RECAPPI_PROCESS_AUDIO_BOOST_BELOW_RMS = 0.01;
+const RECAPPI_PROCESS_AUDIO_MAX_ADAPTIVE_GAIN = 48;
+const RECAPPI_PROCESS_AUDIO_PEAK_CEILING = 0.8;
+
+function rawMeetAudioInputGainConfigured() {
+  return (rawBridgeConfig as Record<string, unknown>).meetAudioInputGain !== undefined;
+}
+
+function sampleEnergy(samples: Float32Array) {
+  let sumSquares = 0;
+  let peak = 0;
+  for (const sample of samples) {
+    const abs = Math.abs(sample);
+    if (abs > peak) peak = abs;
+    sumSquares += sample * sample;
+  }
+  const rms = samples.length ? Math.sqrt(sumSquares / samples.length) : 0;
+  return { rms, peak };
+}
+
+function adaptiveRecappiProcessInputGain(samples: Float32Array) {
+  const configured = configuredRecappiProcessInputGain();
+  const energy = sampleEnergy(samples);
+  if (rawMeetAudioInputGainConfigured() || !samples.length || energy.rms <= 0) {
+    return { gain: configured, ...energy, adaptive: false };
+  }
+  if (energy.rms >= RECAPPI_PROCESS_AUDIO_BOOST_BELOW_RMS) {
+    return { gain: configured, ...energy, adaptive: false };
+  }
+  const rmsGain = RECAPPI_PROCESS_AUDIO_TARGET_RMS / Math.max(energy.rms, 0.000001);
+  const peakGain =
+    energy.peak > 0
+      ? RECAPPI_PROCESS_AUDIO_PEAK_CEILING / energy.peak
+      : RECAPPI_PROCESS_AUDIO_MAX_ADAPTIVE_GAIN;
+  const gain = normalizeMeetAudioInputGain(
+    Math.max(configured, Math.min(rmsGain, peakGain, RECAPPI_PROCESS_AUDIO_MAX_ADAPTIVE_GAIN)),
+    configured,
+  );
+  return { gain, ...energy, adaptive: gain !== configured };
+}
 
 function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
   const source = String(payload.source || "recappi_process_audio");
@@ -198,6 +243,7 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
     Number(payload.sampleRate || 0),
     routingAudioContext.sampleRate,
   );
+  const gain = adaptiveRecappiProcessInputGain(queued);
   const maxQueuedSamples = routingAudioContext.sampleRate * 2;
   if (recappiAudioQueuedSamples + queued.length > maxQueuedSamples) {
     const drop = recappiAudioQueuedSamples + queued.length - maxQueuedSamples;
@@ -218,11 +264,18 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   recappiAudioInputQueue.push(queued);
   recappiAudioQueuedSamples += queued.length;
   markRecappiAudioInputConnected(payload);
+  updateRoutingInputGain(
+    gain.gain,
+    gain.adaptive ? "recappi-process-audio-adaptive-gain" : "recappi-process-audio",
+  );
   recappiConnection.recappiAudioInput = {
     ...getRecappiAudioInputState(),
     chunks: Number(getRecappiAudioInputState()?.chunks || 0) + 1,
     samplesReceived: Number(getRecappiAudioInputState()?.samplesReceived || 0) + samples.length,
     samplesQueued: recappiAudioQueuedSamples,
+    lastRawRms: gain.rms,
+    lastRawPeak: gain.peak,
+    adaptiveGain: gain.gain,
     lastChunkAt: new Date().toISOString(),
     lastPushAt: new Date().toISOString(),
   };

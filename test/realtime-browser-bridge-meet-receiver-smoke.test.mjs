@@ -206,6 +206,9 @@ async function installRealtimeHarness(page, harnessOptions = {}) {
       autoRespondToAvatarToolCalls: harnessOptions.autoRespondToAvatarToolCalls,
       captureMeetAudioForTranscript: false,
       meetAudioEnergyStaleMs: 1000,
+      ...(harnessOptions.meetAudioInputGain !== undefined
+        ? { meetAudioInputGain: harnessOptions.meetAudioInputGain }
+        : {}),
     }),
   });
 }
@@ -477,6 +480,9 @@ test("Recappi process audio input feeds the routing mix without RTC tracks", asy
     assert.equal(result.connection.meetAudioSourcesUnmuted, 1);
     assert.equal(result.connection.meetAudioEnergy.observed, true);
     assert.equal(result.feedback.failureMatrix.audioInput.status, "ok");
+    assert.equal(result.connection.meetAudioInputGain, 1);
+    assert.equal(result.connection.recappiAudioInput.adaptiveGain, 1);
+    assert.ok(result.connection.recappiAudioInput.lastRawRms > 0);
   } finally {
     await browser.close();
   }
@@ -782,7 +788,7 @@ test("Recappi process audio uses source-specific gain instead of Meet receiver a
         source: "recappi_process_audio",
         sampleRate: 48000,
         channels: 2,
-        samples: [0.01, 0.01, -0.01, -0.01],
+        samples: [0.02, 0.02, -0.02, -0.02],
       });
       await wait(80);
       return {
@@ -794,6 +800,90 @@ test("Recappi process audio uses source-specific gain instead of Meet receiver a
     assert.equal(result.currentSource, "recappi_process_audio_tap");
     assert.equal(result.meetAudioInputGain, 1);
     assert.notEqual(result.meetAudioInputGain, 48);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Recappi process audio adaptively boosts low true-room input levels", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, { meetAudioInputSource: "recappi_process_audio" });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      const samples = [];
+      for (let frame = 0; frame < 4096; frame += 1) {
+        const value = Math.sin((frame / 48000) * Math.PI * 2 * 440) * 0.001;
+        samples.push(value, value);
+      }
+      const accepted = window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+        source: "recappi_process_audio",
+        sampleRate: 48000,
+        channels: 2,
+        samples,
+      });
+      await wait(300);
+      const gainEvents = window.MAB_REALTIME_BRIDGE.timeline.filter(
+        (entry) =>
+          entry.type === "meet_audio_input_gain_updated" &&
+          entry.detail.reason === "recappi-process-audio-adaptive-gain",
+      );
+      return {
+        accepted,
+        gainEvents,
+        connection: window.MAB_REALTIME_BRIDGE.connection,
+      };
+    });
+
+    assert.equal(result.accepted.ok, true);
+    assert.equal(result.connection.currentRealtimeInputSource, "recappi_process_audio_tap");
+    assert.equal(result.connection.recappiAudioInput.connected, true);
+    assert.equal(result.connection.recappiAudioInput.lastRawRms < 0.01, true);
+    assert.equal(result.connection.recappiAudioInput.lastRawPeak < 0.01, true);
+    assert.equal(result.connection.recappiAudioInput.adaptiveGain > 1, true);
+    assert.equal(
+      result.connection.meetAudioInputGain,
+      result.connection.recappiAudioInput.adaptiveGain,
+    );
+    assert.equal(result.gainEvents.length >= 1, true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Recappi process audio respects explicit input gain overrides", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, {
+      meetAudioInputSource: "recappi_process_audio",
+      meetAudioInputGain: 3,
+    });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await window.MAB_REALTIME_CLIENT.connect();
+      const samples = [];
+      for (let frame = 0; frame < 4096; frame += 1) {
+        const value = Math.sin((frame / 48000) * Math.PI * 2 * 440) * 0.001;
+        samples.push(value, value);
+      }
+      window.MAB_REALTIME_CLIENT.pushRecappiAudioSamples({
+        source: "recappi_process_audio",
+        sampleRate: 48000,
+        channels: 2,
+        samples,
+      });
+      await wait(150);
+      return {
+        connection: window.MAB_REALTIME_BRIDGE.connection,
+      };
+    });
+
+    assert.equal(result.connection.recappiAudioInput.connected, true);
+    assert.equal(result.connection.meetAudioInputGain, 3);
+    assert.equal(result.connection.recappiAudioInput.adaptiveGain, 3);
   } finally {
     await browser.close();
   }

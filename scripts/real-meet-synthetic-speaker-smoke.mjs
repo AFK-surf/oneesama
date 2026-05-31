@@ -15,6 +15,19 @@ function envMs(name, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function realMeetAudioInputGainFields() {
+  const raw = process.env.MAB_REAL_MEET_AUDIO_INPUT_GAIN;
+  if (!raw) return {};
+  const gain = Number(raw);
+  if (!Number.isFinite(gain) || gain <= 0) {
+    throw new Error(`Invalid MAB_REAL_MEET_AUDIO_INPUT_GAIN: ${raw}`);
+  }
+  return {
+    meetAudioInputGain: gain,
+    meet_audio_input_gain: gain,
+  };
+}
+
 function argValue(name) {
   const inlinePrefix = `${name}=`;
   const inline = process.argv.find((entry) => entry.startsWith(inlinePrefix));
@@ -180,6 +193,7 @@ function compactBridgeStatus(status) {
   const connection = bridge?.connection || {};
   const meetAudioEnergy = connection.meetAudioEnergy || {};
   const realtimeInputEnergy = connection.realtimeInputEnergy || {};
+  const recappiAudioInput = connection.recappiAudioInput || {};
   const senderStats = connection.realtimeAudioSenderStats || {};
   const primaryMeetAudioSenderStats = connection.primaryMeetAudioSenderStats || {};
   const remoteAudioTrackStats = connection.realtimeRemoteAudioTrackStats || {};
@@ -220,6 +234,16 @@ function compactBridgeStatus(status) {
     dataChannelOpen: connection.dataChannelOpen === true,
     currentRealtimeInputSource: connection.currentRealtimeInputSource || "",
     meetAudioInputGain: Number(connection.meetAudioInputGain || 0),
+    recappiAudioInput: {
+      connected: recappiAudioInput.connected === true,
+      chunks: Number(recappiAudioInput.chunks || 0),
+      samplesReceived: Number(recappiAudioInput.samplesReceived || 0),
+      samplesQueued: Number(recappiAudioInput.samplesQueued || 0),
+      source: recappiAudioInput.source || "",
+      lastRawRms: Number(recappiAudioInput.lastRawRms || 0),
+      lastRawPeak: Number(recappiAudioInput.lastRawPeak || 0),
+      adaptiveGain: Number(recappiAudioInput.adaptiveGain || 0),
+    },
     senderTrackReadyState: senderStats.trackReadyState || "",
     senderBytesSent: Number(senderStats.bytesSent || 0),
     senderPacketsSent: Number(senderStats.packetsSent || 0),
@@ -334,7 +358,9 @@ function gateStatus(compact, options = {}) {
     participantPresent:
       Number(compact.participantCount || 0) >= 2 || Boolean(compact.activeSpeaker),
     senderLive:
-      compact.currentRealtimeInputSource === "meet_audio_mix" &&
+      ["meet_audio_mix", "recappi_process_audio_tap"].includes(
+        compact.currentRealtimeInputSource,
+      ) &&
       compact.senderTrackReadyState === "live" &&
       compact.senderBytesSent > 0,
     meetEnergyOk,
@@ -438,6 +464,9 @@ async function runMain() {
   );
   const timeoutMs = envMs("MAB_REAL_MEET_SYNTHETIC_WAIT_MS", 120_000);
   const speakerJoinTimeoutMs = envMs("MAB_SYNTHETIC_SPEAKER_JOIN_TIMEOUT_MS", 120_000);
+  const expectedToolNames = envCsv("MAB_REALTIME_SYNTHETIC_EXPECTED_TOOLS");
+  const requireTool =
+    process.env.MAB_REALTIME_SYNTHETIC_REQUIRE_TOOL === "1" || expectedToolNames.length > 0;
   const tmpDir = await mkdtemp(pathJoin(tmpdir(), "oneesama-real-meet-speaker-"));
   const wavPath = await generateSpeakerWav(tmpDir);
   const sessionId = process.env.MAB_REAL_MEET_SESSION_ID || `real_meet_synthetic_${Date.now()}`;
@@ -487,8 +516,7 @@ async function runMain() {
       include_participant_audio: true,
       forwardMeetAudioToRealtime: true,
       forward_meet_audio_to_realtime: true,
-      meetAudioInputGain: 1,
-      meet_audio_input_gain: 1,
+      ...realMeetAudioInputGainFields(),
       captureCaptions: false,
       capture_captions: false,
     });
@@ -497,7 +525,7 @@ async function runMain() {
       async () => {
         const status = await fetchJson(`${meetingAgentUrl}/join/status`);
         const compact = compactBridgeStatus(status);
-        const gates = gateStatus(compact);
+        const gates = gateStatus(compact, { expectedToolNames });
         return {
           done:
             gates.participantPresent &&
@@ -505,7 +533,7 @@ async function runMain() {
             gates.meetEnergyOk &&
             gates.speechStarted &&
             gates.responseSeen &&
-            gates.outputRouted,
+            (requireTool ? gates.expectedToolCalled : gates.outputRouted),
           gates,
           compact,
         };
@@ -513,7 +541,18 @@ async function runMain() {
       timeoutMs,
       1500,
     );
-    const result = { ok: true, meetUrl, sessionId, speakerSessionId, wavPath, join, final };
+    const result = {
+      ok: true,
+      meetUrl,
+      sessionId,
+      speakerSessionId,
+      wavPath,
+      syntheticSpeakerText: currentSyntheticSpeakerText(),
+      expectedToolNames,
+      requireTool,
+      join,
+      final,
+    };
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     const result = {
