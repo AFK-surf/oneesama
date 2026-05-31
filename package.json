@@ -89,6 +89,7 @@
     "benchmark:realtime-turn-formation": "node --import tsx scripts/real-meet-synthetic-speaker-smoke.mjs --local-fixture",
     "benchmark:realtime-tool-recall": "node --import tsx scripts/realtime-tool-recall-benchmark.mjs",
     "benchmark:realtime-tool-lanes": "node --import tsx scripts/realtime-tool-recall-benchmark.mjs --fixture scripts/fixtures/realtime-tool-lane-coverage-cases.json",
+    "benchmark:realtime-tool-chains": "node --import tsx scripts/realtime-tool-chain-benchmark.mjs",
     "smoke:realtime-repeat-guard": "tsx src/cli.ts realtime-repeat-guard-smoke",
     "smoke:realtime-session-update": "tsx src/cli.ts realtime-session-update-smoke",
     "smoke:realtime-worker-tool": "tsx src/cli.ts realtime-worker-tool-smoke",

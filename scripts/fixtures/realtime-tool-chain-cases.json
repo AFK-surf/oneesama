@@ -1,0 +1,40 @@
+{
+  "schema": "oneesama.realtime-tool-chain-cases.v1",
+  "description": "Multi-step Realtime tool routing coverage. These cases verify that function_call_output reinjection can trigger the next functional tool instead of stopping after the first helper call.",
+  "variants": [
+    {
+      "name": "full",
+      "toolNames": "*",
+      "minStepRecall": 1
+    }
+  ],
+  "cases": [
+    {
+      "id": "linear_current_user_to_assignee_lookup_zh",
+      "utterance": "我在 linear 上还有哪些没做完的 issue",
+      "steps": [
+        {
+          "expectedToolNames": ["current_user_identity"],
+          "responseInstructions": "Summarize the result in concise Chinese. If it failed, state the exact blocker without mentioning internal routing names.",
+          "output": {
+            "ok": true,
+            "current_user": {
+              "name": "Peng Xiao",
+              "english_name": "Peng",
+              "preferred_address": "Peng",
+              "email": "peng@example.com",
+              "linear": "peng-xiao",
+              "github": "peng-xiao",
+              "role": "founder",
+              "aliases": ["Peng", "peng-xiao"]
+            },
+            "answer_hint_zh": "当前和你说话的人是 Peng。"
+          }
+        },
+        {
+          "expectedToolNames": ["linear_user_issues"]
+        }
+      ]
+    }
+  ]
+}
