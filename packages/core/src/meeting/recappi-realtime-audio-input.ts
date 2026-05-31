@@ -52,6 +52,7 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
   let pushActive = false;
   let pushFlushScheduled = false;
   const pendingPayloads: RecappiAudioPayload[] = [];
+  const maxPendingPushes = Math.max(1, options.maxPendingPushes || 64);
 
   function rememberError(stage: string, error: unknown) {
     state.ok = false;
@@ -69,11 +70,31 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     state.pendingPushes = pendingPayloads.length + (pushActive ? 1 : 0);
   }
 
+  function coalescePayloads(payloads: RecappiAudioPayload[]): RecappiAudioPayload | null {
+    if (!payloads.length) return null;
+    if (payloads.length === 1) return payloads[0];
+    const first = payloads[0];
+    const sampleCount = payloads.reduce((total, payload) => total + payload.samples.length, 0);
+    const samples = Array.from<number>({ length: sampleCount });
+    let offset = 0;
+    for (const payload of payloads) {
+      for (let index = 0; index < payload.samples.length; index += 1) {
+        samples[offset + index] = payload.samples[index] || 0;
+      }
+      offset += payload.samples.length;
+    }
+    return {
+      ...first,
+      samples,
+    };
+  }
+
   async function flushPushQueue() {
     if (pushLoop) return pushLoop;
     pushLoop = (async () => {
       while (pendingPayloads.length > 0) {
-        const payload = pendingPayloads.shift();
+        const batch = pendingPayloads.splice(0, pendingPayloads.length);
+        const payload = coalescePayloads(batch);
         if (!payload) continue;
         pushActive = true;
         refreshPendingPushes();
@@ -89,7 +110,7 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
             );
           }, payload);
           if (!result?.ok) throw new Error(result?.error || result?.reason || "push_failed");
-          state.pushedChunks += 1;
+          state.pushedChunks += batch.length;
           state.lastPushAt = nowIso();
         } catch (pushError) {
           rememberError("browser_push", pushError);
@@ -127,7 +148,7 @@ export function createRecappiRealtimeAudioInput(options: RecappiRealtimeAudioInp
     const target = page;
     if (!target || target.isClosed()) return;
     refreshPendingPushes();
-    if (state.pendingPushes >= (options.maxPendingPushes || 8)) {
+    if (state.pendingPushes >= maxPendingPushes) {
       state.droppedChunks += 1;
       return;
     }

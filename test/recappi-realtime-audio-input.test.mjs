@@ -65,3 +65,52 @@ test("Recappi realtime input serializes typed-array chunks for browser push", as
   assert.deepEqual(pushed[0].samples, [0.25, -0.25, 0.5, -0.5]);
   assert.equal(input.status().pushedChunks, 1);
 });
+
+test("Recappi realtime input coalesces bursty chunks before browser push", async () => {
+  let consumer = null;
+  const pushed = [];
+  const recappiTap = {
+    start: async () => ({
+      source: "recappi_process_audio",
+      sampleRate: 44100,
+      channels: 2,
+      processId: 1234,
+    }),
+    addConsumer: (callback) => {
+      consumer = callback;
+      return () => {
+        consumer = null;
+      };
+    },
+    status: () => ({
+      ok: true,
+      running: true,
+      source: "recappi_process_audio",
+      sampleRate: 44100,
+      channels: 2,
+      processId: 1234,
+    }),
+  };
+  const page = {
+    isClosed: () => false,
+    evaluate: async (_fn, payload) => {
+      pushed.push(payload);
+      return { ok: true };
+    },
+  };
+
+  const input = createRecappiRealtimeAudioInput({ sessionId: "session_test", recappiTap });
+  await input.start({ context: {}, page, diagnostics: null });
+  assert.equal(typeof consumer, "function");
+
+  for (let chunk = 0; chunk < 20; chunk += 1) {
+    consumer(null, Float32Array.from([chunk, -chunk]));
+  }
+
+  await waitFor(() => input.status().pushedChunks === 20);
+  assert.equal(input.status().droppedChunks, 0);
+  assert.equal(pushed.length, 1);
+  assert.equal(pushed[0].samples.length, 40);
+  assert.deepEqual(pushed[0].samples.slice(0, 6), [0, 0, 1, -1, 2, -2]);
+  assert.deepEqual(pushed[0].samples.slice(-4), [18, -18, 19, -19]);
+});
