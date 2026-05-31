@@ -785,7 +785,7 @@ test("mock Meet receiver smoke fails loudly when playback mute silences capture"
     assert.equal(result.feedback.failureMatrix.audioInput.status, "ok");
     assert.equal(result.feedback.failureMatrix.modelTurn.status, "waiting");
     assert.equal(result.feedback.failureMatrix.modelTurn.reason, "meet_audio_no_energy_observed");
-    assert.equal(result.feedback.failureMatrix.audioOutput.reason, "waiting_for_model_response");
+    assert.equal(result.feedback.failureMatrix.audioOutput.status, "ok");
   } finally {
     await browser.close();
   }

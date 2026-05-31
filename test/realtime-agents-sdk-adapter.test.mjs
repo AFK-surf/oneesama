@@ -676,7 +676,7 @@ test("Realtime Agents SDK records session transport response events as model tur
 
       assert.equal(feedback.checks.responseEvents, 1);
       assert.equal(feedback.failureMatrix.modelTurn.status, "ok");
-      assert.equal(feedback.failureMatrix.modelTurn.reason, "response_events_observed");
+      assert.equal(feedback.failureMatrix.modelTurn.reason, "model_turn_observed");
     } finally {
       await browser.close();
     }
@@ -891,12 +891,17 @@ test("Realtime Agents SDK audio lifecycle does not gate local input", async () =
         window.__MAB_FAKE_SDK_SESSION.emit("audio_start", { type: "audio_start" });
         return {
           protection: { ...window.MAB_REALTIME_BRIDGE.protection },
+          feedback: window.MAB_REALTIME_BRIDGE.feedback,
           timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
         };
       });
       const removedOutputGateKey = ["output", "AudioActive"].join("");
       assert.equal(removedOutputGateKey in started.protection, false);
       assert.ok(started.timelineTypes.includes("realtime_agent_sdk_audio_start"));
+      assert.equal(started.feedback.checks.responseEvents, 0);
+      assert.equal(started.feedback.checks.agentModelEvents, 1);
+      assert.equal(started.feedback.failureMatrix.modelTurn.status, "ok");
+      assert.equal(started.feedback.failureMatrix.modelTurn.reason, "model_turn_observed");
 
       const stopped = await page.evaluate(() => {
         window.__MAB_FAKE_SDK_SESSION.emit("audio_stopped", { type: "audio_stopped" });

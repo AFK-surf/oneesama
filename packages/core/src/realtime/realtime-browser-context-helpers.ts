@@ -489,7 +489,7 @@
           checks.meetAudioRoutedToRealtimeInput &&
           checks.meetAudioEnergyObserved &&
           checks.meetAudioSilenceMs > checks.meetAudioEnergyStaleMs &&
-          !checks.responseEvents
+          !checks.modelTurnEvents
         ) {
           return matrixCell("waiting", "meet_audio_energy_stale", {
             silenceMs: checks.meetAudioSilenceMs,
@@ -499,10 +499,12 @@
             peak: checks.meetAudioEnergyPeak,
           });
         }
-        if (!checks.responseEvents) return matrixCell("waiting", "no_response_events");
-        return matrixCell("ok", "response_events_observed", {
+        if (!checks.modelTurnEvents) return matrixCell("waiting", "no_model_turn_events");
+        return matrixCell("ok", "model_turn_observed", {
           inboundEvents: checks.inboundEvents,
           responseEvents: checks.responseEvents,
+          agentModelEvents: checks.agentModelEvents,
+          avatarAudioOutputObserved: checks.avatarAudioOutputObserved,
           outputTranscriptChars: checks.outputTranscriptChars,
         });
       })();
@@ -521,7 +523,7 @@
       })();
 
       const audioOutput = (() => {
-        if (!checks.responseEvents) return matrixCell("waiting", "waiting_for_model_response");
+        if (!checks.modelTurnEvents) return matrixCell("waiting", "waiting_for_model_response");
         if (!checks.remoteAudioAttached) return matrixCell("blocked", "remote_audio_not_attached");
         if (!checks.remoteAudioRoutedToAvatarBus)
           return matrixCell("blocked", "remote_audio_not_routed");
@@ -579,6 +581,19 @@
       const avatarAudio = (window as any).MAB_AVATAR_AUDIO || {};
       const avatarOutputEnergy = avatarAudio.outputEnergy || {};
       const remoteAudioTrackStats = state.connection.realtimeRemoteAudioTrackStats || {};
+      const responseEvents = state.inbound.filter((entry) =>
+        String(entry.event?.type || "").startsWith("response."),
+      ).length;
+      const agentModelEvents = state.inbound.filter((entry) =>
+        [
+          "agents_sdk.agent_start",
+          "agents_sdk.agent_end",
+          "agents_sdk.audio_start",
+          "agents_sdk.audio_stopped",
+          "agents_sdk.audio_interrupted",
+        ].includes(String(entry.event?.type || "")),
+      ).length;
+      const avatarAudioOutputObserved = avatarOutputEnergy.observed === true;
       const checks = {
         peerConnected:
           state.connected === true ||
@@ -623,15 +638,15 @@
           state.connection.currentRealtimeInputIsRoutingMix === true,
         recvOnlyAudioTransceiverAdded: state.connection.recvOnlyAudioTransceiverAdded === true,
         inboundEvents: state.inbound.length,
-        responseEvents: state.inbound.filter((entry) =>
-          String(entry.event?.type || "").startsWith("response."),
-        ).length,
+        responseEvents,
+        agentModelEvents,
+        modelTurnEvents: responseEvents + agentModelEvents + (avatarAudioOutputObserved ? 1 : 0),
         remoteAudioAttached: state.connection.remoteAudioAttached === true,
         remoteAudioRoutedToAvatarBus: state.connection.remoteAudioRoutedToAvatarBus === true,
         realtimeRemoteAudioTrackObserved: remoteAudioTrackStats.observed === true,
         realtimeRemoteAudioTrackEnergy: Number(remoteAudioTrackStats.totalAudioEnergy || 0),
         realtimeRemoteAudioTrackBytes: Number(remoteAudioTrackStats.bytesReceived || 0),
-        avatarAudioOutputObserved: avatarOutputEnergy.observed === true,
+        avatarAudioOutputObserved,
         avatarAudioOutputMaxRms: Number(avatarOutputEnergy.maxRms || 0),
         avatarToolCalls: state.avatarTools.calls.length,
         workerToolCalls: state.workerTools.calls.length,
@@ -724,7 +739,7 @@
         checks.meetParticipantAudioExpected &&
         checks.meetAudioRoutedToRealtimeInput &&
         !checks.meetAudioEnergyObserved &&
-        !checks.responseEvents
+        !checks.modelTurnEvents
       ) {
         status = "waiting_for_turn";
         summary =
@@ -735,16 +750,16 @@
         checks.meetAudioRoutedToRealtimeInput &&
         checks.meetAudioEnergyObserved &&
         checks.meetAudioSilenceMs > checks.meetAudioEnergyStaleMs &&
-        !checks.responseEvents
+        !checks.modelTurnEvents
       ) {
         status = "waiting_for_turn";
         summary =
           "Realtime input is routed through the Meet audio mix, but recent mixer energy is stale.";
         blockers.push("meet_audio_energy_stale");
-      } else if (!checks.responseEvents) {
+      } else if (!checks.modelTurnEvents) {
         status = "waiting_for_response";
-        summary = "Realtime server events are arriving, but no response events have been observed.";
-        blockers.push("no_response_events");
+        summary = "Realtime server events are arriving, but no model turn activity has been observed.";
+        blockers.push("no_model_turn_events");
       } else if (!checks.remoteAudioAttached) {
         status = "output_blocked";
         summary = "Realtime response events exist, but no remote audio track is attached.";
