@@ -357,6 +357,7 @@ export async function createVideoAvatarRenderer(
   let previousState: "idle" | "speaking" = "idle";
   let transitionStartedAt = performance.now();
   let lastSpeakingAt = -Infinity;
+  let lastRenderedAt = -Infinity;
 
   Object.assign(rendererState, {
     renderer: "video",
@@ -385,6 +386,13 @@ export async function createVideoAvatarRenderer(
   }
 
   function tick(now: number) {
+    const targetFps = Math.max(1, Number(config.captureFps || 24));
+    const minFrameMs = 1000 / targetFps;
+    if (now - lastRenderedAt < minFrameMs * 0.9) {
+      requestAnimationFrame(tick);
+      return;
+    }
+    lastRenderedAt = now;
     updateTargetState(now);
     const background = sourceByState[currentState]?.background || sourceByState.idle.background;
     ctx.fillStyle = background;

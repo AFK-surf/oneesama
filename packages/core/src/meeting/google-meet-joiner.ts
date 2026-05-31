@@ -418,9 +418,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       disableLive2D: Boolean(input.disableLive2D),
       deferRendererUntilExplicitStart:
         input.deferAvatarRendererUntilJoined !== false && installAvatar,
-      canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1920),
-      canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 1080),
-      captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 30),
+      canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1280),
+      canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 720),
+      captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 24),
     };
     if (String(requestedAvatarRenderer || "").toLowerCase() === "video" && installAvatar) {
       const loadInlineVideoSource = async (relativePath: string) => {

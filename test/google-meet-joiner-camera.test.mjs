@@ -91,6 +91,24 @@ test("Realtime Meet joins keep local playback unmuted for audio capture by defau
   );
 });
 
+test("Meet avatar camera defaults avoid 1080p chroma-key CPU burn", async () => {
+  const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+  const envSource = await readFile("packages/core/src/env.ts", "utf8");
+
+  assert.ok(
+    source.includes("config.avatarCanvasWidth || 1280"),
+    "Meet avatar canvas should default to the native 720p video asset width",
+  );
+  assert.ok(
+    source.includes("config.avatarCanvasHeight || 720"),
+    "Meet avatar canvas should default to the native 720p video asset height",
+  );
+  assert.ok(
+    envSource.includes("MAB_AVATAR_CAPTURE_FPS || 24"),
+    "video avatar capture should default to the source asset frame rate",
+  );
+});
+
 test("Realtime Recappi Meet joins keep raw audio on native server VAD", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
 

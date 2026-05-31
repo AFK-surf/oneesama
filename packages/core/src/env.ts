@@ -184,9 +184,9 @@ export function getRuntimeConfig(env = process.env) {
     avatarVideoIdlePath: env.MAB_AVATAR_VIDEO_IDLE_PATH || DEFAULT_VIDEO_IDLE_PATH,
     avatarVideoSpeakingPath: env.MAB_AVATAR_VIDEO_SPEAKING_PATH || DEFAULT_VIDEO_SPEAKING_PATH,
     avatarLayout: env.MAB_AVATAR_LAYOUT || "face",
-    avatarCanvasWidth: Number(env.MAB_AVATAR_CANVAS_WIDTH || 1920),
-    avatarCanvasHeight: Number(env.MAB_AVATAR_CANVAS_HEIGHT || 1080),
-    avatarCaptureFps: Number(env.MAB_AVATAR_CAPTURE_FPS || 30),
+    avatarCanvasWidth: Number(env.MAB_AVATAR_CANVAS_WIDTH || 1280),
+    avatarCanvasHeight: Number(env.MAB_AVATAR_CANVAS_HEIGHT || 720),
+    avatarCaptureFps: Number(env.MAB_AVATAR_CAPTURE_FPS || 24),
     avatarUseSwiftShader: ["1", "true", "yes"].includes(
       String(env.MAB_AVATAR_USE_SWIFTSHADER || "").toLowerCase(),
     ),
