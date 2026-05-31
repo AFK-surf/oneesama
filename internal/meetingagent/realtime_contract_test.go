@@ -118,6 +118,9 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"observe -> plan -> act -> verify",
 		"status queued or running",
 		"Do not claim completion",
+		"Screen-share action mandate:",
+		"first action in that turn must be list_shareable_windows or share_existing_app_window",
+		"Do not answer that a window list is processing",
 	} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("instructions missing %q:\n%s", want, instructions)

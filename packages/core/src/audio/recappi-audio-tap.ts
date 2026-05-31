@@ -115,16 +115,29 @@ async function findChromiumAudioPid(
       const matchedApps = chromiumApps.filter((app) =>
         cdpPids.has(Number(app.processId || app.pid)),
       );
-      const matchedApp = matchedApps.find((app) => !isHelperApp(app)) || matchedApps[0];
+      const matchedHelperApp = matchedApps.find(isHelperApp);
+      const matchedApp = matchedApps.find((app) => !isHelperApp(app));
       if (matchedApp?.processId || matchedApp?.pid) {
         return Number(matchedApp.processId || matchedApp.pid);
+      }
+      if (matchedHelperApp?.processId || matchedHelperApp?.pid) {
+        log(
+          `Ignoring Recappi Chromium helper pid ${matchedHelperApp.processId || matchedHelperApp.pid}; using global fallback if no app PID is available`,
+        );
       }
 
       const browserProc = (processInfo || []).find((p) => p.type === "browser");
       const browserPid = Number(browserProc?.id || 0);
       if (browserPid && shareableContent.applicationWithProcessId) {
         const app = shareableContent.applicationWithProcessId(browserPid);
-        if (app?.processId || app?.pid) return Number(app.processId || app.pid);
+        if ((app?.processId || app?.pid) && !isHelperApp(app)) {
+          return Number(app.processId || app.pid);
+        }
+        if (app?.processId || app?.pid) {
+          log(
+            `Ignoring Recappi browser process lookup because it resolved to helper pid ${app.processId || app.pid}; using global fallback if no app PID is available`,
+          );
+        }
       }
 
       const audio = (processInfo || []).find((p) => p.type === "audio.mojom.AudioService");

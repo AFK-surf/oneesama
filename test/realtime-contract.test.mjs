@@ -131,6 +131,9 @@ test("Realtime contract keeps short voice checks and self-introductions on topic
   assert.match(session.instructions, /Chinese share intent has priority over arithmetic/);
   assert.match(session.instructions, /“共享一下”/);
   assert.match(session.instructions, /“Pencil 这个 app”/);
+  assert.match(session.instructions, /Screen-share action mandate:/);
+  assert.match(session.instructions, /first action in that turn must be list_shareable_windows or share_existing_app_window/);
+  assert.match(session.instructions, /Do not answer that a window list is processing/);
 });
 
 test("Realtime contract exposes product identity resolver tool", () => {

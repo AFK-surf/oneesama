@@ -43,6 +43,41 @@ test("Recappi audio tap never uses the CDP audio-service PID as an app PID", asy
   assert.equal(status.source, "recappi_global_audio");
 });
 
+test("Recappi audio tap rejects helper apps that match the CDP audio-service PID", async () => {
+  const tapped = [];
+  const shareableContent = {
+    applications: () => [
+      {
+        processId: 333,
+        name: "Google Chrome for Testing Helper",
+        bundleIdentifier: "com.google.ChromeForTesting.helper",
+      },
+    ],
+    applicationWithProcessId: () => null,
+    tapAudio: (pid) => {
+      tapped.push({ type: "app", pid });
+      return { sampleRate: 44100, channels: 2, stop: () => {} };
+    },
+    tapGlobalAudio: () => {
+      tapped.push({ type: "global" });
+      return { sampleRate: 44100, channels: 2, stop: () => {} };
+    },
+  };
+  const tap = createRecappiAudioTap({ shareableContent, log: () => {} });
+
+  const status = await tap.start({
+    context: fakeContext([
+      { type: "browser", id: 999 },
+      { type: "audio.mojom.AudioService", id: 333 },
+    ]),
+    allowGlobalFallback: true,
+  });
+
+  assert.deepEqual(tapped, [{ type: "global" }]);
+  assert.equal(status.source, "recappi_global_audio");
+  assert.equal(status.processId, 0);
+});
+
 test("Recappi audio tap uses a Recappi app PID when it matches the browser process", async () => {
   const tapped = [];
   const shareableContent = {
