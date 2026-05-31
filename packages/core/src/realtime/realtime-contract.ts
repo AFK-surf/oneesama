@@ -179,19 +179,18 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "control_shared_app_window",
     description:
-      "Operate the currently shared existing macOS app/window through the host Computer Use executor. Use when the user asks you to click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle a stuck Chrome/browser window, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. Treat Chinese shorthand such as “你用电脑控制”, “你来操作”, “切到第三个账号”, “在搜索框输入”, and “处理 Chrome 卡住” as app-control requests even when the target app is implied by the current shared window. This tool operates the bot host's shared window, not the human's personal computer. Pass the user's goal as instruction; the host executor owns the observe -> plan -> act -> verify loop, including unfamiliar apps. By default this queues the app-control work asynchronously and returns a job_id immediately so voice turns do not block; call again with job_id to check status. Do not invent click/drag primitives in the foreground Realtime turn, do not ask the user to share/control their own computer, and do not use this to create a new browser workspace.",
+      "Operate the currently shared existing macOS app/window through the host Computer Use executor. Use when the user asks you to click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle a stuck Chrome/browser window, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. Treat Chinese shorthand such as “你用电脑控制”, “你来操作”, “切到第三个账号”, “在搜索框输入”, and “处理 Chrome 卡住” as app-control requests. If the app/window target is implicit, unknown, or only described by the currently shared window, still call this tool with the user's goal in instruction and leave target fields null; the backend resolves the active share or returns a blocker. This tool operates the bot host's shared window, not the human's personal computer. Pass the user's goal as instruction; the host executor owns the observe -> plan -> act -> verify loop, including unfamiliar apps. By default this queues the app-control work asynchronously and returns a job_id immediately so voice turns do not block; call again with job_id to check status. Do not invent click/drag primitives in the foreground Realtime turn, do not ask the user to share/control their own computer, and do not use this to create a new browser workspace.",
     parameters: {
       type: "object",
       properties: {
         job_id: {
           type: "string",
-          description:
-            "Existing app-control job id to check. When set, instruction and operations are not required.",
+          description: "Existing app-control job id to check. When set, instruction is not required.",
         },
         instruction: {
           type: "string",
           description:
-            "Concrete user-facing operation to perform in the shared app/window. Preserve important wording. Optional when operations fully describe the action.",
+            "Concrete user-facing operation to perform in the shared app/window. Preserve important wording; for implicit targets, put the full user goal here.",
         },
         applicationName: {
           type: "string",
@@ -215,44 +214,7 @@ const rawRealtimeToolSchemas = [
           type: "integer",
           description: "Optional process id from list_shareable_windows.",
         },
-        operations: {
-          type: "array",
-          description:
-            "Optional low-level app-control operations for debug, harnesses, or direct-adapter cases. Prefer instruction-only user goals so the host executor can observe, plan, act, and verify internally.",
-          items: {
-            type: "object",
-            properties: {
-              kind: {
-                type: "string",
-                enum: ["state", "click", "type_text", "press_key", "scroll", "drag"],
-              },
-              text: { type: "string", description: "Text to type for type_text." },
-              key: {
-                type: "string",
-                description:
-                  "Key name for press_key, e.g. Return, Tab, Escape, Space, ArrowUp, or a single character.",
-              },
-              direction: { type: "string", enum: ["up", "down", "left", "right"] },
-              x: { type: "number", description: "Window-local x coordinate for click." },
-              y: { type: "number", description: "Window-local y coordinate for click." },
-              from_x: { type: "number", description: "Window-local drag start x coordinate." },
-              from_y: { type: "number", description: "Window-local drag start y coordinate." },
-              to_x: { type: "number", description: "Window-local drag end x coordinate." },
-              to_y: { type: "number", description: "Window-local drag end y coordinate." },
-            },
-            required: ["kind"],
-          },
-        },
         session_id: { type: "string", description: "Current meeting session id when known." },
-        timeoutMs: {
-          type: "integer",
-          description: "Maximum time for the queued backend task, not for the Realtime tool call.",
-          default: 2000,
-        },
-        wait: {
-          type: "boolean",
-          default: false,
-        },
       },
       required: [],
     },

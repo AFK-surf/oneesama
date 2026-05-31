@@ -176,30 +176,21 @@ test("Realtime contract exposes application share tools", () => {
   assert.equal(control.strict, undefined);
   assert.equal(control.parameters.additionalProperties, false);
   assert.ok(control.parameters.required.includes("instruction"));
-  assert.ok(control.parameters.required.includes("operations"));
   assert.match(control.description, /Computer Use/);
   assert.match(control.description, /bot host's shared window/);
   assert.match(control.description, /not the human's personal computer/);
   assert.match(control.description, /switch accounts/);
+  assert.match(control.description, /still call this tool/);
+  assert.match(control.description, /leave target fields null/);
   assert.match(control.description, /在搜索框输入/);
   assert.match(control.description, /queues the app-control work asynchronously/);
   assert.match(control.description, /observe -> plan -> act -> verify/);
   assert.match(control.description, /Do not invent click\/drag primitives/);
   assert.deepEqual(control.parameters.properties.job_id.type, ["string", "null"]);
-  assert.equal(control.parameters.properties.wait.default, false);
-  assert.deepEqual(control.parameters.properties.operations.type, ["array", "null"]);
-  assert.match(
-    control.parameters.properties.operations.description,
-    /Optional low-level app-control operations/,
-  );
-  assert.equal(control.parameters.properties.operations.items.additionalProperties, false);
-  assert.ok(control.parameters.properties.operations.items.required.includes("kind"));
-  assert.ok(control.parameters.properties.operations.items.properties.kind.enum.includes("drag"));
-  assert.ok(
-    !control.parameters.properties.operations.items.properties.kind.enum.includes(
-      "perform_secondary_action",
-    ),
-  );
+  assert.deepEqual(control.parameters.properties.instruction.type, ["string", "null"]);
+  assert.equal(control.parameters.properties.operations, undefined);
+  assert.equal(control.parameters.properties.wait, undefined);
+  assert.equal(control.parameters.properties.timeoutMs, undefined);
 });
 
 test("Realtime tool schemas are strict-compatible", () => {
