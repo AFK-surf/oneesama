@@ -148,7 +148,7 @@ test("Realtime contract keeps short voice checks and self-introductions on topic
   assert.match(session.instructions, /call control_shared_app_window/);
   assert.match(
     session.instructions,
-    /Never satisfy an app-control request with a visual avatar-state\/HUD update alone/,
+    /Never satisfy an app-control request with a visual\/HUD-only update/,
   );
   assert.match(session.instructions, /Do not tell the human to share Chrome to you/);
 });
@@ -200,9 +200,8 @@ test("Realtime tool schemas are strict-compatible", () => {
   }
 });
 
-test("Realtime tool descriptions fence off visual and delegation tools", () => {
+test("Realtime tool descriptions fence off delegation tools", () => {
   const worker = realtimeToolSchemas.find((tool) => tool.name === "delegate_to_worker");
-  const avatarState = realtimeToolSchemas.find((tool) => tool.name === "update_avatar_state");
 
   assert.match(worker.description, /external workspace lookup/);
   assert.match(worker.description, /后台任务/);
@@ -213,12 +212,6 @@ test("Realtime tool descriptions fence off visual and delegation tools", () => {
   assert.match(workerStatus.description, /codex 那个活儿/);
   assert.match(workerStatus.parameters.properties.jobId.description, /latest or previous/);
   assert.match(meetChat.description, /会议聊天/);
-  assert.match(avatarState.description, /Visual-only avatar\/HUD control/);
-  assert.match(avatarState.description, /call the correct functional tool first/);
-  assert.match(
-    avatarState.parameters.properties.status_text.description,
-    /Do not include internal logs, tool names, backend names, or secrets/,
-  );
 });
 
 test("Realtime foreground tool surface hides unwired and legacy fine-grained tools", () => {
@@ -238,6 +231,7 @@ test("Realtime foreground tool surface hides unwired and legacy fine-grained too
     "memory_read",
     "set_avatar_expression",
     "set_avatar_action",
+    "update_avatar_state",
   ]) {
     assert.equal(names.has(hidden), false, `${hidden} should stay behind the foreground surface`);
   }

@@ -85,19 +85,14 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 		t.Fatalf("instructions leaked identity/mechanism details: %q", instructions)
 	}
 	tools := body["tools"].([]any)
-	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "share_existing_app_window", "control_shared_app_window", "update_avatar_state", "resolve_speaker_identity") {
+	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "share_existing_app_window", "control_shared_app_window", "resolve_speaker_identity") {
 		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
 	}
 	if toolNamesInclude(tools, "list_shareable_apps", "present_app_share", "start_demo_surface", "start_demo_execution") {
 		t.Fatalf("tools = %#v, realtime foreground must not expose legacy/ambiguous screen-share tools", body["tools"])
 	}
-	updateAvatarState := toolByName(tools, "update_avatar_state")
-	updateParams := updateAvatarState["parameters"].(map[string]any)
-	updateProperties := updateParams["properties"].(map[string]any)
-	statusKind := updateProperties["status_kind"].(map[string]any)
-	if !containsAnyString(statusKind["enum"].([]any), "writing_code") ||
-		updateProperties["status_text"] == nil {
-		t.Fatalf("update_avatar_state schema = %#v, want visual status HUD fields", updateAvatarState)
+	if toolNamesInclude(tools, "update_avatar_state", "set_avatar_expression", "set_avatar_action") {
+		t.Fatalf("tools = %#v, visual-only avatar tools must not steal foreground functional requests", body["tools"])
 	}
 	if toolNamesInclude(tools, "open_shared_browser_surface", "create_shared_workspace", "stop_shared_browser_surface") {
 		t.Fatalf("tools = %#v, demo surface tools must stay hidden when default-off", body["tools"])

@@ -180,14 +180,6 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"meet_url": stringSchema("Google Meet URL. Defaults to the current meeting when omitted."),
 		})),
 		realtimeTool("now", "Return the current date/time in Asia/Shanghai.", objectSchema(nil, map[string]realtimeJSONSchema{})),
-		realtimeTool("update_avatar_state", "Visual-only avatar/HUD control: set mood/action and optional on-frame status. This never shares windows, controls apps, delegates work, searches, checks worker status, reads chat, changes browser/workspace state, or satisfies app-control/share/GitHub/Linear/meeting-chat/delegation requests. For app/window share, click, type, draw, scroll, switch-account, stuck-browser, code, research, status, search, or task lookup requests, call the correct functional tool first; use this only as visual progress if useful.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"mood":           enumStringSchema("", "neutral", "happy", "surprised", "thinking", "sad", "shy"),
-			"action":         enumStringSchema("", "idle", "nod", "shake", "wave", "think", "lean_forward", "emphasize", "shrug", "speak"),
-			"intensity":      numberSchema("0.2 to 1.2 is the normal visible range."),
-			"status_text":    stringSchema("Short visual-only status shown on the avatar video frame, e.g. 'Thinking' or 'Working'. Do not include internal logs, tool names, backend names, or secrets."),
-			"status_kind":    enumStringSchema("thinking", "thinking", "writing_code", "opening_preview", "blocked", "done", "idle"),
-			"status_hold_ms": integerSchema("How long to keep the visual status visible.", float64(12000)),
-		})),
 	}
 }
 

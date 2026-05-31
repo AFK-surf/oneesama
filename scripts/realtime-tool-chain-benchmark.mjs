@@ -7,6 +7,7 @@ import { WebSocket } from "ws";
 const DEFAULT_FIXTURE = "scripts/fixtures/realtime-tool-chain-cases.json";
 const DEFAULT_AGENT_URL = "http://127.0.0.1:8781";
 const DEFAULT_TIMEOUT_MS = 35_000;
+const DEFAULT_RETRIES = 2;
 
 function parseArgs(argv) {
   const args = {
@@ -16,6 +17,7 @@ function parseArgs(argv) {
     caseFilter: "",
     iterations: 1,
     timeoutMs: DEFAULT_TIMEOUT_MS,
+    retries: DEFAULT_RETRIES,
     jsonOut: "",
     reportOnly: false,
   };
@@ -27,6 +29,7 @@ function parseArgs(argv) {
     else if (arg === "--case-filter") args.caseFilter = argv[++i];
     else if (arg === "--iterations") args.iterations = Number(argv[++i]);
     else if (arg === "--timeout-ms") args.timeoutMs = Number(argv[++i]);
+    else if (arg === "--retries") args.retries = Number(argv[++i]);
     else if (arg === "--json-out") args.jsonOut = argv[++i];
     else if (arg === "--report-only") args.reportOnly = true;
     else if (arg === "--help" || arg === "-h") {
@@ -40,6 +43,8 @@ function parseArgs(argv) {
   args.iterations = Number.isFinite(args.iterations) && args.iterations > 0 ? args.iterations : 1;
   args.timeoutMs =
     Number.isFinite(args.timeoutMs) && args.timeoutMs > 0 ? args.timeoutMs : DEFAULT_TIMEOUT_MS;
+  args.retries =
+    Number.isFinite(args.retries) && args.retries >= 0 ? args.retries : DEFAULT_RETRIES;
   return args;
 }
 
@@ -53,6 +58,7 @@ Options:
   --case-filter <regex>         Run matching case ids only
   --iterations <n>              Runs per case (default: 1)
   --timeout-ms <n>              Per Realtime response timeout (default: ${DEFAULT_TIMEOUT_MS})
+  --retries <n>                 Retry transport/connect failures only (default: ${DEFAULT_RETRIES})
   --json-out <path>             Write structured report
   --report-only                 Always exit 0 after writing the report
 `);
@@ -81,6 +87,39 @@ async function fetchJson(url, options = {}) {
     throw new Error(`HTTP ${response.status} ${url}: ${text.slice(0, 400)}`);
   }
   return body;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function collectErrorText(error, parts = []) {
+  if (!error) return parts;
+  parts.push(String(error?.message || error));
+  if (error.code) parts.push(String(error.code));
+  if (error.cause && error.cause !== error) collectErrorText(error.cause, parts);
+  return parts;
+}
+
+function isRetryableTransportError(error) {
+  const text = collectErrorText(error).join(" ").toLowerCase();
+  if (/\bhttp\s+(500|502|503|504)\b/i.test(text)) return true;
+  return [
+    "client network socket disconnected",
+    "fetch failed",
+    "socket hang up",
+    "econnreset",
+    "etimedout",
+    "eai_again",
+    "enotfound",
+    "tls",
+    "und_err_connect_timeout",
+    "terminated",
+  ].some((needle) => text.includes(needle));
+}
+
+function retryDelayMs(attempt) {
+  return Math.min(2_500, 500 * 2 ** Math.max(0, attempt - 1));
 }
 
 function pickTools(allTools, variant) {
@@ -300,6 +339,24 @@ async function runCase(args, config, variant, tools, testCase, iteration) {
   return rows;
 }
 
+async function runCaseWithRetries(args, config, variant, tools, testCase, iteration) {
+  let lastError;
+  for (let attempt = 1; attempt <= args.retries + 1; attempt += 1) {
+    try {
+      const rows = await runCase(args, config, variant, tools, testCase, iteration);
+      for (const row of rows) {
+        row.attempts = attempt;
+      }
+      return rows;
+    } catch (error) {
+      lastError = error;
+      if (attempt > args.retries || !isRetryableTransportError(error)) break;
+      await sleep(retryDelayMs(attempt));
+    }
+  }
+  throw lastError;
+}
+
 function summarizeVariant(variant, rows) {
   const passed = rows.filter((row) => row.ok).length;
   const recall = rows.length ? passed / rows.length : 1;
@@ -308,6 +365,8 @@ function summarizeVariant(variant, rows) {
     stepPassed: passed,
     stepTotal: rows.length,
     recall,
+    retriedRows: rows.filter((row) => row.attempts > 1).length,
+    maxAttempts: Math.max(1, ...rows.map((row) => row.attempts || 1)),
     minStepRecall: Number(variant.minStepRecall ?? 1),
   };
 }
@@ -334,6 +393,7 @@ async function main() {
     toolCount: allTools.length,
     fixture: args.fixture,
     iterations: args.iterations,
+    retries: args.retries,
     variants: [],
   };
   for (const variant of selectedVariants) {
@@ -342,12 +402,15 @@ async function main() {
     for (const testCase of selectedCases) {
       for (let iteration = 1; iteration <= args.iterations; iteration += 1) {
         try {
-          rows.push(...(await runCase(args, config, variant, tools, testCase, iteration)));
+          rows.push(
+            ...(await runCaseWithRetries(args, config, variant, tools, testCase, iteration)),
+          );
         } catch (error) {
           rows.push({
             id: testCase.id,
             iteration,
             step: 0,
+            attempts: args.retries + 1,
             ok: false,
             calls: [],
             expectedToolNames: [],
@@ -376,19 +439,20 @@ async function main() {
 
 function printReport(report) {
   console.log(
-    `Realtime tool chain benchmark: model=${report.model} tools=${report.toolCount} iterations=${report.iterations}`,
+    `Realtime tool chain benchmark: model=${report.model} tools=${report.toolCount} iterations=${report.iterations} retries=${report.retries}`,
   );
   for (const variant of report.variants) {
     const { summary } = variant;
     console.log(
-      `\n${summary.ok ? "PASS" : "FAIL"} ${variant.name}: steps ${summary.stepPassed}/${summary.stepTotal} (${summary.recall.toFixed(2)}), tools=${variant.toolCount}`,
+      `\n${summary.ok ? "PASS" : "FAIL"} ${variant.name}: steps ${summary.stepPassed}/${summary.stepTotal} (${summary.recall.toFixed(2)}), retried=${summary.retriedRows}, maxAttempts=${summary.maxAttempts}, tools=${variant.toolCount}`,
     );
     for (const row of variant.cases) {
       const errors = row.errors.length
         ? ` errors=${row.errors.map((entry) => entry.message).join(" | ")}`
         : "";
+      const attempts = row.attempts > 1 ? ` attempts=${row.attempts}` : "";
       console.log(
-        `  ${row.ok ? "ok " : "BAD"} ${row.id}#${row.iteration}.${row.step}: calls=[${row.calls.join(",") || "none"}] want=${row.expectedToolNames.join("/")}${errors}`,
+        `  ${row.ok ? "ok " : "BAD"} ${row.id}#${row.iteration}.${row.step}: calls=[${row.calls.join(",") || "none"}] want=${row.expectedToolNames.join("/")}${attempts}${errors}`,
       );
     }
   }

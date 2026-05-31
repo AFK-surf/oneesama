@@ -111,7 +111,7 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"Do not say internal control-plane status",
 		"Do not announce what you are about to do",
 		"Do not proactively offer capabilities",
-		"prefer the visual channel",
+		"Runtime video/HUD state is driven by audio/tool/job telemetry",
 		"If the user says stop planning",
 		"Ignore obvious self-echo",
 		"Do not invent click/drag primitives",
@@ -126,7 +126,7 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"这台 Mac mini",
 		"“你用电脑控制”",
 		"call control_shared_app_window",
-		"Never satisfy an app-control request with a visual avatar-state/HUD update alone",
+		"Never satisfy an app-control request with a visual/HUD-only update",
 		"Do not tell the human to share Chrome to you",
 	} {
 		if !strings.Contains(instructions, want) {

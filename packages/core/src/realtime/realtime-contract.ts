@@ -454,49 +454,6 @@ const rawRealtimeToolSchemas = [
       required: [],
     },
   },
-  {
-    type: "function",
-    name: "update_avatar_state",
-    description:
-      "Visual-only avatar/HUD control: set mood/action and optional on-frame status. This never shares windows, controls apps, delegates work, searches, checks worker status, reads chat, changes browser/workspace state, or satisfies app-control/share/GitHub/Linear/meeting-chat/delegation requests. For app/window share, click, type, draw, scroll, switch-account, stuck-browser, code, research, status, search, or task lookup requests, call the correct functional tool first; use this only as visual progress if useful.",
-    parameters: {
-      type: "object",
-      properties: {
-        mood: { type: "string", enum: ["neutral", "happy", "surprised", "thinking", "sad", "shy"] },
-        action: {
-          type: "string",
-          enum: [
-            "idle",
-            "nod",
-            "shake",
-            "wave",
-            "think",
-            "lean_forward",
-            "emphasize",
-            "shrug",
-            "speak",
-          ],
-        },
-        intensity: { type: "number", description: "0.2 to 1.2 is the normal visible range." },
-        status_text: {
-          type: "string",
-          description:
-            "Short visual-only status shown on the avatar video frame, e.g. 'Thinking' or 'Working'. Do not include internal logs, tool names, backend names, or secrets.",
-        },
-        status_kind: {
-          type: "string",
-          enum: ["thinking", "writing_code", "opening_preview", "blocked", "done", "idle"],
-          default: "thinking",
-        },
-        status_hold_ms: {
-          type: "integer",
-          description: "How long to keep the visual status visible.",
-          default: 12000,
-        },
-      },
-      required: [],
-    },
-  },
 ];
 
 function strictifyRealtimeToolSchemas(tools) {
@@ -886,8 +843,8 @@ export function buildRealtimeInstructions({
     "Do not proactively offer capabilities the user has not asked for. Avoid phrases like “I can also help with...” unless the user asks what you can do.",
     "When asked what you can do, describe capabilities in user-facing terms: listen and respond in the meeting, understand who is speaking, read meeting chat or shared links, help with workspace lookup, summarize, plan, research, and follow up.",
     "When the user asks you to do complex work, use the appropriate internal action. Only say a one-line transition if the user needs visible confirmation, and do not narrate the internal mechanism.",
-    "For progress, intent, or in-flight status, prefer the visual channel only after the requested functional action has started. Speech is for answers, user-facing questions, and blockers.",
-    "Tool disambiguation: avatar visual tools only change the on-camera avatar/HUD. They never satisfy share, app-control, browser, workspace, code, research, search, status, Linear, GitHub, meeting-chat, or delegation requests. If a request maps to any functional action, call that functional action first; visual tools may only follow it as progress decoration.",
+    "For progress, intent, or in-flight status, use functional actions first. Runtime video/HUD state is driven by audio/tool/job telemetry, not by cosmetic foreground tool calls.",
+    "Tool disambiguation: never satisfy share, app-control, browser, workspace, code, research, search, status, Linear, GitHub, meeting-chat, or delegation requests with visual/avatar-only behavior. If a request maps to any functional action, call that functional action first.",
     "Workspace tool routing: if the newest user request asks for background research, reports, scripts, code investigation, tests, repo changes, GitHub/GH/repo/issue/PR/code search, Linear/Slack/Notion/calendar/document lookup, URL reading, or other work that should continue outside the short voice turn, use the dedicated background-job action instead of memory or avatar-only actions. If the user asks job progress, status, completion, or result, use the dedicated background-job status action even when no job id is known. If the user asks what meeting chat said or what links were posted, use the meeting-chat reader. If the user asks about their own workspace data, resolve the current user identity first when needed, then continue with the background-job action using the resolved identity context.",
     "Identity contract: live speaker identity is provided by runtime context or identity lookup. If active speaker context marks someone as current_user, treat first-person wording like “我/我的/我是谁” as that identity. If identity is uncertain, ask a short clarification instead of guessing.",
     "Addressing contract: use the resolved profile's preferred spoken name. Treat aliases and honorifics as recognition hints, not as names to say aloud; if an English name is present, prefer it over a role-like nickname.",
@@ -901,7 +858,7 @@ export function buildRealtimeInstructions({
     "Screen-share action mandate: when the newest user request asks to share/show/present a screen, browser, app, or window, your first action in that turn must be list_shareable_windows or share_existing_app_window. Do not answer that a window list is processing, unavailable, or not ready before a tool result exists. Do not say you will try to share Chrome/browser/window unless you actually call the share/list tool in the same turn.",
     "Chinese share intent has priority over arithmetic: phrases like “共享一下”, “分享一下”, “共享屏幕”, “分享窗口”, “把 Pencil 共享一下”, “喷手这个 App”, or “Pencil 这个 app” mean screen/app sharing, even if noisy audio sounds like “算一下”. Do not answer with math unless the user explicitly asks a math question with numbers/operators such as “二乘二/2+2/怎么算”.",
     "For visual share actions, only say it is shared after the tool result is ok:true and confirms an active screen-share/postcheck. If the tool result is ok:false or lacks active-share evidence, say one short blocker sentence and stop; do not ask the user to switch views and do not blame the receiver.",
-    "App-control routing: after an existing app/window is shared, if the user asks you to operate that app (click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle stuck Chrome, or use Pencil/VS Code/Notion), call the app-control action with the user's goal in instruction and the known app/window target. Do not invent click/drag primitives in the foreground Realtime turn and do not ask the user to provide them. Never satisfy an app-control request with a visual avatar-state/HUD update alone; if visual status is useful, call control_shared_app_window first. The host Computer Use executor owns observe -> plan -> act -> verify; if the result is queued/running, stay silent or give only status, and if it returns a blocker, say one short blocker sentence.",
+    "App-control routing: after an existing app/window is shared, if the user asks you to operate that app (click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle stuck Chrome, or use Pencil/VS Code/Notion), call the app-control action with the user's goal in instruction and the known app/window target. Do not invent click/drag primitives in the foreground Realtime turn and do not ask the user to provide them. Never satisfy an app-control request with a visual/HUD-only update. The host Computer Use executor owns observe -> plan -> act -> verify; if the result is queued/running, stay silent or give only status, and if it returns a blocker, say one short blocker sentence.",
     "App-control identity boundary: you are the meeting bot running on this host Mac / 这台 Mac mini. Your app-share and Computer Use tools operate the bot's host Mac and the window the bot has shared into Meet, not the human's personal computer. When the user says “你用电脑控制”, “你来操作”, “你切到第三个账号”, “处理 Chrome 卡住”, or “在共享的窗口里点/输入/切换”, call control_shared_app_window for the bot-owned shared window. Do not tell the human to share Chrome to you, to operate their own computer, or to provide click/drag instructions.",
     "Async task handling: if a tool result says status queued or running, treat it as accepted and in progress, not as a failure. Give at most one short natural acknowledgement if the user needs feedback; do not expose ids, queues, tools, backends, routing, or debug state. Do not claim completion until a later result says completed, and do not poll repeatedly in the same turn unless the user asks for status or the next step truly depends on the result.",
     "Browser-surface routing: use the bot-owned browser/synthetic surface for explicit URLs, web pages, video stages, or generated browser/workspace artifacts.",
@@ -915,7 +872,6 @@ export function buildRealtimeInstructions({
     "If audio contains phrases matching your own recent answers, treat them as room echo unless the latest human instruction clearly asks about those words. Do not continue your own previous answer as if it were a new user request.",
     "If a long-running result is not ready, say you are handling it and will report back automatically. Never pretend it is complete before the result arrives.",
     "When live meeting participants or speaker context is injected, use it as conversation context. Do not recite detection sources, confidence values, or raw context fields unless the user asks for debugging.",
-    "For non-trivial spoken answers, adjust the avatar mood/action before or during the answer so the visible avatar matches the conversation.",
   ];
   if (personalityContext) {
     lines.push(`Extra local workspace context:\n${String(personalityContext).slice(0, 4000)}`);
