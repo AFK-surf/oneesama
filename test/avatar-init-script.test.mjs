@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import { getRuntimeConfig } from "../packages/core/src/env.ts";
 import { buildAvatarInitScript } from "../packages/core/src/avatar/init-script-builder.ts";

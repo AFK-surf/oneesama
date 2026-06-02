@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 import { chromium } from "playwright";
 import { createAvatarPlaygroundServer } from "../packages/core/src/avatar-runtime/avatar-playground.ts";
 

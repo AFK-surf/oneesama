@@ -59,7 +59,7 @@
 
 ## Acceptance Criteria
 
-- [x] A developer can clone the repo and run `npm run doctor`.
+- [x] A developer can clone the repo and run `vp run doctor`.
 - [x] A developer can run Slack Agent and Meeting Agent locally without internal workspace credentials.
 - [x] A mocked Slack command can create a meeting session record.
 - [x] Slack Agent can hand off that session to Meeting Agent locally.
@@ -103,7 +103,7 @@
 ## Full Replacement Criteria
 
 - [ ] Real Slack Agent D parity: Slack app command/event flow, persistent workspace sessions, permissions, status reporting. Current slice covers signed slash-command HTTP semantics, parser/signature/command contract matrix, local JSON persistence, low-side-effect live bot-key capability checks, isolated Socket Mode event-loop smoke, and mock/live `chat.postMessage` result posting seam, not full OAuth/permissions cutover.
-- [ ] Real Meet D parity: non-dry-run Google Meet join, single-bot lifecycle guard, diagnostics, stop/rejoin behavior. Current slice covers local fixture non-dry-run join, stricter Meet contract matrix, lifecycle, diagnostics, participant audio seam, and optional real-room smoke through `MAB_REAL_MEET_URL npm run smoke:real-meet`. Full production acceptance still needs a scheduled room with waiting-room/admit policy and real Realtime speech.
+- [ ] Real Meet D parity: non-dry-run Google Meet join, single-bot lifecycle guard, diagnostics, stop/rejoin behavior. Current slice covers local fixture non-dry-run join, stricter Meet contract matrix, lifecycle, diagnostics, participant audio seam, and optional real-room smoke through `MAB_REAL_MEET_URL vp run smoke:real-meet`. Full production acceptance still needs a scheduled room with waiting-room/admit policy and real Realtime speech.
 - [ ] Realtime/dialog parity: browser WebRTC audio bridge, interrupt/repeat protection, model/tool state reflected in Hiyori. Current slice covers the browser connection/data-channel seam in mock mode, session.update tool registration, participant audio discovery, a mock remote-audio route into the avatar fake mic bus, duplicate worker-result suppression, user-speech response cancellation, avatar mood/action tool state, local dialog provider -> TTS provider audio buffer -> fake mic -> Hiyori `speak` action, an optional true Hiyori Live2D pixel smoke, and optional real Realtime smokes; real participant speech STT acceptance still remains open.
 - [ ] Worker parity: complex requests delegate to a user-selected provider, report in Slack, and are spoken in meeting when ready. Current slice covers dry-run/Codex/Claude Code/Ollama/Slack Agent D bridge/command/HTTP provider selection, local-dialog provider responses spoken through the fake mic seam, browser-side polling/delivery, model-style `delegate_to_worker` / `worker_status` calls for Realtime-compatible providers, data-channel-shaped event creation, and Slack-side polling/formatting/posting/deduplication of completed Meeting Agent jobs; production TTS/STT provider and live Slack token acceptance remain open.
 - [ ] Shadow-mode parity: new repo matches or beats the existing stack on the same demo checklist. Current slice has cutover feature flags, report plumbing, fixture-level old/new control-plane comparison, side-effect-free receiver, and env-gated transmitter hook; old Slack Agent D hook wiring and real old/new stack comparison remain open.

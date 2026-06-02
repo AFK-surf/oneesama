@@ -20,7 +20,7 @@ The registry lives in:
 Local smoke:
 
 ```bash
-npm run smoke:slack-tool-registry
+vp run smoke:slack-tool-registry
 ```
 
 The smoke exercises the generic `slack_api` proxy against a mock Slack Web API
@@ -70,7 +70,7 @@ Agent now creates that table family through `MAB_SLACK_DOMAIN_STORE=1` and
 Smoke:
 
 ```bash
-npm run smoke:slack-domain-store
+vp run smoke:slack-domain-store
 ```
 
 Runtime inspection:
@@ -128,7 +128,7 @@ MAB_SLACK_TRIAGE_HEURISTIC_FALLBACK=1
 Smoke:
 
 ```bash
-npm run smoke:slack-triage-flow
+vp run smoke:slack-triage-flow
 ```
 
 Runtime inspection:

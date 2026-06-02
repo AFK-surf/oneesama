@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import {
   buildChecks,

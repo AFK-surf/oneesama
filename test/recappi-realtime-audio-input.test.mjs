@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import { createRecappiRealtimeAudioInput } from "../packages/core/src/meeting/recappi-realtime-audio-input.ts";
 

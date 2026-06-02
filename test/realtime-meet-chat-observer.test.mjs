@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 import { chromium } from "playwright";
 
 import { readBrowserInitSource } from "../packages/core/src/browser-init-source.ts";

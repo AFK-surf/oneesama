@@ -128,10 +128,10 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 
 - [ ] `id`
 - [ ] `kind`: `person_profile | team_fact | team_decision | team_action |
-  episode | worker_result | foreground_identity | lesson`
+episode | worker_result | foreground_identity | lesson`
 - [ ] `subject`: canonical person/project/team/entity key
 - [ ] `scope`: `foreground | worker | slack | meet | channel | thread |
-  person | team`
+person | team`
 - [ ] `applies_to`: list of surfaces or entities this fact can be used for
 - [ ] `do_not_generalize_to`: explicit negative scope list
 - [ ] `content`
@@ -140,7 +140,7 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 - [ ] `trust`: numeric 0-1 plus `trust_reason`
 - [ ] `staleness`: `fresh | aging | stale | expired` plus age days
 - [ ] `status`: `active | candidate | superseded | contradiction_review |
-  rejected`
+rejected`
 - [ ] `supersedes` / `superseded_by`
 - [ ] `contradictions`: list of conflicting fact ids and reason codes
 
@@ -149,7 +149,7 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 - [ ] `id`, `date`, `cluster_key`
 - [ ] `input_refs`: all episodes/signals used
 - [ ] `proposal_type`: `new_fact | update_fact | contradiction |
-  gate_fixture | prompt_candidate | ignore`
+gate_fixture | prompt_candidate | ignore`
 - [ ] `proposal`
 - [ ] `confidence`
 - [ ] `required_canaries`
@@ -159,20 +159,20 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 ### `LearningSignal`
 
 - [ ] `source`: `approval_card | llm_judge | production_incident |
-  manual_review | triage_sweep | benchmark`
+manual_review | triage_sweep | benchmark`
 - [ ] `surface`: Slack / Meet / demo surface / worker
 - [ ] `verdict`: `confirm | reject | block | false_positive |
-  false_negative | quality_regression | pass`
+false_negative | quality_regression | pass`
 - [ ] `refs`: concrete artifacts, not summaries
 - [ ] `reason_code`
 - [ ] `proposed_action`: `memory_candidate | contradiction_review |
-  prompt_candidate | gate_fixture | benchmark_case | ignore`
+prompt_candidate | gate_fixture | benchmark_case | ignore`
 
 ### `SkillOrPolicyCandidate`
 
 - [ ] `id`, `date`, `source_signal_ids`
 - [ ] `target`: `prompt_policy | visible_reply_gate | triage_sweep_bucket |
-  runbook | canary_fixture | benchmark_case`
+runbook | canary_fixture | benchmark_case`
 - [ ] `proposal`
 - [ ] `why_reusable`
 - [ ] `do_not_capture`: explicit reason when the learning is environment-only,

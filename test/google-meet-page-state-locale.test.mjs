@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
+import { afterAll as after, beforeAll as before, test } from "vite-plus/test";
 import { chromium } from "playwright";
 
 import { evaluateMeetPageState } from "../packages/core/src/meeting/google-meet-joiner-runtime-state.ts";

@@ -300,7 +300,7 @@ ONEESAMA_PERSONA_RUNTIME_MODE=live
 ONEESAMA_PERSONA_RUNTIME_SHADOW_ONLY=0
 ONEESAMA_PERSONA_RUNTIME_BASE_URL=http://127.0.0.1:8799
 
-PERSONA_SIDECAR_MODE=live npm run persona:start
+PERSONA_SIDECAR_MODE=live vp run persona:start
 ```
 
 ### Phase 4: Add Persona Behavior Canaries

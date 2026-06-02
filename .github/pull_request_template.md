@@ -8,7 +8,7 @@ What problem does this change solve?
 
 ## Verification
 
-- [ ] `npm run doctor`
+- [ ] `vp run doctor`
 - [ ] relevant smoke / test commands
 - [ ] manual validation when needed
 

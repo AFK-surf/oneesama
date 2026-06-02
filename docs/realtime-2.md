@@ -86,10 +86,10 @@ of flattening it to a string-only `{type: ...}` shape.
 Default local CI does not require an OpenAI key:
 
 ```bash
-npm run smoke:realtime
-npm run smoke:realtime-session-update
-npm run smoke:realtime-sdk
-npm run smoke:realtime-live-tool
+vp run smoke:realtime
+vp run smoke:realtime-session-update
+vp run smoke:realtime-sdk
+vp run smoke:realtime-live-tool
 ```
 
 The first two smokes assert the Realtime 2 session contract locally. The last
@@ -98,8 +98,8 @@ two skip unless an OpenAI-compatible key is present.
 Live checks:
 
 ```bash
-MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_SDK=1 npm run smoke:realtime-sdk
-MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_LIVE_TOOL=1 npm run smoke:realtime-live-tool
+MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_SDK=1 vp run smoke:realtime-sdk
+MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_LIVE_TOOL=1 vp run smoke:realtime-live-tool
 ```
 
 These smokes verify the actual Agents SDK Realtime connection and the

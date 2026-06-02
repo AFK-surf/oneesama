@@ -5,7 +5,7 @@ This matrix tracks the fixture-level Google Meet contracts needed before the ope
 Run:
 
 ```bash
-npm run smoke:meet-contract
+vp run smoke:meet-contract
 ```
 
 ## Covered In `smoke:meet-contract`
@@ -25,17 +25,17 @@ npm run smoke:meet-contract
 
 ## Covered By Adjacent Smokes
 
-| Contract                                                                               | Smoke                                                           |
-| -------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Minimal non-dry-run fixture join and stop-before-start guard                           | `npm run smoke:meet`                                            |
-| Optional real Google Meet join / waiting-room evidence                                 | `MAB_REAL_MEET_URL=... npm run smoke:real-meet`                 |
-| Participant audio discovery in Realtime mock mode                                      | `npm run smoke:realtime-participant-audio`                      |
-| Remote audio routing into the avatar fake mic bus                                      | `npm run smoke:realtime-audio-route`                            |
-| Joined runtime with participant audio, worker result, Realtime tools, and avatar state | `npm run smoke:runtime-acceptance`                              |
-| Local AgentRunner dialog loop in a fixture room                                        | `npm run smoke:local-agent-dialog`                              |
-| Optional real Google Meet + local provider dialog loop                                 | `MAB_REAL_MEET_URL=... npm run smoke:real-local-dialog`         |
-| Hiyori/fallback visual state gates                                                     | `npm run smoke:avatar-visual` and `npm run smoke:hiyori-live2d` |
-| Browser-level screen-share stream bridge                                               | `npm run smoke:screen-share`                                    |
+| Contract                                                                               | Smoke                                                         |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Minimal non-dry-run fixture join and stop-before-start guard                           | `vp run smoke:meet`                                           |
+| Optional real Google Meet join / waiting-room evidence                                 | `MAB_REAL_MEET_URL=... vp run smoke:real-meet`                |
+| Participant audio discovery in Realtime mock mode                                      | `vp run smoke:realtime-participant-audio`                     |
+| Remote audio routing into the avatar fake mic bus                                      | `vp run smoke:realtime-audio-route`                           |
+| Joined runtime with participant audio, worker result, Realtime tools, and avatar state | `vp run smoke:runtime-acceptance`                             |
+| Local AgentRunner dialog loop in a fixture room                                        | `vp run smoke:local-agent-dialog`                             |
+| Optional real Google Meet + local provider dialog loop                                 | `MAB_REAL_MEET_URL=... vp run smoke:real-local-dialog`        |
+| Hiyori/fallback visual state gates                                                     | `vp run smoke:avatar-visual` and `vp run smoke:hiyori-live2d` |
+| Browser-level screen-share stream bridge                                               | `vp run smoke:screen-share`                                   |
 
 ## Known Gaps
 

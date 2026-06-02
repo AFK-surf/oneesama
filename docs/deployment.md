@@ -50,7 +50,7 @@ has transcript input. Set `MAB_CAPTION_LANGUAGE` to change the default.
 4. Validate the browser-heavy meeting surfaces directly inside the Linux image:
 
 ```bash
-npm run smoke:docker-meeting-surfaces
+vp run smoke:docker-meeting-surfaces
 ```
 
 This host-side helper builds `meeting-avatar-bot:local` and verifies the

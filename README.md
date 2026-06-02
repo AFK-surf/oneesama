@@ -52,6 +52,7 @@ Typical meeting requests:
 Requirements:
 
 - Node.js `>=22`
+- Vite+ `vp`
 - Go `1.25`
 - Playwright Chromium
 - Slack credentials for live Slack usage
@@ -60,8 +61,8 @@ Requirements:
 Install and build:
 
 ```bash
-npm ci
-npm run setup:browsers
+vp install
+vp run setup:browsers
 make build
 ```
 
@@ -138,13 +139,13 @@ curl -X POST http://127.0.0.1:8781/screen-share/apps
 These checks do not need Slack or OpenAI credentials:
 
 ```bash
-npm run ci
+vp run ci
 go test ./...
 go test -tags cueboardparity ./...
-npm run smoke:meet-contract
-npm run smoke:screen-share
-npm run smoke:local-agent-dialog
-npm run smoke:realtime-agents-sdk
+vp run smoke:meet-contract
+vp run smoke:screen-share
+vp run smoke:local-agent-dialog
+vp run smoke:realtime-agents-sdk
 ```
 
 ## Product Boundaries

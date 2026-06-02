@@ -5,7 +5,7 @@ This matrix tracks the fixture-level Slack contracts needed before the open-sour
 Run:
 
 ```bash
-npm run smoke:slack-contract
+vp run smoke:slack-contract
 ```
 
 ## Covered In `smoke:slack-contract`
@@ -25,14 +25,14 @@ npm run smoke:slack-contract
 
 ## Covered By Adjacent Smokes
 
-| Contract                                                                              | Smoke                              |
-| ------------------------------------------------------------------------------------- | ---------------------------------- |
-| Slack result formatting from Meeting Agent jobs                                       | `npm run smoke:slack-results`      |
-| `chat.postMessage` mock/live seam, thread metadata, retry, dedup key, delivery marker | `npm run smoke:slack-posting`      |
-| Old-stack shadow tap receiver auth and side-effect suppression                        | `npm run smoke:shadow-tap`         |
-| Sanitized old-stack mirror transmitter payloads                                       | `npm run smoke:shadow-transmitter` |
-| Fixture old/new join/work/status/stop parity                                          | `npm run smoke:shadow-parity`      |
-| Shadow/canary/rollback cutover decisions                                              | `npm run smoke:cutover-shadow`     |
+| Contract                                                                              | Smoke                             |
+| ------------------------------------------------------------------------------------- | --------------------------------- |
+| Slack result formatting from Meeting Agent jobs                                       | `vp run smoke:slack-results`      |
+| `chat.postMessage` mock/live seam, thread metadata, retry, dedup key, delivery marker | `vp run smoke:slack-posting`      |
+| Old-stack shadow tap receiver auth and side-effect suppression                        | `vp run smoke:shadow-tap`         |
+| Sanitized old-stack mirror transmitter payloads                                       | `vp run smoke:shadow-transmitter` |
+| Fixture old/new join/work/status/stop parity                                          | `vp run smoke:shadow-parity`      |
+| Shadow/canary/rollback cutover decisions                                              | `vp run smoke:cutover-shadow`     |
 
 ## Known Gaps
 

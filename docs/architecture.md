@@ -142,16 +142,16 @@ Default development should stay on `new` or local fixture mode. Production migra
 
 ## Verification Layers
 
-| Layer                      | Command                                                                                |
-| -------------------------- | -------------------------------------------------------------------------------------- |
-| Full local default gate    | `npm run ci`                                                                           |
-| Slack contract matrix      | `npm run smoke:slack-contract`                                                         |
-| Meet contract matrix       | `npm run smoke:meet-contract`                                                          |
-| Local dialog loop          | `npm run smoke:local-agent-dialog`                                                     |
-| Runtime integrated fixture | `npm run smoke:runtime-acceptance`                                                     |
-| Optional real Meet room    | `MAB_REAL_MEET_URL=... npm run smoke:real-meet`                                        |
-| Optional real local dialog | `MAB_REAL_MEET_URL=... MAB_AGENT_RUNNER=codex npm run smoke:real-local-dialog`         |
-| Optional OpenAI Realtime 2 | `MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_LIVE_TOOL=1 npm run smoke:realtime-live-tool` |
+| Layer                      | Command                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| Full local default gate    | `vp run ci`                                                                           |
+| Slack contract matrix      | `vp run smoke:slack-contract`                                                         |
+| Meet contract matrix       | `vp run smoke:meet-contract`                                                          |
+| Local dialog loop          | `vp run smoke:local-agent-dialog`                                                     |
+| Runtime integrated fixture | `vp run smoke:runtime-acceptance`                                                     |
+| Optional real Meet room    | `MAB_REAL_MEET_URL=... vp run smoke:real-meet`                                        |
+| Optional real local dialog | `MAB_REAL_MEET_URL=... MAB_AGENT_RUNNER=codex vp run smoke:real-local-dialog`         |
+| Optional OpenAI Realtime 2 | `MAB_OPENAI_API_KEY=... MAB_RUN_REALTIME_LIVE_TOOL=1 vp run smoke:realtime-live-tool` |
 
 ## Non-Committed Private State
 

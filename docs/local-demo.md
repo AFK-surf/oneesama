@@ -5,9 +5,9 @@ This runbook uses only public configuration and dry-run defaults. It does not re
 ## 1. Install
 
 ```bash
-npm ci
+vp install
 cp .env.example .env
-npm run doctor
+vp run doctor
 ```
 
 `doctor` is warning-only. Missing OpenAI and Slack tokens are expected when running the local smoke suite.
@@ -15,10 +15,10 @@ npm run doctor
 ## 2. Run The Smoke Suite
 
 ```bash
-npm run ci
+vp run ci
 ```
 
-`npm run ci` installs the Playwright Chromium runtime if it is missing, then runs the full smoke suite.
+`vp run ci` installs the Playwright Chromium runtime if it is missing, then runs the full smoke suite.
 
 This verifies:
 
@@ -59,13 +59,13 @@ This verifies:
 Terminal A:
 
 ```bash
-npm run dev:meeting
+vp run dev:meeting
 ```
 
 Terminal B:
 
 ```bash
-npm run dev:slack
+vp run dev:slack
 ```
 
 ## 4. Exercise Slack Commands Without Slack
@@ -93,8 +93,8 @@ By default, `join` uses the Google Meet joiner dry-run path. Pass `--dry-run fal
 For an automated non-dry-run browser proof that does not require a real Google Meet room, run:
 
 ```bash
-npm run smoke:meet
-npm run smoke:meet-contract
+vp run smoke:meet
+vp run smoke:meet-contract
 ```
 
 `smoke:meet` starts a local Meet-like fixture, launches Playwright Chromium, fills the bot name, clicks `Join now`, verifies the injected fake camera and mic tracks, then starts a second join to prove the old browser is stopped before a new bot is created.
@@ -107,23 +107,23 @@ The repo includes minimal provider env files under `examples/`:
 
 ```bash
 source examples/provider-codex.env
-npm run smoke:local-agent-dialog
+vp run smoke:local-agent-dialog
 
 source examples/provider-claude.env
-npm run smoke:local-agent-dialog
+vp run smoke:local-agent-dialog
 
 source examples/provider-ollama.env
-npm run smoke:ollama-provider
+vp run smoke:ollama-provider
 # To run a live local model:
 #   ollama serve
 #   ollama pull "$MAB_OLLAMA_MODEL"
-#   MAB_RUN_OLLAMA_PROVIDER_SMOKE=1 npm run smoke:ollama-provider
+#   MAB_RUN_OLLAMA_PROVIDER_SMOKE=1 vp run smoke:ollama-provider
 
 source examples/provider-slack-agent-d.env
-npm run smoke:slack-agent-d-provider
+vp run smoke:slack-agent-d-provider
 
 source examples/provider-command.env
-npm run smoke:local-agent-dialog
+vp run smoke:local-agent-dialog
 ```
 
 For HTTP provider mode, start the sample runner first:
@@ -131,7 +131,7 @@ For HTTP provider mode, start the sample runner first:
 ```bash
 node examples/provider-http-runner.mjs
 source examples/provider-http.env
-npm run smoke:local-agent-dialog
+vp run smoke:local-agent-dialog
 ```
 
 For a quick operator-facing entry point, start with the root
@@ -140,8 +140,8 @@ For a quick operator-facing entry point, start with the root
 For a real Google Meet room acceptance smoke, use a throwaway room and keep a human nearby in case Google puts the bot in the waiting room:
 
 ```bash
-MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz npm run smoke:real-meet
-MAB_REQUIRE_REAL_MEET=1 MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz npm run smoke:real-meet
+MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz vp run smoke:real-meet
+MAB_REQUIRE_REAL_MEET=1 MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz vp run smoke:real-meet
 ```
 
 The real-room smoke is not part of default CI. It launches Playwright Chromium, injects the Hiyori/fake mic-cam runtime, fills the guest name, clicks `Join now` or `Ask to join`, waits briefly for in-call controls or participant audio discovery, writes screenshots/diagnostics under `/tmp/meeting-avatar-bot`, and automatically leaves the room in cleanup.
@@ -152,7 +152,7 @@ If a live Google Meet room blocks guest automation at the prejoin anti-bot check
 MAB_MEET_PROFILE_MODE=persistent \
 MAB_BROWSER_USER_DATA_DIR=/path/to/automation-chrome-profile \
 MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz \
-npm run smoke:real-meet
+vp run smoke:real-meet
 ```
 
 Guest mode remains the default because it matches the old avatar-spike launcher. Frequent automated joins against the same room/IP can still trip Google's `Getting ready... confirm you're not a bot` prejoin risk check; when that happens, cool down, use a fresh room, or switch to a dedicated persistent automation profile. Use a dedicated automation profile, not the user's active daily Chrome profile, so Playwright can own the browser lifecycle.
@@ -187,7 +187,7 @@ The first command observes the shared app/window and writes a screenshot through
 To verify the live Realtime model routes a shared-app edit request to the app-control tool without making the foreground model produce primitives, run:
 
 ```bash
-MAB_RUN_REALTIME_LIVE_ROUTING=1 npm run smoke:realtime-live-routing
+MAB_RUN_REALTIME_LIVE_ROUTING=1 vp run smoke:realtime-live-routing
 ```
 
 This smoke uses real OpenAI Realtime but dry-runs local tools. It proves routing, queued/running turn policy, and argument shape, not visible Pencil mutation.
@@ -205,11 +205,11 @@ Final app-control acceptance still needs a real-room manual smoke because it cro
 For the no-OpenAI-key local dialog bridge, run:
 
 ```bash
-npm run smoke:dialog-provider
-npm run smoke:local-agent-dialog
-MAB_AGENT_RUNNER=codex MAB_BROWSER_HEADLESS=true npm run smoke:local-agent-dialog
-MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz npm run smoke:real-local-dialog
-MAB_REQUIRE_REAL_LOCAL_DIALOG=1 MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz npm run smoke:real-local-dialog
+vp run smoke:dialog-provider
+vp run smoke:local-agent-dialog
+MAB_AGENT_RUNNER=codex MAB_BROWSER_HEADLESS=true vp run smoke:local-agent-dialog
+MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz vp run smoke:real-local-dialog
+MAB_REQUIRE_REAL_LOCAL_DIALOG=1 MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz vp run smoke:real-local-dialog
 ```
 
 The fixture smoke dispatches a synthetic local-STT utterance, calls the selected AgentRunner provider, requests audio from Meeting Agent `/tts/synthesize`, decodes the returned WAV data URL into the avatar fake mic, and verifies Hiyori enters the `speak` action. The real-room variant clicks into Google Meet first, then injects the same controlled utterance so it can prove the provider/TTS/avatar loop without requiring OpenAI Realtime.
@@ -217,8 +217,8 @@ The fixture smoke dispatches a synthetic local-STT utterance, calls the selected
 For a stronger avatar renderer gate on a WebGL-capable machine, run:
 
 ```bash
-npm run smoke:hiyori-live2d
-MAB_REQUIRE_HIYORI_LIVE2D=1 npm run smoke:hiyori-live2d
+vp run smoke:hiyori-live2d
+MAB_REQUIRE_HIYORI_LIVE2D=1 vp run smoke:hiyori-live2d
 ```
 
 Without `MAB_REQUIRE_HIYORI_LIVE2D=1`, this smoke skips cleanly when headless Chromium cannot initialize the true Cubism/PIXI Live2D renderer. With the flag set, it fails unless true Hiyori Live2D pixels render and mood/action state changes alter the captured frame.
@@ -226,13 +226,13 @@ Without `MAB_REQUIRE_HIYORI_LIVE2D=1`, this smoke skips cleanly when headless Ch
 For operator-facing avatar/HUD iteration without Google Meet, start the standalone playground:
 
 ```bash
-npm run dev:avatar-playground
+vp run dev:avatar-playground
 ```
 
 Open the printed URL (defaults to `http://127.0.0.1:18912/`). The playground loads the avatar fake-camera runtime by itself, shows the HUD on the avatar frame, and lets you switch avatar presets plus runtime state presets (`Listening`, `Thinking`, `Speaking`, `Using Tool`, `Blocked`, `Done`). It is the fast local surface for tuning Live2D/VRM/fallback visuals, HUD placement, and future avatar-preset animation switches. Run the regression smoke with:
 
 ```bash
-npm run smoke:avatar-playground
+vp run smoke:avatar-playground
 ```
 
 For the video-avatar replacement direction, use
@@ -247,7 +247,7 @@ runtime, so keep generated/private clips out of git and point the playground at
 an asset directory:
 
 ```bash
-ONEESAMA_AVATAR_ASSET_ROOT=tmp/avatar-video npm run dev:avatar-playground
+ONEESAMA_AVATAR_ASSET_ROOT=tmp/avatar-video vp run dev:avatar-playground
 ```
 
 Then open `http://127.0.0.1:18912/?avatar=oneesama-video`.
@@ -256,7 +256,7 @@ Production video assets use a two-stage flow: Image2 first, Seedance second.
 Generate and review still keyframes before any video task runs:
 
 ```bash
-npm run avatar:video:keyframes -- --ref /path/to/ref.png --out-dir tmp/avatar-video/keyframes
+vp run avatar:video:keyframes -- --ref /path/to/ref.png --out-dir tmp/avatar-video/keyframes
 ```
 
 The command writes Image2 prompt files, a manifest, and `REVIEW.md`. Save the
@@ -276,7 +276,7 @@ server-side Seedance/ModelArk key. The script prints only key presence/status,
 never the secret value:
 
 ```bash
-SEEDANCE_API_KEY=... npm run avatar:video:seedance -- --keyframe-dir tmp/avatar-video/keyframes --out-dir tmp/avatar-video
+SEEDANCE_API_KEY=... vp run avatar:video:seedance -- --keyframe-dir tmp/avatar-video/keyframes --out-dir tmp/avatar-video
 ```
 
 `ARK_API_KEY` is accepted as a fallback. If the key is missing, the script exits
@@ -332,7 +332,7 @@ Socket Mode WebSocket, ack real events, or post messages.
 ```bash
 MAB_SLACK_LIVE_ENV_FILE=/path/to/other-bot.env \
 MAB_RUN_SLACK_LIVE_CAPABILITY_SMOKE=1 \
-npm run smoke:slack-live-capability
+vp run smoke:slack-live-capability
 ```
 
 To prove the bot can post into a disposable test channel, opt in explicitly:
@@ -342,7 +342,7 @@ MAB_SLACK_LIVE_ENV_FILE=/path/to/other-bot.env \
 MAB_RUN_SLACK_LIVE_CAPABILITY_SMOKE=1 \
 MAB_SLACK_LIVE_POST_TEST=1 \
 MAB_SLACK_LIVE_TEST_CHANNEL=C0123456789 \
-npm run smoke:slack-live-capability
+vp run smoke:slack-live-capability
 ```
 
 To prove the same validated bot can enter the public Slack Agent Socket Mode
@@ -353,7 +353,7 @@ smoke against a disposable test channel:
 MAB_SLACK_LIVE_ENV_FILE=/path/to/other-bot.env \
 MAB_RUN_SLACK_LIVE_SOCKET_SMOKE=1 \
 MAB_SLACK_LIVE_TEST_CHANNEL=C0123456789 \
-npm run smoke:slack-live-socket
+vp run smoke:slack-live-socket
 ```
 
 This starts an isolated `apps/slack-agent` process, connects Socket Mode, posts

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import { fetchJson } from "../packages/core/src/http-fetch-json.ts";
 

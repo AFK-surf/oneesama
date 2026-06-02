@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import {
   __captionCaptureTestInternals,
@@ -30,23 +30,19 @@ function fakeCaptionSettingsPage(
     async evaluate(fn, arg) {
       if (typeof arg === "number") return true;
       const source = String(fn);
+      const checksLiveCaptions = /Live captions|实时字幕|即時字幕/.test(source);
+      const checksTranslatedCaptions = /Translated captions|翻译字幕|翻譯字幕/.test(source);
       if (
         source.includes('querySelectorAll("button, [role=button]")') ||
         source.includes('querySelectorAll<HTMLElement>("button, [role=button]")')
       ) {
         return directProbe;
       }
-      if (source.includes("targetPattern=/^(Live captions|") && source.includes("triggerClick")) {
-        clicks.push({ selector: "dom-live-captions-mode" });
-        return true;
-      }
-      if (source.includes("targetPattern=/^(Live captions|")) {
-        return Boolean(liveSelected && dialogOpen);
-      }
-      if (source.includes("targetPattern=/^(Translated captions|")) {
-        return Boolean(translatedSelected && dialogOpen);
-      }
-      if (source.includes('[role="combobox"][aria-expanded="true"]')) {
+      if (
+        source.includes('[role="combobox"][aria-expanded="true"]') ||
+        (source.includes("aria-expanded") && source.includes('[role="option"]')) ||
+        (source.includes("patternSource") && source.includes("candidateOptions"))
+      ) {
         clicks.push({ selector: "dom-meeting-language-option", pattern: String(arg || "") });
         return domMeetingLanguageOptionClick;
       }
@@ -56,6 +52,16 @@ function fakeCaptionSettingsPage(
       if (source.includes("language of the meeting|meeting language")) {
         if (domMeetingLanguageClick) clicks.push({ selector: "dom-meeting-language-combobox" });
         return domMeetingLanguageClick;
+      }
+      if (checksLiveCaptions && source.includes("triggerClick")) {
+        clicks.push({ selector: "dom-live-captions-mode" });
+        return true;
+      }
+      if (checksLiveCaptions) {
+        return Boolean(liveSelected && dialogOpen);
+      }
+      if (checksTranslatedCaptions) {
+        return Boolean(translatedSelected && dialogOpen);
       }
       if (source.includes("translated captions|translate captions")) return undefined;
       return directProbe;
@@ -121,9 +127,11 @@ test("enableMeetCaptions still configures the selected language when captions ar
   assert.ok(
     page.clicks.some(
       (click) =>
-        click.selector === "dom-meeting-language-option" &&
-        String(click.pattern).includes("Chinese, Mandarin"),
+        (click.selector === "dom-meeting-language-option" &&
+          String(click.pattern).includes("Chinese, Mandarin")) ||
+        (click.selector === '[role="option"]' && String(click.filter).includes("Chinese")),
     ),
+    JSON.stringify(page.clicks),
   );
   assert.deepEqual(
     records.find((record) => record.type === "caption_settings_live_radio_selected")?.detail,

@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 test(
   "app-control helper serves stdio JSON-RPC on macOS",

@@ -13,10 +13,10 @@ This repo is ready for source releases on GitHub. It is not set up for `npm publ
 Run these from a clean checkout:
 
 ```bash
-npm ci
-npm run doctor
-npm run ci
-npm run smoke:docker-meeting-surfaces
+vp install
+vp run doctor
+vp run ci
+vp run smoke:docker-meeting-surfaces
 ```
 
 If the release is meant to bless live operator flows, also run the relevant human-gated checks:
@@ -51,14 +51,14 @@ gh release create v0.1.0 --generate-notes
 
 ## Docker Publishing
 
-The repo includes `Dockerfile`, `docker-compose.yml`, and `npm run smoke:docker-meeting-surfaces`, but it does not yet automate image publication.
+The repo includes `Dockerfile`, `docker-compose.yml`, and `vp run smoke:docker-meeting-surfaces`, but it does not yet automate image publication.
 
 For now:
 
 ```bash
 docker build -t ghcr.io/afk-surf/oneesama:v0.1.0 .
-docker run --rm --shm-size=1g ghcr.io/afk-surf/oneesama:v0.1.0 npm run smoke:screen-share
-docker run --rm --shm-size=1g ghcr.io/afk-surf/oneesama:v0.1.0 npm run smoke:hiyori-live2d
+docker run --rm --shm-size=1g ghcr.io/afk-surf/oneesama:v0.1.0 vp run smoke:screen-share
+docker run --rm --shm-size=1g ghcr.io/afk-surf/oneesama:v0.1.0 vp run smoke:hiyori-live2d
 docker push ghcr.io/afk-surf/oneesama:v0.1.0
 ```
 

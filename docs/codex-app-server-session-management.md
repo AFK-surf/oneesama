@@ -77,7 +77,7 @@ The job context echoes the mapping for audit:
 
 ## Verification
 
-The local smoke `npm run smoke:codex-app-server-provider` covers:
+The local smoke `vp run smoke:codex-app-server-provider` covers:
 
 - Same Slack thread reuses the same business key and Codex thread.
 - A different Slack participant in the same thread still reuses the same Codex thread.
