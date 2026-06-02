@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "vite-plus/test";
 
-import { buildKWWKNativeCursorReport } from "../scripts/realtime-kwwk-native-cursor-benchmark.mjs";
+import {
+  buildKWWKNativeCursorReport,
+  kwwkNativeCursorExpectedResponseError,
+  parseKWWKNativeCursorResponses,
+} from "../scripts/realtime-kwwk-native-cursor-benchmark.mjs";
 
 test("KWWK native cursor report distinguishes foreground panel evidence from shared-surface mirror evidence", () => {
   const report = buildKWWKNativeCursorReport(
@@ -16,10 +20,12 @@ test("KWWK native cursor report distinguishes foreground panel evidence from sha
       durationMs: 12,
       result: {
         ok: true,
+        source: "oneesama_app_control_helper",
         nativeForegroundCursor: nativeEvidence(),
       },
       renderResult: {
         ok: true,
+        source: "oneesama_app_control_helper",
         nativeCursorRender: renderEvidence(),
       },
     },
@@ -59,16 +65,26 @@ test("KWWK native cursor report fails mirror-only evidence", () => {
       durationMs: 12,
       result: {
         ok: true,
+        source: "oneesama_app_control_helper",
         nativeForegroundCursor: {
           schema: "oneesama.kwwk-cursor-artifact.v1",
           materialized: false,
         },
       },
+      renderResult: {
+        ok: true,
+        source: "oneesama_app_control_helper",
+        nativeCursorRender: renderEvidence(),
+      },
     },
   );
 
   assert.equal(report.ok, false);
-  assert.equal(report.cases[0].blocker, "native_foreground_cursor_not_materialized");
+  assert.equal(
+    report.cases.find((testCase) => testCase.id === "native-foreground-cursor-materialized")
+      .blocker,
+    "native_foreground_cursor_not_materialized",
+  );
 });
 
 test("KWWK native cursor report fails without light/dark render evidence", () => {
@@ -80,10 +96,12 @@ test("KWWK native cursor report fails without light/dark render evidence", () =>
       durationMs: 12,
       result: {
         ok: true,
+        source: "oneesama_app_control_helper",
         nativeForegroundCursor: nativeEvidence(),
       },
       renderResult: {
         ok: true,
+        source: "oneesama_app_control_helper",
         nativeCursorRender: {},
       },
     },
@@ -99,6 +117,87 @@ test("KWWK native cursor report fails without light/dark render evidence", () =>
     cases.get("native-foreground-drag-trail-rendered").blocker,
     "native_cursor_drag_trail_render_missing",
   );
+});
+
+test("KWWK native cursor response parser returns structured parse failure", () => {
+  const parsed = parseKWWKNativeCursorResponses('{"jsonrpc":"2.0","id":"ok"}\nnot-json\n');
+
+  assert.equal(parsed.ok, false);
+  assert.match(parsed.error, /native_cursor_helper_invalid_json/);
+  const report = buildKWWKNativeCursorReport(
+    { timeoutMs: 15_000 },
+    {
+      ok: false,
+      exitCode: 0,
+      durationMs: 12,
+      error: parsed.error,
+      result: {},
+      renderResult: {},
+    },
+  );
+  assert.equal(report.ok, false);
+  assert.match(report.error, /native_cursor_helper_invalid_json/);
+});
+
+test("KWWK native cursor response parser rejects invalid JSON-RPC response shapes", () => {
+  const parsedNull = parseKWWKNativeCursorResponses("null\n");
+  assert.equal(parsedNull.ok, false);
+  assert.match(parsedNull.error, /native_cursor_helper_invalid_response: line 1 is not an object/);
+
+  const parsedMissingID = parseKWWKNativeCursorResponses('{"jsonrpc":"2.0","result":{}}\n');
+  assert.equal(parsedMissingID.ok, false);
+  assert.match(parsedMissingID.error, /native_cursor_helper_invalid_response: line 1 missing id/);
+});
+
+test("KWWK native cursor expected response guard reports helper errors and missing source", () => {
+  assert.match(
+    kwwkNativeCursorExpectedResponseError(null, { id: "native-cursor-render", result: {} }),
+    /native_cursor_helper_missing_response:native-cursor/,
+  );
+  assert.match(
+    kwwkNativeCursorExpectedResponseError(
+      { id: "native-cursor", error: { message: "probe failed" } },
+      { id: "native-cursor-render", result: {} },
+    ),
+    /native_cursor_helper_rpc_error:native-cursor:probe failed/,
+  );
+  assert.equal(
+    kwwkNativeCursorExpectedResponseError(
+      { id: "native-cursor", result: { ok: true, source: "oneesama_app_control_helper" } },
+      {
+        id: "native-cursor-render",
+        result: { ok: true, source: "oneesama_app_control_helper" },
+      },
+    ),
+    "",
+  );
+  assert.match(
+    kwwkNativeCursorExpectedResponseError(
+      { id: "native-cursor", result: { ok: true, source: "fake_helper" } },
+      {
+        id: "native-cursor-render",
+        result: { ok: true, source: "oneesama_app_control_helper" },
+      },
+    ),
+    /native_cursor_helper_source_missing:native-cursor/,
+  );
+});
+
+test("KWWK native cursor report preserves missing helper response errors", () => {
+  const report = buildKWWKNativeCursorReport(
+    { timeoutMs: 15_000 },
+    {
+      ok: false,
+      exitCode: 0,
+      durationMs: 12,
+      error: "native_cursor_helper_missing_response",
+      result: {},
+      renderResult: {},
+    },
+  );
+
+  assert.equal(report.ok, false);
+  assert.equal(report.error, "native_cursor_helper_missing_response");
 });
 
 test(

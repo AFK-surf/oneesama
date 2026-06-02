@@ -31,6 +31,7 @@ import {
   saveDiagnostics,
   shouldMuteMeetLocalPlayback,
   takeScreenshot,
+  type Diagnostics,
   type GoogleMeetJoinInput,
   type GoogleMeetJoinerOptions,
   type LocalMultipartFrameServer,
@@ -58,6 +59,7 @@ import {
   buildMeetingAwarenessState,
   clickMeetJoinButton,
   compactCaptionState,
+  compactJoinStatusActive,
   compactRuntimeState,
   evaluateAvatarAudio,
   evaluateAvatarReady,
@@ -86,6 +88,104 @@ function videoMimeType(relativePath: string): string {
   if (normalized.endsWith(".webm")) return "video/webm";
   if (normalized.endsWith(".mov")) return "video/quicktime";
   return "video/mp4";
+}
+
+interface MeetAvatarConfigInput {
+  input: GoogleMeetJoinInput;
+  config: ReturnType<typeof getRuntimeConfig>;
+  botName: string;
+  installAvatar: boolean;
+  diagnostics: Diagnostics;
+}
+
+async function buildMeetAvatarConfig({
+  input,
+  config,
+  botName,
+  installAvatar,
+  diagnostics,
+}: MeetAvatarConfigInput): Promise<Record<string, unknown>> {
+  const requestedAvatarRenderer = input.avatarRenderer || config.avatarRenderer;
+  const avatarRendererIsVideo = String(requestedAvatarRenderer || "").toLowerCase() === "video";
+  const avatarConfig: Record<string, unknown> = {
+    modelUrl: input.avatarModelUrl || config.avatarModelUrl,
+    modelFallbackUrls: config.avatarModelFallbackUrls,
+    avatarRenderer: requestedAvatarRenderer,
+    vrmModelUrl: input.avatarVRMModelUrl || config.avatarVRMModelUrl,
+    vrmModelFallbackUrls: config.avatarVRMModelFallbackUrls,
+    live2dDepsDir: input.avatarDepsDir || config.avatarDepsDir,
+    layout: input.avatarLayout || config.avatarLayout,
+    botName,
+    disableLive2D: Boolean(input.disableLive2D),
+    deferRendererUntilExplicitStart:
+      input.deferAvatarRendererUntilJoined !== false && installAvatar,
+    canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1280),
+    canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 720),
+    captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 12),
+  };
+  if (avatarRendererIsVideo && installAvatar) {
+    const videoUsesAlpha =
+      /\.webm$/iu.test(String(config.avatarVideoIdlePath || "")) &&
+      /\.webm$/iu.test(String(config.avatarVideoSpeakingPath || ""));
+    const loadInlineVideoSource = async (relativePath: string) => {
+      const assetPath = pathJoin(config.avatarAssetRoot, relativePath);
+      const data = await readFile(assetPath);
+      return {
+        inlineBase64: data.toString("base64"),
+        mimeType: videoMimeType(relativePath),
+      };
+    };
+    const idleInlineSource = await loadInlineVideoSource(config.avatarVideoIdlePath);
+    const speakingInlineSource = await loadInlineVideoSource(config.avatarVideoSpeakingPath);
+    Object.assign(avatarConfig, {
+      background: "#0b1018",
+      videoObjectFit: "cover",
+      videoMuted: true,
+      videoCrossfadeMs: 0,
+      videoSpeakingDebounceMs: 220,
+      videoChromaKey: {
+        enabled: !videoUsesAlpha,
+        keyColor: "#00ff00",
+        similarity: 0.22,
+        smoothness: 0.06,
+        minGreen: 45,
+        minDominance: 18,
+        spill: 0.82,
+        spillSoftness: 10,
+        matteErodePx: 0,
+        matteFeatherPx: 0,
+        maxProcessingWidth: 640,
+        maxProcessingHeight: 360,
+      },
+      videoSources: [
+        {
+          id: "idle",
+          label: "Idle loop",
+          state: "idle",
+          ...idleInlineSource,
+          objectFit: "cover",
+          background: "#0b1018",
+          default: true,
+        },
+        {
+          id: "speaking",
+          label: "Speaking loop",
+          state: "speaking",
+          ...speakingInlineSource,
+          objectFit: "cover",
+          background: "#0b1018",
+        },
+      ],
+    });
+    diagnostics.record("avatar_video_assets", {
+      root: config.avatarAssetRoot,
+      delivery: "inline_blob",
+      idlePath: config.avatarVideoIdlePath,
+      speakingPath: config.avatarVideoSpeakingPath,
+      alpha: videoUsesAlpha,
+    });
+  }
+  return avatarConfig;
 }
 
 export function defaultGoogleMeetRealtimeTools() {
@@ -481,86 +581,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       realtimeRuntimePlacement === "sidecar" &&
       realtimeWantsMeetAudio &&
       !audio.isGoogleMeetUrlForRealtimeAudio(meetUrl);
-    const requestedAvatarRenderer = input.avatarRenderer || config.avatarRenderer;
-    const avatarRendererIsVideo = String(requestedAvatarRenderer || "").toLowerCase() === "video";
-    const avatarConfig = {
-      modelUrl: input.avatarModelUrl || config.avatarModelUrl,
-      modelFallbackUrls: config.avatarModelFallbackUrls,
-      avatarRenderer: requestedAvatarRenderer,
-      vrmModelUrl: input.avatarVRMModelUrl || config.avatarVRMModelUrl,
-      vrmModelFallbackUrls: config.avatarVRMModelFallbackUrls,
-      live2dDepsDir: input.avatarDepsDir || config.avatarDepsDir,
-      layout: input.avatarLayout || config.avatarLayout,
+    const avatarConfig = await buildMeetAvatarConfig({
+      input,
+      config,
       botName,
-      disableLive2D: Boolean(input.disableLive2D),
-      deferRendererUntilExplicitStart:
-        input.deferAvatarRendererUntilJoined !== false && installAvatar,
-      canvasWidth: Number(input.avatarCanvasWidth || config.avatarCanvasWidth || 1280),
-      canvasHeight: Number(input.avatarCanvasHeight || config.avatarCanvasHeight || 720),
-      captureFps: Number(input.avatarCaptureFps || config.avatarCaptureFps || 12),
-    };
-    if (avatarRendererIsVideo && installAvatar) {
-      const videoUsesAlpha =
-        /\.webm$/iu.test(String(config.avatarVideoIdlePath || "")) &&
-        /\.webm$/iu.test(String(config.avatarVideoSpeakingPath || ""));
-      const loadInlineVideoSource = async (relativePath: string) => {
-        const assetPath = pathJoin(config.avatarAssetRoot, relativePath);
-        const data = await readFile(assetPath);
-        return {
-          inlineBase64: data.toString("base64"),
-          mimeType: videoMimeType(relativePath),
-        };
-      };
-      const idleInlineSource = await loadInlineVideoSource(config.avatarVideoIdlePath);
-      const speakingInlineSource = await loadInlineVideoSource(config.avatarVideoSpeakingPath);
-      Object.assign(avatarConfig, {
-        background: "#0b1018",
-        videoObjectFit: "cover",
-        videoMuted: true,
-        videoCrossfadeMs: 0,
-        videoSpeakingDebounceMs: 220,
-        videoChromaKey: {
-          enabled: !videoUsesAlpha,
-          keyColor: "#00ff00",
-          similarity: 0.22,
-          smoothness: 0.06,
-          minGreen: 45,
-          minDominance: 18,
-          spill: 0.82,
-          spillSoftness: 10,
-          matteErodePx: 0,
-          matteFeatherPx: 0,
-          maxProcessingWidth: 640,
-          maxProcessingHeight: 360,
-        },
-        videoSources: [
-          {
-            id: "idle",
-            label: "Idle loop",
-            state: "idle",
-            ...idleInlineSource,
-            objectFit: "cover",
-            background: "#0b1018",
-            default: true,
-          },
-          {
-            id: "speaking",
-            label: "Speaking loop",
-            state: "speaking",
-            ...speakingInlineSource,
-            objectFit: "cover",
-            background: "#0b1018",
-          },
-        ],
-      });
-      diagnostics.record("avatar_video_assets", {
-        root: config.avatarAssetRoot,
-        delivery: "inline_blob",
-        idlePath: config.avatarVideoIdlePath,
-        speakingPath: config.avatarVideoSpeakingPath,
-        alpha: videoUsesAlpha,
-      });
-    }
+      installAvatar,
+      diagnostics,
+    });
     const realtimeBridgeConfig = {
       mode: realtimeBridgeMode,
       agentRuntime: realtimeAgentRuntime,
@@ -1115,36 +1142,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const realtimeSidecarStatus = active ? await collectRealtimeSidecarPageStatus(active) : null;
     return {
       ok: true,
-      active: active
-        ? {
-            sessionId: active.sessionId,
-            meetUrl: active.meetUrl,
-            startedAt: active.startedAt,
-            meetProfileMode: active.meetProfileMode || "",
-            browserUserDataDir: active.browserUserDataDir || "",
-            realtimeRuntimePlacement: active.realtimeRuntimePlacement || "sidecar",
-            realtimeSdkOwner: active.realtimeSdkOwner || "sidecar",
-            realtimeSidecar: active.realtimeSidecarPage ? realtimeSidecarStatus : null,
-            clickedJoinSelector: active.clickedJoinSelector || "",
-            diagnosticsPath: active.diagnostics?.jsonPath || "",
-            artifactsDir: active.artifactsDir || "",
-            screenshots: active.diagnostics?.screenshots || [],
-            avatarReady: active.avatarReady || null,
-            avatarAudio: active.avatarAudio || null,
-            recorder: active.recorder?.status() || null,
-            realtimeAudioCapture: active.realtimeAudioCapture?.status() || null,
-            realtimeRecappiAudioInput: active.realtimeRecappiAudioInput?.status() || null,
-            captions: compactCaptionState(active.captions) || null,
-            fixtureState: active.fixtureState || null,
-            realtimeBridge: active.realtimeBridge || null,
-            workerResultBridge: active.workerResultBridge || null,
-            localDialog: active.localDialog || null,
-            screenShare: active.screenShare || null,
-            meetPage: active.meetPage || null,
-            meetingAwareness: active.meetingAwareness || null,
-            meetingAwarenessPush: active.meetingAwarenessPush || null,
-          }
-        : null,
+      active: compactJoinStatusActive(active, realtimeSidecarStatus),
     };
   }
 

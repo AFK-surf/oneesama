@@ -8,6 +8,7 @@ import type { MeetingAgentInput } from "./meeting-agent-types.js";
 
 interface AppControlHandlerDeps {
   config: { internalAuthKey?: string };
+  runDirectAppControl?: DirectAppControlRunner;
   reports: {
     create(input: {
       id: string;
@@ -21,6 +22,11 @@ interface AppControlHandlerDeps {
     }): unknown;
   };
 }
+
+type DirectAppControlRunner = (
+  body: MeetingAgentInput,
+  status?: unknown,
+) => Promise<Record<string, unknown>>;
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -108,6 +114,44 @@ function booleanInput(value: unknown) {
     .trim()
     .toLowerCase();
   return ["1", "true", "yes", "y"].includes(normalized);
+}
+
+function sanitizeAppControlContext(context: unknown) {
+  const compact = { ...recordValue(context) };
+  delete compact.operation;
+  delete compact.operations;
+  delete compact.realtimeBridge;
+  delete compact.workerResultBridge;
+  return compact;
+}
+
+function directAppControlBody(body: MeetingAgentInput) {
+  const compact: MeetingAgentInput = { ...body };
+  delete compact.operation;
+  delete compact.operations;
+  compact.context = sanitizeAppControlContext(body.context);
+  return compact;
+}
+
+function tsDelegateAppControlUnavailable() {
+  return compactMeetingAgentAppControlResult({
+    ok: false,
+    provider: "kwwk",
+    status: "failed",
+    error: "ts_delegate_app_control_unavailable",
+    blocker: "ts_delegate_app_control_unavailable",
+    summary: "TS meeting-agent only supports direct KWWK app-control.",
+  });
+}
+
+async function runCompactDirectAppControl(
+  runDirectAppControl: DirectAppControlRunner,
+  body: MeetingAgentInput,
+  status: unknown,
+) {
+  return compactMeetingAgentAppControlResult(
+    await runDirectAppControl(directAppControlBody(body), status),
+  );
 }
 
 async function runKWWKDirectAppControl(body: MeetingAgentInput, status: unknown = null) {
@@ -233,8 +277,12 @@ export function createInternalControlGuard(config: AppControlHandlerDeps["config
   };
 }
 
-export function createTSAppControlToolHandler({ reports }: AppControlHandlerDeps) {
+export function createTSAppControlToolHandler({
+  reports,
+  runDirectAppControl = runKWWKDirectAppControl,
+}: AppControlHandlerDeps) {
   const tsAppControlJobs = new Map<string, TSAppControlJob>();
+  let tsAppControlQueueTail = Promise.resolve();
 
   function appControlJobEnvelope(job: TSAppControlJob) {
     return {
@@ -283,7 +331,11 @@ export function createTSAppControlToolHandler({ reports }: AppControlHandlerDeps
     job.updatedAt = new Date().toISOString();
     rememberTSAppControlJob(job);
     try {
-      const result = await runKWWKDirectAppControl(job.request, job.screenShareStatus);
+      const result = await runCompactDirectAppControl(
+        runDirectAppControl,
+        job.request,
+        job.screenShareStatus,
+      );
       job.result = result as Record<string, unknown>;
       job.status = result.ok === true ? "completed" : "failed";
       job.error = result.ok === true ? "" : String(result.error || result.blocker || "");
@@ -317,7 +369,11 @@ export function createTSAppControlToolHandler({ reports }: AppControlHandlerDeps
       screenShareStatus: status,
     };
     rememberTSAppControlJob(job);
-    void runQueuedTSAppControlJob(job);
+    queueMicrotask(() => {
+      tsAppControlQueueTail = tsAppControlQueueTail
+        .catch(() => undefined)
+        .then(() => runQueuedTSAppControlJob(job));
+    });
     return appControlJobEnvelope(job);
   }
 
@@ -341,11 +397,17 @@ export function createTSAppControlToolHandler({ reports }: AppControlHandlerDeps
     const executionMode = String(body.executionMode || body.execution_mode || "")
       .trim()
       .toLowerCase();
-    if (executionMode === "delegate" || booleanInput(body.wait)) {
-      const result = await runKWWKDirectAppControl(body, status);
+    if (executionMode === "delegate") {
+      return {
+        ...tsDelegateAppControlUnavailable(),
+        screenShare: appControlTargetFromBody(body, status),
+      };
+    }
+    if (booleanInput(body.wait)) {
+      const result = await runCompactDirectAppControl(runDirectAppControl, body, status);
       return {
         ...result,
-        screenShare: recordValue(result).screenShare || appControlTargetFromBody(body, status),
+        screenShare: appControlTargetFromBody(body, status),
       };
     }
     return queueTSAppControlJob(body, status);

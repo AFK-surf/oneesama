@@ -1,17 +1,10 @@
 package meetingagent
 
-import (
-	"strings"
-
-	appconfig "github.com/AFK-surf/oneesama/pkg/config"
-)
+import appconfig "github.com/AFK-surf/oneesama/pkg/config"
 
 func NewConfiguredAppControlBackend(cfg appconfig.AppControlConfig, service *Service) AppControlBackend {
 	codex := NewCodexAppControlBackend(service)
 	codexFallback := cfg.CodexFallback
-	if strings.TrimSpace(cfg.Provider) == "" {
-		codexFallback = true
-	}
 	switch appconfig.NormalizeAppControlProvider(cfg.Provider) {
 	case "codex":
 		return codex

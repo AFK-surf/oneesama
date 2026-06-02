@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+const KWWK_NATIVE_CURSOR_HELPER_SOURCE = "oneesama_app_control_helper";
 
 function parseArgs(argv) {
   const args = { jsonOut: "", timeoutMs: 15_000 };
@@ -59,6 +61,19 @@ export function buildKWWKNativeCursorReport(args, runResult) {
   const render = renderEvidence(runResult.renderResult);
   const approach = evidence.animation?.approach || {};
   const cases = [
+    {
+      id: "native-helper-source",
+      ok:
+        runResult.result?.source === KWWK_NATIVE_CURSOR_HELPER_SOURCE &&
+        runResult.renderResult?.source === KWWK_NATIVE_CURSOR_HELPER_SOURCE,
+      cursorSource: runResult.result?.source || "",
+      renderSource: runResult.renderResult?.source || "",
+      blocker:
+        runResult.result?.source === KWWK_NATIVE_CURSOR_HELPER_SOURCE &&
+        runResult.renderResult?.source === KWWK_NATIVE_CURSOR_HELPER_SOURCE
+          ? ""
+          : "native_cursor_helper_source_missing",
+    },
     {
       id: "native-foreground-cursor-materialized",
       ok:
@@ -167,6 +182,10 @@ export function buildKWWKNativeCursorReport(args, runResult) {
       platform: process.platform,
       helper: "oneesama_app_control_helper",
     },
+    nativeHelperSource: {
+      cursor: runResult.result?.source || "",
+      render: runResult.renderResult?.source || "",
+    },
     nativeForegroundCursor: evidence,
     nativeCursorRender: render,
     cases,
@@ -174,6 +193,65 @@ export function buildKWWKNativeCursorReport(args, runResult) {
     timedOut: runResult.timedOut === true,
     error: runResult.error || "",
   };
+}
+
+export function parseKWWKNativeCursorResponses(stdout) {
+  const responses = [];
+  const lines = String(stdout || "")
+    .trim()
+    .split(/\r?\n/u)
+    .filter(Boolean);
+  for (const [index, line] of lines.entries()) {
+    try {
+      const response = JSON.parse(line);
+      if (!response || typeof response !== "object" || Array.isArray(response)) {
+        return {
+          ok: false,
+          error: `native_cursor_helper_invalid_response: line ${index + 1} is not an object`,
+          responses: [],
+        };
+      }
+      if (String(response.id || "").trim() === "") {
+        return {
+          ok: false,
+          error: `native_cursor_helper_invalid_response: line ${index + 1} missing id`,
+          responses: [],
+        };
+      }
+      responses.push({ ...response, id: String(response.id) });
+    } catch (error) {
+      return {
+        ok: false,
+        error: `native_cursor_helper_invalid_json: line ${index + 1}: ${String(
+          error?.message || error,
+        )}`,
+        responses: [],
+      };
+    }
+  }
+  return { ok: true, error: "", responses };
+}
+
+export function kwwkNativeCursorExpectedResponseError(response, renderResponse) {
+  if (!response) return "native_cursor_helper_missing_response:native-cursor";
+  if (!renderResponse) return "native_cursor_helper_missing_response:native-cursor-render";
+  const responseRPCError = String(response.error?.message || response.error || "").trim();
+  if (responseRPCError) return `native_cursor_helper_rpc_error:native-cursor:${responseRPCError}`;
+  const renderRPCError = String(renderResponse.error?.message || renderResponse.error || "").trim();
+  if (renderRPCError) {
+    return `native_cursor_helper_rpc_error:native-cursor-render:${renderRPCError}`;
+  }
+  if (response.result?.source !== KWWK_NATIVE_CURSOR_HELPER_SOURCE) {
+    return "native_cursor_helper_source_missing:native-cursor";
+  }
+  if (renderResponse.result?.source !== KWWK_NATIVE_CURSOR_HELPER_SOURCE) {
+    return "native_cursor_helper_source_missing:native-cursor-render";
+  }
+  if (response.result?.ok !== true) return "native_cursor_helper_result_not_ok:native-cursor";
+  if (renderResponse.result?.ok !== true) {
+    return "native_cursor_helper_result_not_ok:native-cursor-render";
+  }
+  return "";
 }
 
 export async function runKWWKNativeCursorBenchmark(args) {
@@ -190,65 +268,82 @@ export async function runKWWKNativeCursorBenchmark(args) {
   }
 
   const dir = await mkdtemp(join(tmpdir(), "oneesama-kwwk-native-cursor-"));
-  const child = spawn(
-    process.execPath,
-    ["--import", "tsx", "packages/core/src/meeting/app-control-helper.ts", "--stdio"],
-    {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...process.env, ONEESAMA_APP_CONTROL_HELPER: join(dir, "helper") },
-      stdio: ["pipe", "pipe", "pipe"],
-    },
-  );
-  const timer = setTimeout(() => child.kill("SIGTERM"), args.timeoutMs);
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  child.stdin.write(
-    `${JSON.stringify({
-      jsonrpc: "2.0",
-      id: "native-cursor",
-      method: "app_control.native_cursor_overlay_probe",
-      params: { kind: "click", label: "native cursor probe" },
-    })}\n`,
-  );
-  child.stdin.write(
-    `${JSON.stringify({
-      jsonrpc: "2.0",
-      id: "native-cursor-render",
-      method: "app_control.native_cursor_render_probe",
-      params: {},
-    })}\n`,
-  );
-  child.stdin.end();
-  const exit = await new Promise((resolve) => {
-    child.once("exit", (code, signal) => resolve({ code, signal }));
-  });
-  clearTimeout(timer);
-  const responses = stdout
-    .trim()
-    .split(/\r?\n/u)
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-  const byId = new Map(responses.map((response) => [response.id, response]));
-  const response = byId.get("native-cursor") || {};
-  const renderResponse = byId.get("native-cursor-render") || {};
-  return {
-    ok: exit.code === 0 && response?.result?.ok === true && renderResponse?.result?.ok === true,
-    exitCode: exit.code,
-    signal: exit.signal || "",
-    timedOut: exit.signal === "SIGTERM",
-    error: exit.code === 0 ? "" : stderr.trim() || "helper_failed",
-    durationMs: Math.round(performance.now() - started),
-    result: response.result || {},
-    renderResult: renderResponse.result || {},
-  };
+  try {
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", "packages/core/src/meeting/app-control-helper.ts", "--stdio"],
+      {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+        env: { ...process.env, ONEESAMA_APP_CONTROL_HELPER: join(dir, "helper") },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const timer = setTimeout(() => child.kill("SIGTERM"), args.timeoutMs);
+    let stdout = "";
+    let stderr = "";
+    let exit;
+    try {
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.stdin.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: "native-cursor",
+          method: "app_control.native_cursor_overlay_probe",
+          params: { kind: "click", label: "native cursor probe" },
+        })}\n`,
+      );
+      child.stdin.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: "native-cursor-render",
+          method: "app_control.native_cursor_render_probe",
+          params: {},
+        })}\n`,
+      );
+      child.stdin.end();
+      exit = await new Promise((resolve) => {
+        child.once("exit", (code, signal) => resolve({ code, signal }));
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const parsed = parseKWWKNativeCursorResponses(stdout);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        exitCode: exit.code,
+        signal: exit.signal || "",
+        timedOut: exit.signal === "SIGTERM",
+        error: parsed.error,
+        durationMs: Math.round(performance.now() - started),
+        result: {},
+        renderResult: {},
+      };
+    }
+    const byId = new Map(parsed.responses.map((response) => [response.id, response]));
+    const response = byId.get("native-cursor") || null;
+    const renderResponse = byId.get("native-cursor-render") || null;
+    const responseError = kwwkNativeCursorExpectedResponseError(response, renderResponse);
+    return {
+      ok: exit.code === 0 && responseError === "",
+      exitCode: exit.code,
+      signal: exit.signal || "",
+      timedOut: exit.signal === "SIGTERM",
+      error: exit.code === 0 ? responseError : stderr.trim() || responseError || "helper_failed",
+      durationMs: Math.round(performance.now() - started),
+      result: response?.result || {},
+      renderResult: renderResponse?.result || {},
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function main() {

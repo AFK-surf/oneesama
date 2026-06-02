@@ -19,6 +19,7 @@ import (
 const kwwkAppControlMethod = "app_control.control_shared_app_window"
 const maxKWWKAppControlMessageBytes = 1 << 20
 const defaultKWWKAppControlTimeout = 15 * time.Second
+const kwwkRPCResponseBuffer = 16
 
 type KWWKStdioAppControlConfig struct {
 	Command string
@@ -247,7 +248,7 @@ func newKWWKStdioSession(_ context.Context, cfg kwwkStdioSessionConfig) (*kwwkSt
 		command:   command,
 		stdin:     stdin,
 		stderr:    stderr,
-		responses: make(chan kwwkRPCResponse),
+		responses: make(chan kwwkRPCResponse, kwwkRPCResponseBuffer),
 		readErr:   make(chan error, 1),
 		waitDone:  make(chan error, 1),
 	}
@@ -287,20 +288,15 @@ func (s *kwwkStdioSession) Call(ctx context.Context, timeout time.Duration, meth
 	for {
 		select {
 		case response := <-s.responses:
-			if response.ID != requestID {
+			matched, err := handleKWWKRPCResponse(requestID, method, response, target)
+			if !matched {
 				continue
 			}
-			if response.Error != nil {
-				return fmt.Errorf("kwwk %s failed: %s", method, response.Error.Message)
-			}
-			if target == nil {
-				return nil
-			}
-			if err := json.Unmarshal(response.Result, target); err != nil {
-				return fmt.Errorf("decode kwwk %s result: %w", method, err)
-			}
-			return nil
+			return err
 		case err := <-s.readErr:
+			if matched, responseErr := s.drainBufferedResponse(requestID, method, target); matched {
+				return responseErr
+			}
 			if err == nil {
 				return fmt.Errorf("kwwk %s closed without response", method)
 			}
@@ -310,6 +306,36 @@ func (s *kwwkStdioSession) Call(ctx context.Context, timeout time.Duration, meth
 			return fmt.Errorf("kwwk %s timed out after %s: %w", method, timeout, callCtx.Err())
 		}
 	}
+}
+
+func (s *kwwkStdioSession) drainBufferedResponse(requestID string, method string, target any) (bool, error) {
+	for {
+		select {
+		case response := <-s.responses:
+			matched, err := handleKWWKRPCResponse(requestID, method, response, target)
+			if matched {
+				return true, err
+			}
+		default:
+			return false, nil
+		}
+	}
+}
+
+func handleKWWKRPCResponse(requestID string, method string, response kwwkRPCResponse, target any) (bool, error) {
+	if response.ID != requestID {
+		return false, nil
+	}
+	if response.Error != nil {
+		return true, fmt.Errorf("kwwk %s failed: %s", method, response.Error.Message)
+	}
+	if target == nil {
+		return true, nil
+	}
+	if err := json.Unmarshal(response.Result, target); err != nil {
+		return true, fmt.Errorf("decode kwwk %s result: %w", method, err)
+	}
+	return true, nil
 }
 
 func (s *kwwkStdioSession) Close(_ context.Context) error {

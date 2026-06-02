@@ -71,8 +71,8 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 		}
 	}
 	sessionID = resolvedSessionID
-	status := s.realtimeAppControlStatus(ctx, sessionID)
-	request := appControlRequestFromRealtime(input, sessionID, status)
+	rawStatus := s.realtimeAppControlStatus(ctx, sessionID)
+	request := appControlRequestFromRealtime(input, sessionID, rawStatus)
 	backend := s.appControlBackendForRequest(request)
 	if err := requireAppControlBackend(backend); err != nil {
 		return map[string]any{
@@ -103,7 +103,7 @@ func (s *Service) ControlRealtimeSharedApp(ctx context.Context, input RealtimeSh
 			"error":       err.Error(),
 			"provider":    backend.Name(),
 			"status":      appControlStatusFailed,
-			"screenShare": status,
+			"screenShare": request.Target.ScreenShare,
 		}
 	}
 	s.logger.Info(

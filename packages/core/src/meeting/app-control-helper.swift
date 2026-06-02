@@ -785,6 +785,9 @@ private final class KWWKForegroundCursorOverlay {
       )
     }
 
+    defer {
+      hideOnMain()
+    }
     view.kind = kind
     if !kind.contains("drag") {
       dragTrailAppKitPoints = []
@@ -820,7 +823,6 @@ private final class KWWKForegroundCursorOverlay {
       "drag": ["enabled": false],
     ]
     Self.pump(for: KWWKForegroundCursorTiming.finalHold)
-    hideOnMain()
     return payload
   }
 
@@ -842,6 +844,9 @@ private final class KWWKForegroundCursorOverlay {
       )
     }
 
+    defer {
+      hideOnMain()
+    }
     view.kind = "drag"
     view.trailPoints = []
     dragTrailAppKitPoints = []
@@ -891,7 +896,6 @@ private final class KWWKForegroundCursorOverlay {
       "style": "native_foreground_orange_trail",
     ]
     Self.pump(for: KWWKForegroundCursorTiming.finalHold)
-    hideOnMain()
     return payload
   }
 
@@ -1185,15 +1189,19 @@ private final class KWWKForegroundCursorOverlay {
     guard let context = NSGraphicsContext(bitmapImageRep: rep) else {
       throw HelperError.unsupported("native_cursor_render_context_failed")
     }
-    let previous = NSGraphicsContext.current
-    NSGraphicsContext.current = context
-    background.setFill()
-    NSRect(origin: .zero, size: size).fill()
-    let view = KWWKForegroundCursorView(frame: CGRect(origin: .zero, size: size))
-    view.kind = kind
-    view.trailPoints = trailPoints
-    view.draw(CGRect(origin: .zero, size: size))
-    NSGraphicsContext.current = previous
+    do {
+      let previous = NSGraphicsContext.current
+      NSGraphicsContext.current = context
+      defer {
+        NSGraphicsContext.current = previous
+      }
+      background.setFill()
+      NSRect(origin: .zero, size: size).fill()
+      let view = KWWKForegroundCursorView(frame: CGRect(origin: .zero, size: size))
+      view.kind = kind
+      view.trailPoints = trailPoints
+      view.draw(CGRect(origin: .zero, size: size))
+    }
     guard let data = rep.representation(using: .png, properties: [:]) else {
       throw HelperError.unsupported("native_cursor_render_png_failed")
     }

@@ -187,6 +187,48 @@ func TestRealtimeSharedAppControlDirectConfiguredKWWKDoesNotStartCodexExecutor(t
 	}
 }
 
+func TestKWWKComputerUseToolForcesDirectExecutionMode(t *testing.T) {
+	t.Parallel()
+
+	backend := &fakeAppControlBackend{
+		name:   "kwwk",
+		result: AppControlResult{OK: true, Provider: "kwwk", Status: appControlStatusCompleted, Summary: "clicked Got it"},
+	}
+	rootDir := t.TempDir()
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir:  rootDir,
+		InternalAuthKey:   "secret-key",
+		Pipeline:          postmeeting.NewPipeline(rootDir),
+		AppControlBackend: backend,
+		OpenAI:            appconfig.OpenAIConfig{RealtimeModel: "gpt-realtime-2", BotName: "Meeting Avatar Bot"},
+		MeetRunner: fakeMeetRunnerWithRuntime{
+			statusActive: map[string]any{
+				"sessionId": "meet_session",
+				"screenShare": map[string]any{
+					"active":          true,
+					"applicationName": "Chrome",
+					"title":           "Chrome",
+				},
+			},
+		},
+	})
+
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"session_id":"meet_session","applicationName":"Chrome","instruction":"click Got it","executionMode":"delegate","wait":true}`, http.StatusOK)
+
+	if body["ok"] != true || body["provider"] != "kwwk" || body["summary"] != "clicked Got it" {
+		t.Fatalf("body = %#v, want direct KWWK result", body)
+	}
+	req, ok := backend.lastRequest()
+	if !ok {
+		t.Fatalf("backend requests = %d, want captured kwwk request", backend.requestCount())
+	}
+	if req.ExecutionMode != appControlExecutionModeDirect {
+		t.Fatalf("request = %#v, kwwk_computer_use must force direct execution mode", req)
+	}
+}
+
 func TestRealtimeSharedAppControlRoutesKWWKBackgroundAgentPlanToCodexExecutor(t *testing.T) {
 	t.Parallel()
 
@@ -578,6 +620,7 @@ func TestRealtimeSharedAppControlBackendUnavailableFailsFast(t *testing.T) {
 	t.Parallel()
 
 	backend := &fakeAppControlBackend{name: "kwwk", err: errors.New("kwwk_backend_unavailable")}
+	hugeTimeline := strings.Repeat("hugeTimelineToken", 5000)
 	rootDir := t.TempDir()
 	router := newRealtimeTestRouterWithConfig(t, Config{
 		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
@@ -592,6 +635,10 @@ func TestRealtimeSharedAppControlBackendUnavailableFailsFast(t *testing.T) {
 				"screenShare": map[string]any{
 					"active":          true,
 					"applicationName": "Pencil",
+					"windowId":        4521,
+				},
+				"realtimeBridge": map[string]any{
+					"timeline": hugeTimeline,
 				},
 			},
 		},
@@ -604,6 +651,13 @@ func TestRealtimeSharedAppControlBackendUnavailableFailsFast(t *testing.T) {
 
 	if body["ok"] != false || body["error"] != "kwwk_backend_unavailable" || body["provider"] != "kwwk" {
 		t.Fatalf("body = %#v, want backend unavailable surfaced", body)
+	}
+	screenShare := body["screenShare"].(map[string]any)
+	if _, ok := screenShare["realtimeBridge"]; ok {
+		t.Fatalf("screenShare = %#v, backend error path must not expose raw runtime state", screenShare)
+	}
+	if screenShare["applicationName"] != "Pencil" || screenShare["windowId"] != 4521.0 && screenShare["windowId"] != 4521 {
+		t.Fatalf("screenShare = %#v, want compact app target", screenShare)
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("elapsed = %s, want fail-fast under 2s", elapsed)
@@ -1014,6 +1068,15 @@ func (f *fakeAppControlBackend) requestCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.requests)
+}
+
+func (f *fakeAppControlBackend) lastRequest() (AppControlRequest, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.requests) == 0 {
+		return AppControlRequest{}, false
+	}
+	return f.requests[len(f.requests)-1], true
 }
 
 var _ meetrunner.Runner = fakeMeetRunnerWithRuntime{}

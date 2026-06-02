@@ -18,6 +18,14 @@ import {
   type Page,
   type PresentationButton,
 } from "./google-meet-joiner-base.ts";
+import { compactCaptionState } from "./google-meet-joiner-status-compaction.ts";
+export {
+  compactCaptionState,
+  compactJoinStatusActive,
+  compactJoinStatusRealtimeBridge,
+  compactJoinStatusWorkerResultBridge,
+} from "./google-meet-joiner-status-compaction.ts";
+
 export async function fillGuestName(
   page: Page,
   botName: string,
@@ -385,18 +393,6 @@ export async function evaluateLocalDialogState(page) {
 
 export async function evaluateScreenShareState(page) {
   return await evaluateWindowState(page, "MAB_SCREEN_SHARE");
-}
-
-export function compactCaptionState(captions) {
-  if (!captions) return null;
-  return {
-    ok: captions.ok,
-    count: captions.count,
-    latest: captions.latest || null,
-    paths: captions.paths || null,
-    containerFound: Boolean(captions.browser?.containerFound),
-    errors: captions.browser?.errors || [],
-  };
 }
 
 export function captionEventTimeMs(event: any): number {

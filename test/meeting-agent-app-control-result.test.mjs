@@ -58,6 +58,26 @@ test("TS meeting-agent app-control compaction keeps compact blockers", () => {
   });
 });
 
+test("TS meeting-agent app-control compaction treats terminal failure status as not ok", () => {
+  const compact = compactMeetingAgentAppControlResult({
+    ok: true,
+    status: "blocked",
+    summary: "Helper reported ok but status says blocked.",
+    blocker: "permission_required",
+  });
+
+  assert.deepEqual(compact, {
+    ok: false,
+    provider: "kwwk",
+    status: "blocked",
+    summary: "Helper reported ok but status says blocked.",
+    blocker: "permission_required",
+    error: "permission_required",
+    displayText: "需要权限",
+    answer_hint_zh: "需要权限",
+  });
+});
+
 test("TS meeting-agent app-control compaction adds compact failure wording", () => {
   const cases = [
     ["blocked_ambiguous_target", "目标不明确"],

@@ -1,6 +1,7 @@
 package meetingagent
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -116,6 +117,185 @@ func TestKWWKStdioAppControlBackendPreservesBackgroundAgentStatus(t *testing.T) 
 	}
 }
 
+func TestKWWKStdioAppControlBackendIgnoresWrongIDStrayResponse(t *testing.T) {
+	t.Parallel()
+
+	helper := writeKWWKAppControlHelperSource(t, `
+import readline from "node:readline";
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
+for await (const line of rl) {
+  const req = JSON.parse(line);
+  console.log(JSON.stringify({
+    jsonrpc: "2.0",
+    id: "stray-" + req.id,
+    error: { code: -32000, message: "stale response must be ignored" }
+  }));
+  console.log(JSON.stringify({
+    jsonrpc: "2.0",
+    id: req.id,
+    result: {
+      ok: true,
+      summary: "matched response handled",
+      actions: ["observe"],
+      confidence: 0.7
+    }
+  }));
+}
+`)
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command: "node " + shellQuote(helper),
+		Timeout: time.Second,
+	})
+	t.Cleanup(func() {
+		_ = backend.Shutdown(context.Background())
+	})
+
+	result, err := backend.ControlSharedApp(context.Background(), AppControlRequest{
+		SessionID:   "meet_session",
+		Instruction: "observe active app",
+		Timeout:     time.Second,
+	})
+	if err != nil {
+		t.Fatalf("ControlSharedApp() error = %v", err)
+	}
+	if !result.OK || result.Summary != "matched response handled" {
+		t.Fatalf("result = %#v, want matched response success after wrong-id stray", result)
+	}
+}
+
+func TestKWWKStdioAppControlBackendIgnoresStartupStrayResponse(t *testing.T) {
+	t.Parallel()
+
+	helper := writeKWWKAppControlHelperSource(t, `
+import readline from "node:readline";
+console.log(JSON.stringify({
+  jsonrpc: "2.0",
+  id: "startup-stray",
+  error: { code: -32000, message: "startup response must be ignored" }
+}));
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
+for await (const line of rl) {
+  const req = JSON.parse(line);
+  console.log(JSON.stringify({
+    jsonrpc: "2.0",
+    id: req.id,
+    result: {
+      ok: true,
+      summary: "startup stray ignored",
+      actions: ["observe"],
+      confidence: 0.7
+    }
+  }));
+}
+`)
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command: "node " + shellQuote(helper),
+		Timeout: time.Second,
+	})
+	t.Cleanup(func() {
+		_ = backend.Shutdown(context.Background())
+	})
+
+	result, err := backend.ControlSharedApp(context.Background(), AppControlRequest{
+		SessionID:   "meet_session",
+		Instruction: "observe active app",
+		Timeout:     time.Second,
+	})
+	if err != nil {
+		t.Fatalf("ControlSharedApp() error = %v", err)
+	}
+	if !result.OK || result.Summary != "startup stray ignored" {
+		t.Fatalf("result = %#v, want success after startup stray", result)
+	}
+}
+
+func TestKWWKStdioSessionConsumesBufferedResponseBeforeEOF(t *testing.T) {
+	t.Parallel()
+
+	for range 100 {
+		session := &kwwkStdioSession{
+			stdin:     discardWriteCloser{},
+			stderr:    &bytes.Buffer{},
+			responses: make(chan kwwkRPCResponse, 1),
+			readErr:   make(chan error, 1),
+			waitDone:  make(chan error, 1),
+		}
+		session.responses <- kwwkRPCResponse{
+			ID:     "1",
+			Result: []byte(`{"ok":true,"summary":"matched response survived eof","actions":["observe"],"confidence":0.7}`),
+		}
+		session.readErr <- nil
+
+		var response kwwkAppControlResponse
+		if err := session.Call(context.Background(), time.Second, kwwkAppControlMethod, map[string]any{}, &response); err != nil {
+			t.Fatalf("Call() error = %v, want buffered response to win before EOF", err)
+		}
+		if !response.OK || response.Summary != "matched response survived eof" {
+			t.Fatalf("response = %#v, want buffered matching response", response)
+		}
+	}
+}
+
+func TestKWWKStdioAppControlBackendResetsSessionAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	helper := writeKWWKAppControlHelperSource(t, `
+import fs from "node:fs";
+import readline from "node:readline";
+const statePath = process.env.KWWK_TEST_STATE_PATH;
+const priorStarts = Number(fs.existsSync(statePath) ? fs.readFileSync(statePath, "utf8") : "0");
+fs.writeFileSync(statePath, String(priorStarts + 1));
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
+for await (const line of rl) {
+  const req = JSON.parse(line);
+  if (priorStarts === 0) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  console.log(JSON.stringify({
+    jsonrpc: "2.0",
+    id: req.id,
+    result: {
+      ok: true,
+      summary: priorStarts === 0 ? "late first response" : "fresh session response",
+      actions: ["observe"],
+      confidence: 0.7
+    }
+  }));
+}
+`)
+	statePath := filepath.Join(t.TempDir(), "helper-starts.txt")
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command: "KWWK_TEST_STATE_PATH=" + shellQuote(statePath) + " node " + shellQuote(helper),
+		Timeout: 100 * time.Millisecond,
+	})
+	t.Cleanup(func() {
+		_ = backend.Shutdown(context.Background())
+	})
+
+	first, err := backend.ControlSharedApp(context.Background(), AppControlRequest{
+		SessionID:   "meet_session",
+		Instruction: "observe active app",
+		Timeout:     100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("ControlSharedApp(first) error = %v", err)
+	}
+	if first.OK || first.Error != "kwwk_app_control_unavailable" {
+		t.Fatalf("first = %#v, want timeout surfaced as KWWK unavailable", first)
+	}
+	second, err := backend.ControlSharedApp(context.Background(), AppControlRequest{
+		SessionID:   "meet_session",
+		Instruction: "observe active app",
+		Timeout:     time.Second,
+	})
+	if err != nil {
+		t.Fatalf("ControlSharedApp(second) error = %v", err)
+	}
+	if !second.OK || second.Summary != "fresh session response" {
+		t.Fatalf("second = %#v, want fresh helper session after timeout", second)
+	}
+}
+
 func TestFallbackAppControlBackendFallsBackToCodexOnlyWhenKWWKUnavailable(t *testing.T) {
 	t.Parallel()
 
@@ -196,7 +376,6 @@ func TestFallbackAppControlBackendFallsBackToCodexOnlyWhenKWWKUnavailable(t *tes
 
 func writeKWWKAppControlHelper(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "kwwk-helper.mjs")
 	source := `
 import readline from "node:readline";
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
@@ -251,6 +430,12 @@ for await (const line of rl) {
   console.log(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }));
 }
 `
+	return writeKWWKAppControlHelperSource(t, source)
+}
+
+func writeKWWKAppControlHelperSource(t *testing.T, source string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kwwk-helper.mjs")
 	if err := os.WriteFile(path, []byte(source), 0o755); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
@@ -259,4 +444,14 @@ for await (const line of rl) {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+type discardWriteCloser struct{}
+
+func (discardWriteCloser) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (discardWriteCloser) Close() error {
+	return nil
 }

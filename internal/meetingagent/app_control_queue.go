@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,8 @@ import (
 const (
 	appControlStatusQueued  = "queued"
 	appControlStatusRunning = "running"
+	// Terminal jobs are pruned to this target size; pending/running jobs are preserved.
+	appControlMaxStoredJobs = 100
 )
 
 type appControlJob struct {
@@ -74,9 +77,7 @@ func (s *Service) enqueueAppControlJob(req AppControlRequest, screenShare map[st
 		ScreenShare: screenShare,
 		CreatedAt:   now,
 	}
-	s.appControlJobsMu.Lock()
-	s.appControlJobs[id] = job
-	s.appControlJobsMu.Unlock()
+	s.storeAppControlJob(job)
 
 	select {
 	case s.appControlQueue <- appControlQueuedJob{ID: id}:
@@ -93,9 +94,7 @@ func (s *Service) enqueueAppControlJob(req AppControlRequest, screenShare map[st
 		job.Error = "app_control_queue_full"
 		job.Blocker = "app_control_queue_full"
 		job.FinishedAt = time.Now().UTC()
-		s.appControlJobsMu.Lock()
-		s.appControlJobs[id] = job
-		s.appControlJobsMu.Unlock()
+		s.storeAppControlJob(job)
 		return appControlJobMap(job), fmt.Errorf("app_control_queue_full")
 	}
 }
@@ -191,6 +190,48 @@ func (s *Service) storeAppControlJob(job appControlJob) {
 	s.appControlJobsMu.Lock()
 	defer s.appControlJobsMu.Unlock()
 	s.appControlJobs[job.ID] = job
+	s.pruneAppControlJobsLocked(job.ID)
+}
+
+func (s *Service) pruneAppControlJobsLocked(protectedID string) {
+	if len(s.appControlJobs) <= appControlMaxStoredJobs {
+		return
+	}
+	candidates := make([]appControlJob, 0, len(s.appControlJobs))
+	for id, job := range s.appControlJobs {
+		if id == protectedID || !appControlJobCanPrune(job) {
+			continue
+		}
+		candidates = append(candidates, job)
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		leftTime := appControlJobPruneTime(candidates[left])
+		rightTime := appControlJobPruneTime(candidates[right])
+		if leftTime.Equal(rightTime) {
+			return candidates[left].ID < candidates[right].ID
+		}
+		return leftTime.Before(rightTime)
+	})
+	for _, candidate := range candidates {
+		if len(s.appControlJobs) <= appControlMaxStoredJobs {
+			return
+		}
+		delete(s.appControlJobs, candidate.ID)
+	}
+}
+
+func appControlJobCanPrune(job appControlJob) bool {
+	return !appControlStatusIsPending(job.Status)
+}
+
+func appControlJobPruneTime(job appControlJob) time.Time {
+	if !job.FinishedAt.IsZero() {
+		return job.FinishedAt
+	}
+	if !job.StartedAt.IsZero() {
+		return job.StartedAt
+	}
+	return job.CreatedAt
 }
 
 func appControlJobMap(job appControlJob) map[string]any {
