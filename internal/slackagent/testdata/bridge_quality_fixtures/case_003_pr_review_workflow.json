@@ -18,9 +18,7 @@
     "files": [],
     "memory_seed_files": []
   },
-  "expected_contract_items": [
-    "C223_workflow_intent_recognition"
-  ],
+  "expected_contract_items": ["C223_workflow_intent_recognition"],
   "expected_evidence_anchors": [
     "slack_workflow_context (ok)",
     "operational_github_work",
@@ -31,9 +29,7 @@
     "https://github.com/AFK-surf/cueboard/pull/1917",
     "<@U0ALY77RMJL>"
   ],
-  "expected_tools_invoked": [
-    "slack_workflow_context"
-  ],
+  "expected_tools_invoked": ["slack_workflow_context"],
   "expected_decision_shape": {
     "min_chars": 0,
     "max_chars": 0,

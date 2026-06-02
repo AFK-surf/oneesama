@@ -23,9 +23,7 @@
       }
     ]
   },
-  "expected_contract_items": [
-    "C4_related_memory_evidence_injected"
-  ],
+  "expected_contract_items": ["C4_related_memory_evidence_injected"],
   "expected_evidence_anchors": [
     "memory/team/meetings/jc-case-study.md",
     "not a recorded Case Study"

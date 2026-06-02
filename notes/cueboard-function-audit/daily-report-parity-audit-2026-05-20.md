@@ -98,7 +98,7 @@ Port the old durable source of truth and extend it: new daily report includes `n
   - `Reply category mix`, `Liked / emoji reactions`, `Skipped category mix`, `Failed`
   - `Emoji audit`
   - `Self-iteration notes`
-  (`internal/slackagent/daily_report.go:645-730`).
+    (`internal/slackagent/daily_report.go:645-730`).
 
 ### Diff
 

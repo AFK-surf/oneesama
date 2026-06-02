@@ -1,26 +1,100 @@
 #!/usr/bin/env node
 import { printHelp } from "./cli/common.js";
-import { doctor, smoke, agentProviderSmoke, agentRealTaskSmoke, claudeProviderSmoke } from "./cli/providers.js";
-import { codexAppServerProviderSmoke, ollamaProviderSmoke, slackAgentDProviderSmoke } from "./cli/providers-extra.js";
-import { slackLiveCapabilitySmoke, slackLiveSocketSmoke, slackMemorySeed, slackMemorySmoke } from "./cli/slack-live.js";
-import { localAgentDialogSmoke, captionLocalDialogSmoke, realLocalDialogSmoke, dialogProviderSmoke, postMeetingSmoke } from "./cli/dialog-post-meeting.js";
-import { meetdApiCompatSmoke, meetdRuntimeStoreSmoke, digestWebhookSmoke, meetingCopilotSmoke } from "./cli/meetd-digest.js";
-import { canvasPublisherSmoke, slackMrkdwnRendererSmoke, slackAssistantScheduleSmoke, slackAssistantScheduleServiceSmoke, slackWorkspaceBootstrapSmoke } from "./cli/slack-assistant.js";
+import {
+  doctor,
+  smoke,
+  agentProviderSmoke,
+  agentRealTaskSmoke,
+  claudeProviderSmoke,
+} from "./cli/providers.js";
+import {
+  codexAppServerProviderSmoke,
+  ollamaProviderSmoke,
+  slackAgentDProviderSmoke,
+} from "./cli/providers-extra.js";
+import {
+  slackLiveCapabilitySmoke,
+  slackLiveSocketSmoke,
+  slackMemorySeed,
+  slackMemorySmoke,
+} from "./cli/slack-live.js";
+import {
+  localAgentDialogSmoke,
+  captionLocalDialogSmoke,
+  realLocalDialogSmoke,
+  dialogProviderSmoke,
+  postMeetingSmoke,
+} from "./cli/dialog-post-meeting.js";
+import {
+  meetdApiCompatSmoke,
+  meetdRuntimeStoreSmoke,
+  digestWebhookSmoke,
+  meetingCopilotSmoke,
+} from "./cli/meetd-digest.js";
+import {
+  canvasPublisherSmoke,
+  slackMrkdwnRendererSmoke,
+  slackAssistantScheduleSmoke,
+  slackAssistantScheduleServiceSmoke,
+  slackWorkspaceBootstrapSmoke,
+} from "./cli/slack-assistant.js";
 import { slackInstallSmoke, slackToolRegistrySmoke } from "./cli/slack-registry.js";
 import { slackDomainStoreSmoke, slackTriageFlowSmoke } from "./cli/slack-domain-triage.js";
-import { avatarSmoke, realtimeSmoke, meetSmoke, meetContractSmoke, screenShareSmoke, realMeetSmoke, persistenceSmoke } from "./cli/runtime-basic.js";
-import { stateProviderSmoke, workerBridgeSmoke, realtimeBrowserSmoke, realtimeWebrtcSmoke, realtimeAudioRouteSmoke, realtimeParticipantAudioSmoke, realtimeRepeatGuardSmoke } from "./cli/realtime-basic.js";
-import { realtimeSessionUpdateSmoke, realtimeWorkerToolSmoke, realtimeLiveToolSmoke, realtimeLiveRoutingSmoke } from "./cli/realtime-tools.js";
-import { avatarStateSmoke, avatarVisualSmoke, avatarVRMSmoke, hiyoriLive2dSmoke, runtimeAcceptanceSmoke, realtimeSdkSmoke, realtimeSdpSmoke } from "./cli/avatar-runtime.js";
-import { slackResultSmoke, slackPostingSmoke, cutoverShadowSmoke, cutoverRollbackSmoke, shadowParitySmoke, shadowTapSmoke, shadowTransmitterSmoke } from "./cli/slack-cutover.js";
-import { shadowTransmitterHook, cutoverEvidenceBundle, cutoverEvidenceSmoke } from "./cli/support.js";
+import {
+  avatarSmoke,
+  realtimeSmoke,
+  meetSmoke,
+  meetContractSmoke,
+  screenShareSmoke,
+  realMeetSmoke,
+  persistenceSmoke,
+} from "./cli/runtime-basic.js";
+import {
+  stateProviderSmoke,
+  workerBridgeSmoke,
+  realtimeBrowserSmoke,
+  realtimeWebrtcSmoke,
+  realtimeAudioRouteSmoke,
+  realtimeParticipantAudioSmoke,
+  realtimeRepeatGuardSmoke,
+} from "./cli/realtime-basic.js";
+import {
+  realtimeSessionUpdateSmoke,
+  realtimeWorkerToolSmoke,
+  realtimeLiveToolSmoke,
+  realtimeLiveRoutingSmoke,
+} from "./cli/realtime-tools.js";
+import {
+  avatarStateSmoke,
+  avatarVisualSmoke,
+  avatarVRMSmoke,
+  hiyoriLive2dSmoke,
+  runtimeAcceptanceSmoke,
+  realtimeSdkSmoke,
+  realtimeSdpSmoke,
+} from "./cli/avatar-runtime.js";
+import {
+  slackResultSmoke,
+  slackPostingSmoke,
+  cutoverShadowSmoke,
+  cutoverRollbackSmoke,
+  shadowParitySmoke,
+  shadowTapSmoke,
+  shadowTransmitterSmoke,
+} from "./cli/slack-cutover.js";
+import {
+  shadowTransmitterHook,
+  cutoverEvidenceBundle,
+  cutoverEvidenceSmoke,
+} from "./cli/support.js";
 import { slackContractSmoke } from "./cli/slack-contract.js";
 import { slackSmoke } from "./cli/slack-smoke.js";
 import { meetLiveAcceptance } from "./cli/meet-live-acceptance.js";
 
 const command = process.argv[2] || "help";
 const commands: Record<string, () => Promise<void> | void> = {
-  doctor, smoke,
+  doctor,
+  smoke,
   "agent-provider-smoke": agentProviderSmoke,
   "agent-real-task-smoke": agentRealTaskSmoke,
   "claude-provider-smoke": claudeProviderSmoke,

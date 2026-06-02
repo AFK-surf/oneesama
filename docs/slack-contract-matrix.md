@@ -10,18 +10,18 @@ npm run smoke:slack-contract
 
 ## Covered In `smoke:slack-contract`
 
-| Contract                   | Coverage                                                                                                                                            |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contract                   | Coverage                                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Slash command parser       | `join`, `status`, `stop`, `help`, quoted strings, `--session`, `--bot-name`, `--dry-run`, `--start-joiner`; hidden worker/debug terms remain non-public |
-| Google Meet URL validation | Accepts canonical Meet URLs with query strings; rejects non-Meet URLs                                                                               |
-| Slack signing secret       | Valid HMAC accepted; wrong secret rejected by service; stale timestamp rejected by verifier and service; malformed signature rejected by verifier   |
-| URL-encoded slash payload  | Posts real `application/x-www-form-urlencoded` payloads with Slack-like `team_id`, `channel_id`, `user_id`, `response_url`, and `trigger_id` fields |
-| Route compatibility        | Exercises both `/commands/avatar` and `/slack/commands/avatar`                                                                                      |
-| Command happy paths        | `help`, `join`, `status`, `stop`, plus natural-language app mentions                                                                                |
-| Command edge paths         | Invalid `join`, unknown command, hidden worker/debug commands                                                                                       |
-| Meeting handoff            | `join` creates a Slack session and hands it to Meeting Agent in dry-run mode                                                                        |
-| Internal work routing      | Natural-language mentions use the selected AgentRunner when needed, attach session context, and report the completed job to Meeting Agent          |
-| Slack job polling          | Internal result polling returns a completed Meeting Agent job once and proves no duplicate Slack delivery                                           |
+| Google Meet URL validation | Accepts canonical Meet URLs with query strings; rejects non-Meet URLs                                                                                   |
+| Slack signing secret       | Valid HMAC accepted; wrong secret rejected by service; stale timestamp rejected by verifier and service; malformed signature rejected by verifier       |
+| URL-encoded slash payload  | Posts real `application/x-www-form-urlencoded` payloads with Slack-like `team_id`, `channel_id`, `user_id`, `response_url`, and `trigger_id` fields     |
+| Route compatibility        | Exercises both `/commands/avatar` and `/slack/commands/avatar`                                                                                          |
+| Command happy paths        | `help`, `join`, `status`, `stop`, plus natural-language app mentions                                                                                    |
+| Command edge paths         | Invalid `join`, unknown command, hidden worker/debug commands                                                                                           |
+| Meeting handoff            | `join` creates a Slack session and hands it to Meeting Agent in dry-run mode                                                                            |
+| Internal work routing      | Natural-language mentions use the selected AgentRunner when needed, attach session context, and report the completed job to Meeting Agent               |
+| Slack job polling          | Internal result polling returns a completed Meeting Agent job once and proves no duplicate Slack delivery                                               |
 
 ## Covered By Adjacent Smokes
 

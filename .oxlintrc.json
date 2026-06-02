@@ -23,33 +23,36 @@
   },
   "categories": {
     "correctness": "error",
-    "suspicious": "warn",
-    "perf": "warn",
+    "suspicious": "error",
+    "perf": "error",
     "pedantic": "off",
     "style": "off",
     "restriction": "off",
     "nursery": "off"
   },
   "rules": {
-    "eslint/no-underscore-dangle": "off",
-    "eslint/no-await-in-loop": "off",
-    "eslint/no-unused-vars": [
-      "warn",
-      {
-        "argsIgnorePattern": "^_",
-        "varsIgnorePattern": "^_",
-        "ignoreRestSiblings": true
-      }
-    ],
+    "eqeqeq": ["error", "smart"],
+    "eslint/no-underscore-dangle": "allow",
+    "eslint/no-await-in-loop": "allow",
+    "eslint/no-unused-vars": "error",
     "promise/no-multiple-resolved": "off",
-    "unicorn/consistent-function-scoping": "off",
+    "no-debugger": "error",
+    "no-underscore-dangle": "allow",
+    "no-unused-vars": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "typescript/no-floating-promises": "error",
+    "unicorn/consistent-function-scoping": "allow",
+    "unicorn/no-array-reverse": "allow",
+    "unicorn/no-array-sort": "allow",
     "unicorn/require-post-message-target-origin": "off",
     "unicorn/no-useless-fallback-in-spread": "warn",
     "max-lines": [
       "error",
       {
         "max": 1200,
-        "skipBlankLines": true
+        "skipBlankLines": true,
+        "skipComments": true
       }
     ]
   },
@@ -69,6 +72,7 @@
     {
       "files": ["packages/core/src/meeting/google-meet-joiner.ts"],
       "rules": {
+        "prefer-const": "allow",
         "max-lines": [
           "error",
           {
@@ -81,6 +85,7 @@
     {
       "files": ["apps/slack-agent/src/index.ts"],
       "rules": {
+        "prefer-const": "allow",
         "max-lines": [
           "error",
           {
@@ -124,6 +129,24 @@
             "skipBlankLines": true
           }
         ]
+      }
+    },
+    {
+      "files": ["packages/core/src/meeting/caption-capture.ts"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1244,
+            "skipBlankLines": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/core/src/realtime/realtime-browser-bridge.ts"],
+      "rules": {
+        "prefer-const": "allow"
       }
     }
   ]

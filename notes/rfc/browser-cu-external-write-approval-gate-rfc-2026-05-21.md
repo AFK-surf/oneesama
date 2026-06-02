@@ -4,6 +4,7 @@ Status: Proposed
 Date: 2026-05-21
 Anchor task: #328
 Parent RFCs:
+
 - `notes/rfc/oneesama-harness-cache-tool-stability-rfc-2026-05-21.md`
 - `notes/rfc/kwwk-cu-demo-surface-poc-rfc-2026-05-21.md`
 
@@ -42,13 +43,13 @@ start_demo_surface / control_demo_surface
 
 ## Action Taxonomy
 
-| Class | Examples | Default |
-|---|---|---|
-| `read_only` | `open_url`, `capture`, read URL, screenshot observation | allow when URL is allowlisted/session-approved |
-| `passive_mutation` | scroll, highlight, focus visible element | allow or dry-run based on `DryRun` |
-| `local_demo_write` | click a local fixture button, type into a bot-owned local demo app | requires `AllowActiveControl=true`; no external approval token if URL is loopback session-approved |
-| `external_write` | Linear close/update/comment, GitHub issue/PR comment/update/merge, Notion edit, Slack/Meet message send through browser UI | requires approval token |
-| `forbidden_write` | file download exfiltration, credential changes, billing/payment/admin/security actions, deleting production data | block even with token unless a later RFC explicitly permits |
+| Class              | Examples                                                                                                                   | Default                                                                                            |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `read_only`        | `open_url`, `capture`, read URL, screenshot observation                                                                    | allow when URL is allowlisted/session-approved                                                     |
+| `passive_mutation` | scroll, highlight, focus visible element                                                                                   | allow or dry-run based on `DryRun`                                                                 |
+| `local_demo_write` | click a local fixture button, type into a bot-owned local demo app                                                         | requires `AllowActiveControl=true`; no external approval token if URL is loopback session-approved |
+| `external_write`   | Linear close/update/comment, GitHub issue/PR comment/update/merge, Notion edit, Slack/Meet message send through browser UI | requires approval token                                                                            |
+| `forbidden_write`  | file download exfiltration, credential changes, billing/payment/admin/security actions, deleting production data           | block even with token unless a later RFC explicitly permits                                        |
 
 ## Approval Token Shape
 
@@ -119,27 +120,27 @@ observable and keep the current default conservative.
 ## Implementation Slices
 
 - [x] #328-A. RFC and config/status seam.
-  Done when the default config requires approval for external writes and the
-  meeting status exposes the approval policy state.
+      Done when the default config requires approval for external writes and the
+      meeting status exposes the approval policy state.
 - [ ] #328-B. Add `DemoApprovalTokenStore` with in-memory fake + persistent
-  interface.
-  Done when tests cover mint / match / consume / expire / revoke.
+      interface.
+      Done when tests cover mint / match / consume / expire / revoke.
 - [ ] #328-C. Extend `DemoSafetyPolicy` to accept an approval token reference
-  for `click` / `type` and classify external write vs local demo write.
-  Done when external writes block without a matching token even if
-  `AllowActiveControl=true`.
+      for `click` / `type` and classify external write vs local demo write.
+      Done when external writes block without a matching token even if
+      `AllowActiveControl=true`.
 - [ ] #328-D. Add Slack approval-card mint/reject path.
-  Done when a deterministic test mints a token from a button payload and audit
-  stores requester/approver/scope.
+      Done when a deterministic test mints a token from a button payload and audit
+      stores requester/approver/scope.
 - [ ] #328-E. Add realtime approval capture path.
-  Done when an affirmative current-speaker reply can mint a single-use token
-  and a negative/ambiguous reply cannot.
+      Done when an affirmative current-speaker reply can mint a single-use token
+      and a negative/ambiguous reply cannot.
 - [ ] #328-F. Add live smoke for local fixture issue close.
-  Done when the Snake/Linear-like fixture can close its issue only after a
-  scoped token is minted.
+      Done when the Snake/Linear-like fixture can close its issue only after a
+      scoped token is minted.
 - [ ] #328-G. Add production denylist for forbidden writes.
-  Done when billing/admin/security/delete flows are blocked with
-  `external_write_forbidden`.
+      Done when billing/admin/security/delete flows are blocked with
+      `external_write_forbidden`.
 
 ## Acceptance Gates
 

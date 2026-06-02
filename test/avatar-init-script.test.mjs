@@ -7,7 +7,10 @@ import { buildAvatarInitScript } from "../packages/core/src/avatar/init-script-b
 test("avatar runtime config uses resilient Hiyori model URLs", () => {
   const config = getRuntimeConfig({});
 
-  assert.match(config.avatarModelUrl, /fastly\.jsdelivr\.net\/gh\/Live2D\/CubismWebSamples@develop/);
+  assert.match(
+    config.avatarModelUrl,
+    /fastly\.jsdelivr\.net\/gh\/Live2D\/CubismWebSamples@develop/,
+  );
   assert.ok(
     config.avatarModelFallbackUrls.some((url) =>
       url.includes("raw.githubusercontent.com/Live2D/CubismWebSamples/develop"),

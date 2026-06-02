@@ -17,29 +17,29 @@ This doc is the second pass. The first pass (`bdd274c`) is reverted (`a2d00b3`) 
 
 Old Slack Agent D, since `2026-05-12`:
 
-| Query | Count |
-|---|---:|
-| All triage runs | 1824 |
-| Bridge-related runs (`Bridge` / `bridge` / `<@U09SF0MQZ5M>`) | 343 |
-| Bridge-related mutating runs | 17 |
+| Query                                                        | Count |
+| ------------------------------------------------------------ | ----: |
+| All triage runs                                              |  1824 |
+| Bridge-related runs (`Bridge` / `bridge` / `<@U09SF0MQZ5M>`) |   343 |
+| Bridge-related mutating runs                                 |    17 |
 
 New Oneesama live state, post-cutover window:
 
-| Signal | Finding |
-|---|---|
-| `slack_triage_runs.json` Bridge-related hits | Present, but mostly scanner-level triage summaries |
-| `slack_workspace_contexts.json` old Bridge mention hits | 3 item-level contexts |
-| Old Bridge bot user ID still actively addressed by humans | `<@U09SF0MQZ5M>` |
-| Current Oneesama bot user ID | `<@U0AP5UFU0FR>` |
+| Signal                                                    | Finding                                            |
+| --------------------------------------------------------- | -------------------------------------------------- |
+| `slack_triage_runs.json` Bridge-related hits              | Present, but mostly scanner-level triage summaries |
+| `slack_workspace_contexts.json` old Bridge mention hits   | 3 item-level contexts                              |
+| Old Bridge bot user ID still actively addressed by humans | `<@U09SF0MQZ5M>`                                   |
+| Current Oneesama bot user ID                              | `<@U0AP5UFU0FR>`                                   |
 
 ## Representative Cases
 
-| Case | Old/new signal | Disposition |
-|---|---|---|
-| `C09KVPBMLJ3:1779155610.872839` / `C0ALMF2AD70:1779155697.253139` | User asked about Jc's five Case Study videos. | Fixed earlier by app-mention related-memory injection (`36993d1`) + entity attribution import (`555feac`). |
-| `C09L0TAN31T:1779165686.034869` / reply `1779165695.173579` | User shared `agency-agents` and asked about prior discussion. | Fixed by deriving related-memory queries from fetched link context (#218, `9fa69eb`). |
-| `C09SSC9Q5HS:1779166071.849179` | User asked to inspect channel videos and organize usable material. | Not a clean app-mention parity case; needs media/file reasoning. **Watchlist → task #220**. |
-| `C0AN9NDQUPN:1779156913.102829` | User asked about dashboard location addressed to old Bridge bot. | Not a new Oneesama failure: user intentionally @-mentioned the still-live old Bridge, not the new Oneesama. **No fix required**; see "Misread Scope" below. |
+| Case                                                              | Old/new signal                                                     | Disposition                                                                                                                                                 |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `C09KVPBMLJ3:1779155610.872839` / `C0ALMF2AD70:1779155697.253139` | User asked about Jc's five Case Study videos.                      | Fixed earlier by app-mention related-memory injection (`36993d1`) + entity attribution import (`555feac`).                                                  |
+| `C09L0TAN31T:1779165686.034869` / reply `1779165695.173579`       | User shared `agency-agents` and asked about prior discussion.      | Fixed by deriving related-memory queries from fetched link context (#218, `9fa69eb`).                                                                       |
+| `C09SSC9Q5HS:1779166071.849179`                                   | User asked to inspect channel videos and organize usable material. | Not a clean app-mention parity case; needs media/file reasoning. **Watchlist → task #220**.                                                                 |
+| `C0AN9NDQUPN:1779156913.102829`                                   | User asked about dashboard location addressed to old Bridge bot.   | Not a new Oneesama failure: user intentionally @-mentioned the still-live old Bridge, not the new Oneesama. **No fix required**; see "Misread Scope" below. |
 
 ## Misread Scope: Identity Migration ≠ Traffic Interception
 
@@ -81,13 +81,13 @@ The lesson is a drift pattern in its own right and is recorded in
 
 After removing the misread, four real quality regressions from this sweep are now first-class tasks (created 2026-05-19 13:30 SHA):
 
-| Task | Gap |
-|---|---|
+| Task | Gap                                                                                                                                  |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | #219 | Bridge triage quality fixtures: build old-vs-new canaries from past week logs (the test infrastructure this sweep proves is needed). |
-| #220 | App-mention media/file/video parity: provide file-context evidence and fail-closed on unviewed media. |
-| #221 | Worker interactive tool-loop parity: replace remaining prompt-only tool assumptions with first-class dispatcher path. |
-| #222 | Memory recall ranking parity: compare old Agent D traces vs Oneesama query/ranking on real Bridge cases. |
-| #223 | Product workflow intent parity: recognize PR review / task workflow requests instead of generic link commentary. |
+| #220 | App-mention media/file/video parity: provide file-context evidence and fail-closed on unviewed media.                                |
+| #221 | Worker interactive tool-loop parity: replace remaining prompt-only tool assumptions with first-class dispatcher path.                |
+| #222 | Memory recall ranking parity: compare old Agent D traces vs Oneesama query/ranking on real Bridge cases.                             |
+| #223 | Product workflow intent parity: recognize PR review / task workflow requests instead of generic link commentary.                     |
 
 Plus pre-existing follow-ups:
 

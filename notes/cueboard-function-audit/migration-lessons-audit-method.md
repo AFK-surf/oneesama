@@ -1,7 +1,8 @@
 # Migration Lessons — Audit-method drift (companion to migration-lessons.md)
 
 This is a companion to `migration-lessons.md` (the canonical incident table
-+ gates + Definition of Done). Read that first.
+
+- gates + Definition of Done). Read that first.
 
 This file adds the v1 audit author's perspective: I wrote
 `notes/oneesama-go-parity-audit.md` (5/13), the cross-check
@@ -39,7 +40,7 @@ Concrete trail of how that happened:
 
 - `/slack/tools/parity` was marked ✓ done in v1 audit. The endpoint
   returned a list. The 4-class `active / validation_only /
-  registered_unavailable / product_excluded` semantic that the report
+registered_unavailable / product_excluded` semantic that the report
   was supposed to advertise had to be retrofitted later (see commit
   trail `slack_tool_parity_status_test.go`). ✓ meant "endpoint
   returns JSON", not "endpoint tells runtime truth".
@@ -58,18 +59,18 @@ Canonical fix: see `migration-lessons.md` Gate 0 + Gate 6.
 Cross-check Section 8 enumerated ~5000 LOC of Slack intelligence as
 ❌ MISSING by file:
 
-| TS file | LOC | What got ported |
-| --- | --- | --- |
-| `app-mention-context.ts` | 572 | partial — rich context shipped in Phase 2 via new Go helpers, not as a 1:1 port |
-| `legacy-slack-domain-store.ts` | 1720 | not ported as a file; subsumed into typed collections + cognition |
-| `legacy-slack-tool-registry.ts` | 489 | not ported as a file; tool gating handled by parity matrix |
-| `local-memory.ts` | 363 | partial via persistence layer; workspace memory shape differs |
-| `meeting-copilot-runner.ts` | 501 | deferred / not ported |
-| `mrkdwn-renderer.ts` | 384 | partial; Slack-side rendering uses different shape |
-| `scanner-compaction.ts` | 104 | partial via service_scanner_poll |
-| `slack-context.ts` | 261 | partial |
-| `triage-context.ts` | 306 | partial via service_triage |
-| `triage-flow.ts` | 446 | rebuilt as multiple Go files; not a per-function port |
+| TS file                         | LOC  | What got ported                                                                 |
+| ------------------------------- | ---- | ------------------------------------------------------------------------------- |
+| `app-mention-context.ts`        | 572  | partial — rich context shipped in Phase 2 via new Go helpers, not as a 1:1 port |
+| `legacy-slack-domain-store.ts`  | 1720 | not ported as a file; subsumed into typed collections + cognition               |
+| `legacy-slack-tool-registry.ts` | 489  | not ported as a file; tool gating handled by parity matrix                      |
+| `local-memory.ts`               | 363  | partial via persistence layer; workspace memory shape differs                   |
+| `meeting-copilot-runner.ts`     | 501  | deferred / not ported                                                           |
+| `mrkdwn-renderer.ts`            | 384  | partial; Slack-side rendering uses different shape                              |
+| `scanner-compaction.ts`         | 104  | partial via service_scanner_poll                                                |
+| `slack-context.ts`              | 261  | partial                                                                         |
+| `triage-context.ts`             | 306  | partial via service_triage                                                      |
+| `triage-flow.ts`                | 446  | rebuilt as multiple Go files; not a per-function port                           |
 
 Few of those got a "port file X → Go file Y, prove byte-equivalent
 output on a TS fixture" sequence. Most got new Go code solving similar
@@ -130,15 +131,15 @@ level and wrong at the call-site level.
 Today's repair trail (all from #185 slice 2/3):
 
 - `af4e097 fix(triage-replay): normalize snake_case inputs in backfill
-  scan` — backfill classifier didn't run `normalizeSlackInboundMessage`
+scan` — backfill classifier didn't run `normalizeSlackInboundMessage`
   internally, so a snake-case `channel_id` input came out with empty
   ChannelID and grouping was wrong. Driver caught.
 - `fbb6c46 fix(triage-replay): treat subtype=bot_message as
-  bot-authored` — `isAuthoredByBot` only checked `bot_id`, missing
+bot-authored` — `isAuthoredByBot` only checked `bot_id`, missing
   Slackbot/incoming-webhook posts that use `subtype=bot_message`
   without `bot_id`. Driver caught.
 - `c381045 refactor(triage-replay): exclude bot replies from candidate
-  draft bundle` — bot reply text was leaking into the draft summary
+draft bundle` — bot reply text was leaking into the draft summary
   because the classifier saw all replies in the bundle.
 
 All three are the same root failure: a wire-format dual (snake/camel
@@ -185,12 +186,12 @@ that showed degraded quality vs old Slack Agent D. Within ~60 minutes
 driver shipped 4 fixes that exposed three distinct bugs — all in the
 same `app_mention` entry-point:
 
-| Case | Bug                                                                  | Fix         | Drift pattern                                  |
-| ---- | -------------------------------------------------------------------- | ----------- | ---------------------------------------------- |
-| 1    | App_mention worker prompt missing related-memory evidence            | `36993d1`   | shape ≠ contract (caller drift)                |
-| 2    | Job orphaned by deploy restart                                       | `a6407dc`   | lifecycle invariant (persisted ↔ runtime)      |
-| 3    | Socket app_mention event lost; scanner cursor advanced without compensation | `f9629fe` | compensation path partial implementation       |
-| 4    | meet-runner pipe closed; meeting-agent kept polling joined state     | `9f9f99d`   | lifecycle invariant (persisted ↔ runtime)      |
+| Case | Bug                                                                         | Fix       | Drift pattern                             |
+| ---- | --------------------------------------------------------------------------- | --------- | ----------------------------------------- |
+| 1    | App_mention worker prompt missing related-memory evidence                   | `36993d1` | shape ≠ contract (caller drift)           |
+| 2    | Job orphaned by deploy restart                                              | `a6407dc` | lifecycle invariant (persisted ↔ runtime) |
+| 3    | Socket app_mention event lost; scanner cursor advanced without compensation | `f9629fe` | compensation path partial implementation  |
+| 4    | meet-runner pipe closed; meeting-agent kept polling joined state            | `9f9f99d` | lifecycle invariant (persisted ↔ runtime) |
 
 Three separate bugs in the same entry-point in one diagnostic session
 is the proof that "by subsystem" audit was wrong and "by user entry"
@@ -318,7 +319,7 @@ What driver did:
 1. Read cueboard `slack_api_tool_canvas.go` and `slack_api_tool.go`.
 2. Wrote `notes/cueboard-function-audit/canvas-parity-audit-2026-05-19.md`,
    five behaviors each with `Old does (file:line) / New does (file:line) /
-   Diff / Decision / Fixtures`.
+Diff / Decision / Fixtures`.
 3. Caught two real drifts that the previous re-derived implementation
    (`b2114ff`) had missed:
    - `slack_api(create_canvas)` / `slack_api(edit_canvas)` had been
@@ -1002,7 +1003,7 @@ What got read:
   unconditionally calls `s.runner.StartTask`.
 - `internal/slackagent/persona_shadow.go:130` —
   `queueSlackTriagePersonaForeground` takes `decision
-  SlackTriageDecision` as a parameter, runs Pi AFTER Codex's
+SlackTriageDecision` as a parameter, runs Pi AFTER Codex's
   decision.
 
 What got assumed (wrong) earlier today:
@@ -1051,10 +1052,10 @@ Concrete shape on 2026-05-19:
   article in `C09L0TAN31T:1779192707778889`. Pi's scope was too
   narrow for the Bridge team's needs.
 - First fix (`92b8ddb fix(persona): treat product-adjacent articles
-  as in scope`) widened Pi's universal scope to include AI-agent /
+as in scope`) widened Pi's universal scope to include AI-agent /
   coding tools / Memory / Bridge-like products.
 - Second fix (`76c1165 docs(persona): scope product article policy
-  to workspace`) scoped the prompt to "Oneesama/Bridge workspace"
+to workspace`) scoped the prompt to "Oneesama/Bridge workspace"
   but kept the topic list hardcoded inside the Pi prompt.
 - Peng corrected: "应该这个作为每个 workspace 自定义的 triage 行为."
 - Third fix (`ad070ec` / `4ab81a6` / `9359251` / supervisor sweep
@@ -1195,9 +1196,9 @@ Three concrete shapes shipped on 2026-05-20:
   audit at 10:56 SHA.)
 - **#240**: channel brain summary cached "policy says no-action /
   pure link / not in scope" as a long-term fact. Heartbeat followup
-  + future triage runs both consumed that cache. The cache was
-  state from a now-superseded policy decision, but nothing
-  invalidated it when the policy changed at 23:55.
+  - future triage runs both consumed that cache. The cache was
+    state from a now-superseded policy decision, but nothing
+    invalidated it when the policy changed at 23:55.
 
 Driver's named pattern from the post-incident retro (`task #240/#242/#243`
 in_review):
@@ -1311,8 +1312,8 @@ What the fix did:
   reasons; they no longer survive policy changes as long-term
   facts.
 - `4198996`: link-commentary canary requires workspace Memory anchor
-  + second-source synthesis; headline-only fails. case_009
-  flipped from pending to active.
+  - second-source synthesis; headline-only fails. case_009
+    flipped from pending to active.
 
 Why this is the worked example:
 

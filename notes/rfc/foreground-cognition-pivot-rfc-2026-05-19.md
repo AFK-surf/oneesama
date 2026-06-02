@@ -84,7 +84,7 @@ migration of a similar shape does not repeat it.
 Timeline:
 
 - 2026-05-18 ~18:30 SHA: `adc0182 feat(persona): route live triage
-  replies through persona runtime` shipped. The commit message
+replies through persona runtime` shipped. The commit message
   framed this as "Pi foreground." Implementation:
   `queueSlackTriagePersonaForeground` took the existing Codex
   `SlackTriageDecision` and asked Pi to refine/replace its actions.
@@ -348,31 +348,31 @@ intentionally combines them.
 - [x] Document current `codex_then_pi` chain with file references.
 - [x] Document target Pi-first chain and no-hedge/delegate rule.
 - [x] Document workspace-policy layering so workspace taste does not
-  leak into universal Pi behavior.
+      leak into universal Pi behavior.
 - [x] Add proposed decisions for Peng review.
 - [x] Peng overrode the pause and directed direct implementation; @喵喵
-  is supervising through active fixture/audit commits.
+      is supervising through active fixture/audit commits.
 
 ### Step 2 — Instrument Foreground Chain
 
 - [x] Add config enum `slack.triage.foreground_chain`.
 - [x] Default it to the current `codex_then_pi`.
 - [x] Record `foreground_chain`, `pre_pi_agent_runner_started`,
-  `pi_first_decision`, and `delegate_worker_jobs_started` in triage
-  audit metadata.
+      `pi_first_decision`, and `delegate_worker_jobs_started` in triage
+      audit metadata.
 - [x] Add tests proving `pi_first_live` reports no pre-Pi runner.
 - [ ] Deploy and verify live audit shows the active chain honestly.
 
 ### Step 3 — Build Pi-First Request Builder
 
 - [x] Add a Pi-first request builder that takes Slack context, Memory,
-  link/thread/file evidence, and workspace policy, but no
-  `SlackTriageDecision`.
+      link/thread/file evidence, and workspace policy, but no
+      `SlackTriageDecision`.
 - [x] Run it in live when `foreground_chain=pi_first_live`.
 - [x] Store Pi-first decision, latency, citations, worker
-  requests, and no-hedge/delegate markers.
+      requests, and no-hedge/delegate markers.
 - [ ] Extend `cmd/oneesama-triage-replay` with `--foreground-chain` for
-  offline side-by-side reports.
+      offline side-by-side reports.
 
 ### Step 4 — Quality Gate On Real Cases
 
@@ -380,9 +380,9 @@ intentionally combines them.
 - [ ] Replay the Memory-backed scanner cases that previously regressed.
 - [ ] Add `pi_low_confidence_must_delegate`.
 - [ ] Add `workspace_policy_engagement` with two workspace policies and
-  the same input producing different engagement decisions.
+      the same input producing different engagement decisions.
 - [ ] Produce a shadow report: current chain vs Pi-first decision,
-  mutation rate, missed-reply cases, latency, and user-visible richness.
+      mutation rate, missed-reply cases, latency, and user-visible richness.
 
 ### Step 5 — Pi-First Live Behind Flag
 
@@ -390,16 +390,16 @@ intentionally combines them.
 - [x] In `pi_first_live`, do not call `agent_runner.StartTask` before Pi.
 - [x] Implement `delegate_worker` job creation from Pi response.
 - [x] Keep explicit rollback to `codex_then_pi` for one deploy window,
-  but never silently fallback per event.
+      but never silently fallback per event.
 - [ ] Verify live audit has `pre_pi_agent_runner_started=false`.
 
 ### Step 6 — Remove Old Candidate Generator Path
 
 - [x] Remove `triage_candidate_actions` from the Pi-first foreground Pi request.
 - [ ] Remove `SlackTriageDecision` from
-  `queueSlackTriagePersonaForeground`.
+      `queueSlackTriagePersonaForeground`.
 - [ ] Keep `SlackTriageDecision` only where explicitly needed for
-  replay/legacy current-chain comparison until the rollback window ends.
+      replay/legacy current-chain comparison until the rollback window ends.
 - [ ] Update migration lessons with the final worked example.
 
 ## Acceptance Gates
@@ -582,7 +582,7 @@ Driver recommendation for the first implementation round:
   if Pi latency exceeds a threshold, or strictly fail-closed with
   user-visible "I'm warming up, try again" text?
 - For the shadow phase, do we need to record the user-visible reply
-  Codex *would* have posted (the candidate text) so reviewers can
+  Codex _would_ have posted (the candidate text) so reviewers can
   spot cases where Pi's wording is materially worse, not just where
   the decision differs?
 - Provider/Memory fanout latency contributes to Pi request build

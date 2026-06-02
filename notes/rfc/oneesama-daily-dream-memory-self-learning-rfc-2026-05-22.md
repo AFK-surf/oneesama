@@ -33,66 +33,66 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 
 - [ ] `agent/memory_provider.py`
   - Provider lifecycle has `system_prompt_block()` for stable static text and
-        `prefetch()` for dynamic recall.
+    `prefetch()` for dynamic recall.
   - Hooks exist for `sync_turn`, `on_session_end`, `on_pre_compress`,
-        `on_memory_write`, and parent-side `on_delegation`.
+    `on_memory_write`, and parent-side `on_delegation`.
   - Subagent/delegation observations are parent-side; the subagent itself has
-        no provider session by default.
+    no provider session by default.
 - [ ] `plugins/memory/honcho/__init__.py`
   - Honcho has recall modes: `context`, `tools`, `hybrid`.
   - Static prompt text is separated from live context injection; base context is
-        cached and refreshed by cadence.
+    cached and refreshed by cadence.
   - Dialectic passes are explicit and bounded: pass 0 cold/warm assessment,
-        later passes synthesize gaps and reconcile contradictions.
+    later passes synthesize gaps and reconcile contradictions.
   - Prefetch is asynchronous, has cadence/backoff/stale-result handling, and
-        returns cached recall on the next turn.
+    returns cached recall on the next turn.
   - Built-in memory writes can mirror into Honcho conclusions.
 - [ ] `plugins/memory/honcho/session.py`
   - Sessions are scoped by session key and peer IDs.
   - Conclusions are written about a target peer and feed peer cards /
-        representations.
+    representations.
   - Writes can be async, per-turn, session-end, or every N turns; session end
-        flushes pending messages.
+    flushes pending messages.
 - [ ] `agent/background_review.py` + `agent/conversation_loop.py`
   - Hermes runs self-improvement after the user-facing response, so background
-        review does not compete with the live task.
+    review does not compete with the live task.
   - Memory and skill review triggers are turn-count nudges hydrated from
-        persisted history.
+    persisted history.
   - The review fork is tool-limited and disables recursive nudges.
 - [ ] `agent/agent_init.py`
   - Memory and skill nudge intervals default to turn-count based review, not a
-        wall-clock cron. The counters are configurable and hydrated from history.
+    wall-clock cron. The counters are configurable and hydrated from history.
 - [ ] `agent/curator.py`
   - The curator is a periodic, recoverable consolidation loop.
   - It writes run reports, distinguishes consolidated vs pruned items, archives
-        instead of deleting, and supports dry-run.
+    instead of deleting, and supports dry-run.
   - Curator review forks use `skip_memory=True` and explicitly disable recursive
-        memory/skill nudges.
+    memory/skill nudges.
 - [ ] `tools/session_search_tool.py`
   - Cross-session recall is FTS5-backed and returns actual messages, not an LLM
-        summary as source of truth.
+    summary as source of truth.
   - Discovery returns anchored windows and bookends; scroll/browse are separate
-        low-cost shapes.
+    low-cost shapes.
 - [ ] `plugins/memory/holographic/store.py` +
       `plugins/memory/holographic/retrieval.py`
   - A local fact store can carry `trust_score`, entity links, FTS5 search,
-        retrieval/helpful counters, and optional temporal decay.
+    retrieval/helpful counters, and optional temporal decay.
 
 ### OpenClaw / Existing Oneesama Contracts To Reuse
 
 - [ ] `docs/persona-runtime.md`
   - Foreground avatar identity belongs to a Pi/OpenClaw-style persona runtime,
-        while Codex/Claude/browser workers are delegated execution components.
+    while Codex/Claude/browser workers are delegated execution components.
   - Oneesama memory reference is OpenClaw + Hermes, not a worker prompt blob.
 - [ ] `notes/code-polish/openclaw-hermes-memory-roadmap-canary-first-2026-05-21.md`
   - #289-A through #289-F are the canonical missing Memory capabilities.
   - Every slice must land a failing canary before implementation.
 - [ ] `notes/code-polish/memory-provider-ownership-matrix-2026-05-21.md`
   - Current Oneesama has structured memory files, providers, family boosts, and
-        source refs, but not trust/staleness/contradiction gates.
+    source refs, but not trust/staleness/contradiction gates.
 - [ ] `notes/cueboard-function-audit/memory-recall-parity-inventory.md`
   - Product behavior is "use memory as evidence before speaking", not "there is
-        a memory tool".
+    a memory tool".
 
 ## Goals
 
@@ -128,10 +128,10 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 
 - [ ] `id`
 - [ ] `kind`: `person_profile | team_fact | team_decision | team_action |
-      episode | worker_result | foreground_identity | lesson`
+  episode | worker_result | foreground_identity | lesson`
 - [ ] `subject`: canonical person/project/team/entity key
 - [ ] `scope`: `foreground | worker | slack | meet | channel | thread |
-      person | team`
+  person | team`
 - [ ] `applies_to`: list of surfaces or entities this fact can be used for
 - [ ] `do_not_generalize_to`: explicit negative scope list
 - [ ] `content`
@@ -140,7 +140,7 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 - [ ] `trust`: numeric 0-1 plus `trust_reason`
 - [ ] `staleness`: `fresh | aging | stale | expired` plus age days
 - [ ] `status`: `active | candidate | superseded | contradiction_review |
-      rejected`
+  rejected`
 - [ ] `supersedes` / `superseded_by`
 - [ ] `contradictions`: list of conflicting fact ids and reason codes
 
@@ -149,7 +149,7 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 - [ ] `id`, `date`, `cluster_key`
 - [ ] `input_refs`: all episodes/signals used
 - [ ] `proposal_type`: `new_fact | update_fact | contradiction |
-      gate_fixture | prompt_candidate | ignore`
+  gate_fixture | prompt_candidate | ignore`
 - [ ] `proposal`
 - [ ] `confidence`
 - [ ] `required_canaries`
@@ -159,20 +159,20 @@ Fetched `~/.hermes/hermes-agent` `origin/main` at
 ### `LearningSignal`
 
 - [ ] `source`: `approval_card | llm_judge | production_incident |
-      manual_review | triage_sweep | benchmark`
+  manual_review | triage_sweep | benchmark`
 - [ ] `surface`: Slack / Meet / demo surface / worker
 - [ ] `verdict`: `confirm | reject | block | false_positive |
-      false_negative | quality_regression | pass`
+  false_negative | quality_regression | pass`
 - [ ] `refs`: concrete artifacts, not summaries
 - [ ] `reason_code`
 - [ ] `proposed_action`: `memory_candidate | contradiction_review |
-      prompt_candidate | gate_fixture | benchmark_case | ignore`
+  prompt_candidate | gate_fixture | benchmark_case | ignore`
 
 ### `SkillOrPolicyCandidate`
 
 - [ ] `id`, `date`, `source_signal_ids`
 - [ ] `target`: `prompt_policy | visible_reply_gate | triage_sweep_bucket |
-      runbook | canary_fixture | benchmark_case`
+  runbook | canary_fixture | benchmark_case`
 - [ ] `proposal`
 - [ ] `why_reusable`
 - [ ] `do_not_capture`: explicit reason when the learning is environment-only,
@@ -238,12 +238,12 @@ Verification:
 
 - [ ] Add a canary `case_identity_scope_codex3720_not_oneesama`.
   - Input: memory contains a codex-3720 / worker self-description and a user
-        asks "你是什么模型 / 你是谁".
+    asks "你是什么模型 / 你是谁".
   - Expected: foreground answer uses Oneesama/Pi identity; worker memory is
-        either ignored or cited only as non-foreground evidence.
+    either ignored or cited only as non-foreground evidence.
 - [ ] Add a canary `case_contradiction_routes_to_review`.
   - Input: existing high-trust Oneesama identity fact conflicts with a new worker
-        or legacy memory write.
+    or legacy memory write.
   - Expected: new write lands as `contradiction_review`, not active memory.
 - [ ] Wire these canaries before implementation.
 

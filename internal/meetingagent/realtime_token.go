@@ -134,7 +134,7 @@ func realtimeTuningGuide() map[string]any {
 					"create_response":    true,
 					"interrupt_response": true,
 				},
-				"note":          "least interrupt-prone; lets the user take time before chunking.",
+				"note": "least interrupt-prone; lets the user take time before chunking.",
 			},
 			"balanced": map[string]any{
 				"turnDetection": map[string]any{
@@ -143,7 +143,7 @@ func realtimeTuningGuide() map[string]any {
 					"create_response":    true,
 					"interrupt_response": true,
 				},
-				"note":          "default human-loop starting point.",
+				"note": "default human-loop starting point.",
 			},
 			"fast": map[string]any{
 				"turnDetection": map[string]any{
@@ -152,7 +152,7 @@ func realtimeTuningGuide() map[string]any {
 					"create_response":    true,
 					"interrupt_response": true,
 				},
-				"note":          "faster responses; more likely to cut short pauses.",
+				"note": "faster responses; more likely to cut short pauses.",
 			},
 			"server_vad": map[string]any{
 				"turnDetection": map[string]any{

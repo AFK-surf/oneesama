@@ -29,12 +29,12 @@ The inventory gate fails while any relevant Cueboard test file is not migrated, 
 
 ## Ported In This Sweep
 
-| New test | Cueboard source | Behavior |
-|---|---|---|
-| `internal/meetingagent/cueboard_lifecycle_parity_test.go` | `meeting-joiner/src/meet-session/ui.ts::waitForMeetingEnd` | `participantCount <= 1` is an empty-room signal |
-| `internal/meetingagent/cueboard_lifecycle_parity_test.go` | `internal/meeting/watcher_finalize.go` / current product decision | empty transcript on scheduled meetd end still emits a failed `meeting.result` |
-| `internal/postmeeting/cueboard_summary_parity_test.go` | `internal/meeting/summary_test.go::TestBuildFallbackSummary_*` | fallback summary must avoid raw JSON blobs and truncate long text |
-| `internal/postmeeting/cueboard_summary_parity_test.go` | `internal/meeting/watcher_caption_test.go::TestDeduplicateTranscriptDropsExactDuplicates` | exact duplicate captions collapse before summary |
+| New test                                                  | Cueboard source                                                                           | Behavior                                                                      |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `internal/meetingagent/cueboard_lifecycle_parity_test.go` | `meeting-joiner/src/meet-session/ui.ts::waitForMeetingEnd`                                | `participantCount <= 1` is an empty-room signal                               |
+| `internal/meetingagent/cueboard_lifecycle_parity_test.go` | `internal/meeting/watcher_finalize.go` / current product decision                         | empty transcript on scheduled meetd end still emits a failed `meeting.result` |
+| `internal/postmeeting/cueboard_summary_parity_test.go`    | `internal/meeting/summary_test.go::TestBuildFallbackSummary_*`                            | fallback summary must avoid raw JSON blobs and truncate long text             |
+| `internal/postmeeting/cueboard_summary_parity_test.go`    | `internal/meeting/watcher_caption_test.go::TestDeduplicateTranscriptDropsExactDuplicates` | exact duplicate captions collapse before summary                              |
 
 ## Source Test Inventory
 
@@ -46,51 +46,51 @@ Canonical Cueboard source used for this sweep:
 
 Source scope found:
 
-| Area | Files | Test funcs | Scope rule |
-|---|---:|---:|---|
-| `internal/meeting/*_test.go` | 10 | 83 | all in-scope |
-| `cmd/meetd/*_test.go` | 1 | 5 | in-scope startup/config |
-| `internal/bridge/slack/*_test.go` | 49 | 321 | default in-scope unless explicitly admin/debug/third-party/out-of-product |
-| `cmd/slack-agentd/*_test.go` | 3 | 14 | in-scope startup/config/tool-gate audit |
-| **Total** | **63** | **423** | broad Slack/Meet/meeting coverage |
+| Area                              |  Files | Test funcs | Scope rule                                                                |
+| --------------------------------- | -----: | ---------: | ------------------------------------------------------------------------- |
+| `internal/meeting/*_test.go`      |     10 |         83 | all in-scope                                                              |
+| `cmd/meetd/*_test.go`             |      1 |          5 | in-scope startup/config                                                   |
+| `internal/bridge/slack/*_test.go` |     49 |        321 | default in-scope unless explicitly admin/debug/third-party/out-of-product |
+| `cmd/slack-agentd/*_test.go`      |      3 |         14 | in-scope startup/config/tool-gate audit                                   |
+| **Total**                         | **63** |    **423** | broad Slack/Meet/meeting coverage                                         |
 
 Bulk inventory status after `internal/cueboardparity/inventory_test.go`:
 
-| Status | Files | Test funcs | Meaning |
-|---|---:|---:|---|
-| `equivalent` | 3 | 7 | already covered by current Oneesama tests |
-| `migrated` | 54 | 320 | Cueboard source test file has been ported into current Oneesama tests |
-| `partial` | 0 | 0 | no remaining partial files |
-| `missing` | 0 | 0 | no current equivalent test/implementation |
-| `needs_decision` | 0 | 0 | mixed Slack/Meet relevance or product-scope decision needed |
-| `skipped` | 6 | 22 | explicitly out-of-scope by prior product decisions |
+| Status           | Files | Test funcs | Meaning                                                               |
+| ---------------- | ----: | ---------: | --------------------------------------------------------------------- |
+| `equivalent`     |     3 |          7 | already covered by current Oneesama tests                             |
+| `migrated`       |    54 |        320 | Cueboard source test file has been ported into current Oneesama tests |
+| `partial`        |     0 |          0 | no remaining partial files                                            |
+| `missing`        |     0 |          0 | no current equivalent test/implementation                             |
+| `needs_decision` |     0 |          0 | mixed Slack/Meet relevance or product-scope decision needed           |
+| `skipped`        |     6 |         22 | explicitly out-of-scope by prior product decisions                    |
 
-| Cueboard test file | Relevant cases | Oneesama status | Action |
-|---|---:|---|---|
-| `internal/meeting/asr_test.go` | 4 | ✅ migrated | Whisper helper normalization/output/model/binary parity covered; configured Gemini ASR provider remains in R25 provider work |
-| `internal/meeting/summary_test.go` | 21 | ✅ migrated | Response cleanup, JSON repair, fallback hardening, structured summary parsing, configured provider guard, and streaming fallback covered; model IDs remain env/config-only |
-| `internal/meeting/watcher_caption_test.go` | 21 | ✅ migrated | Live-caption merge/dedupe, transcript windows, speaker normalization, calibration source selection, chunk windows, ASR-only guard, and timestamp normalization covered |
-| `internal/meeting/webhook_test.go` | 3 | ✅ equivalent sender/signature tests exist in `internal/postmeeting/webhook_test.go` | keep current tests; add retry-attempt parity if behavior diverges |
-| `internal/meeting/joiner_test.go` | 5 | ✅ migrated | Old joiner subprocess coverage mapped to current persistent meet-runner command/process-group/shutdown/flag-preservation contracts |
-| `internal/meeting/httpapi_test.go` | 11 | ✅ migrated | create/get/list/idempotency/validation/cancel/redeliver/resummarize/artifact/caption/chat HTTP API behavior covered in current meeting-agent handlers |
-| `internal/meeting/store_test.go` | 6 | ✅ migrated | meeting state, caption alias/ordering, chat fail-closed, and stable summary upsert covered in current meetd persistence collections |
-| `internal/meeting/audio_artifacts_test.go` | 3 | ✅ migrated | audio artifact preference/transcode/retention parity covered |
-| `internal/meeting/runtime_wakeup_test.go` | 1 | ✅ migrated | scheduled meetd runtime wakeup parity covered |
-| `internal/bridge/slack/mention_test.go` | 19 | ✅ migrated | mention strip, thread transcript/file/image/canvas formatting, outstanding request/compaction, queued mention coalescing, reply footer/markdown/feedback summary, failure/compaction reply, allowlist, and latest assistant fallback covered |
-| `internal/bridge/slack/assistant_context_test.go` | 6 | ✅ migrated | durable ledger/channel brain/outstanding-request prompt parity covered |
-| `internal/bridge/slack/bridge_session_test.go` | 6 | ✅ migrated | durable context cold-start, latest meeting context reuse, bounded recent commands, channel-type normalization, and repo clone refresh covered |
-| `internal/bridge/slack/config_test.go` | 14 | ✅ migrated | secrets-file loading, legacy config path, scanner env aliases, run-mode-to-agent-runner mapping, and Slack startup token validation covered |
-| `internal/bridge/slack/defaults_test.go` | 21 | ✅ migrated | local memory adapter boundaries, triage policy rails, prompt compact/private-token guard, Slack event normalization, and scanner ignore/file-share behavior covered |
-| `internal/bridge/slack/heartbeat_followup_test.go` | 29 | ✅ migrated | followup creation/status/resolve, canonical thread commitment dedupe, delivery routing/blocking, heartbeat context/surface status, and current scoped runtime behavior covered |
-| `internal/bridge/slack/store_test.go` | 23 | ✅ migrated | outbound action, meeting result delivery, thread ledger/channel brain, triage run, feedback seed, and cursor store parity covered |
-| `internal/bridge/slack/meeting_webhook_test.go` | 10 | ✅ migrated | incremental transcript, copilot side-effect summaries/follow-up detection, and artifact materialization/staging parity covered |
-| `internal/bridge/slack/meeting_webhook_audio_test.go` | 1 | ✅ migrated | audio artifact extension sniffing now covered by `cueboardparity` |
-| `internal/bridge/slack/meeting_handler_test.go` | 5 | ✅ migrated | approval-channel normalization/lookup and meeting approval/join text formatting covered with Onee Sama branding |
-| `internal/bridge/slack/mrkdwn_test.go` + `mrkdwn_blocks_test.go` | 7 | ⚠️ current Slack cards avoid most markdown conversion; renderer parity not complete | non-blocking Slack renderer backlog |
-| `cmd/meetd/main_test.go` | 5 | ✅ migrated | MeetD model/env precedence, watch interval, ASR env/config, and env-only model defaults covered in current config |
-| `cmd/slack-agentd/main_test.go` | 8 | ✅ migrated | Slack assistant/triage capability gates, safe bash guardrails, schedule-tool registration boundary, and process secret scrub covered |
-| `cmd/slack-agentd/validate_only_test.go` + `backend_auth_test.go` | 6 | ✅ migrated | validation/backend auth covered in `cmd/oneesama` + `internal/slackstartup` |
-| `internal/bridge/slack/run_command_tool_test.go` | 1 | ✅ migrated | narrow gh/curl/date allowlist and local/mutating command blocks covered |
+| Cueboard test file                                                | Relevant cases | Oneesama status                                                                      | Action                                                                                                                                                                                                                                       |
+| ----------------------------------------------------------------- | -------------: | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal/meeting/asr_test.go`                                    |              4 | ✅ migrated                                                                          | Whisper helper normalization/output/model/binary parity covered; configured Gemini ASR provider remains in R25 provider work                                                                                                                 |
+| `internal/meeting/summary_test.go`                                |             21 | ✅ migrated                                                                          | Response cleanup, JSON repair, fallback hardening, structured summary parsing, configured provider guard, and streaming fallback covered; model IDs remain env/config-only                                                                   |
+| `internal/meeting/watcher_caption_test.go`                        |             21 | ✅ migrated                                                                          | Live-caption merge/dedupe, transcript windows, speaker normalization, calibration source selection, chunk windows, ASR-only guard, and timestamp normalization covered                                                                       |
+| `internal/meeting/webhook_test.go`                                |              3 | ✅ equivalent sender/signature tests exist in `internal/postmeeting/webhook_test.go` | keep current tests; add retry-attempt parity if behavior diverges                                                                                                                                                                            |
+| `internal/meeting/joiner_test.go`                                 |              5 | ✅ migrated                                                                          | Old joiner subprocess coverage mapped to current persistent meet-runner command/process-group/shutdown/flag-preservation contracts                                                                                                           |
+| `internal/meeting/httpapi_test.go`                                |             11 | ✅ migrated                                                                          | create/get/list/idempotency/validation/cancel/redeliver/resummarize/artifact/caption/chat HTTP API behavior covered in current meeting-agent handlers                                                                                        |
+| `internal/meeting/store_test.go`                                  |              6 | ✅ migrated                                                                          | meeting state, caption alias/ordering, chat fail-closed, and stable summary upsert covered in current meetd persistence collections                                                                                                          |
+| `internal/meeting/audio_artifacts_test.go`                        |              3 | ✅ migrated                                                                          | audio artifact preference/transcode/retention parity covered                                                                                                                                                                                 |
+| `internal/meeting/runtime_wakeup_test.go`                         |              1 | ✅ migrated                                                                          | scheduled meetd runtime wakeup parity covered                                                                                                                                                                                                |
+| `internal/bridge/slack/mention_test.go`                           |             19 | ✅ migrated                                                                          | mention strip, thread transcript/file/image/canvas formatting, outstanding request/compaction, queued mention coalescing, reply footer/markdown/feedback summary, failure/compaction reply, allowlist, and latest assistant fallback covered |
+| `internal/bridge/slack/assistant_context_test.go`                 |              6 | ✅ migrated                                                                          | durable ledger/channel brain/outstanding-request prompt parity covered                                                                                                                                                                       |
+| `internal/bridge/slack/bridge_session_test.go`                    |              6 | ✅ migrated                                                                          | durable context cold-start, latest meeting context reuse, bounded recent commands, channel-type normalization, and repo clone refresh covered                                                                                                |
+| `internal/bridge/slack/config_test.go`                            |             14 | ✅ migrated                                                                          | secrets-file loading, legacy config path, scanner env aliases, run-mode-to-agent-runner mapping, and Slack startup token validation covered                                                                                                  |
+| `internal/bridge/slack/defaults_test.go`                          |             21 | ✅ migrated                                                                          | local memory adapter boundaries, triage policy rails, prompt compact/private-token guard, Slack event normalization, and scanner ignore/file-share behavior covered                                                                          |
+| `internal/bridge/slack/heartbeat_followup_test.go`                |             29 | ✅ migrated                                                                          | followup creation/status/resolve, canonical thread commitment dedupe, delivery routing/blocking, heartbeat context/surface status, and current scoped runtime behavior covered                                                               |
+| `internal/bridge/slack/store_test.go`                             |             23 | ✅ migrated                                                                          | outbound action, meeting result delivery, thread ledger/channel brain, triage run, feedback seed, and cursor store parity covered                                                                                                            |
+| `internal/bridge/slack/meeting_webhook_test.go`                   |             10 | ✅ migrated                                                                          | incremental transcript, copilot side-effect summaries/follow-up detection, and artifact materialization/staging parity covered                                                                                                               |
+| `internal/bridge/slack/meeting_webhook_audio_test.go`             |              1 | ✅ migrated                                                                          | audio artifact extension sniffing now covered by `cueboardparity`                                                                                                                                                                            |
+| `internal/bridge/slack/meeting_handler_test.go`                   |              5 | ✅ migrated                                                                          | approval-channel normalization/lookup and meeting approval/join text formatting covered with Onee Sama branding                                                                                                                              |
+| `internal/bridge/slack/mrkdwn_test.go` + `mrkdwn_blocks_test.go`  |              7 | ⚠️ current Slack cards avoid most markdown conversion; renderer parity not complete  | non-blocking Slack renderer backlog                                                                                                                                                                                                          |
+| `cmd/meetd/main_test.go`                                          |              5 | ✅ migrated                                                                          | MeetD model/env precedence, watch interval, ASR env/config, and env-only model defaults covered in current config                                                                                                                            |
+| `cmd/slack-agentd/main_test.go`                                   |              8 | ✅ migrated                                                                          | Slack assistant/triage capability gates, safe bash guardrails, schedule-tool registration boundary, and process secret scrub covered                                                                                                         |
+| `cmd/slack-agentd/validate_only_test.go` + `backend_auth_test.go` |              6 | ✅ migrated                                                                          | validation/backend auth covered in `cmd/oneesama` + `internal/slackstartup`                                                                                                                                                                  |
+| `internal/bridge/slack/run_command_tool_test.go`                  |              1 | ✅ migrated                                                                          | narrow gh/curl/date allowlist and local/mutating command blocks covered                                                                                                                                                                      |
 
 ## First Run Results
 
@@ -130,13 +130,13 @@ FAIL internal/postmeeting
 
 ## Failure Queue
 
-| Failing parity test | Gap | Fix slice | Current status |
-|---|---|---|
-| `TestCueboardParityParticipantCountOneMeansEmptyRoom` | current runtime status treats `inMeeting + participantCount=1` as plain joined, so bot stays alone | R24.11 | ✅ fixed |
-| `TestCueboardParityMeetdEmptyTranscriptSendsFailedResult` | scheduled meetd empty transcript marks done but emits no failed result webhook | R25.4 | ✅ fixed |
-| `TestCueboardParityFallbackSummaryAvoidsRawJSONBlob` | fallback-only summary can expose structured JSON as user-facing highlight | R25.2 | ✅ fixed |
-| `TestCueboardParityFallbackSummaryTruncatesLongText` | fallback highlights are unbounded compared with cueboard truncation | R25.2 | ✅ fixed |
-| `TestCueboardParityTranscriptDropsExactDuplicateCaptions` | exact duplicate caption segments are not collapsed | R25.1/R25.2 | ✅ fixed |
+| Failing parity test                                       | Gap                                                                                                | Fix slice   | Current status |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------- | -------------- |
+| `TestCueboardParityParticipantCountOneMeansEmptyRoom`     | current runtime status treats `inMeeting + participantCount=1` as plain joined, so bot stays alone | R24.11      | ✅ fixed       |
+| `TestCueboardParityMeetdEmptyTranscriptSendsFailedResult` | scheduled meetd empty transcript marks done but emits no failed result webhook                     | R25.4       | ✅ fixed       |
+| `TestCueboardParityFallbackSummaryAvoidsRawJSONBlob`      | fallback-only summary can expose structured JSON as user-facing highlight                          | R25.2       | ✅ fixed       |
+| `TestCueboardParityFallbackSummaryTruncatesLongText`      | fallback highlights are unbounded compared with cueboard truncation                                | R25.2       | ✅ fixed       |
+| `TestCueboardParityTranscriptDropsExactDuplicateCaptions` | exact duplicate caption segments are not collapsed                                                 | R25.1/R25.2 | ✅ fixed       |
 
 ## Fixed Run Results
 

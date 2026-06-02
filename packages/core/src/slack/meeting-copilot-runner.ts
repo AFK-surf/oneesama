@@ -161,7 +161,10 @@ export function containsMeetingCopilotRealtimeControlRequest(transcript: unknown
   if (controlTerms.some((phrase) => lower.includes(phrase))) return true;
   if (
     lower.includes("cpu") &&
-    (lower.includes("窗口") || lower.includes("切") || lower.includes("占用") || lower.includes("进程"))
+    (lower.includes("窗口") ||
+      lower.includes("切") ||
+      lower.includes("占用") ||
+      lower.includes("进程"))
   ) {
     return true;
   }
@@ -196,7 +199,9 @@ export function buildMeetingCopilotPrompt({
   chatDelta = "",
   state = {},
   now = new Date(),
-}: BuildMeetingCopilotPromptArgs & { state?: MeetingCopilotState & { priorActions?: string[] } } = {}) {
+}: BuildMeetingCopilotPromptArgs & {
+  state?: MeetingCopilotState & { priorActions?: string[] };
+} = {}) {
   const lines = [`## Meeting: ${text(payload.title, "Meeting")}`, ""];
   if (state.lastChatAt) {
     lines.push(

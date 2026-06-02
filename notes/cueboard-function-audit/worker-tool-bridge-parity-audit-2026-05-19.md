@@ -11,11 +11,11 @@ This follows the fail-closed audit. `51bd3ca` removed the unsafe prompt-curl bri
 
 ## Summary
 
-| Behavior | Old Cueboard Agent D | New Oneesama after this audit | Decision |
-|---|---|---|---|
-| Tool registration | Slack sessions receive native tools through `RegisterSlackTools`. | The app-mention entry can run selected Go-side tools before starting the Codex worker and inject the result as `slackToolEvidence`. | Port the entry-level behavior as evidence plumbing, not prompt-curl. |
-| Fresh unknown entity search | Old assistant could call web/search tools at runtime. | When an app mention asks about an unknown entity and related memory has no hit, Oneesama dispatches `exa_search` via `Service.ExecuteSlackTool` before worker start. | Provide first-class search evidence for the common quality gap. |
-| Worker prompt | Old assistant saw native tool results through the agent loop. | The prompt receives "Slack tool evidence" blocks and still forbids localhost/internal gateway access. | Keep the worker evidence-driven and fail-closed. |
+| Behavior                    | Old Cueboard Agent D                                              | New Oneesama after this audit                                                                                                                                        | Decision                                                             |
+| --------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Tool registration           | Slack sessions receive native tools through `RegisterSlackTools`. | The app-mention entry can run selected Go-side tools before starting the Codex worker and inject the result as `slackToolEvidence`.                                  | Port the entry-level behavior as evidence plumbing, not prompt-curl. |
+| Fresh unknown entity search | Old assistant could call web/search tools at runtime.             | When an app mention asks about an unknown entity and related memory has no hit, Oneesama dispatches `exa_search` via `Service.ExecuteSlackTool` before worker start. | Provide first-class search evidence for the common quality gap.      |
+| Worker prompt               | Old assistant saw native tool results through the agent loop.     | The prompt receives "Slack tool evidence" blocks and still forbids localhost/internal gateway access.                                                                | Keep the worker evidence-driven and fail-closed.                     |
 
 ## Behavior 1: Tool Evidence Is Dispatched By Go, Not Curl In Prompt
 

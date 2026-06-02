@@ -183,7 +183,9 @@ async function waitForImage(path: string, timeoutMs: number, child?: ChildProces
       if (dimensions.width && dimensions.height) return dimensions;
     }
     if (lastExit) {
-      throw new Error(`macos_window_capture_stream_exited:${lastExit.code ?? lastExit.signal ?? "unknown"}`);
+      throw new Error(
+        `macos_window_capture_stream_exited:${lastExit.code ?? lastExit.signal ?? "unknown"}`,
+      );
     }
     await new Promise((settle) => setTimeout(settle, 40));
   }
@@ -228,15 +230,15 @@ export function macOSWindowCaptureHelperProcessFromPSLine(
   return { pid, command };
 }
 
-async function killOrphanedHelperStreams(options: {
-  keepProcessIds?: Array<number | null | undefined>;
-  settleMs?: number;
-} = {}) {
+async function killOrphanedHelperStreams(
+  options: {
+    keepProcessIds?: Array<number | null | undefined>;
+    settleMs?: number;
+  } = {},
+) {
   if (process.platform !== "darwin") return 0;
   const keep = new Set(
-    (options.keepProcessIds || [])
-      .map((value) => Number(value || 0) || 0)
-      .filter(Boolean),
+    (options.keepProcessIds || []).map((value) => Number(value || 0) || 0).filter(Boolean),
   );
   const { stdout } = await execFileAsync("/bin/ps", ["-axo", "pid=,command="], {
     timeout: 3000,
@@ -293,25 +295,33 @@ async function ensureHelperBinary() {
   await mkdir(dirname(binary), { recursive: true });
   const webPPrefix = helperWebPPrefix();
   const object = join(tmpdir(), "oneesama-macos-window-webp.o");
-  await execFileAsync("/usr/bin/clang", ["-c", webPSource, "-I", `${webPPrefix}/include`, "-o", object], {
-    timeout: 30000,
-    maxBuffer: 1024 * 1024,
-  });
-  await execFileAsync("/usr/bin/swiftc", [
-    "-parse-as-library",
-    source,
-    object,
-    "-import-objc-header",
-    webPHeader,
-    "-L",
-    `${webPPrefix}/lib`,
-    "-lwebp",
-    "-o",
-    binary,
-  ], {
-    timeout: 30000,
-    maxBuffer: 1024 * 1024,
-  });
+  await execFileAsync(
+    "/usr/bin/clang",
+    ["-c", webPSource, "-I", `${webPPrefix}/include`, "-o", object],
+    {
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  await execFileAsync(
+    "/usr/bin/swiftc",
+    [
+      "-parse-as-library",
+      source,
+      object,
+      "-import-objc-header",
+      webPHeader,
+      "-L",
+      `${webPPrefix}/lib`,
+      "-lwebp",
+      "-o",
+      binary,
+    ],
+    {
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    },
+  );
   return binary;
 }
 
@@ -356,10 +366,12 @@ export function matchesMacOSWindowCaptureTarget(
     .some((candidate) => candidate === name || candidate.includes(name));
 }
 
-export async function listMacOSWindowCaptureTargets(options: {
-  keepProcessIds?: Array<number | null | undefined>;
-  cleanupOrphanedStreams?: boolean;
-} = {}): Promise<MacOSWindowCaptureListResult> {
+export async function listMacOSWindowCaptureTargets(
+  options: {
+    keepProcessIds?: Array<number | null | undefined>;
+    cleanupOrphanedStreams?: boolean;
+  } = {},
+): Promise<MacOSWindowCaptureListResult> {
   if (options.cleanupOrphanedStreams !== false) {
     await killOrphanedHelperStreams({ keepProcessIds: options.keepProcessIds });
   }
@@ -457,12 +469,15 @@ export async function startMacOSWindowCaptureStream(input: {
     stderr += String(chunk || "");
     if (stderr.length > 4096) stderr = stderr.slice(-4096);
   });
-  const dimensions = await waitForImage(outputPath, Math.max(1000, input.timeoutMs || 2500), child)
-    .catch((error) => {
-      child.kill("SIGTERM");
-      const detail = stderr.trim();
-      throw new Error(detail ? `${error.message}: ${detail}` : error.message);
-    });
+  const dimensions = await waitForImage(
+    outputPath,
+    Math.max(1000, input.timeoutMs || 2500),
+    child,
+  ).catch((error) => {
+    child.kill("SIGTERM");
+    const detail = stderr.trim();
+    throw new Error(detail ? `${error.message}: ${detail}` : error.message);
+  });
   return {
     ok: true,
     source: "macos_screencapturekit",

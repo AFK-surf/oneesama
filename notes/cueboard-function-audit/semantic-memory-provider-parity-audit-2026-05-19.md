@@ -75,11 +75,11 @@ Provider behavior:
 
 ## Decisions
 
-| Question | Decision |
-|---|---|
-| Should semantic recall be enabled by default? | No. Keep production lexical behavior unchanged until task #232 canaries and real provider quality justify enabling it. |
-| Should this call an external embedding API now? | No. The first slice proves the provider contract and hybrid merge without adding network, quota, or secret risk. |
-| Is the local vector backend "Hermes-equivalent"? | No. It is a scaffold provider that makes semantic recall pluggable; true mem0/supermemory-grade embeddings remain future providers. |
+| Question                                                          | Decision                                                                                                                              |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Should semantic recall be enabled by default?                     | No. Keep production lexical behavior unchanged until task #232 canaries and real provider quality justify enabling it.                |
+| Should this call an external embedding API now?                   | No. The first slice proves the provider contract and hybrid merge without adding network, quota, or secret risk.                      |
+| Is the local vector backend "Hermes-equivalent"?                  | No. It is a scaffold provider that makes semantic recall pluggable; true mem0/supermemory-grade embeddings remain future providers.   |
 | Should memory writes persist the semantic index file immediately? | Not in this slice. Writes mirror into the provider's in-process index. Durable indexing belongs with the selected production backend. |
 
 ## Fixtures

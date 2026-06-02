@@ -10,13 +10,59 @@ import { waitForMeetAdmission } from "./meet-admission.ts";
 import { installMeetLocalPlaybackMute } from "./meet-local-playback-mute.ts";
 import * as audio from "./meeting-audio-inputs.ts";
 import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-prompts.ts";
-import { buildRealtimeInstructions, buildRealtimeSessionConfig, type RealtimeCurrentUser, realtimeToolSchemas } from "../realtime/realtime-contract.ts";
-import { DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS, DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT, DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH, assertMeetUrl, createDiagnostics, gotoMeetWithRetry, installPageDiagnostics, loadPlaywright, normalizeMeetProfileMode, nowIso, saveDiagnostics, shouldMuteMeetLocalPlayback, takeScreenshot, type GoogleMeetJoinInput, type GoogleMeetJoinerOptions, type LocalMultipartFrameServer, type LocalStaticAssetServer, type MeetChatInput } from "./google-meet-joiner-base.ts";
+import {
+  buildRealtimeInstructions,
+  buildRealtimeSessionConfig,
+  type RealtimeCurrentUser,
+  realtimeToolSchemas,
+} from "../realtime/realtime-contract.ts";
+import {
+  DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
+  DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
+  DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,
+  assertMeetUrl,
+  createDiagnostics,
+  gotoMeetWithRetry,
+  installPageDiagnostics,
+  loadPlaywright,
+  normalizeMeetProfileMode,
+  nowIso,
+  saveDiagnostics,
+  shouldMuteMeetLocalPlayback,
+  takeScreenshot,
+  type GoogleMeetJoinInput,
+  type GoogleMeetJoinerOptions,
+  type LocalMultipartFrameServer,
+  type LocalStaticAssetServer,
+  type MeetChatInput,
+} from "./google-meet-joiner-base.ts";
 import { clickFirstVisible, collectButtonInventory } from "./google-meet-joiner-ui.ts";
-import { buildMeetingAwarenessState, clickMeetJoinButton, compactCaptionState, compactRuntimeState, evaluateAvatarAudio, evaluateAvatarReady, evaluateFixtureState, evaluateLocalDialogState, evaluateMeetPageState, evaluateRealtimeBridgeState, evaluateScreenShareState, evaluateWorkerResultBridgeState, fillGuestName, logMeetingAwarenessDebug, meetingAwarenessSignature, openMeetPeoplePanelForAwareness, publishMeetingAwarenessToPage, startAvatarRenderer } from "./google-meet-joiner-runtime-state.ts";
+import {
+  buildMeetingAwarenessState,
+  clickMeetJoinButton,
+  compactCaptionState,
+  compactRuntimeState,
+  evaluateAvatarAudio,
+  evaluateAvatarReady,
+  evaluateFixtureState,
+  evaluateLocalDialogState,
+  evaluateMeetPageState,
+  evaluateRealtimeBridgeState,
+  evaluateScreenShareState,
+  evaluateWorkerResultBridgeState,
+  fillGuestName,
+  logMeetingAwarenessDebug,
+  meetingAwarenessSignature,
+  openMeetPeoplePanelForAwareness,
+  publishMeetingAwarenessToPage,
+  startAvatarRenderer,
+} from "./google-meet-joiner-runtime-state.ts";
 import { createGoogleMeetShareActions } from "./google-meet-joiner-share-actions.ts";
 
-export { buildMeetingAwarenessState, meetingAwarenessContextText } from "./google-meet-joiner-runtime-state.ts";
+export {
+  buildMeetingAwarenessState,
+  meetingAwarenessContextText,
+} from "./google-meet-joiner-runtime-state.ts";
 
 function videoMimeType(relativePath: string): string {
   const normalized = String(relativePath || "").toLowerCase();
@@ -236,17 +282,20 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       Boolean(input.includeParticipantAudio);
     const realtimeRequiresRecappi =
       realtimeWantsMeetAudio && audio.isGoogleMeetUrlForRealtimeAudio(meetUrl);
-    const { recorder, realtimeAudioCapture, realtimeRecappiAudioInput: initialRecappiAudioInput } =
-      audio.createMeetingAudioInputs({
-        input,
-        config,
-        sessionId,
-        artifactsDir,
-        meetUrl,
-        installRealtimeBridge,
-        recordMeeting,
-      });
-    let realtimeRecappiAudioInput = initialRecappiAudioInput;
+    const {
+      recorder,
+      realtimeAudioCapture,
+      realtimeRecappiAudioInput: initialRecappiAudioInput,
+    } = audio.createMeetingAudioInputs({
+      input,
+      config,
+      sessionId,
+      artifactsDir,
+      meetUrl,
+      installRealtimeBridge,
+      recordMeeting,
+    });
+    const realtimeRecappiAudioInput = initialRecappiAudioInput;
     const browserUserDataDirInput = input.browserUserDataDir || config.browserUserDataDir || "";
     const meetProfileMode = normalizeMeetProfileMode(
       input.meetProfileMode || config.meetProfileMode,
@@ -1128,7 +1177,14 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     };
   }
 
-  const captureRef = { get current() { return activeMacWindowCapture; }, set current(value) { activeMacWindowCapture = value; } };
+  const captureRef = {
+    get current() {
+      return activeMacWindowCapture;
+    },
+    set current(value) {
+      activeMacWindowCapture = value;
+    },
+  };
   const {
     listShareableApps,
     presentAppShare,

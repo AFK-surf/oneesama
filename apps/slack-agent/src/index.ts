@@ -247,7 +247,8 @@ interface SlackWorkerResponseBody {
   keepStatus?: boolean;
   [key: string]: unknown;
 }
-type ParsedAvatarCommand = import("../../../packages/core/src/control-plane/avatar-command.js").AvatarCommandResult;
+type ParsedAvatarCommand =
+  import("../../../packages/core/src/control-plane/avatar-command.js").AvatarCommandResult;
 type SlackAvatarCommandBody = SlackHandlerInput;
 const config = getRuntimeConfig();
 const sqlitePath = config.stateSqlitePath || `${config.dataDir}/meeting-avatar-bot.sqlite3`;
@@ -283,7 +284,7 @@ const localSlackMemory = createLocalSlackMemoryProvider({
 });
 const slackWorkspaceDir =
   process.env.MAB_SLACK_WORKSPACE_DIR || `${config.dataDir}/slack-workspace`;
-let lastScannerCompactionHash = "";
+const lastScannerCompactionHash = "";
 const slackWorkspaceBootstrapEnabled = process.env.MAB_SLACK_WORKSPACE_BOOTSTRAP !== "0";
 const slackWorkspaceBootstrap = slackWorkspaceBootstrapEnabled
   ? ensureSlackWorkspaceFiles({ workspaceDir: slackWorkspaceDir })
@@ -488,11 +489,14 @@ function rememberSlackCommand({
   return { slackContext, domainContext };
 }
 let workerResultHandlers: any;
-const reportFinishedWorkerJob = (job: SlackJobLike) => workerResultHandlers.reportFinishedWorkerJob(job);
+const reportFinishedWorkerJob = (job: SlackJobLike) =>
+  workerResultHandlers.reportFinishedWorkerJob(job);
 const updateSlackAssistantStatusForWorkerJob = (job: SlackJobLike) =>
   workerResultHandlers.updateSlackAssistantStatusForWorkerJob(job);
-const pollMeetingWorkerResults = (input = {}) => workerResultHandlers.pollMeetingWorkerResults(input);
-const postMeetingWorkerResultsToSlack = (input = {}) => workerResultHandlers.postMeetingWorkerResultsToSlack(input);
+const pollMeetingWorkerResults = (input = {}) =>
+  workerResultHandlers.pollMeetingWorkerResults(input);
+const postMeetingWorkerResultsToSlack = (input = {}) =>
+  workerResultHandlers.postMeetingWorkerResultsToSlack(input);
 const slackImmediateWorkerAckText = (body: SlackWorkerResponseBody = {}) =>
   workerResultHandlers.slackImmediateWorkerAckText(body);
 const shouldKeepAssistantStatusUntilWorkerDone = (body: SlackWorkerResponseBody = {}) =>
@@ -908,13 +912,23 @@ const service = createJsonServer({
     "GET /tools/parity": () => legacyTools.report(),
     "GET /slack/tools/parity": () => legacyTools.report(),
     "POST /tools/call": async ({ body }) => {
-      const b = body as { tool?: string; name?: string; args?: Record<string, unknown>; input?: Record<string, unknown> };
+      const b = body as {
+        tool?: string;
+        name?: string;
+        args?: Record<string, unknown>;
+        input?: Record<string, unknown>;
+      };
       const tool = String(b.tool || b.name || "");
       const result = await legacyTools.execute(tool, b.args || b.input || {});
       return { status: result.ok ? 200 : 400, body: result };
     },
     "POST /slack/tools/call": async ({ body }) => {
-      const b = body as { tool?: string; name?: string; args?: Record<string, unknown>; input?: Record<string, unknown> };
+      const b = body as {
+        tool?: string;
+        name?: string;
+        args?: Record<string, unknown>;
+        input?: Record<string, unknown>;
+      };
       const tool = String(b.tool || b.name || "");
       const result = await legacyTools.execute(tool, b.args || b.input || {});
       return { status: result.ok ? 200 : 400, body: result };

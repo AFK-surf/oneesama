@@ -145,4 +145,3 @@ Audit rule:
      without an unrelated text reply or manual confirmation?
 
 Tool execution alone is not parity.
-

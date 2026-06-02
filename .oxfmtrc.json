@@ -1,0 +1,4 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": ["notes/rfc/oneesama-daily-dream-memory-self-learning-rfc-2026-05-22.md"]
+}

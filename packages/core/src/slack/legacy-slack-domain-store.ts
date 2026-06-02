@@ -2,8 +2,33 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { normalizeTriageContext } from "./triage-context.js";
-import { LEGACY_SLACK_DOMAIN_SCHEMA_VERSION, LEGACY_SLACK_DOMAIN_TABLES, clamp01, json, migrate, normalizeThreadTs, normalizedChoice, nowIso, numberOrZero, rowJson, safeJson, slackIdentity, text, type CreateLegacySlackDomainStoreOptions, type Row, type SlackDomainStoreInput, type SlackEventBody, type UpsertChannelInput } from "./legacy-slack-domain-store-shared.js";
-export { LEGACY_SLACK_DOMAIN_SCHEMA_VERSION, LEGACY_SLACK_DOMAIN_TABLES }; export type { CreateLegacySlackDomainStoreOptions, SlackDomainStoreInput, SlackEventBody, UpsertChannelInput };
+import {
+  LEGACY_SLACK_DOMAIN_SCHEMA_VERSION,
+  LEGACY_SLACK_DOMAIN_TABLES,
+  clamp01,
+  json,
+  migrate,
+  normalizeThreadTs,
+  normalizedChoice,
+  nowIso,
+  numberOrZero,
+  rowJson,
+  safeJson,
+  slackIdentity,
+  text,
+  type CreateLegacySlackDomainStoreOptions,
+  type Row,
+  type SlackDomainStoreInput,
+  type SlackEventBody,
+  type UpsertChannelInput,
+} from "./legacy-slack-domain-store-shared.js";
+export { LEGACY_SLACK_DOMAIN_SCHEMA_VERSION, LEGACY_SLACK_DOMAIN_TABLES };
+export type {
+  CreateLegacySlackDomainStoreOptions,
+  SlackDomainStoreInput,
+  SlackEventBody,
+  UpsertChannelInput,
+};
 export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomainStoreOptions = {}) {
   if (!dbPath) throw new Error("dbPath is required for Legacy Slack domain store");
   mkdirSync(dirname(dbPath), { recursive: true });
@@ -11,7 +36,9 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
   db.pragma("busy_timeout = 5000");
   migrate(db);
   function tableCount(table: string): number {
-    const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number } | undefined;
+    const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as
+      | { count: number }
+      | undefined;
     return Number(row?.count || 0);
   }
   function upsertChannel({ id, name = "", type = "public_channel" }: UpsertChannelInput = {}) {
@@ -117,7 +144,12 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
         ) || null
     );
   }
-  function touchChannelBrain({ workspaceId = "workspace", channelId = "channel", sessionId = "", threadTs = "" }: { workspaceId?: string; channelId?: string; sessionId?: string; threadTs?: string } = {}) {
+  function touchChannelBrain({
+    workspaceId = "workspace",
+    channelId = "channel",
+    sessionId = "",
+    threadTs = "",
+  }: { workspaceId?: string; channelId?: string; sessionId?: string; threadTs?: string } = {}) {
     db.prepare(
       `
       INSERT INTO channel_brain (workspace_id, channel_id, last_session_id, last_thread_ts)
@@ -326,7 +358,10 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
     return rowJson(db.prepare("SELECT * FROM outbound_action WHERE id = ?").get(id));
   }
 
-  function listOutboundActions({ status = "", limit = 20 }: { status?: string; limit?: number } = {}) {
+  function listOutboundActions({
+    status = "",
+    limit = 20,
+  }: { status?: string; limit?: number } = {}) {
     return db
       .prepare(
         `
@@ -378,7 +413,10 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
     return getThreadRecommendation(id);
   }
 
-  function listThreadRecommendations({ status = "", limit = 20 }: { status?: string; limit?: number } = {}) {
+  function listThreadRecommendations({
+    status = "",
+    limit = 20,
+  }: { status?: string; limit?: number } = {}) {
     return db
       .prepare(
         `
@@ -416,7 +454,12 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
     return getPendingAction(id);
   }
 
-  function setPendingActionStatus(id: string | number, status: string, confirmedBy: string = "", result: string = "") {
+  function setPendingActionStatus(
+    id: string | number,
+    status: string,
+    confirmedBy: string = "",
+    result: string = "",
+  ) {
     db.prepare(
       `
       UPDATE pending_action
@@ -577,7 +620,10 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
     return db.prepare("SELECT * FROM heartbeat_followup WHERE id = ?").get(result.lastInsertRowid);
   }
 
-  function listHeartbeatFollowups({ status = "open", limit = 20 }: { status?: string; limit?: number } = {}) {
+  function listHeartbeatFollowups({
+    status = "open",
+    limit = 20,
+  }: { status?: string; limit?: number } = {}) {
     return db
       .prepare(
         `
@@ -628,7 +674,11 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
     return db.prepare("SELECT * FROM heartbeat_surface WHERE id = ?").get(result.lastInsertRowid);
   }
 
-  function listHeartbeatSurfaces({ followupId = 0, status = "", limit = 20 }: { followupId?: number; status?: string; limit?: number } = {}) {
+  function listHeartbeatSurfaces({
+    followupId = 0,
+    status = "",
+    limit = 20,
+  }: { followupId?: number; status?: string; limit?: number } = {}) {
     const followup = numberOrZero(followupId);
     return db
       .prepare(
@@ -678,7 +728,8 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
   }
 
   function recordTriageRun(input: SlackDomainStoreInput = {}) {
-    const run = ((input.run as SlackDomainStoreInput | undefined) || input) as SlackDomainStoreInput & {
+    const run = ((input.run as SlackDomainStoreInput | undefined) ||
+      input) as SlackDomainStoreInput & {
       occurredAt?: string;
       occurred_at?: string;
       steps?: number;
@@ -752,7 +803,8 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
   }
 
   function updateTriageRun(input: SlackDomainStoreInput = {}) {
-    const run = ((input.run as SlackDomainStoreInput | undefined) || input) as SlackDomainStoreInput & {
+    const run = ((input.run as SlackDomainStoreInput | undefined) ||
+      input) as SlackDomainStoreInput & {
       id?: number | string;
       steps?: number;
       durationSeconds?: number;
@@ -903,7 +955,10 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
     );
   }
 
-  function listFeedbackEntries({ dates = [], limit = 20 }: { dates?: string[]; limit?: number } = {}) {
+  function listFeedbackEntries({
+    dates = [],
+    limit = 20,
+  }: { dates?: string[]; limit?: number } = {}) {
     const dateList = Array.isArray(dates) ? dates : [dates];
     const normalizedDates = dateList.map((date) => text(date)).filter(Boolean);
     const rowLimit = Math.max(1, Number.parseInt(String(limit), 10) || 20);

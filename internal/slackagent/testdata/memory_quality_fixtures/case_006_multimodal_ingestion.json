@@ -49,9 +49,5 @@
     "bridge_assets_brief.pdf",
     "slack.fetchFile"
   ],
-  "must_not_contain": [
-    "127.0.0.1",
-    "/slack/tools/call",
-    "x-oneesama-internal-key"
-  ]
+  "must_not_contain": ["127.0.0.1", "/slack/tools/call", "x-oneesama-internal-key"]
 }

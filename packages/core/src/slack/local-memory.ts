@@ -301,7 +301,9 @@ function seedSearchResults({ seed, keywords, limit }) {
       });
     }
   }
-  return results.toSorted((a, b) => b.score - a.score || a.kind.localeCompare(b.kind)).slice(0, limit);
+  return results
+    .toSorted((a, b) => b.score - a.score || a.kind.localeCompare(b.kind))
+    .slice(0, limit);
 }
 
 export function createLocalSlackMemoryProvider(options: LocalSlackMemoryProviderOptions = {}) {

@@ -60,7 +60,13 @@ export interface CallSlackApiResult {
   ok: boolean;
   status?: number;
   method: string;
-  body?: { ok?: boolean; error?: string; canvas_id?: string; canvas?: { id?: string }; [key: string]: unknown };
+  body?: {
+    ok?: boolean;
+    error?: string;
+    canvas_id?: string;
+    canvas?: { id?: string };
+    [key: string]: unknown;
+  };
   error?: string;
   detail?: string;
 }
@@ -265,9 +271,9 @@ export function createCanvasPublisher(options: CreateCanvasPublisherOptions = {}
       .filter((name) => name.endsWith(".json"))
       .map(
         (name) =>
-          safeJsonParse<PublishedCanvasManifest>(readFileSync(join(outDir, name), "utf8")) as
-            | PublishedCanvasManifest
-            | null,
+          safeJsonParse<PublishedCanvasManifest>(
+            readFileSync(join(outDir, name), "utf8"),
+          ) as PublishedCanvasManifest | null,
       )
       .filter((entry): entry is PublishedCanvasManifest => Boolean(entry))
       .toSorted((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
@@ -280,8 +286,7 @@ export function createCanvasPublisher(options: CreateCanvasPublisherOptions = {}
     const id = input.id || `canvas-${sanitizeId(artifactId)}-${crypto.randomUUID().slice(0, 8)}`;
     const createdAt = new Date().toISOString();
     const summaryMarkdown =
-      input.summaryMarkdown ||
-      readTextIfExists(input.summaryPath || artifact.files?.summary || "");
+      input.summaryMarkdown || readTextIfExists(input.summaryPath || artifact.files?.summary || "");
     const markdown = renderPublishMarkdown({
       artifact,
       summaryMarkdown,

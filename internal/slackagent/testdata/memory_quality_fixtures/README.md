@@ -5,6 +5,7 @@ write replay canaries for the pluggable Memory provider contract
 (`SlackMemoryProvider`, `slackMemoryProviderManager`, commit `a4e874e`).
 
 This suite is distinct from `bridge_quality_fixtures/` (task #219):
+
 - `bridge_quality_fixtures` pins app-mention entry-parity contract items
   (C1-C7 + C218 + C220 + C222 + C223). Layer:
   `buildAgentRunnerContext`.

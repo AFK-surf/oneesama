@@ -155,7 +155,9 @@ function normalizeChannelList(value: unknown): string[] {
   return Array.isArray(parsed) ? parsed.map((channel) => text(channel)).filter(Boolean) : [];
 }
 
-export function normalizeTriageContext(input: TriageContextInput | unknown = {}): NormalizedTriageContext {
+export function normalizeTriageContext(
+  input: TriageContextInput | unknown = {},
+): NormalizedTriageContext {
   const data = (input || {}) as TriageContextInput;
   const occurredAt = text(
     data.timestamp || data.occurred_at || data.occurredAt,
@@ -184,9 +186,7 @@ export function normalizeTriageContext(input: TriageContextInput | unknown = {})
   };
 }
 
-export function loadTriageContextProjection(
-  workspaceDir: string,
-): NormalizedTriageContext[] {
+export function loadTriageContextProjection(workspaceDir: string): NormalizedTriageContext[] {
   const root = text(workspaceDir);
   if (!root) return [];
   const filePath = projectionPath(root);

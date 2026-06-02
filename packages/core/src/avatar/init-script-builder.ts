@@ -94,10 +94,7 @@ function buildInlineVRMDeps() {
 
   const bundle = result.outputFiles?.[0]?.text || "";
   if (!bundle) throw new Error("build VRM dependency bundle produced no output");
-  cachedInlineVRMDeps = [
-    "window.MAB_AVATAR_INLINE_VRM_DEPS = true;",
-    bundle,
-  ].join("\n");
+  cachedInlineVRMDeps = ["window.MAB_AVATAR_INLINE_VRM_DEPS = true;", bundle].join("\n");
   return cachedInlineVRMDeps;
 }
 

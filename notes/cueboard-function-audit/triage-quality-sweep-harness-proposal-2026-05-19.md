@@ -55,11 +55,11 @@ the prose.
 
 ### 1. Decision Distribution
 
-| System | runs | reply | stay_silent | delegate_worker | memory_write | failed |
-|---|--:|--:|--:|--:|--:|--:|
-| old slackd | N | n1 | n2 | n3 | n4 | n5 |
-| new oneesama (codex_then_pi) | N | n1 | n2 | n3 | n4 | n5 |
-| Δ | — | Δ1 | Δ2 | Δ3 | Δ4 | Δ5 |
+| System                       | runs | reply | stay_silent | delegate_worker | memory_write | failed |
+| ---------------------------- | ---: | ----: | ----------: | --------------: | -----------: | -----: |
+| old slackd                   |    N |    n1 |          n2 |              n3 |           n4 |     n5 |
+| new oneesama (codex_then_pi) |    N |    n1 |          n2 |              n3 |           n4 |     n5 |
+| Δ                            |    — |    Δ1 |          Δ2 |              Δ3 |           Δ4 |     Δ5 |
 
 Acceptance gate: |Δ stay_silent| / N < threshold% during shadow
 phase; if Pi is systematically silent where old wasn't, this lights
@@ -67,36 +67,36 @@ yellow / red.
 
 ### 2. Mutation Rate
 
-| System | mutations | non-mutation runs | mutation rate % |
-|---|--:|--:|--:|
-| old slackd | M | N-M | M/N% |
-| new oneesama | M' | N-M' | M'/N% |
-| Δ | — | — | Δ% |
+| System       | mutations | non-mutation runs | mutation rate % |
+| ------------ | --------: | ----------------: | --------------: |
+| old slackd   |         M |               N-M |            M/N% |
+| new oneesama |        M' |              N-M' |           M'/N% |
+| Δ            |         — |                 — |              Δ% |
 
 ### 3. Evidence Injection Rate
 
 | System | runs with cited evidence | runs without evidence | evidence rate % |
-|---|--:|--:|--:|
+| ------ | -----------------------: | --------------------: | --------------: |
 
 ### 4. Tool Call Distribution
 
-| Tool | old slackd calls | new oneesama calls | Δ |
-|---|--:|--:|--:|
-| slack_api/fetch_thread | … | … | … |
-| exa_search | … | … | … |
-| exa_contents | … | … | … |
-| memory_search | … | … | … |
-| memory_get | … | … | … |
-| person_memory | … | … | … |
+| Tool                   | old slackd calls | new oneesama calls |   Δ |
+| ---------------------- | ---------------: | -----------------: | --: |
+| slack_api/fetch_thread |                … |                  … |   … |
+| exa_search             |                … |                  … |   … |
+| exa_contents           |                … |                  … |   … |
+| memory_search          |                … |                  … |   … |
+| memory_get             |                … |                  … |   … |
+| person_memory          |                … |                  … |   … |
 
 ### 5. Reply Quality Proxies
 
-| Metric | old slackd | new oneesama |
-|---|--:|--:|
-| Avg reply length (chars) | … | … |
-| % replies with cited source path | … | … |
-| % replies on threads with linked external content | … | … |
-| % replies that mention specific person/project entities | … | … |
+| Metric                                                  | old slackd | new oneesama |
+| ------------------------------------------------------- | ---------: | -----------: |
+| Avg reply length (chars)                                |          … |            … |
+| % replies with cited source path                        |          … |            … |
+| % replies on threads with linked external content       |          … |            … |
+| % replies that mention specific person/project entities |          … |            … |
 
 ### 6. Notable Cases (auto-extracted)
 

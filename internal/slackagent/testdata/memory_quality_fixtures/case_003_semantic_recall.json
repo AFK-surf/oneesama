@@ -27,10 +27,5 @@
     "bridge_cold_open_montage_v15.mp4",
     "memory_provider:local_semantic"
   ],
-  "must_not_contain": [
-    "127.0.0.1",
-    "/slack/tools/call",
-    "curl",
-    "localhost:8780"
-  ]
+  "must_not_contain": ["127.0.0.1", "/slack/tools/call", "curl", "localhost:8780"]
 }

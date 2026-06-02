@@ -4,7 +4,9 @@ import { fetchJson, type UpstreamError } from "../../../packages/core/src/http-f
 import { getRuntimeConfig } from "../../../packages/core/src/env.js";
 import { resolveSpeakerIdentity } from "../../../packages/core/src/realtime/speaker-identity.js";
 
-interface MeetingAgentToolInput { [key: string]: any }
+interface MeetingAgentToolInput {
+  [key: string]: any;
+}
 const config = getRuntimeConfig();
 const workspaceCredentialFile = process.env.MAB_WORKSPACE_TOOLS_ENV_FILE || "";
 const currentUser = {
@@ -47,7 +49,11 @@ export function stageVideoAssetUrl(filePath = "") {
 }
 
 export function normalizeSessionKind(value = "") {
-  return String(value || "").trim().toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("_", "-")
+    .replaceAll(" ", "-");
 }
 
 export function workerContext(value: unknown): Record<string, unknown> {
@@ -73,15 +79,24 @@ export function isRealtimeMeetingScopedContext(context: Record<string, unknown>)
     if (realtimeMeetingSessionKinds.has(kind)) return true;
     if (realtimeNonMeetingSessionKinds.has(kind)) return false;
   }
-  const source = String(context.source || "").trim().toLowerCase();
+  const source = String(context.source || "")
+    .trim()
+    .toLowerCase();
   if (!source) return false;
-  if (source.includes("persona_delegate") || source.includes("triage") || source.includes("secretary")) {
+  if (
+    source.includes("persona_delegate") ||
+    source.includes("triage") ||
+    source.includes("secretary")
+  ) {
     return false;
   }
   return source.startsWith("meeting-") || source.startsWith("meeting_");
 }
 
-export function realtimeSuppressChannelForContext(context: Record<string, unknown>, sessionId = "") {
+export function realtimeSuppressChannelForContext(
+  context: Record<string, unknown>,
+  sessionId = "",
+) {
   if (!isRealtimeMeetingScopedContext(context)) return "realtime_non_meeting_suppressed";
   const targetSessionId = workerMeetingSessionId(context);
   if (sessionId && targetSessionId && targetSessionId !== sessionId) {
@@ -152,7 +167,6 @@ export function loadSlackAgentPersonalityContext() {
   }
   return sections.join("\n\n").slice(0, 4000);
 }
-
 
 export function toolFailure(error: unknown, fallback = "workspace_tool_failed") {
   const err = (error || {}) as UpstreamError;

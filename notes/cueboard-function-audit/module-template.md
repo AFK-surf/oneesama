@@ -8,15 +8,15 @@ Oneesama comparison root: `<absolute path>`
 
 ## Summary
 
-| Status | Count | Notes |
-|---|--:|---|
-| identical | 0 |  |
-| verbatim_port | 0 |  |
-| partial | 0 |  |
-| drift | 0 |  |
-| missing | 0 |  |
-| product_excluded | 0 |  |
-| unreviewed | 0 |  |
+| Status           | Count | Notes |
+| ---------------- | ----: | ----- |
+| identical        |     0 |       |
+| verbatim_port    |     0 |       |
+| partial          |     0 |       |
+| drift            |     0 |       |
+| missing          |     0 |       |
+| product_excluded |     0 |       |
+| unreviewed       |     0 |       |
 
 ## Function Inventory
 
@@ -31,8 +31,8 @@ go run ./cmd/cueboard-function-inventory \
 Then fill the review columns:
 
 | Module | Source file | Function | Kind | Exported | Lines | Suggested status | Oneesama target | Evidence | Notes |
-|---|---|---|---|---:|---:|---|---|---|---|
-|  |  |  |  |  |  | unreviewed |  |  |  |
+| ------ | ----------- | -------- | ---- | -------: | ----: | ---------------- | --------------- | -------- | ----- |
+|        |             |          |      |          |       | unreviewed       |                 |          |       |
 
 ## P0 Gaps
 

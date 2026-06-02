@@ -71,24 +71,21 @@ test("command agent runner caps command output", async () => {
 });
 
 test("HTTP agent runner marks hanging requests as timeout", async () => {
-  await withMockFetch(
-    hangingFetch,
-    async () => {
-      const runner = createAgentRunner({
-        provider: "http",
-        env: {
-          ...process.env,
-          MAB_AGENT_RUNNER: "http",
-          MAB_AGENT_HTTP_URL: "https://example.invalid/agent",
-          MAB_AGENT_RUNNER_TIMEOUT_MS: "50",
-        },
-      });
+  await withMockFetch(hangingFetch, async () => {
+    const runner = createAgentRunner({
+      provider: "http",
+      env: {
+        ...process.env,
+        MAB_AGENT_RUNNER: "http",
+        MAB_AGENT_HTTP_URL: "https://example.invalid/agent",
+        MAB_AGENT_RUNNER_TIMEOUT_MS: "50",
+      },
+    });
 
-      const job = await runner.startTask({ task: "hang", mode: "smoke" });
-      const completed = await waitForRunnerJob(runner, job.id);
+    const job = await runner.startTask({ task: "hang", mode: "smoke" });
+    const completed = await waitForRunnerJob(runner, job.id);
 
-      assert.equal(completed.status, "timeout");
-      assert.match(completed.error, /timed out after 50ms/);
-    },
-  );
+    assert.equal(completed.status, "timeout");
+    assert.match(completed.error, /timed out after 50ms/);
+  });
 });

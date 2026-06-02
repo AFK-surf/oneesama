@@ -74,7 +74,7 @@ import {
   hasCommand,
   parseEnvFile,
   envValue,
-  redactSecret
+  redactSecret,
 } from "./common.js";
 import type { ShadowTapInput } from "./common.js";
 import type {
@@ -89,7 +89,7 @@ import type {
   ShadowHookResult,
   ShadowReportEvent,
   EvidenceArtifact,
-  CutoverEvidenceManifest
+  CutoverEvidenceManifest,
 } from "./common.js";
 
 export async function copyAgentRealTaskReports({ rootDir }) {
@@ -917,4 +917,3 @@ export async function postSignedSlackJson(
   });
   return { ...(await response.json()), httpStatus: response.status, rawBody, timestamp, signature };
 }
-

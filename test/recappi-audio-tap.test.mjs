@@ -154,8 +154,7 @@ test("Recappi audio tap uses a Recappi app PID when it matches the browser proce
 test(
   "Recappi SDK exposes Google Chrome as a process-tappable application on this machine",
   {
-    skip:
-      process.platform !== "darwin" || process.env.ONEESAMA_RUN_LOCAL_RECAPPI_PROBE !== "1",
+    skip: process.platform !== "darwin" || process.env.ONEESAMA_RUN_LOCAL_RECAPPI_PROBE !== "1",
   },
   async () => {
     const tap = createRecappiAudioTap({ log: () => {} });

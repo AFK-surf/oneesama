@@ -276,7 +276,10 @@ export function createSlackAgentDRunner(options: SlackAgentDRunnerOptions = {}) 
     return getJob(job.id);
   }
 
-  async function postJson(url: string, payload: Record<string, unknown>): Promise<SlackAgentDHttpResult> {
+  async function postJson(
+    url: string,
+    payload: Record<string, unknown>,
+  ): Promise<SlackAgentDHttpResult> {
     const response = await fetchImpl(url, {
       method: "POST",
       headers: createHeaders(config),

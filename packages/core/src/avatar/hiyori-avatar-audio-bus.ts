@@ -75,7 +75,8 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     const track = destination.stream.getAudioTracks()[0];
     state.outputTrackReadyState = track?.readyState || "";
     state.outputTrackMuted = track?.muted === true;
-    audioContext.resume?.()
+    audioContext
+      .resume?.()
       .then(() => {
         state.audioContextState = audioContext.state || "";
         state.lastResumeAt = new Date().toISOString();
@@ -176,7 +177,9 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
 
   function setSyntheticSpeech(active: boolean, options: { holdMs?: number } = {}) {
     syntheticSpeechActive = Boolean(active);
-    syntheticSpeechUntil = syntheticSpeechActive ? performance.now() + Number(options.holdMs ?? 1600) : 0;
+    syntheticSpeechUntil = syntheticSpeechActive
+      ? performance.now() + Number(options.holdMs ?? 1600)
+      : 0;
     state.syntheticSpeechActive = syntheticSpeechActive;
     touch("synthetic_speech", { active: syntheticSpeechActive });
     return { ok: true, active: syntheticSpeechActive };
@@ -232,7 +235,10 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
       gain.connect(masterGain);
       source.start();
       state.routedBuffers += 1;
-      touch("buffer", { label: options.label || "", durationMs: Math.round(decoded.duration * 1000) });
+      touch("buffer", {
+        label: options.label || "",
+        durationMs: Math.round(decoded.duration * 1000),
+      });
       return { ok: true, durationMs: Math.round(decoded.duration * 1000) };
     } catch (error) {
       rememberError(error);

@@ -21,11 +21,5 @@
     "sync_turn_count_min": 1
   },
   "expected_search_result_anchors": [],
-  "must_not_contain": [
-    "127.0.0.1",
-    "/slack/tools/call",
-    "curl",
-    "exit status 7",
-    "localhost:8780"
-  ]
+  "must_not_contain": ["127.0.0.1", "/slack/tools/call", "curl", "exit status 7", "localhost:8780"]
 }

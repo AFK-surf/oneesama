@@ -36,6 +36,7 @@ within `internal/`, `cmd/`, `pkg/`, `templates/`, `packages/core/`.
 Active-runtime matches: 0.
 
 Remaining matches:
+
 - `notes/rfc/foreground-cognition-pivot-rfc-2026-05-19.md:177`
   documents the policy boundary; correct usage (referring to the
   Bridge workspace's choice to opt-in, not embedding it as
@@ -67,12 +68,12 @@ These are runtime decision-gate keyword arrays in Go, not prompts.
 They route inputs to evidence emitters; they're not "what's in
 scope" workspace policy. They remain in code as of `9359251`:
 
-| File | Keyword purpose | Drift |
-| --- | --- | --- |
-| `service_worker_jobs.go` | `canvas` / `画布` → Canvas publish route | Class 2 |
-| `app_mention_tool_evidence.go` | `是什么` / `是谁` / `what is` / `who is` etc → fresh exa_search dispatch | Class 2 |
+| File                               | Keyword purpose                                                                 | Drift                       |
+| ---------------------------------- | ------------------------------------------------------------------------------- | --------------------------- |
+| `service_worker_jobs.go`           | `canvas` / `画布` → Canvas publish route                                        | Class 2                     |
+| `app_mention_tool_evidence.go`     | `是什么` / `是谁` / `what is` / `who is` etc → fresh exa_search dispatch        | Class 2                     |
 | `app_mention_workflow_evidence.go` | `review` / `approve` / `merge` / `pull request` etc → workflow context evidence | Class 2 (conjunction logic) |
-| `app_mention_media_evidence.go` | `视频` / `素材` / `image` / `video` etc → media file evidence | Class 2 |
+| `app_mention_media_evidence.go`    | `视频` / `素材` / `image` / `video` etc → media file evidence                   | Class 2                     |
 
 These belong in the #199 polish queue per earlier audit. They are
 NOT a missing externalization in #238's scope (#238 was about

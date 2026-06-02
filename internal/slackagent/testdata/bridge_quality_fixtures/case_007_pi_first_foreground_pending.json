@@ -20,9 +20,7 @@
     "files": [],
     "memory_seed_files": []
   },
-  "expected_contract_items": [
-    "C237_pi_first_foreground_no_pre_pi_runner"
-  ],
+  "expected_contract_items": ["C237_pi_first_foreground_no_pre_pi_runner"],
   "intended_provider_signals": [
     "Pi.Decide invoked exactly once per event before any agent_runner.StartTask call.",
     "audit metadata records foreground_chain=pi_first_live + pre_pi_agent_runner_started=false.",
@@ -32,11 +30,5 @@
   ],
   "expected_provider_events": {},
   "expected_search_result_anchors": [],
-  "must_not_contain": [
-    "127.0.0.1",
-    "/slack/tools/call",
-    "curl",
-    "exit status 7",
-    "localhost:8780"
-  ]
+  "must_not_contain": ["127.0.0.1", "/slack/tools/call", "curl", "exit status 7", "localhost:8780"]
 }

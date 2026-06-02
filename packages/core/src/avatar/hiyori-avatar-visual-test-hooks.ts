@@ -24,7 +24,10 @@ interface RenderSnapshotInput {
   includeDataUrl?: boolean;
 }
 
-export function createAvatarVisualTestHooks(sourceCanvas: HTMLCanvasElement, input: VisualHooksInput) {
+export function createAvatarVisualTestHooks(
+  sourceCanvas: HTMLCanvasElement,
+  input: VisualHooksInput,
+) {
   const {
     config,
     avatarController,
@@ -122,8 +125,12 @@ export function createAvatarVisualTestHooks(sourceCanvas: HTMLCanvasElement, inp
       statusVisibleUntil: avatarController.state.statusVisibleUntil,
       statusUpdatedAt: avatarController.state.statusUpdatedAt,
     };
-    const hudRect =
-      (window as any).MAB_AVATAR_HUD_RECT?.() || { x: 580, y: 734, width: 760, height: 118 };
+    const hudRect = (window as any).MAB_AVATAR_HUD_RECT?.() || {
+      x: 580,
+      y: 734,
+      width: 760,
+      height: 118,
+    };
     try {
       const now = performance.now();
       avatarController.state.mood = normalizeEnum(snapshotInput.mood, allowedMoods, "neutral");
@@ -143,10 +150,21 @@ export function createAvatarVisualTestHooks(sourceCanvas: HTMLCanvasElement, inp
       drawFallback(testCtx, Number(snapshotInput.timeMs ?? 1200));
       drawAvatarHud(testCtx);
       sampleCtx.clearRect(0, 0, sampleCanvas.width, sampleCanvas.height);
-      sampleCtx.drawImage(testCanvas, 600, 130, 720, 680, 0, 0, sampleCanvas.width, sampleCanvas.height);
+      sampleCtx.drawImage(
+        testCanvas,
+        600,
+        130,
+        720,
+        680,
+        0,
+        0,
+        sampleCanvas.width,
+        sampleCanvas.height,
+      );
       const compact = sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
       return {
-        label: snapshotInput.label || `${avatarController.state.mood}-${avatarController.state.action}`,
+        label:
+          snapshotInput.label || `${avatarController.state.mood}-${avatarController.state.action}`,
         mood: avatarController.state.mood,
         action: avatarController.state.action,
         intensity: avatarController.state.intensity,
@@ -188,7 +206,17 @@ export function createAvatarVisualTestHooks(sourceCanvas: HTMLCanvasElement, inp
         testCtx.clearRect(0, 0, testCanvas.width, testCanvas.height);
         testCtx.drawImage(sourceCanvas, 0, 0, testCanvas.width, testCanvas.height);
         sampleCtx.clearRect(0, 0, sampleCanvas.width, sampleCanvas.height);
-        sampleCtx.drawImage(sourceCanvas, 600, 130, 720, 680, 0, 0, sampleCanvas.width, sampleCanvas.height);
+        sampleCtx.drawImage(
+          sourceCanvas,
+          600,
+          130,
+          720,
+          680,
+          0,
+          0,
+          sampleCanvas.width,
+          sampleCanvas.height,
+        );
         const compact = sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
         return {
           ok: true,
@@ -223,7 +251,17 @@ export function createAvatarVisualTestHooks(sourceCanvas: HTMLCanvasElement, inp
     },
     getLiveHash() {
       sampleCtx.clearRect(0, 0, sampleCanvas.width, sampleCanvas.height);
-      sampleCtx.drawImage(sourceCanvas, 600, 130, 720, 680, 0, 0, sampleCanvas.width, sampleCanvas.height);
+      sampleCtx.drawImage(
+        sourceCanvas,
+        600,
+        130,
+        720,
+        680,
+        0,
+        0,
+        sampleCanvas.width,
+        sampleCanvas.height,
+      );
       return hashBytes(sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height).data);
     },
   };

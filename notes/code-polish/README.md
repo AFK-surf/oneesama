@@ -10,22 +10,22 @@ If a new polish-era doc lands under this directory, add a row here and in
 
 ## Indexes (read these first)
 
-| Doc | Role | Anchor task |
-|---|---|---|
-| `oneesama-module-punch-list-2026-05-21.md` | Master module map + per-module risk + suggested polish slice ordering. Produced by driver during Phase 0. | #270 |
-| `canary-fixture-index-2026-05-21.md` | Curated index of every behavioural canary fixture (JSON fixtures + dedicated Go regression canaries + the 62 `cueboard_*_parity_test.go` group), with anchor task IDs and what each pins. | #296 |
-| `drift-class-index-2026-05-21.md` | Compact index of the 13 migration-audit drift classes (7 foundational + 6 promoted first-class + 2 observed-not-yet-promoted), each with anchor commit and the single audit reflex to run. Source-of-truth long-form lives in `../cueboard-function-audit/migration-lessons-audit-method.md`. | #297 |
+| Doc                                        | Role                                                                                                                                                                                                                                                                                          | Anchor task |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `oneesama-module-punch-list-2026-05-21.md` | Master module map + per-module risk + suggested polish slice ordering. Produced by driver during Phase 0.                                                                                                                                                                                     | #270        |
+| `canary-fixture-index-2026-05-21.md`       | Curated index of every behavioural canary fixture (JSON fixtures + dedicated Go regression canaries + the 62 `cueboard_*_parity_test.go` group), with anchor task IDs and what each pins.                                                                                                     | #296        |
+| `drift-class-index-2026-05-21.md`          | Compact index of the 13 migration-audit drift classes (7 foundational + 6 promoted first-class + 2 observed-not-yet-promoted), each with anchor commit and the single audit reflex to run. Source-of-truth long-form lives in `../cueboard-function-audit/migration-lessons-audit-method.md`. | #297        |
 
 ## Matrices and roadmaps
 
-| Doc | Role | Anchor task |
-|---|---|---|
-| `memory-provider-ownership-matrix-2026-05-21.md` | Memory provider × Kind ownership + ranking weights table; documents resolved overlaps (multimodal double-index, suppression provider-only) and the residual `persona_memory_write` semantic-vs-scanner overlap. | #284 (matrix), #272 (overlap fixes) |
-| `openclaw-hermes-memory-roadmap-canary-first-2026-05-21.md` | Splits remaining OpenClaw + Hermes Memory capabilities into 6 canary-first sub-tasks (289-A trust scoring … 289-F contradiction at write) with dependency order + canary-first protocol. | #289 |
-| `harness-stability-inventory-2026-05-21.md` | Classifies Oneesama prompt/tool inputs as stable prefix vs dynamic evidence, and defines the first hash contracts for the Harness cache/tool-stability RFC. | #319 |
-| `harness-foreground-tool-inventory-2026-05-21.md` | Classifies realtime foreground tools as stable/optional/deprecated/worker-only and records the schema hash migration gate. | #327 |
-| `harness-compaction-canary-plan-2026-05-21.md` | Defines the source-preserving compaction canary contract: stable prompt hash unchanged and all source refs retained before any idle compaction is enabled. | #330 |
-| `harness-audit-cadence-checklist-2026-05-21.md` | Defines the daily/3h/2h Harness audit cadence, red/yellow/info rules, reviewer checklist, and task evidence map for #319-#332. | #332 |
+| Doc                                                         | Role                                                                                                                                                                                                            | Anchor task                         |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `memory-provider-ownership-matrix-2026-05-21.md`            | Memory provider × Kind ownership + ranking weights table; documents resolved overlaps (multimodal double-index, suppression provider-only) and the residual `persona_memory_write` semantic-vs-scanner overlap. | #284 (matrix), #272 (overlap fixes) |
+| `openclaw-hermes-memory-roadmap-canary-first-2026-05-21.md` | Splits remaining OpenClaw + Hermes Memory capabilities into 6 canary-first sub-tasks (289-A trust scoring … 289-F contradiction at write) with dependency order + canary-first protocol.                        | #289                                |
+| `harness-stability-inventory-2026-05-21.md`                 | Classifies Oneesama prompt/tool inputs as stable prefix vs dynamic evidence, and defines the first hash contracts for the Harness cache/tool-stability RFC.                                                     | #319                                |
+| `harness-foreground-tool-inventory-2026-05-21.md`           | Classifies realtime foreground tools as stable/optional/deprecated/worker-only and records the schema hash migration gate.                                                                                      | #327                                |
+| `harness-compaction-canary-plan-2026-05-21.md`              | Defines the source-preserving compaction canary contract: stable prompt hash unchanged and all source refs retained before any idle compaction is enabled.                                                      | #330                                |
+| `harness-audit-cadence-checklist-2026-05-21.md`             | Defines the daily/3h/2h Harness audit cadence, red/yellow/info rules, reviewer checklist, and task evidence map for #319-#332.                                                                                  | #332                                |
 
 ## Naming conventions
 

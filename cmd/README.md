@@ -10,25 +10,25 @@ binary without reading each `main.go` header. If a new binary is added under
 
 ## Service binaries
 
-| Binary | One-line purpose | Used by |
-|---|---|---|
+| Binary     | One-line purpose                                                                                             | Used by                                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
 | `oneesama` | Unified entry for the slack-agent and meeting-agent HTTP services; first positional arg selects the service. | `scripts/oneesama-live.sh`, live deployment |
 
 ## Operational / migration tools
 
-| Binary | One-line purpose | Default mode |
-|---|---|---|
-| `oneesama-config-migrate` | Convert a cueboard-era YAML config into the JSON shape the oneesama loader expects. | dry-run → stdout; `--out PATH` to write |
-| `oneesama-daily-dream` | Cluster LearningSignal NDJSON into review-gated Daily Dream memory candidates. | dry-run → stdout; `--output PATH` to write report |
-| `oneesama-legacy-slack-memory-import` | Import old Slack Agent D workspace memory + sqlite triage runs into `memory/legacy/slack-agent-d/` Markdown. | dry-run; `--write` to apply |
-| `oneesama-slock-workspace-import` | Import per-agent Slock D workspace knowledge into `memory/legacy/slock-d/` Markdown. | dry-run; `--write` to apply |
-| `oneesama-triage-benchmark` | Replay live Slack threads or labeled fixtures through the triage dry-run path and summarize expected-vs-actual quality signals; supports `--config-set` variant metadata and optional `--judge-model` LLM scoring. | read-only; dry-run endpoint only |
-| `oneesama-triage-replay` | Scan a window of recent Slack messages and propose lightweight follow-up replies for ones oneesama should have caught. | read-only by default |
+| Binary                                | One-line purpose                                                                                                                                                                                                   | Default mode                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| `oneesama-config-migrate`             | Convert a cueboard-era YAML config into the JSON shape the oneesama loader expects.                                                                                                                                | dry-run → stdout; `--out PATH` to write           |
+| `oneesama-daily-dream`                | Cluster LearningSignal NDJSON into review-gated Daily Dream memory candidates.                                                                                                                                     | dry-run → stdout; `--output PATH` to write report |
+| `oneesama-legacy-slack-memory-import` | Import old Slack Agent D workspace memory + sqlite triage runs into `memory/legacy/slack-agent-d/` Markdown.                                                                                                       | dry-run; `--write` to apply                       |
+| `oneesama-slock-workspace-import`     | Import per-agent Slock D workspace knowledge into `memory/legacy/slock-d/` Markdown.                                                                                                                               | dry-run; `--write` to apply                       |
+| `oneesama-triage-benchmark`           | Replay live Slack threads or labeled fixtures through the triage dry-run path and summarize expected-vs-actual quality signals; supports `--config-set` variant metadata and optional `--judge-model` LLM scoring. | read-only; dry-run endpoint only                  |
+| `oneesama-triage-replay`              | Scan a window of recent Slack messages and propose lightweight follow-up replies for ones oneesama should have caught.                                                                                             | read-only by default                              |
 
 ## Audit / inventory tools
 
-| Binary | One-line purpose | Output |
-|---|---|---|
+| Binary                        | One-line purpose                                                                                                                | Output                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | `cueboard-function-inventory` | Walk Go source roots and emit a Markdown function/method inventory with a per-row Suggested status column for migration audits. | stdout markdown by default; `--out PATH` to write |
 
 ## Build / test conventions

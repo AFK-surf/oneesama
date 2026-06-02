@@ -74,7 +74,8 @@ export async function installMeetPromptAutoDismisser(page, diagnostics = null) {
       const globalScope = window;
       if (globalScope.__MAB_MEET_PROMPT_DISMISSER) return { ok: true, installed: false };
       /** @returns {HTMLElement[]} */
-      const queryButtons = () => Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]"));
+      const queryButtons = () =>
+        Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]"));
       const buttonPattern =
         /^(got it|continue|continue without.*|dismiss|ok|okay|allow|close|not now|maybe later|skip)$/i;
       const isVisible = (node) => {

@@ -109,4 +109,3 @@ regression, and incident when they do not also refer to Oneesama's own system.
 - Triage metadata records `delegate_worker_scope_blocks > 0` for blocked cases.
 - In-scope memory lookup / memo / synthesis worker cases remain allowed.
 - Full tests, cueboard parity tests, build, CI, and live monitor pass.
-

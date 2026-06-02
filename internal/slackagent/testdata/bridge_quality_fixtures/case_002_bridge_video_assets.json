@@ -35,9 +35,7 @@
     ],
     "memory_seed_files": []
   },
-  "expected_contract_items": [
-    "C220_media_file_evidence"
-  ],
+  "expected_contract_items": ["C220_media_file_evidence"],
   "expected_evidence_anchors": [
     "slack_file_context (ok)",
     "1 video(s)",
@@ -45,9 +43,7 @@
     "Do not claim to have watched videos",
     "slack.fetchFile"
   ],
-  "expected_tools_invoked": [
-    "slack_file_context"
-  ],
+  "expected_tools_invoked": ["slack_file_context"],
   "expected_decision_shape": {
     "min_chars": 0,
     "max_chars": 0,

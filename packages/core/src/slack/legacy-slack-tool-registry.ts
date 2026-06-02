@@ -369,9 +369,18 @@ export function createLegacySlackToolRegistry(options: CreateLegacySlackToolRegi
 
     if (name === "manage_schedule") {
       const result = await executeAssistantScheduleTool(
-        args as { action?: string; channel_id?: string; channelId?: string; thread_ts?: string; threadTs?: string; [key: string]: unknown },
+        args as {
+          action?: string;
+          channel_id?: string;
+          channelId?: string;
+          thread_ts?: string;
+          threadTs?: string;
+          [key: string]: unknown;
+        },
         {
-          scheduleManager: scheduleManager as Parameters<typeof executeAssistantScheduleTool>[1]["scheduleManager"],
+          scheduleManager: scheduleManager as Parameters<
+            typeof executeAssistantScheduleTool
+          >[1]["scheduleManager"],
           slackContext,
           sessionMetadata: options.sessionMetadata || {},
         },

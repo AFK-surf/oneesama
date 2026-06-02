@@ -1,7 +1,9 @@
 pre-commit:
   jobs:
-    - name: repo lint
-      run: npm run lint
+    - name: format check
+      run: npm run format:check
+    - name: new go lint
+      run: npm run lint:go:new
 
 pre-push:
   jobs:

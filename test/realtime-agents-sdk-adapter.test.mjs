@@ -779,9 +779,7 @@ test("Realtime Agents SDK WebRTC transport captures the outbound audio sender", 
       assert.equal(bridge.connection.realtimeAudioSenderStats.bytesSent, 4096);
       assert.equal(bridge.connection.realtimeAudioSenderStats.packetsSent, 32);
       assert.ok(
-        bridge.timeline.some(
-          (entry) => entry.type === "realtime_agent_sdk_input_sender_attached",
-        ),
+        bridge.timeline.some((entry) => entry.type === "realtime_agent_sdk_input_sender_attached"),
       );
     } finally {
       await browser.close();

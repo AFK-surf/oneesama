@@ -409,16 +409,16 @@ The benchmark summary should aggregate:
 
 The benchmark should report pipeline smells even when no explicit label exists:
 
-| Signal | What it suggests |
-|---|---|
-| `high_silent_rate_with_questions` | Pi-first or context fetch may be under-responding. |
-| `high_gate_block_rate` | Upstream Pi/worker output contract is weak; the gate is doing too much rescue work. |
-| `delegate_without_worker_result_contract` | Worker prompt/schema cannot produce source-backed visible results. |
-| `link_or_file_context_missing` | The pipeline is deciding before it has the evidence the old slackd would have fetched. |
-| `approval_reject_cluster` | Oneesama is creating reviewer burden; positive allow-list features are not strong enough. |
-| `would_change_outcome_spike` | A prompt/gate/worker change has shifted behavior and needs manual review. |
-| `self_identity_overreach` | A worker or Pi claimed the wrong layer/model/provider identity. |
-| `memory_scope_confusion` | Retrieved memory from another agent/project was used as if it applied to Oneesama. |
+| Signal                                    | What it suggests                                                                          |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `high_silent_rate_with_questions`         | Pi-first or context fetch may be under-responding.                                        |
+| `high_gate_block_rate`                    | Upstream Pi/worker output contract is weak; the gate is doing too much rescue work.       |
+| `delegate_without_worker_result_contract` | Worker prompt/schema cannot produce source-backed visible results.                        |
+| `link_or_file_context_missing`            | The pipeline is deciding before it has the evidence the old slackd would have fetched.    |
+| `approval_reject_cluster`                 | Oneesama is creating reviewer burden; positive allow-list features are not strong enough. |
+| `would_change_outcome_spike`              | A prompt/gate/worker change has shifted behavior and needs manual review.                 |
+| `self_identity_overreach`                 | A worker or Pi claimed the wrong layer/model/provider identity.                           |
+| `memory_scope_confusion`                  | Retrieved memory from another agent/project was used as if it applied to Oneesama.        |
 
 These signals should be treated as design-review prompts, not automatic
 failures. The point is to make wrong assumptions visible early.
@@ -489,7 +489,7 @@ Reviewer rule:
 - [x] Collect v0 case list from today's incidents:
       DSML/tool protocol leak, persona meta leak, over-respond approval-card
       cases, HN identity lookup under-response, product-link commentary, and a
-  direct smoke command.
+      direct smoke command.
 - [x] Include the 2026-05-22 self-identity incident where a Codex worker
       answered "你是什么模型" as if Oneesama itself were Codex/OpenRouter.
 - [x] Include the 2026-05-22 raw JSON worker output incident where

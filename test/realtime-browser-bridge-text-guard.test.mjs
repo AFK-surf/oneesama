@@ -113,9 +113,7 @@ test("Realtime bridge observes Meet caption turns without using them as model in
         skipped,
         responsesRequested: window.MAB_REALTIME_BRIDGE.responsesRequested,
         captionTurnsObserved: window.MAB_REALTIME_BRIDGE.connection.captionTurnsObserved,
-        hasMisleadingInjectedCaptionMetric: Object.keys(
-          window.MAB_REALTIME_BRIDGE.connection,
-        ).some(
+        hasMisleadingInjectedCaptionMetric: Object.keys(window.MAB_REALTIME_BRIDGE.connection).some(
           (key) => key.toLowerCase().includes("caption") && key.toLowerCase().includes("inject"),
         ),
         lastCaptionTurnText: window.MAB_REALTIME_BRIDGE.connection.lastCaptionTurnText,
@@ -182,9 +180,7 @@ test("Realtime bridge does not resurrect caption fallback for duplicate streams"
         duplicate,
         responsesRequested: window.MAB_REALTIME_BRIDGE.responsesRequested,
         captionTurnsObserved: window.MAB_REALTIME_BRIDGE.connection.captionTurnsObserved,
-        hasMisleadingInjectedCaptionMetric: Object.keys(
-          window.MAB_REALTIME_BRIDGE.connection,
-        ).some(
+        hasMisleadingInjectedCaptionMetric: Object.keys(window.MAB_REALTIME_BRIDGE.connection).some(
           (key) => key.toLowerCase().includes("caption") && key.toLowerCase().includes("inject"),
         ),
         outbound: window.MAB_REALTIME_BRIDGE.outbound.map((entry) => entry.event),

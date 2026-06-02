@@ -36,7 +36,7 @@ What lands here:
   semantic index, enabling the local semantic provider, and asserting
   the provider-backed anchors appear in `SearchRelatedMemory`.
 - `internal/slackagent/memory_quality_canary_test.go::
-  TestMemoryQualityCanaries` loads every `case_*.json` file under
+TestMemoryQualityCanaries` loads every `case_*.json` file under
   the fixtures dir, builds a fresh `Service` with the provider
   registered, drives the appropriate code path, and asserts both
   per-scenario hook activity and `must_not_contain` fail-closed
@@ -80,12 +80,20 @@ Semantic recall fixtures use this shape:
 {
   "scenario": {
     "type": "semantic_recall",
-    "search": {"query": "<semantic query>", "limit": 5},
+    "search": { "query": "<semantic query>", "limit": 5 },
     "provider_seed_records": [
-      {"path": "semantic/example.md", "content": "<indexable evidence>", "kind": "semantic_memory"}
+      {
+        "path": "semantic/example.md",
+        "content": "<indexable evidence>",
+        "kind": "semantic_memory"
+      }
     ]
   },
-  "expected_search_result_anchors": ["semantic/example.md", "<evidence anchor>", "memory_provider:local_semantic"]
+  "expected_search_result_anchors": [
+    "semantic/example.md",
+    "<evidence anchor>",
+    "memory_provider:local_semantic"
+  ]
 }
 ```
 

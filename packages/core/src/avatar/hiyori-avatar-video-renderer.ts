@@ -1,4 +1,7 @@
-import { drawVideoHoldFrame, startSuppressedVideoHoldRenderer } from "./hiyori-avatar-video-hold.js";
+import {
+  drawVideoHoldFrame,
+  startSuppressedVideoHoldRenderer,
+} from "./hiyori-avatar-video-hold.js";
 
 type VideoAvatarSource = {
   id: string;

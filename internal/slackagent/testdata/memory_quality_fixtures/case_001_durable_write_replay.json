@@ -19,10 +19,5 @@
     "on_memory_write_content_contains": "Bridge case 001 anchor memory"
   },
   "expected_search_result_anchors": [],
-  "must_not_contain": [
-    "127.0.0.1",
-    "/slack/tools/call",
-    "curl",
-    "localhost:8780"
-  ]
+  "must_not_contain": ["127.0.0.1", "/slack/tools/call", "curl", "localhost:8780"]
 }

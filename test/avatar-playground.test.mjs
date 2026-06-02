@@ -29,10 +29,7 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
 
     const tool = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("tool"));
     assert.equal(tool.signals.find((signal) => signal.label === "工具")?.level, "active");
-    assert.equal(
-      tool.signals.find((signal) => signal.label === "工具")?.value,
-      "列窗口→共享→控制",
-    );
+    assert.equal(tool.signals.find((signal) => signal.label === "工具")?.value, "列窗口→共享→控制");
 
     const blocked = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("blocked"));
     assert.equal(blocked.signals.find((signal) => signal.label === "错误")?.level, "blocked");

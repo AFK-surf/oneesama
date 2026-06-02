@@ -96,7 +96,11 @@ Every proposed public reply should normalize to:
   "type": "post_thread_reply",
   "message": "human-facing text",
   "evidence_anchors": [
-    {"kind": "fetched_link", "source_ref": "https://news.ycombinator.com/user?id=Johnson8053", "quote": "created: 2024-09"}
+    {
+      "kind": "fetched_link",
+      "source_ref": "https://news.ycombinator.com/user?id=Johnson8053",
+      "quote": "created: 2024-09"
+    }
   ],
   "novelty": "adds_fact | routes_owner | answers_direct_question | records_followup",
   "boundary": "secretary_lookup | issue_hygiene | meeting_coordination | source_backed_commentary",

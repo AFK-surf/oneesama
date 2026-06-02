@@ -1,6 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { extname, join, normalize, relative, resolve } from "node:path";
-import { handleWorkspaceTool, isLocalVideoPath, loadSlackAgentPersonalityContext, realtimeSuppressChannelForContext, stageVideoAssetUrl, videoContentType, workerContext } from "./workspace-tools.js";
+import {
+  handleWorkspaceTool,
+  isLocalVideoPath,
+  loadSlackAgentPersonalityContext,
+  realtimeSuppressChannelForContext,
+  stageVideoAssetUrl,
+  videoContentType,
+  workerContext,
+} from "./workspace-tools.js";
 import { createJsonServer } from "../../../packages/core/src/http-json.js";
 import { getRuntimeConfig } from "../../../packages/core/src/env.js";
 import { createPersistentSessionStore } from "../../../packages/core/src/session-store.js";
@@ -142,7 +150,6 @@ export interface MeetingAgentInput {
   status?: string;
   [key: string]: unknown;
 }
-
 
 function reportFinishedWorkerJob(job) {
   if (!["completed", "failed", "timeout"].includes(job.status)) return null;

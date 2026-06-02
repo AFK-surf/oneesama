@@ -1,7 +1,4 @@
-export function drawVideoHoldFrame(
-  ctx: CanvasRenderingContext2D,
-  config: Record<string, any>,
-) {
+export function drawVideoHoldFrame(ctx: CanvasRenderingContext2D, config: Record<string, any>) {
   ctx.fillStyle = String(config.background || "#0b1018");
   ctx.fillRect(0, 0, Number(config.canvasWidth), Number(config.canvasHeight));
 }

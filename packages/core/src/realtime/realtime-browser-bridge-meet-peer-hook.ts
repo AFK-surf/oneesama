@@ -306,9 +306,10 @@ function scanMeetMediaElementAudio() {
     const srcObjectAudioTracks = srcObject?.getAudioTracks?.() || [];
     const participantStreamAlreadyDispatched =
       element.dataset?.meetingAvatarParticipantStreamDispatched === "1";
-    const captured = routedMeetMediaElements.has(element) || participantStreamAlreadyDispatched
-      ? { stream: null, error: "already_routed" }
-      : captureStreamFromMediaElement(element);
+    const captured =
+      routedMeetMediaElements.has(element) || participantStreamAlreadyDispatched
+        ? { stream: null, error: "already_routed" }
+        : captureStreamFromMediaElement(element);
     const captureAudioTracks =
       captured.stream?.getAudioTracks?.().filter((track) => track.readyState !== "ended") || [];
     elementStates.push({

@@ -1,6 +1,7 @@
 # oneesama Go Rewrite
 
 ## Scope
+
 - This branch hosts the Go rewrite of the oneesama host services.
 - Keep the existing TypeScript implementation as the reference implementation until parity is proven.
 - Keep browser-injected code in TypeScript/JavaScript for now:
@@ -10,11 +11,13 @@
   - DOM/caption/worker-result/local-dialog injectors
 
 ## Layout
+
 - `cmd/<binary>` for executable entrypoints
 - `internal/<feature>` for host-service implementation
 - `pkg/<shared>` for shared contracts/config/version/observability
 
 ## Defaults
+
 - HTTP: `gin-gonic/gin`
 - Logging: `log/slog`
 - Config: env-first with optional `config.json`
@@ -22,6 +25,7 @@
 - Tracing: defer OpenTelemetry until the host-service seams settle
 
 ## Guardrails
+
 - Do not delete the TS implementation during early rewrite slices.
 - Prefer explicit `context.Context` plumbing on service methods.
 - Wrap errors with context using `fmt.Errorf("context: %w", err)`.

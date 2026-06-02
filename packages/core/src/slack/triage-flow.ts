@@ -253,17 +253,15 @@ export function normalizeSlackTriageActions(
   const allowedTypes = new Set(SLACK_PENDING_ACTION_TYPES);
   return actions
     .map((action) => {
-      const type = safeString(
-        action.type || action.actionType || action.action_type,
-        "follow_up",
-      )
+      const type = safeString(action.type || action.actionType || action.action_type, "follow_up")
         .toLowerCase()
         .replace(/^slack\./, "");
-      const aliasedType = type === "reply" || type === "answer" || type === "postthreadreply"
-        ? "post_thread_reply"
-        : type === "delegate"
-          ? "create_task"
-          : type;
+      const aliasedType =
+        type === "reply" || type === "answer" || type === "postthreadreply"
+          ? "post_thread_reply"
+          : type === "delegate"
+            ? "create_task"
+            : type;
       const normalizedType = allowedTypes.has(aliasedType) ? aliasedType : "follow_up";
       if (normalizedType === "none") return null;
       const title = safeString(
@@ -286,7 +284,8 @@ export function normalizeSlackTriageActions(
         reason: safeString(action.reason || action.rationale),
         requiresConfirmation:
           normalizedType !== "post_thread_reply" &&
-          (action.requiresConfirmation !== false && action.requires_confirmation !== false),
+          action.requiresConfirmation !== false &&
+          action.requires_confirmation !== false,
       };
     })
     .filter(Boolean)

@@ -4,7 +4,7 @@ What problem does this change solve?
 
 ## Changes
 
-- 
+-
 
 ## Verification
 
@@ -14,4 +14,4 @@ What problem does this change solve?
 
 ## Follow-ups
 
-- 
+-

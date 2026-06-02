@@ -10,11 +10,11 @@ This audit was triggered by Peng's app-mention quality comparison: the new worke
 
 ## Summary
 
-| Behavior | Old Cueboard Agent D | New Oneesama after this audit | Decision |
-|---|---|---|---|
-| Tool surface | Tools are registered as native `agent.Tool` values through `RegisterSlackTools`. | The worker prompt no longer tells Codex to curl a local gateway; it must use injected evidence or fail closed. | Stop prompt-as-implementation drift. |
-| Internal gateway failures | No loopback gateway URL is part of the assistant-facing prompt. | Worker final text is sanitized before Slack delivery when it contains loopback/gateway/curl connection failures. | Add delivery-layer safety net. |
-| Fresh unknown entity search | Old Agent D could call native search/content tools. | Still not a native Codex worker tool bridge in this Go command-provider path. | Keep as explicit follow-up; do not hide behind unsafe curl instructions. |
+| Behavior                    | Old Cueboard Agent D                                                             | New Oneesama after this audit                                                                                    | Decision                                                                 |
+| --------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Tool surface                | Tools are registered as native `agent.Tool` values through `RegisterSlackTools`. | The worker prompt no longer tells Codex to curl a local gateway; it must use injected evidence or fail closed.   | Stop prompt-as-implementation drift.                                     |
+| Internal gateway failures   | No loopback gateway URL is part of the assistant-facing prompt.                  | Worker final text is sanitized before Slack delivery when it contains loopback/gateway/curl connection failures. | Add delivery-layer safety net.                                           |
+| Fresh unknown entity search | Old Agent D could call native search/content tools.                              | Still not a native Codex worker tool bridge in this Go command-provider path.                                    | Keep as explicit follow-up; do not hide behind unsafe curl instructions. |
 
 ## Behavior 1: Tool Dispatch Is Native, Not Prompt-Curl
 

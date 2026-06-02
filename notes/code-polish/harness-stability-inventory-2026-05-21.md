@@ -10,13 +10,13 @@ thread context changes.
 
 ## Summary
 
-| Surface | Stable prefix | Dynamic evidence | Immediate risk |
-|---|---|---|---|
-| Pi foreground | `oneesamaPISystemPrompt` universal role / decision JSON contract | `persona.Request` user payload: context, evidence, memory, safety, metadata | Medium: stable prompt is currently a function of `Request`, even though it does not read it. Hash tests must pin that it stays request-invariant. |
-| Slack worker | `cueboardDefaultSystemPromptForAgentRunner` and fixed worker adapter rules | `StartInput.Task`, `StartInput.Context`, related memory/tool evidence strings | High: assistant context and evidence are mixed into prompt sections. This is worker-only, but it can still cause cache churn and evidence leakage if treated as foreground. |
-| Demo surface worker | fixed demo-surface worker prompt | URL/session/task/context for browser observation | Low: scope is bounded by `SessionKindDemoSurface`; host-side active writes remain policy-gated. |
-| Realtime tools | `defaultRealtimeToolDefinitions` and optional demo-surface tool group | runtime config decides whether demo-surface tools are exposed | High: many tool schemas live in one foreground realtime tool list; any schema churn changes the prefix. |
-| Slack triage context | no separate stable prompt yet; Pi request is typed | workspace policy, custom emoji, channel brain, related memory, file/link evidence | High: these must become typed dynamic envelopes instead of ad-hoc strings. |
+| Surface              | Stable prefix                                                              | Dynamic evidence                                                                  | Immediate risk                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pi foreground        | `oneesamaPISystemPrompt` universal role / decision JSON contract           | `persona.Request` user payload: context, evidence, memory, safety, metadata       | Medium: stable prompt is currently a function of `Request`, even though it does not read it. Hash tests must pin that it stays request-invariant.                           |
+| Slack worker         | `cueboardDefaultSystemPromptForAgentRunner` and fixed worker adapter rules | `StartInput.Task`, `StartInput.Context`, related memory/tool evidence strings     | High: assistant context and evidence are mixed into prompt sections. This is worker-only, but it can still cause cache churn and evidence leakage if treated as foreground. |
+| Demo surface worker  | fixed demo-surface worker prompt                                           | URL/session/task/context for browser observation                                  | Low: scope is bounded by `SessionKindDemoSurface`; host-side active writes remain policy-gated.                                                                             |
+| Realtime tools       | `defaultRealtimeToolDefinitions` and optional demo-surface tool group      | runtime config decides whether demo-surface tools are exposed                     | High: many tool schemas live in one foreground realtime tool list; any schema churn changes the prefix.                                                                     |
+| Slack triage context | no separate stable prompt yet; Pi request is typed                         | workspace policy, custom emoji, channel brain, related memory, file/link evidence | High: these must become typed dynamic envelopes instead of ad-hoc strings.                                                                                                  |
 
 ## Stable Prefix Sources
 
@@ -107,16 +107,16 @@ Risk note:
 
 These should converge on the RFC envelope shape:
 
-| Dynamic source | Current location | Target envelope kind |
-|---|---|---|
-| Workspace triage policy | Slack persona request context | `workspace_triage_policy` |
-| Custom emoji list | Slack persona request context / tool evidence | `workspace_custom_emoji` |
-| Related memory evidence | `service_avatar.go`, semantic/entity/multimodal providers | `related_memory_evidence` |
-| Channel brain summary | slackagent channel-brain / triage context | `channel_brain_summary` |
-| Current time | scattered prompt/tool helpers | `current_time` |
-| Live health/status | monitor/status endpoints | `live_service_status` |
-| Browser observations | demo-surface observation bus | `browser_demo_observation` |
-| Worker output | worker job completion records | `worker_result_envelope` |
+| Dynamic source          | Current location                                          | Target envelope kind       |
+| ----------------------- | --------------------------------------------------------- | -------------------------- |
+| Workspace triage policy | Slack persona request context                             | `workspace_triage_policy`  |
+| Custom emoji list       | Slack persona request context / tool evidence             | `workspace_custom_emoji`   |
+| Related memory evidence | `service_avatar.go`, semantic/entity/multimodal providers | `related_memory_evidence`  |
+| Channel brain summary   | slackagent channel-brain / triage context                 | `channel_brain_summary`    |
+| Current time            | scattered prompt/tool helpers                             | `current_time`             |
+| Live health/status      | monitor/status endpoints                                  | `live_service_status`      |
+| Browser observations    | demo-surface observation bus                              | `browser_demo_observation` |
+| Worker output           | worker job completion records                             | `worker_result_envelope`   |
 
 ## First Hash Contracts
 
@@ -142,4 +142,3 @@ Before adding a prompt or tool change, ask:
 2. If dynamic, where is the envelope source/version/freshness?
 3. Does this change a stable hash?
 4. If yes, where is the migration note and acceptance fixture?
-

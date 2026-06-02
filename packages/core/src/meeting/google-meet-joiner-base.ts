@@ -140,7 +140,9 @@ export type ShareScreenDomClickResult =
       error?: string;
     };
 
-export type ScreenShareControllerState = ScreenShareState | { ok: boolean; error?: string; mode?: string };
+export type ScreenShareControllerState =
+  | ScreenShareState
+  | { ok: boolean; error?: string; mode?: string };
 
 export interface GuestNameEvalResult {
   ok: boolean;
@@ -317,7 +319,12 @@ export function positiveInteger(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-export function fitDimensionsWithin(width: number, height: number, maxWidth: number, maxHeight: number) {
+export function fitDimensionsWithin(
+  width: number,
+  height: number,
+  maxWidth: number,
+  maxHeight: number,
+) {
   if (!width || !height) return { width: maxWidth, height: maxHeight };
   const scale = Math.min(1, maxWidth / width, maxHeight / height);
   return {
@@ -360,7 +367,10 @@ export function assertMeetUrl(meetUrl: string, options: MeetUrlOptions = {}) {
   }
 }
 
-export function normalizeMeetProfileMode(mode: unknown, hasUserDataDir: boolean): "guest" | "persistent" {
+export function normalizeMeetProfileMode(
+  mode: unknown,
+  hasUserDataDir: boolean,
+): "guest" | "persistent" {
   const normalized = String(mode || "")
     .trim()
     .toLowerCase();
@@ -868,7 +878,11 @@ export async function gotoMeetWithRetry(page: Page, meetUrl: string, diagnostics
   throw lastError;
 }
 
-export async function takeScreenshot(page: Page, diagnostics: Diagnostics, name: string): Promise<string> {
+export async function takeScreenshot(
+  page: Page,
+  diagnostics: Diagnostics,
+  name: string,
+): Promise<string> {
   if (process.env.MAB_SKIP_SCREENSHOTS === "1") {
     diagnostics.record("screenshot_skipped", { name });
     return "";

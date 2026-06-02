@@ -49,6 +49,7 @@ Module: `internal/slackagent` + `internal/agentrunner`
 Issue: A delegated worker timeout surfaced `job timed out` directly in Slack.
 
 Acceptance:
+
 - Timeout worker results use a user-safe fail-closed message.
 - No `job timed out`, stack, provider debug, localhost, or internal gateway text
   can reach Slack-visible worker delivery.
@@ -65,6 +66,7 @@ Issue: `service_triage.go` is 1831 lines and mixes live routing, audit,
 persona foreground, worker delegation, link context, and metadata construction.
 
 Acceptance:
+
 - Extract cohesive files without changing behavior:
   - `triage_audit_report.go`
   - `triage_persona_foreground.go`
@@ -82,6 +84,7 @@ Issue: Routing keywords for canvas, fresh search, media, and workflow intent are
 still hardcoded in Go in several files.
 
 Acceptance:
+
 - Move simple keyword lists into `templates/triage/*keywords*.{zh,en}.txt` or a
   small structured config format.
 - Keep workflow conjunction logic readable; do not flatten it into unsafe
@@ -96,6 +99,7 @@ Issue: We have already fixed several cases where workspace preference became
 universal model behavior. This needs a structural guard.
 
 Acceptance:
+
 - Centralize policy injection and policy source metadata.
 - Add grep/canary tests proving product-specific topic lists are not hardcoded
   into persona prompts.
@@ -109,6 +113,7 @@ Issue: Pi can delegate broad live-product questions, but the worker may start
 from the Oneesama repo even when the target is another repo or runtime surface.
 
 Acceptance:
+
 - Delegated worker prompt/context includes explicit target surface and evidence
   boundaries.
 - For "staging app.cue.surf is slow" style tasks, worker must first request
@@ -126,6 +131,7 @@ provider, turn extraction, and persona writes are all active; source labels and
 ranking rules need one clear ownership model.
 
 Acceptance:
+
 - Add a short provider matrix in code docs or package comments.
 - `memory/persona/writes/...` remains `persona_memory_write`.
 - Evidence ranking tests cover legacy trace vs persona write vs person profile
@@ -140,6 +146,7 @@ Issue: daily reports and `oneesama-triage-quality-sweep.sh` inspect overlapping
 quality concepts with separate code paths.
 
 Acceptance:
+
 - Align bucket names and sanitization rules.
 - Keep old daily-report visible shape unchanged.
 - Add tests for redacted runtime errors and emoji/reaction quality counts.
@@ -152,6 +159,7 @@ Issue: custom emoji discovery, Pi `react` decisions, and reaction execution just
 landed; they need stronger behavior shaping.
 
 Acceptance:
+
 - Add canary cases for "react only", "reply only", "reply + react", and
   "stay_silent".
 - Ensure workspace custom emoji names are injected but not hallucinated.
@@ -165,6 +173,7 @@ Issue: thread/link context fetch, context summarization, and worker delegation
 share context budgets but are spread across files.
 
 Acceptance:
+
 - One helper owns context char budget decisions.
 - Audit metadata clearly records raw chars, summarized chars, and fetch errors.
 - Add regression for large-thread summary not blocking foreground forever.
@@ -179,6 +188,7 @@ Issue: persona request/response has several flexible `map[string]any` fields.
 That is useful at boundaries but weak for in-repo invariants.
 
 Acceptance:
+
 - Keep wire-compatible JSON, but add typed builders for Slack foreground
   requests.
 - Tests assert required fields for reply, react, delegate_worker, memory_write.
@@ -192,6 +202,7 @@ Issue: OpenClaw-style durable workspace memory is partially implemented; Hermes
 style trust, staleness, consolidation, and entity history are still follow-ups.
 
 Acceptance:
+
 - Split roadmap into explicit task-sized slices:
   - persona-write quota/rotation
   - trust/staleness score
@@ -209,6 +220,7 @@ Issue: recent recording bugs came from capture/finalize/redeliver/upload being
 treated as separate patches.
 
 Acceptance:
+
 - One contract doc/test enumerates states:
   captured, finalized, redelivered, compressed upload, webhook delivered.
 - Raw `.wav` is never uploaded to Slack when compressed artifact exists.
@@ -222,6 +234,7 @@ Issue: join monitor, stale recovery, session store, redelivery, and UI card
 state need one readable lifecycle.
 
 Acceptance:
+
 - State transition table in tests or docs.
 - Focused tests for stale recovery, duplicate join suppression, and final
   user-visible card state.
@@ -233,6 +246,7 @@ Module: `internal/meetingagent`
 Issue: `realtime_tools.go` embeds a huge JSON string.
 
 Acceptance:
+
 - Move schemas into generated or structured Go declarations.
 - Keep parity test against existing JSON shape.
 - Add comments for high-risk tools: screen share, identity, worker delegation.
@@ -247,6 +261,7 @@ Issue: user-visible delivery needs to distinguish timeout, provider auth,
 cancel, unsafe tool request, and process failure.
 
 Acceptance:
+
 - Add typed failure reason or normalized error code.
 - Slack delivery maps codes to safe text.
 - Monitor/sweep can count each code separately.
@@ -258,6 +273,7 @@ Module: `pkg/config`, `scripts/oneesama-live.sh`
 Issue: live env source order and stale env snapshot already caused drift.
 
 Acceptance:
+
 - Add generated/printed effective config summary for high-risk fields.
 - Preflight fails if stale persona runtime fields conflict with active
   `oneesama-pi`.
@@ -271,6 +287,7 @@ Issue: monitor and quality sweep are useful but still shell-heavy and partly
 duplicated.
 
 Acceptance:
+
 - Either extract shared jq snippets or add a Go CLI for triage quality.
 - Default window stays 3h.
 - Red output always distinguishes current red from historical-window red.
@@ -285,6 +302,7 @@ Issue: bridge quality fixtures, memory quality fixtures, audit docs, and live
 monitor scripts all exist but need a single index.
 
 Acceptance:
+
 - Add a fixture index listing every case, contract item, owner task, and whether
   it is active or pending.
 - Pending fixtures must have a linked task.
@@ -296,6 +314,7 @@ Module: `notes/cueboard-function-audit`
 Issue: drift classes are valuable but spread through a long audit-method doc.
 
 Acceptance:
+
 - Add a compact top-level drift-class table with anchor commit/task.
 - Keep worked examples below it.
 

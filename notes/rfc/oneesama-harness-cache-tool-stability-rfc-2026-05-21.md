@@ -212,8 +212,8 @@ Worker results should return:
   "confidence": 0.0,
   "summary": "short evidence-backed result",
   "evidence": [
-    {"kind": "slack_file", "ref": "...", "quote": "..."},
-    {"kind": "browser_observation", "ref": "...", "summary": "..."}
+    { "kind": "slack_file", "ref": "...", "quote": "..." },
+    { "kind": "browser_observation", "ref": "...", "summary": "..." }
   ],
   "artifacts": ["..."],
   "user_visible": false
@@ -293,113 +293,113 @@ Recommendation: start with provider-neutral hash and budget canaries first.
 ### Phase 0: Inventory and Baseline
 
 - [ ] 0-A. Inventory every Pi / agentrunner / realtime stable prompt builder.
-  Done when a doc lists stable vs dynamic inputs for each builder.
+      Done when a doc lists stable vs dynamic inputs for each builder.
 - [ ] 0-B. Inventory foreground tool schemas and their current hashes.
-  Done when test fixtures can print canonical schema hashes.
+      Done when test fixtures can print canonical schema hashes.
 - [ ] 0-C. Add a harness status endpoint/report section with prompt hash,
-  tool-schema hash, dynamic envelope counts, and worker scope counts.
+      tool-schema hash, dynamic envelope counts, and worker scope counts.
 
 ### Phase 1: Stable Prefix Guards
 
 - [ ] 1-A. Add `pi_stable_prompt_hash` and `pi_tool_schema_hash` tests.
-  Done when current time, workspace policy, emoji list, and memory evidence
-  changes do not affect stable hashes.
+      Done when current time, workspace policy, emoji list, and memory evidence
+      changes do not affect stable hashes.
 - [ ] 1-B. Move `workspace_custom_emoji`, `workspace_triage_policy`, and
-  `current_time` into typed dynamic envelopes.
-  Done when they are visible to Pi but absent from the stable hash inputs.
+      `current_time` into typed dynamic envelopes.
+      Done when they are visible to Pi but absent from the stable hash inputs.
 - [ ] 1-C. Add pollution canaries for "workspace preference as universal
-  behavior" and "dynamic status as prompt mutation."
+      behavior" and "dynamic status as prompt mutation."
 
 ### Phase 2: Dynamic Evidence Envelope
 
 - [ ] 2-A. Introduce typed `PersonaDynamicContextEnvelope` in Go.
 - [ ] 2-B. Convert related Memory evidence and channel-brain summaries to the
-  envelope shape.
+      envelope shape.
 - [ ] 2-C. Add source/version/freshness invalidation for workspace policy and
-  custom emoji.
+      custom emoji.
 - [ ] 2-D. Teach daily triage audit to report stale dynamic envelope usage.
 
 ### Phase 3: Worker / Skill Isolation
 
 - [ ] 3-A. Define `WorkerResultEnvelope` and normalize all worker completions
-  through it.
+      through it.
 - [ ] 3-B. Block raw worker logs from foreground Pi context unless explicitly
-  requested for audit.
+      requested for audit.
 - [ ] 3-C. Add worker scratch-history isolation tests: large worker file reads
-  must not expand foreground Pi history.
+      must not expand foreground Pi history.
 - [ ] 3-D. Add failure-mode tests: timeout / no result / blocked worker produce
-  audit rows, not user-visible canned completion text.
+      audit rows, not user-visible canned completion text.
 
 ### Phase 4: Tool Surface Consolidation
 
 - [ ] 4-A. Generate a foreground tool inventory and classify tools as stable,
-  worker-only, or deprecated.
+      worker-only, or deprecated.
 - [ ] 4-B. Add tool-schema change review gate: any foreground schema change
-  must update an RFC/task note.
+      must update an RFC/task note.
 - [ ] 4-C. Consolidate Browser/CU actions under the existing demo-surface
-  control tool, not new one-off tools.
+      control tool, not new one-off tools.
 - [ ] 4-D. Add approval-token design for Browser/CU external write actions
-  such as Linear close / GitHub issue update.
+      such as Linear close / GitHub issue update.
 
 ### Phase 5: Compression and Cache-Aware Context Budget
 
 - [ ] 5-A. Add request context budget metrics to triage and meeting/realtime
-  paths.
+      paths.
 - [ ] 5-B. Add compaction audit rows for triage and meeting transcript
-  summaries.
+      summaries.
 - [ ] 5-C. Prototype idle compaction for triage channel brain only.
 - [ ] 5-D. Add canary: compaction preserves source attribution and does not
-  rewrite stable prefix.
+      rewrite stable prefix.
 
 ### Phase 6: Observability and Daily Review
 
 - [ ] 6-A. Extend daily report with harness metrics:
-  stable hash drift, tool schema drift, dynamic context stale count, worker
-  isolation violations, browser/CU approval-denied count.
+      stable hash drift, tool schema drift, dynamic context stale count, worker
+      isolation violations, browser/CU approval-denied count.
 - [ ] 6-B. Extend the 2h triage quality sweep with harness buckets:
-  `stable_prefix_changed`, `dynamic_context_stale`,
-  `worker_log_leaked`, `unexpected_tool_schema`.
+      `stable_prefix_changed`, `dynamic_context_stale`,
+      `worker_log_leaked`, `unexpected_tool_schema`.
 - [ ] 6-C. Add old-slackd vs Oneesama comparison fields for reaction/emoji use
-  without putting emoji names in stable prompt.
+      without putting emoji names in stable prompt.
 
 ## Task Breakdown
 
-| Slice | Suggested owner | Write scope | Deliverable |
-|---|---|---|---|
-| Harness 0-A prompt/tool inventory RFC appendix | `@劲霸仁波切` | `notes/rfc`, `notes/code-polish` | Stable/dynamic source map |
-| Harness 0-B hash scaffold | `@劲霸仁波切` | `internal/persona`, `internal/meetingagent`, tests | Prompt/tool hash helpers |
-| Harness 1-A stable-prefix canaries | `@喵喵` | tests + audit docs | Hash invariance fixtures |
-| Harness 1-B dynamic envelope type | `@劲霸仁波切` | `internal/persona`, `internal/slackagent` | Typed envelope and builders |
-| Harness 2-A policy/emoji/time migration | `@劲霸仁波切` | persona/slack context builders | Dynamic context migration |
-| Harness 2-B stale envelope audit | `@喵喵` | audit/sweep/daily report | Stale dynamic context buckets |
-| Harness 3-A worker result envelope | `@劲霸仁波切` | `internal/slackagent`, `internal/agentrunner` | Result-only worker contract |
-| Harness 3-B worker isolation canaries | `@喵喵` | tests/fixtures | Scratch-history isolation tests |
-| Harness 4-A tool inventory/gate | `@喵喵` | docs/tests/scripts | Foreground tool registry |
-| Harness 4-B Browser/CU approval gate RFC | `@劲霸仁波切` | `notes/rfc`, demo surface config | External write approval design |
-| Harness 5-A context budget metrics | `@劲霸仁波切` | triage/meeting request builders | Token/context budget metadata |
-| Harness 5-B compaction canary plan | `@喵喵` | docs/tests | Source-preserving compaction gate |
-| Harness 6-A daily harness report | `@劲霸仁波切` | daily/sweep/monitor | Operator-facing metrics |
-| Harness 6-B audit review cadence | `@喵喵` | audit docs/reminders | How to review drift weekly |
+| Slice                                          | Suggested owner | Write scope                                        | Deliverable                       |
+| ---------------------------------------------- | --------------- | -------------------------------------------------- | --------------------------------- |
+| Harness 0-A prompt/tool inventory RFC appendix | `@劲霸仁波切`   | `notes/rfc`, `notes/code-polish`                   | Stable/dynamic source map         |
+| Harness 0-B hash scaffold                      | `@劲霸仁波切`   | `internal/persona`, `internal/meetingagent`, tests | Prompt/tool hash helpers          |
+| Harness 1-A stable-prefix canaries             | `@喵喵`         | tests + audit docs                                 | Hash invariance fixtures          |
+| Harness 1-B dynamic envelope type              | `@劲霸仁波切`   | `internal/persona`, `internal/slackagent`          | Typed envelope and builders       |
+| Harness 2-A policy/emoji/time migration        | `@劲霸仁波切`   | persona/slack context builders                     | Dynamic context migration         |
+| Harness 2-B stale envelope audit               | `@喵喵`         | audit/sweep/daily report                           | Stale dynamic context buckets     |
+| Harness 3-A worker result envelope             | `@劲霸仁波切`   | `internal/slackagent`, `internal/agentrunner`      | Result-only worker contract       |
+| Harness 3-B worker isolation canaries          | `@喵喵`         | tests/fixtures                                     | Scratch-history isolation tests   |
+| Harness 4-A tool inventory/gate                | `@喵喵`         | docs/tests/scripts                                 | Foreground tool registry          |
+| Harness 4-B Browser/CU approval gate RFC       | `@劲霸仁波切`   | `notes/rfc`, demo surface config                   | External write approval design    |
+| Harness 5-A context budget metrics             | `@劲霸仁波切`   | triage/meeting request builders                    | Token/context budget metadata     |
+| Harness 5-B compaction canary plan             | `@喵喵`         | docs/tests                                         | Source-preserving compaction gate |
+| Harness 6-A daily harness report               | `@劲霸仁波切`   | daily/sweep/monitor                                | Operator-facing metrics           |
+| Harness 6-B audit review cadence               | `@喵喵`         | audit docs/reminders                               | How to review drift weekly        |
 
 ## Acceptance Gates
 
 - [ ] Changing current date/time does not change `pi_stable_prompt_hash`.
 - [ ] Changing workspace policy content/version does not change stable prompt
-  or tool schema hash.
+      or tool schema hash.
 - [ ] Changing custom emoji list does not change stable prompt or tool schema
-  hash.
+      hash.
 - [ ] Changing Memory retrieval results does not change stable prompt or tool
-  schema hash.
+      schema hash.
 - [ ] Any foreground tool schema change fails a test unless expected hash
-  fixtures are updated with a migration note.
+      fixtures are updated with a migration note.
 - [ ] Worker scratch logs do not appear in Pi foreground request context.
 - [ ] Worker failure with empty result does not produce user-visible canned
-  completion text.
+      completion text.
 - [ ] Browser/CU click/type that mutates external state requires an approval
-  token.
+      token.
 - [ ] Daily report shows stable hash drift and dynamic context stale counts.
 - [ ] Triage quality sweep separates behavior quality failures from harness
-  drift failures.
+      drift failures.
 
 ## Open Questions
 
@@ -419,4 +419,3 @@ Recommendation: start with provider-neutral hash and budget canaries first.
 Ship Phases 0-2 first. They are low-risk and directly prevent the regressions
 that caused the recent Oneesama incidents. Then ship worker isolation and
 Browser/CU approval gates before enabling real Linear/GitHub write workflows.
-

@@ -45,12 +45,12 @@ Failure codes:
 
 ## Surfaces
 
-| Surface | Current status | Gate before automation |
-|---|---|---|
-| Slack daily note compaction | Existing worker path (`memory_compact`) | Add audit row with input hash, output hash, preserved source refs, result |
-| Slack triage channel/thread context | Not automatic yet | Any compacted `MemoryRecord` / `ContextItem` must carry source refs |
-| Meeting transcript summary | Existing post-meeting summary path | Summary artifacts must retain transcript/caption/audio source refs |
-| Realtime observation bus | Compact observation context exists | Observation compaction must keep artifact refs / frame paths |
+| Surface                             | Current status                          | Gate before automation                                                    |
+| ----------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
+| Slack daily note compaction         | Existing worker path (`memory_compact`) | Add audit row with input hash, output hash, preserved source refs, result |
+| Slack triage channel/thread context | Not automatic yet                       | Any compacted `MemoryRecord` / `ContextItem` must carry source refs       |
+| Meeting transcript summary          | Existing post-meeting summary path      | Summary artifacts must retain transcript/caption/audio source refs        |
+| Realtime observation bus            | Compact observation context exists      | Observation compaction must keep artifact refs / frame paths              |
 
 ## Implementation Order
 
@@ -59,18 +59,18 @@ Failure codes:
 - [ ] Add Slack daily-note compaction audit rows when compaction actually runs.
 - [ ] Add meeting transcript compaction audit rows beside summary artifacts.
 - [ ] Add monitor/daily rollup counts for `stable_prefix_changed` and
-  `source_attribution_lost`.
+      `source_attribution_lost`.
 - [ ] Only then enable idle compaction for any foreground request path.
 
 ## Operator Checklist
 
 - [ ] Compacted output has fewer bytes/tokens than input.
 - [ ] Every source-backed conclusion retains a `source_ref`, citation, artifact
-  ref, or frame path.
+      ref, or frame path.
 - [ ] The stable prompt hash before/after compaction matches.
 - [ ] Worker scratch logs are absent from the compacted foreground payload.
 - [ ] The audit row is visible in the same run/session that consumed the
-  compacted context.
+      compacted context.
 
 ## Review Note
 

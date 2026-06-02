@@ -52,7 +52,9 @@ export function verifyShadowTapRequest({ secret = "", req }: VerifyShadowTapRequ
     return { ok: false, status: 503, error: "shadow_tap_secret_not_configured" };
   }
   const headerSecretRaw = req?.headers?.["x-mab-shadow-tap-secret"];
-  const headerSecret = Array.isArray(headerSecretRaw) ? headerSecretRaw[0] || "" : headerSecretRaw || "";
+  const headerSecret = Array.isArray(headerSecretRaw)
+    ? headerSecretRaw[0] || ""
+    : headerSecretRaw || "";
   const authorizationRaw = req?.headers?.authorization;
   const authorization = Array.isArray(authorizationRaw)
     ? authorizationRaw[0] || ""
@@ -68,7 +70,8 @@ export function normalizeShadowSlackCommand(body: ShadowSlackCommandBody = {}) {
     (typeof body.slackCommand === "object" && body.slackCommand) ||
     (typeof body.command === "object" && body.command) ||
     {};
-  const user = (typeof body.user === "object" && body.user) || ({} as { id?: string; name?: string });
+  const user =
+    (typeof body.user === "object" && body.user) || ({} as { id?: string; name?: string });
   const channel =
     (typeof body.channel === "object" && body.channel) || ({} as { id?: string; name?: string });
   const team = body.team || ({} as { id?: string; domain?: string });

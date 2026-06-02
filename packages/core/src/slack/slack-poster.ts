@@ -34,7 +34,13 @@ export interface SlackPostMessageResult {
   dedupKey?: string;
   attempts?: number;
   status?: number;
-  body?: { ok?: boolean; error?: string; ts?: string; message?: { thread_ts?: string }; [key: string]: unknown };
+  body?: {
+    ok?: boolean;
+    error?: string;
+    ts?: string;
+    message?: { thread_ts?: string };
+    [key: string]: unknown;
+  };
   error?: string;
   detail?: string;
   deduped?: boolean;
@@ -178,7 +184,11 @@ export function createSlackPoster(options: CreateSlackPosterOptions = {}) {
         if (dedupKey) postedByDedupKey.set(dedupKey, last);
         return last;
       }
-      if (attempt === maxAttempts || !shouldRetry({ status: last.status, body: last.body, error: last.error })) return last;
+      if (
+        attempt === maxAttempts ||
+        !shouldRetry({ status: last.status, body: last.body, error: last.error })
+      )
+        return last;
       await delay(retryDelayMs * attempt);
     }
 

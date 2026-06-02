@@ -74,7 +74,7 @@ import {
   hasCommand,
   parseEnvFile,
   envValue,
-  redactSecret
+  redactSecret,
 } from "./common.js";
 import type {
   RealtimeBridgeWorkerToolCall,
@@ -88,7 +88,7 @@ import type {
   ShadowHookResult,
   ShadowReportEvent,
   EvidenceArtifact,
-  CutoverEvidenceManifest
+  CutoverEvidenceManifest,
 } from "./common.js";
 import {
   shadowTransmitterHook,
@@ -116,7 +116,7 @@ import {
   postSignedSlackCommand,
   buildSlackInteractionForm,
   postSignedSlackInteraction,
-  postSignedSlackJson
+  postSignedSlackJson,
 } from "./support.js";
 
 export async function doctor() {

@@ -94,16 +94,16 @@ test("runtime init composer keeps representative Meet init script contents stabl
 
   assert.deepEqual(actual, {
     avatar: {
-      contentLength: 70238,
-      sha256: "f15bdb3ff9a4855781770ba135969e979bd62fbdd26d80ff7a71dc99674c70eb",
+      contentLength: 97050,
+      sha256: "873474e2f94d0fff7e2be4e9931a014e71d4a2574a8e0a9d8ca97f1b309f2c85",
     },
     realtime: {
-      contentLength: 4000606,
-      sha256: "bd506aee02288701fb1bd43ba9f3fbff36b0e2ac2c1332db2a7b3eb86d8a0877",
+      contentLength: 4029574,
+      sha256: "ccf528c360bd45ffa164a5d42fa7325795a510067795e239377a30cbcf723035",
     },
     local_dialog: {
-      contentLength: 9737,
-      sha256: "42aaa1a626583521da36d49e0df3dc14d6c8d09ce4598da5d55de73d47db79be",
+      contentLength: 9883,
+      sha256: "4e894e2c627e5f8b0830d6841ae95501990b5c910a77ea0c7b5d48158cb61ecb",
     },
     screen_share: {
       contentLength: 16003,

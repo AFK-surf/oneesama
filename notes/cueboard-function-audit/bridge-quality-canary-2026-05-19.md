@@ -151,7 +151,7 @@ This way the canary suite grows with the entry-parity contract.
   `handleAgentRunnerUpdate` on job completion, with a continuation
   job. To canary C221 the fixture suite needs a mock runner +
   recording poster (driver's `service_worker_jobs_test.go::
-  TestSlackWorkerToolRequestStartsContinuationWithDispatcherEvidence`
+TestSlackWorkerToolRequestStartsContinuationWithDispatcherEvidence`
   is the existing pin and can be ported into a fixture-driven shape
   in a future scaffold pass). Until then, treat that test as the
   C221 canary anchor.
@@ -160,7 +160,7 @@ This way the canary suite grows with the entry-parity contract.
   `scanSlackHistoryOnce` → `SweepSlackScanner` → `StartSlackTriage`,
   which requires an httptest Slack API server + a `fakeRunner` /
   recording-runner. Driver's `triage_scanner_entry_parity_test.go::
-  TestSlackHistoryScannerTriageCarriesMemoryAndPlannerContext`
+TestSlackHistoryScannerTriageCarriesMemoryAndPlannerContext`
   (146 lines) is the existing pin. To canary C224 in this fixture
   suite, the scaffold would need to accept fixture fields for
   fake-Slack history responses + previous-triage seed context, and

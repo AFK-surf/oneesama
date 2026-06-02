@@ -118,7 +118,11 @@ function requiredConfigError(value: unknown, message: string): string | undefine
   return value ? undefined : message;
 }
 
-function appendLimitedText(current: LimitedText, chunk: unknown, maxTextLength: number): LimitedText {
+function appendLimitedText(
+  current: LimitedText,
+  chunk: unknown,
+  maxTextLength: number,
+): LimitedText {
   const next = current.text + String(chunk || "");
   if (!maxTextLength || maxTextLength <= 0 || next.length <= maxTextLength) {
     return { text: next, truncated: current.truncated };

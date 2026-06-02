@@ -150,7 +150,8 @@ export function createSlackContextProvider(options: CreateSlackContextProviderOp
     const channelId = text(b.channel_id);
     const threadTs = text(b.thread_ts || b.message_ts);
     const id = contextId({ workspaceId, channelId, threadTs });
-    const previous = (contexts.get(id) as SlackContextRecord | undefined) || ({} as Partial<SlackContextRecord>);
+    const previous =
+      (contexts.get(id) as SlackContextRecord | undefined) || ({} as Partial<SlackContextRecord>);
     const now = new Date().toISOString();
     const recentCommand: RecentSlackCommand = {
       ts: now,

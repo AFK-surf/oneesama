@@ -27,10 +27,5 @@
     "external/memory/case-002-anchor.md",
     "memory provider integration"
   ],
-  "must_not_contain": [
-    "127.0.0.1",
-    "/slack/tools/call",
-    "curl",
-    "localhost:8780"
-  ]
+  "must_not_contain": ["127.0.0.1", "/slack/tools/call", "curl", "localhost:8780"]
 }

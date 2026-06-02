@@ -116,7 +116,10 @@ interface SpeakResult extends AudioPlaybackResult {
     });
   }
 
-  async function speakText(text: string, options: LocalDialogSpeakOptions = {}): Promise<SpeakResult> {
+  async function speakText(
+    text: string,
+    options: LocalDialogSpeakOptions = {},
+  ): Promise<SpeakResult> {
     const safeText = String(text || "").trim();
     const avatar = setAvatarSpeaking(safeText);
     const bus = window.MAB_AVATAR_AUDIO_BUS;
@@ -141,7 +144,8 @@ interface SpeakResult extends AudioPlaybackResult {
           }),
         });
         const body = await response.json().catch(() => ({}));
-        if (!response.ok || !body.ok) throw new Error(body.error || `tts_provider_failed_${response.status}`);
+        if (!response.ok || !body.ok)
+          throw new Error(body.error || `tts_provider_failed_${response.status}`);
         if (!body.audioDataUrl) throw new Error("tts_provider_missing_audio_data_url");
         const played = await bus.playAudioDataUrl(body.audioDataUrl, {
           label: options.label || "local-dialog-tts",
@@ -158,14 +162,22 @@ interface SpeakResult extends AudioPlaybackResult {
           durationMs: body.durationMs || played.durationMs || durationMs,
           played,
         };
-        return { ok: played.ok, provider: body.provider || "", played, avatar, durationMs: body.durationMs || played.durationMs || durationMs };
+        return {
+          ok: played.ok,
+          provider: body.provider || "",
+          played,
+          avatar,
+          durationMs: body.durationMs || played.durationMs || durationMs,
+        };
       } catch (error) {
         const entry = rememberError(error, { phase: "tts_provider" });
         return { ok: false, error: entry.message, avatar };
       }
     }
     if (!bus.injectTone) {
-      const error = rememberError(new Error("avatar_audio_bus_missing_inject_tone"), { phase: "tts" });
+      const error = rememberError(new Error("avatar_audio_bus_missing_inject_tone"), {
+        phase: "tts",
+      });
       return { ok: false, error: error.message, avatar };
     }
     const tone = bus.injectTone({
@@ -198,9 +210,11 @@ interface SpeakResult extends AudioPlaybackResult {
       source: input.source || config.sttProvider || "event",
       text: utterance,
     };
-    window.dispatchEvent(new CustomEvent("meeting-avatar-user-speech-started", {
-      detail: { source: "local-dialog", utterance },
-    }));
+    window.dispatchEvent(
+      new CustomEvent("meeting-avatar-user-speech-started", {
+        detail: { source: "local-dialog", utterance },
+      }),
+    );
     const turn = rememberTurn({
       utterance,
       source: input.source || "local-stt",
@@ -236,9 +250,11 @@ interface SpeakResult extends AudioPlaybackResult {
         provider: body.provider || body.job?.provider || "",
         tts,
       });
-      window.dispatchEvent(new CustomEvent("meeting-avatar-local-dialog-response", {
-        detail: { turn, response: body, tts },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("meeting-avatar-local-dialog-response", {
+          detail: { turn, response: body, tts },
+        }),
+      );
       return { ok: true, turn, response: body, tts };
     } catch (error) {
       rememberError(error, { phase: "dialog_turn", utterance });

@@ -331,9 +331,7 @@ export function createMeetdRuntime({
 }) {
   if (!store) throw new Error("store is required");
 
-  function processReadyMeetings(
-    options: { now?: Date; dryRunJoiner?: boolean } = {},
-  ) {
+  function processReadyMeetings(options: { now?: Date; dryRunJoiner?: boolean } = {}) {
     const current = toDate(options.now || now()) || new Date();
     const dryRunJoiner = options.dryRunJoiner !== false;
     const results = [];
@@ -380,7 +378,9 @@ export function createMeetdRuntime({
     return results;
   }
 
-  function tick(options: { now?: Date; staleMs?: number; olderThanMs?: number; dryRunJoiner?: boolean } = {}) {
+  function tick(
+    options: { now?: Date; staleMs?: number; olderThanMs?: number; dryRunJoiner?: boolean } = {},
+  ) {
     const current = options.now || now();
     const cleaned = store.cleanupStaleMeetings({
       now: current,

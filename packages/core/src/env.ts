@@ -174,7 +174,7 @@ export function getRuntimeConfig(env = process.env) {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    avatarRenderer: env.MAB_AVATAR_RENDERER || "video",
+    avatarRenderer: env.MAB_AVATAR_RENDERER || "live2d",
     avatarVRMModelUrl:
       env.MAB_AVATAR_VRM_MODEL_URL ||
       "https://raw.githubusercontent.com/trinhtanphat/AMI-Chat-AI/main/public/models/3d/Sendagaya_Shibu.vrm",

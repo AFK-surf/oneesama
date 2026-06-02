@@ -32,23 +32,25 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
     allowNonGoogleMeet: Boolean(params.allow_non_google_meet),
     collectFixtureState: Boolean(params.collect_fixture_state),
     captureCaptions: Boolean(params.capture_captions),
-    captionLanguage: typeof params.caption_language === "string" ? params.caption_language.trim() : "",
+    captionLanguage:
+      typeof params.caption_language === "string" ? params.caption_language.trim() : "",
     recordMeeting: Boolean(params.record_meeting),
     artifactsDir: typeof params.artifacts_dir === "string" ? params.artifacts_dir.trim() : "",
-    meetAudioBackend: typeof params.meet_audio_backend === "string" ? params.meet_audio_backend.trim() : "",
+    meetAudioBackend:
+      typeof params.meet_audio_backend === "string" ? params.meet_audio_backend.trim() : "",
     installAvatar,
     disableLive2D: !installAvatar,
     installRealtimeBridge,
     realtimeBridgeMode:
       typeof params.realtime_bridge_mode === "string" ? params.realtime_bridge_mode.trim() : "",
     realtimeAgentRuntime:
-      typeof params.realtime_agent_runtime === "string"
-        ? params.realtime_agent_runtime.trim()
-        : "",
+      typeof params.realtime_agent_runtime === "string" ? params.realtime_agent_runtime.trim() : "",
     autoConnectRealtime: Boolean(params.auto_connect_realtime),
-    sendRealtimeSessionUpdate: installRealtimeBridge && params.send_realtime_session_update !== false,
+    sendRealtimeSessionUpdate:
+      installRealtimeBridge && params.send_realtime_session_update !== false,
     includeParticipantAudio: Boolean(params.include_participant_audio),
-    forwardMeetAudioToRealtime: installRealtimeBridge && params.forward_meet_audio_to_realtime !== false,
+    forwardMeetAudioToRealtime:
+      installRealtimeBridge && params.forward_meet_audio_to_realtime !== false,
     meetAudioInputGain: Number(params.meet_audio_input_gain) || undefined,
     realtimeFallbackToLocalMic: Boolean(params.realtime_fallback_to_local_mic),
     installLocalDialogBridge: Boolean(params.install_local_dialog_bridge),

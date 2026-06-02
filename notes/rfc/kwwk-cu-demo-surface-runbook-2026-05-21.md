@@ -27,14 +27,14 @@ mainline meeting runtime.
 
 ## Module quick map
 
-| Module | Code | Owner task |
-|---|---|---|
-| Workspace lifecycle (browser sandbox) | `internal/meetingagent/demo_workspace_lifecycle.go` | #305 |
+| Module                                                | Code                                                                                                                                                    | Owner task     |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| Workspace lifecycle (browser sandbox)                 | `internal/meetingagent/demo_workspace_lifecycle.go`                                                                                                     | #305           |
 | KWWK/CU client contract + fake/browser/codex adapters | `internal/meetingagent/demo_kwwk_client.go`, `internal/meetingagent/demo_agent_browser_client.go`, `internal/meetingagent/demo_codex_browser_client.go` | #306/#316/#318 |
-| Controller (intent → observation loop) | `internal/meetingagent/demo_controller.go` (in flight) | #307 |
-| Observation feedback renderer | `internal/meetingagent/demo_observation_feedback.go` | #310 |
-| Allowlist + safety policy | `internal/meetingagent/demo_safety_policy.go` | #311 |
-| Session state + audit | `internal/meetingagent/demo_session_audit.go` | #312 |
+| Controller (intent → observation loop)                | `internal/meetingagent/demo_controller.go` (in flight)                                                                                                  | #307           |
+| Observation feedback renderer                         | `internal/meetingagent/demo_observation_feedback.go`                                                                                                    | #310           |
+| Allowlist + safety policy                             | `internal/meetingagent/demo_safety_policy.go`                                                                                                           | #311           |
+| Session state + audit                                 | `internal/meetingagent/demo_session_audit.go`                                                                                                           | #312           |
 
 Realtime bridge (#308) and surface presenter (#309) land after the
 controller stabilises so they do not bind to a phantom contract.

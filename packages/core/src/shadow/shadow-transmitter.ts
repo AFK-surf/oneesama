@@ -90,7 +90,10 @@ function randomEventId(): string {
   return `shadow_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function createShadowTapHeaders({ secret = "" }: { secret?: string } = {}): Record<string, string> {
+export function createShadowTapHeaders({ secret = "" }: { secret?: string } = {}): Record<
+  string,
+  string
+> {
   if (!String(secret || "").trim()) {
     throw new Error("MAB_SHADOW_TAP_SECRET is required before mirroring old-stack commands");
   }

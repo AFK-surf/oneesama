@@ -48,7 +48,11 @@
       parsed?.detail?.error?.message,
     ];
     return candidates
-      .map((value) => String(value || "").trim().toLowerCase())
+      .map((value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase(),
+      )
       .filter(Boolean)
       .join(" ");
   }

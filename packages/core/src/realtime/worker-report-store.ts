@@ -158,9 +158,15 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
         return false;
       }
     }
-    const source = String(context.source || "").trim().toLowerCase();
+    const source = String(context.source || "")
+      .trim()
+      .toLowerCase();
     if (!source) return false;
-    if (source.includes("persona_delegate") || source.includes("triage") || source.includes("secretary")) {
+    if (
+      source.includes("persona_delegate") ||
+      source.includes("triage") ||
+      source.includes("secretary")
+    ) {
       return false;
     }
     return source.startsWith("meeting-") || source.startsWith("meeting_");

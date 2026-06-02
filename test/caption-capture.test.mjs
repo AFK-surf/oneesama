@@ -151,29 +151,29 @@ test("local Meet speaker detection drops the bot client's own caption label", ()
 });
 
 test("caption settings language labels are not treated as transcript text", () => {
-  assert.equal(__captionCaptureTestInternals.isCaptionSettingsUiText("Chinese, Mandarin (Simplified)"), true);
+  assert.equal(
+    __captionCaptureTestInternals.isCaptionSettingsUiText("Chinese, Mandarin (Simplified)"),
+    true,
+  );
   assert.equal(__captionCaptureTestInternals.isCaptionSettingsUiText("English"), true);
   assert.equal(__captionCaptureTestInternals.isCaptionSettingsUiText("我们继续测一下"), false);
 });
 
 test("enableMeetCaptions falls back to the legacy settings menu when the inline caption button is unavailable", async () => {
-  const page = fakeCaptionSettingsPage(
-    captionsAlreadyOnProbe(),
-    {
-      failSelectors: [
-        [
-          'button[aria-label*="Open caption settings" i]',
-          '[role="button"][aria-label*="Open caption settings" i]',
-          'button[aria-label*="caption settings" i]',
-          '[role="button"][aria-label*="caption settings" i]',
-          'button[aria-label*="字幕设置" i]',
-          '[role="button"][aria-label*="字幕设置" i]',
-          'button[aria-label*="字幕設定" i]',
-          '[role="button"][aria-label*="字幕設定" i]',
-        ].join(", "),
-      ],
-    },
-  );
+  const page = fakeCaptionSettingsPage(captionsAlreadyOnProbe(), {
+    failSelectors: [
+      [
+        'button[aria-label*="Open caption settings" i]',
+        '[role="button"][aria-label*="Open caption settings" i]',
+        'button[aria-label*="caption settings" i]',
+        '[role="button"][aria-label*="caption settings" i]',
+        'button[aria-label*="字幕设置" i]',
+        '[role="button"][aria-label*="字幕设置" i]',
+        'button[aria-label*="字幕設定" i]',
+        '[role="button"][aria-label*="字幕設定" i]',
+      ].join(", "),
+    ],
+  });
 
   const result = await enableMeetCaptions(page, { captionLanguage: "Chinese (Simplified)" });
 
@@ -188,15 +188,12 @@ test("enableMeetCaptions falls back to the legacy settings menu when the inline 
 });
 
 test("enableMeetCaptions falls back to DOM click when the language combobox refuses a normal click", async () => {
-  const page = fakeCaptionSettingsPage(
-    captionsAlreadyOnProbe(),
-    {
-      domMeetingLanguageClick: false,
-      failSelectors: [
-        "xpath=(//*[self::div or self::span or self::label][contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'language of the meeting') or contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'meeting language') or contains(normalize-space(.), '会议语言') or contains(normalize-space(.), '會議語言')]/following::*[@role='combobox'][1])[1]",
-      ],
-    },
-  );
+  const page = fakeCaptionSettingsPage(captionsAlreadyOnProbe(), {
+    domMeetingLanguageClick: false,
+    failSelectors: [
+      "xpath=(//*[self::div or self::span or self::label][contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'language of the meeting') or contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'meeting language') or contains(normalize-space(.), '会议语言') or contains(normalize-space(.), '會議語言')]/following::*[@role='combobox'][1])[1]",
+    ],
+  });
 
   const result = await enableMeetCaptions(page, { captionLanguage: "Chinese (Simplified)" });
 
@@ -210,12 +207,9 @@ test("enableMeetCaptions falls back to DOM click when the language combobox refu
 });
 
 test("enableMeetCaptions refuses translated captions mode when a meeting language was requested", async () => {
-  const page = fakeCaptionSettingsPage(
-    captionsAlreadyOnProbe(),
-    {
-      translatedSelected: true,
-    },
-  );
+  const page = fakeCaptionSettingsPage(captionsAlreadyOnProbe(), {
+    translatedSelected: true,
+  });
 
   const result = await enableMeetCaptions(page, { captionLanguage: "Chinese (Simplified)" });
 

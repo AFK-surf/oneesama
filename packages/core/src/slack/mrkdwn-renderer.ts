@@ -30,7 +30,6 @@ const PH_BI_CLOSE = "\u0000BI\u0002";
 const PH_B_OPEN = "\u0000B\u0001";
 const PH_B_CLOSE = "\u0000B\u0002";
 
-
 export interface MarkdownRendererOptions {
   linearWorkspaceSlug?: string;
   maxBlocks?: number | string;
@@ -188,7 +187,10 @@ export function markdownishToMrkdwn(text: unknown, options: MarkdownRendererOpti
     .join("");
 }
 
-export function markdownToSlackFallbackText(text: unknown, options: MarkdownRendererOptions = {}): string {
+export function markdownToSlackFallbackText(
+  text: unknown,
+  options: MarkdownRendererOptions = {},
+): string {
   const fallback = markdownToMrkdwn(text, options).trim();
   return fallback || String(text || "");
 }
@@ -265,7 +267,10 @@ function truncateSlackHeader(text) {
   return value.length > 150 ? `${value.slice(0, 149)}…` : value;
 }
 
-export function markdownToBlocks(markdown: unknown, options: MarkdownRendererOptions = {}): Array<Record<string, unknown>> {
+export function markdownToBlocks(
+  markdown: unknown,
+  options: MarkdownRendererOptions = {},
+): Array<Record<string, unknown>> {
   const input = String(markdown || "").trim();
   if (!input) return [];
   const blocks = [];

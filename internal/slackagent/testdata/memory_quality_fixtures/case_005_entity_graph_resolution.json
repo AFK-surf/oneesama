@@ -24,12 +24,7 @@
       "Negative relationship 'Cumora is not in Alma product line' must be preserved in the evidence content; the new system must not silently drop the disambiguation.",
       "Entity attribution must hold across alias forms: yetone / 大yetone / @yetone slack handle should resolve to the same entity record."
     ],
-    "intended_anchor_entities": [
-      "Cumora",
-      "yetone",
-      "Isoform",
-      "Alma"
-    ]
+    "intended_anchor_entities": ["Cumora", "yetone", "Isoform", "Alma"]
   },
   "expected_provider_events": {
     "search_query_contains": "Cumora",
@@ -42,11 +37,5 @@
     "yetone organization is Isoform",
     "Cumora is not related to Alma"
   ],
-  "must_not_contain": [
-    "127.0.0.1",
-    "/slack/tools/call",
-    "curl",
-    "exit status 7",
-    "localhost:8780"
-  ]
+  "must_not_contain": ["127.0.0.1", "/slack/tools/call", "curl", "exit status 7", "localhost:8780"]
 }

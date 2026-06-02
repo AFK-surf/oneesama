@@ -14,8 +14,7 @@ function helperSourcePath() {
 
 export function appControlHelperBinaryPath() {
   return resolve(
-    process.env.ONEESAMA_APP_CONTROL_HELPER ||
-      join(tmpdir(), "oneesama-app-control-helper"),
+    process.env.ONEESAMA_APP_CONTROL_HELPER || join(tmpdir(), "oneesama-app-control-helper"),
   );
 }
 

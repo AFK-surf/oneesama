@@ -12,12 +12,12 @@ This audit was triggered by the Cumora/yetone production case. Old Slack Agent D
 
 ## Summary
 
-| Behavior | Old Cueboard Agent D | New Oneesama after this audit | Decision |
-|---|---|---|---|
-| Person memory actions | `person_memory` supports `lookup`, `briefing`, `list`, `correct`. | New tool now accepts `briefing` in addition to `lookup`, `list`, `correct`. | Port action parity. |
-| Person search scoring | Scores exact key, file key, name, identity, and full profile text. | New search now ranks name/file/identity/full profile text, including durable context, responsibilities, meetings, and notes. | Port scoring shape. |
-| Old tool-result memory | Old triage archive JSON stores the actual tool calls/results that produced answers. | Importer now renders `memory/triage-archive/*.json` into line-citable Markdown under `memory/legacy/slack-agent-d/workspace/memory/triage-archive/*.md`. | Port evidence source. |
-| URL/entity related-memory query | Old Agent D could search `yetone cumora.ai` and cite Isoform/Alma evidence. | Related-memory tokenization ignores URL scheme/TLD noise so entity evidence beats generic `https`/`AI` notes. | Fix query quality drift. |
+| Behavior                        | Old Cueboard Agent D                                                                | New Oneesama after this audit                                                                                                                            | Decision                 |
+| ------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| Person memory actions           | `person_memory` supports `lookup`, `briefing`, `list`, `correct`.                   | New tool now accepts `briefing` in addition to `lookup`, `list`, `correct`.                                                                              | Port action parity.      |
+| Person search scoring           | Scores exact key, file key, name, identity, and full profile text.                  | New search now ranks name/file/identity/full profile text, including durable context, responsibilities, meetings, and notes.                             | Port scoring shape.      |
+| Old tool-result memory          | Old triage archive JSON stores the actual tool calls/results that produced answers. | Importer now renders `memory/triage-archive/*.json` into line-citable Markdown under `memory/legacy/slack-agent-d/workspace/memory/triage-archive/*.md`. | Port evidence source.    |
+| URL/entity related-memory query | Old Agent D could search `yetone cumora.ai` and cite Isoform/Alma evidence.         | Related-memory tokenization ignores URL scheme/TLD noise so entity evidence beats generic `https`/`AI` notes.                                            | Fix query quality drift. |
 
 ## Behavior 1: `person_memory` Actions
 

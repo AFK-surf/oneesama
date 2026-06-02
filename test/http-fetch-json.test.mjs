@@ -58,13 +58,10 @@ test("fetchJson converts response failures into upstream errors", async () => {
 });
 
 test("fetchJson times out hanging upstream requests", async () => {
-  await withMockFetch(
-    hangingFetch,
-    async () => {
-      await assert.rejects(fetchJson("https://example.invalid/hang", { timeoutMs: 1 }), {
-        message: "upstream_timeout",
-        status: 504,
-      });
-    },
-  );
+  await withMockFetch(hangingFetch, async () => {
+    await assert.rejects(fetchJson("https://example.invalid/hang", { timeoutMs: 1 }), {
+      message: "upstream_timeout",
+      status: 504,
+    });
+  });
 });

@@ -9,56 +9,56 @@ subsection below in the same commit.
 
 ## Layout
 
-| Subdirectory | What lives there | Hub doc |
-|---|---|---|
-| `notes/cueboard-function-audit/` | Per-area Cueboard → Oneesama function parity audits, the migration-lessons drift-class catalogue, and the dated quality canary / parity audit notes that drove the migration. | `notes/cueboard-function-audit/README.md` |
-| `notes/code-polish/` | Polish-pass artefacts produced during task #269+: module punch list, ownership/ranking matrices, canary fixture index, drift-class index, OpenClaw/Hermes roadmap, memory-provider ownership matrix. | `notes/code-polish/README.md` |
-| `notes/rfc/` | Active RFC drafts for in-flight architectural decisions (foreground cognition pivot, secretary routing delegation, future capabilities). | (this README; small set, one row each below) |
+| Subdirectory                     | What lives there                                                                                                                                                                                     | Hub doc                                      |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `notes/cueboard-function-audit/` | Per-area Cueboard → Oneesama function parity audits, the migration-lessons drift-class catalogue, and the dated quality canary / parity audit notes that drove the migration.                        | `notes/cueboard-function-audit/README.md`    |
+| `notes/code-polish/`             | Polish-pass artefacts produced during task #269+: module punch list, ownership/ranking matrices, canary fixture index, drift-class index, OpenClaw/Hermes roadmap, memory-provider ownership matrix. | `notes/code-polish/README.md`                |
+| `notes/rfc/`                     | Active RFC drafts for in-flight architectural decisions (foreground cognition pivot, secretary routing delegation, future capabilities).                                                             | (this README; small set, one row each below) |
 
 ## Polish-era hubs (task #269+)
 
 These are the curated, scannable indexes that point into the long-form notes.
 Start here when navigating the polish work.
 
-| Hub doc | Role |
-|---|---|
-| `notes/code-polish/oneesama-module-punch-list-2026-05-21.md` | Master punch list / module map produced during task #270 Phase 0. Lists every module + bytes + risk + suggested slice. |
-| `notes/code-polish/canary-fixture-index-2026-05-21.md` | Curated index of every behavioural canary fixture in the codebase (JSON fixtures + dedicated Go regression canaries + the 62 `cueboard_*_parity_test.go` group). Task #296. |
-| `notes/code-polish/drift-class-index-2026-05-21.md` | Compact index of the 13 migration-audit drift classes (7 foundational + 6 promoted first-class + 2 observed-not-yet-promoted), each with anchor commit and the single audit reflex to run. Task #297. |
-| `notes/code-polish/memory-provider-ownership-matrix-2026-05-21.md` | Memory provider × Kind ownership matrix + ranking weights table + resolved/residual overlaps. Task #284 / #272. |
-| `notes/code-polish/openclaw-hermes-memory-roadmap-canary-first-2026-05-21.md` | Splits the remaining OpenClaw + Hermes Memory capabilities into canary-first sub-tasks (289-A trust scoring … 289-F contradiction at write). Task #289. |
-| `notes/code-polish/harness-stability-inventory-2026-05-21.md` | Stable-prefix vs dynamic-evidence inventory for the Oneesama Harness cache/tool-stability RFC. Task #319. |
-| `notes/code-polish/harness-foreground-tool-inventory-2026-05-21.md` | Realtime foreground tool class registry plus schema-hash migration gate for Harness tool-surface stability. Task #327. |
-| `notes/code-polish/harness-compaction-canary-plan-2026-05-21.md` | Source-preserving compaction gate: stable prompt hash unchanged and source refs retained before idle compaction can feed foreground context. Task #330. |
-| `notes/code-polish/harness-audit-cadence-checklist-2026-05-21.md` | Operator cadence and reviewer checklist for Harness drift metrics, stable prefix/tool hash, dynamic envelopes, worker isolation, Browser/CU approvals, budgets, and compaction. Task #332. |
+| Hub doc                                                                       | Role                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notes/code-polish/oneesama-module-punch-list-2026-05-21.md`                  | Master punch list / module map produced during task #270 Phase 0. Lists every module + bytes + risk + suggested slice.                                                                                |
+| `notes/code-polish/canary-fixture-index-2026-05-21.md`                        | Curated index of every behavioural canary fixture in the codebase (JSON fixtures + dedicated Go regression canaries + the 62 `cueboard_*_parity_test.go` group). Task #296.                           |
+| `notes/code-polish/drift-class-index-2026-05-21.md`                           | Compact index of the 13 migration-audit drift classes (7 foundational + 6 promoted first-class + 2 observed-not-yet-promoted), each with anchor commit and the single audit reflex to run. Task #297. |
+| `notes/code-polish/memory-provider-ownership-matrix-2026-05-21.md`            | Memory provider × Kind ownership matrix + ranking weights table + resolved/residual overlaps. Task #284 / #272.                                                                                       |
+| `notes/code-polish/openclaw-hermes-memory-roadmap-canary-first-2026-05-21.md` | Splits the remaining OpenClaw + Hermes Memory capabilities into canary-first sub-tasks (289-A trust scoring … 289-F contradiction at write). Task #289.                                               |
+| `notes/code-polish/harness-stability-inventory-2026-05-21.md`                 | Stable-prefix vs dynamic-evidence inventory for the Oneesama Harness cache/tool-stability RFC. Task #319.                                                                                             |
+| `notes/code-polish/harness-foreground-tool-inventory-2026-05-21.md`           | Realtime foreground tool class registry plus schema-hash migration gate for Harness tool-surface stability. Task #327.                                                                                |
+| `notes/code-polish/harness-compaction-canary-plan-2026-05-21.md`              | Source-preserving compaction gate: stable prompt hash unchanged and source refs retained before idle compaction can feed foreground context. Task #330.                                               |
+| `notes/code-polish/harness-audit-cadence-checklist-2026-05-21.md`             | Operator cadence and reviewer checklist for Harness drift metrics, stable prefix/tool hash, dynamic envelopes, worker isolation, Browser/CU approvals, budgets, and compaction. Task #332.            |
 
 ## Cueboard-era hubs (task #161-#234 era)
 
 These are the migration-era hubs that pre-date the polish pass. They are
 still load-bearing reference for "why does the code look like this".
 
-| Hub doc | Role |
-|---|---|
-| `notes/cueboard-function-audit/README.md` | Top-of-tree audit README. Inventory tool usage + review workflow. |
-| `notes/cueboard-function-audit/migration-lessons.md` | Canonical migration gates + definition of done. |
+| Hub doc                                                           | Role                                                                                                                                                      |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notes/cueboard-function-audit/README.md`                         | Top-of-tree audit README. Inventory tool usage + review workflow.                                                                                         |
+| `notes/cueboard-function-audit/migration-lessons.md`              | Canonical migration gates + definition of done.                                                                                                           |
 | `notes/cueboard-function-audit/migration-lessons-audit-method.md` | Long-form catalogue of the 8+ drift classes with worked examples (consolidated into the polish-era index above; the long-form here remains the evidence). |
-| `notes/cueboard-function-audit/consolidated-backlog.md` | Implementation backlog produced from #161-#171. |
-| `notes/cueboard-function-audit/memory-recall-parity-inventory.md` | OpenClaw-style memory recall parity reference. |
-| `notes/cueboard-function-audit/module-template.md` | Template for new per-area parity audit docs. |
+| `notes/cueboard-function-audit/consolidated-backlog.md`           | Implementation backlog produced from #161-#171.                                                                                                           |
+| `notes/cueboard-function-audit/memory-recall-parity-inventory.md` | OpenClaw-style memory recall parity reference.                                                                                                            |
+| `notes/cueboard-function-audit/module-template.md`                | Template for new per-area parity audit docs.                                                                                                              |
 
 ## RFCs
 
-| RFC | Status | Anchor |
-|---|---|---|
-| `notes/rfc/foreground-cognition-pivot-rfc-2026-05-19.md` | Accepted (drove tasks #200 through #237). | Establishes the persona-runtime + secretary boundary that the Pi runtime + delegation policy now enforce. |
-| `notes/rfc/secretary-routing-delegation-rfc-2026-05-21.md` | Accepted (implemented in task #283). | Tightens `delegate_worker` to bounded secretary scope; covers prompt + Go guard + canary fixtures. |
-| `notes/rfc/kwwk-cu-demo-surface-poc-rfc-2026-05-21.md` | Proposed (task #304). | Splits the mainline-bound KWWK / Computer Use meeting demo-surface POC into independently testable lifecycle, adapter, controller, presentation, realtime, feedback, safety, and audit/runbook slices. |
-| `notes/rfc/kwwk-cu-demo-surface-runbook-2026-05-21.md` | Operator runbook (task #312). | Start/inspect/stop a host-run demo session, where audit rows live, and the mainline integration gate checklist before the POC modules ship behind the meeting runtime flag. |
-| `notes/rfc/oneesama-harness-cache-tool-stability-rfc-2026-05-21.md` | Proposed. | Applies cache-locality / stable-tool-surface Harness practices to Oneesama: stable prefix hashes, dynamic context envelopes, bounded worker isolation, Browser/CU approval gates, and daily harness audit metrics. |
-| `notes/rfc/browser-cu-external-write-approval-gate-rfc-2026-05-21.md` | Proposed (task #328). | Defines the scoped approval-token gate for Browser/CU external writes while keeping `control_demo_surface` as the stable foreground boundary. |
-| `notes/rfc/slack-visible-reply-evidence-anchor-allowlist-rfc-2026-05-22.md` | Proposed (task #357). | Replaces the Slack-visible reply deny-list with an evidence-anchor allow-list, while keeping Peng approval cards as the pilot gate. |
-| `notes/rfc/slack-triage-replay-benchmark-rfc-2026-05-22.md` | Proposed (task #365). | Defines the real-traffic triage replay benchmark: 24h Slack inputs, side-effect-free dry-run, no-oracle multi-signal reporting, future A/B variants, and LLM judge scoring. |
-| `notes/rfc/oneesama-daily-dream-memory-self-learning-rfc-2026-05-22.md` | Proposed (task #367). | Turns the OpenClaw + latest Hermes memory contracts into a daily dream consolidation and self-learning loop before the triage replay benchmark lands. |
+| RFC                                                                         | Status                                    | Anchor                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `notes/rfc/foreground-cognition-pivot-rfc-2026-05-19.md`                    | Accepted (drove tasks #200 through #237). | Establishes the persona-runtime + secretary boundary that the Pi runtime + delegation policy now enforce.                                                                                                          |
+| `notes/rfc/secretary-routing-delegation-rfc-2026-05-21.md`                  | Accepted (implemented in task #283).      | Tightens `delegate_worker` to bounded secretary scope; covers prompt + Go guard + canary fixtures.                                                                                                                 |
+| `notes/rfc/kwwk-cu-demo-surface-poc-rfc-2026-05-21.md`                      | Proposed (task #304).                     | Splits the mainline-bound KWWK / Computer Use meeting demo-surface POC into independently testable lifecycle, adapter, controller, presentation, realtime, feedback, safety, and audit/runbook slices.             |
+| `notes/rfc/kwwk-cu-demo-surface-runbook-2026-05-21.md`                      | Operator runbook (task #312).             | Start/inspect/stop a host-run demo session, where audit rows live, and the mainline integration gate checklist before the POC modules ship behind the meeting runtime flag.                                        |
+| `notes/rfc/oneesama-harness-cache-tool-stability-rfc-2026-05-21.md`         | Proposed.                                 | Applies cache-locality / stable-tool-surface Harness practices to Oneesama: stable prefix hashes, dynamic context envelopes, bounded worker isolation, Browser/CU approval gates, and daily harness audit metrics. |
+| `notes/rfc/browser-cu-external-write-approval-gate-rfc-2026-05-21.md`       | Proposed (task #328).                     | Defines the scoped approval-token gate for Browser/CU external writes while keeping `control_demo_surface` as the stable foreground boundary.                                                                      |
+| `notes/rfc/slack-visible-reply-evidence-anchor-allowlist-rfc-2026-05-22.md` | Proposed (task #357).                     | Replaces the Slack-visible reply deny-list with an evidence-anchor allow-list, while keeping Peng approval cards as the pilot gate.                                                                                |
+| `notes/rfc/slack-triage-replay-benchmark-rfc-2026-05-22.md`                 | Proposed (task #365).                     | Defines the real-traffic triage replay benchmark: 24h Slack inputs, side-effect-free dry-run, no-oracle multi-signal reporting, future A/B variants, and LLM judge scoring.                                        |
+| `notes/rfc/oneesama-daily-dream-memory-self-learning-rfc-2026-05-22.md`     | Proposed (task #367).                     | Turns the OpenClaw + latest Hermes memory contracts into a daily dream consolidation and self-learning loop before the triage replay benchmark lands.                                                              |
 
 ## Maintenance rules
 
@@ -66,7 +66,7 @@ still load-bearing reference for "why does the code look like this".
   README in the same commit. No silent additions.
 - When a doc is superseded by a polish-era hub (e.g. a dated parity audit
   whose findings are now folded into the canary index), add a `> Status:
-  superseded by <hub doc>` line at the top of the older file. Do not delete.
+superseded by <hub doc>` line at the top of the older file. Do not delete.
 - Dated docs (`*-YYYY-MM-DD.md`) are point-in-time records and should not be
   edited after the date unless a clearly-marked retro / correction section is
   added.

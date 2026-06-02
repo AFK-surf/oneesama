@@ -20,9 +20,7 @@
     "files": [],
     "memory_seed_files": []
   },
-  "expected_contract_items": [
-    "C238_workspace_policy_engagement"
-  ],
+  "expected_contract_items": ["C238_workspace_policy_engagement"],
   "intended_provider_signals": [
     "Two persona Service instances, same Pi binary, same input.",
     "Workspace A policy: { engage_on_topics: [ai_agent, coding_tools, memory_systems, collaboration_products, bridge_products], casual_channel_default: maybe_engage_with_evidence } -> Pi decision must be 'reply' with source-backed product comment OR 'delegate_worker' to fetch evidence.",
@@ -32,11 +30,5 @@
   ],
   "expected_provider_events": {},
   "expected_search_result_anchors": [],
-  "must_not_contain": [
-    "127.0.0.1",
-    "/slack/tools/call",
-    "curl",
-    "exit status 7",
-    "localhost:8780"
-  ]
+  "must_not_contain": ["127.0.0.1", "/slack/tools/call", "curl", "exit status 7", "localhost:8780"]
 }

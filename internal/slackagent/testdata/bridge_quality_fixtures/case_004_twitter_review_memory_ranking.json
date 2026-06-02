@@ -27,9 +27,7 @@
       }
     ]
   },
-  "expected_contract_items": [
-    "C222_memory_recall_ranking_parity"
-  ],
+  "expected_contract_items": ["C222_memory_recall_ranking_parity"],
   "expected_evidence_anchors": [
     "memory/legacy/slack-agent-d/workspace/memory/triage-archive/2026-05-17.md",
     "Twitter reply review card waiting for human approval",

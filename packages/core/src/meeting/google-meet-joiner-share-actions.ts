@@ -1,8 +1,40 @@
 import { join as pathJoin } from "node:path";
 import { listShareableApplications } from "./meeting-recorder.ts";
-import { captureMacOSWindowFrame, listMacOSWindowCaptureTargets, matchesMacOSWindowCaptureTarget, readImageDimensions, startMacOSWindowCaptureStream } from "./macos-window-capture.ts";
-import { DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS, DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT, DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH, buildVideoStageHtml, installPageDiagnostics, normalizeScreenShareImageUrl, positiveInteger, safeFilePart, saveDiagnostics, startLocalMultipartFrameServer, syntheticShareDimensionsFromSource, takeScreenshot, withTimeout, type AppShareInput, type LocalMultipartFrameServer, type ScreenShareBridgeInput, type VideoStageInput } from "./google-meet-joiner-base.ts";
-import { clickFirstVisible, clickMeetShareScreenControl, collectButtonInventory, ensureScreenShareController, getMeetPresentationState, readScreenShareControllerState, waitForScreenShareImageSource } from "./google-meet-joiner-ui.ts";
+import {
+  captureMacOSWindowFrame,
+  listMacOSWindowCaptureTargets,
+  matchesMacOSWindowCaptureTarget,
+  readImageDimensions,
+  startMacOSWindowCaptureStream,
+} from "./macos-window-capture.ts";
+import {
+  DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
+  DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
+  DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,
+  buildVideoStageHtml,
+  installPageDiagnostics,
+  normalizeScreenShareImageUrl,
+  positiveInteger,
+  safeFilePart,
+  saveDiagnostics,
+  startLocalMultipartFrameServer,
+  syntheticShareDimensionsFromSource,
+  takeScreenshot,
+  withTimeout,
+  type AppShareInput,
+  type LocalMultipartFrameServer,
+  type ScreenShareBridgeInput,
+  type VideoStageInput,
+} from "./google-meet-joiner-base.ts";
+import {
+  clickFirstVisible,
+  clickMeetShareScreenControl,
+  collectButtonInventory,
+  ensureScreenShareController,
+  getMeetPresentationState,
+  readScreenShareControllerState,
+  waitForScreenShareImageSource,
+} from "./google-meet-joiner-ui.ts";
 import { evaluateMeetPageState } from "./google-meet-joiner-runtime-state.ts";
 type Page = import("playwright").Page;
 type MeetPageState = any;
@@ -82,14 +114,20 @@ export function createGoogleMeetShareActions(ctx: any) {
   }
 
   function macWindowFramePath(app: any, frame: number) {
-    const captureDir = pathJoin(ctx.getActive()?.artifactsDir || config.dataDir, "screen-share-capture");
+    const captureDir = pathJoin(
+      ctx.getActive()?.artifactsDir || config.dataDir,
+      "screen-share-capture",
+    );
     const appPart = safeFilePart(app.applicationName || app.name || app.title || "app");
     const windowPart = safeFilePart(app.windowId || app.windowID || app.processId || "window");
     return pathJoin(captureDir, `${appPart}-${windowPart}-${String(frame).padStart(4, "0")}.png`);
   }
 
   function macWindowLatestFramePath(app: any) {
-    const captureDir = pathJoin(ctx.getActive()?.artifactsDir || config.dataDir, "screen-share-capture");
+    const captureDir = pathJoin(
+      ctx.getActive()?.artifactsDir || config.dataDir,
+      "screen-share-capture",
+    );
     const appPart = safeFilePart(app.applicationName || app.name || app.title || "app");
     const windowPart = safeFilePart(app.windowId || app.windowID || app.processId || "window");
     return pathJoin(captureDir, `${appPart}-${windowPart}-latest.jpg`);
@@ -613,9 +651,13 @@ export function createGoogleMeetShareActions(ctx: any) {
     }
     const controllerBefore = await readScreenShareControllerState(ready.page);
     const start = await startScreenShare(bridgeInput);
-    const clickedSelector = await clickMeetShareScreenControl(ready.page, ctx.getActive().diagnostics, {
-      allowCoordinateFallback: Boolean(bridgeInput.allowCoordinateFallback),
-    });
+    const clickedSelector = await clickMeetShareScreenControl(
+      ready.page,
+      ctx.getActive().diagnostics,
+      {
+        allowCoordinateFallback: Boolean(bridgeInput.allowCoordinateFallback),
+      },
+    );
     if (!clickedSelector) {
       const afterMissPresentation = await getMeetPresentationState(ready.page);
       ctx.getActive().diagnostics?.record("screen_share_present_blocked", {
@@ -701,7 +743,10 @@ export function createGoogleMeetShareActions(ctx: any) {
   async function openVideoStage(input: VideoStageInput = {}) {
     if (!ctx.getActive()?.context) return { ok: false, error: "no_active_join" };
     if (ctx.getActive().stagePage && !ctx.getActive().stagePage.isClosed()) {
-      await ctx.getActive().stagePage.close().catch(() => {});
+      await ctx
+        .getActive()
+        .stagePage.close()
+        .catch(() => {});
     }
     const stagePage = await ctx.getActive().context.newPage();
     ctx.getActive().stagePage = stagePage;

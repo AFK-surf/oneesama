@@ -68,14 +68,14 @@ reading logs after the fact.
 
 ### Minimal Replay Cases
 
-| User utterance | Expected tool | Why |
-| --- | --- | --- |
-| "用 Pencil 演示当前画面" | `share_existing_app_window` | Pencil is an existing local app/window. |
-| "共享 VS Code 屏幕" | `share_existing_app_window` | VS Code is a concrete existing desktop app/window. |
-| "用编辑器演示当前画面" | `list_shareable_windows` | "editor" is a generic category; list candidates before choosing. |
-| "打开 https://example.com 给我看" | `open_shared_browser_surface` | Explicit URL belongs to browser surface. |
-| "做一个贪吃蛇，然后给我看" | `create_shared_workspace` | User asks to create/build a new artifact. |
-| "停止分享" | `stop_video_stage` or `stop_shared_browser_surface` | Stop the active visual surface, depending on active surface state. |
+| User utterance                    | Expected tool                                       | Why                                                                |
+| --------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
+| "用 Pencil 演示当前画面"          | `share_existing_app_window`                         | Pencil is an existing local app/window.                            |
+| "共享 VS Code 屏幕"               | `share_existing_app_window`                         | VS Code is a concrete existing desktop app/window.                 |
+| "用编辑器演示当前画面"            | `list_shareable_windows`                            | "editor" is a generic category; list candidates before choosing.   |
+| "打开 https://example.com 给我看" | `open_shared_browser_surface`                       | Explicit URL belongs to browser surface.                           |
+| "做一个贪吃蛇，然后给我看"        | `create_shared_workspace`                           | User asks to create/build a new artifact.                          |
+| "停止分享"                        | `stop_video_stage` or `stop_shared_browser_surface` | Stop the active visual surface, depending on active surface state. |
 
 ## Tool Taxonomy
 
@@ -146,13 +146,13 @@ The prompt should describe the taxonomy, not memorize a demo:
 - [x] Add explicit browser/shared workspace tools with non-overlapping names.
 - [x] Keep old `/tools/*` endpoint aliases backend-compatible.
 - [x] Keep browser bridge compatible with both old and new names while exposing
-  only new names to Realtime.
+      only new names to Realtime.
 - [x] Update TypeScript realtime schema to match Go exactly.
 - [x] Update foreground tool inventory and golden schema hashes.
 - [x] Add local unit tests for exposed/hidden tool names.
 - [x] Add live Realtime routing smoke for the replay cases above.
 - [ ] Run real meeting smoke after deploy: app share Pencil/code editor, browser
-  URL surface, generated shared workspace, stop share.
+      URL surface, generated shared workspace, stop share.
 
 ## Smoke Acceptance
 

@@ -72,7 +72,9 @@ test("Realtime Meet joins keep local playback unmuted for audio capture by defau
   const baseSource = await readFile("packages/core/src/meeting/google-meet-joiner-base.ts", "utf8");
 
   assert.ok(
-    baseSource.includes("function shouldMuteMeetLocalPlayback(input: GoogleMeetJoinInput): boolean {"),
+    baseSource.includes(
+      "function shouldMuteMeetLocalPlayback(input: GoogleMeetJoinInput): boolean {",
+    ),
     "Meet local playback mute policy should be explicit",
   );
   assert.ok(
@@ -130,7 +132,8 @@ test("Meet avatar camera defaults avoid 1080p chroma-key CPU burn", async () => 
 test("Realtime Recappi Meet joins keep raw audio on native server VAD", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
 
-  const recappiSource = 'meetAudioInputSource: realtimeRecappiAudioInput ? "recappi_process_audio"';
+  const recappiSource = "const realtimeMeetAudioInputSource = realtimeRecappiAudioInput";
+  const recappiConfig = "meetAudioInputSource: realtimeMeetAudioInputSource";
   const oldTranscriptGate = ["gateRealtimeResponsesOn", "InputTranscription"].join("");
   const oldTranscriptFlag = ["responseAfter", "InputTranscription"].join("");
 
@@ -145,6 +148,10 @@ test("Realtime Recappi Meet joins keep raw audio on native server VAD", async ()
   assert.ok(
     source.includes(recappiSource),
     "Recappi joins must select the process audio tap as the Realtime input source",
+  );
+  assert.ok(
+    source.includes(recappiConfig),
+    "Recappi joins must pass the selected process audio tap source into the browser runtime",
   );
   assert.ok(
     source.indexOf("buildRealtimeSessionConfig") <

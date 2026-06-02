@@ -28,9 +28,7 @@ Each `case_NNN_<slug>.json` file has:
     "linked_slack_threads": [],
     "files": []
   },
-  "expected_contract_items": [
-    "C4_related_memory_evidence_injected"
-  ],
+  "expected_contract_items": ["C4_related_memory_evidence_injected"],
   "expected_evidence_anchors": [
     "memory/team/meetings/jc-case-study.md",
     "not a recorded Case Study"
@@ -40,13 +38,7 @@ Each `case_NNN_<slug>.json` file has:
     "type": "reply_with_cite",
     "min_chars": 40,
     "max_chars": 600,
-    "must_not_contain": [
-      "127.0.0.1",
-      "/slack/tools/call",
-      "curl",
-      "exit status",
-      "localhost"
-    ]
+    "must_not_contain": ["127.0.0.1", "/slack/tools/call", "curl", "exit status", "localhost"]
   },
   "contract_mapping": {
     "C1": "Socket -> app_mention job (basic path)",

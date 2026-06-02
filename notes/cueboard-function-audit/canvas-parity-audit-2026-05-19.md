@@ -10,13 +10,13 @@ This audit was triggered by Peng's migration rule on 2026-05-19: do not re-deriv
 
 ## Summary
 
-| Behavior | Old Cueboard Agent D | New Oneesama after this audit | Decision |
-|---|---|---|---|
-| Read Canvas | `slack_api/fetch_canvas` downloads Canvas HTML and returns Markdown. | `slack.fetch_canvas` is active, fetches via `files.info`, converts HTML to Markdown, and enforces prompt-size caps. | Keep new implementation; stronger bounded read path. |
-| Create Canvas | `slack_api/create_canvas` directly calls `canvases.create` with `title`, `markdown`, optional `channel`. | Direct `slack_api(create_canvas)` is now active and calls `canvases.create`; suggest_action confirmation remains available. | Port direct tool parity. |
-| Edit Canvas | `slack_api/edit_canvas` directly calls `canvases.edit`, defaulting `operation=insert_at_end`. | Direct `slack_api(edit_canvas)` is now active; pending-action edit path still requires human confirmation. | Port direct tool parity. |
-| Reuse existing Canvas | Old assistant could fetch/edit an existing Canvas by `canvas_id`. | App-mention context hydrates linked Slack threads and Canvas file IDs; worker Canvas publish now edits the first linked Canvas instead of always creating a new Canvas. | Fix drift; keep explicit ID-based reuse. |
-| Meeting summary Canvas | Old meet publish creates Canvas and posts a Slack link. | New CanvasPublisher creates/edits Slack Canvas, retries sanitized Markdown on validation errors, and posts thread notifications. | Keep new implementation; stricter fallback. |
+| Behavior               | Old Cueboard Agent D                                                                                     | New Oneesama after this audit                                                                                                                                           | Decision                                             |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Read Canvas            | `slack_api/fetch_canvas` downloads Canvas HTML and returns Markdown.                                     | `slack.fetch_canvas` is active, fetches via `files.info`, converts HTML to Markdown, and enforces prompt-size caps.                                                     | Keep new implementation; stronger bounded read path. |
+| Create Canvas          | `slack_api/create_canvas` directly calls `canvases.create` with `title`, `markdown`, optional `channel`. | Direct `slack_api(create_canvas)` is now active and calls `canvases.create`; suggest_action confirmation remains available.                                             | Port direct tool parity.                             |
+| Edit Canvas            | `slack_api/edit_canvas` directly calls `canvases.edit`, defaulting `operation=insert_at_end`.            | Direct `slack_api(edit_canvas)` is now active; pending-action edit path still requires human confirmation.                                                              | Port direct tool parity.                             |
+| Reuse existing Canvas  | Old assistant could fetch/edit an existing Canvas by `canvas_id`.                                        | App-mention context hydrates linked Slack threads and Canvas file IDs; worker Canvas publish now edits the first linked Canvas instead of always creating a new Canvas. | Fix drift; keep explicit ID-based reuse.             |
+| Meeting summary Canvas | Old meet publish creates Canvas and posts a Slack link.                                                  | New CanvasPublisher creates/edits Slack Canvas, retries sanitized Markdown on validation errors, and posts thread notifications.                                        | Keep new implementation; stricter fallback.          |
 
 ## Behavior 1: Fetch Canvas Content
 
