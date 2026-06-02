@@ -820,6 +820,7 @@ private final class KWWKForegroundCursorOverlay {
       "drag": ["enabled": false],
     ]
     Self.pump(for: KWWKForegroundCursorTiming.finalHold)
+    hideOnMain()
     return payload
   }
 
@@ -890,7 +891,14 @@ private final class KWWKForegroundCursorOverlay {
       "style": "native_foreground_orange_trail",
     ]
     Self.pump(for: KWWKForegroundCursorTiming.finalHold)
+    hideOnMain()
     return payload
+  }
+
+  private func hideOnMain() {
+    panel?.orderOut(nil)
+    view?.trailPoints = []
+    panel?.displayIfNeeded()
   }
 
   private func ensureMaterialized() {
