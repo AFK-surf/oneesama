@@ -36,6 +36,9 @@ func Validate(cfg Config) error {
 	if err := validatePersonaRuntime(cfg.PersonaRuntime); err != nil {
 		errs = errors.Join(errs, err)
 	}
+	if err := validateDemoSurface(cfg.DemoSurface); err != nil {
+		errs = errors.Join(errs, err)
+	}
 	if cfg.Meetd.WatchInterval <= 0 {
 		errs = errors.Join(errs, errors.New("meetd.watch_interval must be positive"))
 	}
@@ -50,6 +53,13 @@ func Validate(cfg Config) error {
 	}
 	if strings.TrimSpace(cfg.OpenAI.RealtimeModel) == "" {
 		errs = errors.Join(errs, errors.New("openai.realtime_model is required"))
+	}
+	if placement := strings.ToLower(strings.TrimSpace(cfg.OpenAI.RealtimeRuntimePlacement)); placement != "" {
+		switch placement {
+		case "sidecar":
+		default:
+			errs = errors.Join(errs, fmt.Errorf("openai.realtime_runtime_placement must be sidecar; got %q", cfg.OpenAI.RealtimeRuntimePlacement))
+		}
 	}
 	if strings.TrimSpace(cfg.OpenAI.BotName) == "" {
 		errs = errors.Join(errs, errors.New("openai.bot_name is required"))
@@ -116,6 +126,18 @@ func validatePersistence(cfg PersistenceConfig) error {
 	}
 
 	return errs
+}
+
+func validateDemoSurface(cfg DemoSurfaceConfig) error {
+	if !cfg.ExposeRealtimeTools {
+		return nil
+	}
+	switch normalizeProvider(cfg.Adapter) {
+	case "fake", "":
+		return errors.New("demo_surface.adapter must not be fake when demo_surface.expose_realtime_tools is true; use demo_surface.mode=safe or set adapter to agent_browser/codex")
+	default:
+		return nil
+	}
 }
 
 func normalizeProvider(value string) string {

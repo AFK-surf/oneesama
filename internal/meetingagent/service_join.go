@@ -12,6 +12,14 @@ import (
 	"github.com/AFK-surf/oneesama/internal/meetrunner"
 )
 
+type InvalidRealtimeRuntimePlacementError struct {
+	Reason string
+}
+
+func (e InvalidRealtimeRuntimePlacementError) Error() string {
+	return e.Reason
+}
+
 func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetRequest) (JoinGoogleMeetResponse, error) {
 	if strings.TrimSpace(input.MeetingURL) == "" {
 		return JoinGoogleMeetResponse{}, fmt.Errorf("meeting_url is required")
@@ -44,7 +52,16 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 	}
 	realtimeInstructions := buildRealtimeInstructions(realtimeOptions, s.openai)
 	realtimeSession := buildRealtimeSessionConfig(realtimeOptions, s.openai)
-	realtimeToolSchemaHash, _ := RealtimeToolSchemaStableHash(s.demoBridge != nil)
+	realtimeToolSchemaHash, _ := RealtimeToolSchemaStableHash(s.realtimeDemoSurfaceToolsExposed())
+	realtimeRuntimePlacement := firstNonEmpty(strings.TrimSpace(input.RealtimeRuntimePlacement), s.openai.RealtimeRuntimePlacement)
+	if realtimeRuntimePlacement == "" {
+		realtimeRuntimePlacement = "sidecar"
+	}
+	if input.InstallRealtimeBridge {
+		if err := validateJoinRealtimeRuntimePlacement(realtimeRuntimePlacement); err != nil {
+			return JoinGoogleMeetResponse{}, err
+		}
+	}
 	prepare, err := s.meetRunner.PrepareGoogleMeet(ctx, meetrunner.PrepareGoogleMeetInput{
 		SessionID:                  sessionID,
 		MeetingURL:                 strings.TrimSpace(input.MeetingURL),
@@ -61,6 +78,7 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 		InstallRealtimeBridge:      input.InstallRealtimeBridge,
 		RealtimeBridgeMode:         strings.TrimSpace(input.RealtimeBridgeMode),
 		RealtimeAgentRuntime:       firstNonEmpty(strings.TrimSpace(input.RealtimeAgentRuntime), s.openai.RealtimeAgentRuntime),
+		RealtimeRuntimePlacement:   realtimeRuntimePlacement,
 		RealtimeToolCallbackToken:  s.internalAuthKey,
 		RealtimeInstructions:       realtimeInstructions,
 		RealtimeTools:              realtimeTools,
@@ -113,6 +131,7 @@ func (s *Service) JoinGoogleMeet(ctx context.Context, input JoinGoogleMeetReques
 			"realtime_join":                  input.InstallRealtimeBridge,
 			"realtime_bridge_mode":           strings.TrimSpace(input.RealtimeBridgeMode),
 			"realtime_agent_runtime":         firstNonEmpty(strings.TrimSpace(input.RealtimeAgentRuntime), s.openai.RealtimeAgentRuntime),
+			"realtime_runtime_placement":     realtimeRuntimePlacement,
 			"realtime_tool_count":            len(realtimeTools),
 			"realtime_tool_schema_hash":      realtimeToolSchemaHash,
 			"auto_connect_realtime":          input.AutoConnectRealtime,
@@ -217,6 +236,25 @@ func normalizeJoinMeetingURL(value string) string {
 	}
 	beforeQuery, _, _ := strings.Cut(trimmed, "?")
 	return strings.TrimRight(beforeQuery, "/")
+}
+
+func normalizeRealtimeRuntimePlacementForJoin(value string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), "_", "-")
+}
+
+func validateJoinRealtimeRuntimePlacement(value string) error {
+	switch normalizeRealtimeRuntimePlacementForJoin(value) {
+	case "", "sidecar":
+		return nil
+	case "inline":
+		return InvalidRealtimeRuntimePlacementError{
+			Reason: "inline Realtime SDK on Meet has been removed; use realtime_runtime_placement=sidecar",
+		}
+	default:
+		return InvalidRealtimeRuntimePlacementError{
+			Reason: fmt.Sprintf("realtime_runtime_placement must be sidecar; got %q", value),
+		}
+	}
 }
 
 func defaultJoinArtifactsDir(rootDir string, sessionID string) string {

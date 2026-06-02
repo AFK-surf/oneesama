@@ -101,8 +101,9 @@ async function emitMeetAudioCaptureEvent(type, detail = {}) {
   });
 }
 
-function maybeStartMeetAudioCapture(reason = "meet-audio-forwarded") {
-  if (!config.captureMeetAudioForTranscript) return { ok: true, skipped: true, reason: "disabled" };
+function startMeetAudioRecorderFromStream(stream, reason, detail = {}) {
+  const tracks = stream?.getAudioTracks?.() || [];
+  if (!tracks.length) return { ok: false, error: "capture_stream_has_no_audio_track" };
   const mimeType = supportedMeetAudioCaptureMimeType();
   const sinkAvailable = meetAudioCaptureSinkAvailable();
   updateMeetAudioCaptureState({
@@ -110,15 +111,13 @@ function maybeStartMeetAudioCapture(reason = "meet-audio-forwarded") {
     supported: Boolean(mimeType),
     sinkAvailable,
     mimeType: state.connection.meetAudioCapture?.mimeType || mimeType,
+    ...detail,
   });
   if (!sinkAvailable) return { ok: false, error: "capture_sink_unavailable" };
   if (!mimeType) return { ok: false, error: "media_recorder_audio_webm_unsupported" };
   if (meetAudioRecorder?.state === "recording") return { ok: true, recording: true };
-  if (!routingDestination) return { ok: false, error: "routing_destination_missing" };
-  const tracks = routingDestination.stream?.getAudioTracks?.() || [];
-  if (!tracks.length) return { ok: false, error: "routing_stream_has_no_audio_track" };
   try {
-    meetAudioRecorder = new MediaRecorder(routingDestination.stream, { mimeType });
+    meetAudioRecorder = new MediaRecorder(stream, { mimeType });
     meetAudioRecorder.addEventListener("dataavailable", (event) => {
       uploadMeetAudioBlob(event.data);
     });
@@ -129,15 +128,16 @@ function maybeStartMeetAudioCapture(reason = "meet-audio-forwarded") {
         startedAt,
         stoppedAt: "",
         mimeType,
+        ...detail,
       });
-      emitMeetAudioCaptureEvent("started", { mimeType }).catch((error) =>
+      emitMeetAudioCaptureEvent("started", { mimeType, ...detail }).catch((error) =>
         rememberMeetAudioCaptureError("event_start", error),
       );
-      recordTimeline("meet_audio_capture_started", { reason, mimeType });
+      recordTimeline("meet_audio_capture_started", { reason, mimeType, ...detail });
     });
     meetAudioRecorder.addEventListener("stop", () => {
       meetAudioCaptureUploadChain
-        .then(() => emitMeetAudioCaptureEvent("stopped", { mimeType }))
+        .then(() => emitMeetAudioCaptureEvent("stopped", { mimeType, ...detail }))
         .catch((error) => rememberMeetAudioCaptureError("event_stop", error))
         .finally(() => {
           updateMeetAudioCaptureState({
@@ -158,6 +158,25 @@ function maybeStartMeetAudioCapture(reason = "meet-audio-forwarded") {
     rememberMeetAudioCaptureError("start", error);
     return { ok: false, error: String((error && error.message) || error) };
   }
+}
+
+function maybeStartMeetAudioCapture(reason = "meet-audio-forwarded") {
+  if (!config.captureMeetAudioForTranscript) return { ok: true, skipped: true, reason: "disabled" };
+  if (!routingDestination) return { ok: false, error: "routing_destination_missing" };
+  return startMeetAudioRecorderFromStream(routingDestination.stream, reason, {
+    captureMode: "routing_mix",
+  });
+}
+
+function maybeStartMeetAudioTrackCapture(track, reason = "meet-audio-track") {
+  if (!config.captureMeetAudioForTranscript) return { ok: true, skipped: true, reason: "disabled" };
+  if (!track || track.kind !== "audio") return { ok: false, error: "audio_track_required" };
+  if (track.readyState === "ended") return { ok: false, error: "audio_track_ended" };
+  return startMeetAudioRecorderFromStream(new MediaStream([track]), reason, {
+    captureMode: "receiver_track",
+    sourceTrackId: track.id || "",
+    sourceTrackLabel: track.label || "",
+  });
 }
 
 function stopMeetAudioCapture(reason = "manual_stop") {

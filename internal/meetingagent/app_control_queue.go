@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/AFK-surf/oneesama/internal/agentrunner"
 )
 
 const (
@@ -58,7 +60,8 @@ func (s *Service) enqueueAppControlJob(req AppControlRequest, screenShare map[st
 	if err := requireAppControlBackend(backend); err != nil {
 		return nil, err
 	}
-	id := fmt.Sprintf("app_control_%d", atomic.AddUint64(&s.appControlJobSeq, 1))
+	seq := atomic.AddUint64(&s.appControlJobSeq, 1)
+	id := fmt.Sprintf("app_control_%d_%s", seq, strings.TrimPrefix(newSessionID(), "session_"))
 	now := time.Now().UTC()
 	job := appControlJob{
 		ID:          id,
@@ -120,8 +123,8 @@ func (s *Service) runQueuedAppControlJob(ctx context.Context, id string) {
 			job.Error = err.Error()
 			job.Blocker = err.Error()
 			job.FinishedAt = time.Now().UTC()
-			s.storeAppControlJob(job)
 			s.reportQueuedAppControlJob(ctx, job)
+			s.storeAppControlJob(job)
 			return
 		}
 		job.Backend = backend
@@ -135,7 +138,6 @@ func (s *Service) runQueuedAppControlJob(ctx context.Context, id string) {
 		job.Error = err.Error()
 		job.Blocker = err.Error()
 		job.FinishedAt = time.Now().UTC()
-		s.storeAppControlJob(job)
 		s.logger.Warn(
 			"realtime app-control queued job failed",
 			"job_id", id,
@@ -145,6 +147,7 @@ func (s *Service) runQueuedAppControlJob(ctx context.Context, id string) {
 			"error", err.Error(),
 		)
 		s.reportQueuedAppControlJob(ctx, job)
+		s.storeAppControlJob(job)
 		return
 	}
 	resultMap := appControlResultMap(result, job.ScreenShare)
@@ -157,7 +160,6 @@ func (s *Service) runQueuedAppControlJob(ctx context.Context, id string) {
 	job.Blocker = strings.TrimSpace(stringFromAny(resultMap["blocker"]))
 	job.Result = resultMap
 	job.FinishedAt = time.Now().UTC()
-	s.storeAppControlJob(job)
 	s.logger.Info(
 		"realtime app-control queued job finished",
 		"job_id", id,
@@ -169,6 +171,7 @@ func (s *Service) runQueuedAppControlJob(ctx context.Context, id string) {
 		"blocker", job.Blocker,
 	)
 	s.reportQueuedAppControlJob(ctx, job)
+	s.storeAppControlJob(job)
 }
 
 func (s *Service) markAppControlJobRunning(id string) (appControlJob, bool) {
@@ -202,7 +205,11 @@ func appControlJobMap(job appControlJob) map[string]any {
 		"started_at":     formatAppControlJobTime(job.StartedAt),
 		"finished_at":    formatAppControlJobTime(job.FinishedAt),
 		"operations":     len(job.Request.Operations),
+		"executionMode":  normalizeAppControlExecutionMode(job.Request.ExecutionMode),
 		"answer_hint_zh": "我已经把 app 控制任务排队执行；不用等这个工具调用卡住语音。",
+	}
+	if appControlStatusIsTerminalFailure(job.Status) {
+		out["ok"] = false
 	}
 	if strings.TrimSpace(job.Error) != "" {
 		out["ok"] = false
@@ -232,6 +239,9 @@ func (s *Service) reportQueuedAppControlJob(ctx context.Context, job appControlJ
 	if status == "" {
 		return
 	}
+	resultText := queuedAppControlWorkerResult(job)
+	errorText := firstNonEmpty(job.Error, job.Blocker)
+	envelope := queuedAppControlWorkerResultEnvelope(job, status, resultText, errorText)
 	report, err := s.createWorkerReport(ctx, WorkerReportInput{
 		ID:       job.ID,
 		Status:   status,
@@ -244,8 +254,10 @@ func (s *Service) reportQueuedAppControlJob(ctx context.Context, job appControlJ
 			"source":             "meeting-realtime-shared-app-control",
 			"app_control_job_id": job.ID,
 		},
-		Result: queuedAppControlWorkerResult(job),
-		Error:  firstNonEmpty(job.Error, job.Blocker),
+		Result:                resultText,
+		Error:                 errorText,
+		ResultEnvelope:        &envelope,
+		ResetRealtimeDelivery: true,
 	})
 	if err != nil {
 		s.logger.Warn("app-control worker report create failed", "job_id", job.ID, "error", err)
@@ -261,28 +273,52 @@ func (s *Service) reportQueuedAppControlJob(ctx context.Context, job appControlJ
 }
 
 func queuedAppControlWorkerStatus(job appControlJob) string {
-	switch strings.TrimSpace(job.Status) {
-	case appControlStatusCompleted:
+	status := normalizeAppControlStatus(job.Status)
+	switch {
+	case appControlStatusIsSuccess(status):
 		return appControlStatusCompleted
-	case appControlStatusFailed:
+	case appControlStatusIsTerminalFailure(status):
 		return appControlStatusFailed
-	case appControlStatusQueued, appControlStatusRunning, "":
+	case appControlStatusIsPending(status):
 		return ""
 	default:
 		if strings.TrimSpace(job.Error) != "" || strings.TrimSpace(job.Blocker) != "" {
 			return appControlStatusFailed
 		}
-		return appControlStatusCompleted
+		return appControlStatusFailed
 	}
 }
 
 func queuedAppControlWorkerResult(job appControlJob) string {
 	if job.Result != nil {
-		if summary := strings.TrimSpace(stringFromAny(job.Result["summary"])); summary != "" {
-			return summary
-		}
 		if raw, err := json.Marshal(job.Result); err == nil {
 			return string(raw)
+		}
+	}
+	if text := strings.TrimSpace(firstNonEmpty(job.Error, job.Blocker)); text != "" {
+		return text
+	}
+	return "App-control job completed."
+}
+
+func queuedAppControlWorkerResultEnvelope(job appControlJob, status string, resultText string, errorText string) agentrunner.WorkerResultEnvelope {
+	return agentrunner.WorkerResultEnvelope{
+		Schema:   agentrunner.WorkerResultEnvelopeSchema,
+		JobID:    job.ID,
+		Provider: job.Provider,
+		Mode:     "app_control",
+		Status:   agentrunner.JobStatus(status),
+		Summary:  queuedAppControlWorkerSummary(job),
+		Result:   resultText,
+		Error:    errorText,
+		Source:   "meetingagent",
+	}
+}
+
+func queuedAppControlWorkerSummary(job appControlJob) string {
+	if job.Result != nil {
+		if summary := strings.TrimSpace(stringFromAny(job.Result["summary"])); summary != "" {
+			return summary
 		}
 	}
 	if text := strings.TrimSpace(firstNonEmpty(job.Error, job.Blocker)); text != "" {

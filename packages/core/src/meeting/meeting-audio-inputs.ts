@@ -32,15 +32,35 @@ export function createMeetingAudioInputs({
   })
     ? createRecappiRealtimeAudioInput({ sessionId, recappiTap })
     : null;
-  const realtimeAudioCapture =
-    recordMeeting &&
-    installRealtimeBridge &&
-    input.forwardMeetAudioToRealtime !== false &&
-    !realtimeRecappiAudioInput &&
-    !isGoogleMeetUrlForRealtimeAudio(meetUrl)
-      ? createWebRTCAudioCaptureSink({ sessionId, artifactsDir })
-      : null;
+  const realtimeAudioCapture = shouldCaptureWebRTCRealtimeAudio({
+    config,
+    installRealtimeBridge,
+    recordMeeting,
+    forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime,
+    realtimeRecappiAudioInput,
+    meetUrl,
+  })
+    ? createWebRTCAudioCaptureSink({
+        sessionId,
+        artifactsDir,
+        ...(realtimeRecappiAudioInput ? { basename: "receiver-audio" } : {}),
+      })
+    : null;
   return { recorder, realtimeRecappiAudioInput, realtimeAudioCapture };
+}
+
+export function shouldCaptureWebRTCRealtimeAudio({
+  config = {},
+  installRealtimeBridge,
+  recordMeeting,
+  forwardMeetAudioToRealtime,
+  realtimeRecappiAudioInput,
+  meetUrl,
+}) {
+  if (!recordMeeting || !installRealtimeBridge || forwardMeetAudioToRealtime === false)
+    return false;
+  if (!isGoogleMeetUrlForRealtimeAudio(meetUrl)) return true;
+  return Boolean((config as any).recordReceiverAudioDuringRecappi && realtimeRecappiAudioInput);
 }
 
 export function isGoogleMeetUrlForRealtimeAudio(meetUrl = "") {
@@ -72,6 +92,15 @@ export async function startRealtimeRecappiAudioInput({
   diagnostics,
 }) {
   if (!realtimeRecappiAudioInput) return null;
+  if (!page) {
+    const skipped = {
+      ok: false,
+      skipped: true,
+      reason: "realtime_sidecar_page_missing",
+    };
+    diagnostics?.record?.("recappi_realtime_audio_ready", skipped);
+    return skipped;
+  }
   const started = await realtimeRecappiAudioInput.start({ context, page, diagnostics });
   diagnostics.record("recappi_realtime_audio_ready", started);
   return started;

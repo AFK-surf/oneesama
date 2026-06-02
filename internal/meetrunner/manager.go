@@ -18,6 +18,7 @@ const defaultTimeout = 10 * time.Second
 const joinLaunchTimeout = 4 * time.Minute
 const statusSnapshotTimeout = 45 * time.Second
 const screenShareCallTimeout = 60 * time.Second
+const realtimeTextTurnCallTimeout = 60 * time.Second
 
 type Config struct {
 	Dir     string
@@ -75,6 +76,7 @@ func (m *Manager) Ping(_ context.Context) (RunnerStatus, error) {
 			"runner.ping", "join.google_meet.prepare", "join.session.status", "join.session.stop",
 			"worker.result.inject", "meet.chat.send", "screen_share.start", "screen_share.present",
 			"screen_share.video", "screen_share.apps", "screen_share.app", "screen_share.stop",
+			"realtime.event", "realtime.text_turn",
 		},
 	}, nil
 }
@@ -145,6 +147,30 @@ func (m *Manager) SendMeetChat(ctx context.Context, input MeetChatInput) (MeetCh
 	}
 	if result.Success && !result.OK {
 		result.OK = true
+	}
+	return result, nil
+}
+
+func (m *Manager) RequestRealtimeTextTurn(ctx context.Context, input RealtimeTextTurnInput) (RealtimeTextTurnResult, error) {
+	worker, err := m.resolveCallSession(input.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	var result RealtimeTextTurnResult
+	if err := worker.CallWithTimeoutNoClose(ctx, realtimeTextTurnCallTimeout, "realtime.text_turn", input, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (m *Manager) SendRealtimeEvent(ctx context.Context, input RealtimeEventInput) (RealtimeEventResult, error) {
+	worker, err := m.resolveCallSession(input.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	var result RealtimeEventResult
+	if err := worker.CallWithTimeoutNoClose(ctx, realtimeTextTurnCallTimeout, "realtime.event", input, &result); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

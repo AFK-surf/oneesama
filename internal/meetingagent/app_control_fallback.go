@@ -74,10 +74,22 @@ func appControlShouldFallback(result AppControlResult) bool {
 	if result.OK {
 		return false
 	}
-	reason := strings.ToLower(strings.TrimSpace(firstNonEmpty(result.Error, result.Blocker)))
-	switch reason {
-	case "", "kwwk_app_control_unconfigured", "kwwk_app_control_unavailable", "kwwk_app_control_start_failed":
+	if appControlNeedsBackgroundAgent(result) {
 		return true
 	}
-	return strings.Contains(reason, "unavailable") || strings.Contains(reason, "unconfigured") || strings.Contains(reason, "start")
+	reason := strings.ToLower(strings.TrimSpace(firstNonEmpty(result.Error, result.Blocker)))
+	switch reason {
+	case "kwwk_app_control_unconfigured", "kwwk_app_control_unavailable", "kwwk_app_control_start_failed":
+		return true
+	}
+	return false
+}
+
+func appControlNeedsBackgroundAgent(result AppControlResult) bool {
+	for _, value := range []string{result.Status, result.Blocker, result.Error} {
+		if strings.EqualFold(strings.TrimSpace(value), "needs_background_agent") {
+			return true
+		}
+	}
+	return false
 }

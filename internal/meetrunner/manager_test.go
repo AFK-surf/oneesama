@@ -21,6 +21,15 @@ func requireMeetRunnerRuntime(t *testing.T) {
 	}
 }
 
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestManagerPing(t *testing.T) {
 	t.Parallel()
 	requireMeetRunnerRuntime(t)
@@ -32,6 +41,9 @@ func TestManagerPing(t *testing.T) {
 	}
 	if !status.OK || status.Name != "meet-runner" || status.BridgeMode != "persistent-session" {
 		t.Fatalf("status = %#v, want persistent-session meet-runner", status)
+	}
+	if !containsString(status.Capabilities, "realtime.event") || !containsString(status.Capabilities, "realtime.text_turn") {
+		t.Fatalf("capabilities = %#v, want realtime event and text turn control-plane methods", status.Capabilities)
 	}
 }
 
@@ -47,6 +59,26 @@ func TestManagerPrepareRejectsInvalidMeetURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("PrepareGoogleMeet() error = nil, want invalid meet url")
+	}
+}
+
+func TestManagerPrepareRejectsInlineRealtimePlacement(t *testing.T) {
+	t.Parallel()
+	requireMeetRunnerRuntime(t)
+
+	manager := New(Config{Dir: filepath.Join("..", "..", "meet-runner")})
+	_, err := manager.PrepareGoogleMeet(context.Background(), PrepareGoogleMeetInput{
+		SessionID:                "session_inline_rejected",
+		MeetingURL:               "https://meet.google.com/abc-defg-hij",
+		DryRun:                   true,
+		InstallRealtimeBridge:    true,
+		RealtimeRuntimePlacement: "inline",
+	})
+	if err == nil {
+		t.Fatal("PrepareGoogleMeet() error = nil, want inline placement rejection")
+	}
+	if !strings.Contains(err.Error(), "inline Realtime SDK on Meet has been removed") {
+		t.Fatalf("PrepareGoogleMeet() error = %v, want inline removal guard", err)
 	}
 }
 

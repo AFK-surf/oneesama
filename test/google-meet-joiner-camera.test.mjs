@@ -132,7 +132,10 @@ test("Meet avatar camera defaults avoid 1080p chroma-key CPU burn", async () => 
 test("Realtime Recappi Meet joins keep raw audio on native server VAD", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
 
-  const recappiSource = "const realtimeMeetAudioInputSource = realtimeRecappiAudioInput";
+  const recappiSource = [
+    "const realtimeMeetAudioInputSource = realtimeRecappiAudioInput",
+    '? "recappi_process_audio"',
+  ];
   const recappiConfig = "meetAudioInputSource: realtimeMeetAudioInputSource";
   const oldTranscriptGate = ["gateRealtimeResponsesOn", "InputTranscription"].join("");
   const oldTranscriptFlag = ["responseAfter", "InputTranscription"].join("");
@@ -146,7 +149,7 @@ test("Realtime Recappi Meet joins keep raw audio on native server VAD", async ()
     "browser runtime must not request responses from transcript-derived events",
   );
   assert.ok(
-    source.includes(recappiSource),
+    recappiSource.every((snippet) => source.includes(snippet)),
     "Recappi joins must select the process audio tap as the Realtime input source",
   );
   assert.ok(

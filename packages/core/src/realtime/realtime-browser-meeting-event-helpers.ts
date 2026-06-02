@@ -82,6 +82,14 @@
     function shouldDeliverWorkerResult(job: any): WorkerResultScope {
       const activeSessionId = currentSessionId();
       const jobSessionId = workerResultSessionId(job);
+      if (activeSessionId && !jobSessionId) {
+        return {
+          ok: false,
+          reason: "worker_result_session_missing",
+          currentSessionId: activeSessionId,
+          jobSessionId,
+        };
+      }
       if (activeSessionId && jobSessionId && activeSessionId !== jobSessionId) {
         return {
           ok: false,

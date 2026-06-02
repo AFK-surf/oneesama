@@ -41,6 +41,7 @@ const (
 	defaultOpenAIRealtimeTurnDetection      = "steady"
 	defaultOpenAIRealtimeSessionSchema      = "realtime-2"
 	defaultOpenAIRealtimeAgentRuntime       = "agents-sdk"
+	defaultOpenAIRealtimeRuntimePlacement   = "sidecar"
 	defaultRealtimeBotName                  = "Meeting Avatar Bot"
 	defaultSTTProvider                      = "event"
 	defaultTTSProvider                      = "tone-wav"

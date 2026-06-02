@@ -5,7 +5,7 @@
     {
       "name": "full",
       "toolNames": "*",
-      "minRecall": 0.8,
+      "minRecall": 1,
       "maxDisallowedRate": 0
     }
   ],

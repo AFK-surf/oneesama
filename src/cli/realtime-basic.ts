@@ -703,7 +703,7 @@ export async function realtimeAudioRouteSmoke() {
     const status = await waitForJoinStatus(
       "http://127.0.0.1:18890/join/status",
       (body) =>
-        body.active?.realtimeBridge?.connection?.mockRemoteAudioInjected === true ||
+        body.active?.realtimeBridge?.connection?.remoteAudioRoutedToAvatarBus === true ||
         (body.active?.realtimeBridge?.errors || []).length > 0,
       8_000,
     );

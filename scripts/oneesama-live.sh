@@ -199,6 +199,7 @@ check_live_env_conflicts() {
   check_env_alias_conflict "Codex base URL" ONEESAMA_CODEX_BASE_URL MAB_CODEX_BASE_URL
   check_env_alias_conflict "Codex env key" ONEESAMA_CODEX_ENV_KEY MAB_CODEX_ENV_KEY
   check_env_alias_conflict "Codex wire API" ONEESAMA_CODEX_WIRE_API MAB_CODEX_WIRE_API
+  check_env_alias_conflict "OpenAI Realtime runtime placement" ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT ONEESAMA_REALTIME_RUNTIME_PLACEMENT MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT MAB_REALTIME_RUNTIME_PLACEMENT
   check_env_alias_conflict "state provider" ONEESAMA_STATE_PROVIDER ONEESAMA_PERSISTENCE_PROVIDER MAB_STATE_PROVIDER
   check_env_alias_conflict "state SQLite path" ONEESAMA_STATE_SQLITE_PATH ONEESAMA_PERSISTENCE_SQLITE_PATH MAB_STATE_SQLITE_PATH
 }
@@ -432,6 +433,30 @@ require_env_name() {
 	log "ok: $name exported (length ${#value})"
 }
 
+check_live_meeting_realtime_placement() {
+  if [[ "$subcommand" != "meeting-agent" ]]; then
+    return 0
+  fi
+  local placement normalized
+  placement="$(first_env_value ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT ONEESAMA_REALTIME_RUNTIME_PLACEMENT MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT MAB_REALTIME_RUNTIME_PLACEMENT || true)"
+  if [[ -z "$placement" ]]; then
+    log "ok: OpenAI Realtime runtime placement defaults to sidecar"
+    return 0
+  fi
+  normalized="$(printf '%s' "$placement" | tr '[:upper:]_' '[:lower:]-')"
+  case "$normalized" in
+    sidecar)
+      log "ok: OpenAI Realtime runtime placement explicitly sidecar"
+      ;;
+    inline)
+      die "inline Realtime SDK on Meet has been removed; remove the placement override to use the sidecar default"
+      ;;
+    *)
+      die "OpenAI Realtime runtime placement must be sidecar; got ${placement}"
+      ;;
+  esac
+}
+
 strict_live_slack_enabled() {
   [[ "$subcommand" == "slack-agent" ]] && ! is_true "${ONEESAMA_LIVE_ALLOW_LEGACY_SLACK:-0}"
 }
@@ -481,7 +506,8 @@ preflight_env() {
       fi
     fi
   elif [[ "$subcommand" == "meeting-agent" ]]; then
-    require_env_any "OpenAI Realtime API key" MAB_OPENAI_API_KEY OPENAI_API_KEY
+    require_env_any "OpenAI Realtime API key" ONEESAMA_OPENAI_API_KEY MAB_OPENAI_API_KEY OPENAI_API_KEY
+    check_live_meeting_realtime_placement
   fi
 	local required_codex_env
 	required_codex_env="$(codex_required_env_key || true)"
@@ -518,11 +544,17 @@ check_process_env() {
   kill -0 "$pid" 2>/dev/null || die "process $pid is not running"
 
   local names=()
-  local slack_bot slack_app required_codex_env
+  local slack_bot slack_app openai_realtime_key realtime_placement required_codex_env
   slack_bot="$(first_env_name_with_value ONEESAMA_SLACK_BOT_TOKEN SLACK_BOT_TOKEN MAB_SLACK_BOT_TOKEN || true)"
   slack_app="$(first_env_name_with_value ONEESAMA_SLACK_APP_TOKEN SLACK_APP_TOKEN MAB_SLACK_APP_TOKEN || true)"
   [[ -n "$slack_bot" ]] && names+=("$slack_bot")
   [[ -n "$slack_app" ]] && names+=("$slack_app")
+  if [[ "$subcommand" == "meeting-agent" ]]; then
+    openai_realtime_key="$(first_env_name_with_value ONEESAMA_OPENAI_API_KEY MAB_OPENAI_API_KEY OPENAI_API_KEY || true)"
+    realtime_placement="$(first_env_name_with_value ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT ONEESAMA_REALTIME_RUNTIME_PLACEMENT MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT MAB_REALTIME_RUNTIME_PLACEMENT || true)"
+    [[ -n "$openai_realtime_key" ]] && names+=("$openai_realtime_key")
+    [[ -n "$realtime_placement" ]] && names+=("$realtime_placement")
+  fi
   required_codex_env="$(codex_required_env_key || true)"
   [[ -n "$required_codex_env" ]] && names+=("$required_codex_env")
   if strict_live_slack_enabled; then

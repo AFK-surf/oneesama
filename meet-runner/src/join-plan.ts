@@ -13,17 +13,46 @@ export type BrowserIslandOptions = {
   installRealtimeBridge: boolean;
   realtimeBridgeMode: string;
   realtimeAgentRuntime: string;
+  realtimeRuntimePlacement: string;
   autoConnectRealtime: boolean;
   sendRealtimeSessionUpdate: boolean;
   includeParticipantAudio: boolean;
   forwardMeetAudioToRealtime: boolean;
   meetAudioInputGain?: number;
-  realtimeFallbackToLocalMic: boolean;
   installLocalDialogBridge: boolean;
   installWorkerResultBridge: boolean;
   installScreenShareBridge: boolean;
   autoStartScreenShare: boolean;
 };
+
+function isGoogleMeetPageUrl(value: string) {
+  return /^https:\/\/meet\.google\.com\//i.test(String(value || "").trim());
+}
+
+function normalizeRealtimeRuntimePlacement(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+}
+
+export function assertRealtimeRuntimePlacementForMeetJoin(
+  options: { installRealtimeBridge: boolean; realtimeRuntimePlacement: string },
+  meetingUrl: string,
+) {
+  const placement = normalizeRealtimeRuntimePlacement(options.realtimeRuntimePlacement);
+  if (!options.installRealtimeBridge || !placement) return;
+  if (placement === "sidecar") return;
+  if (placement === "inline" && isGoogleMeetPageUrl(meetingUrl)) {
+    throw new Error(
+      "inline Realtime SDK on Meet has been removed; use realtime_runtime_placement=sidecar",
+    );
+  }
+  if (placement === "inline") return;
+  throw new Error(
+    `realtime_runtime_placement must be sidecar; got ${options.realtimeRuntimePlacement}`,
+  );
+}
 
 export function normalizeBrowserIslandOptions(params: PrepareJoinParams): BrowserIslandOptions {
   const installRealtimeBridge = Boolean(params.install_realtime_bridge);
@@ -45,6 +74,10 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
       typeof params.realtime_bridge_mode === "string" ? params.realtime_bridge_mode.trim() : "",
     realtimeAgentRuntime:
       typeof params.realtime_agent_runtime === "string" ? params.realtime_agent_runtime.trim() : "",
+    realtimeRuntimePlacement:
+      typeof params.realtime_runtime_placement === "string"
+        ? params.realtime_runtime_placement.trim()
+        : "",
     autoConnectRealtime: Boolean(params.auto_connect_realtime),
     sendRealtimeSessionUpdate:
       installRealtimeBridge && params.send_realtime_session_update !== false,
@@ -52,7 +85,6 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
     forwardMeetAudioToRealtime:
       installRealtimeBridge && params.forward_meet_audio_to_realtime !== false,
     meetAudioInputGain: Number(params.meet_audio_input_gain) || undefined,
-    realtimeFallbackToLocalMic: Boolean(params.realtime_fallback_to_local_mic),
     installLocalDialogBridge: Boolean(params.install_local_dialog_bridge),
     installWorkerResultBridge: Boolean(params.install_worker_result_bridge),
     installScreenShareBridge: Boolean(params.install_screen_share_bridge),
@@ -62,6 +94,7 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
 
 export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
   const options = normalizeBrowserIslandOptions(params);
+  assertRealtimeRuntimePlacementForMeetJoin(options, meetingUrl);
   return {
     entry: "google-meet-joiner.ts",
     mode: "playwright-ts",
@@ -79,12 +112,12 @@ export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
     install_realtime_bridge: options.installRealtimeBridge,
     realtime_bridge_mode: options.realtimeBridgeMode,
     realtime_agent_runtime: options.realtimeAgentRuntime,
+    realtime_runtime_placement: options.realtimeRuntimePlacement,
     auto_connect_realtime: options.autoConnectRealtime,
     send_realtime_session_update: options.sendRealtimeSessionUpdate,
     include_participant_audio: options.includeParticipantAudio,
     forward_meet_audio_to_realtime: options.forwardMeetAudioToRealtime,
     meet_audio_input_gain: options.meetAudioInputGain,
-    realtime_fallback_to_local_mic: options.realtimeFallbackToLocalMic,
     install_local_dialog_bridge: options.installLocalDialogBridge,
     install_worker_result_bridge: options.installWorkerResultBridge,
     install_screen_share_bridge: options.installScreenShareBridge,

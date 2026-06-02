@@ -5,6 +5,7 @@ import {
   isLocalVideoPath,
   loadSlackAgentPersonalityContext,
   realtimeSuppressChannelForContext,
+  realtimeSuppressReasonForChannel,
   stageVideoAssetUrl,
   videoContentType,
   workerContext,
@@ -15,11 +16,7 @@ import { createPersistentSessionStore } from "../../../packages/core/src/session
 import { createGoogleMeetJoiner } from "../../../packages/core/src/meeting/google-meet-joiner.js";
 import { createAgentRunner } from "../../../packages/core/src/agent-runner/agent-runner.js";
 import { mintRealtimeClientSecret } from "../../../packages/core/src/realtime/realtime-token.js";
-import {
-  buildRealtimeInstructions,
-  buildRealtimeSessionConfig,
-  realtimeToolSchemas,
-} from "../../../packages/core/src/realtime/realtime-contract.js";
+import { buildRealtimeInstructions } from "../../../packages/core/src/realtime/realtime-contract.js";
 import { createWorkerReportStore } from "../../../packages/core/src/realtime/worker-report-store.js";
 import { createTtsProvider } from "../../../packages/core/src/dialog/tts-provider.js";
 import { createMeetingArtifactPipeline } from "../../../packages/core/src/meeting/post-meeting-artifacts.js";
@@ -29,6 +26,14 @@ import {
   createMeetdRuntimeStore,
   meetdMeetingResponse,
 } from "../../../packages/core/src/meeting/meetd-runtime-store.js";
+import { validateRealtimeRuntimePlacementForJoin } from "./realtime-placement-guard.js";
+import {
+  buildMeetingAgentRealtimeSessionConfig,
+  meetingAgentRealtimeToolsForRequest,
+} from "./realtime-config-tools.js";
+import { realtimeToolRouteRejected } from "./internal-control-guard.js";
+import { createInternalControlGuard, createTSAppControlToolHandler } from "./app-control-routes.js";
+import type { MeetingAgentInput } from "./meeting-agent-types.js";
 
 const config = getRuntimeConfig();
 const sqlitePath = config.stateSqlitePath || `${config.dataDir}/meeting-avatar-bot.sqlite3`;
@@ -44,6 +49,8 @@ const reports = createWorkerReportStore({
   sqlitePath,
   collection: "worker_reports",
 });
+const withInternalControlGuard = createInternalControlGuard(config);
+const handleTSAppControlTool = createTSAppControlToolHandler({ config, reports });
 const ttsProvider = createTtsProvider();
 const artifacts = createMeetingArtifactPipeline({
   rootDir: config.meetingArtifactsDir,
@@ -52,103 +59,59 @@ const artifacts = createMeetingArtifactPipeline({
 const meetdStore = createMeetdRuntimeStore({ sessions });
 const meetdRuntime = createMeetdRuntime({ store: meetdStore });
 
-export interface MeetingAgentInput {
-  url?: string;
-  useJina?: boolean;
-  use_jina?: boolean;
-  maxChars?: number | string;
-  max_chars?: number | string;
-  maxAttempts?: number | string;
-  max_attempts?: number | string;
-  maxResults?: number | string;
-  max_results?: number | string;
-  query?: string;
-  limit?: number | string;
-  count?: number | string;
-  user?: string;
-  data?: unknown;
-  channel?: string;
-  message?: string;
-  meet_url?: string;
-  meetUrl?: string;
-  meetingId?: string;
-  meeting_id?: string;
-  jobId?: string;
-  job_id?: string;
-  id?: string;
-  key?: string;
-  kind?: string;
-  mode?: string;
-  model?: string;
-  event?: unknown;
-  format?: string;
-  reasoning?: unknown;
-  reasoningEffort?: string;
-  reasoning_effort?: string;
-  output_modalities?: string[];
-  outputModalities?: string[];
-  voice?: string;
-  audio?: unknown;
-  avatar?: unknown;
-  context?: unknown;
-  task?: string;
-  text?: string;
-  utterance?: string;
-  reason?: string;
-  preview?: boolean;
-  dryRun?: boolean;
-  dry_run_joiner?: boolean;
-  dryRunJoiner?: boolean;
-  recordMeeting?: boolean;
-  installLocalDialogBridge?: boolean;
-  installRealtimeBridge?: boolean;
-  installScreenShareBridge?: boolean;
-  installWorkerResultBridge?: boolean;
-  realtimeBridgeMode?: string;
-  realtimeInstructions?: string;
-  realtimeSdpUrl?: string;
-  realtimeTokenUrl?: string;
-  meetAudioBackend?: string;
-  forwardMeetAudioToRealtime?: boolean;
-  includeParticipantAudio?: boolean;
-  autoConnectRealtime?: boolean;
-  autoStartScreenShare?: boolean;
-  botName?: string;
-  captureCaptions?: boolean;
-  captionLanguage?: string;
-  disableLive2D?: boolean;
-  collectFixtureState?: boolean;
-  allowNonGoogleMeet?: boolean;
-  artifactsDir?: string;
-  localDialogTurnUrl?: string;
-  localDialogSttProvider?: string;
-  localDialogTtsProvider?: string;
-  localDialogTtsMode?: string;
-  localDialogTtsUrl?: string;
-  localDialogTtsGain?: number;
-  localDialogAcceptanceUtterance?: string;
-  dedupKey?: string;
-  markDelivered?: boolean;
-  minCreatedAt?: string;
-  mock?: boolean;
-  muted?: boolean;
-  now?: string;
-  onlyLinks?: boolean;
-  only_links?: boolean;
-  path?: string;
-  durationMs?: number;
-  frequency?: number;
-  gain?: number;
-  height?: number;
-  instructions?: string;
-  at?: string;
-  allowCodeChanges?: boolean;
-  chat_transcript?: string;
-  chatTranscript?: string;
-  result?: string | Record<string, unknown>;
-  error?: string;
-  status?: string;
-  [key: string]: unknown;
+function defaultRealtimeBridgeModeForRuntime(runtime: unknown) {
+  const normalized = String(runtime || "")
+    .trim()
+    .toLowerCase();
+  if (["agents-sdk", "openai-agents", "openai-agents-sdk"].includes(normalized)) {
+    return "agents-sdk";
+  }
+  return "mock";
+}
+
+function realtimeEventPayload(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function realtimeDeliverySuppressed(delivery: unknown) {
+  const record = recordValue(delivery);
+  const nested = recordValue(record.delivery);
+  return record.suppressed === true || nested.suppressed === true;
+}
+
+function realtimeDeliverySuppressionReason(delivery: unknown) {
+  const record = recordValue(delivery);
+  const nested = recordValue(record.delivery);
+  return String(
+    record.reason ||
+      nested.reason ||
+      realtimeSuppressReasonForChannel(String(record.channel || "")) ||
+      "worker_result_suppressed",
+  );
+}
+
+function suppressedRealtimeDelivery(channel: string) {
+  return {
+    ok: false,
+    suppressed: true,
+    channel,
+    reason: realtimeSuppressReasonForChannel(channel),
+  };
+}
+
+function validateHostRealtimeEvent(event: Record<string, unknown>) {
+  const type = String(event.type || "").trim();
+  if (!type) return { ok: false, error: "realtime_event_type_required" };
+  if (type === "response.cancel" || type === "input_audio_buffer.clear") return { ok: true };
+  return { ok: false, error: "realtime_event_type_not_allowed" };
 }
 
 function reportFinishedWorkerJob(job) {
@@ -488,6 +451,7 @@ async function handleMeetdPostAction(
 const service = createJsonServer({
   name: "meeting-agent",
   port: config.meetingPort,
+  host: config.meetingHost,
   routes: {
     "GET /health": () => ({ body: { status: "ok" } }),
     "GET /healthz": () => ({
@@ -599,27 +563,42 @@ const service = createJsonServer({
       } as Parameters<typeof artifacts.postProcessMeeting>[0]);
       return { status: result.ok ? 200 : 400, body: result };
     },
-    "GET /realtime/config": () => ({
-      ok: true,
-      model: config.openaiRealtimeModel,
-      reasoningEffort: config.openaiRealtimeReasoningEffort,
-      voice: config.openaiRealtimeVoice,
-      turnDetection: config.openaiRealtimeTurnDetection,
-      sessionSchema: config.openaiRealtimeSessionSchema,
-      instructions: buildRealtimeInstructions({
-        botName: config.botName,
-        personalityContext: realtimePersonalityContext,
-        currentUser,
-      }),
-      tools: realtimeToolSchemas,
-      session: buildRealtimeSessionConfig({ botName: config.botName }, config),
+    "GET /realtime/config": withInternalControlGuard(() => {
+      const tools = meetingAgentRealtimeToolsForRequest();
+      return {
+        ok: true,
+        model: config.openaiRealtimeModel,
+        reasoningEffort: config.openaiRealtimeReasoningEffort,
+        voice: config.openaiRealtimeVoice,
+        turnDetection: config.openaiRealtimeTurnDetection,
+        sessionSchema: config.openaiRealtimeSessionSchema,
+        instructions: buildRealtimeInstructions({
+          botName: config.botName,
+          personalityContext: realtimePersonalityContext,
+          currentUser,
+        }),
+        tools,
+        session: buildMeetingAgentRealtimeSessionConfig({ botName: config.botName }, config),
+      };
     }),
-    "POST /tools/*": async ({ url, body }) => {
+    "POST /tools/*": withInternalControlGuard(async ({ url, body }) => {
       const toolName = decodeURIComponent(url.pathname.replace(/^\/tools\/?/, ""));
+      const rejected = realtimeToolRouteRejected(toolName, meetingAgentRealtimeToolsForRequest());
+      if (rejected) return rejected;
+      if (toolName === "kwwk_computer_use" || toolName === "control_shared_app_window") {
+        const b = { ...(body as MeetingAgentInput) };
+        if (toolName === "kwwk_computer_use") b.executionMode = "direct";
+        const status = await joiner.status().catch(() => null);
+        const result = await handleTSAppControlTool(b, status);
+        return {
+          status: 200,
+          body: result,
+        };
+      }
       const result = await handleWorkspaceTool(toolName, body);
       return result?.status ? result : { body: result };
-    },
-    "POST /realtime/client-secret": async ({ body }) => {
+    }),
+    "POST /realtime/client-secret": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       const result = await mintRealtimeClientSecret({
         botName: String(b.botName || config.botName),
@@ -632,12 +611,12 @@ const service = createJsonServer({
         outputModalities: (b.outputModalities || b.output_modalities) as string[] | undefined,
         audio: b.audio,
         instructions: b.instructions,
-        tools: b.tools as unknown[] | undefined,
+        tools: meetingAgentRealtimeToolsForRequest(b.tools as unknown[] | undefined),
         toolChoice: b.toolChoice as string | undefined,
         safetyIdentifier: String(b.safetyIdentifier || b.requestedBy || "meeting-avatar-bot-local"),
       });
       return { status: result.ok ? 200 : result.dryRun ? 200 : 502, body: result };
-    },
+    }),
     "GET /sessions": () => ({ ok: true, sessions: sessions.list() }),
     "POST /sessions": async ({ body }) => {
       const b = body as MeetingAgentInput & { startJoiner?: boolean };
@@ -649,6 +628,17 @@ const service = createJsonServer({
       });
       let joinResult = null;
       if (b.startJoiner || b.dryRunJoiner) {
+        const installRealtimeBridge = b.installRealtimeBridge !== false;
+        const realtimeRuntimePlacement = validateRealtimeRuntimePlacementForJoin(
+          b.realtimeRuntimePlacement || config.openaiRealtimeRuntimePlacement || "",
+          installRealtimeBridge,
+        );
+        if (!realtimeRuntimePlacement.ok) {
+          return {
+            status: realtimeRuntimePlacement.status || 400,
+            body: realtimeRuntimePlacement,
+          };
+        }
         joinResult = await joiner.join({
           sessionId: session.id,
           meetUrl: session.meetUrl,
@@ -665,7 +655,14 @@ const service = createJsonServer({
           installWorkerResultBridge: b.installWorkerResultBridge !== false,
           workerDelegateUrl: b.workerDelegateUrl as string | undefined,
           workerStatusUrl: b.workerStatusUrl as string | undefined,
-          realtimeBridgeMode: String(b.realtimeBridgeMode || "mock"),
+          realtimeBridgeMode: String(
+            b.realtimeBridgeMode ||
+              defaultRealtimeBridgeModeForRuntime(
+                b.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime,
+              ),
+          ),
+          realtimeAgentRuntime: String(b.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime),
+          realtimeRuntimePlacement: realtimeRuntimePlacement.realtimeRuntimePlacement,
           autoConnectRealtime: Boolean(b.autoConnectRealtime),
           includeParticipantAudio: Boolean(b.includeParticipantAudio),
           forwardMeetAudioToRealtime: b.forwardMeetAudioToRealtime !== false,
@@ -713,7 +710,7 @@ const service = createJsonServer({
         },
       };
     },
-    "POST /join/google-meet": async ({ body }) => {
+    "POST /join/google-meet": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput & {
         sessionId?: string;
         workerPollUrl?: string;
@@ -727,6 +724,17 @@ const service = createJsonServer({
         screenShareHeight?: number;
         screenShareFps?: number;
       };
+      const installRealtimeBridge = b.installRealtimeBridge !== false;
+      const realtimeRuntimePlacement = validateRealtimeRuntimePlacementForJoin(
+        b.realtimeRuntimePlacement || config.openaiRealtimeRuntimePlacement || "",
+        installRealtimeBridge,
+      );
+      if (!realtimeRuntimePlacement.ok) {
+        return {
+          status: realtimeRuntimePlacement.status || 400,
+          body: realtimeRuntimePlacement,
+        };
+      }
       const result = await joiner.join({
         sessionId: String(b.sessionId || ""),
         meetUrl: String(b.meetUrl || ""),
@@ -748,7 +756,13 @@ const service = createJsonServer({
             personalityContext: realtimePersonalityContext,
             currentUser,
           }),
-        realtimeBridgeMode: b.realtimeBridgeMode || "mock",
+        realtimeBridgeMode:
+          b.realtimeBridgeMode ||
+          defaultRealtimeBridgeModeForRuntime(
+            b.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime,
+          ),
+        realtimeAgentRuntime: b.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime,
+        realtimeRuntimePlacement: realtimeRuntimePlacement.realtimeRuntimePlacement,
         autoConnectRealtime: Boolean(b.autoConnectRealtime),
         includeParticipantAudio: Boolean(b.includeParticipantAudio),
         forwardMeetAudioToRealtime: b.forwardMeetAudioToRealtime !== false,
@@ -777,7 +791,7 @@ const service = createJsonServer({
         meetAudioBackend: b.meetAudioBackend,
       });
       return { ok: true, result };
-    },
+    }),
     "GET /dialog/providers": () => ({
       ok: true,
       stt: {
@@ -810,13 +824,27 @@ const service = createJsonServer({
       });
       return { status: result.ok ? 200 : 400, body: result };
     },
-    "GET /join/status": () => joiner.status(),
-    "POST /join/stop": async ({ body }) => {
+    "GET /join/status": withInternalControlGuard(() => joiner.status()),
+    "POST /join/stop": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       const result = await joiner.stop(String(b.reason || "api_stop"));
       return { ok: true, result };
-    },
-    "POST /screen-share/start": async ({ body }) => {
+    }),
+    "GET /screen-share/apps": withInternalControlGuard(async () => {
+      const result = await joiner.listShareableApps();
+      return { status: result.ok ? 200 : 400, body: result };
+    }),
+    "POST /screen-share/apps": withInternalControlGuard(async () => {
+      const result = await joiner.listShareableApps();
+      return { status: result.ok ? 200 : 400, body: result };
+    }),
+    "POST /screen-share/app": withInternalControlGuard(async ({ body }) => {
+      const result = await joiner.presentAppShare(
+        body as Parameters<typeof joiner.presentAppShare>[0],
+      );
+      return { status: result.ok ? 200 : 400, body: result };
+    }),
+    "POST /screen-share/start": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput & {
         title?: string;
         screenShareTitle?: string;
@@ -829,8 +857,8 @@ const service = createJsonServer({
         preview: Boolean(b.preview),
       });
       return { status: result.ok ? 200 : 400, body: result };
-    },
-    "POST /screen-share/present": async ({ body }) => {
+    }),
+    "POST /screen-share/present": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput & {
         title?: string;
         screenShareTitle?: string;
@@ -847,8 +875,8 @@ const service = createJsonServer({
         waitMs: b.waitMs,
       });
       return { status: result.ok ? 200 : 400, body: result };
-    },
-    "POST /screen-share/video": async ({ body }) => {
+    }),
+    "POST /screen-share/video": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput & {
         videoUrl?: string;
         title?: string;
@@ -877,7 +905,7 @@ const service = createJsonServer({
         waitMs: b.waitMs,
       });
       return { status: result.ok ? 200 : 400, body: result };
-    },
+    }),
     "GET /stage-media/video": ({ url }) => {
       const filePath = resolve(String(url.searchParams.get("path") || ""));
       const allowedRoots = [
@@ -899,31 +927,34 @@ const service = createJsonServer({
         contentType: videoContentType(filePath),
       };
     },
-    "POST /screen-share/stop": async () => {
+    "POST /screen-share/stop": withInternalControlGuard(async () => {
       const result = await joiner.stopScreenShare();
       return { status: result.ok ? 200 : 400, body: result };
-    },
-    "POST /realtime/event": async ({ body }) => {
+    }),
+    "POST /realtime/event": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
-      const result = await joiner.sendRealtimeEvent(b.event || b);
+      const event = realtimeEventPayload(b.event || b);
+      const validation = validateHostRealtimeEvent(event);
+      if (!validation.ok) return { status: 400, body: validation };
+      const result = await joiner.sendRealtimeEvent(event);
       return { status: result.ok ? 200 : 400, body: result };
-    },
-    "POST /realtime/text-turn": async ({ body }) => {
+    }),
+    "POST /realtime/text-turn": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       const result = await joiner.requestRealtimeTextTurn({
         text: String(b.text || ""),
         instructions: String(b.instructions || ""),
       });
       return { status: result.ok ? 200 : 400, body: result };
-    },
-    "POST /meet/chat": async ({ body }) => {
+    }),
+    "POST /meet/chat": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       const result = await joiner.sendMeetChat({
         text: String(b.text || b.message || ""),
       });
       return { status: result.ok ? 200 : 400, body: result };
-    },
-    "GET /meet/chat": async ({ url }) => {
+    }),
+    "GET /meet/chat": withInternalControlGuard(async ({ url }) => {
       const result = await joiner.readMeetChat({
         limit: Number(url.searchParams.get("limit") || 10),
         onlyLinks: ["1", "true", "yes"].includes(
@@ -931,16 +962,16 @@ const service = createJsonServer({
         ),
       });
       return { status: result.ok ? 200 : 400, body: result };
-    },
-    "POST /meet/chat/read": async ({ body }) => {
+    }),
+    "POST /meet/chat/read": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       const result = await joiner.readMeetChat({
         limit: Number(b.limit || b.count || 10),
         onlyLinks: Boolean(b.onlyLinks || b.only_links),
       });
       return { status: result.ok ? 200 : 400, body: result };
-    },
-    "POST /worker/report": async ({ body }) => {
+    }),
+    "POST /worker/report": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput & { result?: unknown; task?: string };
       const resultText =
         typeof b.result === "string" ? b.result : b.result ? JSON.stringify(b.result) : "";
@@ -961,11 +992,24 @@ const service = createJsonServer({
         ? realtimeSuppressChannelForContext(context, activeSessionId)
         : "";
       const realtimeDelivery = suppressChannel
-        ? { ok: true, channel: suppressChannel }
+        ? suppressedRealtimeDelivery(suppressChannel)
         : await joiner.injectWorkerResult(job);
-      if (realtimeDelivery.ok) {
+      if (realtimeDeliverySuppressed(realtimeDelivery)) {
+        reports.update(job.id, {
+          deliveredToRealtime: false,
+          realtimeSuppressed: true,
+          realtimeDeliveryAttempt: null,
+          realtimeDelivery: {
+            channel: String(realtimeDelivery.channel || ""),
+            suppressed: true,
+            reason: realtimeDeliverySuppressionReason(realtimeDelivery),
+            suppressedAt: new Date().toISOString(),
+          },
+        });
+      } else if (realtimeDelivery.ok) {
         reports.update(job.id, {
           deliveredToRealtime: true,
+          realtimeSuppressed: false,
           realtimeDelivery: {
             channel: realtimeDelivery.channel || "",
             deliveredAt: new Date().toISOString(),
@@ -973,8 +1017,8 @@ const service = createJsonServer({
         });
       }
       return { ok: true, job: reports.get(job.id) || job, realtimeDelivery };
-    },
-    "POST /worker/delegate": async ({ body }) => {
+    }),
+    "POST /worker/delegate": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       const job = await runner.startTask({
         task: String(b.task || ""),
@@ -984,8 +1028,8 @@ const service = createJsonServer({
       });
       const report = reportFinishedWorkerJob(job);
       return { ok: true, job, report };
-    },
-    "POST /dialog/turn": async ({ body }) => {
+    }),
+    "POST /dialog/turn": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput & { timeoutMs?: number };
       const utterance = String(b.utterance || b.text || "").trim();
       if (!utterance) return { status: 400, body: { ok: false, error: "utterance_required" } };
@@ -1011,8 +1055,8 @@ const service = createJsonServer({
           report,
         },
       };
-    },
-    "POST /worker/status": async ({ body }) => {
+    }),
+    "POST /worker/status": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       const jobId = String(b.jobId || b.id || "");
       const job = jobId ? runner.getJob(jobId) || reports.get(jobId) : null;
@@ -1021,9 +1065,9 @@ const service = createJsonServer({
         job,
         jobs: job ? [job] : reports.list(),
       };
-    },
-    "GET /worker/jobs": () => ({ ok: true, jobs: reports.list() }),
-    "POST /worker/poll-realtime": async ({ body }) => {
+    }),
+    "GET /worker/jobs": withInternalControlGuard(() => ({ ok: true, jobs: reports.list() })),
+    "POST /worker/poll-realtime": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       return {
         ok: true,
@@ -1034,8 +1078,32 @@ const service = createJsonServer({
           sessionId: String(b.sessionId || b.session_id || ""),
         }),
       };
-    },
-    "POST /worker/poll-slack": async ({ body }) => {
+    }),
+    "POST /worker/mark-realtime-delivered": withInternalControlGuard(async ({ body }) => {
+      const b = body as MeetingAgentInput;
+      const jobId = String(b.jobId || b.job_id || b.id || "");
+      const existing = jobId ? reports.get(jobId) : null;
+      const expectedToken = String(
+        (existing?.realtimeDeliveryAttempt as { token?: string } | undefined)?.token || "",
+      );
+      const deliveryToken = String(b.deliveryToken || b.delivery_token || b.token || "");
+      if (!existing || !expectedToken || deliveryToken !== expectedToken) {
+        return {
+          status: 409,
+          body: {
+            ok: false,
+            job: existing || null,
+            error: "realtime_delivery_attempt_token_required",
+          },
+        };
+      }
+      const job = reports.markRealtimeDelivered(jobId, {
+        channel: String(b.channel || ""),
+        deliveryToken,
+      });
+      return { status: job ? 200 : 404, body: { ok: Boolean(job), job } };
+    }),
+    "POST /worker/poll-slack": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput;
       return {
         ok: true,
@@ -1044,8 +1112,8 @@ const service = createJsonServer({
           markDelivered: b.markDelivered !== false,
         }),
       };
-    },
-    "POST /worker/mark-slack-delivered": async ({ body }) => {
+    }),
+    "POST /worker/mark-slack-delivered": withInternalControlGuard(async ({ body }) => {
       const b = body as MeetingAgentInput & { ts?: string };
       const jobId = String(b.jobId || b.id || "");
       const job = jobId
@@ -1062,7 +1130,7 @@ const service = createJsonServer({
           })
         : null;
       return { status: job ? 200 : 404, body: { ok: Boolean(job), job } };
-    },
+    }),
   },
 });
 

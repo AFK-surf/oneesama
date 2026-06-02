@@ -1,208 +1,4 @@
 /* eslint-disable no-unused-vars */
-const {
-  rememberAvatarToolCall,
-  rememberAvatarToolError,
-  rememberWorkerToolCall,
-  rememberWorkerToolError,
-  rememberMeetToolCall,
-  rememberMeetToolError,
-  rememberWorkspaceToolCall,
-  rememberWorkspaceToolError,
-} = (window as any).__MAB_REALTIME_LOCAL_TOOL_ROUTER_HELPERS.createToolState(state);
-
-function realtimeItemMetadata(event) {
-  const item = event?.item || event?.message || {};
-  return {
-    ...(typeof event?.metadata === "object" && event.metadata ? event.metadata : {}),
-    ...(typeof item?.metadata === "object" && item.metadata ? item.metadata : {}),
-  };
-}
-
-function realtimeEventSource(event) {
-  const metadata = realtimeItemMetadata(event);
-  return String(metadata.source || event?.__mabSource || event?.source || "").trim();
-}
-
-function isUserInputTextItem(event) {
-  if (event?.type !== "conversation.item.create") return false;
-  const item = event.item || event.message || {};
-  if (item.role !== "user") return false;
-  return (item.content || []).some((part) => part?.type === "input_text" && part?.text);
-}
-
-function shouldAllowUserInputTextEvent(event) {
-  if (!isUserInputTextItem(event)) return { ok: true, source: "" };
-  const source = realtimeEventSource(event);
-  // Captions are intentionally absent here: ASR/Realtime speech turns must come
-  // from Meet audio, not from a caption fallback that can drift or echo.
-  const allowed = new Set(["manual_text_turn", "meet_chat_observer"]);
-  return { ok: allowed.has(source), source };
-}
-
-function sanitizeRealtimeEventForWire(event) {
-  const cloned = JSON.parse(JSON.stringify(event || {}));
-  delete cloned.metadata;
-  delete cloned.__mabSource;
-  for (const key of ["item", "message", "image"]) {
-    if (cloned[key] && typeof cloned[key] === "object") {
-      delete cloned[key].metadata;
-      delete cloned[key].__mabSource;
-    }
-  }
-  return cloned;
-}
-
-function sendRealtimeEvent(event) {
-  const textGuard = shouldAllowUserInputTextEvent(event);
-  if (!textGuard.ok) {
-    state.connection.blockedUserTextEvents = (state.connection.blockedUserTextEvents || 0) + 1;
-    recordTimeline("realtime_user_text_blocked", {
-      source: textGuard.source || "missing",
-      type: event?.type || "",
-    });
-    updateFeedback();
-    return "blocked-untrusted-user-text";
-  }
-  const stamped = {
-    ...event,
-    event_id: event.event_id || `evt_${randomEventId()}`,
-  };
-  state.outbound.push({ ts: new Date().toISOString(), event: stamped });
-  state.outbound = state.outbound.slice(-100);
-  state.connection.lastOutboundEventAt = new Date().toISOString();
-  state.connection.lastOutboundEventType = stamped.type || "";
-  recordTimeline("realtime_outbound", summarizeRealtimeEvent(stamped));
-  updateFeedback();
-  const wireEvent = sanitizeRealtimeEventForWire(stamped);
-
-  if (state.agentRuntime.active === "agents-sdk" && activeRealtimeAgentTransport?.sendEvent) {
-    if (stamped.type === "response.cancel" && activeRealtimeAgentSession?.interrupt) {
-      activeRealtimeAgentSession.interrupt();
-    } else {
-      activeRealtimeAgentTransport.sendEvent(wireEvent);
-    }
-    state.connection.sentDataChannelMessages.push({
-      ts: new Date().toISOString(),
-      payload: JSON.stringify(wireEvent),
-      runtime: "agents-sdk",
-    });
-    state.connection.sentDataChannelMessages = state.connection.sentDataChannelMessages.slice(-100);
-    return "agents-sdk-transport";
-  }
-
-  const dataChannel = window.MAB_REALTIME_DATA_CHANNEL || window.MAB_REALTIME_DC;
-  if (dataChannel?.readyState === "open" && typeof dataChannel.send === "function") {
-    if (
-      state.connection.peerConnectionState === "failed" ||
-      state.connection.peerConnectionState === "closed"
-    ) {
-      scheduleRealtimeReconnect(`send_${state.connection.peerConnectionState}`, 0);
-    }
-    dataChannel.send(JSON.stringify(wireEvent));
-    return "data-channel";
-  }
-
-  if (state.connection.mode !== "mock" && state.connection.mode !== "webrtc-mock") {
-    scheduleRealtimeReconnect("send_without_open_data_channel", 0);
-  }
-  window.dispatchEvent(new CustomEvent("meeting-avatar-realtime-event", { detail: wireEvent }));
-  return "custom-event";
-}
-
-const {
-  extractLocalToolCall,
-  runLocalAvatarTool,
-  updateAvatarHudStatus,
-  postJson,
-  localServiceUrl,
-  runLocalWorkerTool,
-  runLocalWorkspaceTool,
-} = (window as any).__MAB_REALTIME_LOCAL_TOOL_HELPERS.create({
-  config,
-  state,
-  localWorkspaceTools,
-  isLocalToolName,
-  recordTimeline,
-  rememberAvatarToolError,
-});
-const {
-  sendMeetChat,
-  readMeetChat: _readMeetChat,
-  installMeetChatObserver,
-  runLocalMeetTool,
-} = (window as any).__MAB_REALTIME_MEET_CHAT_HELPERS.create({
-  config,
-  state,
-  observedMeetChatKeys,
-  postJson,
-  localServiceUrl,
-  recordTimeline,
-  sendRealtimeEvent,
-  updateFeedback,
-});
-
-const meetingEventHelpers = (window as any).__MAB_REALTIME_MEETING_EVENT_HELPERS.create({
-  config,
-  state,
-  recordTimeline,
-});
-
-const {
-  deliverFunctionToolResult,
-  deliverFunctionToolError,
-  prepareFunctionToolResult,
-  prepareFunctionToolError,
-  deliverWorkerResult,
-  rememberSuppressedWorkerResult,
-  shouldDeliverWorkerResult,
-} = (window as any).__MAB_REALTIME_TURN_POLICY_HELPERS.create({
-  config,
-  state,
-  sendRealtimeEvent,
-  sendMeetChat,
-  recordTimeline,
-  buildWorkerResultChatText,
-  shouldSendWorkerResultToMeetChat,
-  shouldVoiceAckWorkerResult,
-  buildWorkerResultVoiceText,
-  buildWorkerResultText,
-  meetingEvents: meetingEventHelpers,
-});
-const { runLocalToolForSDK, handleLocalToolCallEvent } = (
-  window as any
-).__MAB_REALTIME_LOCAL_TOOL_ROUTER_HELPERS.create({
-  state,
-  handledLocalToolCallIds,
-  extractLocalToolCall,
-  runLocalAvatarTool,
-  runLocalWorkerTool,
-  runLocalMeetTool,
-  runLocalWorkspaceTool,
-  deliverFunctionToolResult,
-  deliverFunctionToolError,
-  prepareFunctionToolResult,
-  prepareFunctionToolError,
-  rememberAvatarToolCall,
-  rememberAvatarToolError,
-  rememberWorkerToolCall,
-  rememberWorkerToolError,
-  rememberMeetToolCall,
-  rememberMeetToolError,
-  rememberWorkspaceToolCall,
-  rememberWorkspaceToolError,
-  recordTimeline,
-  updateFeedback,
-});
-
-const { createMockDataChannel, routeRemoteAudioStream, injectMockRemoteAudio } = (
-  window as any
-).__MAB_REALTIME_AUDIO_OUTPUT_HELPERS.create({
-  state,
-  rememberError,
-  recordTimeline,
-  updateFeedback,
-});
-
 interface BuildSessionUpdateOptions {
   session?: RealtimeSessionShape & { schema?: string; session_schema?: string };
   instructions?: string;
@@ -381,7 +177,7 @@ function buildRealtimeAgentSDKTools(namespace, tools = []) {
             details?.call_id ||
             "";
           const execution = await runLocalToolForSDK(name, input || {}, callId);
-          const output = JSON.stringify(execution.delivery?.modelResult || execution.result);
+          const output = JSON.stringify(realtimeAgentSDKToolModelOutput(execution));
           return execution.delivery?.policy?.autoRespond === false && namespace.backgroundResult
             ? namespace.backgroundResult(output)
             : output;
@@ -391,4 +187,13 @@ function buildRealtimeAgentSDKTools(namespace, tools = []) {
   }
   state.agentRuntime.sdkToolNames = sdkTools.map((entry) => entry.name || "");
   return sdkTools;
+}
+
+function realtimeAgentSDKToolModelOutput(execution) {
+  return (
+    execution?.delivery?.modelResult?.result ||
+    execution?.delivery?.compactResult ||
+    execution?.result ||
+    execution
+  );
 }

@@ -57,7 +57,7 @@
     }
 
     function textFromHistoryContent(content: unknown): string {
-      if (typeof content === "string") return content;
+      if (typeof content === "string") return content.slice(0, 500);
       if (!Array.isArray(content)) return "";
       return content
         .map((part) => {
@@ -69,6 +69,10 @@
         .slice(0, 500);
     }
 
+    function uniqueStrings(values: string[]): string[] {
+      return [...new Set(values.filter(Boolean))];
+    }
+
     function summarizeHistoryItem(item: unknown) {
       const entry = (item || {}) as Record<string, unknown>;
       return {
@@ -78,6 +82,228 @@
         callId: String(entry.call_id || entry.callId || ""),
         text: textFromHistoryContent(entry.content || entry.output || entry.text),
       };
+    }
+
+    const shareToolNames = new Set([
+      "list_shareable_windows",
+      "share_existing_app_window",
+      "kwwk_computer_use",
+      "control_shared_app_window",
+    ]);
+    const shareIntentPattern =
+      /(共享|分享|演示|展示|给.*看|share|present|show).*(浏览器|chrome|窗口|屏幕|app|应用|pencil|vscode|vs code|notion|terminal)|((浏览器|chrome|窗口|屏幕|app|应用|pencil|vscode|vs code|notion|terminal).*(共享|分享|演示|展示|share|present|show))/i;
+    const controlIntentPattern =
+      /(控制|操作|点击|输入|回车|滚动|切到|处理.*卡住|画|涂|编辑|修改|control|click|type|scroll|press|draw|edit)/i;
+
+    function historyToolName(item: unknown): string {
+      const entry = (item || {}) as Record<string, unknown>;
+      const name = String(entry.name || entry.tool_name || entry.toolName || "").trim();
+      if (name) return name;
+      const itemObj = (entry.item || {}) as Record<string, unknown>;
+      return String(itemObj.name || itemObj.tool_name || itemObj.toolName || "").trim();
+    }
+
+    function historyRole(item: unknown): string {
+      const entry = (item || {}) as Record<string, unknown>;
+      return String(entry.role || (entry as any).item?.role || "").trim();
+    }
+
+    function historyText(item: unknown): string {
+      const entry = (item || {}) as Record<string, unknown>;
+      return textFromHistoryContent(
+        entry.content || entry.output || entry.text || (entry as any).item?.content,
+      );
+    }
+
+    function functionalIntentForText(text: string) {
+      const value = String(text || "");
+      if (controlIntentPattern.test(value)) return "control";
+      if (shareIntentPattern.test(value)) return "share";
+      return "";
+    }
+
+    function expectedToolsForIntent(intent: string) {
+      if (intent === "control") return ["kwwk_computer_use", "control_shared_app_window"];
+      if (intent === "share") return ["list_shareable_windows", "share_existing_app_window"];
+      return [];
+    }
+
+    function modelTurnSignalCount() {
+      const responseEvents = state.inbound.filter((entry) =>
+        String(entry.event?.type || "").startsWith("response."),
+      ).length;
+      const agentModelEvents = state.inbound.filter((entry) =>
+        [
+          "agents_sdk.agent_start",
+          "agents_sdk.agent_end",
+          "agents_sdk.audio_start",
+          "agents_sdk.audio_stopped",
+          "agents_sdk.audio_interrupted",
+        ].includes(String(entry.event?.type || "")),
+      ).length;
+      const avatarAudio = (window as any).MAB_AVATAR_AUDIO || {};
+      const avatarOutputEnergy = avatarAudio.outputEnergy || {};
+      return responseEvents + agentModelEvents + (avatarOutputEnergy.observed === true ? 1 : 0);
+    }
+
+    function toolCallName(call: unknown): string {
+      const entry = (call || {}) as Record<string, unknown>;
+      return String(entry.name || entry.toolName || entry.tool_name || "").trim();
+    }
+
+    function toolCallTime(call: unknown): number {
+      const ts = String((call as Record<string, unknown>)?.ts || "");
+      const parsed = Date.parse(ts);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function recentFunctionalToolNamesForTurn(turn: Record<string, any>, turnTime: number) {
+      const baselineMeetToolCalls = Math.max(0, Number(turn.baselineMeetToolCalls || 0));
+      const baselineWorkspaceToolCalls = Math.max(0, Number(turn.baselineWorkspaceToolCalls || 0));
+      return uniqueStrings(
+        [
+          ...(state.meetTools.calls || []).slice(baselineMeetToolCalls),
+          ...(state.workspaceTools.calls || []).slice(baselineWorkspaceToolCalls),
+        ]
+          .filter((call) => toolCallTime(call) >= turnTime)
+          .map(toolCallName)
+          .filter((name) => shareToolNames.has(name)),
+      );
+    }
+
+    function analyzeManualFunctionalTurnFallback(
+      historyTurn: Record<string, any>,
+      history: unknown[] = [],
+    ) {
+      if (historyTurn.observed) return historyTurn;
+      const turns = Array.isArray(state.turnPolicy.manualFunctionalTurns)
+        ? state.turnPolicy.manualFunctionalTurns
+        : [];
+      const turn = turns[turns.length - 1] || null;
+      if (!turn) return historyTurn;
+      const turnTime = Date.parse(String(turn.ts || ""));
+      const recent = Number.isFinite(turnTime) && Date.now() - turnTime < 5 * 60 * 1000;
+      if (!recent) return historyTurn;
+      const expectedToolNames = Array.isArray(turn.expectedToolNames)
+        ? turn.expectedToolNames
+        : expectedToolsForIntent(String(turn.intent || ""));
+      const toolNames = recentFunctionalToolNamesForTurn(turn, turnTime);
+      const toolCalled = toolNames.some((name) => expectedToolNames.includes(name));
+      const modelTurnObserved = modelTurnSignalCount() > Number(turn.baselineModelTurnSignals || 0);
+      const historyObserved = history.some(
+        (item) =>
+          historyRole(item) === "user" &&
+          historyText(item).includes(String(turn.userText || "").slice(0, 120)),
+      );
+      const fakeExecution = !toolCalled && modelTurnObserved;
+      return {
+        observed: true,
+        source: "manual_text_turn",
+        historyObserved,
+        intent: turn.intent || "",
+        userIndex: -1,
+        userText: String(turn.userText || "").slice(0, 800),
+        expectedToolNames,
+        toolNames,
+        assistantText: "",
+        modelTurnObserved,
+        toolCalled,
+        fakeExecution,
+        reason: toolCalled
+          ? "expected_tool_observed_after_manual_functional_turn"
+          : fakeExecution
+            ? "manual_functional_turn_model_turn_without_expected_tool"
+            : historyObserved
+              ? "manual_functional_turn_in_history_waiting_for_tool"
+              : "manual_functional_turn_missing_from_sdk_history",
+      };
+    }
+
+    function analyzeLatestFunctionalTurn(history: unknown[] = []) {
+      let userIndex = -1;
+      let userText = "";
+      let intent = "";
+      for (let index = history.length - 1; index >= 0; index -= 1) {
+        const role = historyRole(history[index]);
+        if (role !== "user") continue;
+        const text = historyText(history[index]);
+        const detected = functionalIntentForText(text);
+        if (!detected) continue;
+        userIndex = index;
+        userText = text;
+        intent = detected;
+        break;
+      }
+      if (userIndex < 0) {
+        return analyzeManualFunctionalTurnFallback(
+          {
+            observed: false,
+            fakeExecution: false,
+            toolCalled: false,
+            reason: "no_recent_functional_user_turn",
+          },
+          history,
+        );
+      }
+      const expectedToolNames = expectedToolsForIntent(intent);
+      const afterUser = history.slice(userIndex + 1);
+      const toolNames = uniqueStrings(
+        afterUser.map(historyToolName).filter((name) => shareToolNames.has(name)),
+      );
+      const assistantText = afterUser
+        .filter((item) => historyRole(item) === "assistant")
+        .map(historyText)
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 800);
+      const toolCalled = toolNames.some((name) => expectedToolNames.includes(name));
+      const fakeExecution = !toolCalled && Boolean(assistantText);
+      return {
+        observed: true,
+        intent,
+        userIndex,
+        userText: userText.slice(0, 800),
+        expectedToolNames,
+        toolNames,
+        assistantText,
+        toolCalled,
+        fakeExecution,
+        reason: toolCalled
+          ? "expected_tool_observed_in_history"
+          : fakeExecution
+            ? "assistant_text_without_expected_tool"
+            : "expected_tool_missing",
+      };
+    }
+
+    function recordManualFunctionalTextTurn(text: string, detail: Record<string, unknown> = {}) {
+      const userText = String(text || "").trim();
+      const intent = functionalIntentForText(userText);
+      if (!intent) return { ok: true, skipped: true, reason: "not_functional_turn" };
+      const entry = {
+        ts: new Date().toISOString(),
+        source: "manual_text_turn",
+        userText: userText.slice(0, 800),
+        intent,
+        expectedToolNames: expectedToolsForIntent(intent),
+        baselineModelTurnSignals: modelTurnSignalCount(),
+        baselineMeetToolCalls: state.meetTools.calls.length,
+        baselineWorkspaceToolCalls: state.workspaceTools.calls.length,
+        ...detail,
+      };
+      state.turnPolicy.manualFunctionalTurns.push(entry);
+      state.turnPolicy.manualFunctionalTurns = state.turnPolicy.manualFunctionalTurns.slice(-40);
+      recordTimeline("realtime_manual_functional_turn_recorded", {
+        intent,
+        chars: userText.length,
+        baselineModelTurnSignals: entry.baselineModelTurnSignals,
+        baselineMeetToolCalls: entry.baselineMeetToolCalls,
+        baselineWorkspaceToolCalls: entry.baselineWorkspaceToolCalls,
+      });
+      updateContextHealthFromHistory(currentHistorySnapshot());
+      return { ok: true, ...entry };
     }
 
     function currentHistorySnapshot(): unknown[] {
@@ -93,6 +319,7 @@
       state.contextHealth.nextCompactThreshold = lifecycle.compactTokenThreshold;
       state.contextHealth.recentItemsRetained = lifecycle.recentItems;
       state.contextHealth.lastHistoryTail = history.slice(-8).map(summarizeHistoryItem);
+      state.contextHealth.latestFunctionalTurn = analyzeLatestFunctionalTurn(history);
       return state.contextHealth;
     }
 
@@ -293,7 +520,8 @@
       if (metadata?.source) summary.source = String(metadata.source).slice(0, 120);
       if (metadata?.reason) summary.reason = String(metadata.reason).slice(0, 200);
       const response = eventObj.response as { id?: string } | undefined;
-      if (response?.id) summary.responseId = response.id;
+      const responseId = response?.id || eventObj.response_id || eventObj.responseId;
+      if (responseId) summary.responseId = String(responseId);
       const item = eventObj.item as { type?: string } | undefined;
       if (item?.type) summary.itemType = item.type;
       if (eventObj.name) summary.name = String(eventObj.name);
@@ -311,6 +539,27 @@
 
     function rememberTranscriptEvent(event) {
       const type = String(event?.type || "");
+      if (
+        type === "conversation.item.input_audio_transcription.delta" &&
+        typeof event.delta === "string"
+      ) {
+        state.transcripts.currentInput += event.delta;
+        state.transcripts.currentInput = state.transcripts.currentInput.slice(-4000);
+        return;
+      }
+      if (type === "conversation.item.input_audio_transcription.completed") {
+        const text = String(event.transcript || state.transcripts.currentInput || "").trim();
+        if (text) {
+          state.transcripts.input.push({
+            ts: new Date().toISOString(),
+            itemId: String(event.item_id || event.itemId || ""),
+            text: text.slice(0, 2000),
+          });
+          state.transcripts.input = state.transcripts.input.slice(-20);
+        }
+        state.transcripts.currentInput = "";
+        return;
+      }
       if (type === "response.output_audio_transcript.delta" && typeof event.delta === "string") {
         state.transcripts.currentOutput += event.delta;
         state.transcripts.currentOutput = state.transcripts.currentOutput.slice(-4000);
@@ -329,6 +578,30 @@
         }
         state.transcripts.currentOutput = "";
         return;
+      }
+    }
+
+    function responseIdFromEvent(event): string {
+      return String(event?.response?.id || event?.response_id || event?.responseId || "").trim();
+    }
+
+    function rememberResponseLifecycleEvent(event) {
+      const type = String(event?.type || "");
+      if (type === "response.created") {
+        const responseId = responseIdFromEvent(event);
+        if (responseId) state.protection.activeResponseId = responseId;
+        return;
+      }
+      if (
+        type === "response.done" ||
+        type === "response.failed" ||
+        type === "response.cancelled" ||
+        type === "response.incomplete"
+      ) {
+        const responseId = responseIdFromEvent(event);
+        if (!responseId || state.protection.activeResponseId === responseId) {
+          state.protection.activeResponseId = "";
+        }
       }
     }
 
@@ -479,6 +752,42 @@
           signals,
         };
       }
+      if (checks.meetParticipantAudioExpected && checks.meetAudioRoutedToRealtimeInput) {
+        const source = checks.currentRealtimeInputSource || "unknown";
+        const routedSourceNeedsEnergy = [
+          "meet_audio_mix",
+          "host_meet_audio_pcm",
+          "recappi_process_audio_tap",
+        ].includes(source);
+        if (routedSourceNeedsEnergy && !checks.meetAudioEnergyObserved) {
+          const blocked = missingInputMs >= missingInputBlockAfterMs;
+          return {
+            status: blocked ? "blocked" : "waiting",
+            reason: "meet_audio_no_energy_observed",
+            ready: false,
+            expected: true,
+            source,
+            blockers: ["waiting_for_meet_audio", "meet_audio_no_energy_observed"],
+            signals,
+          };
+        }
+        if (
+          routedSourceNeedsEnergy &&
+          checks.meetAudioEnergyObserved &&
+          checks.meetAudioSilenceMs > checks.meetAudioEnergyStaleMs
+        ) {
+          const blocked = checks.meetAudioSilenceMs >= missingInputBlockAfterMs;
+          return {
+            status: blocked ? "blocked" : "waiting",
+            reason: "meet_audio_energy_stale",
+            ready: false,
+            expected: true,
+            source,
+            blockers: ["waiting_for_meet_audio", "meet_audio_energy_stale"],
+            signals,
+          };
+        }
+      }
       return {
         status: "ok",
         reason: "input_audio_ready",
@@ -555,6 +864,13 @@
       })();
 
       const toolTurns = (() => {
+        if (checks.latestFunctionalTurnFakeExecution) {
+          return matrixCell(
+            "blocked",
+            "assistant_text_without_expected_functional_tool",
+            checks.latestFunctionalTurn || {},
+          );
+        }
         if (appControlJobs.blocked > 0) {
           return matrixCell("blocked", "app_control_job_blocked", appControlJobs);
         }
@@ -697,6 +1013,11 @@
         workerToolCalls: state.workerTools.calls.length,
         meetToolCalls: state.meetTools.calls.length,
         workspaceToolCalls: state.workspaceTools.calls.length,
+        latestFunctionalTurn: state.contextHealth.latestFunctionalTurn || null,
+        latestFunctionalTurnFakeExecution:
+          state.contextHealth.latestFunctionalTurn?.fakeExecution === true,
+        latestFunctionalTurnToolCalled:
+          state.contextHealth.latestFunctionalTurn?.toolCalled === true,
         appControlJobTotal: appControlJobs.total,
         appControlJobsPending: appControlJobs.pending,
         appControlJobsStale: appControlJobs.stale,
@@ -746,6 +1067,13 @@
         status = "blocked";
         summary = "Realtime session.update has not been sent.";
         blockers.push("session_not_configured");
+      } else if (checks.latestFunctionalTurnFakeExecution) {
+        status = "tool_blocked";
+        summary =
+          state.contextHealth.latestFunctionalTurn?.source === "manual_text_turn"
+            ? "Realtime text-turn replay produced model activity without SDK history evidence or a matching share/control tool call."
+            : "Realtime answered a functional share/control request without an observed matching tool call in the SDK history tail.";
+        blockers.push("assistant_text_without_expected_functional_tool");
       } else if (
         audioInputPolicy.expected &&
         !audioInputPolicy.ready &&
@@ -822,6 +1150,13 @@
           : "Realtime output path is healthy for text/tool turns; audio input is intentionally disabled to avoid avatar self-echo.";
       }
 
+      if (
+        checks.latestFunctionalTurnFakeExecution &&
+        !blockers.includes("assistant_text_without_expected_functional_tool")
+      ) {
+        blockers.push("assistant_text_without_expected_functional_tool");
+      }
+
       const feedback = {
         status,
         summary,
@@ -835,6 +1170,7 @@
     }
 
     function updateFeedback() {
+      updateContextHealthFromHistory(currentHistorySnapshot());
       state.feedback = classifyRealtimeFeedback();
       state.audioInputPolicy = state.feedback.audioInputPolicy;
       state.runtimeState = state.feedback.runtimeState;
@@ -843,6 +1179,10 @@
 
     function rememberInboundEvent(event, source = "data-channel") {
       const summary = summarizeRealtimeEvent(event);
+      if (summary.type === "session.created") {
+        const sessionId = String((event as any)?.session?.id || "");
+        if (sessionId) state.connection.openaiSessionId = sessionId;
+      }
       state.inbound.push({
         ts: new Date().toISOString(),
         source,
@@ -853,6 +1193,7 @@
       state.connection.lastInboundEventAt = new Date().toISOString();
       state.connection.lastInboundEventType = summary.type || "";
       rememberTranscriptEvent(event);
+      rememberResponseLifecycleEvent(event);
       recordTimeline("realtime_inbound", { source, ...summary });
       updateFeedback();
     }
@@ -865,6 +1206,7 @@
       maybeCompactRealtimeHistory,
       pushSessionContext,
       rememberInboundEvent,
+      recordManualFunctionalTextTurn,
       rememberSessionContext,
       rememberTranscriptEvent,
       summarizeRealtimeEvent,

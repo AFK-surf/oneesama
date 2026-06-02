@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join as pathJoin } from "node:path";
 import { getRuntimeConfig } from "../env.ts";
 import { buildAvatarRuntimeInitScripts } from "../avatar-runtime/runtime-init-builder.ts";
@@ -13,9 +13,10 @@ import { dismissMeetPrompts, installMeetPromptAutoDismisser } from "./meet-promp
 import {
   buildRealtimeInstructions,
   buildRealtimeSessionConfig,
+  defaultRealtimeToolSchemas,
   type RealtimeCurrentUser,
-  realtimeToolSchemas,
 } from "../realtime/realtime-contract.ts";
+import { normalizeRealtimeRuntimePlacement } from "../realtime/realtime-browser-init-builder.ts";
 import {
   DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
   DEFAULT_SYNTHETIC_SCREEN_SHARE_HEIGHT,
@@ -36,6 +37,22 @@ import {
   type LocalStaticAssetServer,
   type MeetChatInput,
 } from "./google-meet-joiner-base.ts";
+import { createActiveBrowserRecord } from "./google-meet-joiner-browser-record.ts";
+import {
+  getRealtimeControlPageForActive,
+  injectWorkerResultIntoActive,
+  readMeetChatFromActive,
+  requestRealtimeTextTurnFromActive,
+  sendMeetChatFromActive,
+  sendRealtimeEventToActive,
+} from "./google-meet-joiner-realtime-control.ts";
+import {
+  assertRealtimeRuntimePlacementForMeetJoin,
+  collectRealtimeSidecarPageStatus,
+  defaultRealtimeBridgeModeForRuntime,
+  mergeMeetSurfaceAudioOutputState,
+} from "./google-meet-joiner-realtime-status.ts";
+import { startRealtimeSidecarPage } from "./google-meet-joiner-realtime-sidecar.ts";
 import { clickFirstVisible, collectButtonInventory } from "./google-meet-joiner-ui.ts";
 import {
   buildMeetingAwarenessState,
@@ -71,15 +88,8 @@ function videoMimeType(relativePath: string): string {
   return "video/mp4";
 }
 
-const demoSurfaceRealtimeTools = new Set([
-  "open_shared_browser_surface",
-  "create_shared_workspace",
-  "control_shared_browser_surface",
-  "stop_shared_browser_surface",
-]);
-
 export function defaultGoogleMeetRealtimeTools() {
-  return realtimeToolSchemas.filter((tool) => !demoSurfaceRealtimeTools.has(tool.name));
+  return defaultRealtimeToolSchemas;
 }
 
 export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
@@ -94,6 +104,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     stop: (reason?: string) => void;
   } = null;
   const activeBrowserPath = pathJoin(config.dataDir, "active-meet-browser.json");
+  const activeBrowserRecord = createActiveBrowserRecord(activeBrowserPath);
 
   function buildConfiguredRealtimeCurrentUser(): RealtimeCurrentUser {
     return {
@@ -107,92 +118,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     };
   }
 
-  async function clearActiveBrowserRecord() {
-    await unlink(activeBrowserPath).catch(() => {});
-  }
-
-  async function rememberActiveBrowser(browser, sessionId, meetUrl) {
-    const pid = typeof browser?.process === "function" ? browser.process()?.pid : 0;
-    if (!pid) return { ok: false, reason: "browser_pid_unavailable" };
-    await mkdir(config.dataDir, { recursive: true });
-    await writeFile(
-      activeBrowserPath,
-      `${JSON.stringify(
-        {
-          pid,
-          sessionId,
-          meetUrl,
-          createdAt: nowIso(),
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    return { ok: true, pid, path: activeBrowserPath };
-  }
-
-  async function stopRecordedBrowser(reason = "replace_existing_bot") {
-    let record;
-    try {
-      record = JSON.parse(await readFile(activeBrowserPath, "utf8"));
-    } catch {
-      return { ok: true, stopped: false, reason, source: "record_absent" };
-    }
-    const pid = Number(record.pid || 0);
-    if (!pid || pid === process.pid) {
-      await clearActiveBrowserRecord();
-      return { ok: true, stopped: false, reason, source: "record_invalid" };
-    }
-    try {
-      process.kill(pid, 0);
-    } catch {
-      await clearActiveBrowserRecord();
-      return {
-        ok: true,
-        stopped: false,
-        reason,
-        source: "process_absent",
-        pid,
-        sessionId: record.sessionId || "",
-      };
-    }
-    try {
-      process.kill(pid, "SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      try {
-        process.kill(pid, 0);
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // Process exited after SIGTERM.
-      }
-      await clearActiveBrowserRecord();
-      return {
-        ok: true,
-        stopped: true,
-        reason,
-        source: "recorded_browser",
-        pid,
-        sessionId: record.sessionId || "",
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        stopped: false,
-        reason,
-        source: "recorded_browser",
-        pid,
-        sessionId: record.sessionId || "",
-        error: String(error?.message || error),
-      };
-    }
-  }
-
   async function stop(reason = "manual_stop") {
     if (!active) return { ok: true, stopped: false, reason };
     const previous = active;
     active = null;
     stopActiveMacWindowCapture(reason);
     previous.avatarAssetServer?.stop();
+    previous.realtimeSidecarServer?.stop();
     previous.diagnostics?.record("stop", { reason });
     try {
       const browserStop = previous.page?.isClosed?.()
@@ -247,7 +179,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       previous.diagnostics?.record("stop_close_error", { error: String(error?.message || error) });
       // Browser may already be gone.
     }
-    await clearActiveBrowserRecord();
+    await activeBrowserRecord.clear();
     if (previous.diagnostics) await saveDiagnostics(previous.diagnostics).catch(() => {});
     return {
       ok: true,
@@ -256,6 +188,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       reason,
       diagnosticsPath: previous.diagnostics?.jsonPath || "",
     };
+  }
+
+  function getRealtimeControlPage() {
+    return getRealtimeControlPageForActive(active);
   }
 
   async function join(input: GoogleMeetJoinInput) {
@@ -270,6 +206,15 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const installLocalDialogBridge = Boolean(input.installLocalDialogBridge);
     const installWorkerResultBridge = input.installWorkerResultBridge !== false;
     const installScreenShareBridge = Boolean(input.installScreenShareBridge);
+    const realtimeRuntimePlacement = normalizeRealtimeRuntimePlacement(
+      input.realtimeRuntimePlacement || config.openaiRealtimeRuntimePlacement,
+    );
+    assertRealtimeRuntimePlacementForMeetJoin({
+      installRealtimeBridge,
+      realtimeRuntimePlacement,
+      meetUrl,
+    });
+    const realtimeSdkOwner = realtimeRuntimePlacement === "sidecar" ? "sidecar" : "meet-page";
     const autoStartScreenShare = Boolean(input.autoStartScreenShare);
     const workerPollUrl = input.workerPollUrl || `${config.meetingAgentUrl}/worker/poll-realtime`;
     const recordMeeting = Boolean(input.recordMeeting ?? config.recordMeeting);
@@ -295,7 +240,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       installRealtimeBridge,
       recordMeeting,
     });
-    const realtimeRecappiAudioInput = initialRecappiAudioInput;
+    let realtimeRecappiAudioInput = initialRecappiAudioInput;
     const browserUserDataDirInput = input.browserUserDataDir || config.browserUserDataDir || "";
     const meetProfileMode = normalizeMeetProfileMode(
       input.meetProfileMode || config.meetProfileMode,
@@ -307,7 +252,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       );
     }
     const browserUserDataDir = meetProfileMode === "persistent" ? browserUserDataDirInput : "";
-    const realtimeBridgeMode = input.realtimeBridgeMode || "mock";
+    const realtimeAgentRuntime = input.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime;
+    const realtimeBridgeMode =
+      input.realtimeBridgeMode || defaultRealtimeBridgeModeForRuntime(realtimeAgentRuntime);
     const runtimeSessionValidation = validateGoogleMeetRuntimeSessionConfig({
       sessionId,
       botName,
@@ -324,7 +271,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const replacementStop = await stop("replace_existing_bot");
     const recordedBrowserStop = replacementStop.stopped
       ? { ok: true, stopped: false, reason: "active_stop_closed_browser", source: "record_skipped" }
-      : await stopRecordedBrowser("replace_existing_bot");
+      : await activeBrowserRecord.stop("replace_existing_bot");
 
     const plan = {
       provider: "google-meet",
@@ -348,6 +295,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       screenshotDir: config.screenshotDir,
       meetProfileMode,
       browserUserDataDir,
+      realtimeRuntimePlacement,
+      realtimeSdkOwner,
       replacementStop,
       recordedBrowserStop,
       runtimeSessionValidation: runtimeSessionValidation.summary,
@@ -370,6 +319,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       installAvatar,
       allowNonGoogleMeet,
       meetProfileMode,
+      realtimeRuntimePlacement,
+      realtimeSdkOwner,
     });
     const playwright = await loadPlaywright(
       options.playwrightModulePath || config.playwrightModulePath,
@@ -432,7 +383,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       await saveDiagnostics(diagnostics);
       await context.close().catch(() => {});
       if (browser && typeof browser.close === "function") await browser.close().catch(() => {});
-      await clearActiveBrowserRecord();
+      await activeBrowserRecord.clear();
       return {
         ok: false,
         error: "recappi_realtime_audio_required",
@@ -449,15 +400,19 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       meetProfileMode,
       startedAt: nowIso(),
       meetUrl,
+      realtimeRuntimePlacement,
+      realtimeSdkOwner,
       diagnostics,
       artifactsDir,
+      realtimeSidecarPage: null,
+      realtimeSidecarServer: null,
       recorder: recordMeeting ? recorder : null,
       realtimeAudioCapture,
       realtimeRecappiAudioInput,
       avatarAssetServer: null as LocalStaticAssetServer | null,
       captionCapture: null,
     };
-    const browserRecord = await rememberActiveBrowser(browser, sessionId, meetUrl);
+    const browserRecord = await activeBrowserRecord.remember(browser, sessionId, meetUrl);
     // tsx/esbuild can serialize page.evaluate callbacks through __name; expose a no-op
     // helper so browser-side diagnostics keep working when smokes run TypeScript directly.
     await context.addInitScript({
@@ -522,6 +477,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       : realtimeRequiresRecappi
         ? "none"
         : "webrtc";
+    const allowHostMeetAudioPcmInput =
+      realtimeRuntimePlacement === "sidecar" &&
+      realtimeWantsMeetAudio &&
+      !audio.isGoogleMeetUrlForRealtimeAudio(meetUrl);
     const requestedAvatarRenderer = input.avatarRenderer || config.avatarRenderer;
     const avatarRendererIsVideo = String(requestedAvatarRenderer || "").toLowerCase() === "video";
     const avatarConfig = {
@@ -602,6 +561,42 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         alpha: videoUsesAlpha,
       });
     }
+    const realtimeBridgeConfig = {
+      mode: realtimeBridgeMode,
+      agentRuntime: realtimeAgentRuntime,
+      realtimeRuntimePlacement,
+      sessionId,
+      botName,
+      toolCallbackToken: input.realtimeToolCallbackToken || config.internalAuthKey || "",
+      autoRespondToWorkerResults: input.autoRespondToWorkerResults !== false,
+      autoRespondToAvatarToolCalls: input.autoRespondToAvatarToolCalls !== false,
+      instructions: realtimeInstructions,
+      tools: realtimeTools,
+      session: realtimeSession,
+      currentUser: realtimeCurrentUser,
+      sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
+      includeParticipantAudio: Boolean(input.includeParticipantAudio),
+      forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
+      meetAudioInputSource: realtimeMeetAudioInputSource,
+      allowHostMeetAudioPcmInput,
+      allowParticipantAudioStreamEvents: allowNonGoogleMeet,
+      meetAudioInputGain: input.meetAudioInputGain,
+      captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
+      workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,
+      workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,
+      autoConnect: Boolean(input.autoConnectRealtime),
+      tokenUrl: input.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
+      openaiRealtimeBaseUrl: config.openaiBaseUrl,
+      sdpUrl: input.realtimeSdpUrl || config.openaiRealtimeSdpUrl,
+    };
+    const workerResultConfig = {
+      workerPollUrl,
+      workerMarkRealtimeDeliveredUrl: `${config.meetingAgentUrl}/worker/mark-realtime-delivered`,
+      enabled: Boolean(workerPollUrl),
+      minCreatedAt: input.workerResultMinCreatedAt || new Date().toISOString(),
+      sessionId,
+      toolCallbackToken: realtimeBridgeConfig.toolCallbackToken,
+    };
     const runtimeInitScripts = buildAvatarRuntimeInitScripts({
       sessionId,
       botName,
@@ -611,32 +606,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       installRealtimeBridge,
       installLocalDialogBridge,
       installScreenShareBridge,
-      installWorkerResultBridge,
+      installWorkerResultBridge:
+        installWorkerResultBridge && realtimeRuntimePlacement !== "sidecar",
       avatar: avatarConfig,
       realtime: {
-        mode: realtimeBridgeMode,
-        agentRuntime: input.realtimeAgentRuntime || config.openaiRealtimeAgentRuntime,
-        sessionId,
-        botName,
-        toolCallbackToken: input.realtimeToolCallbackToken || config.internalAuthKey || "",
-        autoRespondToWorkerResults: input.autoRespondToWorkerResults !== false,
-        autoRespondToAvatarToolCalls: input.autoRespondToAvatarToolCalls !== false,
-        instructions: realtimeInstructions,
-        tools: realtimeTools,
-        session: realtimeSession,
-        currentUser: realtimeCurrentUser,
-        sendSessionUpdateOnConnect: input.sendRealtimeSessionUpdate !== false,
-        includeParticipantAudio: Boolean(input.includeParticipantAudio),
-        forwardMeetAudioToRealtime: input.forwardMeetAudioToRealtime !== false,
-        meetAudioInputSource: realtimeMeetAudioInputSource,
-        meetAudioInputGain: input.meetAudioInputGain,
-        captureMeetAudioForTranscript: Boolean(realtimeAudioCapture),
-        workerDelegateUrl: input.workerDelegateUrl || `${config.meetingAgentUrl}/worker/delegate`,
-        workerStatusUrl: input.workerStatusUrl || `${config.meetingAgentUrl}/worker/status`,
-        autoConnect: Boolean(input.autoConnectRealtime),
-        tokenUrl: input.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
-        openaiRealtimeBaseUrl: config.openaiBaseUrl,
-        sdpUrl: input.realtimeSdpUrl || config.openaiRealtimeSdpUrl,
+        ...realtimeBridgeConfig,
+        realtimeRuntimePlacement,
+        realtimePageRole: "meet-surface",
       },
       localDialog: {
         enabled: true,
@@ -660,10 +636,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         fps: input.screenShareFps || DEFAULT_SYNTHETIC_SCREEN_SHARE_FPS,
       },
       workerResult: {
-        workerPollUrl,
-        enabled: Boolean(workerPollUrl),
-        minCreatedAt: input.workerResultMinCreatedAt || new Date().toISOString(),
-        sessionId,
+        ...workerResultConfig,
       },
     });
     diagnostics.record("runtime_session_validation", runtimeSessionValidation.summary);
@@ -671,16 +644,31 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       categories: runtimeInitScripts.map((script) => script.category),
       events: runtimeInitScripts.map((script) => script.event),
     });
-    for (const script of runtimeInitScripts) {
-      await context.addInitScript({ content: script.content });
+    if (installRealtimeBridge && realtimeRuntimePlacement === "sidecar") {
+      const realtimeSidecar = await startRealtimeSidecarPage({
+        context,
+        diagnostics,
+        getMeetPage: () => active?.page || null,
+        realtimeBridgeConfig,
+        sessionId,
+        workerResultConfig: installWorkerResultBridge ? workerResultConfig : null,
+      });
+      active = {
+        ...active,
+        realtimeSidecarPage: realtimeSidecar.page,
+        realtimeSidecarServer: realtimeSidecar.server,
+      };
     }
     const page = await context.newPage();
+    installPageDiagnostics(page, diagnostics);
+    for (const script of runtimeInitScripts) {
+      await page.addInitScript({ content: script.content });
+    }
     active = {
       ...active,
       context,
       page,
     };
-    installPageDiagnostics(page, diagnostics);
     diagnostics.record("goto_start", { meetUrl });
     await saveDiagnostics(diagnostics);
     const gotoResponse = await gotoMeetWithRetry(page, meetUrl, diagnostics);
@@ -826,7 +814,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     await audio.startRealtimeRecappiAudioInput({
       realtimeRecappiAudioInput,
       context,
-      page,
+      page: getRealtimeControlPage(),
       diagnostics,
     });
     if (recordMeeting) {
@@ -926,7 +914,16 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       peoplePanelAwarenessAttempted: Boolean(meetPage.inMeeting),
     };
     active.lastMeetingAwarenessSignature = "";
-    active.meetingAwarenessPush = await publishMeetingAwarenessToPage(page, meetingAwareness);
+    const realtimeControlPage = getRealtimeControlPage();
+    active.meetingAwarenessPush = await publishMeetingAwarenessToPage(
+      realtimeControlPage,
+      meetingAwareness,
+    );
+    active.meetingAwarenessSurfaceStore = await publishMeetingAwarenessToPage(
+      page,
+      meetingAwareness,
+      false,
+    );
     logMeetingAwarenessDebug("join_complete", meetingAwareness, active.meetingAwarenessPush);
     if (active.meetingAwarenessPush?.pushed) {
       active.lastMeetingAwarenessSignature = meetingAwarenessSignature(meetingAwareness);
@@ -946,6 +943,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       screenshotDir: config.screenshotDir,
       diagnosticsPath: diagnostics.jsonPath,
       artifactsDir,
+      realtimeRuntimePlacement,
+      realtimeSdkOwner,
       recorder: recordMeeting ? recorder.status() : null,
       realtimeAudioCapture: realtimeAudioCapture?.status() || null,
       realtimeRecappiAudioInput: realtimeRecappiAudioInput?.status() || null,
@@ -966,11 +965,13 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
 
   async function refreshActiveRuntimeState() {
     if (!active?.page) return;
+    const realtimeControlPage = getRealtimeControlPage();
     let [
       avatarReady,
       avatarAudio,
       fixtureState,
       realtimeBridge,
+      meetSurfaceRealtimeBridge,
       workerResultBridge,
       localDialog,
       screenShare,
@@ -980,13 +981,20 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
       evaluateAvatarReady(active.page),
       evaluateAvatarAudio(active.page),
       evaluateFixtureState(active.page),
-      evaluateRealtimeBridgeState(active.page),
-      evaluateWorkerResultBridgeState(active.page),
+      evaluateRealtimeBridgeState(realtimeControlPage),
+      realtimeControlPage === active.page
+        ? Promise.resolve(null)
+        : evaluateRealtimeBridgeState(active.page),
+      evaluateWorkerResultBridgeState(realtimeControlPage),
       evaluateLocalDialogState(active.page),
       evaluateScreenShareState(active.page),
       active.captionCapture?.status() || Promise.resolve(null),
       evaluateMeetPageState(active.page),
     ]);
+    realtimeBridge = mergeMeetSurfaceAudioOutputState(
+      realtimeBridge,
+      meetSurfaceRealtimeBridge || realtimeBridge,
+    );
     if (meetPage.inMeeting && !active.peoplePanelAwarenessAttempted) {
       active.peoplePanelAwarenessAttempted = true;
       await openMeetPeoplePanelForAwareness(active.page, active.diagnostics);
@@ -1011,13 +1019,21 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
     const nextAwarenessSignature = meetingAwarenessSignature(meetingAwareness);
     if (nextAwarenessSignature && nextAwarenessSignature !== active.lastMeetingAwarenessSignature) {
       active.meetingAwarenessPush = await publishMeetingAwarenessToPage(
+        realtimeControlPage,
+        meetingAwareness,
+      );
+      active.meetingAwarenessSurfaceStore = await publishMeetingAwarenessToPage(
         active.page,
         meetingAwareness,
+        false,
       );
       if (active.meetingAwarenessPush?.pushed) {
         active.lastMeetingAwarenessSignature = nextAwarenessSignature;
       }
     } else {
+      await publishMeetingAwarenessToPage(realtimeControlPage, meetingAwareness, false).catch(
+        () => {},
+      );
       await publishMeetingAwarenessToPage(active.page, meetingAwareness, false).catch(() => {});
     }
     logMeetingAwarenessDebug(
@@ -1046,135 +1062,27 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
   }
 
   async function injectWorkerResult(job) {
-    if (!active?.page) return { ok: false, error: "no_active_join" };
-    const result = await active.page
-      .evaluate(async (payload) => {
-        if (typeof window.MAB_REALTIME_CLIENT?.injectWorkerResult === "function") {
-          return {
-            ok: true,
-            channel: "MAB_REALTIME_CLIENT.injectWorkerResult",
-            delivery: await window.MAB_REALTIME_CLIENT.injectWorkerResult(payload),
-          };
-        }
-        if (typeof window.MAB_REALTIME_CLIENT?.sendWorkerResult === "function") {
-          return {
-            ok: true,
-            channel: "MAB_REALTIME_CLIENT.sendWorkerResult",
-            delivery: await window.MAB_REALTIME_CLIENT.sendWorkerResult(payload),
-          };
-        }
-        window.dispatchEvent(new CustomEvent("meeting-avatar-worker-result", { detail: payload }));
-        return { ok: true, channel: "meeting-avatar-worker-result" };
-      }, job)
-      .catch((error) => ({ ok: false, error: String(error?.message || error) }));
-    await refreshActiveRuntimeState();
-    return {
-      ...result,
-      realtimeBridge: active.realtimeBridge || null,
-      workerResultBridge: active.workerResultBridge || null,
-    };
+    return injectWorkerResultIntoActive(active, job, refreshActiveRuntimeState);
   }
 
   async function sendRealtimeEvent(event) {
-    if (!active?.page) return { ok: false, error: "no_active_join" };
-    const result = await active.page
-      .evaluate((payload) => {
-        if (!window.MAB_REALTIME_CLIENT?.sendRealtimeEvent) {
-          return { ok: false, error: "realtime_client_missing" };
-        }
-        const channel = window.MAB_REALTIME_CLIENT.sendRealtimeEvent(payload);
-        return { ok: true, channel };
-      }, event)
-      .catch((error) => ({ ok: false, error: String(error?.message || error) }));
-    await refreshActiveRuntimeState();
-    return {
-      ...result,
-      feedback: active.realtimeBridge?.feedback || null,
-      realtimeBridge: active.realtimeBridge || null,
-    };
+    return sendRealtimeEventToActive(active, event, refreshActiveRuntimeState);
   }
 
   async function requestRealtimeTextTurn({ text, instructions }) {
-    const userText = String(text || "").trim();
-    if (!userText) return { ok: false, error: "text_required" };
-    const item = await sendRealtimeEvent({
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "user",
-        metadata: { source: "manual_text_turn" },
-        content: [
-          {
-            type: "input_text",
-            text: userText,
-          },
-        ],
-      },
-    });
-    if (!item.ok) return item;
-    const response = await sendRealtimeEvent({
-      type: "response.create",
-      response: {
-        instructions:
-          instructions || "Answer the user's text turn in concise Chinese with real audio.",
-      },
-    });
-    return {
-      ok: response.ok,
-      item,
-      response,
-      feedback: response.feedback,
-      realtimeBridge: response.realtimeBridge,
-    };
+    return requestRealtimeTextTurnFromActive(
+      active,
+      { text, instructions },
+      refreshActiveRuntimeState,
+    );
   }
 
   async function sendMeetChat(input: MeetChatInput = {}) {
-    const text = String(input.text || input.message || "").trim();
-    if (!text) return { ok: false, error: "text_required" };
-    if (!active?.page) return { ok: false, error: "no_active_join" };
-    const result = await active.page
-      .evaluate(
-        async (payload) => {
-          const client = window.MAB_REALTIME_CLIENT;
-          if (typeof client?.runLocalMeetTool !== "function") {
-            return { ok: false, error: "meet_chat_bridge_missing" };
-          }
-          return await client.runLocalMeetTool("send_meet_chat", payload);
-        },
-        { text },
-      )
-      .catch((error) => ({ ok: false, error: String(error?.message || error) }));
-    await refreshActiveRuntimeState();
-    return {
-      ...result,
-      realtimeBridge: active.realtimeBridge || null,
-      fixtureState: active.fixtureState || null,
-    };
+    return sendMeetChatFromActive(active, input, refreshActiveRuntimeState);
   }
 
   async function readMeetChat(input: MeetChatInput = {}) {
-    if (!active?.page) return { ok: false, error: "no_active_join" };
-    const result = await active.page
-      .evaluate(
-        async (payload) => {
-          const client = window.MAB_REALTIME_CLIENT;
-          if (typeof client?.runLocalMeetTool !== "function") {
-            return { ok: false, error: "meet_chat_bridge_missing" };
-          }
-          return await client.runLocalMeetTool("read_meet_chat", payload);
-        },
-        {
-          limit: input.limit || input.count || 10,
-          onlyLinks: Boolean(input.onlyLinks || input.only_links),
-        },
-      )
-      .catch((error) => ({ ok: false, error: String(error?.message || error) }));
-    await refreshActiveRuntimeState();
-    return {
-      ...result,
-      realtimeBridge: active.realtimeBridge || null,
-      fixtureState: active.fixtureState || null,
-    };
+    return readMeetChatFromActive(active, input, refreshActiveRuntimeState);
   }
 
   const captureRef = {
@@ -1204,6 +1112,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
 
   async function status() {
     await refreshActiveRuntimeState();
+    const realtimeSidecarStatus = active ? await collectRealtimeSidecarPageStatus(active) : null;
     return {
       ok: true,
       active: active
@@ -1213,6 +1122,9 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
             startedAt: active.startedAt,
             meetProfileMode: active.meetProfileMode || "",
             browserUserDataDir: active.browserUserDataDir || "",
+            realtimeRuntimePlacement: active.realtimeRuntimePlacement || "sidecar",
+            realtimeSdkOwner: active.realtimeSdkOwner || "sidecar",
+            realtimeSidecar: active.realtimeSidecarPage ? realtimeSidecarStatus : null,
             clickedJoinSelector: active.clickedJoinSelector || "",
             diagnosticsPath: active.diagnostics?.jsonPath || "",
             artifactsDir: active.artifactsDir || "",

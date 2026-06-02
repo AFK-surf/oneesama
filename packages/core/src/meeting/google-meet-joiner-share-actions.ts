@@ -28,7 +28,7 @@ import {
 } from "./google-meet-joiner-base.ts";
 import {
   clickFirstVisible,
-  clickMeetShareScreenControl,
+  clickMeetShareScreenControlResult,
   collectButtonInventory,
   ensureScreenShareController,
   getMeetPresentationState,
@@ -651,27 +651,32 @@ export function createGoogleMeetShareActions(ctx: any) {
     }
     const controllerBefore = await readScreenShareControllerState(ready.page);
     const start = await startScreenShare(bridgeInput);
-    const clickedSelector = await clickMeetShareScreenControl(
+    const clickResult = await clickMeetShareScreenControlResult(
       ready.page,
       ctx.getActive().diagnostics,
       {
         allowCoordinateFallback: Boolean(bridgeInput.allowCoordinateFallback),
       },
     );
+    const clickedSelector = clickResult.ok ? clickResult.selector : "";
     if (!clickedSelector) {
       const afterMissPresentation = await getMeetPresentationState(ready.page);
+      let reason = "share_screen_button_not_found";
+      if ("reason" in clickResult) reason = clickResult.reason;
       ctx.getActive().diagnostics?.record("screen_share_present_blocked", {
-        reason: "share_screen_button_not_found",
+        reason,
         start,
         afterMissPresentation,
+        clickResult,
       });
       await saveDiagnostics(ctx.getActive().diagnostics).catch(() => {});
       return {
         ok: false,
-        error: "share_screen_button_not_found",
+        error: reason,
         mode: "synthetic",
         start,
         presentation: afterMissPresentation,
+        clickResult,
         screenShare: ctx.getActive().screenShare || null,
         fixtureState: ctx.getActive().fixtureState || null,
       };

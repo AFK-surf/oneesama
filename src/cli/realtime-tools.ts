@@ -118,6 +118,7 @@ import {
   postSignedSlackInteraction,
   postSignedSlackJson,
 } from "./support.js";
+import { defaultGoogleMeetRealtimeTools } from "../../packages/core/src/meeting/google-meet-joiner.js";
 
 export async function realtimeSessionUpdateSmoke() {
   const { chromium } = await import("playwright");
@@ -582,30 +583,13 @@ export async function realtimeLiveToolSmoke() {
       { timeout: 35_000 },
     );
 
-    await page.evaluate((tool) => {
-      window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: "请把这个测试任务委托给后台 worker：用一句话说明 Realtime live tool smoke 已经触发。",
-            },
-          ],
-        },
+    await page.evaluate(() => {
+      window.MAB_REALTIME_CLIENT.requestRealtimeTextTurn?.({
+        text: "请把这个测试任务委托给后台 worker：用一句话说明 Realtime live tool smoke 已经触发。",
+        instructions:
+          "You must call delegate_to_worker once with a short Chinese task. Do not produce a final answer before the function call.",
       });
-      window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
-        type: "response.create",
-        response: {
-          instructions:
-            "You must call delegate_to_worker once with a short Chinese task. Do not produce a final answer before the function call.",
-          tools: [tool],
-          tool_choice: "required",
-        },
-      });
-    }, delegateTool);
+    });
 
     await page.waitForFunction(
       () => {
@@ -723,6 +707,91 @@ export async function realtimeLiveToolSmoke() {
   }
 }
 
+export interface RealtimeLiveRoutingSmokeCase {
+  id: string;
+  text: string;
+  expectedTools: string[];
+  forbiddenTools?: string[];
+  requireInstruction?: boolean;
+  forbidOperations?: boolean;
+}
+
+export function realtimeLiveRoutingSmokePlan({
+  includeDemoSurfaceRouting = false,
+}: {
+  includeDemoSurfaceRouting?: boolean;
+} = {}) {
+  const toolNames = [
+    "share_existing_app_window",
+    "stop_video_stage",
+    "list_shareable_windows",
+    "kwwk_computer_use",
+  ];
+  const cases: RealtimeLiveRoutingSmokeCase[] = [
+    {
+      id: "existing_app_pencil",
+      text: "用 Pencil 演示当前画面",
+      expectedTools: ["share_existing_app_window"],
+    },
+    {
+      id: "control_shared_pencil",
+      text: "Pencil 已经在屏幕共享里了，请在 Pencil 里画一个贪食蛇 mockup",
+      expectedTools: ["kwwk_computer_use"],
+      requireInstruction: true,
+      forbidOperations: true,
+    },
+    {
+      id: "ambiguous_app_editor",
+      text: "用编辑器演示当前画面",
+      expectedTools: ["list_shareable_windows"],
+    },
+    {
+      id: "stop_share",
+      text: "停止分享",
+      expectedTools: ["stop_video_stage"],
+    },
+    {
+      id: "stop_when_idle_negative",
+      text: "现在没有共享时停止分享",
+      expectedTools: ["stop_video_stage"],
+      forbiddenTools: [
+        "share_existing_app_window",
+        "open_shared_browser_surface",
+        "create_shared_workspace",
+      ],
+    },
+  ];
+  if (includeDemoSurfaceRouting) {
+    toolNames.push(
+      "open_shared_browser_surface",
+      "create_shared_workspace",
+      "stop_shared_browser_surface",
+    );
+    cases.push(
+      {
+        id: "browser_url",
+        text: "打开 https://example.com 给我看",
+        expectedTools: ["open_shared_browser_surface"],
+      },
+      {
+        id: "generate_snake",
+        text: "做一个贪吃蛇，然后给我看",
+        expectedTools: ["create_shared_workspace"],
+      },
+      {
+        id: "create_dashboard",
+        text: "做一个 Q3 metrics dashboard",
+        expectedTools: ["create_shared_workspace"],
+      },
+    );
+  }
+  return {
+    toolNames,
+    cases,
+    includeDemoSurfaceRouting,
+  };
+}
+
 export async function realtimeLiveRoutingSmoke() {
   const config = getRuntimeConfig();
   const shouldRunLive = shouldRunOptionalSmoke(
@@ -774,69 +843,21 @@ export async function realtimeLiveRoutingSmoke() {
     ],
   });
 
-  const visualToolNames = [
-    "share_existing_app_window",
-    "open_shared_browser_surface",
-    "create_shared_workspace",
-    "stop_video_stage",
-    "stop_shared_browser_surface",
-    "list_shareable_windows",
-    "control_shared_app_window",
-  ];
+  const includeDemoSurfaceRouting =
+    process.env.MAB_REALTIME_LIVE_ROUTING_INCLUDE_DEMO_SURFACE === "1";
+  const routingPlan = realtimeLiveRoutingSmokePlan({
+    includeDemoSurfaceRouting,
+  });
+  const visualToolNames = routingPlan.toolNames;
+  const schemaSource = includeDemoSurfaceRouting
+    ? realtimeToolSchemas
+    : defaultGoogleMeetRealtimeTools();
   const visualTools = visualToolNames.map((name) => {
-    const tool = realtimeToolSchemas.find((entry) => entry.name === name);
+    const tool = schemaSource.find((entry) => entry.name === name);
     assertSmoke(tool, `Realtime visual routing tool schema missing: ${name}`, visualToolNames);
     return tool;
   });
-  const cases = [
-    {
-      id: "existing_app_pencil",
-      text: "用 Pencil 演示当前画面",
-      expectedTools: ["share_existing_app_window"],
-    },
-    {
-      id: "control_shared_pencil",
-      text: "Pencil 已经在屏幕共享里了，请在 Pencil 里画一个贪食蛇 mockup",
-      expectedTools: ["control_shared_app_window"],
-      requireInstruction: true,
-      forbidOperations: true,
-    },
-    {
-      id: "ambiguous_app_editor",
-      text: "用编辑器演示当前画面",
-      expectedTools: ["list_shareable_windows"],
-    },
-    {
-      id: "browser_url",
-      text: "打开 https://example.com 给我看",
-      expectedTools: ["open_shared_browser_surface"],
-    },
-    {
-      id: "generate_snake",
-      text: "做一个贪吃蛇，然后给我看",
-      expectedTools: ["create_shared_workspace"],
-    },
-    {
-      id: "create_dashboard",
-      text: "做一个 Q3 metrics dashboard",
-      expectedTools: ["create_shared_workspace"],
-    },
-    {
-      id: "stop_share",
-      text: "停止分享",
-      expectedTools: ["stop_video_stage", "stop_shared_browser_surface"],
-    },
-    {
-      id: "stop_when_idle_negative",
-      text: "现在没有共享时停止分享",
-      expectedTools: ["stop_video_stage", "stop_shared_browser_surface"],
-      forbiddenTools: [
-        "share_existing_app_window",
-        "open_shared_browser_surface",
-        "create_shared_workspace",
-      ],
-    },
-  ];
+  const cases = routingPlan.cases;
   const results: unknown[] = [];
 
   try {
@@ -894,28 +915,9 @@ export async function realtimeLiveRoutingSmoke() {
           { timeout: 35_000 },
         );
 
-        await page.evaluate(
-          ({ text, tools }) => {
-            window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
-              type: "conversation.item.create",
-              metadata: { source: "manual_text_turn" },
-              item: {
-                type: "message",
-                role: "user",
-                metadata: { source: "manual_text_turn" },
-                content: [{ type: "input_text", text }],
-              },
-            });
-            window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
-              type: "response.create",
-              response: {
-                tools,
-                tool_choice: "auto",
-              },
-            });
-          },
-          { text: testCase.text, tools: visualTools },
-        );
+        await page.evaluate((text) => {
+          window.MAB_REALTIME_CLIENT.requestRealtimeTextTurn?.({ text });
+        }, testCase.text);
 
         await page.waitForFunction(
           () => {
@@ -939,32 +941,6 @@ export async function realtimeLiveRoutingSmoke() {
           null,
           { timeout: 45_000 },
         );
-        if ("requireOperations" in testCase && testCase.requireOperations) {
-          await page.waitForFunction(
-            () => {
-              const calls =
-                (
-                  window.MAB_REALTIME_BRIDGE as
-                    | {
-                        workspaceTools?: {
-                          calls?: Array<{ name?: string; arguments?: { operations?: unknown } }>;
-                        };
-                      }
-                    | null
-                    | undefined
-                )?.workspaceTools?.calls || [];
-              return calls.some((call) => {
-                if (call.name !== "control_shared_app_window") return false;
-                const operations = Array.isArray(call.arguments?.operations)
-                  ? (call.arguments.operations as Array<{ kind?: unknown }>)
-                  : [];
-                return operations.some((operation) => String(operation?.kind || "") !== "state");
-              });
-            },
-            null,
-            { timeout: 45_000 },
-          );
-        }
         if ("requireInstruction" in testCase && testCase.requireInstruction) {
           await page.waitForFunction(
             () => {
@@ -984,7 +960,8 @@ export async function realtimeLiveRoutingSmoke() {
                 )?.workspaceTools?.calls || [];
               return calls.some(
                 (call) =>
-                  call.name === "control_shared_app_window" &&
+                  (call.name === "kwwk_computer_use" ||
+                    call.name === "control_shared_app_window") &&
                   String(call.arguments?.instruction || "").trim().length > 0,
               );
             },
@@ -1032,31 +1009,12 @@ export async function realtimeLiveRoutingSmoke() {
           { text: testCase.text, actualTools, calls, bridge: result.bridge },
         );
         const appControlCalls =
-          "requireOperations" in testCase ||
-          "requireInstruction" in testCase ||
-          "forbidOperations" in testCase
-            ? calls.filter((call) => call.name === "control_shared_app_window")
+          "requireInstruction" in testCase || "forbidOperations" in testCase
+            ? calls.filter(
+                (call) =>
+                  call.name === "kwwk_computer_use" || call.name === "control_shared_app_window",
+              )
             : [];
-        const directOperationCall = appControlCalls.find((call) => {
-          const args = call.arguments as { operations?: unknown } | undefined;
-          const operations = Array.isArray(args?.operations)
-            ? (args.operations as Array<{ kind?: unknown }>)
-            : [];
-          return operations.some((operation) => String(operation?.kind || "") !== "state");
-        });
-        if ("requireOperations" in testCase && testCase.requireOperations) {
-          const operations = appControlCalls.flatMap((call) => {
-            const args = call.arguments as { operations?: unknown } | undefined;
-            return Array.isArray(args?.operations)
-              ? (args.operations as Array<{ kind?: unknown }>)
-              : [];
-          });
-          assertSmoke(
-            operations.some((operation) => String(operation?.kind || "") !== "state"),
-            `Realtime routing case ${testCase.id} did not continue with direct app-control operations after state`,
-            { text: testCase.text, actualTools, appControlCalls, bridge: result.bridge },
-          );
-        }
         if ("requireInstruction" in testCase && testCase.requireInstruction) {
           assertSmoke(
             appControlCalls.some(
@@ -1088,7 +1046,6 @@ export async function realtimeLiveRoutingSmoke() {
           expectedTools: testCase.expectedTools,
           actualTools,
           firstCall: calls[0],
-          ...(directOperationCall ? { directOperationCall } : {}),
         });
       } catch (error) {
         const snapshot = await page

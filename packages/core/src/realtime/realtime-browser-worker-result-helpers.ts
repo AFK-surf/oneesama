@@ -13,13 +13,21 @@
 
   function buildWorkerResultChatText(job) {
     const status = workerResultStatusLabel(job);
-    const result = job.result || job.error || "没有返回详细结果。";
+    const result = workerResultChatBody(job);
     return truncateText([`后台任务${status}：${job.task || job.id}`, "", result].join("\n"));
   }
 
   function shouldSendWorkerResultToMeetChat(job) {
-    const result = String(job.result || job.error || "");
+    const result = String(workerResultChatBody(job, ""));
     return result.trim().length > 0;
+  }
+
+  function workerResultChatBody(job, fallback = "没有返回详细结果。") {
+    if (isMeetingAppControlWorkerJob(job)) {
+      const envelope = job?.resultEnvelope || job?.result_envelope || {};
+      return envelope.summary || envelope.error || job.error || job.result || fallback;
+    }
+    return job.result || job.error || fallback;
   }
 
   function normalizedToken(value) {

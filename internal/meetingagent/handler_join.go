@@ -21,6 +21,11 @@ func (h *Handler) handleJoinGoogleMeet(c *gin.Context) {
 			httputil.AbortWithError(c, httputil.InvalidRequestError("invalid join body", gin.H{"reason": err.Error()}))
 			return
 		}
+		var invalidRealtimeRuntimePlacement InvalidRealtimeRuntimePlacementError
+		if errors.As(err, &invalidRealtimeRuntimePlacement) {
+			httputil.AbortWithError(c, httputil.InvalidRequestError("invalid join body", gin.H{"reason": err.Error()}))
+			return
+		}
 		h.service.logger.Warn("join google meet failed", "meeting_url", request.MeetingURL, "session_id", request.SessionID, "error", err)
 		httputil.AbortWithError(c, httputil.InternalServerError("join google meet failed", gin.H{"reason": err.Error()}))
 		return

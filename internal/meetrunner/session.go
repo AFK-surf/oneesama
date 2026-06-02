@@ -179,6 +179,9 @@ func (s *Session) callWithTimeout(
 			return nil
 		case err := <-s.readErr:
 			if err == nil {
+				if stderr := strings.TrimSpace(s.stderr.String()); stderr != "" {
+					return fmt.Errorf("meet-runner %s closed without response (%s)", method, stderr)
+				}
 				return fmt.Errorf("meet-runner %s closed without response", method)
 			}
 			return fmt.Errorf("meet-runner %s stream failed: %w (%s)", method, err, strings.TrimSpace(s.stderr.String()))

@@ -206,8 +206,22 @@ async function installRealtimeHarness(page, harnessOptions = {}) {
       autoRespondToAvatarToolCalls: harnessOptions.autoRespondToAvatarToolCalls,
       captureMeetAudioForTranscript: false,
       meetAudioEnergyStaleMs: 1000,
+      tools: harnessOptions.tools || [
+        {
+          type: "function",
+          name: "update_avatar_state",
+          description: "Update avatar state for the fixture.",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      ],
       ...(harnessOptions.meetAudioInputGain !== undefined
         ? { meetAudioInputGain: harnessOptions.meetAudioInputGain }
+        : {}),
+      ...(harnessOptions.allowGenericMediaElementAudioDiscovery !== undefined
+        ? {
+            allowGenericMediaElementAudioDiscovery:
+              harnessOptions.allowGenericMediaElementAudioDiscovery,
+          }
         : {}),
     }),
   });
@@ -501,7 +515,7 @@ test("Recappi process audio skips Meet receiver tracks by default", async () => 
 
     assert.deepEqual(result.forwardedSources, []);
     assert.equal(result.connection.recappiAudioInput.connected, false);
-    assert.notEqual(result.connection.recappiReceiverFallbackActive, true);
+    assert.equal("recappiReceiverFallbackActive" in result.connection, false);
     assert.equal(result.connection.currentRealtimeInputSource, "silent_placeholder");
     assert.equal(result.connection.meetAudioTracksForwarded, 0);
     assert.equal(result.feedback.failureMatrix.audioInput.status, "waiting");
@@ -510,7 +524,7 @@ test("Recappi process audio skips Meet receiver tracks by default", async () => 
   }
 });
 
-test("Recappi process audio falls back to Meet receiver tracks until tap connects", async () => {
+test("Recappi process audio ignores legacy Meet receiver fallback flag", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -524,14 +538,12 @@ test("Recappi process audio falls back to Meet receiver tracks until tap connect
       emitSpeechAndResponse: false,
     });
 
-    assert.deepEqual(result.forwardedSources, ["pc.track"]);
+    assert.deepEqual(result.forwardedSources, []);
     assert.equal(result.connection.recappiAudioInput.connected, false);
-    assert.equal(result.connection.recappiReceiverFallbackActive, true);
-    assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
-    assert.equal(result.connection.currentRealtimeInputIsRoutingMix, true);
-    assert.equal(result.connection.meetAudioInputGain, 48);
-    assert.equal(result.connection.meetAudioEnergy.observed, true);
-    assert.equal(result.feedback.failureMatrix.audioInput.status, "ok");
+    assert.equal("recappiReceiverFallbackActive" in result.connection, false);
+    assert.equal(result.connection.currentRealtimeInputSource, "silent_placeholder");
+    assert.equal(result.connection.meetAudioTracksForwarded, 0);
+    assert.equal(result.feedback.failureMatrix.audioInput.status, "waiting");
   } finally {
     await browser.close();
   }
@@ -572,7 +584,7 @@ test("Realtime marks missing expected audio input as blocked after startup grace
   }
 });
 
-test("Recappi process audio disconnects temporary Meet receiver fallback once tap connects", async () => {
+test("Recappi process audio keeps Meet receiver diagnostic-only before tap connects", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -602,7 +614,7 @@ test("Recappi process audio disconnects temporary Meet receiver fallback once ta
       await window.MAB_REALTIME_CLIENT.connect();
       await wait(250);
       const fallback = {
-        active: window.MAB_REALTIME_BRIDGE.connection.recappiReceiverFallbackActive === true,
+        statePresent: "recappiReceiverFallbackActive" in window.MAB_REALTIME_BRIDGE.connection,
         gain: window.MAB_REALTIME_BRIDGE.connection.meetAudioInputGain,
         trackStates: window.MAB_REALTIME_BRIDGE.connection.meetAudioTrackStates,
       };
@@ -620,7 +632,7 @@ test("Recappi process audio disconnects temporary Meet receiver fallback once ta
       });
       await wait(300);
       const disconnectEvents = window.MAB_REALTIME_BRIDGE.timeline.filter(
-        (entry) => entry.type === "meet_audio_receiver_fallback_disconnected",
+        (entry) => entry.type === "meet_audio_receiver_diagnostic_disconnected",
       );
       oscillator.stop();
       meetTrack.stop();
@@ -633,19 +645,18 @@ test("Recappi process audio disconnects temporary Meet receiver fallback once ta
       };
     });
 
-    assert.equal(result.fallback.active, true);
-    assert.equal(result.fallback.gain, 48);
+    assert.equal(result.fallback.statePresent, false);
+    assert.equal(result.fallback.gain, 1);
     assert.equal(result.accepted.ok, true);
     assert.equal(result.connection.recappiAudioInput.connected, true);
-    assert.equal(result.connection.recappiReceiverFallbackActive, false);
+    assert.equal("recappiReceiverFallbackActive" in result.connection, false);
     assert.equal(result.connection.currentRealtimeInputSource, "recappi_process_audio_tap");
     assert.equal(result.connection.meetAudioInputGain, 1);
-    assert.ok(result.disconnectEvents.length >= 1);
+    assert.equal(result.disconnectEvents.length, 0);
     const fallbackTrack = result.connection.meetAudioTrackStates.find(
       (entry) => entry.source === "pc.track",
     );
-    assert.equal(fallbackTrack?.connected, false);
-    assert.equal(fallbackTrack?.disconnectReason, "recappi-process-audio-connected");
+    assert.equal(fallbackTrack, undefined);
   } finally {
     await browser.close();
   }
@@ -1034,7 +1045,11 @@ test("mock Meet receiver smoke fails loudly when playback mute silences capture"
     assert.equal(result.connection.meetAudioEnergy.observed, false);
     assert.equal(result.connection.captionTurnsObserved, 1);
     assert.equal(result.feedback.checks.responseEvents, 0);
-    assert.equal(result.feedback.failureMatrix.audioInput.status, "ok");
+    assert.equal(result.feedback.status, "waiting_for_turn");
+    assert.equal(result.feedback.audioInputPolicy.ready, false);
+    assert.equal(result.feedback.runtimeState.audioInputReady, false);
+    assert.equal(result.feedback.failureMatrix.audioInput.status, "waiting");
+    assert.equal(result.feedback.failureMatrix.audioInput.reason, "meet_audio_no_energy_observed");
     assert.equal(result.feedback.failureMatrix.modelTurn.status, "waiting");
     assert.equal(result.feedback.failureMatrix.modelTurn.reason, "meet_audio_no_energy_observed");
     assert.equal(result.feedback.failureMatrix.audioOutput.status, "ok");
@@ -1047,7 +1062,10 @@ test("Google Meet pages ignore generic media element audio and keep receiver hoo
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
-    await installRealtimeHarness(page, { url: "https://meet.google.com/fga-dyac-smw" });
+    await installRealtimeHarness(page, {
+      url: "https://meet.google.com/fga-dyac-smw",
+      allowGenericMediaElementAudioDiscovery: true,
+    });
     const result = await page.evaluate(async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const genericContext = new AudioContext();
@@ -1113,6 +1131,68 @@ test("Google Meet pages ignore generic media element audio and keep receiver hoo
     assert.equal(result.connection.meetAudioTracksForwarded, 1);
     assert.equal(result.connection.currentRealtimeInputSource, "meet_audio_mix");
     assert.equal(result.connection.meetAudioEnergy.observed, true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("Google Meet peer hook attaches avatar bus to null-track outbound audio senders discovered by stats", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await installRealtimeHarness(page, {
+      url: "https://meet.google.com/fga-dyac-smw",
+    });
+    const result = await page.evaluate(async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const audioContext = new AudioContext();
+      await audioContext.resume();
+      const destination = audioContext.createMediaStreamDestination();
+      const [avatarTrack] = destination.stream.getAudioTracks();
+      window.MAB_AVATAR_AUDIO_BUS.track = avatarTrack;
+
+      const meetPeer = new RTCPeerConnection();
+      const sender = {
+        track: null,
+        async replaceTrack(nextTrack) {
+          this.track = nextTrack || null;
+        },
+        async getStats() {
+          return new Map([
+            [
+              "outbound-audio",
+              {
+                type: "outbound-rtp",
+                kind: "audio",
+                bytesSent: this.track?.readyState === "live" ? 4096 : 0,
+                packetsSent: this.track?.readyState === "live" ? 16 : 0,
+              },
+            ],
+          ]);
+        },
+      };
+      meetPeer.senders.push(sender);
+      await wait(1800);
+
+      const connection = window.MAB_REALTIME_BRIDGE.connection;
+      const timelineTypes = window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type);
+      const senderTrackId = sender.track?.id || "";
+      await audioContext.close();
+      return {
+        avatarTrackId: avatarTrack.id,
+        senderTrackId,
+        connection,
+        timelineTypes,
+      };
+    });
+
+    assert.notEqual(result.senderTrackId, result.avatarTrackId);
+    assert.equal(result.connection.primaryMeetAudioSenderUsingAvatarBus, true);
+    assert.equal(result.connection.primaryMeetAudioSenderStats?.supported, true);
+    assert.equal(result.connection.primaryMeetAudioSenderStats?.trackReadyState, "live");
+    assert.ok(result.connection.primaryMeetAudioSenderStats?.bytesSent > 0);
+    assert.ok(result.timelineTypes.includes("primary_meet_audio_sender_selected"));
+    assert.ok(result.timelineTypes.includes("primary_meet_audio_sender_attached"));
   } finally {
     await browser.close();
   }

@@ -26,7 +26,7 @@ type realtimeJSONSchema struct {
 }
 
 func defaultRealtimeToolSchemas() []map[string]any {
-	return realtimeToolSchemasAsMaps(defaultRealtimeToolDefinitions())
+	return realtimeToolSchemas(false)
 }
 
 func realtimeToolSchemas(includeDemoSurface bool) []map[string]any {
@@ -52,7 +52,7 @@ func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
 	out := make([]realtimeToolSchema, 0, len(definitions))
 	for _, definition := range definitions {
 		switch definition.Name {
-		case "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface":
+		case "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "control_shared_app_window":
 			continue
 		default:
 			out = append(out, definition)
@@ -95,7 +95,18 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"subtitle":         stringSchema("Visible share subtitle."),
 			"mode":             stringSchema("Native app-share mode. Usually omit; the service defaults to native."),
 		})),
-		realtimeTool("control_shared_app_window", "Operate the currently shared existing macOS app/window through the host Computer Use executor. Use when the user asks you to click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle a stuck Chrome/browser window, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. Treat Chinese shorthand such as “你用电脑控制”, “你来操作”, “切到第三个账号”, “在搜索框输入”, and “处理 Chrome 卡住” as app-control requests. If the app/window target is implicit, unknown, or only described by the currently shared window, still call this tool with the user's goal in instruction and leave target fields null; the backend resolves the active share or returns a blocker. This tool operates the bot host's shared window, not the human's personal computer. Pass the user's goal as instruction; the host executor owns the observe -> plan -> act -> verify loop, including unfamiliar apps. By default this queues the app-control work asynchronously and returns a job_id immediately so voice turns do not block; call again with job_id to check status. Do not invent click/drag primitives in the foreground Realtime turn, do not ask the user to share/control their own computer, and do not use this to create a new browser workspace.", objectSchema(nil, map[string]realtimeJSONSchema{
+		realtimeTool("kwwk_computer_use", "Use KWWK Computer Use for a simple bounded operation in the bot host's currently shared or named macOS app/window. This is the generic direct app-operation tool: put the user's exact UI goal in instruction, optionally include the target app/window fields, and do not invent click coordinates, screenshots, operation arrays, or low-level primitives. Use it for simple app actions such as click/type/press/scroll/select/switch/change within the shared app. Do not use this for Google Meet's own meeting controls such as muting/unmuting the meeting microphone or camera, leaving the call, toggling captions, admitting/removing people, or changing participant controls. For complex visual goals that require exploration, multi-step planning, unfamiliar UI reasoning, or slow delegated Computer Use, use the long-running background app-control path instead. This tool operates the bot host's shared window, not the human's personal computer.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"job_id":           stringSchema("Existing KWWK app-control job id to check. When set, instruction is not required."),
+			"instruction":      stringSchema("Natural-language app/window operation to perform. Preserve the user's wording and do not translate it into low-level primitives."),
+			"applicationName":  stringSchema("Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal."),
+			"bundleIdentifier": stringSchema("Optional macOS bundle identifier when known."),
+			"windowTitle":      stringSchema("Optional visible window title when known."),
+			"windowId":         integerSchema("Optional macOS window id from the active app share, preferred over app-name guessing when known.", nil),
+			"processId":        integerSchema("Optional process id from list_shareable_windows.", nil),
+			"session_id":       stringSchema("Current meeting session id when known."),
+		})),
+		realtimeTool("control_shared_app_window", "Compatibility app-control entrypoint for the currently shared existing macOS app/window on the bot host. Prefer kwwk_computer_use for simple direct KWWK operations. Use this only for legacy callers or explicit delegate-mode app-control requests that need Codex Computer Use. Put the user's goal in natural language instruction; do not invent click coordinates or low-level UI primitives in the Realtime turn. This tool operates the bot host's shared window, not the human's personal computer.", objectSchema(nil, map[string]realtimeJSONSchema{
+			"executionMode":    enumStringSchemaWithDescription("direct", "direct runs the configured KWWK/direct app-control backend for simple actions; delegate starts the Codex app-control worker for complex tasks.", "direct", "delegate"),
 			"job_id":           stringSchema("Existing app-control job id to check. When set, instruction is not required."),
 			"instruction":      stringSchema("Concrete user-facing operation to perform in the shared app/window. Preserve important wording; for implicit targets, put the full user goal here."),
 			"applicationName":  stringSchema("Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal."),
@@ -226,6 +237,12 @@ func enumStringSchema(defaultValue string, values ...string) realtimeJSONSchema 
 		schema.Default = defaultValue
 		schema.HasDefault = true
 	}
+	return schema
+}
+
+func enumStringSchemaWithDescription(defaultValue string, description string, values ...string) realtimeJSONSchema {
+	schema := enumStringSchema(defaultValue, values...)
+	schema.Description = description
 	return schema
 }
 

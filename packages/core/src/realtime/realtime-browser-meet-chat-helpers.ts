@@ -587,15 +587,49 @@
       return { ok: true };
     }
 
-    async function runLocalMeetTool(name, args = {}) {
+    async function runLocalMeetTool(name, args = {}, meta: Record<string, unknown> = {}) {
+      const isSidecarMeetSurface =
+        String(config.realtimeRuntimePlacement || "") === "sidecar" &&
+        String(config.realtimePageRole || "") === "meet-surface";
+      if (isSidecarMeetSurface) {
+        if (name === "send_meet_chat") return sendMeetChat(args);
+        if (name === "read_meet_chat") return readMeetChat(args);
+        if (name === "meet_participants" || name === "active_speaker")
+          return readMeetingAwarenessTool(name);
+        return {
+          ok: false,
+          error: "meet_surface_tool_not_authorized",
+          tool: name,
+        };
+      }
+      const sidecarSurfaceTools = new Set(["send_meet_chat", "read_meet_chat"]);
+      const isRealtimeSidecarPage =
+        String(config.realtimeRuntimePlacement || "") === "sidecar" &&
+        String(config.realtimePageRole || "") === "sidecar";
+      if (isRealtimeSidecarPage && sidecarSurfaceTools.has(name)) {
+        if (typeof (window as any).MAB_HOST_RUN_SURFACE_TOOL !== "function") {
+          return {
+            ok: false,
+            error: "meet_surface_tool_port_missing",
+            tool: name,
+          };
+        }
+        return await (window as any).MAB_HOST_RUN_SURFACE_TOOL({
+          name,
+          args,
+          sessionId: String(config.sessionId || ""),
+          callId: meta.callId || "",
+          responseId: meta.responseId || "",
+        });
+      }
       if (config.dryRunLocalTools) return { ok: true, dryRun: true, tool: name, arguments: args };
       if (name === "send_meet_chat") return sendMeetChat(args);
       if (name === "present_video_stage")
         return postJson(localServiceUrl("/screen-share/video"), args);
       if (name === "stop_video_stage") return postJson(localServiceUrl("/screen-share/stop"), args);
-      if (name === "list_shareable_windows" || name === "list_shareable_apps")
+      if (name === "list_shareable_windows")
         return postJson(localServiceUrl("/screen-share/apps"), args);
-      if (name === "share_existing_app_window" || name === "present_app_share")
+      if (name === "share_existing_app_window")
         return postJson(localServiceUrl("/screen-share/app"), args);
       if (name === "read_meet_chat") return readMeetChat(args);
       if (name === "meet_participants" || name === "active_speaker")

@@ -144,6 +144,7 @@ type kwwkAppControlRequest struct {
 
 type kwwkAppControlResponse struct {
 	OK         bool                      `json:"ok"`
+	Status     string                    `json:"status,omitempty"`
 	Summary    string                    `json:"summary,omitempty"`
 	Actions    []string                  `json:"actions,omitempty"`
 	Confidence float64                   `json:"confidence,omitempty"`
@@ -156,8 +157,13 @@ func (r kwwkAppControlResponse) appControlResult() AppControlResult {
 	status := appControlStatusCompleted
 	errorText := ""
 	blocker := strings.TrimSpace(r.Blocker)
+	if normalizedStatus := normalizeAppControlStatus(r.Status); normalizedStatus != "" {
+		status = normalizedStatus
+	}
 	if !r.OK {
-		status = appControlStatusFailed
+		if status == appControlStatusCompleted {
+			status = appControlStatusFailed
+		}
 		errorText = "app_control_blocked"
 		if blocker == "accessibility_permission_required" {
 			errorText = "accessibility_permission_required"

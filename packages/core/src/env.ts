@@ -28,6 +28,8 @@ export function getRuntimeConfig(env = process.env) {
     openaiRealtimeTurnDetection: env.MAB_OPENAI_REALTIME_TURN_DETECTION || "steady",
     openaiRealtimeSessionSchema: env.MAB_OPENAI_REALTIME_SESSION_SCHEMA || "realtime-2",
     openaiRealtimeAgentRuntime: env.MAB_OPENAI_REALTIME_AGENT_RUNTIME || "agents-sdk",
+    openaiRealtimeRuntimePlacement:
+      env.MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT || env.MAB_REALTIME_RUNTIME_PLACEMENT || "sidecar",
     realtimePersonalityContext: env.MAB_REALTIME_PERSONALITY_CONTEXT || "",
     internalAuthKey: env.MAB_INTERNAL_AUTH_KEY || env.ONEESAMA_INTERNAL_AUTH_KEY || "",
     slackBotToken: env.SLACK_BOT_TOKEN || "",
@@ -67,6 +69,7 @@ export function getRuntimeConfig(env = process.env) {
     stateProvider: env.MAB_STATE_PROVIDER || "json-file",
     stateSqlitePath: env.MAB_STATE_SQLITE_PATH || "",
     slackPort: Number.parseInt(env.MAB_SLACK_PORT || "8780", 10),
+    meetingHost: env.MAB_MEETING_HOST || "127.0.0.1",
     meetingPort: Number.parseInt(env.MAB_MEETING_PORT || "8781", 10),
     publicBaseUrl: env.MAB_PUBLIC_BASE_URL || "http://127.0.0.1:8780",
     meetingAgentUrl:
@@ -127,6 +130,7 @@ export function getRuntimeConfig(env = process.env) {
     digestWebhookRetryDelayMs: Number.parseInt(env.MAB_DIGEST_WEBHOOK_RETRY_DELAY_MS || "1000", 10),
     meetAudioBackend: env.MAB_MEET_AUDIO_BACKEND || env.MEET_AUDIO_BACKEND || "auto",
     recordMeeting: (env.MAB_RECORD_MEETING || "") === "1",
+    recordReceiverAudioDuringRecappi: (env.MAB_RECORD_RECEIVER_AUDIO_DURING_RECAPPI || "") === "1",
     captureCaptions: (env.MAB_CAPTURE_CAPTIONS || env.MAB_ENABLE_CAPTIONS || "") === "1",
     captionLanguage: env.MAB_CAPTION_LANGUAGE || "",
     asrProvider: env.MAB_ASR_PROVIDER || "none",
@@ -174,7 +178,7 @@ export function getRuntimeConfig(env = process.env) {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    avatarRenderer: env.MAB_AVATAR_RENDERER || "live2d",
+    avatarRenderer: env.MAB_AVATAR_RENDERER || "video",
     avatarVRMModelUrl:
       env.MAB_AVATAR_VRM_MODEL_URL ||
       "https://raw.githubusercontent.com/trinhtanphat/AMI-Chat-AI/main/public/models/3d/Sendagaya_Shibu.vrm",

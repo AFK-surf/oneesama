@@ -139,6 +139,7 @@ type rawMeetdConfig struct {
 type rawDemoSurface struct {
 	Mode                          string `json:"mode"`
 	Enabled                       bool   `json:"enabled"`
+	ExposeRealtimeTools           bool   `json:"expose_realtime_tools"`
 	Adapter                       string `json:"adapter"`
 	RootDir                       string `json:"root_dir"`
 	URLAllowlistPatterns          string `json:"url_allowlist_patterns"`
@@ -160,6 +161,7 @@ type rawOpenAIConfig struct {
 	RealtimeTurnDetection      string `json:"realtime_turn_detection"`
 	RealtimeSessionSchema      string `json:"realtime_session_schema"`
 	RealtimeAgentRuntime       string `json:"realtime_agent_runtime"`
+	RealtimeRuntimePlacement   string `json:"realtime_runtime_placement"`
 	RealtimePersonalityContext string `json:"realtime_personality_context"`
 	BotName                    string `json:"bot_name"`
 	CurrentUserName            string `json:"current_user_name"`
@@ -324,6 +326,7 @@ func buildDemoSurfaceConfig(raw rawDemoSurface) DemoSurfaceConfig {
 	cfg := DemoSurfaceConfig{
 		Mode:                          stringOrDefault(raw.Mode, defaultDemoSurfaceMode),
 		Enabled:                       raw.Enabled,
+		ExposeRealtimeTools:           raw.ExposeRealtimeTools,
 		Adapter:                       stringOrDefault(raw.Adapter, defaultDemoSurfaceAdapter),
 		RootDir:                       stringOrDefault(raw.RootDir, defaultDemoSurfaceRootDir),
 		URLAllowlistPatterns:          splitConfigCSV(raw.URLAllowlistPatterns),
@@ -349,6 +352,9 @@ func buildDemoSurfaceConfig(raw rawDemoSurface) DemoSurfaceConfig {
 	}
 	if raw.AllowActiveControl {
 		cfg.AllowActiveControl = true
+	}
+	if raw.ExposeRealtimeTools {
+		cfg.ExposeRealtimeTools = true
 	}
 	return cfg
 }
@@ -447,6 +453,7 @@ func buildOpenAIConfig(raw rawOpenAIConfig) OpenAIConfig {
 		RealtimeTurnDetection:      stringOrDefault(raw.RealtimeTurnDetection, defaultOpenAIRealtimeTurnDetection),
 		RealtimeSessionSchema:      stringOrDefault(raw.RealtimeSessionSchema, defaultOpenAIRealtimeSessionSchema),
 		RealtimeAgentRuntime:       stringOrDefault(raw.RealtimeAgentRuntime, defaultOpenAIRealtimeAgentRuntime),
+		RealtimeRuntimePlacement:   stringOrDefault(raw.RealtimeRuntimePlacement, defaultOpenAIRealtimeRuntimePlacement),
 		RealtimePersonalityContext: strings.TrimSpace(raw.RealtimePersonalityContext),
 		BotName:                    stringOrDefault(raw.BotName, defaultRealtimeBotName),
 		CurrentUserName:            strings.TrimSpace(raw.CurrentUserName),

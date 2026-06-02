@@ -94,12 +94,12 @@ test("runtime init composer keeps representative Meet init script contents stabl
 
   assert.deepEqual(actual, {
     avatar: {
-      contentLength: 97050,
-      sha256: "873474e2f94d0fff7e2be4e9931a014e71d4a2574a8e0a9d8ca97f1b309f2c85",
+      contentLength: 107197,
+      sha256: "4bbfc6abd444e6b282105bc2637704703d14b62f8b80d6ec2d3b634946647f4c",
     },
     realtime: {
-      contentLength: 4029574,
-      sha256: "ccf528c360bd45ffa164a5d42fa7325795a510067795e239377a30cbcf723035",
+      contentLength: 346081,
+      sha256: "eb7a45a63128271db830fe5afa58a558eabfae7806464e723d83bf2002af8772",
     },
     local_dialog: {
       contentLength: 9883,
@@ -110,8 +110,8 @@ test("runtime init composer keeps representative Meet init script contents stabl
       sha256: "664dcc82c42aa0076781ef90b10670c44857b6df1abd19bbfb9b47df5b8e5551",
     },
     worker_result: {
-      contentLength: 3724,
-      sha256: "6120a480bd5ff0d12235b78c0c7d06808a7d5afc4f6632ff85eb57735712b2a5",
+      contentLength: 6751,
+      sha256: "95a52fbf095bd2acd08caab6465490c03c6838d5cdde14f3a763ea49ea8978f6",
     },
   });
 

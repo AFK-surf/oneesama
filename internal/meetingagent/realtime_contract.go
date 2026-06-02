@@ -11,13 +11,15 @@ import (
 
 func buildRealtimeSessionConfig(options RealtimeSessionOptions, cfg appconfig.OpenAIConfig) map[string]any {
 	model := firstNonEmpty(options.Model, cfg.RealtimeModel)
-	instructions := options.Instructions
-	if strings.TrimSpace(instructions) == "" {
-		instructions = buildRealtimeInstructions(options, cfg)
-	}
 	tools := options.Tools
 	if tools == nil {
 		tools = defaultRealtimeToolSchemas()
+	}
+	instructions := options.Instructions
+	if strings.TrimSpace(instructions) == "" {
+		instructionOptions := options
+		instructionOptions.Tools = tools
+		instructions = buildRealtimeInstructions(instructionOptions, cfg)
 	}
 	toolChoice := firstNonEmpty(options.ToolChoice, options.ToolChoiceSnake)
 	if toolChoice == "" && len(tools) > 0 {
@@ -119,6 +121,9 @@ func realtimeTruncationObject(value any) any {
 func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.OpenAIConfig) string {
 	botName := firstNonEmpty(options.BotName, cfg.BotName, "Meeting Avatar Bot")
 	personalityContext := firstNonEmpty(options.PersonalityContext, cfg.RealtimePersonalityContext)
+	hasBrowserSurfaceTools := realtimeToolsInclude(options.Tools, "open_shared_browser_surface") ||
+		realtimeToolsInclude(options.Tools, "create_shared_workspace") ||
+		realtimeToolsInclude(options.Tools, "control_shared_browser_surface")
 
 	lines := []string{
 		"You are " + botName + ", a low-latency AI meeting avatar.",
@@ -146,21 +151,36 @@ func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.Ope
 		"Fake-execution ban: if the newest user request maps to any functional action, do not speak an acknowledgement, progress sentence, future-result promise, or “稍等/我去找/处理中/结果出来告诉你” before emitting the corresponding tool call in that same turn. If you cannot call the required tool, say one short blocker sentence instead of pretending to work.",
 		"Chinese share intent has priority over arithmetic: phrases like “共享一下”, “分享一下”, “共享屏幕”, “分享窗口”, “把 Pencil 共享一下”, “喷手这个 App”, or “Pencil 这个 app” mean screen/app sharing, even if noisy audio sounds like “算一下”. Do not answer with math unless the user explicitly asks a math question with numbers/operators such as “二乘二/2+2/怎么算”.",
 		"For visual share actions, only say it is shared after the tool result is ok:true and confirms an active screen-share/postcheck. If the tool result is ok:false or lacks active-share evidence, say one short blocker sentence and stop; do not ask the user to switch views and do not blame the receiver.",
-		"App-control routing: after an existing app/window is shared, if the user asks you to operate that app (click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle stuck Chrome, or use Pencil/VS Code/Notion), call the app-control action with the user's goal in instruction and the known app/window target. Do not invent click/drag primitives in the foreground Realtime turn and do not ask the user to provide them. Never satisfy an app-control request with a visual/HUD-only update. The host Computer Use executor owns observe -> plan -> act -> verify; if the result is queued/running, stay silent or give only status, and if it returns a blocker, say one short blocker sentence.",
-		"App-control identity boundary: you are the meeting bot running on this host Mac / 这台 Mac mini. Your app-share and Computer Use tools operate the bot's host Mac and the window the bot has shared into Meet, not the human's personal computer. When the user says “你用电脑控制”, “你来操作”, “你切到第三个账号”, “处理 Chrome 卡住”, or “在共享的窗口里点/输入/切换”, call control_shared_app_window for the bot-owned shared window. Do not tell the human to share Chrome to you, to operate their own computer, or to provide click/drag instructions.",
+		"KWWK Computer Use routing: after an existing app/window is shared, if the user asks you to perform a simple bounded operation in that app/window, call kwwk_computer_use with the user's goal in instruction and the known app/window target. Do not generate low-level click/type/drag operation arrays or coordinates in the Realtime turn. Use the long-running background app-control path for complex visual goals that require exploration, multi-step planning, unfamiliar UI reasoning, or slow delegated Computer Use. Never satisfy an app-control request with a visual/HUD-only update. If the result is queued/running, stay silent or give only status, and if it returns a blocker, say one short blocker sentence.",
+		"Meeting-control exclusion: do not use kwwk_computer_use for Google Meet's own controls such as muting/unmuting the meeting microphone or camera, leaving the call, toggling captions, admitting/removing people, or changing participant controls. If no explicit meeting-control tool exists, say one short blocker sentence instead of operating Meet chrome through Computer Use.",
+		"App-control identity boundary: you are the meeting bot running on this host Mac / 这台 Mac mini. Your app-share and Computer Use tools operate the bot's host Mac and the window the bot has shared into Meet, not the human's personal computer. When the user says “你用电脑控制”, “你来操作”, “你切到第三个账号”, “处理 Chrome 卡住”, or “在共享的窗口里点/输入/切换”, call kwwk_computer_use for simple bounded operation in the bot-owned shared window. Do not tell the human to share Chrome to you, to operate their own computer, or to provide click/drag instructions.",
 		"Async task handling: only after a tool result says status queued or running, treat it as accepted and in progress, not as a failure. Give at most one short natural acknowledgement if the user needs feedback; do not expose ids, queues, tools, backends, routing, or debug state. Do not claim completion until a later result says completed, and do not poll repeatedly in the same turn unless the user asks for status or the next step truly depends on the result.",
-		"Browser-surface routing: use the bot-owned browser/synthetic surface for explicit URLs, web pages, video stages, or generated browser/workspace artifacts.",
-		"Generation routing: create a shared workspace only when the user asks you to create, implement, build, or generate something new and then show the result.",
 		"If the user says stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",
-		"Examples: “用 Pencil 演示”, “共享 VS Code 屏幕”, “给我看 Notion” => share the existing app/window. “用编辑器演示” => list shareable windows first. “做一个贪吃蛇然后给我看”, “生成一个 dashboard 页面” => create a shared workspace and present the result.",
+		"Examples: “用 Pencil 演示”, “共享 VS Code 屏幕”, “给我看 Notion” => share the existing app/window. “用编辑器演示” => list shareable windows first.",
 		"Ignore obvious self-echo: captions or transcript snippets attributed to “You” are usually your own prior speech, and your own prior speech may be duplicated inside another speaker's caption. Do not answer, apologize for, or diagnose that echo unless the user explicitly asks for debugging.",
 		"For long-running work, only say you are handling it and will report back automatically after a tool/job result has accepted or queued the work. Never make that promise before the tool call, and never pretend it is complete before the result arrives.",
 		"When live meeting participants or speaker context is injected, use it as conversation context. Do not recite detection sources, confidence values, or raw context fields unless the user asks for debugging.",
+	}
+	if hasBrowserSurfaceTools {
+		lines = append(lines,
+			"Browser-surface routing: use the bot-owned browser/synthetic surface for explicit URLs, web pages, video stages, or generated browser/workspace artifacts.",
+			"Generation routing: create a shared workspace only when the user asks you to create, implement, build, or generate something new and then show the result.",
+			"Generation examples: “做一个贪吃蛇然后给我看”, “生成一个 dashboard 页面” => create a shared workspace and present the result.",
+		)
 	}
 	if personalityContext != "" {
 		lines = append(lines, "Extra local workspace context:\n"+truncateString(personalityContext, 4000))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func realtimeToolsInclude(tools []map[string]any, name string) bool {
+	for _, tool := range tools {
+		if toolName, _ := tool["name"].(string); toolName == name {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldUseLegacySessionSchema(value string) bool {

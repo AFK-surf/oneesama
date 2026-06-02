@@ -3,8 +3,6 @@ package meetingagent
 const (
 	RealtimeToolClassStableForeground   = "stable_foreground"
 	RealtimeToolClassOptionalForeground = "optional_foreground"
-	RealtimeToolClassDeprecatedAlias    = "deprecated_alias"
-	RealtimeToolClassWorkerOnly         = "worker_only"
 )
 
 type RealtimeForegroundToolInventoryItem struct {
@@ -24,16 +22,6 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Class: RealtimeToolClassStableForeground,
 		Gate:  "session_capabilities",
 		Notes: "reads bounded worker result/status envelopes",
-	},
-	"delegate_to_codex": {
-		Class: RealtimeToolClassDeprecatedAlias,
-		Gate:  "compat_alias_delegate_to_worker",
-		Notes: "compatibility alias; new flows should use delegate_to_worker",
-	},
-	"delegate_status": {
-		Class: RealtimeToolClassDeprecatedAlias,
-		Gate:  "compat_alias_worker_status",
-		Notes: "compatibility alias; new flows should use worker_status",
 	},
 	"send_meet_chat": {
 		Class: RealtimeToolClassStableForeground,
@@ -60,29 +48,34 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Gate:  "active_meeting_session",
 		Notes: "native macOS app/window share boundary; use for named app/window requests",
 	},
+	"kwwk_computer_use": {
+		Class: RealtimeToolClassStableForeground,
+		Gate:  "active_meeting_session_and_host_computer_use",
+		Notes: "generic KWWK direct Computer Use boundary for simple bounded app/window operations; accepts natural-language instruction, not primitive arrays",
+	},
 	"control_shared_app_window": {
 		Class: RealtimeToolClassStableForeground,
 		Gate:  "active_meeting_session_and_host_computer_use",
-		Notes: "native app/window Computer Use boundary; routes app operation requests to the host adapter instead of raw click primitives",
+		Notes: "compatibility app-control entrypoint retained for old sessions and delegate-mode app-control requests; prefer kwwk_computer_use for direct simple actions",
 	},
 	"open_shared_browser_surface": {
 		Class: RealtimeToolClassOptionalForeground,
-		Gate:  "demo_surface_enabled",
-		Notes: "bot-owned Browser/CU surface for URLs or generated browser workspaces; hidden when demo surface bridge is disabled",
+		Gate:  "demo_surface_realtime_tools_exposed",
+		Notes: "bot-owned Browser/CU surface for URLs or generated browser workspaces; hidden unless demo surface Realtime tools are explicitly exposed",
 	},
 	"create_shared_workspace": {
 		Class: RealtimeToolClassOptionalForeground,
-		Gate:  "demo_surface_enabled_and_worker_runner",
+		Gate:  "demo_surface_realtime_tools_exposed_and_worker_runner",
 		Notes: "end-to-end build-and-show boundary; starts visual surface plus code-capable worker with external-write approval gate",
 	},
 	"control_shared_browser_surface": {
 		Class: RealtimeToolClassOptionalForeground,
-		Gate:  "demo_surface_enabled_and_policy",
+		Gate:  "demo_surface_realtime_tools_exposed_and_policy",
 		Notes: "single stable Browser/CU control boundary; active click/type requires policy approval",
 	},
 	"stop_shared_browser_surface": {
 		Class: RealtimeToolClassOptionalForeground,
-		Gate:  "demo_surface_enabled",
+		Gate:  "demo_surface_realtime_tools_exposed",
 		Notes: "stops active bot-owned Browser/CU surface",
 	},
 	"read_meet_chat": {
@@ -100,11 +93,6 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Gate:  "active_meeting_session",
 		Notes: "read-only best-effort speaker signal",
 	},
-	"fetch_url": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "public_url_read",
-		Notes: "read-only URL extraction; deeper browsing should delegate or use demo surface",
-	},
 	"current_user_identity": {
 		Class: RealtimeToolClassStableForeground,
 		Gate:  "workspace_identity_read",
@@ -115,75 +103,15 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Gate:  "workspace_identity_read",
 		Notes: "identity read/write boundary; learn payload is scoped to speaker-resolution memory",
 	},
-	"search_team_members": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "workspace_connector_read",
-		Notes: "read-only team member search",
-	},
-	"linear_query": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "workspace_connector_read",
-		Notes: "read-only Linear issue search; mutations require Browser/CU approval task",
-	},
-	"linear_user_issues": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "workspace_connector_read",
-		Notes: "read-only Linear assignee lookup",
-	},
-	"google_calendar": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "workspace_connector_read",
-		Notes: "read-only Calendar search",
-	},
 	"calendar_attendees": {
 		Class: RealtimeToolClassStableForeground,
 		Gate:  "workspace_connector_read",
 		Notes: "read-only attendee lookup for current Meet URL",
 	},
-	"slack_search": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "workspace_connector_read",
-		Notes: "read-only Slack search from realtime",
-	},
-	"notion_search": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "workspace_connector_read",
-		Notes: "read-only Notion search from realtime",
-	},
-	"github_search": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "workspace_connector_read",
-		Notes: "read-only GitHub search from realtime; mutations require Browser/CU approval task",
-	},
-	"memory_write": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "session_memory",
-		Notes: "writes meeting-avatar session memory, not external systems",
-	},
-	"memory_read": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "session_memory",
-		Notes: "read-only meeting-avatar session memory",
-	},
 	"now": {
 		Class: RealtimeToolClassStableForeground,
 		Gate:  "dynamic_value_tool",
 		Notes: "dynamic output behind stable schema; must not enter stable prompt bytes",
-	},
-	"set_avatar_expression": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "avatar_local_control",
-		Notes: "local avatar expression only",
-	},
-	"set_avatar_action": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "avatar_local_control",
-		Notes: "local avatar action only",
-	},
-	"update_avatar_state": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "avatar_local_control",
-		Notes: "local avatar expression/action only",
 	},
 }
 

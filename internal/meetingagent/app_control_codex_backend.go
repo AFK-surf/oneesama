@@ -92,12 +92,13 @@ func realtimeRequestFromAppControl(req AppControlRequest) RealtimeSharedAppContr
 	return RealtimeSharedAppControlRequest{
 		SessionID:        req.SessionID,
 		Instruction:      req.Instruction,
-		Standalone:       req.Context["standalone_app_control"] == true,
+		ExecutionMode:    normalizeAppControlExecutionMode(req.ExecutionMode),
 		ApplicationName:  req.Target.ApplicationName,
 		BundleIdentifier: req.Target.BundleIdentifier,
 		WindowTitle:      req.Target.WindowTitle,
 		WindowID:         req.Target.WindowID,
 		ProcessID:        req.Target.ProcessID,
+		Operations:       append([]KWWKAppControlOperation(nil), req.Operations...),
 		TimeoutMs:        int(req.Timeout.Milliseconds()),
 		Context:          cloneMap(req.Context),
 	}

@@ -96,10 +96,18 @@ function createInitScript(
 
 function realtimeEventDetail(realtime: Record<string, unknown> | undefined) {
   const realtimeBridgeMode = String(realtime?.mode || "").trim();
-  if (!realtimeBridgeMode) return {};
+  const realtimeRuntimePlacement = String(realtime?.realtimeRuntimePlacement || "").trim();
+  const realtimePageRole = String(realtime?.realtimePageRole || "").trim();
+  const placementDetail = {
+    ...(realtimeRuntimePlacement ? { realtimeRuntimePlacement } : {}),
+    ...(realtimePageRole ? { realtimePageRole } : {}),
+    ...(realtimeRuntimePlacement === "sidecar" ? { sdkOwner: "sidecar" } : {}),
+  };
+  if (!realtimeBridgeMode) return placementDetail;
   return {
     realtimeBridgeMode,
     mockTransport: MOCK_REALTIME_MODES.has(realtimeBridgeMode.toLowerCase()),
+    ...placementDetail,
   };
 }
 

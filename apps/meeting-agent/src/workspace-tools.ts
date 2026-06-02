@@ -99,10 +99,26 @@ export function realtimeSuppressChannelForContext(
 ) {
   if (!isRealtimeMeetingScopedContext(context)) return "realtime_non_meeting_suppressed";
   const targetSessionId = workerMeetingSessionId(context);
+  if (sessionId && !targetSessionId) {
+    return "realtime_session_missing_suppressed";
+  }
   if (sessionId && targetSessionId && targetSessionId !== sessionId) {
     return "realtime_session_mismatch_suppressed";
   }
   return "";
+}
+
+export function realtimeSuppressReasonForChannel(channel = "") {
+  if (channel === "realtime_session_missing_suppressed") {
+    return "worker_result_session_missing";
+  }
+  if (channel === "realtime_session_mismatch_suppressed") {
+    return "worker_result_session_mismatch";
+  }
+  if (channel === "realtime_noop_suppressed") {
+    return "no_action_result";
+  }
+  return channel || "worker_result_suppressed";
 }
 
 export function videoContentType(filePath = "") {

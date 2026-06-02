@@ -50,6 +50,18 @@ export interface AvatarAudioBus {
     stream: MediaStream | null | undefined,
     options?: { label?: string; gain?: number },
   ): { ok?: boolean; [key: string]: unknown };
+  enqueuePcmFrames?(options?: {
+    samples?: number[];
+    frames?: number[];
+    pcm16?: number[];
+    sampleRate?: number;
+    channels?: number;
+    channelCount?: number;
+    format?: string;
+    label?: string;
+    gain?: number;
+    endOfUtterance?: boolean;
+  }): { ok?: boolean; [key: string]: unknown };
   getMouthLevel?(): number;
 }
 
@@ -172,19 +184,12 @@ export interface RealtimeClient {
   reconnect?(reason?: string): unknown;
   cancelActiveResponse?(reason?: string): unknown;
   sendSessionUpdate?(options?: unknown): unknown;
-  runLocalAvatarTool?(toolName: string, args?: unknown): unknown;
-  runLocalWorkerTool?(toolName: string, args?: unknown): unknown;
-  discoverParticipantAudioStreams?(): unknown;
-  registerParticipantAudioStream?(
-    stream: MediaStream | null | undefined,
-    options?: unknown,
-  ): unknown;
+  pushRealtimeOutputPcmFrames?(payload: unknown): unknown;
   stopMeetAudioCapture?(reason?: string): Promise<unknown>;
   injectWorkerResult?(payload: unknown): unknown;
-  sendWorkerResult?(payload: unknown): unknown;
   observeCaptionSpeakerSignal?(payload: CaptionEvent): unknown;
-  sendRealtimeEvent?(payload: unknown): unknown;
-  runLocalMeetTool?(toolName: string, payload: unknown): Promise<unknown>;
+  sendRealtimeControlEvent?(payload: unknown): unknown;
+  requestRealtimeTextTurn?(payload: unknown): unknown;
   [key: string]: unknown;
 }
 
@@ -332,6 +337,12 @@ declare global {
     MAB_AVATAR_READY?: Record<string, unknown> | null;
     MAB_AVATAR_START_RENDERER?: (() => Promise<unknown>) | null;
     MAB_AVATAR_THREE_VRM_DEPS?: Record<string, any> | null;
+    MAB_MEET_SURFACE_TOOLS?: {
+      state?: Record<string, unknown>;
+      run?: (name: string, args?: Record<string, unknown>) => unknown;
+      sendMeetChat?: (args?: Record<string, unknown>) => unknown;
+      readMeetChat?: (args?: Record<string, unknown>) => unknown;
+    };
     MAB_AVATAR_RENDERER?:
       | (Record<string, unknown> & {
           renderer?: string;

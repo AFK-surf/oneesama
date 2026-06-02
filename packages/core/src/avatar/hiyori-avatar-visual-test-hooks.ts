@@ -162,6 +162,19 @@ export function createAvatarVisualTestHooks(
         sampleCanvas.height,
       );
       const compact = sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
+      const cursor = (window as any).MAB_KWWK_CURSOR_SNAPSHOT?.() || { x: 0.5, y: 0.52 };
+      const cursorRect = {
+        x: Math.max(
+          0,
+          Math.min(config.canvasWidth - 96, Math.round(cursor.x * config.canvasWidth) - 48),
+        ),
+        y: Math.max(
+          0,
+          Math.min(config.canvasHeight - 96, Math.round(cursor.y * config.canvasHeight) - 48),
+        ),
+        width: 96,
+        height: 96,
+      };
       return {
         label:
           snapshotInput.label || `${avatarController.state.mood}-${avatarController.state.action}`,
@@ -174,6 +187,7 @@ export function createAvatarVisualTestHooks(
         face: metricsFromContext(testCtx, { x: 600, y: 130, width: 720, height: 680 }),
         mouth: metricsFromContext(testCtx, { x: 760, y: 430, width: 400, height: 250 }),
         status: metricsFromContext(testCtx, hudRect),
+        cursor: metricsFromContext(testCtx, cursorRect),
         dataUrl: snapshotInput.includeDataUrl ? testCanvas.toDataURL("image/png") : undefined,
       };
     } finally {
@@ -218,6 +232,19 @@ export function createAvatarVisualTestHooks(
           sampleCanvas.height,
         );
         const compact = sampleCtx.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height);
+        const cursor = (window as any).MAB_KWWK_CURSOR_SNAPSHOT?.() || { x: 0.5, y: 0.52 };
+        const cursorRect = {
+          x: Math.max(
+            0,
+            Math.min(config.canvasWidth - 96, Math.round(cursor.x * config.canvasWidth) - 48),
+          ),
+          y: Math.max(
+            0,
+            Math.min(config.canvasHeight - 96, Math.round(cursor.y * config.canvasHeight) - 48),
+          ),
+          width: 96,
+          height: 96,
+        };
         return {
           ok: true,
           label: captureInput.label || "source",
@@ -236,6 +263,7 @@ export function createAvatarVisualTestHooks(
               height: 118,
             },
           ),
+          cursor: metricsFromContext(testCtx, cursorRect),
           dataUrl: captureInput.includeDataUrl ? testCanvas.toDataURL("image/png") : undefined,
         };
       } catch (error) {

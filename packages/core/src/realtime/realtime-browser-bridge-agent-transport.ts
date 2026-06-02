@@ -126,6 +126,28 @@ function captureRealtimeAgentSDKInputSender(pc, reason = "agents-sdk-peer-connec
   window.setTimeout(() => retry(`${reason}:timeout-250`), 250);
 }
 
+function markRealtimeAgentSDKTransportDisconnected(reason, detail: Record<string, any> = {}) {
+  const peerConnectionState = String(
+    detail.peerConnectionState || state.connection.peerConnectionState || "",
+  );
+  state.connected = false;
+  state.agentRuntime.sdkConnected = false;
+  state.connection.dataChannelOpen = false;
+  if (peerConnectionState) state.connection.peerConnectionState = peerConnectionState;
+  Object.assign(state.connection as Record<string, unknown>, {
+    lastRealtimeAgentSDKDisconnectAt: new Date().toISOString(),
+    lastRealtimeAgentSDKDisconnectReason: reason,
+  });
+  recordTimeline("realtime_agent_sdk_disconnected", {
+    reason,
+    peerConnectionState,
+    ...detail,
+  });
+  const delayMs = Number(detail.delayMs || 0);
+  scheduleRealtimeReconnect(reason, Number.isFinite(delayMs) ? delayMs : 0);
+  updateFeedback();
+}
+
 function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
   if (connectionConfig.mode === "agents-sdk-mock") return createMockRealtimeAgentTransport();
   const inputDestination = ensureRealtimeInputDestination("agents-sdk-connect");
@@ -171,6 +193,16 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
           captureRealtimeAgentSDKInputSender(pc, "connectionstatechange");
         }
         recordTimeline("realtime_agent_sdk_peer_connection", { state: pc.connectionState });
+        if (
+          pc === activePeerConnection &&
+          ["failed", "closed", "disconnected"].includes(String(pc.connectionState || ""))
+        ) {
+          markRealtimeAgentSDKTransportDisconnected(`agents_sdk_peer_${pc.connectionState}`, {
+            peerConnectionState: pc.connectionState,
+            delayMs: pc.connectionState === "disconnected" ? 750 : 0,
+          });
+          return;
+        }
         updateFeedback();
       });
       const sdkOnTrack = pc.ontrack;
@@ -224,6 +256,9 @@ function installRealtimeAgentSDKEventHandlers(session, transport) {
         updateContextHealthFromHistory(history);
         maybeCompactRealtimeHistory("history_updated");
       }
+      if (type === "agent_end") {
+        updateContextHealthFromHistory(currentHistorySnapshot());
+      }
       updateFeedback();
     };
   for (const eventName of [
@@ -238,9 +273,6 @@ function installRealtimeAgentSDKEventHandlers(session, transport) {
     "audio_interrupted",
     "history_updated",
     "history_added",
-    // Older local fakes used these names; keep them for compatibility.
-    "tool_start",
-    "tool_end",
   ]) {
     session?.on?.(eventName, record(eventName));
   }
@@ -260,6 +292,19 @@ function installRealtimeAgentSDKEventHandlers(session, transport) {
 }
 
 async function connectRealtimeAgentSDK(connectionConfig) {
+  if (realtimeRuntimePlacement === "inline") {
+    const meetSurface = realtimePageRole === "meet-surface";
+    if (meetSurface || !allowInlineAgentsSDKDiagnostic) {
+      state.agentRuntime.fallbackReason = meetSurface
+        ? "inline_agents_sdk_on_meet_removed"
+        : "inline_agents_sdk_requires_diagnostic_opt_in";
+      throw new Error(
+        meetSurface
+          ? "Inline OpenAI Realtime Agents SDK on Meet has been removed; use realtimeRuntimePlacement=sidecar"
+          : "Inline OpenAI Realtime Agents SDK requires allowInlineAgentsSDKDiagnostic=true",
+      );
+    }
+  }
   const namespace = getRealtimeAgentsSDKNamespace();
   if (!namespace) {
     state.agentRuntime.fallbackReason = "openai_agents_realtime_bundle_missing";
@@ -290,10 +335,15 @@ async function connectRealtimeAgentSDK(connectionConfig) {
   activeRealtimeAgentSession = session;
   activeRealtimeAgentTransport = transport;
   installRealtimeAgentSDKEventHandlers(session, transport);
-  await session.connect({
-    apiKey: ephemeralKey,
-    model: connectionConfig.session?.model || "gpt-realtime-2",
-  });
+  (window as any).__MAB_CREATING_REALTIME_AGENT_PEER_CONNECTION = true;
+  try {
+    await session.connect({
+      apiKey: ephemeralKey,
+      model: connectionConfig.session?.model || "gpt-realtime-2",
+    });
+  } finally {
+    (window as any).__MAB_CREATING_REALTIME_AGENT_PEER_CONNECTION = false;
+  }
   state.connected = true;
   state.connection.dataChannelOpen = true;
   state.connection.peerConnectionState = "sdk-connected";
@@ -309,13 +359,22 @@ async function connectRealtimeAgentSDK(connectionConfig) {
     sdkVersion: state.agentRuntime.sdkVersion,
   });
   scheduleRealtimeSessionRenewal("agents_sdk_connected");
-  installMeetChatObserver().catch((error) => {
-    state.meetChat.errors.push({
-      ts: new Date().toISOString(),
-      message: String((error && error.message) || error).slice(0, 300),
+  if (
+    String(config.realtimeRuntimePlacement || "") === "sidecar" &&
+    String(config.realtimePageRole || "") === "sidecar"
+  ) {
+    recordTimeline("meet_chat_observer_skipped", {
+      reason: "sidecar_page_not_meet_surface",
     });
-    state.meetChat.errors = state.meetChat.errors.slice(-20);
-  });
+  } else {
+    installMeetChatObserver().catch((error) => {
+      state.meetChat.errors.push({
+        ts: new Date().toISOString(),
+        message: String((error && error.message) || error).slice(0, 300),
+      });
+      state.meetChat.errors = state.meetChat.errors.slice(-20);
+    });
+  }
   window.dispatchEvent(
     new CustomEvent("meeting-avatar-realtime-connected", {
       detail: { mode: state.connection.mode, agentRuntime: "agents-sdk" },
@@ -330,6 +389,8 @@ function cleanupRealtimeConnection(reason = "cleanup") {
   clearRealtimeSessionRenewalTimer();
   clearRealtimeAudioSenderStatsMonitor();
   clearRealtimeRemoteAudioTrackStats();
+  const peerConnection = activePeerConnection;
+  activePeerConnection = null;
   try {
     activeRealtimeAgentSession?.close?.();
   } catch {
@@ -347,7 +408,7 @@ function cleanupRealtimeConnection(reason = "cleanup") {
     // Best-effort close before reconnecting.
   }
   try {
-    activePeerConnection?.getSenders?.().forEach((sender) => {
+    peerConnection?.getSenders?.().forEach((sender) => {
       if (
         sender.track &&
         sender.track !== silentMeetAudioTrack &&
@@ -360,11 +421,10 @@ function cleanupRealtimeConnection(reason = "cleanup") {
     // Best-effort cleanup.
   }
   try {
-    activePeerConnection?.close?.();
+    peerConnection?.close?.();
   } catch {
     // Best-effort cleanup.
   }
-  activePeerConnection = null;
   activeRealtimeAgentSession = null;
   activeRealtimeAgentTransport = null;
   realtimeAudioSender = null;

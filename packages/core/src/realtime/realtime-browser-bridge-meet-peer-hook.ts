@@ -1,22 +1,85 @@
 /* eslint-disable no-unused-vars */
+const avatarAudioBusSenderTrackClones = new WeakSet();
+
 function isRoutingDestinationTrack(track: MediaStreamTrack | null | undefined) {
   if (!track || !routingDestination) return false;
   return routingDestination.stream.getAudioTracks().includes(track);
 }
 
 function avatarAudioBusTrack() {
-  const track = window.MAB_AVATAR_AUDIO_BUS?.track;
+  const bus = window.MAB_AVATAR_AUDIO_BUS as any;
+  const track = bus?.track || bus?.stream?.getAudioTracks?.()[0] || null;
   return track?.kind === "audio" && track.readyState !== "ended" ? track : null;
 }
 
+function cloneAvatarAudioBusTrack() {
+  const sourceTrack = avatarAudioBusTrack();
+  if (!sourceTrack) return null;
+  const clone = sourceTrack.clone();
+  avatarAudioBusSenderTrackClones.add(clone);
+  (clone as any).__meetingAvatarAudioBusClone = true;
+  (clone as any).__meetingAvatarAudioBusSourceTrackId = sourceTrack.id || "";
+  clone.enabled = true;
+  return clone;
+}
+
+function isAvatarAudioBusSenderTrack(track) {
+  const sourceTrack = avatarAudioBusTrack();
+  return Boolean(
+    track &&
+    (avatarAudioBusSenderTrackClones.has(track) ||
+      (track as any).__meetingAvatarAudioBusClone === true ||
+      (sourceTrack && track.id === sourceTrack.id)),
+  );
+}
+
 function updatePrimaryMeetAudioSenderState(sender) {
-  const avatarTrack = avatarAudioBusTrack();
   const senderTrack = sender?.track || null;
   state.connection.primaryMeetAudioSenderTrackId = senderTrack?.id || "";
-  state.connection.primaryMeetAudioSenderUsingAvatarBus = Boolean(
-    avatarTrack && senderTrack && senderTrack.id === avatarTrack.id,
-  );
+  state.connection.primaryMeetAudioSenderUsingAvatarBus = isAvatarAudioBusSenderTrack(senderTrack);
   updateFeedback();
+}
+
+function statsReportHasOutboundAudio(report) {
+  let found = false;
+  report?.forEach?.((entry) => {
+    if (found) return;
+    const kind = entry.kind || entry.mediaType;
+    if (entry.type === "outbound-rtp" && (!kind || kind === "audio")) found = true;
+  });
+  return found;
+}
+
+async function probeMeetOutboundAudioSenderByStats(pc, pcId, sender, source) {
+  if (!sender?.getStats) return;
+  const now = Date.now();
+  if (sender.__meetingAvatarRealtimeAudioStatsProbeInFlight) return;
+  if (
+    sender.__meetingAvatarRealtimeLastAudioStatsProbeAt &&
+    now - sender.__meetingAvatarRealtimeLastAudioStatsProbeAt < 1000
+  )
+    return;
+  sender.__meetingAvatarRealtimeLastAudioStatsProbeAt = now;
+  sender.__meetingAvatarRealtimeAudioStatsProbeInFlight = true;
+  try {
+    const report = await sender.getStats();
+    if (!statsReportHasOutboundAudio(report)) return;
+    handleMeetOutboundAudioSender(
+      pc,
+      pcId,
+      sender,
+      sender.track?.kind === "audio" ? sender.track : avatarAudioBusTrack(),
+      `${source}.statsProbe`,
+    );
+  } catch (error) {
+    recordTimeline("meet_audio_sender_stats_probe_failed", {
+      pcId,
+      source,
+      error: String((error && error.message) || error).slice(0, 240),
+    });
+  } finally {
+    sender.__meetingAvatarRealtimeAudioStatsProbeInFlight = false;
+  }
 }
 
 async function samplePrimaryMeetAudioSenderStats(reason = "interval") {
@@ -95,22 +158,29 @@ function attachAvatarAudioToPrimaryMeetSender(sender, pcId, source) {
     schedulePrimaryMeetAudioAttachRetry(pcId, source);
     return;
   }
-  if (sender.track?.id === avatarTrack.id) return;
+  if (isAvatarAudioBusSenderTrack(sender.track) && sender.track?.readyState !== "ended") return;
   if (primaryMeetAudioSenderAttachInFlight.has(sender)) return;
+  const replacementTrack = cloneAvatarAudioBusTrack();
+  if (!replacementTrack) {
+    schedulePrimaryMeetAudioAttachRetry(pcId, source);
+    return;
+  }
   primaryMeetAudioSenderAttachInFlight.add(sender);
   state.connection.primaryMeetAudioSenderAttachAttempts += 1;
   sender
-    .replaceTrack(avatarTrack)
+    .replaceTrack(replacementTrack)
     .then(() => {
-      state.connection.primaryMeetAudioSenderTrackId = avatarTrack.id;
+      state.connection.primaryMeetAudioSenderTrackId = replacementTrack.id;
       state.connection.primaryMeetAudioSenderUsingAvatarBus = true;
       state.connection.lastPrimaryMeetAudioAttachAt = new Date().toISOString();
       state.connection.lastPrimaryMeetAudioAttachError = "";
       recordTimeline("primary_meet_audio_sender_attached", {
         pcId,
         source,
-        trackId: avatarTrack.id,
+        trackId: replacementTrack.id,
+        sourceTrackId: avatarTrack.id,
       });
+      samplePrimaryMeetAudioSenderStats("avatar-bus-attached");
       ensurePrimaryMeetAudioSenderStatsMonitor("avatar-bus-attached");
       return updateFeedback();
     })
@@ -216,7 +286,15 @@ function handleMeetOutboundVideoSender(pc, pcId, sender, track, source) {
 }
 
 function instrumentMeetSender(pc, pcId, sender, source) {
-  if (!sender || sender.__meetingAvatarRealtimeInstrumented) return sender;
+  if (!sender) return sender;
+  if (sender.__meetingAvatarRealtimeInstrumented) {
+    if (sender.track?.kind === "audio") {
+      handleMeetOutboundAudioSender(pc, pcId, sender, sender.track, source);
+    } else {
+      probeMeetOutboundAudioSenderByStats(pc, pcId, sender, source);
+    }
+    return sender;
+  }
   sender.__meetingAvatarRealtimeInstrumented = true;
   const originalReplaceTrack = sender.replaceTrack?.bind(sender);
   if (originalReplaceTrack) {
@@ -229,6 +307,8 @@ function instrumentMeetSender(pc, pcId, sender, source) {
   }
   if (sender.track?.kind === "audio") {
     handleMeetOutboundAudioSender(pc, pcId, sender, sender.track, source);
+  } else {
+    probeMeetOutboundAudioSenderByStats(pc, pcId, sender, source);
   }
   if (sender.track?.kind === "video") {
     handleMeetOutboundVideoSender(pc, pcId, sender, sender.track, source);
@@ -357,6 +437,10 @@ function installMeetPeerConnectionHook() {
   function HookedRTCPeerConnection(...args: ConstructorParameters<typeof RTCPeerConnection>) {
     const pc = new OriginalRTCPeerConnection(...args);
     const pcId = ++pcCounter;
+    if ((window as any).__MAB_CREATING_REALTIME_AGENT_PEER_CONNECTION === true) {
+      recordTimeline("peer_connection_created", { pcId, bypass: "realtime_agent" });
+      return pc;
+    }
     recordTimeline("peer_connection_created", { pcId });
 
     const originalAddTrack = pc.addTrack?.bind(pc);

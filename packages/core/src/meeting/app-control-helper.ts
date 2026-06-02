@@ -1,12 +1,13 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const sleep = promisify(setTimeout);
 
 function helperSourcePath() {
   return fileURLToPath(new URL("./app-control-helper.swift", import.meta.url));
@@ -35,10 +36,34 @@ export async function ensureAppControlHelperBinary() {
   const binary = appControlHelperBinaryPath();
   if (!helperNeedsCompile(source, binary)) return binary;
   await mkdir(dirname(binary), { recursive: true });
-  await execFileAsync("/usr/bin/swiftc", [source, "-o", binary], {
-    timeout: 30000,
-    maxBuffer: 1024 * 1024,
-  });
+  const moduleCachePath = join(tmpdir(), "oneesama-swift-module-cache");
+  await mkdir(moduleCachePath, { recursive: true });
+  const lockDir = join(tmpdir(), "oneesama-app-control-helper-compile.lock");
+  for (;;) {
+    try {
+      await mkdir(lockDir);
+      break;
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+        await sleep(50);
+        continue;
+      }
+      throw error;
+    }
+  }
+  try {
+    if (!helperNeedsCompile(source, binary)) return binary;
+    await execFileAsync(
+      "/usr/bin/swiftc",
+      [source, "-module-cache-path", moduleCachePath, "-o", binary],
+      {
+        timeout: 30000,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+  } finally {
+    await rm(lockDir, { recursive: true, force: true });
+  }
   return binary;
 }
 

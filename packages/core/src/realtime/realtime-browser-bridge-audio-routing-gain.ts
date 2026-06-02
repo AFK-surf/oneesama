@@ -5,13 +5,6 @@ function meetAudioInputGain() {
   );
 }
 
-function configuredMeetReceiverInputGain() {
-  return normalizeMeetAudioInputGain(
-    (rawBridgeConfig as Record<string, unknown>).meetAudioInputGain,
-    DEFAULT_MEET_AUDIO_INPUT_GAIN,
-  );
-}
-
 function configuredRecappiProcessInputGain() {
   return normalizeMeetAudioInputGain(
     (rawBridgeConfig as Record<string, unknown>).meetAudioInputGain,
@@ -29,12 +22,4 @@ function updateRoutingInputGain(nextGain, reason = "") {
 
 function recappiProcessAudioConnected() {
   return (state.connection as any).recappiAudioInput?.connected === true;
-}
-
-function shouldUseMeetReceiverFallbackForRecappi() {
-  return (
-    config.allowRecappiReceiverFallback === true &&
-    config.meetAudioInputSource === "recappi_process_audio" &&
-    !recappiProcessAudioConnected()
-  );
 }

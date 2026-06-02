@@ -11,8 +11,13 @@
     };
     runLocalAvatarTool(name: string, args?: Record<string, unknown>): unknown;
     runLocalWorkerTool(name: string, args?: Record<string, unknown>): unknown;
-    runLocalMeetTool(name: string, args?: Record<string, unknown>): unknown;
+    runLocalMeetTool(
+      name: string,
+      args?: Record<string, unknown>,
+      meta?: Record<string, unknown>,
+    ): unknown;
     runLocalWorkspaceTool(name: string, args?: Record<string, unknown>): unknown;
+    isLocalToolExposed(name: string): boolean;
     deliverFunctionToolResult(input: Record<string, unknown>): unknown;
     deliverFunctionToolError(input: Record<string, unknown>): unknown;
     prepareFunctionToolResult(
@@ -40,20 +45,13 @@
     "set_avatar_action",
     "update_avatar_state",
   ]);
-  const localWorkerTools = new Set([
-    "delegate_to_worker",
-    "worker_status",
-    "delegate_to_codex",
-    "delegate_status",
-  ]);
+  const localWorkerTools = new Set(["delegate_to_worker", "worker_status"]);
   const localMeetTools = new Set([
     "send_meet_chat",
     "present_video_stage",
     "stop_video_stage",
     "list_shareable_windows",
     "share_existing_app_window",
-    "list_shareable_apps",
-    "present_app_share",
     "read_meet_chat",
     "meet_participants",
     "active_speaker",
@@ -72,6 +70,7 @@
     "fetch_url",
     "open_shared_browser_surface",
     "create_shared_workspace",
+    "kwwk_computer_use",
     "control_shared_app_window",
     "control_shared_browser_surface",
     "stop_shared_browser_surface",
@@ -98,6 +97,19 @@
     if (localMeetTools.has(name)) return "meet";
     if (localWorkspaceTools.has(name)) return "workspace";
     return "avatar";
+  }
+
+  function shouldStoreCompactToolResult(kind: LocalToolKind, name: string) {
+    if (name === "kwwk_computer_use" || name === "control_shared_app_window") return true;
+    return (
+      kind === "meet" &&
+      [
+        "list_shareable_windows",
+        "share_existing_app_window",
+        "present_video_stage",
+        "stop_video_stage",
+      ].includes(name)
+    );
   }
 
   function createToolState(state: Record<string, any>) {
@@ -137,9 +149,14 @@
   }
 
   function create(deps: LocalToolRouterDeps) {
-    function runLocalToolByKind(kind: LocalToolKind, name: string, args = {}) {
+    function runLocalToolByKind(
+      kind: LocalToolKind,
+      name: string,
+      args = {},
+      meta: Record<string, unknown> = {},
+    ) {
       if (kind === "worker") return deps.runLocalWorkerTool(name, args);
-      if (kind === "meet") return deps.runLocalMeetTool(name, args);
+      if (kind === "meet") return deps.runLocalMeetTool(name, args, meta);
       if (kind === "workspace") return deps.runLocalWorkspaceTool(name, args);
       return deps.runLocalAvatarTool(name, args);
     }
@@ -162,16 +179,43 @@
       else deps.rememberAvatarToolError(error, detail);
     }
 
+    function assertLocalToolExposed(kind: LocalToolKind, name: string, callId = "", source = "") {
+      if (deps.isLocalToolExposed(name)) return;
+      deps.recordTimeline("realtime_local_tool_not_in_session_schema", {
+        kind,
+        name,
+        callId,
+        source,
+        reason: "local_tool_not_in_session_schema",
+      });
+      throw new Error("local_tool_not_in_session_schema");
+    }
+
     async function runLocalToolForSDK(name: string, args = {}, callId = "") {
       deps.recordTimeline("realtime_agent_sdk_tool_start", { name, callId });
       const kind = localToolKind(name);
       try {
-        const result = await runLocalToolByKind(kind, name, args);
+        assertLocalToolExposed(kind, name, callId, "agents_sdk_execute");
+        const result = await runLocalToolByKind(kind, name, args, {
+          callId,
+          responseId: deps.state.responses?.activeResponseId || "",
+        });
         const delivery = deps.prepareFunctionToolResult(
           { kind, name, callId, result },
-          { sendOutput: false },
+          { sendOutput: false, handledOutputChannel: "agents_sdk_execute_return" },
         );
-        const call = { name, callId, arguments: args, result, runtime: "agents-sdk", delivery };
+        const storedResult = shouldStoreCompactToolResult(kind, name)
+          ? delivery.compactResult || delivery.modelResult?.result || result
+          : result;
+        const call = {
+          name,
+          callId,
+          arguments: args,
+          result: storedResult,
+          resultCompacted: storedResult !== result || undefined,
+          runtime: "agents-sdk",
+          delivery,
+        };
         rememberLocalToolCallByKind(kind, call);
         deps.recordTimeline("realtime_agent_sdk_tool_end", { name, callId, ok: true });
         deps.updateFeedback();
@@ -186,10 +230,15 @@
         rememberLocalToolErrorByKind(kind, error, { name, callId });
         const delivery = deps.prepareFunctionToolError(
           { kind, name, callId, error },
-          { sendOutput: false },
+          { sendOutput: false, handledOutputChannel: "agents_sdk_execute_return" },
         );
         deps.updateFeedback();
-        return { result: delivery.modelResult, delivery };
+        return {
+          ok: false,
+          error: String((error as { message?: string })?.message || error),
+          result: delivery.modelResult,
+          delivery,
+        };
       }
     }
 
@@ -215,19 +264,34 @@
       }
       const kind = localToolKind(toolCall.name);
       return Promise.resolve()
-        .then(() => runLocalToolByKind(kind, toolCall.name, toolCall.arguments))
+        .then(() => {
+          assertLocalToolExposed(
+            kind,
+            toolCall.name,
+            toolCall.callId,
+            (event as { type?: string })?.type || "server_event",
+          );
+          return runLocalToolByKind(kind, toolCall.name, toolCall.arguments, {
+            callId: toolCall.callId,
+            responseId: deps.state.responses?.activeResponseId || "",
+          });
+        })
         .then((result) => {
           const delivery = deps.deliverFunctionToolResult({
             kind,
             name: toolCall.name,
             callId: toolCall.callId,
             result,
-          });
+          }) as Record<string, any>;
+          const storedResult = shouldStoreCompactToolResult(kind, toolCall.name)
+            ? delivery.compactResult || delivery.modelResult?.result || result
+            : result;
           rememberLocalToolCallByKind(kind, {
             name: toolCall.name,
             callId: toolCall.callId,
             arguments: toolCall.arguments,
-            result,
+            result: storedResult,
+            resultCompacted: storedResult !== result || undefined,
             delivery,
           });
           return { ok: true, result, delivery };

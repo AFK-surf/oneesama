@@ -72,6 +72,34 @@ func TestBuildRealtimeSessionAppliesProductTruncationDefault(t *testing.T) {
 	}
 }
 
+func TestBuildRealtimeSessionDefaultsToLiveSafeToolSurface(t *testing.T) {
+	t.Parallel()
+
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{}, testRealtimeOpenAIConfig())
+	tools := session["tools"].([]map[string]any)
+	if !toolNamesInclude(realtimeToolMapsAsAny(tools), "share_existing_app_window", "kwwk_computer_use") {
+		t.Fatalf("tools = %#v, missing live-safe app share/control tools", tools)
+	}
+	if toolNamesInclude(realtimeToolMapsAsAny(tools), "control_shared_app_window") {
+		t.Fatalf("tools = %#v, compatibility app-control alias must not be in default Realtime tools", tools)
+	}
+	if toolNamesInclude(realtimeToolMapsAsAny(tools), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface") {
+		t.Fatalf("tools = %#v, default session must not include demo/browser-surface tools", tools)
+	}
+}
+
+func TestBuildRealtimeSessionAllowsExplicitDemoToolSurface(t *testing.T) {
+	t.Parallel()
+
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{
+		Tools: realtimeToolSchemas(true),
+	}, testRealtimeOpenAIConfig())
+	tools := session["tools"].([]map[string]any)
+	if !toolNamesInclude(realtimeToolMapsAsAny(tools), "open_shared_browser_surface", "control_shared_browser_surface") {
+		t.Fatalf("tools = %#v, explicit demo-surface opt-in should include browser tools", tools)
+	}
+}
+
 func TestBuildRealtimeSessionAllowsTruncationOverride(t *testing.T) {
 	session := buildRealtimeSessionConfig(RealtimeSessionOptions{
 		Truncation: "disabled",
@@ -114,8 +142,9 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"Runtime video/HUD state is driven by audio/tool/job telemetry",
 		"If the user says stop planning",
 		"Ignore obvious self-echo",
-		"Do not invent click/drag primitives",
-		"observe -> plan -> act -> verify",
+		"KWWK Computer Use routing:",
+		"call kwwk_computer_use",
+		"long-running background app-control path",
 		"status queued or running",
 		"Do not claim completion",
 		"Screen-share action mandate:",
@@ -128,7 +157,7 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"bot's host Mac",
 		"这台 Mac mini",
 		"“你用电脑控制”",
-		"call control_shared_app_window",
+		"call kwwk_computer_use",
 		"Never satisfy an app-control request with a visual/HUD-only update",
 		"Do not tell the human to share Chrome to you",
 	} {

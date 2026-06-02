@@ -578,7 +578,7 @@ func TestOneesamaLivePreflightSkipsSlackTokensForMeetingAgent(t *testing.T) {
 	envFile := filepath.Join(dir, "live-env.sh")
 	writeFile(t, envFile, strings.Join([]string{
 		"ONEESAMA_AGENT_RUNNER=dry-run",
-		"MAB_OPENAI_API_KEY=test-openai-key",
+		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
 		"",
 	}, "\n"))
 
@@ -588,6 +588,49 @@ func TestOneesamaLivePreflightSkipsSlackTokensForMeetingAgent(t *testing.T) {
 	}
 	if strings.Contains(output, "Slack bot token is required") {
 		t.Fatalf("output = %s, should not require Slack tokens for meeting-agent", output)
+	}
+	if !strings.Contains(output, "OpenAI Realtime runtime placement defaults to sidecar") {
+		t.Fatalf("output = %s, want sidecar placement default", output)
+	}
+}
+
+func TestOneesamaLiveCheckPidRequiresMeetingAgentRealtimeEnv(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
+		"ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT=sidecar",
+		"",
+	}, "\n"))
+
+	good := startSleepWithEnv(t, []string{
+		"PATH=" + os.Getenv("PATH"),
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
+		"ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT=sidecar",
+	})
+	output, err := runLiveScript(t, "--env", envFile, "--check-pid", good, "meeting-agent")
+	if err != nil {
+		t.Fatalf("oneesama-live meeting-agent check-pid failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "pid env check passed") {
+		t.Fatalf("output = %s, want pid env check passed", output)
+	}
+
+	bad := startSleepWithEnv(t, []string{
+		"PATH=" + os.Getenv("PATH"),
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
+	})
+	output, err = runLiveScript(t, "--env", envFile, "--check-pid", bad, "meeting-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live meeting-agent check-pid succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "does not expose required env ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT") {
+		t.Fatalf("output = %s, want missing runtime placement env", output)
 	}
 }
 
@@ -607,6 +650,86 @@ func TestOneesamaLivePreflightRequiresOpenAIForMeetingAgent(t *testing.T) {
 	}
 }
 
+func TestOneesamaLivePreflightRejectsInlineMeetSDK(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"MAB_OPENAI_API_KEY=test-openai-key",
+		"MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT=inline",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "meeting-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live meeting-agent preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "inline Realtime SDK on Meet has been removed") {
+		t.Fatalf("output = %s, want inline removal guard", output)
+	}
+}
+
+func TestOneesamaLivePreflightRejectsInlineMeetSDKDespiteStaleEmergencyOverride(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"MAB_OPENAI_API_KEY=test-openai-key",
+		"MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT=inline",
+		"ONEESAMA_OPENAI_REALTIME_ALLOW_INLINE_MEET_SDK=1",
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "meeting-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live meeting-agent preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "inline Realtime SDK on Meet has been removed") {
+		t.Fatalf("output = %s, want stale inline override rejected", output)
+	}
+}
+
+func TestOneesamaLiveScreenFindsConfiguredTempBinaryPid(t *testing.T) {
+	t.Parallel()
+
+	psOutput := strings.Join([]string{
+		"111 SCREEN -dmS oneesama-live-meeting bash -lc exec /tmp/oneesama-current-rfc meeting-agent",
+		"222 /tmp/oneesama-current-rfc meeting-agent",
+		"333 /Users/pengx17/.vite-plus/js_runtime/node/24.16.0/bin/node --import tsx packages/core/src/meeting/app-control-helper.ts --stdio",
+		"444 /var/folders/T/oneesama-app-control-helper --stdio",
+		"",
+	}, "\n")
+
+	output, err := runLiveScreenFindPid(t, "meeting-agent", psOutput, "--bin", "/tmp/oneesama-current-rfc")
+	if err != nil {
+		t.Fatalf("oneesama-live-screen pid probe failed: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(output) != "222" {
+		t.Fatalf("output = %q, want temp binary pid 222", output)
+	}
+}
+
+func TestOneesamaLiveScreenFindsDefaultOneesamaBinaryPid(t *testing.T) {
+	t.Parallel()
+
+	psOutput := strings.Join([]string{
+		"111 /Users/pengx17/Documents/Github/oneesama/scripts/oneesama-live.sh meeting-agent",
+		"222 /Users/pengx17/Documents/Github/oneesama/oneesama meeting-agent",
+		"333 /tmp/not-oneesama meeting-agent",
+		"",
+	}, "\n")
+
+	output, err := runLiveScreenFindPid(t, "meeting-agent", psOutput)
+	if err != nil {
+		t.Fatalf("oneesama-live-screen pid probe failed: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(output) != "222" {
+		t.Fatalf("output = %q, want default oneesama pid 222", output)
+	}
+}
+
 func runLiveScript(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	return runLiveScriptWithEnv(t, []string{"PATH=" + os.Getenv("PATH")}, args...)
@@ -619,6 +742,21 @@ func runLiveScriptWithEnv(t *testing.T, env []string, args ...string) (string, e
 	command := exec.Command("bash", append([]string{script}, args...)...)
 	command.Dir = root
 	command.Env = env
+	output, err := command.CombinedOutput()
+	return string(output), err
+}
+
+func runLiveScreenFindPid(t *testing.T, service string, psOutput string, args ...string) (string, error) {
+	t.Helper()
+	root := repoRoot(t)
+	script := filepath.Join(root, "scripts", "oneesama-live-screen.sh")
+	command := exec.Command("bash", append([]string{script}, args...)...)
+	command.Dir = root
+	command.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"ONEESAMA_LIVE_SCREEN_TEST_FIND_PID=" + service,
+	}
+	command.Stdin = strings.NewReader(psOutput)
 	output, err := command.CombinedOutput()
 	return string(output), err
 }

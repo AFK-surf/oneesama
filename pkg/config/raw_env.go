@@ -223,6 +223,9 @@ func applyDemoSurfaceEnvOverrides(cfg *Config) {
 	if value, ok := getenvDuration("ONEESAMA_DEMO_SURFACE_APPROVAL_TOKEN_TTL", "MAB_DEMO_SURFACE_APPROVAL_TOKEN_TTL"); ok {
 		cfg.DemoSurface.ExternalWriteApprovalTokenTTL = value
 	}
+	if value, ok := getenvBool("ONEESAMA_DEMO_SURFACE_EXPOSE_REALTIME_TOOLS", "MAB_DEMO_SURFACE_EXPOSE_REALTIME_TOOLS"); ok {
+		cfg.DemoSurface.ExposeRealtimeTools = value
+	}
 }
 
 func applyDemoSurfaceModePreset(cfg *DemoSurfaceConfig, rawMode string) {
@@ -235,18 +238,21 @@ func applyDemoSurfaceModePreset(cfg *DemoSurfaceConfig, rawMode string) {
 	switch mode {
 	case "off", "disabled", "false":
 		cfg.Enabled = false
+		cfg.ExposeRealtimeTools = false
 		cfg.Adapter = defaultDemoSurfaceAdapter
 		cfg.DryRun = true
 		cfg.AllowActiveControl = false
 	case "safe", "preview", "read_only", "readonly":
 		cfg.Mode = "safe"
 		cfg.Enabled = true
+		cfg.ExposeRealtimeTools = false
 		cfg.Adapter = "agent_browser"
 		cfg.DryRun = true
 		cfg.AllowActiveControl = false
 	case "active", "live":
 		cfg.Mode = "active"
 		cfg.Enabled = true
+		cfg.ExposeRealtimeTools = false
 		cfg.Adapter = "agent_browser"
 		cfg.DryRun = false
 		cfg.AllowActiveControl = true
@@ -290,6 +296,9 @@ func applyOpenAIEnvOverrides(cfg *Config) {
 	}
 	if value := strings.TrimSpace(getenv("ONEESAMA_OPENAI_REALTIME_AGENT_RUNTIME", "MAB_OPENAI_REALTIME_AGENT_RUNTIME", "MAB_REALTIME_AGENT_RUNTIME")); value != "" {
 		cfg.OpenAI.RealtimeAgentRuntime = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT", "ONEESAMA_REALTIME_RUNTIME_PLACEMENT", "MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT", "MAB_REALTIME_RUNTIME_PLACEMENT")); value != "" {
+		cfg.OpenAI.RealtimeRuntimePlacement = value
 	}
 	if value := strings.TrimSpace(getenv("ONEESAMA_REALTIME_PERSONALITY_CONTEXT", "MAB_REALTIME_PERSONALITY_CONTEXT")); value != "" {
 		cfg.OpenAI.RealtimePersonalityContext = value

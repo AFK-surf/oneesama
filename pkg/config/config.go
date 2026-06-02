@@ -141,6 +141,7 @@ type MeetdConfig struct {
 type DemoSurfaceConfig struct {
 	Mode                          string
 	Enabled                       bool
+	ExposeRealtimeTools           bool
 	Adapter                       string
 	RootDir                       string
 	URLAllowlistPatterns          []string
@@ -162,6 +163,7 @@ type OpenAIConfig struct {
 	RealtimeTurnDetection      string
 	RealtimeSessionSchema      string
 	RealtimeAgentRuntime       string
+	RealtimeRuntimePlacement   string
 	RealtimePersonalityContext string
 	BotName                    string
 	CurrentUserName            string

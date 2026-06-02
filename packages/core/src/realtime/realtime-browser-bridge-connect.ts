@@ -41,12 +41,9 @@ function configureRealtimeConnectionOptions(connectionConfig) {
     connectionConfig.includeParticipantAudio === true;
   state.connection.meetAudioForwardingEnabled =
     connectionConfig.forwardMeetAudioToRealtime !== false;
-  const nextInputGain =
-    shouldUseMeetReceiverFallbackForRecappi() && state.connection.meetAudioTracksForwarded > 0
-      ? configuredMeetReceiverInputGain()
-      : normalizeMeetAudioInputGain(
-          connectionConfig.meetAudioInputGain || config.meetAudioInputGain,
-        );
+  const nextInputGain = normalizeMeetAudioInputGain(
+    connectionConfig.meetAudioInputGain || config.meetAudioInputGain,
+  );
   updateRoutingInputGain(nextInputGain, "connection-options");
   state.connection.meetAudioEnergyStaleMs = Math.max(
     1000,

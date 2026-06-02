@@ -2,6 +2,8 @@ package meetingagent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -59,8 +61,16 @@ func (s *Service) createWorkerReport(ctx context.Context, input WorkerReportInpu
 		report.CreatedAt = firstNonEmpty(previous.CreatedAt, now)
 		report.DeliveredToRealtime = previous.DeliveredToRealtime
 		report.DeliveredToSlack = previous.DeliveredToSlack
+		report.RealtimeSuppressed = previous.RealtimeSuppressed
 		report.RealtimeDelivery = previous.RealtimeDelivery
+		report.RealtimeDeliveryAttempt = previous.RealtimeDeliveryAttempt
 		report.SlackDelivery = previous.SlackDelivery
+	}
+	if input.ResetRealtimeDelivery {
+		report.DeliveredToRealtime = false
+		report.RealtimeSuppressed = false
+		report.RealtimeDelivery = nil
+		report.RealtimeDeliveryAttempt = nil
 	}
 	if err := store.Set(ctx, id, report); err != nil {
 		return WorkerReport{}, fmt.Errorf("save worker report %s: %w", id, err)
@@ -138,24 +148,26 @@ func (s *Service) pollReadyWorkerReports(ctx context.Context, realtime bool, req
 		if len(ready) >= limit || !isTerminalWorkerStatus(report.Status) {
 			continue
 		}
-		if realtime && report.DeliveredToRealtime || !realtime && report.DeliveredToSlack {
+		if realtime && (report.DeliveredToRealtime || report.RealtimeSuppressed) || !realtime && report.DeliveredToSlack {
 			continue
 		}
 		if !minTime.IsZero() && workerReportTime(report).Before(minTime) {
 			continue
 		}
 		if realtime && workerReportIsNoAction(report) {
-			if workerPollMarkDelivered(request) {
-				_, _ = s.markWorkerDelivered(ctx, report.ID, true, DeliveryMeta{Channel: "realtime_noop_suppressed"})
-			}
+			_, _ = s.markWorkerRealtimeSuppressed(ctx, report.ID, DeliveryMeta{Channel: "realtime_noop_suppressed", Reason: "no_action_result"})
 			continue
 		}
 		if realtime {
 			if channel := workerReportRealtimeSuppressChannel(report, sessionID); channel != "" {
-				if workerPollMarkDelivered(request) {
-					_, _ = s.markWorkerDelivered(ctx, report.ID, true, DeliveryMeta{Channel: channel})
-				}
+				_, _ = s.markWorkerRealtimeSuppressed(ctx, report.ID, DeliveryMeta{Channel: channel, Reason: workerReportRealtimeSuppressReason(channel)})
 				continue
+			}
+		}
+		if realtime && !workerPollMarkDelivered(request) {
+			updated, err := s.prepareWorkerRealtimeDeliveryAttempt(ctx, report, sessionID)
+			if err == nil {
+				report = updated
 			}
 		}
 		ready = append(ready, report)
@@ -182,6 +194,29 @@ func workerPollMarkDelivered(request WorkerPollRequest) bool {
 	return true
 }
 
+func (s *Service) prepareWorkerRealtimeDeliveryAttempt(ctx context.Context, report WorkerReport, sessionID string) (WorkerReport, error) {
+	store, err := s.workerReportStore()
+	if err != nil {
+		return WorkerReport{}, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	report.UpdatedAt = now
+	report.RealtimeDeliveryAttempt = &WorkerDeliveryAttempt{
+		Token:     newWorkerDeliveryToken(),
+		CreatedAt: now,
+		SessionID: sessionID,
+	}
+	return report, store.Set(ctx, report.ID, report)
+}
+
+func newWorkerDeliveryToken() string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err == nil {
+		return hex.EncodeToString(bytes[:])
+	}
+	return newSessionID()
+}
+
 func (s *Service) markWorkerDelivered(ctx context.Context, id string, realtime bool, delivery DeliveryMeta) (WorkerReport, error) {
 	store, err := s.workerReportStore()
 	if err != nil {
@@ -200,11 +235,41 @@ func (s *Service) markWorkerDelivered(ctx context.Context, id string, realtime b
 	}
 	if realtime {
 		report.DeliveredToRealtime = true
+		report.RealtimeSuppressed = false
+		report.RealtimeDeliveryAttempt = nil
 		report.RealtimeDelivery = &delivery
 	} else {
 		report.DeliveredToSlack = true
 		report.SlackDelivery = &delivery
 	}
+	return report, store.Set(ctx, id, report)
+}
+
+func (s *Service) markWorkerRealtimeSuppressed(ctx context.Context, id string, delivery DeliveryMeta) (WorkerReport, error) {
+	store, err := s.workerReportStore()
+	if err != nil {
+		return WorkerReport{}, err
+	}
+	report, found, err := store.Get(ctx, id)
+	if err != nil {
+		return WorkerReport{}, err
+	}
+	if !found {
+		return WorkerReport{}, fmt.Errorf("worker report %s not found", id)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	report.UpdatedAt = now
+	report.DeliveredToRealtime = false
+	report.RealtimeSuppressed = true
+	report.RealtimeDeliveryAttempt = nil
+	if delivery.SuppressedAt == "" {
+		delivery.SuppressedAt = now
+	}
+	delivery.Suppressed = true
+	if delivery.Reason == "" {
+		delivery.Reason = workerReportRealtimeSuppressReason(delivery.Channel)
+	}
+	report.RealtimeDelivery = &delivery
 	return report, store.Set(ctx, id, report)
 }
 

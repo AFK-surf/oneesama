@@ -183,6 +183,42 @@ export interface MeetPageState {
   cannotJoin?: boolean;
   textHead?: string;
   buttons?: Array<PresentationButton | { label: string; role: string }>;
+  realtimeSurface?: {
+    runtimePlacement: string;
+    pageRole: string;
+    sdkOwner: string;
+    sdkSuppressedOnMeetSurface: boolean;
+    hasSDKGlobal: boolean;
+    bundleGlobal: string;
+  };
+  avatarHud?: {
+    available: boolean;
+    cells: Array<{
+      key: string;
+      label: string;
+      value: string;
+      level: string;
+    }>;
+    signals: Array<{
+      key: string;
+      label: string;
+      value: string;
+      level: string;
+    }>;
+  };
+  kwwkCursor?: {
+    available: boolean;
+    snapshot?: {
+      visible: boolean;
+      x: number;
+      y: number;
+      kind: string;
+      label: string;
+      ageMs: number;
+      holdMs: number;
+    };
+    artifact?: Record<string, unknown>;
+  };
   error?: string;
   jsProbe?: { ok: boolean; error?: string };
   accessibilityProbe?: { ok: boolean; error?: string };
@@ -260,6 +296,7 @@ export interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   avatarCaptureFps?: number | string;
   realtimeBridgeMode?: string;
   realtimeAgentRuntime?: string;
+  realtimeRuntimePlacement?: string;
   realtimeToolCallbackToken?: string;
   autoRespondToWorkerResults?: boolean;
   autoRespondToAvatarToolCalls?: boolean;
@@ -428,6 +465,13 @@ export interface LocalStaticAssetServer {
   stop: () => void;
 }
 
+export interface LocalRealtimeSidecarServer {
+  url: string;
+  port: number;
+  token: string;
+  stop: () => void;
+}
+
 function mediaTypeForPath(pathname: string) {
   switch (extname(pathname).toLowerCase()) {
     case ".mp4":
@@ -576,6 +620,66 @@ export async function startLocalStaticAssetServer(input: {
         .map((part) => encodeURIComponent(part))
         .join("/")}`;
     },
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      server.close();
+    },
+  };
+}
+
+export async function startLocalRealtimeSidecarServer(input: {
+  sessionId: string;
+}): Promise<LocalRealtimeSidecarServer> {
+  const token = randomUUID();
+  let stopped = false;
+  const path = `/realtime-sidecar/${token}`;
+  const server = createServer((req, res) => {
+    const url = new URL(req.url || "/", "http://127.0.0.1");
+    if (url.pathname !== path) {
+      res.writeHead(404, {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end("not found");
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.end(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Oneesama Realtime SDK Sidecar</title>
+</head>
+<body>
+  <script>
+    window.MAB_REALTIME_SIDECAR_PAGE = {
+      ok: true,
+      sessionId: ${JSON.stringify(input.sessionId)},
+      startedAt: new Date().toISOString()
+    };
+  </script>
+</body>
+</html>`);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  return {
+    url: `http://127.0.0.1:${port}${path}`,
+    port,
+    token,
     stop: () => {
       if (stopped) return;
       stopped = true;

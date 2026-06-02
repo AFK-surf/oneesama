@@ -387,6 +387,10 @@ async function main() {
   const report = {
     schema: "oneesama.realtime-tool-chain-report.v1",
     ok: true,
+    acceptanceGate: false,
+    notAcceptanceGate: true,
+    acceptanceGateReason:
+      "raw-websocket tool-chain diagnostic; RFC acceptance requires sidecar-control, sidecar-audio, meet-page-csp, or live-room-smoke evidence",
     createdAt: new Date().toISOString(),
     meetingAgentUrl: args.meetingAgentUrl,
     model: config.model || config.session?.model || "",
@@ -441,6 +445,9 @@ function printReport(report) {
   console.log(
     `Realtime tool chain benchmark: model=${report.model} tools=${report.toolCount} iterations=${report.iterations} retries=${report.retries}`,
   );
+  if (report.notAcceptanceGate) {
+    console.log(`Diagnostic-only: ${report.acceptanceGateReason}`);
+  }
   for (const variant of report.variants) {
     const { summary } = variant;
     console.log(

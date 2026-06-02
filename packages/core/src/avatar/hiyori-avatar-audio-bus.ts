@@ -13,6 +13,17 @@ interface InjectToneOptions extends StreamOptions {
   durationMs?: number;
 }
 
+interface PcmFramesOptions extends StreamOptions {
+  samples?: number[];
+  frames?: number[];
+  pcm16?: number[];
+  sampleRate?: number;
+  channels?: number;
+  channelCount?: number;
+  format?: string;
+  endOfUtterance?: boolean;
+}
+
 export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
   const AudioContextImpl = window.AudioContext || window.webkitAudioContext;
   const audioContext = new AudioContextImpl({ sampleRate: 48000 });
@@ -53,12 +64,16 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     routedStreams: 0,
     routedElements: 0,
     routedBuffers: 0,
+    routedPcmChunks: 0,
+    routedPcmSamples: 0,
     injectedTones: 0,
     lastResumeAt: "",
     lastResumeError: "",
     lastRoute: null as Record<string, unknown> | null,
+    lastPcmRoute: null as Record<string, unknown> | null,
     errors: [] as Array<Record<string, unknown>>,
   };
+  let nextPcmStartTime = 0;
 
   function rememberError(error: unknown): void {
     const err = error as { message?: string };
@@ -247,6 +262,65 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     }
   }
 
+  function pcmSamplesFromOptions(options: PcmFramesOptions) {
+    const raw = options.samples || options.frames || options.pcm16 || [];
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+    const format = String(options.format || (options.pcm16 ? "pcm16" : "float32")).toLowerCase();
+    if (format === "pcm16" || options.pcm16) {
+      return raw.map((sample) => Math.max(-1, Math.min(1, Number(sample || 0) / 32768)));
+    }
+    return raw.map((sample) => Math.max(-1, Math.min(1, Number(sample || 0))));
+  }
+
+  function enqueuePcmFrames(options: PcmFramesOptions = {}) {
+    try {
+      const samples = pcmSamplesFromOptions(options);
+      const channelCount = Math.max(
+        1,
+        Math.min(2, Number(options.channels || options.channelCount || 1)),
+      );
+      const frameCount = Math.floor(samples.length / channelCount);
+      if (frameCount <= 0) throw new Error("pcm frame payload is empty");
+      const sampleRate = Math.max(
+        8000,
+        Math.min(96000, Number(options.sampleRate || audioContext.sampleRate)),
+      );
+      const buffer = audioContext.createBuffer(channelCount, frameCount, sampleRate);
+      for (let channel = 0; channel < channelCount; channel += 1) {
+        const channelData = buffer.getChannelData(channel);
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          channelData[frame] = samples[frame * channelCount + channel] || 0;
+        }
+      }
+      const source = audioContext.createBufferSource();
+      const gain = audioContext.createGain();
+      source.buffer = buffer;
+      gain.gain.value = Number(options.gain ?? 1);
+      source.connect(gain);
+      gain.connect(masterGain);
+      const startAt = Math.max(audioContext.currentTime + 0.01, nextPcmStartTime);
+      nextPcmStartTime = startAt + buffer.duration;
+      source.start(startAt);
+      state.routedPcmChunks += 1;
+      state.routedPcmSamples += frameCount * channelCount;
+      const detail = {
+        label: options.label || "realtime-sidecar-pcm",
+        sampleRate,
+        channels: channelCount,
+        frames: frameCount,
+        durationMs: Math.round(buffer.duration * 1000),
+        endOfUtterance: options.endOfUtterance === true,
+      };
+      state.lastPcmRoute = { ts: new Date().toISOString(), ...detail };
+      touch("pcm", detail);
+      return { ok: true, ...detail };
+    } catch (error) {
+      rememberError(error);
+      const err = error as { message?: string };
+      return { ok: false, error: String((err && err.message) || error) };
+    }
+  }
+
   const keeper = audioContext.createConstantSource();
   const keeperGain = audioContext.createGain();
   keeper.offset.value = 0;
@@ -264,6 +338,7 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     addStream,
     addElement,
     playAudioDataUrl,
+    enqueuePcmFrames,
     injectTone,
     getMouthLevel,
     sampleOutputEnergy,

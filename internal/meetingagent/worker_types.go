@@ -3,46 +3,59 @@ package meetingagent
 import "github.com/AFK-surf/oneesama/internal/agentrunner"
 
 type WorkerReport struct {
-	ID                  string                            `json:"id"`
-	Status              string                            `json:"status"`
-	Provider            string                            `json:"provider,omitempty"`
-	Mode                string                            `json:"mode,omitempty"`
-	Task                string                            `json:"task,omitempty"`
-	Context             map[string]any                    `json:"context,omitempty"`
-	AllowCodeChanges    bool                              `json:"allowCodeChanges"`
-	Result              string                            `json:"result,omitempty"`
-	Error               string                            `json:"error,omitempty"`
-	ResultEnvelope      *agentrunner.WorkerResultEnvelope `json:"resultEnvelope,omitempty"`
-	CreatedAt           string                            `json:"createdAt"`
-	UpdatedAt           string                            `json:"updatedAt"`
-	DeliveredToRealtime bool                              `json:"deliveredToRealtime"`
-	DeliveredToSlack    bool                              `json:"deliveredToSlack"`
-	RealtimeDelivery    *DeliveryMeta                     `json:"realtimeDelivery,omitempty"`
-	SlackDelivery       *DeliveryMeta                     `json:"slackDelivery,omitempty"`
+	ID                      string                            `json:"id"`
+	Status                  string                            `json:"status"`
+	Provider                string                            `json:"provider,omitempty"`
+	Mode                    string                            `json:"mode,omitempty"`
+	Task                    string                            `json:"task,omitempty"`
+	Context                 map[string]any                    `json:"context,omitempty"`
+	AllowCodeChanges        bool                              `json:"allowCodeChanges"`
+	Result                  string                            `json:"result,omitempty"`
+	Error                   string                            `json:"error,omitempty"`
+	ResultEnvelope          *agentrunner.WorkerResultEnvelope `json:"resultEnvelope,omitempty"`
+	CreatedAt               string                            `json:"createdAt"`
+	UpdatedAt               string                            `json:"updatedAt"`
+	DeliveredToRealtime     bool                              `json:"deliveredToRealtime"`
+	DeliveredToSlack        bool                              `json:"deliveredToSlack"`
+	RealtimeSuppressed      bool                              `json:"realtimeSuppressed,omitempty"`
+	RealtimeDelivery        *DeliveryMeta                     `json:"realtimeDelivery,omitempty"`
+	RealtimeDeliveryAttempt *WorkerDeliveryAttempt            `json:"realtimeDeliveryAttempt,omitempty"`
+	SlackDelivery           *DeliveryMeta                     `json:"slackDelivery,omitempty"`
+}
+
+type WorkerDeliveryAttempt struct {
+	Token     string `json:"token,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 type DeliveryMeta struct {
-	Channel     string `json:"channel,omitempty"`
-	ThreadTS    string `json:"threadTs,omitempty"`
-	TS          string `json:"ts,omitempty"`
-	DedupKey    string `json:"dedupKey,omitempty"`
-	Mock        bool   `json:"mock,omitempty"`
-	DeliveredAt string `json:"deliveredAt"`
+	Channel       string `json:"channel,omitempty"`
+	ThreadTS      string `json:"threadTs,omitempty"`
+	TS            string `json:"ts,omitempty"`
+	DedupKey      string `json:"dedupKey,omitempty"`
+	DeliveryToken string `json:"deliveryToken,omitempty"`
+	Mock          bool   `json:"mock,omitempty"`
+	DeliveredAt   string `json:"deliveredAt,omitempty"`
+	Suppressed    bool   `json:"suppressed,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	SuppressedAt  string `json:"suppressedAt,omitempty"`
 }
 
 type WorkerReportInput struct {
-	ID                  string                            `json:"id,omitempty"`
-	JobID               string                            `json:"jobId,omitempty"`
-	Status              string                            `json:"status,omitempty"`
-	Provider            string                            `json:"provider,omitempty"`
-	Mode                string                            `json:"mode,omitempty"`
-	Task                string                            `json:"task,omitempty"`
-	Context             map[string]any                    `json:"context,omitempty"`
-	AllowCodeChanges    bool                              `json:"allowCodeChanges,omitempty"`
-	Result              any                               `json:"result,omitempty"`
-	Error               string                            `json:"error,omitempty"`
-	ResultEnvelope      *agentrunner.WorkerResultEnvelope `json:"resultEnvelope,omitempty"`
-	ResultEnvelopeSnake *agentrunner.WorkerResultEnvelope `json:"result_envelope,omitempty"`
+	ID                    string                            `json:"id,omitempty"`
+	JobID                 string                            `json:"jobId,omitempty"`
+	Status                string                            `json:"status,omitempty"`
+	Provider              string                            `json:"provider,omitempty"`
+	Mode                  string                            `json:"mode,omitempty"`
+	Task                  string                            `json:"task,omitempty"`
+	Context               map[string]any                    `json:"context,omitempty"`
+	AllowCodeChanges      bool                              `json:"allowCodeChanges,omitempty"`
+	Result                any                               `json:"result,omitempty"`
+	Error                 string                            `json:"error,omitempty"`
+	ResultEnvelope        *agentrunner.WorkerResultEnvelope `json:"resultEnvelope,omitempty"`
+	ResultEnvelopeSnake   *agentrunner.WorkerResultEnvelope `json:"result_envelope,omitempty"`
+	ResetRealtimeDelivery bool                              `json:"resetRealtimeDelivery,omitempty"`
 }
 
 type WorkerDelegateRequest struct {
@@ -79,6 +92,16 @@ type WorkerMarkSlackDeliveredRequest struct {
 	DedupKey      string `json:"dedupKey,omitempty"`
 	DedupKeySnake string `json:"dedup_key,omitempty"`
 	Mock          bool   `json:"mock,omitempty"`
+}
+
+type WorkerMarkRealtimeDeliveredRequest struct {
+	ID                 string `json:"id,omitempty"`
+	JobID              string `json:"jobId,omitempty"`
+	JobIDSnake         string `json:"job_id,omitempty"`
+	Channel            string `json:"channel,omitempty"`
+	DeliveryToken      string `json:"deliveryToken,omitempty"`
+	DeliveryTokenSnake string `json:"delivery_token,omitempty"`
+	Token              string `json:"token,omitempty"`
 }
 
 type WorkerDelegateResponse struct {

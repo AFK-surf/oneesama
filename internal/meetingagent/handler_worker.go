@@ -120,6 +120,38 @@ func (h *Handler) handleWorkerPoll(c *gin.Context, realtime bool) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "jobs": jobs})
 }
 
+func (h *Handler) handleWorkerMarkRealtimeDelivered(c *gin.Context) {
+	var input WorkerMarkRealtimeDeliveredRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httputil.AbortWithError(c, httputil.InvalidRequestError("parse worker realtime delivery marker", gin.H{"reason": err.Error()}))
+		return
+	}
+	jobID := firstNonEmpty(input.JobID, input.JobIDSnake, input.ID)
+	existing, found, err := h.service.getWorkerReport(c.Request.Context(), jobID)
+	if err != nil {
+		httputil.AbortWithError(c, httputil.InternalServerError("load worker report failed", gin.H{"reason": err.Error()}))
+		return
+	}
+	deliveryToken := firstNonEmpty(input.DeliveryToken, input.DeliveryTokenSnake, input.Token)
+	if !found || existing.RealtimeDeliveryAttempt == nil || deliveryToken == "" || deliveryToken != existing.RealtimeDeliveryAttempt.Token {
+		c.JSON(http.StatusConflict, gin.H{
+			"ok":    false,
+			"job":   nil,
+			"error": "realtime_delivery_attempt_token_required",
+		})
+		return
+	}
+	report, err := h.service.markWorkerDelivered(c.Request.Context(), jobID, true, DeliveryMeta{
+		Channel:       input.Channel,
+		DeliveryToken: deliveryToken,
+	})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"ok": false, "job": nil})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "job": report})
+}
+
 func (h *Handler) handleWorkerMarkSlackDelivered(c *gin.Context) {
 	var input WorkerMarkSlackDeliveredRequest
 	if err := c.ShouldBindJSON(&input); err != nil {

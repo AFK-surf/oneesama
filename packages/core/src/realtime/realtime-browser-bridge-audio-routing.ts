@@ -152,7 +152,8 @@ function refreshMeetAudioTrackStates() {
   if (recappiConnected) {
     const recappiSource = String(recappiInputState.source || "recappi_process_audio");
     trackStates.push({
-      trackId: "recappi-process-audio",
+      trackId:
+        recappiSource === "host_meet_audio_pcm" ? "host-meet-audio-pcm" : "recappi-process-audio",
       readyState: "live",
       enabled: true,
       muted: false,
@@ -160,9 +161,11 @@ function refreshMeetAudioTrackStates() {
       disconnectReason: "",
       source: recappiSource,
       label:
-        recappiSource === "recappi_global_audio"
-          ? "Recappi global system audio"
-          : "Recappi Chrome process audio",
+        recappiSource === "host_meet_audio_pcm"
+          ? "Host-forwarded Meet surface PCM"
+          : recappiSource === "recappi_global_audio"
+            ? "Recappi global system audio"
+            : "Recappi Chrome process audio",
     });
   }
   state.connection.meetAudioTrackStates = trackStates.slice(-10);
@@ -364,24 +367,6 @@ function replaceRealtimeInputWithRoutingMix(reason = "meet-audio") {
 function forwardMeetAudioTrackToRealtime(track, detail = {}) {
   if (!track || track.kind !== "audio") return false;
   if (!state.connection.meetAudioForwardingEnabled) return false;
-  const useRecappiReceiverFallback = shouldUseMeetReceiverFallbackForRecappi();
-  if (config.meetAudioInputSource === "recappi_process_audio" && !useRecappiReceiverFallback) {
-    recordTimeline("meet_audio_track_skipped", {
-      reason: "recappi_process_audio_selected",
-      trackId: track.id,
-      ...detail,
-    });
-    return false;
-  }
-  if (config.meetAudioInputSource !== "webrtc" && !useRecappiReceiverFallback) {
-    recordTimeline("meet_audio_track_skipped", {
-      reason: "meet_audio_input_source_not_webrtc",
-      source: config.meetAudioInputSource || "",
-      trackId: track.id,
-      ...detail,
-    });
-    return false;
-  }
   if (track.readyState === "ended") {
     recordTimeline("meet_audio_track_skipped", {
       reason: "track_ended",
@@ -407,20 +392,28 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
     });
     return false;
   }
+  if (config.meetAudioInputSource === "recappi_process_audio") {
+    const capture = maybeStartMeetAudioTrackCapture(track, "recappi-selected-receiver-diagnostic");
+    recordTimeline("meet_audio_track_skipped", {
+      reason: "recappi_process_audio_selected",
+      trackId: track.id,
+      capture,
+      ...detail,
+    });
+    return false;
+  }
+  if (config.meetAudioInputSource !== "webrtc") {
+    recordTimeline("meet_audio_track_skipped", {
+      reason: "meet_audio_input_source_not_webrtc",
+      source: config.meetAudioInputSource || "",
+      trackId: track.id,
+      ...detail,
+    });
+    return false;
+  }
   if (routedMeetAudioTrackIds.has(track.id)) return false;
   routedMeetAudioTrackIds.add(track.id);
   ensureMeetAudioRoutingContext();
-  if (useRecappiReceiverFallback) {
-    state.connection.recappiReceiverFallbackActive = true;
-    updateRoutingInputGain(configuredMeetReceiverInputGain(), "recappi-receiver-fallback");
-    recordTimeline("meet_audio_receiver_fallback_active", {
-      reason: "recappi_process_audio_unavailable",
-      trackId: track.id,
-      source: config.meetAudioInputSource || "",
-      fallbackGain: state.connection.meetAudioInputGain,
-      ...detail,
-    });
-  }
   try {
     const stream = new MediaStream([track]);
     const source = routingAudioContext.createMediaStreamSource(stream);

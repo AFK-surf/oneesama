@@ -28,6 +28,7 @@ export type JsonHttpHandler = (
 export interface JsonHttpServerOptions {
   name: string;
   port: number;
+  host?: string;
   routes: Record<string, JsonHttpHandler>;
   maxBodyBytes?: number;
 }
@@ -108,6 +109,7 @@ function sendRaw(
 export function createJsonServer({
   name,
   port,
+  host = "0.0.0.0",
   routes,
   maxBodyBytes = defaultMaxBodyBytes,
 }: JsonHttpServerOptions) {
@@ -168,8 +170,10 @@ export function createJsonServer({
     server,
     listen(): Promise<http.Server> {
       return new Promise((resolve) => {
-        server.listen(port, "0.0.0.0", () => {
-          console.log(`[${name}] listening on http://0.0.0.0:${port}`);
+        server.listen(port, host, () => {
+          const address = server.address();
+          const resolvedPort = typeof address === "object" && address ? address.port : port;
+          console.log(`[${name}] listening on http://${host}:${resolvedPort}`);
           resolve(server);
         });
       });

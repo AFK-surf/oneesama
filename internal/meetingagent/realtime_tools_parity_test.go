@@ -12,8 +12,8 @@ import (
 func TestRealtimeToolSchemasMatchTypescriptSource(t *testing.T) {
 	repoRoot := findRepoRootForRealtimeToolsTest(t)
 	script := `
-		import { realtimeToolSchemas } from "./packages/core/src/realtime/realtime-contract.ts";
-		console.log(JSON.stringify(realtimeToolSchemas));
+		import { defaultRealtimeToolSchemas, realtimeToolSchemas } from "./packages/core/src/realtime/realtime-contract.ts";
+		console.log(JSON.stringify({ defaultRealtimeToolSchemas, realtimeToolSchemas }));
 	`
 	cmd := exec.Command("node", "--import", "tsx", "--input-type=module", "-e", script)
 	cmd.Dir = repoRoot
@@ -24,15 +24,34 @@ func TestRealtimeToolSchemasMatchTypescriptSource(t *testing.T) {
 		}
 		t.Fatalf("render TS realtime tool schemas: %v", err)
 	}
-	var tsTools []map[string]any
+	var tsTools struct {
+		DefaultRealtimeToolSchemas []map[string]any `json:"defaultRealtimeToolSchemas"`
+		RealtimeToolSchemas        []map[string]any `json:"realtimeToolSchemas"`
+	}
 	if err := json.Unmarshal(output, &tsTools); err != nil {
 		t.Fatalf("parse TS realtime tools: %v\n%s", err, string(output))
 	}
-	goTools := defaultRealtimeToolSchemas()
-	if !reflect.DeepEqual(goTools, tsTools) {
-		goJSON, _ := json.Marshal(goTools)
-		tsJSON, _ := json.Marshal(tsTools)
-		t.Fatalf("Go realtime tool schema drifted from TS source\nGo: %s\nTS: %s", goJSON, tsJSON)
+	for _, tc := range []struct {
+		name    string
+		goTools []map[string]any
+		tsTools []map[string]any
+	}{
+		{
+			name:    "default live-safe",
+			goTools: defaultRealtimeToolSchemas(),
+			tsTools: tsTools.DefaultRealtimeToolSchemas,
+		},
+		{
+			name:    "full demo opt-in",
+			goTools: realtimeToolSchemas(true),
+			tsTools: tsTools.RealtimeToolSchemas,
+		},
+	} {
+		if !reflect.DeepEqual(tc.goTools, tc.tsTools) {
+			goJSON, _ := json.Marshal(tc.goTools)
+			tsJSON, _ := json.Marshal(tc.tsTools)
+			t.Fatalf("Go realtime tool schema %s drifted from TS source\nGo: %s\nTS: %s", tc.name, goJSON, tsJSON)
+		}
 	}
 }
 

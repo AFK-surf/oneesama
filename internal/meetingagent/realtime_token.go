@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/AFK-surf/oneesama/internal/meetrunner"
 )
 
 const defaultRealtimeSafetyIdentifier = "meeting-avatar-bot-local"
+const realtimeClientSecretMaxAttempts = 3
 
 func (s *Service) RealtimeConfig() map[string]any {
 	currentUser := s.realtimeCurrentUser()
@@ -182,12 +186,39 @@ func (s *Service) realtimeCurrentUser() RealtimeCurrentUser {
 }
 
 func (s *Service) realtimeServerToolSchemas() []map[string]any {
-	return realtimeToolSchemas(s.demoBridge != nil)
+	return realtimeToolSchemas(s.realtimeDemoSurfaceToolsExposed())
+}
+
+func (s *Service) realtimeDemoSurfaceToolsExposed() bool {
+	return s != nil && s.demoBridge != nil && s.demoSurface.ExposeRealtimeTools
 }
 
 func (s *Service) withRealtimeServerToolSchemas(options RealtimeSessionOptions) RealtimeSessionOptions {
-	options.Tools = s.realtimeServerToolSchemas()
+	serverTools := s.realtimeServerToolSchemas()
+	if options.Tools == nil {
+		options.Tools = serverTools
+		return options
+	}
+	options.Tools = filterRealtimeToolSchemasByRequestedNames(serverTools, options.Tools)
 	return options
+}
+
+func filterRealtimeToolSchemasByRequestedNames(serverTools []map[string]any, requestedTools []map[string]any) []map[string]any {
+	requestedNames := map[string]bool{}
+	for _, tool := range requestedTools {
+		name := strings.TrimSpace(stringFromAny(tool["name"]))
+		if name != "" {
+			requestedNames[name] = true
+		}
+	}
+	out := make([]map[string]any, 0, len(serverTools))
+	for _, tool := range serverTools {
+		name := strings.TrimSpace(stringFromAny(tool["name"]))
+		if requestedNames[name] {
+			out = append(out, tool)
+		}
+	}
+	return out
 }
 
 func compactCurrentUserAliases(values []string, identityValues ...string) []string {
@@ -244,45 +275,117 @@ func (s *Service) MintRealtimeClientSecret(ctx context.Context, options Realtime
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("marshal realtime client secret request: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.openai.RealtimeClientSecretsURL, bytes.NewReader(payload))
-	if err != nil {
-		return nil, http.StatusInternalServerError, fmt.Errorf("build realtime client secret request: %w", err)
-	}
-	request.Header.Set("Authorization", "Bearer "+s.openai.APIKey)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("OpenAI-Safety-Identifier", firstNonEmpty(options.SafetyIdentifier, options.RequestedBy, defaultRealtimeSafetyIdentifier))
+	for attempt := 1; attempt <= realtimeClientSecretMaxAttempts; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.openai.RealtimeClientSecretsURL, bytes.NewReader(payload))
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("build realtime client secret request: %w", err)
+		}
+		request.Header.Set("Authorization", "Bearer "+s.openai.APIKey)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("OpenAI-Safety-Identifier", firstNonEmpty(options.SafetyIdentifier, options.RequestedBy, defaultRealtimeSafetyIdentifier))
 
-	response, err := s.httpClient.Do(request)
-	if err != nil {
-		return nil, http.StatusBadGateway, fmt.Errorf("post realtime client secret: %w", err)
-	}
-	defer func() { _ = response.Body.Close() }()
+		response, err := s.httpClient.Do(request)
+		if err != nil {
+			if attempt < realtimeClientSecretMaxAttempts && isRetryableRealtimeClientSecretError(err) {
+				if sleepErr := sleepRealtimeClientSecretRetry(ctx, attempt); sleepErr != nil {
+					return nil, http.StatusBadGateway, fmt.Errorf("post realtime client secret: %w", err)
+				}
+				continue
+			}
+			return nil, http.StatusBadGateway, fmt.Errorf("post realtime client secret: %w", err)
+		}
 
-	parsed := readRealtimeJSON(response.Body)
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return map[string]any{
-			"ok":       false,
-			"error":    "openai_realtime_upstream",
-			"status":   response.StatusCode,
-			"detail":   parsed,
+		parsed := readRealtimeJSON(response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			if attempt < realtimeClientSecretMaxAttempts && isRetryableRealtimeClientSecretStatus(response.StatusCode) {
+				if sleepErr := sleepRealtimeClientSecretRetry(ctx, attempt); sleepErr != nil {
+					return nil, http.StatusBadGateway, fmt.Errorf("retry realtime client secret after status %d: %w", response.StatusCode, sleepErr)
+				}
+				continue
+			}
+			if attempt > 1 {
+				upstream["mintAttempts"] = attempt
+			}
+			return map[string]any{
+				"ok":       false,
+				"error":    "openai_realtime_upstream",
+				"status":   response.StatusCode,
+				"detail":   parsed,
+				"upstream": upstream,
+			}, http.StatusBadGateway, nil
+		}
+
+		result := map[string]any{
+			"ok":       true,
 			"upstream": upstream,
-		}, http.StatusBadGateway, nil
+		}
+		if attempt > 1 {
+			result["mintAttempts"] = attempt
+		}
+		for key, value := range parsed {
+			result[key] = value
+		}
+		return result, http.StatusOK, nil
 	}
+	return nil, http.StatusBadGateway, fmt.Errorf("post realtime client secret: exhausted retry attempts")
+}
 
-	result := map[string]any{
-		"ok":       true,
-		"upstream": upstream,
+func isRetryableRealtimeClientSecretStatus(status int) bool {
+	switch status {
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
 	}
-	for key, value := range parsed {
-		result[key] = value
+}
+
+func isRetryableRealtimeClientSecretError(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
 	}
-	return result, http.StatusOK, nil
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"connection reset",
+		"connection refused",
+		"server closed idle connection",
+		"socket hang up",
+		"timeout",
+		"temporarily unavailable",
+		"eof",
+	} {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func sleepRealtimeClientSecretRetry(ctx context.Context, attempt int) error {
+	delay := time.Duration(250*(1<<(attempt-1))) * time.Millisecond
+	if delay > time.Second {
+		delay = time.Second
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func readRealtimeJSON(reader io.Reader) map[string]any {
 	body, err := io.ReadAll(io.LimitReader(reader, 1<<20))
 	if err != nil {
-		return map[string]any{"raw": ""}
+		return map[string]any{
+			"raw": "",
+		}
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {

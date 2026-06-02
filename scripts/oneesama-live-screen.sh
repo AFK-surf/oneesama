@@ -93,10 +93,6 @@ if [[ ${#services[@]} -eq 0 ]]; then
   services=(meeting-agent)
 fi
 
-wrapper="${repo}/scripts/oneesama-live.sh"
-[[ -x "$wrapper" ]] || die "wrapper is not executable: $wrapper"
-command -v screen >/dev/null 2>&1 || die "screen is required"
-
 session_name() {
   case "$1" in
     slack-agent) printf '%s' "oneesama-live-slack" ;;
@@ -121,9 +117,46 @@ screen_exists() {
 
 find_service_pid() {
   local service="$1"
-  ps axww -o pid=,command= |
-    awk -v svc="$service" '$0 ~ "oneesama " svc "($|[[:space:]])" { print $1 }' |
-    tail -n 1
+  find_service_pids "$service" | tail -n 1
+}
+
+find_service_pids() {
+  local service="$1"
+  ps axww -o pid=,command= | find_service_pids_from_ps "$service"
+}
+
+configured_oneesama_bin() {
+  if [[ ${#bin_arg[@]} -gt 0 ]]; then
+    printf '%s' "${bin_arg[1]}"
+  else
+    printf '%s' "${ONEESAMA_LIVE_BIN:-./oneesama}"
+  fi
+}
+
+find_service_pids_from_ps() {
+  local service="$1"
+  local configured_bin configured_base
+  configured_bin="$(configured_oneesama_bin)"
+  configured_base="$(basename "$configured_bin")"
+  awk -v svc="$service" -v configured_bin="$configured_bin" -v configured_base="$configured_base" '
+    {
+      pid = $1
+      cmd = $0
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", cmd)
+      split(cmd, parts, /[[:space:]]+/)
+      exe = parts[1]
+      first_arg = parts[2]
+      n = split(exe, path, "/")
+      base = path[n]
+      if (first_arg != svc) {
+        next
+      }
+      matches = exe == configured_bin || exe == "./" configured_base || base == configured_base || base == "oneesama" || base ~ /^oneesama[-_]/
+      if (matches) {
+        print pid
+      }
+    }
+  '
 }
 
 wait_for_exit() {
@@ -224,7 +257,7 @@ start_service() {
       wait_for_exit "$session"
     else
       pid="$(find_service_pid "$service")"
-      if [[ "$service" == "slack-agent" && -n "${pid:-}" ]]; then
+      if [[ ( "$service" == "slack-agent" || "$service" == "meeting-agent" ) && -n "${pid:-}" ]]; then
         run_pid_check "$service" "$pid"
       fi
       log "screen session ${session} already exists; use --restart to replace it"
@@ -232,15 +265,24 @@ start_service() {
     fi
   fi
 
+  local existing_pids=()
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && existing_pids+=("$pid")
+  done < <(find_service_pids "$service")
   pid="$(find_service_pid "$service")"
-  if [[ "$restart" -eq 1 && -n "${pid:-}" ]]; then
-    log "stopping existing ${service} process pid=${pid}"
-    kill "$pid" || true
-    if ! wait_for_pid_exit "$pid"; then
-      log "existing ${service} process pid=${pid} did not exit after SIGTERM; sending SIGKILL"
-      kill -9 "$pid" || true
-      wait_for_pid_exit "$pid" || die "${service} process pid=${pid} did not exit"
-    fi
+  if [[ "$restart" -eq 1 && ${#existing_pids[@]} -gt 0 ]]; then
+    for pid in "${existing_pids[@]}"; do
+      log "stopping existing ${service} process pid=${pid}"
+      kill "$pid" || true
+    done
+    for pid in "${existing_pids[@]}"; do
+      if ! wait_for_pid_exit "$pid"; then
+        log "existing ${service} process pid=${pid} did not exit after SIGTERM; sending SIGKILL"
+        kill -9 "$pid" || true
+        wait_for_pid_exit "$pid" || die "${service} process pid=${pid} did not exit"
+      fi
+    done
+    pid=""
   elif [[ -n "${pid:-}" ]]; then
     log "${service} process pid=${pid} already exists outside screen; use --restart to replace it"
     return 0
@@ -277,11 +319,20 @@ start_service() {
 
   pid="$(wait_for_pid "$service" || true)"
   [[ -n "$pid" ]] || die "started screen ${session}, but ${service} pid did not appear; inspect ${logfile}"
-  if [[ "$service" == "slack-agent" ]]; then
+  if [[ "$service" == "slack-agent" || "$service" == "meeting-agent" ]]; then
     run_pid_check "$service" "$pid"
   fi
   log "ok: ${service} running pid=${pid}"
 }
+
+if [[ -n "${ONEESAMA_LIVE_SCREEN_TEST_FIND_PID:-}" ]]; then
+  find_service_pids_from_ps "$ONEESAMA_LIVE_SCREEN_TEST_FIND_PID" | tail -n 1
+  exit 0
+fi
+
+wrapper="${repo}/scripts/oneesama-live.sh"
+[[ -x "$wrapper" ]] || die "wrapper is not executable: $wrapper"
+command -v screen >/dev/null 2>&1 || die "screen is required"
 
 for service in "${services[@]}"; do
   start_service "$service"

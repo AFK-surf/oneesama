@@ -351,6 +351,7 @@ export async function evaluateWorkerResultBridgeState(page) {
 }
 
 export async function evaluateWindowState(page, key: string) {
+  if (!page) return null;
   return await withTimeout(
     page.evaluate((name) => window[name] || null, key),
     2500,
@@ -562,6 +563,7 @@ export async function publishMeetingAwarenessToPage(
   awareness: MeetingAwarenessState | null,
   pushContext = true,
 ) {
+  if (!page) return { ok: false, skipped: true, reason: "realtime_sidecar_page_missing" };
   if (!awareness?.ok) return { ok: false, skipped: true, reason: "awareness_empty" };
   const contextText = meetingAwarenessContextText(awareness);
   return await withTimeout(
@@ -587,19 +589,7 @@ export async function publishMeetingAwarenessToPage(
             result,
           };
         }
-        if (typeof client?.sendRealtimeEvent !== "function") {
-          return { ok: true, stored: true, pushed: false, reason: "realtime_client_missing" };
-        }
-        const channel = client.sendRealtimeEvent({
-          type: "conversation.item.create",
-          item: {
-            type: "message",
-            role: "system",
-            metadata: { source: "meeting_awareness" },
-            content: [{ type: "input_text", text }],
-          },
-        });
-        return { ok: true, stored: true, pushed: true, channel };
+        return { ok: true, stored: true, pushed: false, reason: "session_context_api_missing" };
       },
       {
         state: awareness,
@@ -671,6 +661,8 @@ export function compactRuntimeState({
           routedStreams: avatarAudio.routedStreams,
           routedElements: avatarAudio.routedElements,
           routedBuffers: avatarAudio.routedBuffers,
+          routedPcmChunks: avatarAudio.routedPcmChunks || 0,
+          routedPcmSamples: avatarAudio.routedPcmSamples || 0,
           injectedTones: avatarAudio.injectedTones,
           sampleRate: avatarAudio.sampleRate,
           audioContextState: avatarAudio.audioContextState || "",
@@ -684,15 +676,32 @@ export function compactRuntimeState({
           lastResumeAt: avatarAudio.lastResumeAt || "",
           lastResumeError: avatarAudio.lastResumeError || "",
           lastRoute: avatarAudio.lastRoute || null,
+          lastPcmRoute: avatarAudio.lastPcmRoute || null,
           errors: avatarAudio.errors || [],
         }
       : null,
     realtime: realtimeBridge
       ? {
           mode: realtimeBridge.mode,
+          realtimeRuntimePlacement: realtimeBridge.realtimeRuntimePlacement || "",
+          realtimePageRole: realtimeBridge.realtimePageRole || "",
+          sdkOwner: realtimeBridge.sdkOwner || "",
           connected: realtimeBridge.connected,
           connecting: realtimeBridge.connecting,
           feedback: realtimeBridge.feedback || null,
+          contextHealth: realtimeBridge.contextHealth
+            ? {
+                enabled: realtimeBridge.contextHealth.enabled === true,
+                itemsCount: realtimeBridge.contextHealth.itemsCount || 0,
+                tokenEstimate: realtimeBridge.contextHealth.tokenEstimate || 0,
+                lastHistoryTail: realtimeBridge.contextHealth.lastHistoryTail || [],
+                latestFunctionalTurn: realtimeBridge.contextHealth.latestFunctionalTurn || null,
+                compactCount: realtimeBridge.contextHealth.compactCount || 0,
+                lastCompactAt: realtimeBridge.contextHealth.lastCompactAt || "",
+                lastRefreshAt: realtimeBridge.contextHealth.lastRefreshAt || "",
+                lastRefreshReason: realtimeBridge.contextHealth.lastRefreshReason || "",
+              }
+            : null,
           session: realtimeBridge.session || null,
           connection: realtimeBridge.connection || null,
           protection: realtimeBridge.protection || null,
@@ -763,6 +772,94 @@ export async function evaluateMeetPageState(page: Page): Promise<MeetPageState> 
       const text = (document.body?.innerText || "").slice(0, 5000);
       const url = location.href;
       const title = document.title || "";
+      const realtimeBridge = (window as any).MAB_REALTIME_BRIDGE || {};
+      const realtimeClient = (window as any).MAB_REALTIME_CLIENT || {};
+      const agentRuntime = realtimeBridge.agentRuntime || {};
+      const realtimeSurface = {
+        runtimePlacement: String(
+          realtimeBridge.realtimeRuntimePlacement ||
+            realtimeBridge.runtimePlacement ||
+            realtimeClient.realtimeRuntimePlacement ||
+            realtimeClient.runtimePlacement ||
+            "",
+        ),
+        pageRole: String(
+          realtimeBridge.realtimePageRole ||
+            realtimeBridge.pageRole ||
+            realtimeClient.realtimePageRole ||
+            realtimeClient.pageRole ||
+            "",
+        ),
+        sdkOwner: String(realtimeBridge.sdkOwner || realtimeClient.sdkOwner || ""),
+        sdkSuppressedOnMeetSurface: agentRuntime.sdkSuppressedOnMeetSurface === true,
+        hasSDKGlobal: Boolean(
+          (window as any).OpenAIAgentsRealtime || (window as any).openaiAgentsRealtime,
+        ),
+        bundleGlobal: String(agentRuntime.bundleGlobal || ""),
+      };
+      function compactHudCell(cell: any) {
+        return {
+          key: String(cell?.key || "").slice(0, 48),
+          label: String(cell?.label || "").slice(0, 80),
+          value: String(cell?.value || "").slice(0, 80),
+          level: String(cell?.level || "").slice(0, 32),
+        };
+      }
+      function collectAvatarHud() {
+        const cells =
+          typeof (window as any).MAB_AVATAR_HUD_VISIBLE_CELLS === "function"
+            ? ((window as any).MAB_AVATAR_HUD_VISIBLE_CELLS() || []).map(compactHudCell)
+            : [];
+        const signals =
+          typeof (window as any).MAB_AVATAR_HUD_SIGNALS === "function"
+            ? ((window as any).MAB_AVATAR_HUD_SIGNALS() || []).map(compactHudCell)
+            : [];
+        return {
+          available:
+            typeof (window as any).MAB_AVATAR_HUD_VISIBLE_CELLS === "function" ||
+            typeof (window as any).MAB_AVATAR_HUD_SIGNALS === "function",
+          cells: cells.slice(0, 12),
+          signals: signals.slice(0, 12),
+        };
+      }
+      function collectKWWKCursor() {
+        const snapshot =
+          typeof (window as any).MAB_KWWK_CURSOR_SNAPSHOT === "function"
+            ? (window as any).MAB_KWWK_CURSOR_SNAPSHOT()
+            : null;
+        const artifact =
+          typeof (window as any).MAB_KWWK_CURSOR_ARTIFACT === "function"
+            ? (window as any).MAB_KWWK_CURSOR_ARTIFACT()
+            : null;
+        return {
+          available:
+            typeof (window as any).MAB_KWWK_CURSOR_SNAPSHOT === "function" ||
+            typeof (window as any).MAB_KWWK_CURSOR_ARTIFACT === "function",
+          snapshot: snapshot
+            ? {
+                visible: snapshot.visible === true,
+                x: Number(snapshot.x || 0),
+                y: Number(snapshot.y || 0),
+                kind: String(snapshot.kind || "").slice(0, 32),
+                label: String(snapshot.label || "").slice(0, 80),
+                ageMs: Number(snapshot.ageMs || 0),
+                holdMs: Number(snapshot.holdMs || 0),
+              }
+            : undefined,
+          artifact: artifact
+            ? {
+                schema: String(artifact.schema || ""),
+                coordinateSpaces: artifact.coordinateSpaces || {},
+                events: Array.isArray(artifact.events) ? artifact.events.slice(-20) : [],
+                trail: Array.isArray(artifact.trail) ? artifact.trail.slice(-20) : [],
+                styles: artifact.styles || {},
+                latest: artifact.latest || null,
+              }
+            : undefined,
+        };
+      }
+      const avatarHud = collectAvatarHud();
+      const kwwkCursor = collectKWWKCursor();
       const buttons = Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]"))
         .map((node, index) => {
           const rect = node.getBoundingClientRect();
@@ -1012,6 +1109,9 @@ export async function evaluateMeetPageState(page: Page): Promise<MeetPageState> 
         cannotJoin,
         textHead: text.slice(0, 1000),
         buttons: buttons.slice(0, 30),
+        realtimeSurface,
+        avatarHud,
+        kwwkCursor,
       };
     }),
     2500,

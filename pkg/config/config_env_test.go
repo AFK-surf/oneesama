@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -178,6 +179,17 @@ func TestLoadHonorsDemoSurfaceApprovalEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadHonorsExplicitDemoSurfaceRealtimeToolExposure(t *testing.T) {
+	t.Setenv(oneesamaConfigEnvOverrideKey, "")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_MODE", "safe")
+	t.Setenv("ONEESAMA_DEMO_SURFACE_EXPOSE_REALTIME_TOOLS", "true")
+
+	cfg := loadInTempDir(t)
+	if !cfg.DemoSurface.Enabled || !cfg.DemoSurface.ExposeRealtimeTools {
+		t.Fatalf("DemoSurface = %#v, want enabled bridge with explicit Realtime tool exposure", cfg.DemoSurface)
+	}
+}
+
 func TestLoadHonorsDemoSurfaceModePresets(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -222,10 +234,11 @@ func TestLoadHonorsDemoSurfaceModePresets(t *testing.T) {
 				t.Fatalf("DemoSurface.Mode = %q, want %q", cfg.DemoSurface.Mode, tc.mode)
 			}
 			if cfg.DemoSurface.Enabled != tc.wantEnabled ||
+				cfg.DemoSurface.ExposeRealtimeTools ||
 				cfg.DemoSurface.Adapter != tc.wantAdapter ||
 				cfg.DemoSurface.DryRun != tc.wantDryRun ||
 				cfg.DemoSurface.AllowActiveControl != tc.wantActiveControl {
-				t.Fatalf("DemoSurface = %#v, want enabled=%v adapter=%q dryRun=%v active=%v",
+				t.Fatalf("DemoSurface = %#v, want enabled=%v exposed=false adapter=%q dryRun=%v active=%v",
 					cfg.DemoSurface, tc.wantEnabled, tc.wantAdapter, tc.wantDryRun, tc.wantActiveControl)
 			}
 		})
@@ -282,6 +295,7 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	t.Setenv("MAB_OPENAI_REALTIME_TURN_DETECTION", "server_vad")
 	t.Setenv("MAB_OPENAI_REALTIME_SESSION_SCHEMA", "legacy")
 	t.Setenv("MAB_OPENAI_REALTIME_AGENT_RUNTIME", "raw")
+	t.Setenv("MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT", "sidecar")
 	t.Setenv("MAB_REALTIME_PERSONALITY_CONTEXT", "env personality")
 	t.Setenv("MAB_BOT_NAME", "Env Onee-sama")
 	t.Setenv("MAB_CURRENT_USER_NAME", "Peng")
@@ -322,6 +336,9 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	if cfg.OpenAI.RealtimeAgentRuntime != "raw" {
 		t.Fatalf("OpenAI.RealtimeAgentRuntime = %q, want env value", cfg.OpenAI.RealtimeAgentRuntime)
 	}
+	if cfg.OpenAI.RealtimeRuntimePlacement != "sidecar" {
+		t.Fatalf("OpenAI.RealtimeRuntimePlacement = %q, want explicit env override", cfg.OpenAI.RealtimeRuntimePlacement)
+	}
 	if cfg.OpenAI.RealtimePersonalityContext != "env personality" || cfg.OpenAI.BotName != "Env Onee-sama" {
 		t.Fatalf("OpenAI persona = %#v, want env persona", cfg.OpenAI)
 	}
@@ -336,6 +353,16 @@ func TestLoadHonorsOpenAIRealtimeEnvOverrides(t *testing.T) {
 	}
 	if cfg.Dialog.TTSProvider != "http" || cfg.Dialog.TTSVoice != "warm" || cfg.Dialog.TTSCommand != "tts-command" || cfg.Dialog.TTSHTTPURL != "http://127.0.0.1:9001/tts" {
 		t.Fatalf("Dialog = %#v, want env dialog provider values", cfg.Dialog)
+	}
+}
+
+func TestValidateRejectsInlineOpenAIRealtimeRuntimePlacement(t *testing.T) {
+	cfg := (rawConfig{}).toConfig("")
+	cfg.OpenAI.RealtimeRuntimePlacement = "inline"
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "openai.realtime_runtime_placement must be sidecar") {
+		t.Fatalf("Validate() error = %v, want inline placement rejection", err)
 	}
 }
 

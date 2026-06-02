@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	wantRealtimeToolHashWithoutDemoSurface = "49468ff77ff6f8c0fd61fd220eedf776f82ac265c066b67a1edceaffb412e563"
-	wantRealtimeToolHashWithDemoSurface    = "7e009a3ce3f379e9d037041e7b943f77f3d848ef4f26ebc21c9cf06df8723c11"
+	wantRealtimeToolHashWithoutDemoSurface = "57bc362b5d8010f9ea6c4a9ab09cb3cbe72f6c2e0cde18e06c8897a5958094e6"
+	wantRealtimeToolHashWithDemoSurface    = "0b2de1ee670204b2deabbddabeeb818bf363da37a78d2e274ddb3ede68567ab4"
 )
 
 func TestRealtimeToolSchemaStableHashIsDeterministic(t *testing.T) {
@@ -71,16 +71,26 @@ func TestRealtimeToolSchemaStableHashesAreDocumented(t *testing.T) {
 }
 
 func TestRealtimeToolSchemasAreStrictCompatible(t *testing.T) {
-	for _, tool := range defaultRealtimeToolSchemas() {
-		name, _ := tool["name"].(string)
-		if _, ok := tool["strict"]; ok {
-			t.Fatalf("%s strict = %#v, Realtime session tools do not accept strict", name, tool["strict"])
-		}
-		parameters, ok := tool["parameters"].(map[string]any)
-		if !ok {
-			t.Fatalf("%s parameters = %#v, want object", name, tool["parameters"])
-		}
-		assertStrictRealtimeObjectSchema(t, name+".parameters", parameters)
+	for _, tc := range []struct {
+		name  string
+		tools []map[string]any
+	}{
+		{name: "default live-safe", tools: defaultRealtimeToolSchemas()},
+		{name: "full demo opt-in", tools: realtimeToolSchemas(true)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, tool := range tc.tools {
+				name, _ := tool["name"].(string)
+				if _, ok := tool["strict"]; ok {
+					t.Fatalf("%s strict = %#v, Realtime session tools do not accept strict", name, tool["strict"])
+				}
+				parameters, ok := tool["parameters"].(map[string]any)
+				if !ok {
+					t.Fatalf("%s parameters = %#v, want object", name, tool["parameters"])
+				}
+				assertStrictRealtimeObjectSchema(t, name+".parameters", parameters)
+			}
+		})
 	}
 }
 

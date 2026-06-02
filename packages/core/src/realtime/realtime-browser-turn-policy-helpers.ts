@@ -15,6 +15,7 @@
 
   interface FunctionToolDeliveryOptions {
     sendOutput?: boolean;
+    handledOutputChannel?: string;
   }
 
   interface FunctionToolErrorInput {
@@ -172,6 +173,218 @@
       return candidates.some((candidate) => candidate.active === true);
     }
 
+    function numberOrUndefined(value: unknown): number | undefined {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : undefined;
+    }
+
+    function booleanOrUndefined(value: unknown): boolean | undefined {
+      return typeof value === "boolean" ? value : undefined;
+    }
+
+    function assignString(
+      target: Record<string, unknown>,
+      key: string,
+      value: unknown,
+      maxLength = 500,
+    ) {
+      const text = String(value || "").trim();
+      if (text) target[key] = text.slice(0, maxLength);
+    }
+
+    function assignNumber(target: Record<string, unknown>, key: string, value: unknown) {
+      const numberValue = numberOrUndefined(value);
+      if (numberValue !== undefined) target[key] = numberValue;
+    }
+
+    function assignBoolean(target: Record<string, unknown>, key: string, value: unknown) {
+      const boolValue = booleanOrUndefined(value);
+      if (boolValue !== undefined) target[key] = boolValue;
+    }
+
+    function compactActionList(value: unknown) {
+      if (!Array.isArray(value)) return undefined;
+      const actions = value
+        .map((action) => String(action || "").trim())
+        .filter(Boolean)
+        .slice(0, 12)
+        .map((action) => action.slice(0, 160));
+      return actions.length ? actions : undefined;
+    }
+
+    function compactFrame(value: unknown) {
+      const frame = resultRecord(value);
+      const compact: Record<string, unknown> = {};
+      assignNumber(compact, "x", frame.x);
+      assignNumber(compact, "y", frame.y);
+      assignNumber(compact, "width", frame.width);
+      assignNumber(compact, "height", frame.height);
+      return Object.keys(compact).length ? compact : undefined;
+    }
+
+    function compactShareableApp(value: unknown) {
+      const app = resultRecord(value);
+      const compact: Record<string, unknown> = {};
+      assignString(compact, "applicationName", app.applicationName || app.appName || app.name);
+      assignString(compact, "title", app.title || app.windowTitle || app.name);
+      assignString(compact, "bundleIdentifier", app.bundleIdentifier || app.bundleId);
+      assignString(compact, "source", app.source);
+      assignNumber(compact, "windowId", app.windowId || app.windowID);
+      assignNumber(compact, "processId", app.processId || app.pid);
+      const frame = compactFrame(app.frame);
+      if (frame) compact.frame = frame;
+      return compact;
+    }
+
+    function compactScreenShareState(value: unknown) {
+      const screenShare = resultRecord(value);
+      const compact: Record<string, unknown> = {};
+      assignBoolean(compact, "active", screenShare.active);
+      assignBoolean(compact, "ok", screenShare.ok);
+      assignString(compact, "mode", screenShare.mode);
+      assignString(
+        compact,
+        "applicationName",
+        screenShare.applicationName || screenShare.appName || screenShare.name,
+      );
+      assignString(
+        compact,
+        "bundleIdentifier",
+        screenShare.bundleIdentifier || screenShare.bundleId,
+      );
+      assignString(compact, "windowTitle", screenShare.windowTitle);
+      assignString(compact, "title", screenShare.title);
+      assignString(compact, "subtitle", screenShare.subtitle);
+      assignString(compact, "source", screenShare.source);
+      assignNumber(compact, "windowId", screenShare.windowId || screenShare.windowID);
+      assignNumber(compact, "processId", screenShare.processId || screenShare.pid);
+      assignNumber(compact, "width", screenShare.width);
+      assignNumber(compact, "height", screenShare.height);
+      assignNumber(compact, "fps", screenShare.fps);
+      assignNumber(compact, "frames", screenShare.frames);
+      assignBoolean(compact, "imageReady", screenShare.imageReady);
+      assignBoolean(compact, "videoReady", screenShare.videoReady);
+      assignString(compact, "startedAt", screenShare.startedAt);
+      assignString(compact, "stoppedAt", screenShare.stoppedAt);
+      return Object.keys(compact).length ? compact : undefined;
+    }
+
+    function compactShareResult(input: FunctionToolPolicyInput, result: unknown) {
+      const record = resultRecord(result);
+      const compact: Record<string, unknown> = {
+        ok: record.ok !== false,
+      };
+      assignString(compact, "status", record.status);
+      assignString(compact, "error", record.error);
+      assignString(compact, "detail", record.detail);
+      assignString(compact, "note", record.note);
+      assignString(compact, "source", record.source);
+      assignNumber(compact, "count", record.count);
+      assignString(compact, "session_id", resultSessionId(record));
+
+      if (Array.isArray(record.applications)) {
+        compact.applications = record.applications.slice(0, 20).map(compactShareableApp);
+        compact.count = numberOrUndefined(record.count) ?? record.applications.length;
+      }
+
+      const app = compactShareableApp(record.app);
+      if (Object.keys(app).length) compact.app = app;
+
+      const screenShare = [
+        compactScreenShareState(record.screenShare),
+        compactScreenShareState(nestedRecord(record, "state")),
+        compactScreenShareState(nestedRecord(record, "postcheck").screenShare),
+        compactScreenShareState(nestedRecord(record, "present").screenShare),
+        compactScreenShareState(
+          nestedRecord(nestedRecord(record, "present"), "postcheck").screenShare,
+        ),
+        compactScreenShareState(nestedRecord(record, "start").screenShare),
+        compactScreenShareState(nestedRecord(nestedRecord(record, "capture"), "loop").update),
+      ].reduce<Record<string, unknown>>(
+        (merged, candidate) => (candidate ? Object.assign(merged, candidate) : merged),
+        {},
+      );
+      if (Object.keys(screenShare).length) compact.screenShare = screenShare;
+
+      const capture = resultRecord(record.capture);
+      if (Object.keys(capture).length) {
+        const captureSummary: Record<string, unknown> = {};
+        assignString(captureSummary, "mode", capture.mode);
+        assignString(captureSummary, "source", capture.source);
+        assignNumber(captureSummary, "width", capture.width || capture.sourceWidth);
+        assignNumber(captureSummary, "height", capture.height || capture.sourceHeight);
+        assignNumber(captureSummary, "windowId", capture.windowId || capture.windowID);
+        if (Object.keys(captureSummary).length) compact.capture = captureSummary;
+      }
+
+      return compact;
+    }
+
+    function compactAppControlResult(result: unknown, depth = 0) {
+      const record = resultRecord(result);
+      const compact: Record<string, unknown> = {};
+      assignBoolean(compact, "ok", record.ok);
+      assignString(compact, "status", record.status);
+      assignString(compact, "provider", record.provider);
+      assignString(compact, "error", record.error);
+      assignString(compact, "blocker", record.blocker);
+      assignString(compact, "reason", record.reason);
+      assignString(compact, "displayText", record.displayText || record.display_text, 80);
+      assignString(compact, "summary", record.summary, 800);
+      assignString(compact, "answer_hint_zh", record.answer_hint_zh || record.answerHintZh, 240);
+      assignString(compact, "created_at", record.created_at || record.createdAt);
+      assignString(compact, "started_at", record.started_at || record.startedAt);
+      assignString(compact, "finished_at", record.finished_at || record.finishedAt);
+      const jobId = firstNonEmptyString(
+        record.job_id,
+        record.jobId,
+        resultRecord(record.job).id,
+        resultRecord(record.report).id,
+      );
+      if (jobId) compact.job_id = jobId;
+      assignString(compact, "session_id", record.session_id || record.sessionId);
+      assignNumber(compact, "operations", record.operations);
+      assignNumber(compact, "confidence", record.confidence);
+      const actions = compactActionList(record.actions);
+      if (actions) compact.actions = actions;
+      if (record.screenShare !== undefined) {
+        compact.screenShare = compactScreenShareState(record.screenShare) || null;
+      }
+      if (record.currentShareStatus !== undefined) {
+        compact.currentShareStatus = compactScreenShareState(record.currentShareStatus) || null;
+      }
+      const nested = resultRecord(record.result);
+      if (depth < 1 && Object.keys(nested).length > 0) {
+        const nestedCompact = compactAppControlResult(nested, depth + 1);
+        if (Object.keys(nestedCompact).length > 0) compact.result = nestedCompact;
+        if (compact.summary === undefined && nestedCompact.summary !== undefined) {
+          compact.summary = nestedCompact.summary;
+        }
+        if (compact.actions === undefined && nestedCompact.actions !== undefined) {
+          compact.actions = nestedCompact.actions;
+        }
+      }
+      return compact;
+    }
+
+    function compactFunctionToolResult(input: FunctionToolPolicyInput, result: unknown) {
+      if (
+        input.kind === "meet" &&
+        [
+          "list_shareable_windows",
+          "share_existing_app_window",
+          "present_video_stage",
+          "stop_video_stage",
+        ].includes(input.name)
+      ) {
+        return compactShareResult(input, result);
+      }
+      if (input.name === "kwwk_computer_use" || input.name === "control_shared_app_window") {
+        return compactAppControlResult(result);
+      }
+      return result;
+    }
+
     function resultIsBlocked(result: unknown): boolean {
       const record = resultRecord(result);
       const status = resultStatus(record);
@@ -188,16 +401,7 @@
       if (resultStatus(result) === "running") return true;
       if (appControlResultRecords(result).some((record) => record.ok === false)) return false;
       const actions = resultActions(result);
-      const text = appControlResultRecords(result)
-        .flatMap((record) => [record.reason, record.error, record.blocker, record.summary])
-        .filter(Boolean)
-        .map((value) => String(value).toLowerCase())
-        .join("\n");
-      return (
-        (actions.length > 0 && actions.every((action) => action === "state")) ||
-        text.includes("structured_operations_required") ||
-        text.includes("continue with concrete")
-      );
+      return actions.length > 0 && actions.every((action) => action === "state");
     }
 
     function workerResultEnvelope(job: any): Record<string, unknown> {
@@ -236,28 +440,7 @@
               .filter(Boolean)
           : [],
       );
-      const text = [
-        job?.result,
-        job?.error,
-        job?.blocker,
-        job?.summary,
-        envelope.summary,
-        envelope.result,
-        envelope.error,
-        envelope.blocker,
-        result.summary,
-        result.reason,
-        result.error,
-        result.blocker,
-      ]
-        .filter(Boolean)
-        .map((value) => String(value).toLowerCase())
-        .join("\n");
-      return (
-        (actions.length > 0 && actions.every((action) => action === "state")) ||
-        text.includes("structured_operations_required") ||
-        text.includes("continue with concrete")
-      );
+      return actions.length > 0 && actions.every((action) => action === "state");
     }
 
     function appControlIsAsyncAccepted(result: unknown): boolean {
@@ -280,7 +463,8 @@
 
     function functionToolPolicy(input: FunctionToolPolicyInput): RealtimeTurnPolicy {
       const { kind, name, result } = input;
-      if (name !== "control_shared_app_window" && resultIsBlocked(result)) {
+      const appControlTool = name === "kwwk_computer_use" || name === "control_shared_app_window";
+      if (!appControlTool && resultIsBlocked(result)) {
         return {
           channel: "blocked",
           autoRespond: true,
@@ -341,7 +525,7 @@
               "If the prior user request only asked who they are, answer with the resolved identity in concise Chinese. If the prior user request asked for their own workspace data, tasks, issues, GitHub, Linear, Slack, Notion, calendar, docs, URL, or repo lookup, continue by starting the appropriate background job using the resolved identity context instead of stopping after identity.",
           };
         }
-        if (name === "control_shared_app_window") {
+        if (appControlTool) {
           if (resultIsBlocked(result)) {
             return {
               channel: "blocked",
@@ -444,7 +628,8 @@
     }
 
     function functionToolEventType(input: FunctionToolPolicyInput, policy: RealtimeTurnPolicy) {
-      if (input.name === "control_shared_app_window") return "";
+      if (input.name === "kwwk_computer_use" || input.name === "control_shared_app_window")
+        return "";
       if (policy.channel === "blocked") return "tool_result.blocked";
       if (policy.channel === "visual_only") return "tool_result.visual_only";
       if (policy.channel === "meet_chat") return "tool_result.meet_chat";
@@ -457,7 +642,7 @@
       policy: RealtimeTurnPolicy,
     ) {
       if (
-        input.name !== "control_shared_app_window" ||
+        (input.name !== "kwwk_computer_use" && input.name !== "control_shared_app_window") ||
         policy.reason !== "app_control_executor_running"
       ) {
         return input.result;
@@ -509,7 +694,7 @@
       const result = appControlVisibleModelResult(input, policy);
       return {
         ok: resultRecord(result).ok !== false,
-        result,
+        result: compactFunctionToolResult(input, result),
         turnPolicy: {
           channel: policy.channel,
           autoRespond: policy.autoRespond,
@@ -524,13 +709,23 @@
       options: FunctionToolDeliveryOptions = {},
     ) {
       const policy = functionToolPolicy(input);
-      const outputResult = appControlVisibleModelResult(input, policy);
+      const compactResult = compactFunctionToolResult(input, input.result);
+      const outputResult = compactFunctionToolResult(
+        input,
+        appControlVisibleModelResult(input, policy),
+      );
       const delivery =
         options.sendOutput === false
-          ? { ok: true, skipped: true, reason: "caller_handles_function_call_output" }
+          ? {
+              ok: true,
+              skipped: true,
+              reason: "caller_handles_function_call_output",
+              outputChannel: String(options.handledOutputChannel || "caller_returned_output"),
+              responseChannel: "",
+            }
           : sendFunctionCallOutput(input.callId, outputResult, policy);
       const event =
-        input.name === "control_shared_app_window"
+        input.name === "kwwk_computer_use" || input.name === "control_shared_app_window"
           ? rememberAppControlEvent(input, policy)
           : meetingEvents.rememberMeetingEvent({
               type: functionToolEventType(input, policy),
@@ -559,6 +754,7 @@
         policy,
         decision,
         meetingEvent: event,
+        compactResult,
         modelResult: functionToolModelResult(input, policy),
       };
     }

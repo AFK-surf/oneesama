@@ -33,6 +33,7 @@ export type PrepareJoinParams = {
   install_realtime_bridge?: boolean;
   realtime_bridge_mode?: string;
   realtime_agent_runtime?: string;
+  realtime_runtime_placement?: string;
   realtime_tool_callback_token?: string;
   realtime_instructions?: string;
   realtime_tools?: unknown[];
@@ -42,7 +43,6 @@ export type PrepareJoinParams = {
   include_participant_audio?: boolean;
   forward_meet_audio_to_realtime?: boolean;
   meet_audio_input_gain?: number | string;
-  realtime_fallback_to_local_mic?: boolean;
   install_local_dialog_bridge?: boolean;
   install_worker_result_bridge?: boolean;
   install_screen_share_bridge?: boolean;
@@ -72,4 +72,16 @@ export type StatusSessionParams = {
 export type StopSessionParams = {
   session_id?: string;
   reason?: string;
+};
+
+export type RealtimeTextTurnParams = {
+  session_id?: string;
+  text?: string;
+  instructions?: string;
+};
+
+export type RealtimeEventParams = {
+  session_id?: string;
+  event?: Record<string, unknown>;
+  [key: string]: unknown;
 };

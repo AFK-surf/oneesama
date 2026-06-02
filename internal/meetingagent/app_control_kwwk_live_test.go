@@ -37,7 +37,7 @@ func TestLiveKWWKStdioAppControlBackendControlsHostApp(t *testing.T) {
 
 	result, err := backend.ControlSharedApp(context.Background(), AppControlRequest{
 		SessionID:   "live_smoke",
-		Instruction: "observe the shared app through the KWWK helper",
+		Instruction: "run the explicit KWWK live smoke operation",
 		Target: AppControlTarget{
 			ApplicationName: appName,
 		},
@@ -55,12 +55,10 @@ func TestLiveKWWKStdioAppControlBackendControlsHostApp(t *testing.T) {
 	if !result.OK || result.Provider != "kwwk" {
 		t.Fatalf("result = %#v, want KWWK success", result)
 	}
-	if len(result.Actions) != 1 || result.Actions[0] != "state" {
-		t.Fatalf("actions = %#v, want state action", result.Actions)
+	if len(result.Actions) != 1 || result.Actions[0] != "observe" {
+		t.Fatalf("actions = %#v, want observe action from explicit state operation", result.Actions)
 	}
-	if _, err := os.Stat(screenshot); err != nil {
-		t.Fatalf("screenshot %q stat error = %v; result=%#v", screenshot, err, result)
-	}
+	assertKWWKLiveScreenshotOrState(t, screenshot, result.Raw)
 }
 
 func TestLiveRealtimeSharedAppControlHTTPUsesKWWKBackend(t *testing.T) {
@@ -103,9 +101,7 @@ func TestLiveRealtimeSharedAppControlHTTPUsesKWWKBackend(t *testing.T) {
 	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", jsonForKWWKLiveSmoke(t, map[string]any{
 		"session_id":  "meet_session",
 		"instruction": "observe the shared app through the HTTP tool",
-		"operations": []map[string]any{
-			{"kind": "state"},
-		},
+		"wait":        true,
 		"context": map[string]any{
 			"includeScreenshot": true,
 			"screenshotOutput":  screenshot,
@@ -116,12 +112,10 @@ func TestLiveRealtimeSharedAppControlHTTPUsesKWWKBackend(t *testing.T) {
 	if body["ok"] != true || body["provider"] != "kwwk" || body["status"] != appControlStatusCompleted {
 		t.Fatalf("body = %#v, want KWWK success through HTTP tool", body)
 	}
-	if _, err := os.Stat(screenshot); err != nil {
-		t.Fatalf("screenshot %q stat error = %v; body=%#v", screenshot, err, body)
-	}
+	assertKWWKLiveScreenshotOrState(t, screenshot, body)
 }
 
-func TestLiveRealtimeSharedAppControlHTTPReportsKWWKBlocker(t *testing.T) {
+func TestLiveRealtimeSharedAppControlHTTPAcceptsKWWKInstructionOnlyObserve(t *testing.T) {
 	if os.Getenv("MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE") != "1" {
 		t.Skip("set MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE=1 to run the host app-control smoke")
 	}
@@ -159,15 +153,58 @@ func TestLiveRealtimeSharedAppControlHTTPReportsKWWKBlocker(t *testing.T) {
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
 	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", jsonForKWWKLiveSmoke(t, map[string]any{
 		"session_id":  "meet_session",
-		"instruction": "draw a snake mockup without explicit operations",
+		"instruction": "observe the shared app through instruction-only KWWK direct mode",
+		"wait":        true,
 	}), http.StatusOK)
 
-	if body["ok"] != false || body["provider"] != "kwwk" || body["error"] != "app_control_blocked" || body["blocker"] != "structured_operations_required" {
-		t.Fatalf("body = %#v, want KWWK structured-operations blocker through HTTP tool", body)
+	if body["ok"] != true || body["provider"] != "kwwk" || body["status"] != appControlStatusCompleted {
+		t.Fatalf("body = %#v, want KWWK instruction-only observe success through HTTP tool", body)
+	}
+	actions, _ := body["actions"].([]any)
+	if len(actions) != 1 || actions[0] != "observe" {
+		t.Fatalf("actions = %#v, want observe", body["actions"])
 	}
 }
 
-func TestLiveRealtimeSharedAppControlHTTPMutatesHostApp(t *testing.T) {
+func TestLiveKWWKStdioAppControlBackendRejectsMixedObserveActionInstruction(t *testing.T) {
+	if os.Getenv("MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE") != "1" {
+		t.Skip("set MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE=1 to run the host app-control smoke")
+	}
+	appName := strings.TrimSpace(os.Getenv("MAB_KWWK_APP_CONTROL_LIVE_APP"))
+	if appName == "" {
+		appName = "Pencil"
+	}
+	root := repoRootForKWWKLiveSmoke(t)
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command: `node --import tsx packages/core/src/meeting/app-control-helper.ts --stdio`,
+		Dir:     root,
+		Timeout: kwwkLiveSmokeTimeout,
+	})
+	t.Cleanup(func() {
+		_ = backend.Shutdown(context.Background())
+	})
+
+	result, err := backend.ControlSharedApp(context.Background(), AppControlRequest{
+		SessionID:     "live_mixed_instruction",
+		Instruction:   "Look at the shared app, then click the Got it button if visible.",
+		ExecutionMode: appControlExecutionModeDirect,
+		Target: AppControlTarget{
+			ApplicationName: appName,
+		},
+		Timeout: kwwkLiveSmokeTimeout,
+	})
+	if err != nil {
+		t.Fatalf("ControlSharedApp() error = %v", err)
+	}
+	if result.OK || result.Blocker != "instruction_not_directly_executable" {
+		t.Fatalf("result = %#v, mixed observe+action instruction must return direct blocker", result)
+	}
+	if len(result.Actions) == 1 && result.Actions[0] == "observe" {
+		t.Fatalf("actions = %#v, mixed observe+action instruction must not pass as observe-only", result.Actions)
+	}
+}
+
+func TestLiveKWWKStdioAppControlBackendMutatesHostApp(t *testing.T) {
 	if os.Getenv("MAB_RUN_KWWK_APP_CONTROL_LIVE_MUTATE") != "1" {
 		t.Skip("set MAB_RUN_KWWK_APP_CONTROL_LIVE_MUTATE=1 to run the mutating host app-control smoke")
 	}
@@ -189,50 +226,37 @@ func TestLiveRealtimeSharedAppControlHTTPMutatesHostApp(t *testing.T) {
 	t.Cleanup(func() {
 		_ = backend.Shutdown(context.Background())
 	})
-	router := newRealtimeTestRouterWithConfig(t, Config{
-		Persistence:       appconfig.PersistenceConfig{Provider: "memory"},
-		ArtifactsRootDir:  t.TempDir(),
-		InternalAuthKey:   "secret-key",
-		Pipeline:          postmeeting.NewPipeline(t.TempDir()),
-		AppControlBackend: backend,
-		OpenAI:            appconfig.OpenAIConfig{RealtimeModel: "gpt-realtime-2", BotName: "Meeting Avatar Bot"},
-		MeetRunner: fakeMeetRunnerWithRuntime{
-			statusActive: map[string]any{
-				"sessionId": "meet_session",
-				"screenShare": map[string]any{
-					"active":          true,
-					"applicationName": appName,
-				},
-			},
+	result, err := backend.ControlSharedApp(context.Background(), AppControlRequest{
+		SessionID:   "live_mutate",
+		Instruction: "create a visible snake mockup smoke label in the shared app",
+		Target: AppControlTarget{
+			ApplicationName: appName,
 		},
-	})
-
-	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", jsonForKWWKLiveSmoke(t, map[string]any{
-		"session_id":  "meet_session",
-		"instruction": "create a visible snake mockup smoke label in the shared app",
-		"operations": []map[string]any{
-			{"kind": "press_key", "key": "Escape"},
-			{"kind": "click", "x": 282, "y": 108},
-			{"kind": "click", "x": 850, "y": 430},
-			{"kind": "type_text", "text": label},
+		Operations: []KWWKAppControlOperation{
+			{Kind: KWWKAppControlPressKey, Key: "Escape"},
+			{Kind: KWWKAppControlClick, X: 282, Y: 108},
+			{Kind: KWWKAppControlClick, X: 850, Y: 430},
+			{Kind: KWWKAppControlTypeText, Text: label},
 		},
-		"context": map[string]any{
+		Context: map[string]any{
 			"includeScreenshot": true,
 			"screenshotOutput":  screenshot,
 			"timeoutMs":         15000,
 		},
-	}), http.StatusOK)
-
-	if body["ok"] != true || body["provider"] != "kwwk" || body["status"] != appControlStatusCompleted {
-		t.Fatalf("body = %#v, want KWWK mutation success through HTTP tool", body)
+		Timeout: kwwkLiveSmokeTimeout,
+	})
+	if err != nil {
+		t.Fatalf("ControlSharedApp() error = %v", err)
 	}
-	actions, ok := body["actions"].([]any)
-	if !ok || len(actions) != 4 || actions[0] != "press_key" || actions[3] != "type_text" {
-		t.Fatalf("actions = %#v, want press_key/click/click/type_text", body["actions"])
+
+	if !result.OK || result.Provider != "kwwk" || result.Status != appControlStatusCompleted {
+		t.Fatalf("result = %#v, want KWWK mutation success", result)
+	}
+	if len(result.Actions) != 4 || result.Actions[0] != "press_key" || result.Actions[3] != "type_text" {
+		t.Fatalf("actions = %#v, want press_key/click/click/type_text", result.Actions)
 	}
 	if _, err := os.Stat(screenshot); err != nil {
-		t.Fatalf("screenshot %q stat error = %v; body=%#v", screenshot, err, body)
+		t.Fatalf("screenshot %q stat error = %v; result=%#v", screenshot, err, result)
 	}
 }
 
@@ -243,6 +267,54 @@ func jsonForKWWKLiveSmoke(t *testing.T, value any) string {
 		t.Fatalf("marshal live smoke request: %v", err)
 	}
 	return string(data)
+}
+
+func assertKWWKLiveScreenshotOrState(t *testing.T, screenshot string, evidence any) {
+	t.Helper()
+	if _, err := os.Stat(screenshot); err == nil {
+		return
+	}
+	state := findKWWKLiveStateEvidence(evidence)
+	if state == nil {
+		t.Fatalf("screenshot %q missing and no KWWK state evidence found: %#v", screenshot, evidence)
+	}
+	if state["ok"] != true {
+		t.Fatalf("KWWK state evidence = %#v, want ok=true", state)
+	}
+	if _, ok := state["window"].(map[string]any); !ok {
+		t.Fatalf("KWWK state evidence = %#v, want observed window metadata", state)
+	}
+	if state["screenshotIncluded"] == false && strings.TrimSpace(stringFromAny(state["screenshotBlocker"])) == "" {
+		t.Fatalf("KWWK state evidence = %#v, screenshot miss must include blocker", state)
+	}
+}
+
+func findKWWKLiveStateEvidence(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		if typed["source"] == "oneesama_app_control_helper" {
+			if _, ok := typed["window"].(map[string]any); ok {
+				return typed
+			}
+		}
+		if state, ok := typed["state"].(map[string]any); ok {
+			if found := findKWWKLiveStateEvidence(state); found != nil {
+				return found
+			}
+		}
+		for _, nested := range typed {
+			if found := findKWWKLiveStateEvidence(nested); found != nil {
+				return found
+			}
+		}
+	case []any:
+		for _, nested := range typed {
+			if found := findKWWKLiveStateEvidence(nested); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
 }
 
 func repoRootForKWWKLiveSmoke(t *testing.T) string {

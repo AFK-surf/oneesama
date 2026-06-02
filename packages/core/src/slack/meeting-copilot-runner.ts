@@ -142,6 +142,7 @@ export function containsMeetingCopilotRealtimeControlRequest(transcript: unknown
 
   const controlTerms = [
     "computer use",
+    "kwwk_computer_use",
     "control shared app",
     "control_shared_app_window",
     "activity monitor",

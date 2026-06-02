@@ -273,6 +273,15 @@ export async function clickMeetShareScreenControl(
   diagnostics: Diagnostics | null = null,
   options: { allowCoordinateFallback?: boolean } = {},
 ) {
+  const result = await clickMeetShareScreenControlResult(page, diagnostics, options);
+  return result.ok ? result.selector : "";
+}
+
+export async function clickMeetShareScreenControlResult(
+  page: Page,
+  diagnostics: Diagnostics | null = null,
+  options: { allowCoordinateFallback?: boolean } = {},
+): Promise<ShareScreenDomClickResult> {
   await revealMeetToolbar(page, diagnostics);
   const domClick = await withTimeout<ShareScreenDomClickResult, ShareScreenDomClickResult>(
     page.evaluate(() => {
@@ -316,16 +325,18 @@ export async function clickMeetShareScreenControl(
         .filter(
           (candidate) =>
             candidate.visible &&
-            !candidate.disabled &&
             /\b(share screen|present now|present)\b|computer_arrow_up|present_to_all/i.test(
               candidate.label,
             ),
         );
-      const candidate = candidates[0];
+      const candidate = candidates.find((entry) => !entry.disabled);
       if (!candidate) {
+        const reason = candidates.some((entry) => entry.disabled)
+          ? "share_screen_button_disabled"
+          : "share_screen_button_not_found";
         return {
           ok: false,
-          reason: "share_screen_button_not_found",
+          reason,
           candidates: candidates.slice(0, 8).map(({ index, label, disabled, visible, rect }) => ({
             index,
             label,
@@ -357,9 +368,10 @@ export async function clickMeetShareScreenControl(
   );
   if (domClick.ok) {
     diagnostics?.record("click", { selector: domClick.selector, button: domClick.button });
-    return domClick.selector;
+    return domClick;
   }
   diagnostics?.record("click_miss", domClick);
+  if ("reason" in domClick && domClick.reason === "share_screen_button_disabled") return domClick;
 
   const locatorCandidates = [
     {
@@ -381,7 +393,11 @@ export async function clickMeetShareScreenControl(
     try {
       await candidate.locator().click({ timeout: 2500 });
       diagnostics?.record("click", { selector: candidate.selector });
-      return candidate.selector;
+      return {
+        ok: true,
+        selector: candidate.selector,
+        button: { index: -1, label: "", rect: { x: 0, y: 0, width: 0, height: 0 } },
+      };
     } catch (error) {
       diagnostics?.record("click_miss", {
         selector: candidate.selector,
@@ -397,7 +413,11 @@ export async function clickMeetShareScreenControl(
       const y = Math.max(1, viewport.height - 40);
       await page.mouse.click(x, y, { delay: 20 });
       diagnostics?.record("click", { selector: "coordinate:bottom-toolbar-share-screen", x, y });
-      return "coordinate:bottom-toolbar-share-screen";
+      return {
+        ok: true,
+        selector: "coordinate:bottom-toolbar-share-screen",
+        button: { index: -1, label: "", rect: { x, y, width: 0, height: 0 } },
+      };
     } catch (error) {
       diagnostics?.record("click_miss", {
         selector: "coordinate:bottom-toolbar-share-screen",
@@ -406,7 +426,7 @@ export async function clickMeetShareScreenControl(
     }
   }
 
-  return "";
+  return domClick;
 }
 
 export async function readScreenShareControllerState(

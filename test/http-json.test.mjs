@@ -38,3 +38,29 @@ test("createJsonServer rejects request bodies over the configured limit", async 
     });
   }
 });
+
+test("createJsonServer listens on the configured host", async () => {
+  const service = createJsonServer({
+    name: "test-json-host",
+    host: "127.0.0.1",
+    port: 0,
+    routes: {
+      "GET /healthz": () => ({ ok: true }),
+    },
+  });
+
+  try {
+    await service.listen();
+    const address = service.server.address();
+    assert.equal(typeof address, "object");
+    assert.equal(address.address, "127.0.0.1");
+    const response = await fetch(`http://127.0.0.1:${address.port}/healthz`);
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+  } finally {
+    await new Promise((resolve, reject) => {
+      service.server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});

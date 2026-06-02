@@ -4,7 +4,7 @@ import { chromium } from "playwright";
 
 import { buildRealtimeBrowserInitScript } from "../packages/core/src/realtime/realtime-browser-init-builder.ts";
 
-test("Realtime bridge blocks untagged user text turns from internal streams", async () => {
+test("Realtime browser public API exposes only allowlisted control events", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
@@ -26,7 +26,7 @@ test("Realtime bridge blocks untagged user text turns from internal streams", as
       window.addEventListener("meeting-avatar-realtime-event", (event) => {
         wireEvents.push(event.detail);
       });
-      const blocked = window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
+      const rejectedUserEvent = window.MAB_REALTIME_CLIENT.sendRealtimeControlEvent({
         type: "conversation.item.create",
         item: {
           type: "message",
@@ -34,46 +34,31 @@ test("Realtime bridge blocks untagged user text turns from internal streams", as
           content: [{ type: "input_text", text: "internal text should not become user speech" }],
         },
       });
-      const allowed = window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          metadata: { source: "manual_text_turn" },
-          content: [{ type: "input_text", text: "explicit operator text turn" }],
-        },
-      });
-      const captionBlocked = window.MAB_REALTIME_CLIENT.sendRealtimeEvent({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          metadata: { source: "meet_caption_observer" },
-          content: [{ type: "input_text", text: "caption text is diagnostics only" }],
-        },
+      const allowedControlEvent = window.MAB_REALTIME_CLIENT.sendRealtimeControlEvent({
+        type: "input_audio_buffer.clear",
       });
       return {
-        allowed,
-        blocked,
-        captionBlocked,
+        sendRealtimeEventType: typeof window.MAB_REALTIME_CLIENT.sendRealtimeEvent,
+        rejectedUserEvent,
+        allowedControlEvent,
         blockedCount: window.MAB_REALTIME_BRIDGE.connection.blockedUserTextEvents,
-        blockedTimeline: window.MAB_REALTIME_BRIDGE.timeline.filter(
-          (entry) => entry.type === "realtime_user_text_blocked",
+        rejectedTimeline: window.MAB_REALTIME_BRIDGE.timeline.filter(
+          (entry) => entry.type === "realtime_control_event_rejected",
         ),
         outbound: window.MAB_REALTIME_BRIDGE.outbound.map((entry) => entry.event),
         wireEvents,
       };
     });
 
-    assert.equal(result.blocked, "blocked-untrusted-user-text");
-    assert.equal(result.allowed, "custom-event");
-    assert.equal(result.captionBlocked, "blocked-untrusted-user-text");
-    assert.equal(result.blockedCount, 2);
-    assert.equal(result.blockedTimeline.length, 2);
+    assert.equal(result.sendRealtimeEventType, "undefined");
+    assert.equal(result.rejectedUserEvent, "realtime-control-event-not-allowed");
+    assert.equal(result.allowedControlEvent, "custom-event");
+    assert.equal(result.blockedCount || 0, 0);
+    assert.equal(result.rejectedTimeline.length, 1);
     assert.equal(result.outbound.length, 1);
-    assert.equal(result.outbound[0].item.metadata.source, "manual_text_turn");
+    assert.equal(result.outbound[0].type, "input_audio_buffer.clear");
     assert.equal(result.wireEvents.length, 1);
-    assert.equal(result.wireEvents[0].item.metadata, undefined);
+    assert.equal(result.wireEvents[0].type, "input_audio_buffer.clear");
   } finally {
     await browser.close();
   }

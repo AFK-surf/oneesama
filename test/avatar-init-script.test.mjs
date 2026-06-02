@@ -18,11 +18,31 @@ test("avatar runtime config uses resilient Hiyori model URLs", () => {
   );
 });
 
-test("avatar runtime config defaults to Live2D renderer", () => {
+test("avatar runtime config defaults to video renderer", () => {
   const config = getRuntimeConfig({});
 
-  assert.equal(config.avatarRenderer, "live2d");
+  assert.equal(config.avatarRenderer, "video");
   assert.match(config.avatarVRMModelUrl, /\.vrm$/);
+});
+
+test("runtime config defaults Realtime Google Meet joins to sidecar placement", () => {
+  const config = getRuntimeConfig({});
+
+  assert.equal(config.openaiRealtimeAgentRuntime, "agents-sdk");
+  assert.equal(config.openaiRealtimeRuntimePlacement, "sidecar");
+});
+
+test("runtime config keeps meeting-agent control API on loopback by default", () => {
+  assert.equal(getRuntimeConfig({}).meetingHost, "127.0.0.1");
+  assert.equal(getRuntimeConfig({ MAB_MEETING_HOST: "0.0.0.0" }).meetingHost, "0.0.0.0");
+});
+
+test("runtime config still preserves explicit inline Realtime placement for non-Meet diagnostics", () => {
+  const config = getRuntimeConfig({
+    MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT: "inline",
+  });
+
+  assert.equal(config.openaiRealtimeRuntimePlacement, "inline");
 });
 
 test("avatar init script does not bundle VRM dependencies by default", () => {
@@ -51,6 +71,14 @@ test("avatar init script can defer heavy renderer startup until after join", () 
   assert.match(script, /deferRendererUntilExplicitStart/);
   assert.match(script, /MAB_AVATAR_START_RENDERER/);
   assert.match(script, /avatar renderer deferred until explicit start/);
+});
+
+test("avatar audio bus exposes a PCM enqueue API for Realtime sidecar output", () => {
+  const script = buildAvatarInitScript();
+
+  assert.match(script, /enqueuePcmFrames/);
+  assert.match(script, /routedPcmChunks/);
+  assert.match(script, /lastPcmRoute/);
 });
 
 test("avatar init script bundles VRM dependencies for Meet pages", () => {

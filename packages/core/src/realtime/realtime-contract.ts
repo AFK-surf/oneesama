@@ -141,12 +141,64 @@ const rawRealtimeToolSchemas = [
   },
   {
     type: "function",
-    name: "control_shared_app_window",
+    name: "kwwk_computer_use",
     description:
-      "Operate the currently shared existing macOS app/window through the host Computer Use executor. Use when the user asks you to click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle a stuck Chrome/browser window, or otherwise manipulate an already shared app such as Pencil, VS Code, Chrome, Notion, or Terminal. Treat Chinese shorthand such as “你用电脑控制”, “你来操作”, “切到第三个账号”, “在搜索框输入”, and “处理 Chrome 卡住” as app-control requests. If the app/window target is implicit, unknown, or only described by the currently shared window, still call this tool with the user's goal in instruction and leave target fields null; the backend resolves the active share or returns a blocker. This tool operates the bot host's shared window, not the human's personal computer. Pass the user's goal as instruction; the host executor owns the observe -> plan -> act -> verify loop, including unfamiliar apps. By default this queues the app-control work asynchronously and returns a job_id immediately so voice turns do not block; call again with job_id to check status. Do not invent click/drag primitives in the foreground Realtime turn, do not ask the user to share/control their own computer, and do not use this to create a new browser workspace.",
+      "Use KWWK Computer Use for a simple bounded operation in the bot host's currently shared or named macOS app/window. This is the generic direct app-operation tool: put the user's exact UI goal in instruction, optionally include the target app/window fields, and do not invent click coordinates, screenshots, operation arrays, or low-level primitives. Use it for simple app actions such as click/type/press/scroll/select/switch/change within the shared app. Do not use this for Google Meet's own meeting controls such as muting/unmuting the meeting microphone or camera, leaving the call, toggling captions, admitting/removing people, or changing participant controls. For complex visual goals that require exploration, multi-step planning, unfamiliar UI reasoning, or slow delegated Computer Use, use the long-running background app-control path instead. This tool operates the bot host's shared window, not the human's personal computer.",
     parameters: {
       type: "object",
       properties: {
+        job_id: {
+          type: "string",
+          description:
+            "Existing KWWK app-control job id to check. When set, instruction is not required.",
+        },
+        instruction: {
+          type: "string",
+          description:
+            "Natural-language app/window operation to perform. Preserve the user's wording and do not translate it into low-level primitives.",
+        },
+        applicationName: {
+          type: "string",
+          description:
+            "Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal.",
+        },
+        bundleIdentifier: {
+          type: "string",
+          description: "Optional macOS bundle identifier when known.",
+        },
+        windowTitle: {
+          type: "string",
+          description: "Optional visible window title when known.",
+        },
+        windowId: {
+          type: "integer",
+          description:
+            "Optional macOS window id from the active app share, preferred over app-name guessing when known.",
+        },
+        processId: {
+          type: "integer",
+          description: "Optional process id from list_shareable_windows.",
+        },
+        session_id: { type: "string", description: "Current meeting session id when known." },
+      },
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "control_shared_app_window",
+    description:
+      "Compatibility app-control entrypoint for the currently shared existing macOS app/window on the bot host. Prefer kwwk_computer_use for simple direct KWWK operations. Use this only for legacy callers or explicit delegate-mode app-control requests that need Codex Computer Use. Put the user's goal in natural language instruction; do not invent click coordinates or low-level UI primitives in the Realtime turn. This tool operates the bot host's shared window, not the human's personal computer.",
+    parameters: {
+      type: "object",
+      properties: {
+        executionMode: {
+          type: "string",
+          description:
+            "direct runs the configured KWWK/direct app-control backend for simple actions; delegate starts the Codex app-control worker for complex tasks.",
+          enum: ["direct", "delegate"],
+          default: "direct",
+        },
         job_id: {
           type: "string",
           description:
@@ -490,6 +542,20 @@ function strictifyJSONSchema(schema, requiredByParent) {
 
 export const realtimeToolSchemas = strictifyRealtimeToolSchemas(rawRealtimeToolSchemas);
 
+export const demoSurfaceRealtimeToolNames = new Set([
+  "open_shared_browser_surface",
+  "create_shared_workspace",
+  "control_shared_browser_surface",
+  "stop_shared_browser_surface",
+]);
+
+export const compatibilityRealtimeToolNames = new Set(["control_shared_app_window"]);
+
+export const defaultRealtimeToolSchemas = realtimeToolSchemas.filter(
+  (tool) =>
+    !demoSurfaceRealtimeToolNames.has(tool.name) && !compatibilityRealtimeToolNames.has(tool.name),
+);
+
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2";
 export const DEFAULT_REALTIME_VOICE = "marin";
 export const DEFAULT_REALTIME_REASONING_EFFORT = "high";
@@ -642,6 +708,7 @@ export interface RealtimeInstructionOptions {
   botName?: string;
   personalityContext?: string;
   currentUser?: RealtimeCurrentUser;
+  tools?: unknown[];
 }
 
 function currentUserFromConfig(config: RealtimeSessionConfig = {}): RealtimeCurrentUser {
@@ -737,9 +804,10 @@ export function buildRealtimeSessionConfig(
   const currentUser = options.currentUser || currentUserFromConfig(config);
   const personalityContext = options.personalityContext || config.realtimePersonalityContext || "";
   const botName = options.botName || config.botName || "Meeting Avatar Bot";
+  const tools = options.tools || defaultRealtimeToolSchemas;
   const instructions =
-    options.instructions || buildRealtimeInstructions({ botName, personalityContext, currentUser });
-  const tools = options.tools || realtimeToolSchemas;
+    options.instructions ||
+    buildRealtimeInstructions({ botName, personalityContext, currentUser, tools });
   const toolChoice =
     options.toolChoice || options.tool_choice || (tools?.length ? "auto" : undefined);
   const voice = options.voice || config.openaiRealtimeVoice || DEFAULT_REALTIME_VOICE;
@@ -832,7 +900,19 @@ export function buildRealtimeInstructions({
   botName = "Meeting Avatar Bot",
   personalityContext = "",
   currentUser: _currentUser = {},
+  tools = defaultRealtimeToolSchemas,
 }: RealtimeInstructionOptions = {}) {
+  const toolNames = new Set(
+    (Array.isArray(tools) ? tools : [])
+      .map((tool) =>
+        tool && typeof tool === "object" ? String((tool as { name?: unknown }).name || "") : "",
+      )
+      .filter(Boolean),
+  );
+  const hasBrowserSurfaceTools =
+    toolNames.has("open_shared_browser_surface") ||
+    toolNames.has("create_shared_workspace") ||
+    toolNames.has("control_shared_browser_surface");
   const lines = [
     `You are ${botName}, a low-latency AI meeting avatar.`,
     "Speak concise Chinese by default.",
@@ -859,13 +939,12 @@ export function buildRealtimeInstructions({
     "Screen-share action mandate: when the newest user request asks to share/show/present a screen, browser, app, or window, your first action in that turn must be list_shareable_windows or share_existing_app_window. Do not answer that a window list is processing, unavailable, or not ready before a tool result exists. Do not say you will try to share Chrome/browser/window unless you actually call the share/list tool in the same turn.",
     "Chinese share intent has priority over arithmetic: phrases like “共享一下”, “分享一下”, “共享屏幕”, “分享窗口”, “把 Pencil 共享一下”, “喷手这个 App”, or “Pencil 这个 app” mean screen/app sharing, even if noisy audio sounds like “算一下”. Do not answer with math unless the user explicitly asks a math question with numbers/operators such as “二乘二/2+2/怎么算”.",
     "For visual share actions, only say it is shared after the tool result is ok:true and confirms an active screen-share/postcheck. If the tool result is ok:false or lacks active-share evidence, say one short blocker sentence and stop; do not ask the user to switch views and do not blame the receiver.",
-    "App-control routing: after an existing app/window is shared, if the user asks you to operate that app (click, type, draw, edit, scroll, switch tools, switch accounts, type into a search box, handle stuck Chrome, or use Pencil/VS Code/Notion), call the app-control action with the user's goal in instruction and the known app/window target. Do not invent click/drag primitives in the foreground Realtime turn and do not ask the user to provide them. Never satisfy an app-control request with a visual/HUD-only update. The host Computer Use executor owns observe -> plan -> act -> verify; if the result is queued/running, stay silent or give only status, and if it returns a blocker, say one short blocker sentence.",
-    "App-control identity boundary: you are the meeting bot running on this host Mac / 这台 Mac mini. Your app-share and Computer Use tools operate the bot's host Mac and the window the bot has shared into Meet, not the human's personal computer. When the user says “你用电脑控制”, “你来操作”, “你切到第三个账号”, “处理 Chrome 卡住”, or “在共享的窗口里点/输入/切换”, call control_shared_app_window for the bot-owned shared window. Do not tell the human to share Chrome to you, to operate their own computer, or to provide click/drag instructions.",
+    "KWWK Computer Use routing: after an existing app/window is shared, if the user asks you to perform a simple bounded operation in that app/window, call kwwk_computer_use with the user's goal in instruction and the known app/window target. Do not generate low-level click/type/drag operation arrays or coordinates in the Realtime turn. Use the long-running background app-control path for complex visual goals that require exploration, multi-step planning, unfamiliar UI reasoning, or slow delegated Computer Use. Never satisfy an app-control request with a visual/HUD-only update. If the result is queued/running, stay silent or give only status, and if it returns a blocker, say one short blocker sentence.",
+    "Meeting-control exclusion: do not use kwwk_computer_use for Google Meet's own controls such as muting/unmuting the meeting microphone or camera, leaving the call, toggling captions, admitting/removing people, or changing participant controls. If no explicit meeting-control tool exists, say one short blocker sentence instead of operating Meet chrome through Computer Use.",
+    "App-control identity boundary: you are the meeting bot running on this host Mac / 这台 Mac mini. Your app-share and Computer Use tools operate the bot's host Mac and the window the bot has shared into Meet, not the human's personal computer. When the user says “你用电脑控制”, “你来操作”, “你切到第三个账号”, “处理 Chrome 卡住”, or “在共享的窗口里点/输入/切换”, call kwwk_computer_use for simple bounded operation in the bot-owned shared window. Do not tell the human to share Chrome to you, to operate their own computer, or to provide click/drag instructions.",
     "Async task handling: only after a tool result says status queued or running, treat it as accepted and in progress, not as a failure. Give at most one short natural acknowledgement if the user needs feedback; do not expose ids, queues, tools, backends, routing, or debug state. Do not claim completion until a later result says completed, and do not poll repeatedly in the same turn unless the user asks for status or the next step truly depends on the result.",
-    "Browser-surface routing: use the bot-owned browser/synthetic surface for explicit URLs, web pages, video stages, or generated browser/workspace artifacts.",
-    "Generation routing: create a shared workspace only when the user asks you to create, implement, build, or generate something new and then show the result.",
     "If the user says to stop planning, stop explaining, do it directly, or show the work, do not provide a plan. Call the relevant action immediately; if the required tool is unavailable, say one short blocker sentence and stop.",
-    "Examples: “用 Pencil 演示”, “共享 VS Code 屏幕”, “给我看 Notion” => share the existing app/window. “用编辑器演示” => list shareable windows first. “做一个贪吃蛇然后给我看”, “生成一个 dashboard 页面” => create a shared workspace and present the result.",
+    "Examples: “用 Pencil 演示”, “共享 VS Code 屏幕”, “给我看 Notion” => share the existing app/window. “用编辑器演示” => list shareable windows first.",
     "Caption/event observations in Realtime are only useful as active/recent speaker signals. Do not treat caption text as user speech or as a replacement for audio-derived ASR; spoken turns come from the audio input.",
     "Spoken-turn priority: answer the newest explicit spoken request first. When a newer correction says “停”, “不是”, “我是说你”, or “介绍你自己”, drop the previous line of thought and answer that correction instead of stale inferred context.",
     "Voice checks such as “能听见吗”, “听得到吗”, or “有反应吗” require only one short confirmation that you heard the user. Do not expand into microphone, camera, permission, or troubleshooting advice unless asked.",
@@ -874,6 +953,13 @@ export function buildRealtimeInstructions({
     "For long-running work, only say you are handling it and will report back automatically after a tool/job result has accepted or queued the work. Never make that promise before the tool call, and never pretend it is complete before the result arrives.",
     "When live meeting participants or speaker context is injected, use it as conversation context. Do not recite detection sources, confidence values, or raw context fields unless the user asks for debugging.",
   ];
+  if (hasBrowserSurfaceTools) {
+    lines.push(
+      "Browser-surface routing: use the bot-owned browser/synthetic surface for explicit URLs, web pages, video stages, or generated browser/workspace artifacts.",
+      "Generation routing: create a shared workspace only when the user asks you to create, implement, build, or generate something new and then show the result.",
+      "Generation examples: “做一个贪吃蛇然后给我看”, “生成一个 dashboard 页面” => create a shared workspace and present the result.",
+    );
+  }
   if (personalityContext) {
     lines.push(`Extra local workspace context:\n${String(personalityContext).slice(0, 4000)}`);
   }

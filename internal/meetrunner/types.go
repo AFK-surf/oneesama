@@ -43,6 +43,7 @@ type PrepareGoogleMeetInput struct {
 	InstallRealtimeBridge      bool             `json:"install_realtime_bridge,omitempty"`
 	RealtimeBridgeMode         string           `json:"realtime_bridge_mode,omitempty"`
 	RealtimeAgentRuntime       string           `json:"realtime_agent_runtime,omitempty"`
+	RealtimeRuntimePlacement   string           `json:"realtime_runtime_placement,omitempty"`
 	RealtimeToolCallbackToken  string           `json:"realtime_tool_callback_token,omitempty"`
 	RealtimeInstructions       string           `json:"realtime_instructions,omitempty"`
 	RealtimeTools              []map[string]any `json:"realtime_tools,omitempty"`
@@ -99,6 +100,7 @@ type JoinPlan struct {
 	InstallRealtimeBridge      bool    `json:"install_realtime_bridge,omitempty"`
 	RealtimeBridgeMode         string  `json:"realtime_bridge_mode,omitempty"`
 	RealtimeAgentRuntime       string  `json:"realtime_agent_runtime,omitempty"`
+	RealtimeRuntimePlacement   string  `json:"realtime_runtime_placement,omitempty"`
 	AutoConnectRealtime        bool    `json:"auto_connect_realtime,omitempty"`
 	SendRealtimeSessionUpdate  bool    `json:"send_realtime_session_update,omitempty"`
 	IncludeParticipantAudio    bool    `json:"include_participant_audio,omitempty"`
@@ -154,6 +156,8 @@ type WorkerResultDelivery struct {
 	Delivery           any    `json:"delivery,omitempty"`
 	RealtimeBridge     any    `json:"realtimeBridge,omitempty"`
 	WorkerResultBridge any    `json:"workerResultBridge,omitempty"`
+	Suppressed         bool   `json:"suppressed,omitempty"`
+	Reason             string `json:"reason,omitempty"`
 	Error              string `json:"error,omitempty"`
 }
 
@@ -168,6 +172,21 @@ type MeetChatResult struct {
 	Text    string `json:"text,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
+
+type RealtimeTextTurnInput struct {
+	SessionID    string `json:"session_id,omitempty"`
+	Text         string `json:"text,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
+type RealtimeTextTurnResult map[string]any
+
+type RealtimeEventInput struct {
+	SessionID string         `json:"session_id,omitempty"`
+	Event     map[string]any `json:"event,omitempty"`
+}
+
+type RealtimeEventResult map[string]any
 
 type ScreenShareInput struct {
 	SessionID string `json:"session_id,omitempty"`

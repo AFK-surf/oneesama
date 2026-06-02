@@ -56,11 +56,13 @@ func (s *Service) newRealtimeDemoBridgeFromConfig() *RealtimeDemoBridge {
 
 func (s *Service) demoSurfaceStatus() map[string]any {
 	enabled := s.demoBridge != nil
+	toolsExposed := s.realtimeDemoSurfaceToolsExposed()
 	status := map[string]any{
 		"mode":                          strings.TrimSpace(s.demoSurface.Mode),
 		"enabled":                       enabled,
-		"toolsExposed":                  enabled,
+		"toolsExposed":                  toolsExposed,
 		"configured":                    s.demoSurface.Enabled,
+		"exposeRealtimeTools":           s.demoSurface.ExposeRealtimeTools,
 		"adapter":                       strings.TrimSpace(s.demoSurface.Adapter),
 		"rootDir":                       strings.TrimSpace(s.demoSurface.RootDir),
 		"dryRun":                        s.demoSurface.DryRun,

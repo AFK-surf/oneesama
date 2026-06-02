@@ -19,11 +19,31 @@ interface ParticipantStreamOptions {
   label?: string;
 }
 
+function allowParticipantAudioStreamInput() {
+  return (
+    config.allowParticipantAudioStreamEvents === true ||
+    ["mock", "webrtc-mock", "agents-sdk-mock"].includes(String(config.mode || ""))
+  );
+}
+
 function registerParticipantAudioStream(
   stream: MediaStream | null | undefined,
   options: ParticipantStreamOptions = {},
 ) {
   try {
+    if (!allowParticipantAudioStreamInput()) {
+      recordTimeline("participant_audio_stream_registration_rejected", {
+        label: options.label || "",
+        mode: config.mode || "",
+        reason: "participant_audio_stream_registration_disabled",
+      });
+      updateFeedback();
+      return {
+        ok: false,
+        error: "participant_audio_stream_registration_disabled",
+        added: 0,
+      };
+    }
     const tracks = stream?.getAudioTracks?.() || [];
     const freshTracks = tracks.filter((track) => !participantTrackIds.has(track.id));
     if (!freshTracks.length) return { ok: true, added: 0, duplicate: tracks.length > 0 };
@@ -93,9 +113,22 @@ interface ParticipantAudioEventDetail {
   label?: string;
 }
 
+function allowParticipantAudioStreamEvents() {
+  return allowParticipantAudioStreamInput();
+}
+
 function installParticipantAudioDiscovery() {
   window.addEventListener("meeting-avatar-participant-audio-stream", (event: Event) => {
     const detail = (event as CustomEvent<ParticipantAudioEventDetail>).detail || {};
+    if (!allowParticipantAudioStreamEvents()) {
+      recordTimeline("participant_audio_stream_event_rejected", {
+        label: detail.label || "",
+        mode: config.mode || "",
+        reason: "participant_audio_stream_event_disabled",
+      });
+      updateFeedback();
+      return;
+    }
     registerParticipantAudioStream(detail.stream, {
       label: detail.label || "participant-audio-event",
     });

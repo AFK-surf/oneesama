@@ -273,7 +273,11 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
         .slice(0, 96);
     }
 
-    function setStatus(kind = "idle", text = "", holdMs = 12000) {
+    function defaultStatusHoldMs(kind: string) {
+      return kind === "done" ? 1800 : 12000;
+    }
+
+    function setStatus(kind = "idle", text = "", holdMs?: number) {
       const safeKind = normalizeEnum(kind, ALLOWED_STATUS_KINDS, "idle");
       const safeText = normalizeStatusText(text || defaultStatusText(safeKind));
       if (safeKind === "idle" || !safeText) {
@@ -286,7 +290,8 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
       }
       state.statusKind = safeKind;
       state.statusText = safeText;
-      state.statusVisibleUntil = performance.now() + Number(holdMs ?? 12000);
+      state.statusVisibleUntil =
+        performance.now() + Number(holdMs ?? defaultStatusHoldMs(safeKind));
       state.statusUpdatedAt = new Date().toISOString();
       remember("status", { statusKind: safeKind, statusText: safeText });
       return { ok: true, statusKind: state.statusKind, statusText: state.statusText };
@@ -326,7 +331,7 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
           ? setStatus(
               String(statusKind ?? (statusText !== undefined ? "thinking" : state.statusKind)),
               String(statusText ?? ""),
-              Number(statusHoldMs ?? 12000),
+              statusHoldMs === undefined ? undefined : Number(statusHoldMs),
             )
           : { ok: true, skipped: true, statusKind: state.statusKind, statusText: state.statusText };
       return {

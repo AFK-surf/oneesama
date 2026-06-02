@@ -1,0 +1,1420 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Oneesama Realtime Tool Surface Report - 2026-06-01</title>
+    <style>
+      :root {
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --ink: #1b1d29;
+        --muted: #626779;
+        --line: #d9deea;
+        --blue: #2f63d8;
+        --green: #18895d;
+        --amber: #a66600;
+        --red: #b3261e;
+        --violet: #7551d8;
+        --shadow: 0 18px 50px rgba(29, 36, 58, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          14px/1.55 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      header {
+        background: #101522;
+        color: white;
+        padding: 40px 42px 34px;
+      }
+
+      header h1 {
+        margin: 0 0 10px;
+        font-size: 34px;
+        line-height: 1.1;
+        letter-spacing: 0;
+      }
+
+      header p {
+        margin: 0;
+        max-width: 980px;
+        color: #cfd6ea;
+        font-size: 16px;
+      }
+
+      main {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 28px 24px 56px;
+      }
+
+      section {
+        margin: 22px 0;
+      }
+
+      h2 {
+        margin: 0 0 14px;
+        font-size: 22px;
+        letter-spacing: 0;
+      }
+
+      h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      code {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        font-size: 0.92em;
+        background: #eef1f8;
+        border: 1px solid #dde3f0;
+        border-radius: 5px;
+        padding: 1px 5px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .summary {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: -44px;
+      }
+
+      .card,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+
+      .card {
+        padding: 18px;
+      }
+
+      .card strong {
+        display: block;
+        font-size: 30px;
+        line-height: 1;
+        margin-bottom: 6px;
+      }
+
+      .card span {
+        color: var(--muted);
+      }
+
+      .panel {
+        padding: 20px;
+        box-shadow: none;
+      }
+
+      .two {
+        grid-template-columns: 1.05fr 0.95fr;
+      }
+
+      .three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .note {
+        border-left: 4px solid var(--blue);
+        background: #eef4ff;
+        padding: 12px 14px;
+        border-radius: 6px;
+        color: #23365d;
+      }
+
+      .warn {
+        border-left-color: var(--amber);
+        background: #fff7e8;
+        color: #5d3b00;
+      }
+
+      .danger {
+        border-left-color: var(--red);
+        background: #fff1ef;
+        color: #67201b;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: 1fr 34px 1fr 34px 1fr;
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .flow-step {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: white;
+        padding: 14px;
+        min-height: 120px;
+      }
+
+      .flow-arrow {
+        align-self: center;
+        text-align: center;
+        color: var(--muted);
+        font-size: 24px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 11px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: #eef1f8;
+        color: #34394a;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .pill {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 12px;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+
+      .stable {
+        background: #e9f7ef;
+        color: var(--green);
+      }
+
+      .optional {
+        background: #f4efff;
+        color: var(--violet);
+      }
+
+      .hidden {
+        background: #edf0f5;
+        color: #4f5668;
+      }
+
+      .risk-low {
+        background: #e8f7f0;
+        color: var(--green);
+      }
+
+      .risk-med {
+        background: #fff4dc;
+        color: var(--amber);
+      }
+
+      .risk-high {
+        background: #ffe7e4;
+        color: var(--red);
+      }
+
+      .filterbar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .filterbar input {
+        width: min(420px, 100%);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 9px 11px;
+        font: inherit;
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      ul {
+        margin: 8px 0 0;
+        padding-left: 20px;
+      }
+
+      li + li {
+        margin-top: 6px;
+      }
+
+      footer {
+        color: var(--muted);
+        border-top: 1px solid var(--line);
+        margin-top: 28px;
+        padding-top: 18px;
+      }
+
+      @media (max-width: 900px) {
+        header {
+          padding: 30px 22px;
+        }
+
+        .summary,
+        .two,
+        .three,
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        .flow-arrow {
+          display: none;
+        }
+
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Oneesama Realtime Tool Surface Report</h1>
+      <p>
+        生成时间：2026-06-01，修订：2026-06-02。范围：Realtime foreground tools、浏览器侧本地 tool
+        router、 Go host endpoint，以及 KWWK/Codex app-control 分流。这是当前 worktree
+        的静态审计快照， 不是自动再生成报告。
+      </p>
+    </header>
+
+    <main>
+      <section class="grid summary">
+        <div class="card">
+          <strong>19</strong>
+          <span>TS schema 中的 Realtime function tools</span>
+        </div>
+        <div class="card">
+          <strong>15</strong>
+          <span>默认 live-safe 前台 tools</span>
+        </div>
+        <div class="card">
+          <strong>4</strong>
+          <span>demo/browser surface 可选 foreground tools</span>
+        </div>
+        <div class="card">
+          <strong>2</strong>
+          <span>app-control 执行模式：direct / delegate</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>一眼结论</h2>
+        <div class="grid two">
+          <div>
+            <div class="note">
+              现在不应该新增一个 <code>kwwk_control_shared_app_window</code>。更合理的形状是：
+              保留兼容的 <code>control_shared_app_window</code> tool 名，但用
+              <code>executionMode</code> 明确分流。
+            </div>
+            <ul>
+              <li>
+                简单操作：<code>executionMode: "direct"</code>，走 KWWK/direct backend。Realtime
+                只给 自然语言 <code>instruction</code>，由 KWWK 负责 observe → plan → act → verify。
+              </li>
+              <li>
+                复杂任务：<code>executionMode: "delegate"</code>，启动 Codex app-control worker。
+                适合需要视觉探索、多步规划、不熟 UI、验证闭环的任务。
+              </li>
+              <li>
+                浏览器/生成工作不应该塞进 app-control：URL、网页、生成结果展示走 browser/demo
+                surface 这一组 tool。
+              </li>
+            </ul>
+          </div>
+          <div class="note warn">
+            <strong>风险点：</strong>
+            <code>control_shared_app_window</code> 的名字仍然比较泛，模型需要靠 description 和
+            <code>executionMode</code> 判断快慢路径。后续如果要彻底清爽， 可以做一次 schema
+            migration，把 direct app 操作和 delegate app 操作拆成两个 更窄的 foreground tools。
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>路由全景</h2>
+        <div class="flow">
+          <div class="flow-step">
+            <h3>Realtime model</h3>
+            <p>只能看到 foreground function schema。这里应该做意图分类和必要参数填充。</p>
+            <p><code>control_shared_app_window</code> 是唯一共享 app 操作入口。</p>
+          </div>
+          <div class="flow-arrow">-&gt;</div>
+          <div class="flow-step">
+            <h3>Browser local router</h3>
+            <p>
+              把 tool 分到 <code>worker</code>、<code>meet</code>、<code>workspace</code>
+              或内部 avatar 类别。
+            </p>
+            <p>sidecar 模式下部分 Meet DOM 工具会转发到 Meet surface。</p>
+          </div>
+          <div class="flow-arrow">-&gt;</div>
+          <div class="flow-step">
+            <h3>Go host / helper</h3>
+            <p>Go endpoint 负责实际执行、排队、状态回传和 worker report。</p>
+            <p>KWWK helper 通过 stdio JSON-RPC 执行 macOS app 操作。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Benchmark 状态</h2>
+        <ul>
+          <li>
+            <code>benchmark:realtime-tool-recall</code>：sidecar-control、retries=0 当前通过
+            <code>9/9</code> recall 和 <code>2/2</code> negatives；share-control-only 同样通过。
+            recall/lane fixtures 的 <code>minRecall</code> 已升到 <code>1</code>，所以任何
+            <code>BAD</code> row 都会让 benchmark 真失败；benchmark text-turns 显式 opt-in
+            high-confidence direct routing，明确的 share/control/stop/chat/worker/identity
+            请求直接记录同一套 local tool-wrapper telemetry，不再被模型偶发沉默拖成
+            timeout。Realtime benchmark 进程仍默认共享本地锁，避免 recall/lane/audio 并发踩同一个
+            meeting-agent 和 Realtime 资源。JSON report 现在会显式写
+            <code>evidenceMode: "sidecar_tool_recall"</code>、<code
+              >toolExecutionMode: "dry_run_local_tools"</code
+            >、<code>realAppExecution:false</code>，所以它不能被当成真实 app/window execution 证据。
+          </li>
+          <li>
+            <code>benchmark:realtime-tool-lanes</code>：sidecar-control、retries=0 当前通过
+            <code>7/7</code> lane coverage。
+          </li>
+          <li>
+            <code>benchmark:realtime-kwwk-app-control</code>：新增本机 KWWK/CU live smoke，
+            不需要真实 Meet URL，默认只观察 <code>Chrome</code>，可用
+            <code>-- --app Pencil</code> 换目标 app。它会真实启动 KWWK stdio helper， 验证 backend
+            observe/state、HTTP <code>/tools/control_shared_app_window</code> fake active-share
+            路径，以及 terminal app-control result。2026-06-02 首次复跑抓到两个问题： Swift helper
+            忽略显式 <code>operations</code>，HTTP live smoke 又没传
+            <code>wait:true</code>，所以一个只回 <code>observe</code>、两个只回
+            <code>queued</code>。修复后
+            <code>npm run benchmark:realtime-kwwk-app-control</code> 通过
+            <code>3/3</code>，artifact:
+            <code>/tmp/oneesama-realtime-kwwk-app-control-latest.json</code>。standalone dead-path
+            cleanup 后再次复测：KWWK benchmark 仍通过 <code>3/3</code>，
+            <code>benchmark:realtime-tool-recall -- --case-filter '^control_'</code> 通过 full
+            <code>4/4</code> 和 share-control-only <code>4/4</code>；严格
+            <code>benchmark:realtime-real-app-control</code> 在缺少真实 Meet URL 或活跃
+            meeting-agent session 时会保持 preflight 红灯；最新真实 URL 组合 gate 已在下方记录通过。
+          </li>
+          <li>
+            Realtime 音频 readiness 已收紧：receiver/WebRTC track 或 host PCM 被路由到 input mix
+            以后，只有实际观测到 mixer energy 且未过期，HUD/runtime 才会报告
+            <code>audioInputReady</code>；否则报告 <code>meet_audio_no_energy_observed</code> 或
+            <code>meet_audio_energy_stale</code>。 更新后
+            <code>benchmark:realtime-sidecar-audio</code> 已重跑通过；当前 npm script 已内置默认
+            Recappi sample，不再需要手写 <code>--audio</code>，artifact:
+            <code>/tmp/oneesama-realtime-sidecar-audio-2026-06-02-rerun-after-fix.json</code>。 JSON
+            report 同样写 <code>evidenceMode: "sidecar_audio_tool_replay"</code> 与
+            <code>realAppExecution:false</code>；真实 app-control 执行证据只来自 strict real-room
+            app-control gate。
+          </li>
+          <li>
+            非 sidecar 的 audio browser transport 现在只作为 diagnostic runtime 存在：
+            <code>browser-transport</code> inline SDK 会显式带
+            <code>allowInlineAgentsSDKDiagnostic</code>，report 里也写
+            <code>diagnosticOnly</code>；测试覆盖它不能冒充 RFC acceptance gate。
+          </li>
+          <li>
+            <code>acceptance:realtime-live-sidecar</code>：严格组合 live gate。 有
+            <code>MAB_REAL_MEET_URL</code>、<code>--real-meet-url</code>，或当前 meeting-agent
+            <code>/join/status</code> / live joiner <code>active-meet-browser.json</code> 暴露
+            active Meet URL 时，会先跑真实房间 synthetic speaker / fake-mic sender
+            gate，再跑真实房间 app-control gate；只有两条都返回
+            <code>acceptanceSatisfied:true</code>，组合结果才算通过。缺少可发现的真实 Meet URL
+            时严格入口硬失败。组合 wrapper 还会检查每个子 gate 的进程退出码，并要求子 gate 显式写出
+            <code>acceptanceSatisfied:true</code>；只有旧式 <code>ok:true</code> 或非 0
+            退出都不能让组合 acceptance 通过。子 gate 写出 malformed JSON 时会被转成结构化
+            <code>invalid_json</code> failure，子 gate runtime/IO 异常会转成
+            <code>gate_error</code> failure，child-process <code>error</code> event
+            也会被捕获，不会让 wrapper hang 在等 <code>exit</code>。 2026-06-02 用用户提供的真实房间
+            <code>https://meet.google.com/ypw-fozb-anz</code> 复跑通过：
+            <code
+              >/tmp/oneesama-realtime-live-sidecar-user-meet-after-surface-output-hook.json</code
+            >
+            记录 <code>ok:true</code> / <code>acceptanceSatisfied:true</code>。synthetic speaker 子
+            gate 证明 <code>meetPublishSenderLive:true</code>、
+            <code>primaryMeetAudioSenderUsingAvatarBus:true</code>、primary sender
+            <code>trackReadyState:"live"</code> 且 bytes/packets 有 delta；app-control 子 gate 证明
+            provider 为 <code>kwwk</code>、function output 已送回 Realtime、Meet surface 没有 SDK
+            global、sidecar SDK owner page 数量为 <code>1</code>。
+          </li>
+          <li>
+            <code>benchmark:realtime-real-app-control</code>：现在也是严格 live gate；没有
+            <code>MAB_REAL_MEET_URL</code>、<code>--real-meet-url</code>，且当前 meeting-agent
+            <code>/join/status</code> 和 live joiner <code>active-meet-browser.json</code> 都没有
+            active room URL 时，benchmark 会硬失败。 本地诊断只使用
+            <code>benchmark:realtime-real-app-control:optional</code>；它可以绿色退出并写 skipped
+            evidence，但 artifact 必须明确是
+            <code>ok:false</code
+            >、<code>diagnosticOnly:true</code>、<code>acceptanceSatisfied:false</code>，不能被当成
+            benchmark 或 acceptance pass。有 live URL 时必须通过
+            <code>/realtime/text-turn</code> 触发 <code>control_shared_app_window</code>， 同时记录
+            sidecar tool telemetry、function-output delivery、Meet-page SDK negative probe，并要求
+            <code>realtimeSidecar.pageCount === 1</code> 且
+            <code>realtimeSidecar.sdkOwnerPageCount === 1</code>。终局可以是
+            <code>completed</code>/<code>done</code> 成功，也可以是 <code>blocked</code>/<code
+              >failed</code
+            >
+            但必须带 compact explicit
+            <code>blocker</code>；<code>timeout</code>/<code>stale</code>/<code>error</code>、
+            canceled、缺 blocker、超长 blocker 都是硬失败。<code
+              >acceptance:realtime-real-app-control</code
+            >
+            是严格别名。本次本地复跑的 optional diagnostic artifact:
+            <code>/tmp/oneesama-realtime-real-app-control-optional-latest.json</code>；组合 live
+            sidecar optional artifact:
+            <code>/tmp/oneesama-realtime-live-sidecar-optional-latest.json</code>。本轮 alias
+            修复后，禁用 URL discovery 时主 benchmark 已验证 exit 1，写出
+            <code>skipped:false</code>/<code>diagnosticOnly:false</code>；optional companion 验证
+            exit 0 但仍是 <code>acceptanceSatisfied:false</code>。
+          </li>
+          <li>
+            2026-06-02 post-fix 本地复跑：
+            <code>benchmark:realtime-tool-chains</code> 通过 raw-websocket 诊断链路
+            <code>2/2</code>；<code>benchmark:realtime-real-app-control</code> 在当前没有 active
+            room URL 时必须保持红灯；只有
+            <code>benchmark:realtime-real-app-control:optional</code> 会检查
+            <code>/join/status</code> 后写 diagnostic skipped artifact。skipped artifact 明确是
+            <code>ok:false</code> 的 diagnostic-only 证据；真正的 live 通过必须跑
+            <code>acceptance:realtime-live-sidecar</code>。本轮最终 JSON artifacts:
+            <code>/tmp/oneesama-realtime-tool-recall-fix-final.json</code
+            >、<code>/tmp/oneesama-realtime-tool-lanes-fix-final.json</code>、<code>/tmp/oneesama-realtime-sidecar-audio-fix-final.json</code>。
+          </li>
+          <li>
+            2026-06-02 post-cleanup sidecar-control 复跑： 先抓到旧阈值会让 full
+            <code>8/9</code> 仍打印 <code>PASS</code>，以及 <code>现在几点了</code> 被过宽“点”regex
+            误路由到 app-control；修完后
+            <code
+              >npm run benchmark:realtime-tool-recall -- --iterations 1 --retries 0 --timeout-ms
+              30000 --json-out /tmp/oneesama-realtime-tool-recall-strict-2026-06-02.json</code
+            >
+            通过 full <code>9/9</code> positives + <code>2/2</code> negatives，share/control-only
+            <code>9/9</code> positives + <code>2/2</code> negatives，且无 <code>BAD</code> row；
+            <code
+              >npm run benchmark:realtime-tool-lanes -- --iterations 1 --retries 0 --timeout-ms
+              30000 --json-out /tmp/oneesama-realtime-tool-lanes-strict-2026-06-02.json</code
+            >
+            通过 full <code>7/7</code> lane coverage。
+          </li>
+          <li>
+            2026-06-02 sidecar-control runtime-error hardening：实际 control-only 复跑暴露出前两条
+            full variant row 记录了 Realtime client-secret
+            <code>500</code>/<code>EOF</code>，但旧 scoring 仍因 deterministic direct routing 产生了
+            <code>control_shared_app_window</code> 而显示 <code>PASS</code>。 现在 sidecar runtime
+            <code>errors</code> 会直接让该 row 以 <code>sidecar_runtime_error</code> 失败；dry-run
+            tool recall 不能再带内部 runtime error 假绿。
+          </li>
+          <li>
+            worker-result 桥现在先以 <code>markDelivered: false</code> poll，只有真正注入 sidecar
+            Realtime client 后才带 poll-issued delivery token 调用
+            <code>/worker/mark-realtime-delivered</code>；sidecar 模式下 poller 也从 Meet surface
+            移到了 sidecar page。真实房间 input gate 只接受 <code>recappi_process_audio_tap</code>，
+            不再让 fixture/diagnostic <code>host_meet_audio_pcm</code> 冒充 live sender。
+          </li>
+          <li>
+            <code>allowMockToolSimulation</code> 现在只允许显式
+            <code>simulateRealtimeAgentToolCall</code> helper；它不再顺带打开 custom Realtime server
+            event、speech-start event 或 worker-result DOM event。custom event 仍需 mock mode
+            或对应显式 fixture flag。验证：public-event / app-control / sidecar routing 目标测试
+            <code>35/35</code> 通过；lane benchmark
+            <code>/tmp/oneesama-realtime-tool-lanes-mock-flag-custom-event-hardening.json</code>
+            通过 <code>2/2</code>；control 子集 benchmark
+            <code>/tmp/oneesama-realtime-tool-recall-mock-flag-custom-event-hardening.json</code>
+            通过 full <code>4/4</code> 和 share/control-only <code>4/4</code>。
+          </li>
+          <li>
+            Realtime sidecar page 不再安装 Meet chat DOM observer；SDK-owner sidecar 只记录
+            <code>meet_chat_observer_skipped</code>/<code>sidecar_page_not_meet_surface</code>，
+            不会把 sidecar DOM/fixture mutation 当作 <code>meet_chat_observer</code> user event 注入
+            Realtime。验证：adapter / chat observer / text guard / sidecar routing / mock guard
+            目标测试 <code>37/37</code> 通过；lane benchmark
+            <code>/tmp/oneesama-realtime-tool-lanes-sidecar-chat-observer-hardening.json</code>
+            通过 <code>2/2</code>；control 子集 benchmark
+            <code>/tmp/oneesama-realtime-tool-recall-sidecar-chat-observer-hardening.json</code>
+            通过 full <code>4/4</code> 和 share/control-only <code>4/4</code>。
+          </li>
+          <li>
+            TS meeting-agent control API 默认只监听 <code>127.0.0.1</code>（可用
+            <code>MAB_MEETING_HOST</code> 显式覆盖），所以 <code>/tools/*</code>、
+            <code>/worker/report</code>、<code>/realtime/text-turn</code>、<code>/join/status</code>
+            不会默认裸露到局域网。loopback hardening 后复跑
+            <code>/tmp/oneesama-realtime-tool-recall-loopback-hardening.json</code> 通过 full
+            <code>9/9</code> + negatives <code>2/2</code>，share/control-only <code>9/9</code> +
+            negatives <code>2/2</code>；<code
+              >/tmp/oneesama-realtime-tool-lanes-loopback-hardening.json</code
+            >
+            通过 <code>7/7</code>。
+          </li>
+          <li>
+            2026-06-02 TS control-route / SDK-output hardening：legacy TS meeting-agent
+            的内部控制入口现在会拒绝跨域浏览器请求，除非带匹配的
+            <code>X-Oneesama-Internal-Key</code>；<code>/tools/*</code> 也只接受当前 live-safe
+            Realtime schema 暴露的 tool 名，隐藏的 workspace connector / memory handlers 不能绕过
+            schema。Agents SDK <code>execute</code> 返回给模型的内容也收紧为 compact function
+            result，<code>turnPolicy</code> 只留在 diagnostics。验证：
+            <code>test/meeting-agent-realtime-placement-guard.test.mjs</code>、
+            <code>test/realtime-agents-sdk-adapter.test.mjs</code>、
+            <code>test/realtime-agents-sdk-compact-output.test.mjs</code>、
+            <code>test/realtime-agents-sdk-mock-tool-guard.test.mjs</code>、
+            <code>test/realtime-app-control-bridge.test.mjs</code> 合计
+            <code>50/50</code> 通过；control 子集 benchmark
+            <code>/tmp/oneesama-realtime-tool-recall-after-ts-guard.json</code> 通过 full
+            <code>4/4</code> 和 share/control-only <code>4/4</code>；<code>typecheck</code>、
+            <code>lint:js</code>、<code>git diff --check</code> 通过。
+          </li>
+          <li>
+            2026-06-02 worker-result suppression 修复后复跑 strict benchmark：第一次
+            <code>benchmark:realtime-tool-recall</code> 抓到 full-surface
+            <code>generic_window_share_zh</code> 在 sidecar state capture 前
+            <code>page.waitForFunction</code> timeout；runner 已改成先等 sidecar client API、记录
+            <code>sdkConnectTimedOut</code>，并把真正无 SDK/无输出的行标成
+            <code>sidecar_sdk_not_connected</code>。复跑
+            <code>/tmp/oneesama-realtime-tool-recall-worker-suppression-fix-rerun.json</code>
+            通过 full <code>9/9</code> positives + <code>2/2</code> negatives，share/control-only
+            <code>9/9</code> positives + <code>2/2</code> negatives；lane 复跑
+            <code>/tmp/oneesama-realtime-tool-lanes-worker-suppression-fix.json</code> 通过
+            <code>7/7</code>。
+          </li>
+          <li>
+            2026-06-02 worker-result custom-event fallback hardening：
+            <code>allowCustomWorkerResultEvents</code> 现在只能产生 diagnostic DOM event，不再算
+            Realtime delivery evidence，也不会调用 <code>/worker/mark-realtime-delivered</code>。
+            bridge 记录 <code>custom-event-diagnostic</code> 和
+            <code>custom_worker_result_event_diagnostic_only</code>，只有真实
+            <code>MAB_REALTIME_CLIENT.injectWorkerResult</code> 能确认 delivered； 浏览器 Realtime
+            listener 即使显式开启 fixture flag，也只记录 suppressed diagnostic， 不再更新 HUD 或调用
+            <code>injectWorkerResult</code>； 已移除的 <code>sendWorkerResult</code> alias 在 host
+            wrapper 和 worker poller 里都会被忽略，不能触发
+            <code>/worker/mark-realtime-delivered</code>。验证：sidecar routing / mock guard /
+            joiner realtime control / worker store / app-control bridge 合计
+            <code>33/33</code> 通过；最新 listener-hardening 目标测试 <code>40/40</code> 通过；
+            <code>benchmark:realtime-kwwk-app-control</code> 通过 <code>3/3</code>； control 子集
+            benchmark
+            <code>/tmp/oneesama-realtime-tool-recall-worker-event-listener-hardening.json</code>
+            通过 full <code>4/4</code> 和 share/control-only <code>4/4</code>； real-app-control
+            benchmark 契约测试 <code>22/22</code> 通过； optional real-room app-control benchmark
+            写出 <code>missing_env: MAB_REAL_MEET_URL</code> 的 skipped diagnostic evidence；
+            <code>typecheck</code>、<code>lint:js</code>、<code>git diff --check</code> 通过。
+          </li>
+          <li>
+            2026-06-02 Realtime browser public API hardening：
+            <code>MAB_REALTIME_CLIENT</code> 不再暴露底层
+            <code>runLocalAvatarTool</code>、<code>runLocalWorkerTool</code>、
+            <code>runLocalMeetTool</code> 或 <code>sendWorkerResult</code> alias。前台/fixture tool
+            仍走 <code>simulateRealtimeAgentToolCall</code>，worker-result 走
+            <code>injectWorkerResult</code>，Meet DOM tool 走专用
+            <code>MAB_MEET_SURFACE_TOOLS.run</code>。Meet chat host helper 也不再 fallback 到
+            Realtime client local meet tool。验证：mock guard / joiner realtime control / sidecar
+            routing 合计 <code>19/19</code> 通过；app-control bridge / adapter / compact-output 合计
+            <code>31/31</code> 通过；control 子集 benchmark
+            <code>/tmp/oneesama-realtime-tool-recall-public-api-hardening.json</code> 通过 full
+            <code>4/4</code> 和 share/control-only <code>4/4</code>；<code>typecheck</code>、
+            <code>lint:js</code> 通过。
+          </li>
+          <li>
+            2026-06-02 sidecar-only control page hardening：
+            <code>getRealtimeControlPageForActive()</code> 不再 fallback 到 Google Meet page。
+            worker-result 注入、allowlisted Realtime control event、Realtime text turn、 bridge /
+            worker-result status 读取、Recappi Realtime audio input、以及 push 到 Realtime 的
+            meeting awareness 都必须有 live sidecar page；缺失或关闭时返回
+            <code>realtime_sidecar_page_missing</code>。Meet page 只保留不 push 的 awareness surface
+            store 和 Meet DOM surface tools。sidecar page 的 <code>send_meet_chat</code> /
+            <code>read_meet_chat</code> 没有 <code>MAB_HOST_RUN_SURFACE_TOOL</code> 时返回
+            <code>meet_surface_tool_port_missing</code>，不再 fallback 到 sidecar DOM/fixture。
+            验证： joiner realtime control / runtime-state / meeting-audio-inputs 合计
+            <code>24/24</code> 通过；最新 sidecar routing / app-control bridge 目标测试
+            <code>21/21</code> 通过；Meet-chat surface-port hardening 目标测试
+            <code>29/29</code> 通过；<code>read_meet_chat</code> lane benchmark
+            <code>1/1</code> 通过；control 子集 benchmark full <code>4/4</code> 和
+            share/control-only <code>4/4</code> 通过。
+          </li>
+          <li>
+            2026-06-02 worker dry-run benchmark isolation： 这次 full lane rerun 抓到 benchmark
+            自身的副作用：
+            <code>dryRunLocalTools</code> 只覆盖 app/window tools，没有覆盖 worker tools， 所以
+            <code>delegate_to_worker</code> lane 会启动真实 Codex worker，却只在报告里声称是 routing
+            evidence。现在 browser local-tool helper 在 dry-run 下也会 dry-run
+            <code>delegate_to_worker</code> / <code>worker_status</code>，不再打
+            <code>/worker/delegate</code> 或 <code>/worker/status</code>；benchmark evidence profile
+            也改成明确说明 background-worker tools 是 dry-run-only。验证： sidecar routing + recall
+            benchmark metadata 单测 <code>23/23</code> 通过；lane benchmark
+            <code>/tmp/oneesama-realtime-tool-lanes-worker-dry-run.json</code> 通过
+            <code>7/7</code>，且新 lane run 的 live log 中没有新的 worker delegate/status 请求。
+          </li>
+          <li>
+            2026-06-02 dry-run/mock simulation + sidecar live-boundary cleanup：
+            <code>dryRunLocalTools</code> 不再让真实 <code>agents-sdk</code> 页面获得浏览器侧
+            <code>simulateRealtimeAgentToolCall</code> mock 入口；mock simulation 仍必须是 mock mode
+            或显式 <code>allowMockToolSimulation</code>。strict real Meet app-control compact helper
+            现在能识别 Go meeting-agent 的 <code>status.runtime.active</code> runtime
+            evidence，不会把顶层 <code>status.active</code> 的 persisted session record 误判成缺少
+            Realtime bridge。sidecar host Meet PCM 也会先校验 <code>sessionId</code>，stale page
+            payload 不再进入当前 sidecar；sidecar startup 在 page/setup 失败时会关闭本地 sidecar
+            server。验证：app-control benchmark / sidecar surface audio / sidecar routing / mock
+            guard 合计 <code>46/46</code> 通过；lane benchmark
+            <code>/tmp/oneesama-realtime-tool-lanes-fix.json</code> 通过 <code>7/7</code>。 optional
+            real-app-control benchmark 在缺少真实 Meet URL / 活跃 meeting-agent session / active
+            browser record 时输出 <code>reason: "missing_env"</code>；这是 live-room preflight
+            skip，不是 KWWK/CU/tool-routing failure。最新真实 URL combined gate 已关闭 live-room
+            acceptance。
+          </li>
+          <li>
+            2026-06-02 Meet surface tool session-boundary cleanup： sidecar 调用 Meet surface tool
+            port 时现在会带当前 <code>sessionId</code>； host
+            <code>MAB_HOST_RUN_SURFACE_TOOL</code> binding 会在进入 Meet page 之前拒绝 session
+            不匹配的 payload。这样旧 sidecar page 不能通过共享 browser context 把
+            <code>send_meet_chat</code> / <code>read_meet_chat</code> 发送到当前房间。<code
+              >dryRunLocalTools</code
+            >
+            也不再绕过 Meet surface 授权：未授权的本地 share/app tool 会先被拒绝，sidecar-page Meet
+            chat tools 即使在 benchmark dry-run fixture 里也仍然需要 host surface port。验证：<code
+              >test/realtime-sidecar-tool-routing.test.mjs</code
+            >
+            通过 <code>9/9</code>；lane benchmark
+            <code>/tmp/oneesama-realtime-tool-lanes-surface-dryrun-auth.json</code>
+            通过 <code>7/7</code>。
+          </li>
+          <li>
+            2026-06-02 local-fixture text-turn fallback cleanup： local fixture synthetic-speaker
+            tool gate 不再默认用
+            <code>/realtime/text-turn</code> fallback 补工具调用。
+            <code>MAB_REALTIME_SYNTHETIC_TEXT_TURN_FALLBACK</code> 现在是显式 diagnostic
+            opt-in；只要 child result 用过 fallback，即使之后报告 <code>ok:true</code> /
+            <code>acceptanceSatisfied:true</code>，combined live-sidecar acceptance wrapper
+            也不会把它当通过。验证：<code
+              >test/realtime-real-meet-app-control-benchmark.test.mjs</code
+            >
+            通过 <code>24/24</code>。
+          </li>
+          <li>
+            2026-06-02 sidecar-audio scorer runtime-evidence cleanup：
+            <code>scoreAudioReplay()</code> 现在会把 browser run 返回的
+            <code>browserBridgeRuntime</code> 映射进通用 runtime scorer，并额外要求 sidecar-audio 非
+            diagnostic run 里 SDK 已连接。也就是说，即使工具名匹配， 只要实际 browser evidence 显示
+            Meet surface 有 Agents SDK global、SDK suppression 失败，或 sidecar SDK 没连上，audio
+            replay benchmark 都不能过。验证：<code
+              >test/realtime-audio-tool-replay-benchmark.test.mjs</code
+            >
+            通过 <code>14/14</code>。
+          </li>
+          <li>
+            2026-06-02 TS meeting-agent requested-tool subset cleanup：
+            <code>/realtime/client-secret</code> 现在会把 caller-supplied tools 和 meeting-agent
+            live-safe default whitelist 做交集，而不是忽略 request 后 mint 全量 foreground
+            surface。合法 subset（例如 <code>control_shared_app_window</code>）会保留；stale/hidden
+            names（例如 <code>open_shared_browser_surface</code> /
+            <code>github_search</code>）会被过滤， 不再把本来想缩小工具面的 benchmark variant
+            偷偷放宽。验证：<code>test/meeting-agent-realtime-placement-guard.test.mjs</code> 通过
+            <code>13/13</code>。
+          </li>
+          <li>
+            2026-06-02 Go meeting-agent requested-tool subset cleanup： Go
+            <code>/realtime/client-secret</code> 现在也使用同样的子集语义：省略
+            <code>tools</code> 才使用 server canonical default；显式传入
+            <code>tools</code> 时只和当前 server schema 取交集。stale-only request 不再回退成全量
+            foreground tools；lane request 也不能把 <code>delegate_to_worker</code>、
+            <code>control_shared_app_window</code>、隐藏 browser-surface tools 或
+            <code>github_search</code> 偷偷带回来。验证：<code
+              >go test ./internal/meetingagent</code
+            >
+            通过。
+          </li>
+          <li>
+            2026-06-02 KWWK direct app-control mixed-instruction cleanup： KWWK direct helper
+            不再把所有含有 observe/status 词的指令都当成 state-only 成功；press/scroll/type 等可执行
+            direct operation 会先解析，无法安全映射的 “看一下然后点击/输入/处理”类混合请求返回
+            <code>instruction_not_directly_executable</code>，而不是 <code>ok:true</code> /
+            <code>actions:["observe"]</code>。Go Codex fallback 也只对精确 KWWK availability reason
+            生效，避免把真实 UI blocker（例如 <code>start button not found</code>）误路由到慢的
+            Codex executor。real-Meet app-control acceptance 现在要求 action-bearing instruction
+            产生非 observe action 或 compact explicit blocker。验证：JS targeted
+            <code>41/41</code> 通过；Go fallback/subset 窄测通过；<code
+              >/tmp/oneesama-realtime-kwwk-app-control-mixed-negative.json</code
+            >
+            中 4 个 live host KWWK smoke 全部通过，包括 mixed-instruction negative case。
+          </li>
+          <li>
+            2026-06-02 TS meeting-agent route parity + worker-result auth： TS meeting-agent 现在把
+            <code>/screen-share/apps</code> 和 <code>/screen-share/app</code> 接到
+            <code>joiner.listShareableApps()</code> / <code>joiner.presentAppShare()</code>，并在
+            workspace-tool fallback 前处理 <code>/tools/control_shared_app_window</code>。direct
+            mode 现在默认 queue TS KWWK app-control job，从 active screen-share status 补齐
+            target，并把 terminal result 写进 <code>worker_reports</code>，让 sidecar worker-result
+            bridge 注入回 Realtime；<code>wait:true</code> 仍保留同步 direct 诊断。TS delegate mode
+            返回 compact explicit blocker，而不是让 Realtime 遇到 HTTP transport failure。 TS KWWK
+            helper output 在 direct response 和 queued worker report 前都会 compact， raw
+            <code>metadata</code>、<code>operations</code>、嵌套 <code>result</code> 和
+            <code>responseText</code> 不会通过 TS fallback 回到 foreground model 或 Meet chat。
+            browser local workspace-tool boundary 现在会在模型省略时给
+            <code>control_shared_app_window</code> host POST 注入当前 <code>session_id</code>，
+            queued app-control worker report 不再只依赖 host active-status fallback 来获得 meeting
+            provenance。 sidecar worker-result bridge 也会在 poll 和 ack 请求上携带
+            <code>X-Oneesama-Internal-Key</code>。验证：sidecar routing / placement / app-control
+            compaction / worker-report targeted tests <code>42/42</code> 通过；<code
+              >npm run typecheck</code
+            >
+            通过；KWWK app-control benchmark <code>4/4</code> 通过；tool-lane benchmark
+            <code>7/7</code> 通过。follow-up sweep 中 broader realtime/tool targeted suite
+            <code>122/122</code> 通过，<code>npm run lint:js</code>、<code
+              >go test ./internal/meetingagent</code
+            >、<code>git diff --check</code> 均通过。optional live gates 已复跑，仍是
+            diagnostic-only skip：没有 <code>MAB_REAL_MEET_URL</code>，也没有 active
+            <code>/join/status</code> room 或
+            <code>/tmp/meeting-avatar-bot-data/active-meet-browser.json</code>。
+          </li>
+          <li>
+            2026-06-02 legacy screen-share tool residue cleanup： 从 browser local-tool
+            compact-result 和 Realtime turn-policy compacting 列表里移除了旧
+            <code>start_screen_share</code> / <code>present_screen_share</code> /
+            <code>stop_screen_share</code> 名称。 这些名字已经不在当前 foreground schema 或 local
+            tool router 里，继续留在生产 compact path 会让旧 screen-share
+            语义看起来仍被部分支持。当前 app/window share 和 video-stage 工具仍保留；旧名只在
+            contract test 的 hidden legacy list 里出现。验证： contract/app-control/sidecar-routing
+            targeted tests 合计 <code>41/41</code> 通过。
+          </li>
+          <li>
+            2026-06-02 sidecar-control SDK-connected benchmark gate：
+            <code>scoreCase()</code> 现在会拒绝 <code>sdkConnected=false</code> 的 direct-routed
+            tool calls。这个收紧先复现了旧 benchmark 的假绿：旧 5s SDK wait 下 lane benchmark 只有
+            <code>1/7</code> 通过，6 个 bad row 都是
+            <code>reason: "sidecar_sdk_not_connected"</code> /
+            <code>sdkConnectTimedOut:true</code>，但本地 dry-run tool call 已经存在。现在默认 SDK
+            cold-start wait 提到 15s；SDK 仍没连上就硬红。验证：<code
+              >test/realtime-tool-recall-benchmark.test.mjs</code
+            >
+            通过 <code>17/17</code>；lane benchmark
+            <code>/tmp/oneesama-realtime-tool-lanes-sdk-connected-gate-rerun.json</code>
+            通过 <code>7/7</code>，每行都是 <code>sdkConnected:true</code> /
+            <code>sdkConnectTimedOut:false</code>。
+          </li>
+          <li>
+            2026-06-02 raw Realtime event public API hardening：
+            <code>MAB_REALTIME_CLIENT.sendRealtimeEvent</code> 不再公开；host
+            <code>/realtime/event</code> 现在通过 <code>sendRealtimeControlEvent</code> 进入浏览器，
+            只允许 <code>response.cancel</code> 和 <code>input_audio_buffer.clear</code>。
+            如果浏览器侧返回 <code>realtime-control-event-not-allowed</code>，joiner host wrapper
+            也会把它转换成 <code>ok:false</code> / <code>realtime_event_type_not_allowed</code>，
+            不再把拒绝的 raw event 记成成功发送。 meeting awareness 也只用
+            <code>pushSessionContext</code>，不再 fallback 到 raw
+            <code>conversation.item.create</code> 注入；CLI smoke 里的旧 raw user/response event
+            构造改为 <code>requestRealtimeTextTurn</code>。验证：text guard / joiner realtime
+            control / meet-runner protocol 合计 <code>14/14</code> 通过；app-control bridge /
+            adapter / compact-output / mock guard 合计 <code>41/41</code> 通过；control 子集
+            benchmark
+            <code>/tmp/oneesama-realtime-tool-recall-control-event-api-hardening.json</code>
+            通过 full <code>4/4</code> 和 share/control-only <code>4/4</code>；
+            <code>typecheck</code>、<code>lint:js</code> 通过。
+          </li>
+          <li>
+            旧的 <code>mockRemoteAudioInjected</code> connection 字段已经不再由 runtime 写入； mock
+            remote audio 也只使用通用 <code>remoteAudioRoutedToAvatarBus</code> 证据，避免 mock-only
+            telemetry 像生产输出音频 gate。
+          </li>
+          <li>
+            participant audio 注入边界也收紧了：生产态不仅拒绝
+            <code>meeting-avatar-participant-audio-stream</code> custom event；直接
+            participant-audio discovery/registration 也不再暴露在
+            <code>MAB_REALTIME_CLIENT</code> public API 上。
+          </li>
+          <li>
+            这次 benchmark 红因也被修掉：失败行已经命中
+            <code>control_shared_app_window</code>，真正原因是 Go host mint Realtime client secret
+            时遇到 transient EOF。现在 <code>/realtime/client-secret</code> 会对 retryable post
+            error / upstream 5xx 做最多三次短退避重试，并且耗尽后保留
+            <code>502</code> 上游失败归因，不再伪装成 generic <code>500</code>。复跑
+            <code>/tmp/oneesama-realtime-tool-lanes-after-token-retry-rerun.json</code>
+            已通过 <code>7/7</code>。
+          </li>
+          <li>
+            <code>meet-live-acceptance</code> 现在会校验 sidecar output 到 Meet fake mic
+            的最后一跳： 只要已观测到输出，就必须看到 primary Meet audio sender 使用 avatar bus、
+            <code>trackReadyState: "live"</code>、<code>bytesSent &gt; 0</code>，并且
+            <code>bytesDelta &gt; 0</code> 或 <code>packetsDelta &gt; 0</code>，避免旧的累计 stats
+            冒充本轮正在发送。
+          </li>
+          <li>
+            real-room app-control benchmark 也补了 sidecar ownership 红线：
+            <code>/join/status</code> 会暴露 <code>realtimeSidecar.pageCount</code> 与
+            <code>realtimeSidecar.sdkOwnerPageCount</code>；strict gate 要求两者都正好为
+            <code>1</code>，所以缺 sidecar、重复 sidecar、或 SDK owner 不唯一都不能靠 placement
+            字符串混过。最新收紧还会把 <code>/join/status</code> 的
+            <code>activeSessionId</code> 绑定到本轮 app-control benchmark 的
+            <code>sessionId</code>， 避免旧 active session 的 tool telemetry 被误当作本轮证据；同时
+            <code>delivery.suppressed === true</code> 或 suppressed policy decision 不再算
+            function-output delivered。
+          </li>
+          <li>
+            <code>meet-live-acceptance --expect-tool=control_shared_app_window</code>
+            现在不再只看工具名；它还要求 app-control terminal evidence。<code>completed</code>/<code
+              >done</code
+            >
+            通过，compact explicit blocker 通过，pending/stale 或 blocked 但缺 blocker
+            都会失败；如果 artifact 同时有旧 completed job 和当前 stale/pending job，也不能过；
+            <code>blocked</code>/<code>failed</code> 却带 <code>ok:true</code> 的矛盾结果也不能过。
+          </li>
+          <li>
+            missing-URL resolver 已收紧：strict live gate 现在除
+            <code>/join/status</code> 之外，还会读取 <code>MAB_DATA_DIR</code> 下的
+            <code>active-meet-browser.json</code>（或
+            <code>MAB_ACTIVE_MEET_BROWSER_PATH</code>），并且只有记录的 browser pid
+            仍然存活时才接受其中的 Meet URL。严格失败 JSON 会列出两个 checked sources，并带
+            <code>activeBrowserRecordError</code>，避免把“status 没暴露 URL”误判成没查过现场。
+          </li>
+          <li>
+            本轮修复后已跑：Realtime adapter / mock guard / sidecar output / app-control bridge /
+            sidecar routing / real Meet app-control benchmark / audio replay / surface audio / Meet
+            receiver smoke / meet-live-acceptance 目标测试 <code>119/119</code>；<code
+              >benchmark:realtime-sidecar-audio</code
+            >
+            npm 入口无显式 <code>--audio</code> 重跑通过；<code>go test ./pkg/config</code> 通过；
+            <code
+              >go test ./internal/meetingagent -run
+              'TestRealtimeSharedAppControl|TestRealtime|TestHandleRealtime|TestRealtimeTool'</code
+            >
+            通过； 最新 missing-URL resolver 回归测试
+            <code>test/realtime-real-meet-app-control-benchmark.test.mjs</code>
+            <code>21/21</code> 通过，control 子集 sidecar recall 通过 full <code>4/4</code> 和
+            share-control-only <code>4/4</code>；
+            <code>npm run benchmark:realtime-real-app-control</code> 当前无 active room URL 且无
+            active browser record 时会硬失败；只有
+            <code>benchmark:realtime-real-app-control:optional</code> 会产出
+            <code>ok:false</code> 的 diagnostic-only skipped artifact；strict
+            <code>benchmark/acceptance</code> 入口都不会把 skipped 当通过；<code
+              >npm run typecheck</code
+            >、<code>npm run lint:js</code>、targeted Prettier check 和
+            <code>git diff --check</code> 通过。
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>Foreground Tools</h2>
+        <div class="filterbar">
+          <input id="toolFilter" type="search" placeholder="过滤 tool 名、类别、endpoint..." />
+          <span class="small">下面列的是模型 schema 里真正的前台 surface。</span>
+        </div>
+        <table id="toolTable">
+          <thead>
+            <tr>
+              <th>Tool</th>
+              <th>类别</th>
+              <th>默认暴露</th>
+              <th>主要参数</th>
+              <th>Host / 路由</th>
+              <th>建议用途</th>
+              <th>风险</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>delegate_to_worker</code></td>
+              <td>Worker delegation</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>
+                <code>task</code>, <code>context</code>, <code>mode</code>,
+                <code>allowCodeChanges</code>
+              </td>
+              <td><code>/worker/delegate</code></td>
+              <td>后台研究、写代码、跑测试、读 repo/URL/Slack/Linear/Notion 等长任务。</td>
+              <td>
+                <span class="pill risk-med">medium</span> 需要避免把短语音 turn 阻塞成长任务。
+              </td>
+            </tr>
+            <tr>
+              <td><code>worker_status</code></td>
+              <td>Worker delegation</td>
+              <td><span class="pill stable">stable</span></td>
+              <td><code>jobId</code></td>
+              <td><code>/worker/status</code></td>
+              <td>查询最近或指定后台任务状态。</td>
+              <td><span class="pill risk-low">low</span></td>
+            </tr>
+            <tr>
+              <td><code>send_meet_chat</code></td>
+              <td>Meet local</td>
+              <td><span class="pill stable">stable</span></td>
+              <td><code>text</code></td>
+              <td>Meet DOM；sidecar 可转发到 Meet surface</td>
+              <td>发送短消息到当前 Google Meet 聊天。</td>
+              <td><span class="pill risk-med">medium</span> 可见写入。</td>
+            </tr>
+            <tr>
+              <td><code>present_video_stage</code></td>
+              <td>Meet share</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>
+                <code>videoUrl</code>, <code>title</code>, <code>subtitle</code>, <code>muted</code>
+              </td>
+              <td><code>/screen-share/video</code></td>
+              <td>播放/分享视频 stage。</td>
+              <td><span class="pill risk-med">medium</span> 会改变共享画面。</td>
+            </tr>
+            <tr>
+              <td><code>stop_video_stage</code></td>
+              <td>Meet share</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>无</td>
+              <td><code>/screen-share/stop</code></td>
+              <td>停止当前视频 stage / 屏幕分享。</td>
+              <td><span class="pill risk-low">low</span></td>
+            </tr>
+            <tr>
+              <td><code>list_shareable_windows</code></td>
+              <td>Meet share</td>
+              <td><span class="pill stable">stable</span></td>
+              <td><code>session_id</code></td>
+              <td><code>/screen-share/apps</code></td>
+              <td>列出可共享 macOS app/window，用于消歧。</td>
+              <td><span class="pill risk-low">low</span> 只读。</td>
+            </tr>
+            <tr>
+              <td><code>share_existing_app_window</code></td>
+              <td>Meet share</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>
+                <code>applicationName</code>, <code>windowTitle</code>, <code>processId</code>
+              </td>
+              <td><code>/screen-share/app</code></td>
+              <td>共享已有的 Pencil、Chrome、VS Code、Notion、Terminal 等窗口。</td>
+              <td><span class="pill risk-med">medium</span> 会改变当前 Meet 分享内容。</td>
+            </tr>
+            <tr>
+              <td><code>control_shared_app_window</code></td>
+              <td>App control</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>
+                <code>executionMode</code>, <code>instruction</code>, <code>applicationName</code>,
+                <code>windowId</code>, <code>job_id</code>
+              </td>
+              <td>
+                <code>/tools/control_shared_app_window</code>; direct -> queued KWWK/direct backend
+                result via worker-result bridge; Go delegate -> Codex app-control worker; TS
+                delegate -> compact blocker until Codex delegation is wired
+              </td>
+              <td>
+                操作已共享的 bot host app/window。见下方专门章节。对外 response/artifact 会 suppress
+                backend raw primitive <code>operations</code>，只保留 compact fields 与
+                <code>operationsSuppressed</code> 计数。
+              </td>
+              <td><span class="pill risk-high">high</span> 可真实点击/输入/拖拽 host app。</td>
+            </tr>
+            <tr>
+              <td><code>open_shared_browser_surface</code></td>
+              <td>Browser/demo surface</td>
+              <td><span class="pill optional">optional</span></td>
+              <td>
+                <code>url</code>, <code>goal</code>, <code>instruction</code>,
+                <code>demo_session_id</code>
+              </td>
+              <td><code>/tools/open_shared_browser_surface</code></td>
+              <td>打开 bot-owned browser/synthetic surface 并分享。</td>
+              <td><span class="pill risk-med">medium</span> 取决于 URL/页面。</td>
+            </tr>
+            <tr>
+              <td><code>create_shared_workspace</code></td>
+              <td>Browser/demo surface</td>
+              <td><span class="pill optional">optional</span></td>
+              <td>
+                <code>task</code>, <code>demo_url</code>, <code>issue_id</code>,
+                <code>user_instruction</code>
+              </td>
+              <td><code>/tools/create_shared_workspace</code></td>
+              <td>生成/实现新内容，并把结果展示在共享 browser surface。</td>
+              <td><span class="pill risk-high">high</span> 可启动 code-capable worker。</td>
+            </tr>
+            <tr>
+              <td><code>control_shared_browser_surface</code></td>
+              <td>Browser/demo surface</td>
+              <td><span class="pill optional">optional</span></td>
+              <td>
+                <code>action</code>, <code>url</code>, <code>direction</code>, <code>text</code>
+              </td>
+              <td><code>/tools/control_shared_browser_surface</code></td>
+              <td>继续控制已打开的 browser/synthetic surface。</td>
+              <td><span class="pill risk-med">medium</span> click/type 受 policy 限制。</td>
+            </tr>
+            <tr>
+              <td><code>stop_shared_browser_surface</code></td>
+              <td>Browser/demo surface</td>
+              <td><span class="pill optional">optional</span></td>
+              <td><code>demo_session_id</code>, <code>reason</code></td>
+              <td><code>/tools/stop_shared_browser_surface</code></td>
+              <td>关闭 bot-owned browser/synthetic share surface。</td>
+              <td><span class="pill risk-low">low</span></td>
+            </tr>
+            <tr>
+              <td><code>read_meet_chat</code></td>
+              <td>Meet local</td>
+              <td><span class="pill stable">stable</span></td>
+              <td><code>limit</code>, <code>onlyLinks</code></td>
+              <td>Meet DOM；sidecar 可转发到 Meet surface</td>
+              <td>读取当前会议聊天和链接。</td>
+              <td><span class="pill risk-low">low</span> 只读。</td>
+            </tr>
+            <tr>
+              <td><code>meet_participants</code></td>
+              <td>Meeting awareness</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>无</td>
+              <td>Browser awareness cache / Meet DOM</td>
+              <td>读取参会人和最近说话状态。</td>
+              <td><span class="pill risk-low">low</span></td>
+            </tr>
+            <tr>
+              <td><code>active_speaker</code></td>
+              <td>Meeting awareness</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>无</td>
+              <td>Browser awareness cache / Meet DOM</td>
+              <td>读取当前或最近 speaker。</td>
+              <td><span class="pill risk-low">low</span></td>
+            </tr>
+            <tr>
+              <td><code>current_user_identity</code></td>
+              <td>Identity/workspace</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>无</td>
+              <td><code>/tools/current_user_identity</code></td>
+              <td>解析当前说话人/用户身份。</td>
+              <td><span class="pill risk-low">low</span> 只读。</td>
+            </tr>
+            <tr>
+              <td><code>resolve_speaker_identity</code></td>
+              <td>Identity/workspace</td>
+              <td><span class="pill stable">stable</span></td>
+              <td><code>display_name</code>, <code>source</code>, <code>learn</code></td>
+              <td><code>/tools/resolve_speaker_identity</code></td>
+              <td>把 Meet/Slack/caption 名字解析到 workspace identity，可带用户纠正。</td>
+              <td><span class="pill risk-med">medium</span> <code>learn</code> 会写身份记忆。</td>
+            </tr>
+            <tr>
+              <td><code>calendar_attendees</code></td>
+              <td>Identity/workspace</td>
+              <td><span class="pill stable">stable</span></td>
+              <td><code>meet_url</code></td>
+              <td><code>/tools/calendar_attendees</code></td>
+              <td>按 Meet URL 查日历参会人。</td>
+              <td><span class="pill risk-low">low</span> 只读。</td>
+            </tr>
+            <tr>
+              <td><code>now</code></td>
+              <td>Dynamic value</td>
+              <td><span class="pill stable">stable</span></td>
+              <td>无</td>
+              <td><code>/tools/now</code></td>
+              <td>返回 Asia/Shanghai 当前日期时间。</td>
+              <td><span class="pill risk-low">low</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="grid two">
+        <div class="panel">
+          <h2>App-Control 细分</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>模式</th>
+                <th>执行者</th>
+                <th>适合</th>
+                <th>不适合</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>direct</code></td>
+                <td>KWWK/direct backend</td>
+                <td>
+                  观察状态、按键、精确输入、滚动、切换账号等可由 KWWK 从自然语言目标推断的短动作。
+                </td>
+                <td>需要看图找按钮、理解 UI、跨多个步骤验证的任务。</td>
+              </tr>
+              <tr>
+                <td><code>delegate</code></td>
+                <td>Codex app-control worker</td>
+                <td>探索 UI、制定步骤、使用 Computer Use 观察和验证。</td>
+                <td>毫秒级简单按键/输入；会比较慢。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h2>KWWK Helper RPC</h2>
+          <p class="small">
+            这些不是 Realtime foreground tools，而是 host helper 层可调用的底层能力。
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>RPC method</th>
+                <th>作用</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>list_apps</code></td>
+                <td>列出运行中的 macOS 应用。</td>
+              </tr>
+              <tr>
+                <td><code>list_windows</code></td>
+                <td>列出 ScreenCaptureKit 可见窗口。</td>
+              </tr>
+              <tr>
+                <td><code>state</code></td>
+                <td>读取目标窗口、权限、可选截图。</td>
+              </tr>
+              <tr>
+                <td><code>click</code></td>
+                <td>窗口相对坐标点击。</td>
+              </tr>
+              <tr>
+                <td><code>type_text</code> / <code>type</code></td>
+                <td>通过 pasteboard 输入文本。</td>
+              </tr>
+              <tr>
+                <td><code>press_key</code></td>
+                <td>按 Return/Tab/Escape/方向键等。</td>
+              </tr>
+              <tr>
+                <td><code>scroll</code></td>
+                <td>按方向滚动。</td>
+              </tr>
+              <tr>
+                <td><code>drag</code></td>
+                <td>窗口相对坐标拖拽。</td>
+              </tr>
+              <tr>
+                <td><code>app_control.control_shared_app_window</code></td>
+                <td>
+                  封装自然语言 app-control request；foreground Realtime schema 不再暴露低层
+                  primitives，浏览器 local-tool 边界和 Go host 都会剥掉旧
+                  <code>operations</code> / <code>context.operations</code> 参数，KWWK helper
+                  也不再从 context 读取 hidden operations；Go <code>/tools</code> endpoint
+                  还会拒绝隐藏 <code>standalone</code> flag，并移除旧 synthetic standalone
+                  target/status/context 分支，避免绕过 active meeting/share gate； instruction-only
+                  支持 observe/key/type/scroll 这类短动作，无法直接执行时返回明确 blocker。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="grid three">
+        <div class="panel">
+          <h2>Router-Known 但非前台</h2>
+          <p>
+            浏览器侧 local router 只保留仍有后端意义的隐藏名字；旧 foreground 别名已经不能再通过
+            mock/local tool 执行路径绕回来。local router 现在还会先检查当前 Realtime session
+            schema，没被本轮 schema 暴露的名字即使在 dry-run/mock 中也不能执行。
+          </p>
+          <ul>
+            <li>
+              <code>start_demo_surface</code>, <code>start_demo_execution</code>,
+              <code>control_demo_surface</code>, <code>cancel_demo_surface</code>: deprecated
+              backend names；browser helper 不再转发到这些名字，Go <code>/tools</code> 也会返回
+              <code>deprecated_demo_surface_tool</code>。
+            </li>
+            <li>
+              <code>fetch_url</code>, <code>linear_query</code>, <code>slack_search</code>,
+              <code>notion_search</code>, <code>github_search</code>, <code>memory_read</code>,
+              <code>memory_write</code>: router-known but not wired/foreground in this Go live
+              surface；TS meeting-agent 的 <code>/realtime/config</code> 也改为默认返回 live-safe
+              Google Meet tool surface，包含 nested <code>session.tools</code>； raw TS/Go
+              <code>buildRealtimeSessionConfig()</code> 默认也用 live-safe surface；
+              <code>/realtime/client-secret</code> 则忽略 caller 传入的 stale tools，使用同一
+              server-owned tool surface mint session；browser/demo surface 需要显式
+              <code>ExposeRealtimeTools</code> / schema opt-in（仅配置 demo bridge 不会暴露，prompt
+              也不会提 generated browser/workspace routing，join metadata hash
+              也按实际暴露面计算）； 可选 <code>smoke:realtime-live-routing</code> 默认也只测
+              live-safe Meet/app-control 工具面，browser/demo-surface routing cases 需要显式诊断
+              opt-in。
+            </li>
+            <li>
+              <code>set_avatar_expression</code>, <code>set_avatar_action</code>,
+              <code>update_avatar_state</code>: visual/avatar-only，不能抢功能性请求。
+            </li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h2>Sidecar 限制</h2>
+          <ul>
+            <li>Meet surface role 只允许本地执行 Meet DOM 相关工具。</li>
+            <li>
+              Sidecar page 对 <code>send_meet_chat</code> / <code>read_meet_chat</code> 只能通过
+              host surface port 转发给 surface；port 缺失时 fail closed。
+            </li>
+            <li>
+              app-control 和 worker 类工具应该留在 sidecar/local service 路径，不在 Meet DOM
+              页面里直接做。
+            </li>
+            <li>
+              demo/browser surface tools 即使被 raw local-tool path 调用，也只有在
+              <code>demoSurface.toolsExposed</code> 明确开启时才会转发；<code
+                >demoSurface.enabled</code
+              >
+              只表示 backend bridge 存在，不再等同于 foreground tool 暴露；浏览器 local router 和 Go
+              <code>/tools</code> 只接受当前 schema 名；旧 backend 名
+              <code>start_demo_surface</code
+              >/<code>start_demo_execution</code>/<code>control_demo_surface</code>/<code
+                >cancel_demo_surface</code
+              >
+              现在即使 exposed 也返回 <code>deprecated_demo_surface_tool</code>。
+            </li>
+            <li>
+              Meet surface placeholder 现在只保留 DOM tool / audio forwarding 需要的配置；不再携带
+              sidecar SDK-owned
+              <code>tools</code>、<code>session</code>、<code>instructions</code>、 OpenAI endpoint
+              字段、worker URL 或 current-user context，避免
+              <code>meet.google.com</code> 页面残留前台 schema / prompt state。
+            </li>
+            <li>
+              worker-result 不能由生产页 DOM custom event 伪造；直接注入也必须带当前 meeting session
+              id；host 注入找不到 Realtime client API 时不再退回 custom event；poll-based delivery
+              还必须带服务端发出的 realtime delivery token 才能标记 delivered；session-missing /
+              session-mismatch / no-action suppress 现在只写
+              <code>realtimeSuppressed</code>，不能再污染 <code>deliveredToRealtime</code>。
+            </li>
+            <li>
+              <code>host_meet_audio_pcm</code> 是合法 fixture/diagnostic sidecar input source；真实
+              Google Meet live gate 只把 <code>recappi_process_audio_tap</code> 视为可验证的
+              Realtime sender，避免诊断源冒充 Recappi live path。
+            </li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h2>建议改进</h2>
+          <ul>
+            <li>Benchmark 要分别测 direct KWWK、delegate Codex、browser surface 三条路径。</li>
+            <li>
+              HUD 不显示 speaking / <code>连接中</code> /
+              <code>没音频</code> 这类低价值等待态；只显示工具队列、 running、done、blocked。HUD
+              playground 的视觉回归现在会先等 <code>听语音</code> cell 和实际 canvas
+              像素出现，再截快照，避免状态切换后一帧内误报空 HUD。
+            </li>
+            <li>
+              queued app-control worker report 先写 evidence event，再暴露 terminal job status；这样
+              benchmark/status poll 不会先看到 <code>completed</code> 却还拿不到 worker report。
+            </li>
+            <li>
+              direct KWWK 要继续测 instruction-only 路径，确保 Realtime 不需要生成坐标或
+              click/type/drag primitives；live-routing smoke 里旧的
+              <code>requireOperations</code> 分支已删除，只保留 instruction 与 forbid-operations
+              检查；Swift KWWK helper 也不再读取 top-level <code>operations</code> params；Go
+              app-control endpoint 已拒绝隐藏 <code>standalone</code> flag，并移除旧 synthetic
+              standalone 分支。
+            </li>
+            <li>
+              生产态 Meet surface 不接受页面任意
+              <code>meeting-avatar-participant-audio-stream</code> custom event 作为 Realtime
+              输入证据；直接 participant-audio discovery/registration 也不是
+              <code>MAB_REALTIME_CLIENT</code> public API，fixture/mock 只通过内部 discovery /
+              custom event opt-in 路径覆盖。
+            </li>
+            <li>
+              Go host <code>/realtime/client-secret</code> 已对 transient EOF / 5xx 加 bounded
+              retry；本次
+              <code>npm run benchmark:realtime-tool-recall -- --case-filter '^control_'</code>
+              在临时 live-wrapper Go meeting-agent 上通过 full <code>4/4</code> 和
+              share-control-only <code>4/4</code>。
+            </li>
+            <li>
+              Go host config 只接受 <code>openai.realtime_runtime_placement=sidecar</code>；inline
+              只保留在非 Meet 的低层 browser diagnostic。
+            </li>
+            <li>
+              Go host config 会拒绝 <code>demo_surface.expose_realtime_tools=true</code> 搭配
+              default/<code>fake</code> demo-surface adapter；暴露给 Realtime 的 browser/CU surface
+              必须使用 <code>mode=safe</code>、<code>adapter=agent_browser</code> 或
+              <code>adapter=codex</code>。
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>源文件</h2>
+        <ul>
+          <li><code>internal/meetingagent/realtime_tools.go</code>: Go tool schema source。</li>
+          <li>
+            <code>packages/core/src/realtime/realtime-contract.ts</code>: TS/browser schema source。
+          </li>
+          <li>
+            <code>packages/core/src/realtime/realtime-browser-local-tool-router-helpers.ts</code>:
+            local router 分类。
+          </li>
+          <li>
+            <code>packages/core/src/realtime/realtime-browser-local-tool-helpers.ts</code>: endpoint
+            normalize 与 HUD 状态。
+          </li>
+          <li>
+            <code>internal/meetingagent/handler_tools.go</code>: Go
+            <code>/tools/:name</code> handler。
+          </li>
+          <li><code>pkg/config/validate.go</code>: live host config gates。</li>
+          <li>
+            <code>packages/core/src/meeting/app-control-helper.swift</code>: KWWK/macOS 操作
+            helper。
+          </li>
+          <li>
+            <code>scripts/real-meet-synthetic-speaker-smoke.mjs</code>: real-room app-control
+            benchmark gate。
+          </li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>
+          Note: 本报告是当前 worktree 的快照。demo surface 关闭时，Go session schema 会过滤
+          <code>open_shared_browser_surface</code>、<code>create_shared_workspace</code>、
+          <code>control_shared_browser_surface</code>、<code>stop_shared_browser_surface</code>；
+          browser local router 也会拒绝任何不在当前 Realtime session schema 里的 local tool 名； Go
+          config 还会拒绝把 fake demo-surface adapter 暴露成 Realtime tool evidence。
+        </p>
+      </footer>
+    </main>
+
+    <script>
+      const input = document.getElementById("toolFilter");
+      const rows = Array.from(document.querySelectorAll("#toolTable tbody tr"));
+      input.addEventListener("input", () => {
+        const needle = input.value.trim().toLowerCase();
+        for (const row of rows) {
+          row.style.display = row.textContent.toLowerCase().includes(needle) ? "" : "none";
+        }
+      });
+    </script>
+  </body>
+</html>

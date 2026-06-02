@@ -5,16 +5,12 @@
     {
       "name": "full",
       "toolNames": "*",
-      "minRecall": 0.8,
+      "minRecall": 1,
       "maxDisallowedRate": 0
     },
     {
       "name": "share-control-only",
-      "toolNames": [
-        "list_shareable_windows",
-        "share_existing_app_window",
-        "control_shared_app_window"
-      ],
+      "toolNames": ["list_shareable_windows", "share_existing_app_window", "kwwk_computer_use"],
       "minRecall": 1,
       "maxDisallowedRate": 0
     }
@@ -48,22 +44,27 @@
     {
       "id": "control_shared_browser_input_zh",
       "utterance": "你用电脑控制共享的浏览器，在搜索框输入 hello 然后回车。",
-      "expectedToolNames": ["control_shared_app_window"]
+      "expectedToolNames": ["kwwk_computer_use"]
     },
     {
       "id": "control_switch_account_zh",
       "utterance": "你来操作，切到第三个账号。",
-      "expectedToolNames": ["control_shared_app_window"]
+      "expectedToolNames": ["kwwk_computer_use"]
+    },
+    {
+      "id": "control_switch_tab_zh",
+      "utterance": "让他切换 tab。",
+      "expectedToolNames": ["kwwk_computer_use"]
     },
     {
       "id": "control_chrome_stuck_zh",
       "utterance": "处理一下 Chrome 卡住的问题。",
-      "expectedToolNames": ["control_shared_app_window"]
+      "expectedToolNames": ["kwwk_computer_use"]
     },
     {
       "id": "control_pencil_draw_circle_zh",
       "utterance": "用 Pencil 帮我画个圆。",
-      "expectedToolNames": ["control_shared_app_window", "share_existing_app_window"]
+      "expectedToolNames": ["kwwk_computer_use", "share_existing_app_window"]
     },
     {
       "id": "negative_time_zh",
@@ -72,6 +73,7 @@
       "disallowedToolNames": [
         "list_shareable_windows",
         "share_existing_app_window",
+        "kwwk_computer_use",
         "control_shared_app_window"
       ]
     },
@@ -82,8 +84,21 @@
       "disallowedToolNames": [
         "list_shareable_windows",
         "share_existing_app_window",
+        "kwwk_computer_use",
         "control_shared_app_window"
       ]
+    },
+    {
+      "id": "negative_stop_share_zh",
+      "utterance": "停止共享当前窗口。",
+      "expectedToolNames": [],
+      "disallowedToolNames": ["kwwk_computer_use", "control_shared_app_window"]
+    },
+    {
+      "id": "negative_meeting_control_mute_zh",
+      "utterance": "把会议里的麦克风静音。",
+      "expectedToolNames": [],
+      "disallowedToolNames": ["kwwk_computer_use", "control_shared_app_window"]
     }
   ]
 }

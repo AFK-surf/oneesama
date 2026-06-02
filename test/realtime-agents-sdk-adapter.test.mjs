@@ -4,12 +4,17 @@ import { test } from "vite-plus/test";
 
 import { chromium } from "playwright";
 
-import { buildRealtimeBrowserInitScript } from "../packages/core/src/realtime/realtime-browser-init-builder.ts";
+import {
+  buildRealtimeBrowserInitScript,
+  patchRealtimeAgentsSDKBundleForStrictCSP,
+} from "../packages/core/src/realtime/realtime-browser-init-builder.ts";
 
 test("Realtime Agents SDK init carries the OpenAI base URL into the browser bridge", () => {
   const script = buildRealtimeBrowserInitScript({
     mode: "webrtc",
     agentRuntime: "agents-sdk",
+    realtimeRuntimePlacement: "inline",
+    allowInlineAgentsSDKDiagnostic: true,
     tokenUrl: "http://127.0.0.1:8781/realtime/client-secret",
     openaiRealtimeBaseUrl: "https://api.openai.com/v1",
     sdpUrl: "https://api.openai.com/v1/realtime/calls",
@@ -18,6 +23,176 @@ test("Realtime Agents SDK init carries the OpenAI base URL into the browser brid
 
   assert.match(configLine, /openaiRealtimeBaseUrl/);
   assert.match(configLine, /https:\/\/api\.openai\.com\/v1/);
+});
+
+test("Realtime Agents SDK init disables Zod JIT for strict CSP pages", () => {
+  const source = "before;const Bc={};function qt(e){return Bc};after";
+  assert.equal(
+    patchRealtimeAgentsSDKBundleForStrictCSP(source),
+    "before;const Bc={jitless:!0};function qt(e){return Bc};after",
+  );
+
+  const script = buildRealtimeBrowserInitScript({
+    mode: "webrtc",
+    agentRuntime: "agents-sdk",
+    realtimeRuntimePlacement: "inline",
+    allowInlineAgentsSDKDiagnostic: true,
+  });
+  assert.match(script, /const Bc=\{jitless:!0\};function qt\(e\)\{return Bc\}/);
+  assert.doesNotMatch(script, /const Bc=\{\};function qt\(e\)\{return Bc\}/);
+});
+
+test("Realtime Agents SDK inline bundle requires explicit diagnostic opt-in", () => {
+  const script = buildRealtimeBrowserInitScript({
+    mode: "webrtc",
+    agentRuntime: "agents-sdk",
+    realtimeRuntimePlacement: "inline",
+  });
+
+  assert.doesNotMatch(script, /oe\(W\.OpenAIAgentsRealtime=\{\}\)/);
+  assert.doesNotMatch(script, /const Bc=\{jitless:!0\}/);
+});
+
+test("Realtime Agents SDK init suppresses inline SDK on a Meet surface", () => {
+  const script = buildRealtimeBrowserInitScript({
+    mode: "webrtc",
+    agentRuntime: "agents-sdk",
+    realtimeRuntimePlacement: "inline",
+    allowInlineAgentsSDKDiagnostic: true,
+    realtimePageRole: "meet-surface",
+  });
+
+  assert.match(script, /mab-realtime-inline-sdk-deprecated/);
+  assert.match(script, /inline_agents_sdk_on_google_meet_has_been_removed/);
+  assert.match(script, /realtimeRuntimePlacement=sidecar/);
+  assert.match(script, /inline_realtime_sdk_on_meet_removed/);
+  assert.doesNotMatch(script, /OpenAIAgentsRealtime/);
+  assert.doesNotMatch(script, /const Bc=\{jitless:!0\}/);
+});
+
+test("Realtime sidecar placement keeps the Agents SDK out of Meet surface init", () => {
+  const meetSurfaceScript = buildRealtimeBrowserInitScript({
+    mode: "webrtc",
+    agentRuntime: "agents-sdk",
+    realtimeRuntimePlacement: "sidecar",
+    realtimePageRole: "meet-surface",
+    instructions: "sidecar-only prompt",
+    tools: [
+      {
+        type: "function",
+        name: "control_shared_app_window",
+        description: "Sidecar-only app control schema.",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    ],
+    session: {
+      model: "gpt-realtime-2",
+      tools: [{ type: "function", name: "now" }],
+    },
+    openaiRealtimeBaseUrl: "https://api.openai.example/v1/realtime",
+    sdpUrl: "https://api.openai.example/v1/realtime/calls",
+    currentUser: { name: "Peng" },
+  });
+  assert.match(meetSurfaceScript, /sdkSuppressedOnMeetSurface/);
+  assert.match(meetSurfaceScript, /"sdkOwner":"sidecar"/);
+  assert.doesNotMatch(meetSurfaceScript, /OpenAIAgentsRealtime/);
+  assert.doesNotMatch(meetSurfaceScript, /const Bc=\{jitless:!0\}/);
+  assert.doesNotMatch(meetSurfaceScript, /sidecar-only prompt/);
+  assert.doesNotMatch(meetSurfaceScript, /control_shared_app_window/);
+  assert.doesNotMatch(meetSurfaceScript, /gpt-realtime-2/);
+  assert.doesNotMatch(meetSurfaceScript, /api\.openai\.example/);
+
+  const sidecarScript = buildRealtimeBrowserInitScript({
+    mode: "webrtc",
+    agentRuntime: "agents-sdk",
+    realtimeRuntimePlacement: "sidecar",
+    realtimePageRole: "sidecar",
+  });
+  assert.match(sidecarScript, /"realtimeRuntimePlacement":"sidecar"/);
+  assert.doesNotMatch(sidecarScript, /const Bc=\{jitless:!0\}/);
+});
+
+test("Realtime sidecar placement gives SDK ownership to a separate page", async () => {
+  await withToolServer(async ({ baseUrl, calls }) => {
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext();
+    const meetPage = await context.newPage();
+    const sidecarPage = await context.newPage();
+    try {
+      await meetPage.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "webrtc",
+          agentRuntime: "agents-sdk",
+          realtimeRuntimePlacement: "sidecar",
+          realtimePageRole: "meet-surface",
+          sessionId: "sidecar-placement-session",
+        }),
+      });
+      await sidecarPage.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk-mock",
+          agentRuntime: "agents-sdk",
+          realtimeRuntimePlacement: "sidecar",
+          realtimePageRole: "sidecar",
+          sessionId: "sidecar-placement-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          instructions: "Use tools when needed.",
+          tools: [
+            {
+              type: "function",
+              name: "now",
+              description: "Return current date/time.",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          ],
+          session: {
+            model: "gpt-realtime-2",
+            audio: { output: { voice: "marin" } },
+          },
+        }),
+      });
+
+      await meetPage.goto(`${baseUrl}/meet`);
+      await sidecarPage.goto(`${baseUrl}/sidecar`);
+      await sidecarPage.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.agentRuntime?.sdkConnected === true,
+      );
+
+      const meetState = await meetPage.evaluate(() => ({
+        bridge: window.MAB_REALTIME_BRIDGE,
+        surfaceToolsReady: typeof window.MAB_MEET_SURFACE_TOOLS?.run === "function",
+        hasSDKGlobal: Boolean(window.OpenAIAgentsRealtime),
+      }));
+      const sidecarState = await sidecarPage.evaluate(() => window.MAB_REALTIME_BRIDGE);
+
+      assert.equal(meetState.hasSDKGlobal, false);
+      assert.equal(meetState.bridge.runtimePlacement, "sidecar");
+      assert.equal(meetState.surfaceToolsReady, true);
+      assert.equal(meetState.bridge.agentRuntime.sdkSuppressedOnMeetSurface, true);
+      assert.equal(sidecarState.realtimeRuntimePlacement, "sidecar");
+      assert.equal(sidecarState.realtimePageRole, "sidecar");
+      assert.equal(sidecarState.agentRuntime.sdkConnected, true);
+      assert.equal(sidecarState.meetChat.observerInstalled, false);
+      assert.ok(
+        sidecarState.timeline.some(
+          (entry) =>
+            entry.type === "meet_chat_observer_skipped" &&
+            entry.detail?.reason === "sidecar_page_not_meet_surface",
+        ),
+      );
+      assert.equal(
+        sidecarState.outbound.some(
+          (entry) => entry.event?.item?.metadata?.source === "meet_chat_observer",
+        ),
+        false,
+      );
+      assert.ok(calls.some((entry) => entry.path === "/realtime/client-secret"));
+    } finally {
+      await browser.close();
+    }
+  });
 });
 
 function readJson(request) {
@@ -102,6 +277,38 @@ async function withToolServer(callback) {
   }
 }
 
+test("Realtime Agents SDK inline runtime refuses SDK connect without diagnostic opt-in", async () => {
+  await withToolServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "agents-sdk",
+          agentRuntime: "test-sdk",
+          realtimeRuntimePlacement: "inline",
+          sessionId: "sdk-inline-no-opt-in-session",
+          botName: "Onee-sama",
+          autoConnect: true,
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+        }),
+      });
+      await page.goto(`${baseUrl}/`);
+      await page.waitForFunction(
+        () =>
+          window.MAB_REALTIME_BRIDGE?.agentRuntime?.fallbackReason ===
+          "inline_agents_sdk_requires_diagnostic_opt_in",
+      );
+
+      const bridge = await page.evaluate(() => window.MAB_REALTIME_BRIDGE);
+      assert.equal(bridge.connected, false);
+      assert.equal(bridge.agentRuntime.sdkConnected, false);
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
 test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects", async () => {
   await withToolServer(async ({ baseUrl, calls }) => {
     const browser = await chromium.launch({ headless: true });
@@ -111,6 +318,8 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk-mock",
           agentRuntime: "agents-sdk",
+          realtimeRuntimePlacement: "inline",
+          allowInlineAgentsSDKDiagnostic: true,
           sessionId: "sdk-smoke-session",
           botName: "Onee-sama",
           autoConnect: true,
@@ -161,6 +370,13 @@ test("Realtime Agents SDK adapter connects, calls a local tool, and disconnects"
       assert.equal(toolResult.ok, true);
       assert.equal(toolResult.result.ok, true);
       assert.equal(toolResult.result.timezone, "Asia/Shanghai");
+      assert.equal(toolResult.delivery.outputChannel, "agents_sdk_execute_return");
+      const sdkOutputDecision = await page.evaluate(
+        (callId) =>
+          window.MAB_REALTIME_BRIDGE.turnPolicy.decisions.find((entry) => entry.callId === callId),
+        toolResult.callId,
+      );
+      assert.equal(sdkOutputDecision.outputChannel, "agents_sdk_execute_return");
       assert.ok(calls.some((entry) => entry.path === "/realtime/client-secret"));
       assert.ok(
         calls.some((entry) => entry.path === "/tools/now" && entry.auth === "test-session-token"),
@@ -344,6 +560,8 @@ test("Realtime Agents SDK WebRTC transport uses the full SDP endpoint URL", asyn
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk",
           agentRuntime: "test-sdk",
+          realtimeRuntimePlacement: "inline",
+          allowInlineAgentsSDKDiagnostic: true,
           sessionId: "sdk-endpoint-url-session",
           botName: "Onee-sama",
           autoConnect: true,
@@ -459,6 +677,8 @@ test("Realtime Agents SDK WebRTC transport preserves SDK decode sink while routi
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk",
           agentRuntime: "test-sdk",
+          realtimeRuntimePlacement: "inline",
+          allowInlineAgentsSDKDiagnostic: true,
           sessionId: "sdk-decode-sink-session",
           botName: "Onee-sama",
           autoConnect: true,
@@ -565,6 +785,8 @@ test("Realtime Agents SDK config preserves GA turn detection controls", async ()
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk",
           agentRuntime: "test-sdk",
+          realtimeRuntimePlacement: "inline",
+          allowInlineAgentsSDKDiagnostic: true,
           sessionId: "sdk-turn-detection-session",
           botName: "Onee-sama",
           autoConnect: true,
@@ -658,6 +880,8 @@ test("Realtime Agents SDK records session transport response events as model tur
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk",
           agentRuntime: "test-sdk",
+          realtimeRuntimePlacement: "inline",
+          allowInlineAgentsSDKDiagnostic: true,
           sessionId: "sdk-response-event-session",
           botName: "Onee-sama",
           autoConnect: true,
@@ -679,6 +903,10 @@ test("Realtime Agents SDK records session transport response events as model tur
       assert.equal(feedback.checks.responseEvents, 1);
       assert.equal(feedback.failureMatrix.modelTurn.status, "ok");
       assert.equal(feedback.failureMatrix.modelTurn.reason, "model_turn_observed");
+      assert.equal(
+        await page.evaluate(() => window.MAB_REALTIME_BRIDGE.protection.activeResponseId),
+        "resp_fixture",
+      );
     } finally {
       await browser.close();
     }
@@ -756,6 +984,8 @@ test("Realtime Agents SDK WebRTC transport captures the outbound audio sender", 
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk",
           agentRuntime: "test-sdk",
+          realtimeRuntimePlacement: "inline",
+          allowInlineAgentsSDKDiagnostic: true,
           sessionId: "sdk-sender-diagnostics-session",
           botName: "Onee-sama",
           autoConnect: true,
@@ -796,6 +1026,8 @@ test("Realtime Agents SDK local tool failures use the shared blocked turn policy
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk-mock",
           agentRuntime: "agents-sdk",
+          realtimeRuntimePlacement: "inline",
+          allowInlineAgentsSDKDiagnostic: true,
           sessionId: "sdk-tool-failure-session",
           botName: "Onee-sama",
           autoConnect: true,
@@ -876,6 +1108,8 @@ test("Realtime Agents SDK audio lifecycle does not gate local input", async () =
         content: buildRealtimeBrowserInitScript({
           mode: "agents-sdk-mock",
           agentRuntime: "test-sdk",
+          realtimeRuntimePlacement: "inline",
+          allowInlineAgentsSDKDiagnostic: true,
           sessionId: "sdk-audio-lifecycle-session",
           botName: "Onee-sama",
           autoConnect: true,
@@ -954,71 +1188,6 @@ test("Realtime Agents SDK audio lifecycle does not gate local input", async () =
             callId: "call_share_pencil",
           },
         ],
-      );
-    } finally {
-      await browser.close();
-    }
-  });
-});
-
-test("Realtime Agents SDK local app-control tools record silent turn policy", async () => {
-  await withToolServer(async ({ baseUrl }) => {
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    try {
-      await page.addInitScript({
-        content: buildRealtimeBrowserInitScript({
-          mode: "agents-sdk-mock",
-          agentRuntime: "agents-sdk",
-          sessionId: "sdk-policy-session",
-          botName: "Onee-sama",
-          autoConnect: true,
-          tokenUrl: `${baseUrl}/realtime/client-secret`,
-          toolCallbackToken: "test-session-token",
-          tools: [
-            {
-              type: "function",
-              name: "control_shared_app_window",
-              description: "Control the currently shared app window.",
-              parameters: { type: "object", properties: {}, required: [] },
-            },
-          ],
-          session: {
-            model: "gpt-realtime-2",
-            audio: { output: { voice: "marin" } },
-          },
-        }),
-      });
-      await page.goto(`${baseUrl}/`);
-      await page.waitForFunction(
-        () => window.MAB_REALTIME_BRIDGE?.agentRuntime?.sdkConnected === true,
-      );
-      assert.equal(
-        await page.evaluate(() => typeof window.OpenAIAgentsRealtime?.backgroundResult),
-        "function",
-      );
-
-      const toolResult = await page.evaluate(() =>
-        window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("control_shared_app_window", {
-          operation: "type_text",
-        }),
-      );
-      const bridge = await page.evaluate(() => window.MAB_REALTIME_BRIDGE);
-
-      assert.equal(toolResult.result.status, "queued");
-      assert.equal(toolResult.delivery.policy.reason, "app_control_async_accepted");
-      assert.equal(toolResult.delivery.policy.autoRespond, false);
-      assert.equal(bridge.turnPolicy.decisions.at(-1).reason, "app_control_async_accepted");
-      assert.equal(bridge.turnPolicy.events.at(-1).type, "app_control.accepted");
-      assert.equal(
-        bridge.turnPolicy.appControlJobs.job_sdk_app_control_queued.visibility,
-        "silent",
-      );
-      assert.equal(
-        bridge.connection.sentDataChannelMessages.some((entry) =>
-          String(entry.payload || "").includes("response.create"),
-        ),
-        false,
       );
     } finally {
       await browser.close();

@@ -75,28 +75,40 @@ function adaptiveRecappiProcessInputGain(samples: Float32Array) {
 
 function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
   const source = String(payload.source || "recappi_process_audio");
-  const label =
-    source === "recappi_global_audio"
-      ? "Recappi global system audio"
-      : "Recappi Chrome process audio";
-  if (source === "recappi_process_audio") {
-    updateRoutingInputGain(configuredRecappiProcessInputGain(), "recappi-process-audio-connected");
+  const inputDescriptor =
+    source === "host_meet_audio_pcm"
+      ? {
+          trackId: "host-meet-audio-pcm",
+          label: "Host-forwarded Meet surface PCM",
+          realtimeInputSource: "host_meet_audio_pcm",
+          replaceReason: "host-meet-audio-pcm",
+        }
+      : {
+          trackId: "recappi-process-audio",
+          label:
+            source === "recappi_global_audio"
+              ? "Recappi global system audio"
+              : "Recappi Chrome process audio",
+          realtimeInputSource: "recappi_process_audio_tap",
+          replaceReason: "recappi-process-audio",
+        };
+  if (source === "recappi_process_audio" || source === "host_meet_audio_pcm") {
+    const inputGain =
+      source === "host_meet_audio_pcm"
+        ? normalizeMeetAudioInputGain(config.meetAudioInputGain, DEFAULT_MEET_AUDIO_INPUT_GAIN)
+        : configuredRecappiProcessInputGain();
+    updateRoutingInputGain(inputGain, `${source.replace(/_/g, "-")}-connected`);
     let disconnectedFallbackSources = 0;
     for (const entry of routedMeetAudioSources || []) {
       if (entry.connected === true) {
-        disconnectedFallbackSources += disconnectMeetAudioSource(
-          entry,
-          "recappi-process-audio-connected",
-        )
+        disconnectedFallbackSources += disconnectMeetAudioSource(entry, `${source}-connected`)
           ? 1
           : 0;
       }
     }
-    if (disconnectedFallbackSources > 0 || state.connection.recappiReceiverFallbackActive) {
-      state.connection.recappiReceiverFallbackActive = false;
-      state.connection.recappiReceiverFallbackDisconnectedAt = new Date().toISOString();
-      recordTimeline("meet_audio_receiver_fallback_disconnected", {
-        reason: "recappi_process_audio_connected",
+    if (disconnectedFallbackSources > 0) {
+      recordTimeline("meet_audio_receiver_diagnostic_disconnected", {
+        reason: `${source}_connected`,
         disconnectedSources: disconnectedFallbackSources,
       });
     }
@@ -109,6 +121,18 @@ function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
     channels: Number(payload.channels || getRecappiAudioInputState()?.channels || 0),
     source,
   };
+  if (source === "host_meet_audio_pcm") {
+    recappiConnection.hostMeetAudioInput = {
+      ...recappiConnection.hostMeetAudioInput,
+      enabled: true,
+      connected: true,
+      sampleRate: Number(
+        payload.sampleRate || recappiConnection.hostMeetAudioInput?.sampleRate || 0,
+      ),
+      channels: Number(payload.channels || recappiConnection.hostMeetAudioInput?.channels || 0),
+      source,
+    };
+  }
   state.connection.meetAudioTracksForwarded = Math.max(
     1,
     Number(state.connection.meetAudioTracksForwarded || 0),
@@ -123,23 +147,26 @@ function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
   );
   state.connection.meetAudioTrackStates = [
     ...(state.connection.meetAudioTrackStates || []).filter(
-      (entry) => !["recappi_process_audio", "recappi_global_audio"].includes(entry.source),
+      (entry) =>
+        !["recappi_process_audio", "recappi_global_audio", "host_meet_audio_pcm"].includes(
+          entry.source,
+        ),
     ),
     {
-      trackId: "recappi-process-audio",
+      trackId: inputDescriptor.trackId,
       readyState: "live",
       enabled: true,
       muted: false,
       connected: true,
       disconnectReason: "",
       source,
-      label,
+      label: inputDescriptor.label,
     },
   ].slice(-10);
   if (routingDestination) {
     const [mixedTrack] = routingDestination.stream.getAudioTracks();
-    rememberRealtimeInputTrack("recappi_process_audio_tap", mixedTrack, {
-      lastRealtimeInputReplaceReason: "recappi-process-audio",
+    rememberRealtimeInputTrack(inputDescriptor.realtimeInputSource, mixedTrack, {
+      lastRealtimeInputReplaceReason: inputDescriptor.replaceReason,
       lastRealtimeInputReplaceAt: new Date().toISOString(),
     });
   }
@@ -180,11 +207,17 @@ function ensureRecappiAudioInputNode(payload: Record<string, unknown> = {}) {
   recappiAudioInputProcessor.connect(routingInputGate);
   recappiAudioInputSource.start();
   markRecappiAudioInputConnected(payload);
-  recordTimeline("recappi_audio_input_connected", {
-    sampleRate: Number(payload.sampleRate || 0),
-    channels: Number(payload.channels || 0),
-    source: String(payload.source || "recappi_process_audio"),
-  });
+  const source = String(payload.source || "recappi_process_audio");
+  recordTimeline(
+    source === "host_meet_audio_pcm"
+      ? "host_meet_audio_input_connected"
+      : "recappi_audio_input_connected",
+    {
+      sampleRate: Number(payload.sampleRate || 0),
+      channels: Number(payload.channels || 0),
+      source,
+    },
+  );
 }
 
 function downmixRecappiSamples(samples: number[], channels: unknown) {
@@ -227,15 +260,18 @@ function normalizeRecappiSamples(value: unknown) {
   return [];
 }
 
-function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
-  if (config.meetAudioInputSource !== "recappi_process_audio") {
-    return { ok: false, error: "recappi_audio_input_disabled" };
-  }
-  if (String(payload.source || "") === "recappi_global_audio") {
-    return { ok: false, error: "recappi_global_audio_rejected" };
-  }
+function pushExternalMeetAudioSamples(payload: Record<string, unknown> = {}) {
+  const source = String(payload.source || "recappi_process_audio");
   const samples = normalizeRecappiSamples(payload.samples);
-  if (!samples.length) return { ok: false, error: "empty_recappi_audio_samples" };
+  if (!samples.length) {
+    return {
+      ok: false,
+      error:
+        source === "host_meet_audio_pcm"
+          ? "empty_host_meet_audio_samples"
+          : "empty_recappi_audio_samples",
+    };
+  }
   ensureRecappiAudioInputNode(payload);
   const mono = downmixRecappiSamples(samples, payload.channels);
   const queued = resampleRecappiSamples(
@@ -266,7 +302,7 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
   markRecappiAudioInputConnected(payload);
   updateRoutingInputGain(
     gain.gain,
-    gain.adaptive ? "recappi-process-audio-adaptive-gain" : "recappi-process-audio",
+    gain.adaptive ? `${source.replace(/_/g, "-")}-adaptive-gain` : source.replace(/_/g, "-"),
   );
   recappiConnection.recappiAudioInput = {
     ...getRecappiAudioInputState(),
@@ -279,11 +315,50 @@ function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
     lastChunkAt: new Date().toISOString(),
     lastPushAt: new Date().toISOString(),
   };
+  if (String(payload.source || "") === "host_meet_audio_pcm") {
+    recappiConnection.hostMeetAudioInput = {
+      ...recappiConnection.hostMeetAudioInput,
+      enabled: true,
+      connected: true,
+      chunks: Number(recappiConnection.hostMeetAudioInput?.chunks || 0) + 1,
+      samplesReceived:
+        Number(recappiConnection.hostMeetAudioInput?.samplesReceived || 0) + samples.length,
+      samplesQueued: recappiAudioQueuedSamples,
+      lastRawRms: gain.rms,
+      lastRawPeak: gain.peak,
+      lastChunkAt: new Date().toISOString(),
+      lastPushAt: new Date().toISOString(),
+      source: "host_meet_audio_pcm",
+    };
+  }
   updateFeedback();
   return {
     ok: true,
-    source: String(payload.source || "recappi_process_audio"),
+    source,
     queuedSamples: recappiAudioQueuedSamples,
     chunks: getRecappiAudioInputState().chunks,
   };
+}
+
+function pushRecappiAudioSamples(payload: Record<string, unknown> = {}) {
+  if (config.meetAudioInputSource !== "recappi_process_audio") {
+    return { ok: false, error: "recappi_audio_input_disabled" };
+  }
+  if (String(payload.source || "") === "recappi_global_audio") {
+    return { ok: false, error: "recappi_global_audio_rejected" };
+  }
+  return pushExternalMeetAudioSamples({
+    ...payload,
+    source: payload.source || "recappi_process_audio",
+  });
+}
+
+function pushHostMeetAudioSamples(payload: Record<string, unknown> = {}) {
+  if (config.allowHostMeetAudioPcmInput !== true) {
+    return { ok: false, error: "host_meet_audio_pcm_input_disabled" };
+  }
+  return pushExternalMeetAudioSamples({
+    ...payload,
+    source: "host_meet_audio_pcm",
+  });
 }

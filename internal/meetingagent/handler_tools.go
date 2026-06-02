@@ -8,8 +8,58 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func isRealtimeDemoSurfaceTool(toolName string) bool {
+	switch toolName {
+	case "open_shared_browser_surface",
+		"create_shared_workspace",
+		"control_shared_browser_surface",
+		"stop_shared_browser_surface":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDeprecatedRealtimeDemoSurfaceTool(toolName string) bool {
+	switch toolName {
+	case "start_demo_surface", "start_demo_execution", "control_demo_surface", "cancel_demo_surface":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Handler) rejectDeprecatedRealtimeDemoSurfaceTool(c *gin.Context, toolName string) bool {
+	if !isDeprecatedRealtimeDemoSurfaceTool(toolName) {
+		return false
+	}
+	c.JSON(http.StatusGone, gin.H{
+		"ok":     false,
+		"error":  "deprecated_demo_surface_tool",
+		"tool":   toolName,
+		"reason": "use_current_browser_surface_tool_name",
+	})
+	return true
+}
+
+func (h *Handler) rejectHiddenRealtimeDemoSurfaceTool(c *gin.Context, toolName string) bool {
+	if !isRealtimeDemoSurfaceTool(toolName) || h.service.realtimeDemoSurfaceToolsExposed() {
+		return false
+	}
+	c.JSON(http.StatusServiceUnavailable, gin.H{
+		"ok":     false,
+		"error":  "demo_surface_tool_not_exposed",
+		"tool":   toolName,
+		"reason": "realtime_demo_surface_tool_hidden",
+	})
+	return true
+}
+
 func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 	toolName := c.Param("name")
+	if h.rejectDeprecatedRealtimeDemoSurfaceTool(c, toolName) {
+		return
+	}
 	switch toolName {
 	case "current_user_identity":
 		currentUser := h.service.realtimeCurrentUser()
@@ -88,7 +138,10 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			"date":     now.Format("2006-01-02"),
 			"time":     now.Format("15:04:05"),
 		})
-	case "start_demo_surface", "open_shared_browser_surface":
+	case "open_shared_browser_surface":
+		if h.rejectHiddenRealtimeDemoSurfaceTool(c, toolName) {
+			return
+		}
 		var input RealtimeDemoSurfaceStartRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -103,7 +156,10 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, result)
-	case "start_demo_execution", "create_shared_workspace":
+	case "create_shared_workspace":
+		if h.rejectHiddenRealtimeDemoSurfaceTool(c, toolName) {
+			return
+		}
 		var input RealtimeDemoExecutionStartRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -118,7 +174,10 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, result)
-	case "control_demo_surface", "control_shared_browser_surface":
+	case "control_shared_browser_surface":
+		if h.rejectHiddenRealtimeDemoSurfaceTool(c, toolName) {
+			return
+		}
 		var input RealtimeDemoSurfaceControlRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -133,7 +192,7 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, result)
-	case "control_shared_app_window":
+	case "kwwk_computer_use", "control_shared_app_window":
 		var input RealtimeSharedAppControlRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -142,8 +201,14 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			})
 			return
 		}
+		if toolName == "kwwk_computer_use" {
+			input.ExecutionMode = appControlExecutionModeDirect
+		}
 		c.JSON(http.StatusOK, h.service.ControlRealtimeSharedApp(c.Request.Context(), input))
-	case "cancel_demo_surface", "stop_shared_browser_surface":
+	case "stop_shared_browser_surface":
+		if h.rejectHiddenRealtimeDemoSurfaceTool(c, toolName) {
+			return
+		}
 		var input RealtimeDemoSurfaceCancelRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{

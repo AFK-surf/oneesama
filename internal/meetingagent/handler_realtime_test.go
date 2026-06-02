@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AFK-surf/oneesama/internal/agentrunner"
 	"github.com/AFK-surf/oneesama/internal/httpserver"
 	"github.com/AFK-surf/oneesama/internal/internalauth"
+	"github.com/AFK-surf/oneesama/internal/meetrunner"
 	"github.com/AFK-surf/oneesama/internal/postmeeting"
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 	"github.com/gin-gonic/gin"
@@ -79,14 +79,19 @@ func TestRealtimeConfigMatchesOldDefaults(t *testing.T) {
 	}
 	if strings.Contains(instructions, "peng@example.com") ||
 		strings.Contains(instructions, "Peng Xiao") ||
+		strings.Contains(instructions, "create a shared workspace") ||
+		strings.Contains(instructions, "做一个贪吃蛇") ||
 		strings.Contains(instructions, "delegate_to_") ||
 		strings.Contains(instructions, "Codex") ||
 		strings.Contains(instructions, "worker") {
-		t.Fatalf("instructions leaked identity/mechanism details: %q", instructions)
+		t.Fatalf("instructions leaked identity/unavailable mechanism details: %q", instructions)
 	}
 	tools := body["tools"].([]any)
-	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "share_existing_app_window", "control_shared_app_window", "resolve_speaker_identity") {
-		t.Fatalf("tools = %#v, missing expected old tool names", body["tools"])
+	if !toolNamesInclude(tools, "delegate_to_worker", "present_video_stage", "share_existing_app_window", "kwwk_computer_use", "resolve_speaker_identity") {
+		t.Fatalf("tools = %#v, missing expected live-safe tool names", body["tools"])
+	}
+	if toolNamesInclude(tools, "control_shared_app_window") {
+		t.Fatalf("tools = %#v, compatibility app-control alias must not be in default Realtime tools", body["tools"])
 	}
 	if toolNamesInclude(tools, "list_shareable_apps", "present_app_share", "start_demo_surface", "start_demo_execution") {
 		t.Fatalf("tools = %#v, realtime foreground must not expose legacy/ambiguous screen-share tools", body["tools"])
@@ -209,8 +214,43 @@ func TestRealtimeClientSecretStripsClientRequestedDemoToolsWhenDefaultOff(t *tes
 	decodeRealtimeBody(t, response.Body.String(), &body)
 	session := body["session"].(map[string]any)
 	tools := session["tools"].([]any)
+	if len(tools) != 0 {
+		t.Fatalf("session tools = %#v, stale-only client tool request must not fall back to full defaults", tools)
+	}
 	if toolNamesInclude(tools, "open_shared_browser_surface", "create_shared_workspace", "stop_shared_browser_surface", "control_shared_browser_surface") {
 		t.Fatalf("session tools = %#v, demo tools must be server-gated off", tools)
+	}
+}
+
+func TestRealtimeClientSecretHonorsClientRequestedLiveSafeToolSubset(t *testing.T) {
+	t.Parallel()
+
+	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{
+		BaseURL:                  "https://api.openai.com/v1",
+		RealtimeClientSecretsURL: "https://api.openai.com/v1/realtime/client_secrets",
+		RealtimeSDPURL:           "https://api.openai.com/v1/realtime/calls",
+		RealtimeModel:            "gpt-realtime-2",
+		RealtimeSessionSchema:    "realtime-2",
+		BotName:                  "Meeting Avatar Bot",
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, realtimeRequest(http.MethodPost, "/realtime/client-secret", `{"tools":[{"type":"function","name":"send_meet_chat","parameters":{"type":"object"}},{"type":"function","name":"share_existing_app_window","parameters":{"type":"object"}},{"type":"function","name":"open_shared_browser_surface","parameters":{"type":"object"}},{"type":"function","name":"github_search","parameters":{"type":"object"}}]}`))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want dry-run 200: %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	decodeRealtimeBody(t, response.Body.String(), &body)
+	session := body["session"].(map[string]any)
+	tools := session["tools"].([]any)
+	if len(tools) != 2 || !toolNamesInclude(tools, "send_meet_chat", "share_existing_app_window") {
+		t.Fatalf("session tools = %#v, want exactly requested live-safe server tools", tools)
+	}
+	if toolNamesInclude(tools, "delegate_to_worker") ||
+		toolNamesInclude(tools, "control_shared_app_window") ||
+		toolNamesInclude(tools, "open_shared_browser_surface") ||
+		toolNamesInclude(tools, "github_search") {
+		t.Fatalf("session tools = %#v, must not expand requested subset or expose gated/stale tools", tools)
 	}
 }
 
@@ -263,6 +303,106 @@ func TestRealtimeClientSecretPostsToOpenAI(t *testing.T) {
 	}
 }
 
+func TestRealtimeClientSecretRetriesTransientEOF(t *testing.T) {
+	attempts := 0
+	requestBodies := []string{}
+	client := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			attempts++
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatalf("read request body: %v", err)
+			}
+			requestBodies = append(requestBodies, string(body))
+			if attempts == 1 {
+				return nil, io.EOF
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"client_secret":{"value":"ek_retry"},"expires_at":123}`)),
+				Request:    request,
+			}, nil
+		}),
+	}
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		HTTPClient: client,
+		OpenAI: appconfig.OpenAIConfig{
+			APIKey:                   "test-key",
+			BaseURL:                  "https://api.openai.com/v1",
+			RealtimeClientSecretsURL: "https://api.openai.com/v1/realtime/client_secrets",
+			RealtimeSDPURL:           "https://api.openai.com/v1/realtime/calls",
+			RealtimeModel:            "gpt-realtime-2",
+			RealtimeReasoningEffort:  "high",
+			RealtimeVoice:            "marin",
+			RealtimeTurnDetection:    "semantic_vad",
+			RealtimeSessionSchema:    "realtime-2",
+			BotName:                  "Meeting Avatar Bot",
+		},
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, realtimeRequest(http.MethodPost, "/realtime/client-secret", `{"safetyIdentifier":"operator-retry"}`))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 after retry: %s", response.Code, response.Body.String())
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want first EOF plus successful retry", attempts)
+	}
+	if len(requestBodies) != 2 || requestBodies[0] == "" || requestBodies[0] != requestBodies[1] {
+		t.Fatalf("requestBodies = %#v, want retry with identical non-empty payload", requestBodies)
+	}
+	var body map[string]any
+	decodeRealtimeBody(t, response.Body.String(), &body)
+	if body["mintAttempts"] != float64(2) {
+		t.Fatalf("body = %#v, want mintAttempts=2", body)
+	}
+	secret := body["client_secret"].(map[string]any)
+	if secret["value"] != "ek_retry" {
+		t.Fatalf("client_secret = %#v, want retry response", secret)
+	}
+}
+
+func TestRealtimeClientSecretReturnsBadGatewayAfterTransientRetryExhaustion(t *testing.T) {
+	attempts := 0
+	client := &http.Client{
+		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			attempts++
+			return nil, io.EOF
+		}),
+	}
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		HTTPClient: client,
+		OpenAI: appconfig.OpenAIConfig{
+			APIKey:                   "test-key",
+			BaseURL:                  "https://api.openai.com/v1",
+			RealtimeClientSecretsURL: "https://api.openai.com/v1/realtime/client_secrets",
+			RealtimeSDPURL:           "https://api.openai.com/v1/realtime/calls",
+			RealtimeModel:            "gpt-realtime-2",
+			RealtimeReasoningEffort:  "high",
+			RealtimeVoice:            "marin",
+			RealtimeTurnDetection:    "semantic_vad",
+			RealtimeSessionSchema:    "realtime-2",
+			BotName:                  "Meeting Avatar Bot",
+		},
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, realtimeRequest(http.MethodPost, "/realtime/client-secret", `{}`))
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 after retry exhaustion: %s", response.Code, response.Body.String())
+	}
+	if attempts != realtimeClientSecretMaxAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, realtimeClientSecretMaxAttempts)
+	}
+	var body map[string]any
+	decodeRealtimeBody(t, response.Body.String(), &body)
+	errorEnvelope := body["error"].(map[string]any)
+	if errorEnvelope["message"] != "mint realtime client secret failed" {
+		t.Fatalf("error = %#v, want handler error envelope", errorEnvelope)
+	}
+}
+
 func TestRealtimeClientSecretUpstreamError(t *testing.T) {
 	t.Parallel()
 
@@ -299,6 +439,12 @@ func TestRealtimeClientSecretUpstreamError(t *testing.T) {
 	if detail["raw"] != "not json" {
 		t.Fatalf("detail = %#v, want raw body", detail)
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }
 
 func TestRealtimeWorkspaceToolsExposeCurrentUserAndNow(t *testing.T) {
@@ -476,19 +622,34 @@ func TestRealtimeDemoSurfaceToolsUseBridge(t *testing.T) {
 		Store:        NewDemoSessionStore(),
 		Observations: NewDemoObservationBus(),
 	}
-	router := newRealtimeTestRouterWithDemoBridge(t, appconfig.OpenAIConfig{}, bridge)
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		OpenAI:           appconfig.OpenAIConfig{},
+		DemoBridge:       bridge,
+		DemoSurface: appconfig.DemoSurfaceConfig{
+			Enabled:             true,
+			ExposeRealtimeTools: true,
+			Adapter:             "fake",
+			RootDir:             rootDir,
+			DryRun:              true,
+			AllowActiveControl:  true,
+		},
+	})
 
-	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","url":"https://example.test/demo","goal":"show it"}`, http.StatusOK)
+	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/open_shared_browser_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","url":"https://example.test/demo","goal":"show it"}`, http.StatusOK)
 	if startBody["ok"] != true || startBody["session_id"] != "demo_tool" || !strings.Contains(stringFromAny(startBody["observation_context"]), "Demo page opened") {
 		t.Fatalf("start body = %#v, want demo observation", startBody)
 	}
 
-	controlBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","action":"click","text":"Start snake"}`, http.StatusOK)
+	controlBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_browser_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","action":"click","text":"Start snake"}`, http.StatusOK)
 	if controlBody["ok"] != true || stringFromAny(controlBody["status"]) != realtimeDemoBridgeStatusUpdated || !strings.Contains(stringFromAny(controlBody["observation_context"]), "already shared browser window") {
 		t.Fatalf("control body = %#v, want updated demo observation", controlBody)
 	}
 
-	cancelBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/cancel_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","reason":"done"}`, http.StatusOK)
+	cancelBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/stop_shared_browser_surface", `{"session_id":"meet_session","demo_session_id":"demo_tool","reason":"done"}`, http.StatusOK)
 	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
 		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
 	}
@@ -499,13 +660,17 @@ func TestRealtimeDemoSurfaceToolsDefaultOff(t *testing.T) {
 	t.Parallel()
 
 	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{})
-	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_off","url":"https://example.test/demo","goal":"show it"}`, http.StatusServiceUnavailable)
-	if startBody["ok"] != false || startBody["error"] != errRealtimeDemoBridgeUnavailable.Error() {
-		t.Fatalf("start body = %#v, want demo bridge unavailable", startBody)
+	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/open_shared_browser_surface", `{"session_id":"meet_session","demo_session_id":"demo_off","url":"https://example.test/demo","goal":"show it"}`, http.StatusServiceUnavailable)
+	if startBody["ok"] != false || startBody["error"] != "demo_surface_tool_not_exposed" {
+		t.Fatalf("start body = %#v, want hidden demo tool rejected", startBody)
+	}
+	deprecatedBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_old","url":"https://example.test/demo","goal":"show it"}`, http.StatusGone)
+	if deprecatedBody["ok"] != false || deprecatedBody["error"] != "deprecated_demo_surface_tool" {
+		t.Fatalf("deprecated body = %#v, want deprecated demo tool rejected", deprecatedBody)
 	}
 }
 
-func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
+func TestRealtimeDemoSurfaceEnabledDoesNotExposeForegroundToolsByDefault(t *testing.T) {
 	t.Parallel()
 
 	rootDir := t.TempDir()
@@ -529,17 +694,67 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	})
 
 	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
-	if !toolNamesInclude(configBody["tools"].([]any), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "share_existing_app_window", "control_shared_app_window") {
+	demoTools := []string{"open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface"}
+	if toolNamesInclude(configBody["tools"].([]any), demoTools...) {
+		t.Fatalf("tools = %#v, demo surface bridge must not expose browser tools without explicit opt-in", configBody["tools"])
+	}
+	session := configBody["session"].(map[string]any)
+	if toolNamesInclude(session["tools"].([]any), demoTools...) {
+		t.Fatalf("session.tools = %#v, demo surface bridge must not expose browser tools without explicit opt-in", session["tools"])
+	}
+	demoSurface := configBody["demoSurface"].(map[string]any)
+	if demoSurface["enabled"] != true || demoSurface["configured"] != true || demoSurface["toolsExposed"] != false {
+		t.Fatalf("demoSurface = %#v, want bridge enabled but foreground tools hidden", demoSurface)
+	}
+
+	aliasBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/open_shared_browser_surface", `{"session_id":"meet_session","demo_session_id":"demo_alias_hidden","url":"https://example.test/demo","goal":"show it"}`, http.StatusServiceUnavailable)
+	if aliasBody["ok"] != false || aliasBody["error"] != "demo_surface_tool_not_exposed" {
+		t.Fatalf("alias body = %#v, want hidden realtime demo alias rejected", aliasBody)
+	}
+	canonicalBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_canonical_hidden","url":"https://example.test/demo","goal":"show it"}`, http.StatusGone)
+	if canonicalBody["ok"] != false || canonicalBody["error"] != "deprecated_demo_surface_tool" {
+		t.Fatalf("canonical body = %#v, want deprecated canonical demo tool rejected", canonicalBody)
+	}
+
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
+}
+
+func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: rootDir,
+		InternalAuthKey:  "secret-key",
+		Pipeline:         postmeeting.NewPipeline(rootDir),
+		OpenAI: appconfig.OpenAIConfig{
+			RealtimeModel: "gpt-realtime-2",
+			BotName:       "Meeting Avatar Bot",
+		},
+		MeetRunner: fakeMeetRunner{},
+		DemoSurface: appconfig.DemoSurfaceConfig{
+			Enabled:              true,
+			ExposeRealtimeTools:  true,
+			Adapter:              "fake",
+			RootDir:              rootDir + "/demo-surfaces",
+			URLAllowlistPatterns: []string{"https://example.test/"},
+			DryRun:               true,
+		},
+	})
+
+	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
+	if !toolNamesInclude(configBody["tools"].([]any), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "share_existing_app_window", "kwwk_computer_use", "control_shared_app_window") {
 		t.Fatalf("tools = %#v, want demo surface tools when flag enabled", configBody["tools"])
 	}
 	demoSurface := configBody["demoSurface"].(map[string]any)
-	if demoSurface["enabled"] != true || demoSurface["toolsExposed"] != true || demoSurface["configured"] != true {
+	if demoSurface["enabled"] != true || demoSurface["toolsExposed"] != true || demoSurface["configured"] != true || demoSurface["exposeRealtimeTools"] != true {
 		t.Fatalf("demoSurface = %#v, want enabled configured status", demoSurface)
 	}
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
 
-	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","url":"https://example.test/demo","goal":"show it"}`, http.StatusOK)
+	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/open_shared_browser_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","url":"https://example.test/demo","goal":"show it"}`, http.StatusOK)
 	if startBody["ok"] != true || startBody["session_id"] != "demo_flag" {
 		t.Fatalf("start body = %#v, want successful demo session", startBody)
 	}
@@ -547,9 +762,14 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 		t.Fatalf("start body = %#v, want observation context from fake demo loop", startBody)
 	}
 
-	cancelBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/cancel_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","reason":"done"}`, http.StatusOK)
+	cancelBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/stop_shared_browser_surface", `{"session_id":"meet_session","demo_session_id":"demo_flag","reason":"done"}`, http.StatusOK)
 	if cancelBody["ok"] != true || stringFromAny(cancelBody["status"]) != realtimeDemoBridgeStatusStopped {
 		t.Fatalf("cancel body = %#v, want stopped", cancelBody)
+	}
+
+	deprecatedBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_old_exposed","url":"https://example.test/demo","goal":"show it"}`, http.StatusGone)
+	if deprecatedBody["ok"] != false || deprecatedBody["error"] != "deprecated_demo_surface_tool" {
+		t.Fatalf("deprecated body = %#v, want deprecated canonical demo tool rejected even when exposed", deprecatedBody)
 	}
 
 	postCancelBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
@@ -583,373 +803,53 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	}
 }
 
-func TestRealtimeDemoExecutionStartsWorkerSurfaceAndApprovalGate(t *testing.T) {
+type recordingRealtimeTextTurnRunner struct {
+	fakeMeetRunner
+	input meetrunner.RealtimeTextTurnInput
+	calls int
+}
+
+func (r *recordingRealtimeTextTurnRunner) RequestRealtimeTextTurn(_ context.Context, input meetrunner.RealtimeTextTurnInput) (meetrunner.RealtimeTextTurnResult, error) {
+	r.input = input
+	r.calls++
+	return meetrunner.RealtimeTextTurnResult{
+		"ok":         true,
+		"source":     "fake_realtime_text_turn",
+		"session_id": input.SessionID,
+		"text":       input.Text,
+	}, nil
+}
+
+func TestRealtimeTextTurnRouteProxiesToActiveJoinSession(t *testing.T) {
 	t.Parallel()
 
-	rootDir := t.TempDir()
-	runner := &fakeDemoCodexRunner{
-		startJob: agentrunner.Job{
-			ID:       "job_snake_demo",
-			Provider: "codex",
-			Status:   agentrunner.StatusCompleted,
-			Result:   `{"status":"completed","summary":"Snake page ready","demo_url":"https://example.test/snake/final","files_changed":["snake/index.html"],"needs_approval":["close issue after human approval"]}`,
-		},
-	}
+	runner := &recordingRealtimeTextTurnRunner{}
 	router := newRealtimeTestRouterWithConfig(t, Config{
 		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
-		ArtifactsRootDir: rootDir,
-		InternalAuthKey:  "secret-key",
-		Pipeline:         postmeeting.NewPipeline(rootDir),
-		OpenAI: appconfig.OpenAIConfig{
-			RealtimeModel:          "gpt-realtime-2",
-			BotName:                "Meeting Avatar Bot",
-			CurrentUserEnglishName: "Peng Xiao",
-		},
-		MeetRunner: fakeMeetRunner{},
-		Runner:     runner,
-		DemoSurface: appconfig.DemoSurfaceConfig{
-			Enabled:              true,
-			Mode:                 "safe",
-			Adapter:              "fake",
-			RootDir:              rootDir + "/demo-surfaces",
-			URLAllowlistPatterns: []string{"https://example.test/"},
-			DryRun:               true,
-		},
-	})
-
-	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
-	if !toolNamesInclude(configBody["tools"].([]any), "create_shared_workspace") {
-		t.Fatalf("tools = %#v, want demo execution tool when demo surface enabled", configBody["tools"])
-	}
-	if !strings.Contains(stringFromAny(configBody["instructions"]), "做一个贪吃蛇") ||
-		!strings.Contains(stringFromAny(configBody["instructions"]), "create a shared workspace") ||
-		!strings.Contains(stringFromAny(configBody["instructions"]), "共享 VS Code 屏幕") ||
-		!strings.Contains(stringFromAny(configBody["instructions"]), "把 Pencil 共享一下") ||
-		!strings.Contains(stringFromAny(configBody["instructions"]), "用编辑器演示") {
-		t.Fatalf("instructions = %q, want semantic shared-workspace routing examples", stringFromAny(configBody["instructions"]))
-	}
-
-	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"install_screen_share_bridge":true}`, http.StatusOK)
-
-	startBody := performRealtimeJSON(t, router, http.MethodPost, "/tools/create_shared_workspace", `{"session_id":"meet_session","demo_session_id":"snake_demo","task":"做一个贪吃蛇，然后给我看屏幕，不要先讲规划","task_url":"https://example.test/tasks/snake","demo_url":"https://example.test/tasks/snake","issue_id":"MOCK-1","request_issue_close":true,"user_instruction":"短一点，进度走屏幕"}`, http.StatusOK)
-	if startBody["ok"] != true || stringFromAny(startBody["status"]) != realtimeDemoExecutionStatusStarted {
-		t.Fatalf("start body = %#v, want started demo execution", startBody)
-	}
-	approval := startBody["approval"].(map[string]any)
-	if approval["required"] != true || approval["operation"] != "close_issue" || approval["reason"] != "external_write_approval_required" {
-		t.Fatalf("approval = %#v, want external close approval gate", approval)
-	}
-	if startBody["completion_demo"] != nil || startBody["report"] != nil {
-		t.Fatalf("start body = %#v, want async worker completion outside immediate tool result", startBody)
-	}
-	if !strings.Contains(stringFromAny(startBody["observation_context"]), "fake kwwk open_url observation") {
-		t.Fatalf("start body = %#v, want initial demo observation", startBody)
-	}
-	if runner.startCount != 1 || !runner.startInput.AllowCodeChanges || runner.startInput.Mode != "code" {
-		t.Fatalf("runner input = %#v count=%d, want code-capable worker", runner.startInput, runner.startCount)
-	}
-	if runner.startInput.Context["session_kind"] != agentrunner.SessionKindDemoExecution ||
-		runner.startInput.Context["session_role"] != agentrunner.SessionRoleDemoExecution {
-		t.Fatalf("runner context = %#v, want demo execution capabilities", runner.startInput.Context)
-	}
-	preferences := runner.startInput.Context["user_preferences"].(map[string]any)
-	if preferences["no_planning"] != true || preferences["concise"] != true ||
-		preferences["progress_channel"] != "demo_surface" || preferences["preferred_spoken_name"] != "Peng Xiao" {
-		t.Fatalf("preferences = %#v, want user preference snapshot", preferences)
-	}
-	if !strings.Contains(runner.startInput.Task, "Do the requested task; do not return a plan-only answer.") ||
-		!strings.Contains(runner.startInput.Task, "needs_approval") ||
-		!strings.Contains(runner.startInput.Task, "做一个贪吃蛇") {
-		t.Fatalf("worker task = %q, missing execution contract", runner.startInput.Task)
-	}
-	waitForDemoTrailEntry(t, router, "snake_demo", "https://example.test/snake/final", "demo_execution_worker_started")
-}
-
-func TestServiceShutdownCancelsDemoExecutionCompletion(t *testing.T) {
-	t.Parallel()
-
-	rootDir := t.TempDir()
-	runner := &fakeDemoCodexRunner{
-		startJob: agentrunner.Job{
-			ID:       "job_slow_demo",
-			Provider: "codex",
-			Status:   agentrunner.StatusRunning,
-		},
-	}
-	service := NewService(Config{
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
-		ArtifactsRootDir: rootDir,
-		InternalAuthKey:  "secret-key",
-		Pipeline:         postmeeting.NewPipeline(rootDir),
-		OpenAI: appconfig.OpenAIConfig{
-			RealtimeModel: "gpt-realtime-2",
-			BotName:       "Meeting Avatar Bot",
-		},
-		MeetRunner: fakeMeetRunner{},
-		Runner:     runner,
-		DemoBridge: &RealtimeDemoBridge{
-			Mode:      "safe",
-			Lifecycle: NewDemoWorkspaceLifecycle(rootDir+"/demo-surfaces", demoWorkspaceNoopLauncher{}),
-			Controller: DemoController{
-				Client: NewFakeDemoKWWKClient(),
-				Safety: DemoSafetyPolicy{
-					URLAllowlistPatterns: []string{"https://example.test/"},
-					DryRun:               true,
-				},
-			},
-			Presenter:    fakeDemoSurfacePresenter{},
-			Store:        NewPersistentDemoSessionStore(rootDir + "/demo-surfaces/feedback"),
-			Observations: NewDemoObservationBus(),
-		},
-	})
-
-	result, err := service.StartRealtimeDemoExecution(context.Background(), RealtimeDemoExecutionStartRequest{
-		MeetingSessionID: "meet_session",
-		DemoSessionID:    "slow_demo",
-		Task:             "做一个慢任务，然后给我看屏幕",
-		DemoURL:          "https://example.test/tasks/slow",
-	})
-	if err != nil || !result.OK || result.Status != realtimeDemoExecutionStatusStarted {
-		t.Fatalf("StartRealtimeDemoExecution() = %#v, %v; want started", result, err)
-	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := service.Shutdown(shutdownCtx); err != nil {
-		t.Fatalf("Shutdown() error = %v", err)
-	}
-	trail, ok := service.DemoSurfaceTrail("slow_demo")
-	if !ok {
-		t.Fatalf("DemoSurfaceTrail(slow_demo) missing")
-	}
-	if !demoTrailHasReason(trail, "demo_execution_completion_cancelled") {
-		t.Fatalf("trail = %#v, want completion cancellation audit", trail)
-	}
-}
-
-func TestRealtimeDemoSurfaceRuntimeFlagEnablesCodexAdapterSmoke(t *testing.T) {
-	t.Parallel()
-
-	rootDir := t.TempDir()
-	runner := &fakeDemoCodexRunner{
-		startJob: agentrunner.Job{
-			ID:       "job_demo_codex_runtime",
-			Provider: "codex",
-			Status:   agentrunner.StatusCompleted,
-			Result:   `{"summary":"Codex browser-use opened the demo page and saw the launch checklist.","confidence":0.88}`,
-		},
-	}
-	router := newRealtimeTestRouterWithConfig(t, Config{
-		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
-		ArtifactsRootDir: rootDir,
-		InternalAuthKey:  "secret-key",
-		Pipeline:         postmeeting.NewPipeline(rootDir),
-		OpenAI: appconfig.OpenAIConfig{
-			RealtimeModel: "gpt-realtime-2",
-			BotName:       "Meeting Avatar Bot",
-		},
-		MeetRunner: fakeMeetRunner{},
-		Runner:     runner,
-		DemoSurface: appconfig.DemoSurfaceConfig{
-			Enabled:              true,
-			Adapter:              "codex",
-			RootDir:              rootDir + "/demo-surfaces",
-			URLAllowlistPatterns: []string{"https://example.test/"},
-			DryRun:               true,
-		},
-	})
-
-	configResponse := httptest.NewRecorder()
-	router.ServeHTTP(configResponse, realtimeRequest(http.MethodGet, "/realtime/config", ""))
-	if configResponse.Code != http.StatusOK {
-		t.Fatalf("config status = %d: %s", configResponse.Code, configResponse.Body.String())
-	}
-	var configBody map[string]any
-	decodeRealtimeBody(t, configResponse.Body.String(), &configBody)
-	demoSurface := configBody["demoSurface"].(map[string]any)
-	if demoSurface["enabled"] != true || demoSurface["adapter"] != "codex" {
-		t.Fatalf("demoSurface = %#v, want enabled codex adapter", demoSurface)
-	}
-
-	join := httptest.NewRecorder()
-	router.ServeHTTP(join, realtimeRequest(http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`))
-	if join.Code != http.StatusOK {
-		t.Fatalf("join status = %d: %s", join.Code, join.Body.String())
-	}
-
-	start := httptest.NewRecorder()
-	router.ServeHTTP(start, realtimeRequest(http.MethodPost, "/tools/start_demo_surface", `{"session_id":"meet_session","demo_session_id":"demo_codex_flag","url":"https://example.test/demo","goal":"show it"}`))
-	if start.Code != http.StatusOK {
-		t.Fatalf("start status = %d: %s", start.Code, start.Body.String())
-	}
-	var startBody map[string]any
-	decodeRealtimeBody(t, start.Body.String(), &startBody)
-	if startBody["ok"] != true || startBody["session_id"] != "demo_codex_flag" {
-		t.Fatalf("start body = %#v, want successful codex demo session", startBody)
-	}
-	if !strings.Contains(stringFromAny(startBody["observation_context"]), "Codex browser-use opened") {
-		t.Fatalf("start body = %#v, want observation context from codex adapter", startBody)
-	}
-	if runner.startCount != 1 || !strings.Contains(runner.startInput.Task, "browser-use") {
-		t.Fatalf("runner start = %d input=%#v, want codex browser-use job", runner.startCount, runner.startInput)
-	}
-}
-
-func TestResolveSpeakerIdentityFusesSlackAndPeopleMemory(t *testing.T) {
-	t.Parallel()
-
-	slackAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/users.list" {
-			t.Fatalf("slack path = %q, want /users.list", r.URL.Path)
-		}
-		if r.Header.Get("Authorization") != "Bearer xoxb-test" {
-			t.Fatalf("Authorization = %q, want bot token", r.Header.Get("Authorization"))
-		}
-		_, _ = w.Write([]byte(`{
-			"ok": true,
-			"members": [
-				{
-					"id": "U123",
-					"team_id": "T123",
-					"name": "peng",
-					"real_name": "Peng Xiao",
-					"profile": {
-						"display_name": "Peng",
-						"real_name": "Peng Xiao",
-						"email": "peng@example.com"
-					}
-				}
-			],
-			"response_metadata": {"next_cursor": ""}
-		}`))
-	}))
-	defer slackAPI.Close()
-
-	service := NewService(Config{
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
 		ArtifactsRootDir: t.TempDir(),
-		InternalAuthKey:  "secret-key",
-		Pipeline:         postmeeting.NewPipeline(t.TempDir()),
-		OpenAI: appconfig.OpenAIConfig{
-			CurrentUserName:        "Peng Xiao",
-			CurrentUserEnglishName: "Peng Xiao",
-			CurrentUserEmail:       "peng@example.com",
-			CurrentUserAliases:     []string{"彭潇"},
-		},
-		SlackBotToken:   "xoxb-test",
-		SlackAPIBaseURL: slackAPI.URL,
+		MeetRunner:       runner,
 	})
-	if err := service.upsertIdentityRecord(context.Background(), IdentityUserRecord{
-		ID:                  "person:peng",
-		CanonicalName:       "Peng Xiao",
-		PreferredName:       "Peng Xiao",
-		HonorificPreference: "肖鹏",
-		Role:                "current_user",
-		Aliases:             []string{"老大"},
-		Email:               "peng@example.com",
-		Sources:             []string{"people_memory"},
-	}); err != nil {
-		t.Fatalf("seed people memory: %v", err)
-	}
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
 
-	identity := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
-		DisplayName: "彭潇",
-		Source:      "meet_dom",
-	})
-	if identity["canonical_name"] != "Peng Xiao" || identity["preferred_name"] != "肖鹏" || identity["is_current_user"] != true {
-		t.Fatalf("identity = %#v, want fused current user with honorific", identity)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/realtime/text-turn", `{"text":"分享 Chrome 浏览器窗口","instructions":"force a real tool call"}`, http.StatusOK)
+	if body["ok"] != true || body["source"] != "fake_realtime_text_turn" {
+		t.Fatalf("body = %#v, want proxied realtime text turn", body)
 	}
-	if identity["confidence"] != "high" || identity["source_match_count"] != 3 {
-		t.Fatalf("identity = %#v, want high confidence from three sources", identity)
+	if runner.calls != 1 {
+		t.Fatalf("runner calls = %d, want 1", runner.calls)
 	}
-	cross := identity["cross_service_ids"].(map[string]any)
-	if cross["slack_user_id"] != "U123" || cross["email"] != "peng@example.com" {
-		t.Fatalf("cross_service_ids = %#v, want Slack + email mapping", cross)
+	if runner.input.SessionID != "meet_session" || runner.input.Text != "分享 Chrome 浏览器窗口" || runner.input.Instructions != "force a real tool call" {
+		t.Fatalf("runner input = %#v", runner.input)
 	}
 }
 
-func TestResolveSpeakerIdentityUsesCalendarAttendees(t *testing.T) {
+func TestRealtimeTextTurnRouteRequiresText(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(Config{
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
-		ArtifactsRootDir: t.TempDir(),
-		InternalAuthKey:  "secret-key",
-		Pipeline:         postmeeting.NewPipeline(t.TempDir()),
-		OpenAI: appconfig.OpenAIConfig{
-			CurrentUserName:        "Peng Xiao",
-			CurrentUserEnglishName: "Peng Xiao",
-		},
-	})
-	start := "2026-05-17T09:00:00Z"
-	end := "2026-05-17T10:00:00Z"
-	if _, err := service.ScheduleMeetdMeeting(context.Background(), MeetdMeetingBrief{
-		EventID:   "event-1",
-		MeetURL:   "https://meet.google.com/abc-defg-hij",
-		Title:     "Calendar source fixture",
-		StartAt:   start,
-		EndAt:     end,
-		Attendees: []string{"Li Si <lisi@example.com>"},
-		Status:    "active",
-	}); err != nil {
-		t.Fatalf("schedule meeting: %v", err)
-	}
-
-	identity := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
-		DisplayName: "Li Si",
-		Source:      "caption",
-		MeetingURL:  "https://meet.google.com/abc-defg-hij",
-	})
-	if identity["canonical_name"] != "Li Si" || identity["role"] != "external" || identity["confidence"] != "medium" {
-		t.Fatalf("identity = %#v, want calendar attendee match", identity)
-	}
-	cross := identity["cross_service_ids"].(map[string]any)
-	emails := cross["calendar_emails"].([]string)
-	if len(emails) != 1 || emails[0] != "lisi@example.com" {
-		t.Fatalf("cross_service_ids = %#v, want calendar email", cross)
-	}
-}
-
-func TestResolveSpeakerIdentityDisambiguatesAndFailsClosed(t *testing.T) {
-	t.Parallel()
-
-	service := NewService(Config{
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
-		ArtifactsRootDir: t.TempDir(),
-		InternalAuthKey:  "secret-key",
-		Pipeline:         postmeeting.NewPipeline(t.TempDir()),
-		OpenAI: appconfig.OpenAIConfig{
-			CurrentUserName: "Owner",
-		},
-	})
-	for _, record := range []IdentityUserRecord{
-		{ID: "person:zhang-san", CanonicalName: "张三", Aliases: []string{"Zhang San"}, Sources: []string{"people_memory"}},
-		{ID: "person:zhang-shan", CanonicalName: "张山", Aliases: []string{"Zhang Shan"}, Sources: []string{"people_memory"}},
-		{ID: "person:alex-a", CanonicalName: "Alex A", Aliases: []string{"Alex"}, Sources: []string{"people_memory"}},
-		{ID: "person:alex-b", CanonicalName: "Alex B", Aliases: []string{"Alex"}, Sources: []string{"people_memory"}},
-	} {
-		if err := service.upsertIdentityRecord(context.Background(), record); err != nil {
-			t.Fatalf("seed identity %s: %v", record.ID, err)
-		}
-	}
-
-	resolved := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
-		DisplayName: "Zhang San",
-		Source:      "meet_dom",
-	})
-	if resolved["canonical_name"] != "张三" || resolved["confidence"] != "medium" {
-		t.Fatalf("resolved = %#v, want exact Zhang San match", resolved)
-	}
-
-	ambiguous := service.resolveSpeakerIdentity(context.Background(), resolveSpeakerIdentityInput{
-		DisplayName: "Alex",
-		Source:      "meet_dom",
-	})
-	if ambiguous["canonical_name"] != "Alex" || ambiguous["confidence"] != "low" || ambiguous["resolver"] != "identity_resolver_v2" {
-		t.Fatalf("ambiguous = %#v, want low-confidence fallback", ambiguous)
+	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{})
+	body := performRealtimeJSON(t, router, http.MethodPost, "/realtime/text-turn", `{}`, http.StatusBadRequest)
+	if body["ok"] != false || body["error"] != "text_required" {
+		t.Fatalf("body = %#v, want text_required", body)
 	}
 }
 

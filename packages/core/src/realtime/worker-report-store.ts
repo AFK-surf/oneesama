@@ -19,6 +19,7 @@ export interface WorkerReport {
   updatedAt: string;
   deliveredToRealtime: boolean;
   deliveredToSlack: boolean;
+  realtimeSuppressed?: boolean;
   [key: string]: unknown;
 }
 
@@ -48,6 +49,7 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
       updatedAt: now,
       deliveredToRealtime: false,
       deliveredToSlack: false,
+      realtimeSuppressed: Boolean(job.realtimeSuppressed),
     };
     jobs.set(next.id, next);
     return next;
@@ -84,7 +86,11 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
     const ready: WorkerReport[] = [];
     for (const job of list()) {
       if (ready.length >= limit) break;
-      if (!["completed", "failed", "timeout"].includes(job.status) || job.deliveredToRealtime) {
+      if (
+        !["completed", "failed", "timeout"].includes(job.status) ||
+        job.deliveredToRealtime ||
+        job.realtimeSuppressed
+      ) {
         continue;
       }
       if (minTime && Date.parse(String(job.createdAt || job.updatedAt || "")) < minTime) {
@@ -92,12 +98,16 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
       }
       const suppressChannel = realtimeSuppressChannel(job, sessionId);
       if (suppressChannel) {
-        if (markDelivered) {
-          update(job.id, {
-            deliveredToRealtime: true,
-            realtimeDelivery: { channel: suppressChannel, deliveredAt: new Date().toISOString() },
-          });
-        }
+        markRealtimeSuppressed(job.id, suppressChannel);
+        continue;
+      }
+      if (!markDelivered) {
+        const attempt = {
+          token: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          sessionId,
+        };
+        ready.push(update(job.id, { realtimeDeliveryAttempt: attempt }) || job);
         continue;
       }
       ready.push(job);
@@ -126,13 +136,57 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
     return ready;
   }
 
+  function markRealtimeDelivered(id: string, delivery: Record<string, unknown> = {}) {
+    return update(id, {
+      deliveredToRealtime: true,
+      realtimeSuppressed: false,
+      realtimeDeliveryAttempt: null,
+      realtimeDelivery: {
+        ...delivery,
+        deliveredAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  function markRealtimeSuppressed(
+    id: string,
+    channel: string,
+    delivery: Record<string, unknown> = {},
+  ) {
+    return update(id, {
+      deliveredToRealtime: false,
+      realtimeSuppressed: true,
+      realtimeDeliveryAttempt: null,
+      realtimeDelivery: {
+        ...delivery,
+        channel,
+        suppressed: true,
+        reason: realtimeSuppressReason(channel),
+        suppressedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   function realtimeSuppressChannel(job: WorkerReport, sessionId = "") {
     if (!isRealtimeMeetingScoped(job)) return "realtime_non_meeting_suppressed";
     const targetSessionId = workerMeetingSessionId(job);
+    if (sessionId && !targetSessionId) {
+      return "realtime_session_missing_suppressed";
+    }
     if (sessionId && targetSessionId && targetSessionId !== sessionId) {
       return "realtime_session_mismatch_suppressed";
     }
     return "";
+  }
+
+  function realtimeSuppressReason(channel: string) {
+    if (channel === "realtime_session_missing_suppressed") {
+      return "worker_result_session_missing";
+    }
+    if (channel === "realtime_session_mismatch_suppressed") {
+      return "worker_result_session_mismatch";
+    }
+    return channel || "worker_result_suppressed";
   }
 
   function isRealtimeMeetingScoped(job: WorkerReport) {
@@ -191,6 +245,8 @@ export function createWorkerReportStore(options: WorkerReportStoreOptions = {}) 
     list,
     pollReadyForRealtime,
     pollReadyForSlack,
+    markRealtimeDelivered,
+    markRealtimeSuppressed,
     provider: jobs.provider,
     path: jobs.path,
     collection: jobs.collection,

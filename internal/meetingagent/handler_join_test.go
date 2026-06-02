@@ -71,6 +71,7 @@ func (fakeMeetRunner) PrepareGoogleMeet(_ context.Context, input meetrunner.Prep
 			MeetAudioBackend:           input.MeetAudioBackend,
 			InstallRealtimeBridge:      input.InstallRealtimeBridge,
 			RealtimeBridgeMode:         input.RealtimeBridgeMode,
+			RealtimeRuntimePlacement:   input.RealtimeRuntimePlacement,
 			AutoConnectRealtime:        input.AutoConnectRealtime,
 			SendRealtimeSessionUpdate:  input.SendRealtimeSessionUpdate,
 			IncludeParticipantAudio:    input.IncludeParticipantAudio,
@@ -283,6 +284,34 @@ func TestHandleJoinLifecycle(t *testing.T) {
 	}
 	if strings.Contains(cleanStatusResponse.Body.String(), `"active"`) {
 		t.Fatalf("body = %s, want stopped session not exposed as active", cleanStatusResponse.Body.String())
+	}
+}
+
+func TestHandleJoinRejectsInlineRealtimePlacement(t *testing.T) {
+	t.Setenv("ONEESAMA_OPENAI_REALTIME_ALLOW_INLINE_MEET_SDK", "")
+	t.Setenv("MAB_OPENAI_REALTIME_ALLOW_INLINE_MEET_SDK", "")
+
+	router := newJoinTestRouter(t)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_inline_rejected","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"install_realtime_bridge":true,"realtime_runtime_placement":"inline"}`)
+	if joinResponse.Code != http.StatusBadRequest {
+		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
+	}
+	if !strings.Contains(joinResponse.Body.String(), "inline Realtime SDK on Meet has been removed") {
+		t.Fatalf("body = %s, want inline removal guard", joinResponse.Body.String())
+	}
+}
+
+func TestHandleJoinRejectsInlineRealtimePlacementDespiteStaleEmergencyOverride(t *testing.T) {
+	t.Setenv("ONEESAMA_OPENAI_REALTIME_ALLOW_INLINE_MEET_SDK", "1")
+	t.Setenv("MAB_OPENAI_REALTIME_ALLOW_INLINE_MEET_SDK", "")
+
+	router := newJoinTestRouter(t)
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_inline_stale_override","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true,"install_realtime_bridge":true,"realtime_runtime_placement":"inline"}`)
+	if joinResponse.Code != http.StatusBadRequest {
+		t.Fatalf("join status = %d, body = %s", joinResponse.Code, joinResponse.Body.String())
+	}
+	if !strings.Contains(joinResponse.Body.String(), "inline Realtime SDK on Meet has been removed") {
+		t.Fatalf("body = %s, want stale inline override rejected", joinResponse.Body.String())
 	}
 }
 

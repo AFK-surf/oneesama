@@ -49,23 +49,39 @@ func TestRealtimeForegroundToolInventoryRespectsDemoSurfaceGate(t *testing.T) {
 	}
 	for _, name := range []string{"open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface"} {
 		if !optional[name] {
-			t.Fatalf("optional demo-surface tool %q missing from enabled inventory", name)
+			t.Fatalf("optional demo-surface tool %q missing from exposed inventory", name)
 		}
 	}
 }
 
-func TestRealtimeForegroundToolInventoryHidesDeprecatedAliases(t *testing.T) {
+func TestRealtimeForegroundToolInventoryDoesNotCarryDeprecatedAliases(t *testing.T) {
 	inventory := RealtimeForegroundToolInventory(true)
 	classes := make(map[string]string, len(inventory))
 	for _, item := range inventory {
 		classes[item.Name] = item.Class
 	}
-	for _, name := range []string{"delegate_to_codex", "delegate_status"} {
+	for _, name := range []string{"delegate_to_codex", "delegate_status", "list_shareable_apps", "present_app_share"} {
 		if _, ok := classes[name]; ok {
-			t.Fatalf("deprecated alias %q is still exposed in foreground inventory", name)
+			t.Fatalf("deprecated alias %q is still present in foreground inventory", name)
+		}
+		if _, ok := realtimeForegroundToolInventoryByName[name]; ok {
+			t.Fatalf("deprecated alias %q is still present in inventory metadata", name)
 		}
 	}
 	if classes["delegate_to_worker"] != RealtimeToolClassStableForeground {
 		t.Fatalf("delegate_to_worker class = %q, want %q", classes["delegate_to_worker"], RealtimeToolClassStableForeground)
+	}
+}
+
+func TestRealtimeForegroundToolInventoryMetadataOnlyCoversCurrentSchema(t *testing.T) {
+	currentSchema := map[string]bool{}
+	for _, definition := range defaultRealtimeToolDefinitions() {
+		currentSchema[definition.Name] = true
+	}
+
+	for name := range realtimeForegroundToolInventoryByName {
+		if !currentSchema[name] {
+			t.Fatalf("non-foreground tool %q still has foreground inventory metadata", name)
+		}
 	}
 }

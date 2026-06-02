@@ -106,6 +106,16 @@ function bridgeFailureMatrix(bridge: any) {
   return bridge?.feedback?.failureMatrix || bridge?.failureMatrix || {};
 }
 
+function isSidecarMeetSurfacePlaceholder(bridge: any) {
+  const placement = String(bridge?.runtimePlacement || bridge?.realtimeRuntimePlacement || "");
+  const pageRole = String(bridge?.pageRole || bridge?.realtimePageRole || "");
+  return (
+    placement === "sidecar" &&
+    pageRole === "meet-surface" &&
+    (bridge?.agentRuntime?.sdkSuppressedOnMeetSurface === true || bridge?.sdkOwner === "sidecar")
+  );
+}
+
 function failureLevel(entry: any): HudSignal["level"] {
   if (!entry?.status) return "idle";
   if (entry.status === "blocked") return "blocked";
@@ -139,7 +149,7 @@ function toolStepLabel(name: unknown) {
   const text = String(name || "");
   if (text === "list_shareable_windows") return "列窗口";
   if (text === "share_existing_app_window") return "共享";
-  if (text === "control_shared_app_window") return "控制";
+  if (text === "kwwk_computer_use" || text === "control_shared_app_window") return "控制";
   if (text === "delegate_to_worker") return "后台";
   if (text === "worker_status") return "查进度";
   if (text === "read_meet_chat") return "读聊天";
@@ -171,9 +181,12 @@ function latestToolChain(bridge: any) {
 }
 
 function realtimeSignal(bridge: any, failures: any): HudSignal {
+  if (isSidecarMeetSurfacePlaceholder(bridge)) {
+    return { key: "rt", label: "连接", value: "", level: "idle" };
+  }
   const level = failureLevel(failures.realtimeConnection || failures.transport);
-  if (level === "blocked" || level === "warn") {
-    return { key: "rt", label: "连接", value: "卡住", level };
+  if (level === "blocked") {
+    return { key: "rt", label: "连接", value: "卡住", level: "blocked" };
   }
   const connected =
     bridge?.connected === true ||
@@ -181,13 +194,16 @@ function realtimeSignal(bridge: any, failures: any): HudSignal {
     bridge?.connection?.dataChannelReadyState === "open";
   return connected
     ? { key: "rt", label: "连接", value: "在线", level: "ok" }
-    : { key: "rt", label: "连接", value: "连接中", level: "warn" };
+    : { key: "rt", label: "连接", value: "", level: "idle" };
 }
 
 function audioSignal(bridge: any, failures: any): HudSignal {
+  if (isSidecarMeetSurfacePlaceholder(bridge)) {
+    return { key: "audio", label: "音频", value: "", level: "idle" };
+  }
   const level = failureLevel(failures.audioInput);
   if (level === "blocked") return { key: "audio", label: "音频", value: "卡住", level };
-  if (level === "warn") return { key: "audio", label: "音频", value: "接音频", level };
+  if (level === "warn") return { key: "audio", label: "音频", value: "", level: "idle" };
   const source = String(bridge?.connection?.currentRealtimeInputSource || "").trim();
   if (source.includes("recappi"))
     return { key: "audio", label: "音频", value: "有输入", level: "ok" };
@@ -196,8 +212,8 @@ function audioSignal(bridge: any, failures: any): HudSignal {
   return {
     key: "audio",
     label: "音频",
-    value: source ? "有输入" : "没音频",
-    level: source ? "ok" : "warn",
+    value: source ? "有输入" : "",
+    level: source ? "ok" : "idle",
   };
 }
 
@@ -220,28 +236,9 @@ function thinkingSignal(bridge: any, failures: any): HudSignal {
 }
 
 function speakingSignal(bridge: any, failures: any): HudSignal {
-  const level = failureLevel(failures.audioOutput);
-  if (level === "blocked") return { key: "speak", label: "说", value: "卡住", level };
-  if (level === "warn") {
-    const reason = String(failures.audioOutput?.reason || "");
-    const events = Number(bridge?.connection?.responseEvents || bridge?.responseEvents || 0);
-    if (reason === "waiting_for_model_response" && events === 0) {
-      return { key: "speak", label: "说", value: "没开口", level: "idle" };
-    }
-    return { key: "speak", label: "说", value: "没出声", level };
-  }
-  const avatarAudio = (window as any).MAB_AVATAR_AUDIO || {};
-  const output = avatarAudio.outputEnergy || {};
-  const rms = Number(output.rms || 0);
-  const recent = millisSinceIso(output.lastEnergyAt) < 1_500;
-  const threshold = Math.max(0.003, Number(output.thresholdRms || 0));
-  if (recent && rms >= threshold) {
-    return { key: "speak", label: "说", value: "在说", level: "active" };
-  }
-  if (output.observed || bridge?.feedback?.checks?.avatarAudioOutputObserved) {
-    return { key: "speak", label: "说", value: "可出声", level: "ok" };
-  }
-  return { key: "speak", label: "说", value: "安静", level: "idle" };
+  void bridge;
+  void failures;
+  return { key: "speak", label: "说", value: "", level: "idle" };
 }
 
 function toolSignal(bridge: any, failures: any): HudSignal {
@@ -292,7 +289,7 @@ function collectSignals(): HudSignal[] {
 }
 
 function shouldDrawHud(status: AvatarStatus | null, signals: HudSignal[]) {
-  return visibleCells(status, signals).length > 0;
+  return visibleCells(status, signals).length > 0 || getKWWKCursorSnapshot().visible;
 }
 
 function trimHudText(value: string, max = 72) {
@@ -306,16 +303,10 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
   if (!status || status.kind === "idle") return null;
   const text = trimHudText(status.text, 24);
   if (!text) return null;
+  if (/说话|讲话|开口|speaking|talk/i.test(text)) return null;
   if (status.kind === "thinking") {
     if (text === "等待输入" || /listening/i.test(text)) {
-      return {
-        key: "audio",
-        label: "听语音",
-        value: "",
-        level: "active",
-        color: CELL_COLORS.audio,
-        pulse: true,
-      };
+      return null;
     }
     return {
       key: "think",
@@ -347,16 +338,6 @@ function statusCell(status: AvatarStatus | null): HudCell | null {
     };
   }
   if (status.kind === "done") {
-    if (/说话|speaking|talk/i.test(text)) {
-      return {
-        key: "speak",
-        label: "在说",
-        value: "",
-        level: "active",
-        color: CELL_COLORS.speak,
-        pulse: true,
-      };
-    }
     return {
       key: "done",
       label: "完成",
@@ -487,7 +468,10 @@ export function createAvatarHud(options: {
     const signals = collectSignals();
     if (!shouldDrawHud(status, signals)) return;
 
+    drawKWWKCursorFeedback(ctx, config.canvasWidth, config.canvasHeight);
+
     const cells = visibleCells(status, signals);
+    if (cells.length === 0) return;
     const { x, y } = rect();
     const gap = 5;
 
@@ -505,6 +489,14 @@ export function createAvatarHud(options: {
   }
 
   (window as any).MAB_AVATAR_HUD_SIGNALS = collectSignals;
+  (window as any).MAB_AVATAR_HUD_VISIBLE_CELLS = () =>
+    visibleCells(avatarController.visibleStatus(), collectSignals());
+  installKWWKCursorFeedbackGlobals();
 
   return { rect, draw };
 }
+import {
+  drawKWWKCursorFeedback,
+  getKWWKCursorSnapshot,
+  installKWWKCursorFeedbackGlobals,
+} from "./hiyori-avatar-cursor-feedback.js";

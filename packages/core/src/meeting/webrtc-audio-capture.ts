@@ -55,6 +55,7 @@ async function runFfmpeg(args: string[]): Promise<void> {
 
 export function createWebRTCAudioCaptureSink(options: WebRTCAudioCaptureSinkOptions) {
   const base = options.basename || "webrtc-remote-audio";
+  const audioBase = options.basename || "audio";
   const state = {
     ok: true,
     enabled: true,
@@ -62,7 +63,7 @@ export function createWebRTCAudioCaptureSink(options: WebRTCAudioCaptureSinkOpti
     sessionId: options.sessionId,
     artifactsDir: options.artifactsDir,
     rawPath: join(options.artifactsDir, `${base}.webm`),
-    audioPath: join(options.artifactsDir, "audio.wav"),
+    audioPath: join(options.artifactsDir, `${audioBase}.wav`),
     mimeType: "",
     startedAt: "",
     stoppedAt: "",

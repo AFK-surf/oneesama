@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +63,9 @@ func TestLoadUsesDefaultsWithoutConfigFile(t *testing.T) {
 	if cfg.DemoSurface.Enabled {
 		t.Fatal("DemoSurface.Enabled = true, want default-off")
 	}
+	if cfg.DemoSurface.ExposeRealtimeTools {
+		t.Fatal("DemoSurface.ExposeRealtimeTools = true, want default hidden from Realtime")
+	}
 	if cfg.DemoSurface.Adapter != defaultDemoSurfaceAdapter || cfg.DemoSurface.RootDir != defaultDemoSurfaceRootDir || !cfg.DemoSurface.DryRun {
 		t.Fatalf("DemoSurface defaults = %#v, want fake adapter, default root, dry-run", cfg.DemoSurface)
 	}
@@ -70,6 +74,9 @@ func TestLoadUsesDefaultsWithoutConfigFile(t *testing.T) {
 	}
 	if cfg.AppControl.Provider != defaultAppControlProvider || cfg.AppControl.Timeout != defaultAppControlTimeout || cfg.AppControl.CodexFallback {
 		t.Fatalf("AppControl defaults = %#v, want KWWK provider with live-safe timeout and no Codex fallback", cfg.AppControl)
+	}
+	if cfg.OpenAI.RealtimeRuntimePlacement != "sidecar" {
+		t.Fatalf("OpenAI.RealtimeRuntimePlacement = %q, want sidecar default", cfg.OpenAI.RealtimeRuntimePlacement)
 	}
 	if len(cfg.Meetd.WebhookSecret) != 64 {
 		t.Fatalf("Meetd.WebhookSecret length = %d, want 64 hex chars", len(cfg.Meetd.WebhookSecret))
@@ -206,6 +213,27 @@ func TestLoadHonorsConfigPathOverride(t *testing.T) {
 	}
 	if !cfg.Slack.Memory.SemanticEnabled || cfg.Slack.Memory.SemanticIndexPath != "./semantic-memory.json" {
 		t.Fatalf("Slack.Memory = %#v, want semantic config", cfg.Slack.Memory)
+	}
+}
+
+func TestLoadRejectsRealtimeExposedDemoSurfaceWithDefaultFakeAdapter(t *testing.T) {
+	clearAmbientEnvOverrides(t)
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "realtime-demo-fake.json")
+	if err := os.WriteFile(configPath, []byte(`{
+  "demo_surface": {
+    "enabled": true,
+    "expose_realtime_tools": true
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv(oneesamaConfigEnvOverrideKey, configPath)
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "demo_surface.adapter must not be fake") {
+		t.Fatalf("Load() error = %v, want fake adapter rejection for Realtime-exposed demo surface", err)
 	}
 }
 

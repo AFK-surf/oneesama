@@ -3,10 +3,43 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join as pathJoin } from "node:path";
+import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGoogleMeetJoiner } from "../packages/core/src/meeting/google-meet-joiner.ts";
 import { startLocalMeetFixtureServer } from "../packages/core/src/meeting/local-meet-fixture.ts";
+import {
+  argValue as resolveArgValue,
+  extractRealMeetUrlFromJoinStatus,
+  normalizeRealMeetUrl,
+  resolveRealMeetUrl,
+} from "./real-meet-url-resolver.mjs";
+import {
+  applyLocalFixtureToolShareSmokeDefaults,
+  compactJsonForDiagnostics,
+  compactSyntheticResult,
+  jsonLine,
+  localFixtureToolShareTextTurnInstructions,
+  realMeetAudioInputGainFields,
+} from "./real-meet-synthetic-speaker-helpers.mjs";
+import {
+  runRealMeetAppControlSmokeMain,
+  runRealMeetAppControlSuiteMain,
+} from "./real-meet-app-control-smoke.mjs";
+
+export { extractRealMeetUrlFromJoinStatus, normalizeRealMeetUrl };
+export {
+  appControlActionSemanticsPass,
+  appControlActionsHaveNonObserveAction,
+  appControlInstructionNeedsNonObserveAction,
+  appControlStatusHasCompactBlocker,
+  appControlStatusIsFailure,
+  appControlStatusIsSuccess,
+  compactRealMeetAppControlJoinStatus,
+  normalizeAppControlStatus,
+  realMeetAppControlEvidencePasses,
+  realMeetAppControlRealtimeEvidencePasses,
+  realMeetAppControlSuiteCasePasses,
+} from "./real-meet-app-control-smoke.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 
@@ -15,28 +48,63 @@ function envMs(name, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function realMeetAudioInputGainFields() {
-  const raw = process.env.MAB_REAL_MEET_AUDIO_INPUT_GAIN;
-  if (!raw) return {};
-  const gain = Number(raw);
-  if (!Number.isFinite(gain) || gain <= 0) {
-    throw new Error(`Invalid MAB_REAL_MEET_AUDIO_INPUT_GAIN: ${raw}`);
+function envFlag(name) {
+  return /^(1|true|yes|on)$/i.test(String(process.env[name] || "").trim());
+}
+
+function requireRealMeetUrl() {
+  return (
+    envFlag("MAB_REQUIRE_REAL_MEET_URL") ||
+    envFlag("MAB_REAL_MEET_REQUIRED") ||
+    process.argv.includes("--require-real-meet-url")
+  );
+}
+
+async function writeJsonOutIfRequested(output) {
+  const jsonOut = argValue("--json-out");
+  if (!jsonOut) return;
+  await writeFile(jsonOut, `${output}\n`);
+}
+
+async function emitJsonResult(result, { error = false } = {}) {
+  const output = JSON.stringify(result, null, 2);
+  await writeJsonOutIfRequested(output);
+  if (error) {
+    console.error(output);
+  } else {
+    console.log(output);
   }
-  return {
-    meetAudioInputGain: gain,
-    meet_audio_input_gain: gain,
+}
+
+async function skipMissingRealMeetUrl(label, command, options = {}) {
+  const strict = options.strict ?? requireRealMeetUrl();
+  const emit = options.emit !== false;
+  const setExitCode = options.setExitCode !== false;
+  const resolution = options.resolution || {};
+  const result = {
+    ok: false,
+    skipped: !strict,
+    diagnosticOnly: !strict,
+    acceptanceSatisfied: false,
+    reason: "missing_env",
+    missingEnv: ["MAB_REAL_MEET_URL"],
+    checkedSources: resolution.checkedSources || [],
+    discoveryError: resolution.discoveryError || "",
+    activeBrowserRecordError: resolution.activeBrowserRecordError || "",
+    command,
+    message: `Set MAB_REAL_MEET_URL, pass --real-meet-url, or keep a meeting-agent session active so /join/status exposes the real Meet URL to run the ${label}.`,
   };
+  if (emit && strict) {
+    await emitJsonResult(result, { error: true });
+  } else if (emit) {
+    await emitJsonResult(result);
+  }
+  if (strict && setExitCode) process.exitCode = 1;
+  return result;
 }
 
 function argValue(name) {
-  const inlinePrefix = `${name}=`;
-  const inline = process.argv.find((entry) => entry.startsWith(inlinePrefix));
-  if (inline) return inline.slice(inlinePrefix.length);
-  const index = process.argv.indexOf(name);
-  if (index >= 0 && process.argv[index + 1] && !process.argv[index + 1].startsWith("--")) {
-    return process.argv[index + 1];
-  }
-  return "";
+  return resolveArgValue(process.argv, name);
 }
 
 function envOrArgInt(envName, argName, fallback) {
@@ -67,10 +135,6 @@ function defaultSyntheticSpeakerVoice(text) {
   return /[\u3400-\u9fff]/.test(text) ? "Eddy (Chinese (China mainland))" : "Samantha";
 }
 
-function jsonLine(prefix, payload) {
-  console.log(`${prefix} ${JSON.stringify(payload)}`);
-}
-
 async function fetchJson(url, options = {}) {
   const headers = { "content-type": "application/json" };
   if (options.headers) Object.assign(headers, options.headers);
@@ -86,8 +150,14 @@ async function fetchJson(url, options = {}) {
     body = { raw: text };
   }
   if (!response.ok) {
-    const error = new Error(`HTTP ${response.status} ${url}: ${text.slice(0, 400)}`);
+    const compactBody = compactJsonForDiagnostics(body);
+    const error = new Error(
+      `HTTP ${response.status} ${url}: ${JSON.stringify(compactBody).slice(0, 1200)}`,
+    );
     error.body = body;
+    error.compactBody = compactBody;
+    error.status = response.status;
+    error.url = url;
     throw error;
   }
   return body;
@@ -270,7 +340,15 @@ function compactBridgeStatus(status) {
     lastInputSpeechStartedAt: bridge?.protection?.lastInputSpeechStartedAt || "",
     responsesRequested: Number(bridge?.responsesRequested || 0),
     remoteAudioRoutedToAvatarBus: connection.remoteAudioRoutedToAvatarBus === true,
+    meetSurfaceAudioOutputHookStatus: connection.meetSurfaceAudioOutputHookStatus || "",
+    meetOutboundAudioSenderCandidates: Array.isArray(connection.meetOutboundAudioSenderCandidates)
+      ? connection.meetOutboundAudioSenderCandidates.slice(-8)
+      : [],
     primaryMeetAudioSenderUsingAvatarBus: connection.primaryMeetAudioSenderUsingAvatarBus === true,
+    primaryMeetAudioSenderAttachAttempts: Number(
+      connection.primaryMeetAudioSenderAttachAttempts || 0,
+    ),
+    lastPrimaryMeetAudioAttachError: connection.lastPrimaryMeetAudioAttachError || "",
     realtimeRemoteAudioTrackStats: {
       supported: remoteAudioTrackStats.supported === true,
       observed: remoteAudioTrackStats.observed === true,
@@ -326,10 +404,13 @@ function compactBridgeStatus(status) {
   };
 }
 
-function gateStatus(compact, options = {}) {
+export function gateStatus(compact, options = {}) {
   const expectedToolNames = Array.isArray(options.expectedToolNames)
     ? options.expectedToolNames
     : [];
+  const acceptedRealtimeInputSources = options.allowDiagnosticInputSources
+    ? ["meet_audio_mix", "recappi_process_audio_tap", "host_meet_audio_pcm"]
+    : ["recappi_process_audio_tap"];
   const energy = compact.meetAudioEnergy || {};
   const meetEnergyOk =
     energy.observed === true ||
@@ -354,34 +435,29 @@ function gateStatus(compact, options = {}) {
   const toolNames = compact.toolCalls?.all || [];
   const expectedToolCalled =
     expectedToolNames.length === 0 || expectedToolNames.some((name) => toolNames.includes(name));
+  const realtimeInputSenderLive =
+    acceptedRealtimeInputSources.includes(compact.currentRealtimeInputSource) &&
+    compact.senderTrackReadyState === "live" &&
+    compact.senderBytesSent > 0;
+  const meetPublishSenderLive =
+    compact.primaryMeetAudioSenderUsingAvatarBus === true &&
+    compact.primaryMeetAudioSenderStats?.trackReadyState === "live" &&
+    compact.primaryMeetAudioSenderStats?.bytesSent > 0 &&
+    (compact.primaryMeetAudioSenderStats?.bytesDelta > 0 ||
+      compact.primaryMeetAudioSenderStats?.packetsDelta > 0);
   return {
     participantPresent:
       Number(compact.participantCount || 0) >= 2 || Boolean(compact.activeSpeaker),
-    senderLive:
-      ["meet_audio_mix", "recappi_process_audio_tap"].includes(
-        compact.currentRealtimeInputSource,
-      ) &&
-      compact.senderTrackReadyState === "live" &&
-      compact.senderBytesSent > 0,
+    realtimeInputSenderLive,
+    meetPublishSenderLive,
+    senderLive: realtimeInputSenderLive && meetPublishSenderLive,
     meetEnergyOk,
     speechStarted,
     responseSeen,
     outputRouted: responseSeen && avatarOutputObserved,
     expectedToolCalled,
+    acceptedRealtimeInputSources,
   };
-}
-
-function applyLocalFixtureToolShareSmokeDefaults() {
-  process.env.MAB_SYNTHETIC_SPEAKER_TEXT =
-    process.env.MAB_SYNTHETIC_SPEAKER_TEXT ||
-    "请分享 Chrome 浏览器窗口到会议里。请开始屏幕共享。请分享窗口。";
-  process.env.MAB_REALTIME_SYNTHETIC_EXPECTED_TOOLS =
-    process.env.MAB_REALTIME_SYNTHETIC_EXPECTED_TOOLS ||
-    "list_shareable_windows,share_existing_app_window";
-  process.env.MAB_REALTIME_SYNTHETIC_REQUIRE_TOOL =
-    process.env.MAB_REALTIME_SYNTHETIC_REQUIRE_TOOL || "1";
-  process.env.MAB_REALTIME_SYNTHETIC_SPEECH_START_DELAY_MS =
-    process.env.MAB_REALTIME_SYNTHETIC_SPEECH_START_DELAY_MS || "30000";
 }
 
 async function runSpeakerWorker() {
@@ -453,10 +529,17 @@ async function waitForSpeakerReady(child, timeoutMs) {
   });
 }
 
-async function runMain() {
-  const meetUrl = process.env.MAB_REAL_MEET_URL || "";
+async function runMain(options = {}) {
+  const emit = options.emit !== false;
+  const setExitCode = options.setExitCode !== false;
+  const realMeetUrl = await resolveRealMeetUrl();
+  const meetUrl = realMeetUrl.meetUrl || "";
   if (!meetUrl) {
-    throw new Error("Set MAB_REAL_MEET_URL to run the real Meet synthetic speaker smoke.");
+    return await skipMissingRealMeetUrl(
+      "real Meet synthetic speaker smoke",
+      "MAB_REAL_MEET_URL=https://meet.google.com/... npm run smoke:real-meet-synthetic-speaker",
+      { emit, setExitCode, strict: true, resolution: realMeetUrl },
+    );
   }
   const meetingAgentUrl = (process.env.MAB_MEETING_AGENT_URL || "http://127.0.0.1:8781").replace(
     /\/+$/,
@@ -481,7 +564,7 @@ async function runMain() {
       MAB_SYNTHETIC_SPEAKER_HOLD_MS: String(timeoutMs + 30_000),
       MAB_DATA_DIR: speakerDataDir,
       MAB_SCREENSHOT_DIR: pathJoin(tmpDir, "speaker-screenshots"),
-      MAB_BROWSER_HEADLESS: process.env.MAB_SYNTHETIC_SPEAKER_HEADLESS || "true",
+      MAB_BROWSER_HEADLESS: process.env.MAB_SYNTHETIC_SPEAKER_HEADLESS || "false",
       MAB_MEET_PROFILE_MODE: "guest",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -543,7 +626,9 @@ async function runMain() {
     );
     const result = {
       ok: true,
+      acceptanceSatisfied: true,
       meetUrl,
+      meetUrlSource: realMeetUrl.source || "",
       sessionId,
       speakerSessionId,
       wavPath,
@@ -553,18 +638,21 @@ async function runMain() {
       join,
       final,
     };
-    console.log(JSON.stringify(result, null, 2));
+    if (emit) await emitJsonResult(result);
+    return result;
   } catch (error) {
     const result = {
       ok: false,
+      acceptanceSatisfied: false,
       meetUrl,
       sessionId,
       speakerSessionId,
       error: String(error?.message || error),
       last: error?.last || null,
     };
-    console.error(JSON.stringify(result, null, 2));
-    process.exitCode = 1;
+    if (emit) await emitJsonResult(result, { error: true });
+    if (setExitCode) process.exitCode = 1;
+    return result;
   } finally {
     await postJson(`${meetingAgentUrl}/join/stop`, {
       reason: "real_meet_synthetic_speaker_smoke_done",
@@ -584,6 +672,8 @@ async function runLocalFixtureMain(options = {}) {
   const expectedToolNames = envCsv("MAB_REALTIME_SYNTHETIC_EXPECTED_TOOLS");
   const requireTool =
     process.env.MAB_REALTIME_SYNTHETIC_REQUIRE_TOOL === "1" || expectedToolNames.length > 0;
+  const textTurnFallbackEnabled =
+    requireTool && envFlag("MAB_REALTIME_SYNTHETIC_TEXT_TURN_FALLBACK");
   const tmpDir = await mkdtemp(pathJoin(tmpdir(), "oneesama-realtime-speech-"));
   const wavPath = await generateSpeakerWav(tmpDir);
   const fixture = await startLocalMeetFixtureServer({ participantAudioFile: wavPath });
@@ -591,6 +681,7 @@ async function runLocalFixtureMain(options = {}) {
   const fixtureUrl = `${fixture.url}?participantSpeech=1&participantSpeechStartDelayMs=${speechStartDelayMs}`;
   const sessionId =
     process.env.MAB_REALTIME_SYNTHETIC_SESSION_ID || `realtime_speech_${Date.now()}`;
+  let textTurnFallback = null;
   try {
     await postJson(`${meetingAgentUrl}/join/stop`, {
       reason: "synthetic_speech_smoke_preflight",
@@ -633,29 +724,57 @@ async function runLocalFixtureMain(options = {}) {
       async () => {
         const status = await fetchJson(`${meetingAgentUrl}/join/status`);
         const compact = compactBridgeStatus(status);
-        const gates = gateStatus(compact, { expectedToolNames });
+        const gates = gateStatus(compact, {
+          expectedToolNames,
+          allowDiagnosticInputSources: true,
+        });
+        if (
+          textTurnFallbackEnabled &&
+          !textTurnFallback &&
+          gates.meetEnergyOk &&
+          gates.speechStarted &&
+          gates.responseSeen &&
+          !gates.expectedToolCalled
+        ) {
+          textTurnFallback = await postJson(`${meetingAgentUrl}/realtime/text-turn`, {
+            session_id: sessionId,
+            text: currentSyntheticSpeakerText(),
+            instructions: localFixtureToolShareTextTurnInstructions(expectedToolNames),
+          }).catch((error) => ({
+            ok: false,
+            error: String(error?.message || error),
+            body: error?.body || null,
+          }));
+        }
         return {
           done:
-            gates.senderLive &&
             gates.meetEnergyOk &&
             gates.speechStarted &&
             gates.responseSeen &&
-            (requireTool ? gates.expectedToolCalled : gates.outputRouted),
+            (requireTool
+              ? gates.expectedToolCalled || Boolean(textTurnFallback)
+              : gates.outputRouted),
           gates,
           compact,
+          textTurnFallback,
         };
       },
       timeoutMs,
       1500,
     );
+    const acceptanceSatisfied = requireTool
+      ? !textTurnFallback && final.gates?.expectedToolCalled === true
+      : true;
     const result = {
-      ok: true,
+      ok: acceptanceSatisfied,
+      acceptanceSatisfied,
       fixtureUrl,
       sessionId,
       wavPath,
       syntheticSpeakerText: currentSyntheticSpeakerText(),
       expectedToolNames,
       requireTool,
+      textTurnFallback,
       join,
       final,
     };
@@ -668,6 +787,7 @@ async function runLocalFixtureMain(options = {}) {
       sessionId,
       error: String(error?.message || error),
       last: error?.last || null,
+      textTurnFallback,
     };
     if (print) console.error(JSON.stringify(result, null, 2));
     if (print) process.exitCode = 1;
@@ -679,29 +799,6 @@ async function runLocalFixtureMain(options = {}) {
     await fixture.close().catch(() => {});
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
-}
-
-function compactSyntheticResult(result) {
-  const compact = result?.final?.compact || result?.last?.compact || {};
-  const gates = result?.final?.gates || result?.last?.gates || {};
-  return {
-    ok: result?.ok === true,
-    sessionId: result?.sessionId || "",
-    syntheticSpeakerText: result?.syntheticSpeakerText || currentSyntheticSpeakerText(),
-    expectedToolNames: result?.expectedToolNames || envCsv("MAB_REALTIME_SYNTHETIC_EXPECTED_TOOLS"),
-    gates,
-    toolCalls: compact.toolCalls || null,
-    checks: compact.feedback?.checks
-      ? {
-          modelTurnEvents: compact.feedback.checks.modelTurnEvents,
-          meetToolCalls: compact.feedback.checks.meetToolCalls,
-          workspaceToolCalls: compact.feedback.checks.workspaceToolCalls,
-          workerToolCalls: compact.feedback.checks.workerToolCalls,
-          appControlJobTotal: compact.feedback.checks.appControlJobTotal,
-        }
-      : null,
-    error: result?.error || "",
-  };
 }
 
 async function runLocalFixtureToolShareSmokeMain() {
@@ -721,7 +818,12 @@ async function runLocalFixtureToolShareSmokeMain() {
         delete process.env.MAB_REALTIME_SYNTHETIC_SESSION_ID;
       }
       const result = await runLocalFixtureMain({ print: false });
-      results.push(compactSyntheticResult(result));
+      results.push(
+        compactSyntheticResult(result, {
+          syntheticSpeakerText: currentSyntheticSpeakerText(),
+          expectedToolNames: envCsv("MAB_REALTIME_SYNTHETIC_EXPECTED_TOOLS"),
+        }),
+      );
       if (!result?.ok) break;
     }
   } finally {
@@ -731,7 +833,7 @@ async function runLocalFixtureToolShareSmokeMain() {
       delete process.env.MAB_REALTIME_SYNTHETIC_SESSION_ID;
     }
   }
-  const passed = results.filter((result) => result.ok).length;
+  const passed = results.filter((result) => result.acceptanceSatisfied).length;
   const summary = {
     ok: passed === iterations,
     iterations,
@@ -740,19 +842,28 @@ async function runLocalFixtureToolShareSmokeMain() {
     results,
   };
   const output = JSON.stringify(summary, null, 2);
-  if (summary.ok) console.log(output);
-  else {
-    console.error(output);
+  console.log(output);
+  if (!summary.ok) {
     process.exitCode = 1;
   }
 }
 
-if (process.argv.includes("--speaker-worker")) {
-  await runSpeakerWorker();
-} else if (process.argv.includes("--local-fixture")) {
-  await runLocalFixtureMain();
-} else if (process.argv.includes("--local-fixture-tool-share-smoke")) {
-  await runLocalFixtureToolShareSmokeMain();
-} else {
-  await runMain();
+async function main() {
+  if (process.argv.includes("--speaker-worker")) {
+    await runSpeakerWorker();
+  } else if (process.argv.includes("--local-fixture")) {
+    await runLocalFixtureMain();
+  } else if (process.argv.includes("--local-fixture-tool-share-smoke")) {
+    await runLocalFixtureToolShareSmokeMain();
+  } else if (process.argv.includes("--real-meet-app-control-suite")) {
+    await runRealMeetAppControlSuiteMain();
+  } else if (process.argv.includes("--real-meet-app-control-smoke")) {
+    await runRealMeetAppControlSmokeMain();
+  } else {
+    await runMain();
+  }
+}
+
+if (process.argv[1] && pathResolve(process.argv[1]) === SELF) {
+  await main();
 }

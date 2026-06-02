@@ -105,6 +105,42 @@ func TestWorkerPollRealtimeMarksDeliveryByDefault(t *testing.T) {
 	}
 }
 
+func TestWorkerMarkRealtimeDeliveredMarksSpecificJob(t *testing.T) {
+	t.Parallel()
+
+	router := newTestRouter(t)
+	performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_realtime_ack","status":"completed","task":"answer","result":"done","context":{"session_kind":"meeting_copilot","meeting_session_id":"session_worker_ack"}}`)
+
+	poll := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{"sessionId":"session_worker_ack","markDelivered":false}`)
+	if poll.Code != http.StatusOK || !strings.Contains(poll.Body.String(), `"job_realtime_ack"`) || strings.Contains(poll.Body.String(), `"deliveredToRealtime":true`) {
+		t.Fatalf("poll = %d %s, want undelivered realtime job", poll.Code, poll.Body.String())
+	}
+	var pollBody struct {
+		Jobs []WorkerReport `json:"jobs"`
+	}
+	if err := json.Unmarshal(poll.Body.Bytes(), &pollBody); err != nil {
+		t.Fatalf("decode poll: %v", err)
+	}
+	if len(pollBody.Jobs) != 1 || pollBody.Jobs[0].RealtimeDeliveryAttempt == nil || pollBody.Jobs[0].RealtimeDeliveryAttempt.Token == "" {
+		t.Fatalf("poll body = %#v, want realtime delivery attempt token", pollBody)
+	}
+
+	markWithoutToken := performMeetingRequest(router, http.MethodPost, "/worker/mark-realtime-delivered", `{"jobId":"job_realtime_ack","channel":"MAB_REALTIME_CLIENT.injectWorkerResult"}`)
+	if markWithoutToken.Code != http.StatusConflict || !strings.Contains(markWithoutToken.Body.String(), "realtime_delivery_attempt_token_required") {
+		t.Fatalf("mark without token = %d %s, want conflict", markWithoutToken.Code, markWithoutToken.Body.String())
+	}
+
+	mark := performMeetingRequest(router, http.MethodPost, "/worker/mark-realtime-delivered", `{"jobId":"job_realtime_ack","channel":"MAB_REALTIME_CLIENT.injectWorkerResult","deliveryToken":`+strconv.Quote(pollBody.Jobs[0].RealtimeDeliveryAttempt.Token)+`}`)
+	if mark.Code != http.StatusOK || !strings.Contains(mark.Body.String(), `"deliveredToRealtime":true`) || !strings.Contains(mark.Body.String(), `"MAB_REALTIME_CLIENT.injectWorkerResult"`) {
+		t.Fatalf("mark = %d %s, want realtime delivery marked", mark.Code, mark.Body.String())
+	}
+
+	second := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{"sessionId":"session_worker_ack","markDelivered":false}`)
+	if second.Code != http.StatusOK || strings.Contains(second.Body.String(), `"job_realtime_ack"`) {
+		t.Fatalf("second poll = %d %s, want acked job hidden", second.Code, second.Body.String())
+	}
+}
+
 func TestWorkerReportInjectsRealtimeWhenJoinActive(t *testing.T) {
 	t.Parallel()
 
@@ -136,8 +172,9 @@ func TestWorkerReportSuppressesSecretaryLookupRealtimeDelivery(t *testing.T) {
 	report := performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_secretary","status":"completed","task":"slack lookup","result":"unrelated slack answer","context":{"session_kind":"secretary_lookup","source":"persona_delegate_worker","session_id":"triage:C123:456"}}`)
 	if report.Code != http.StatusOK ||
 		!strings.Contains(report.Body.String(), `"channel":"realtime_non_meeting_suppressed"`) ||
-		!strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
-		t.Fatalf("report response = %d %s, want suppressed non-meeting realtime delivery", report.Code, report.Body.String())
+		!strings.Contains(report.Body.String(), `"realtimeSuppressed":true`) ||
+		strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
+		t.Fatalf("report response = %d %s, want suppressed non-meeting realtime report without delivery", report.Code, report.Body.String())
 	}
 
 	pollRealtime := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{"sessionId":"session_worker_scope","markDelivered":false}`)
@@ -148,6 +185,31 @@ func TestWorkerReportSuppressesSecretaryLookupRealtimeDelivery(t *testing.T) {
 	pollSlack := performMeetingRequest(router, http.MethodPost, "/worker/poll-slack", `{"limit":10,"markDelivered":false}`)
 	if pollSlack.Code != http.StatusOK || !strings.Contains(pollSlack.Body.String(), `"job_secretary"`) {
 		t.Fatalf("slack poll = %d %s, want secretary report still available for Slack", pollSlack.Code, pollSlack.Body.String())
+	}
+}
+
+func TestWorkerReportSuppressesMissingMeetingSessionBeforeRealtimeInjection(t *testing.T) {
+	t.Parallel()
+
+	router, service := newScreenShareTestRouterWithService(t, t.TempDir())
+	join := httptest.NewRequest(http.MethodPost, "/join/google-meet", strings.NewReader(`{"session_id":"session_worker_missing","meeting_url":"https://meet.google.com/abc-defg-hij","dry_run":true}`))
+	join.Header.Set(internalauth.HeaderName, "secret-key")
+	join.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(httptest.NewRecorder(), join)
+	markSessionJoined(t, service, "session_worker_missing")
+
+	report := performMeetingRequest(router, http.MethodPost, "/worker/report", `{"id":"job_missing_session","status":"completed","task":"answer","result":"done","context":{"session_kind":"meeting_copilot"}}`)
+	if report.Code != http.StatusOK ||
+		!strings.Contains(report.Body.String(), `"channel":"realtime_session_missing_suppressed"`) ||
+		!strings.Contains(report.Body.String(), `"reason":"worker_result_session_missing"`) ||
+		!strings.Contains(report.Body.String(), `"realtimeSuppressed":true`) ||
+		strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
+		t.Fatalf("report response = %d %s, want missing-session suppression without realtime delivery", report.Code, report.Body.String())
+	}
+
+	pollRealtime := performMeetingRequest(router, http.MethodPost, "/worker/poll-realtime", `{"sessionId":"session_worker_missing","markDelivered":false}`)
+	if pollRealtime.Code != http.StatusOK || strings.Contains(pollRealtime.Body.String(), `"job_missing_session"`) {
+		t.Fatalf("realtime poll = %d %s, want missing-session report hidden", pollRealtime.Code, pollRealtime.Body.String())
 	}
 }
 
@@ -168,8 +230,9 @@ func TestWorkerReportSuppressesNoActionRealtimeDelivery(t *testing.T) {
 	router.ServeHTTP(report, reportRequest)
 	if report.Code != http.StatusOK ||
 		!strings.Contains(report.Body.String(), `"channel":"realtime_noop_suppressed"`) ||
-		!strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
-		t.Fatalf("report response = %d %s, want suppressed realtime delivery", report.Code, report.Body.String())
+		!strings.Contains(report.Body.String(), `"realtimeSuppressed":true`) ||
+		strings.Contains(report.Body.String(), `"deliveredToRealtime":true`) {
+		t.Fatalf("report response = %d %s, want suppressed realtime report without delivery", report.Code, report.Body.String())
 	}
 
 	poll := httptest.NewRecorder()

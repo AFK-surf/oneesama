@@ -7,11 +7,21 @@ import {
   joinFailureMessage,
   recoverAcceptedJoinAfterError,
 } from "./join-result.ts";
-import { buildPlan, normalizeBrowserIslandOptions } from "./join-plan.ts";
+import {
+  assertRealtimeRuntimePlacementForMeetJoin,
+  buildPlan,
+  normalizeBrowserIslandOptions,
+} from "./join-plan.ts";
 import { failure, parseRequestLine, success, writeResponse } from "./protocol.ts";
 import { statusSession } from "./session-status.ts";
 import type { JsonRpcRequest } from "./types.ts";
-import type { PrepareJoinParams, StatusSessionParams, StopSessionParams } from "./types.ts";
+import type {
+  RealtimeEventParams,
+  PrepareJoinParams,
+  RealtimeTextTurnParams,
+  StatusSessionParams,
+  StopSessionParams,
+} from "./types.ts";
 
 const bridgeMode = "persistent-session";
 const meetUrlPattern = /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?#].*)?$/i;
@@ -30,6 +40,22 @@ const joiner = createGoogleMeetJoiner({ allowNonGoogleMeet: true });
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function realtimeEventPayload(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function validateHostRealtimeEvent(event: Record<string, unknown>): {
+  ok: boolean;
+  error?: string;
+} {
+  const type = String(event.type || "").trim();
+  if (!type) return { ok: false, error: "realtime_event_type_required" };
+  if (type === "response.cancel" || type === "input_audio_buffer.clear") return { ok: true };
+  return { ok: false, error: "realtime_event_type_not_allowed" };
 }
 
 function firstNonEmpty(...values: Array<unknown>): string {
@@ -65,6 +91,7 @@ function handleDryRunJoin(params: PrepareJoinParams) {
   const sessionId = firstNonEmpty(params.session_id, `session_${Date.now().toString(36)}`);
   const title = firstNonEmpty(params.title, "Google Meet join plan");
   const dryRun = Boolean(params.dry_run);
+  const plan = buildPlan(params, meetingUrl);
   const session = setSession({
     id: sessionId,
     meeting_url: meetingUrl,
@@ -80,7 +107,7 @@ function handleDryRunJoin(params: PrepareJoinParams) {
     bridge_mode: bridgeMode,
     note: "TS meet-runner bridge keeps a persistent session worker and prepares the Playwright join plan without launching the browser. Browser-island install flags are preserved in the plan for later execution.",
     session,
-    plan: buildPlan(params, meetingUrl),
+    plan,
   };
 }
 
@@ -97,6 +124,7 @@ async function handleJoinRequest(params: PrepareJoinParams) {
   if (!options.allowNonGoogleMeet && !meetUrlPattern.test(meetingUrl)) {
     throw new Error("meeting_url must be a Google Meet URL");
   }
+  assertRealtimeRuntimePlacementForMeetJoin(options, meetingUrl);
 
   const sessionId = firstNonEmpty(params.session_id, `session_${Date.now().toString(36)}`);
   const title = firstNonEmpty(params.title, "Google Meet join plan");
@@ -118,6 +146,7 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     installRealtimeBridge: options.installRealtimeBridge,
     realtimeBridgeMode: options.realtimeBridgeMode,
     realtimeAgentRuntime: options.realtimeAgentRuntime,
+    realtimeRuntimePlacement: options.realtimeRuntimePlacement,
     realtimeToolCallbackToken: params.realtime_tool_callback_token,
     realtimeInstructions: params.realtime_instructions,
     realtimeTools: Array.isArray(params.realtime_tools) ? params.realtime_tools : undefined,
@@ -130,7 +159,6 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     includeParticipantAudio: options.includeParticipantAudio,
     forwardMeetAudioToRealtime: options.forwardMeetAudioToRealtime,
     meetAudioInputGain: options.meetAudioInputGain,
-    realtimeFallbackToLocalMic: options.realtimeFallbackToLocalMic,
     installLocalDialogBridge: options.installLocalDialogBridge,
     installWorkerResultBridge: options.installWorkerResultBridge,
     installScreenShareBridge: options.installScreenShareBridge,
@@ -257,6 +285,8 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
               "screen_share.apps",
               "screen_share.app",
               "screen_share.stop",
+              "realtime.event",
+              "realtime.text_turn",
             ],
           }),
         );
@@ -305,6 +335,27 @@ async function handleRequest(request: JsonRpcRequest): Promise<void> {
       case "screen_share.stop":
         writeResponse(success(request.id, await joiner.stopScreenShare()));
         return;
+      case "realtime.text_turn":
+        writeResponse(
+          success(
+            request.id,
+            await joiner.requestRealtimeTextTurn(
+              (request.params ?? {}) as RealtimeTextTurnParams as any,
+            ),
+          ),
+        );
+        return;
+      case "realtime.event": {
+        const params = (request.params ?? {}) as RealtimeEventParams;
+        const event = realtimeEventPayload(params.event || params);
+        const validation = validateHostRealtimeEvent(event);
+        if (!validation.ok) {
+          writeResponse(failure(request.id, validation.error || "realtime_event_not_allowed"));
+          return;
+        }
+        writeResponse(success(request.id, await joiner.sendRealtimeEvent(event)));
+        return;
+      }
       default:
         writeResponse(failure(request.id, `unsupported method: ${request.method}`));
     }

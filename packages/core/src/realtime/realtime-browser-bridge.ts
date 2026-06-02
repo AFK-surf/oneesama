@@ -30,6 +30,9 @@ interface RealtimeBridgeConfig {
   mode: string;
   agentRuntime?: string;
   agentSDKVersion?: string;
+  realtimeRuntimePlacement?: string;
+  realtimePageRole?: string;
+  allowInlineAgentsSDKDiagnostic?: boolean;
   sessionId?: string;
   toolCallbackToken?: string;
   autoRespondToWorkerResults: boolean;
@@ -43,8 +46,8 @@ interface RealtimeBridgeConfig {
   includeParticipantAudio: boolean;
   forwardMeetAudioToRealtime: boolean;
   meetAudioInputSource?: string;
-  allowRecappiReceiverFallback?: boolean;
-  allowGenericMediaElementAudioDiscovery?: boolean;
+  allowHostMeetAudioPcmInput?: boolean;
+  allowParticipantAudioStreamEvents?: boolean;
   captureMeetAudioForTranscript?: boolean;
   meetAudioCaptureChunkMs?: number;
   meetAudioInputGain?: number;
@@ -57,6 +60,9 @@ interface RealtimeBridgeConfig {
   autoRespondToWorkerToolCalls: boolean;
   autoRespondToMeetToolCalls: boolean;
   dryRunLocalTools?: boolean;
+  directTextTurnToolRouting?: boolean;
+  allowMockToolSimulation?: boolean;
+  allowCustomRealtimeServerEvents?: boolean;
   observeMeetChat: boolean;
   botName: string;
   simulateRemoteAudio?: boolean;
@@ -89,15 +95,8 @@ function normalizeMeetAudioInputGain(value: unknown, fallback = DEFAULT_MEET_AUD
   return Math.max(0.1, Math.min(selected, MAX_MEET_AUDIO_INPUT_GAIN));
 }
 
-function isGoogleMeetDocument() {
-  return window.location.hostname === "meet.google.com";
-}
-
 function shouldRouteGenericMediaElementAudio() {
-  if (typeof config.allowGenericMediaElementAudioDiscovery === "boolean") {
-    return config.allowGenericMediaElementAudioDiscovery;
-  }
-  return !isGoogleMeetDocument();
+  return window.location.hostname !== "meet.google.com";
 }
 
 const rawBridgeConfig = window.MAB_REALTIME_BRIDGE_CONFIG || {};
@@ -118,7 +117,8 @@ const config: RealtimeBridgeConfig = {
   includeParticipantAudio: false,
   forwardMeetAudioToRealtime: true,
   meetAudioInputSource: "webrtc",
-  allowRecappiReceiverFallback: false,
+  allowHostMeetAudioPcmInput: false,
+  allowParticipantAudioStreamEvents: false,
   captureMeetAudioForTranscript: false,
   meetAudioCaptureChunkMs: 5000,
   meetAudioInputGain: undefined,
@@ -129,6 +129,8 @@ const config: RealtimeBridgeConfig = {
   sendSessionUpdateOnConnect: true,
   autoRespondToWorkerToolCalls: true,
   autoRespondToMeetToolCalls: true,
+  allowMockToolSimulation: false,
+  allowCustomRealtimeServerEvents: false,
   observeMeetChat: true,
   botName: "Meeting Avatar Bot",
   ...rawBridgeConfig,
@@ -137,6 +139,9 @@ config.meetAudioInputGain = normalizeMeetAudioInputGain(
   (rawBridgeConfig as Record<string, unknown>).meetAudioInputGain,
   defaultMeetAudioInputGainForSource(config.meetAudioInputSource),
 );
+const realtimeRuntimePlacement = String(config.realtimeRuntimePlacement || "sidecar");
+const realtimePageRole = String(config.realtimePageRole || "generic");
+const allowInlineAgentsSDKDiagnostic = config.allowInlineAgentsSDKDiagnostic === true;
 const {
   formatRealtimeErrorValue,
   classifyRealtimeConnectFailure,
@@ -161,6 +166,9 @@ const state = {
   ok: true,
   mode: config.mode,
   sessionId: String(config.sessionId || ""),
+  realtimeRuntimePlacement,
+  realtimePageRole,
+  sdkOwner: realtimeRuntimePlacement === "sidecar" ? "sidecar" : "meet-page",
   agentRuntime: {
     requested: String(config.agentRuntime || ""),
     active: config.mode === "mock" ? "mock" : "",
@@ -206,6 +214,7 @@ const state = {
     decisions: [],
     events: [],
     appControlJobs: {},
+    manualFunctionalTurns: [],
   },
   meetChat: {
     observerInstalled: false,
@@ -232,15 +241,16 @@ const state = {
     peerConnectionState: "",
     remoteAudioAttached: false,
     remoteAudioRoutedToAvatarBus: false,
+    realtimeOutputAudioPort: null as null | Record<string, unknown>,
+    sidecarOutputPcmChunks: 0,
+    sidecarOutputPcmLastChunkAt: "",
+    sidecarOutputPcmLastError: "",
     realtimeRemoteAudioTrackStats: null as null | Record<string, unknown>,
-    mockRemoteAudioInjected: false,
     recvOnlyAudioTransceiverAdded: false,
     realtimeInputPlaceholderAdded: false,
     currentRealtimeInputTrackId: "",
     currentRealtimeInputSource: "",
     currentRealtimeInputIsRoutingMix: false,
-    recappiReceiverFallbackActive: false,
-    recappiReceiverFallbackDisconnectedAt: "",
     realtimeAudioSenderStats: null as null | Record<string, unknown>,
     realtimeAgentSDKInputTrackIds: [],
     realtimeAgentSDKInputSenderTrackId: "",
@@ -294,6 +304,21 @@ const state = {
       lastChunkAt: "",
       errors: [],
     },
+    hostMeetAudioInput: {
+      enabled: Boolean(config.allowHostMeetAudioPcmInput),
+      connected: false,
+      sampleRate: 0,
+      channels: 0,
+      chunks: 0,
+      samplesReceived: 0,
+      samplesQueued: 0,
+      lastRawRms: 0,
+      lastRawPeak: 0,
+      lastChunkAt: "",
+      lastPushAt: "",
+      source: "",
+      errors: [],
+    },
     duplicateMeetAudioSendersMuted: 0,
     primaryMeetAudioSenderTrackId: "",
     primaryMeetAudioSenderUsingAvatarBus: false,
@@ -325,7 +350,9 @@ const state = {
     lastReconnectReason: "",
   },
   transcripts: {
+    currentInput: "",
     currentOutput: "",
+    input: [],
     output: [],
   },
   inbound: [],
@@ -371,6 +398,7 @@ const state = {
     lastSignature: "",
     lastSignatureAt: 0,
     lastHistoryTail: [],
+    latestFunctionalTurn: null,
     cache: {
       identity: null,
       meetingAwareness: null,
@@ -418,7 +446,6 @@ const routedMeetAudioSources = [];
 const routedMeetMediaElements = new WeakSet();
 const { isLocalToolName, localWorkspaceTools } = (window as any)
   .__MAB_REALTIME_LOCAL_TOOL_ROUTER_HELPERS;
-
 function randomEventId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -432,7 +459,6 @@ function rememberError(error) {
   state.errors = state.errors.slice(-50);
   updateFeedback();
 }
-
 function clearRecoveredConnectionErrors() {
   state.connection.lastTokenError = null;
   state.errors = state.errors.filter((entry) => {
@@ -458,6 +484,7 @@ const {
   maybeCompactRealtimeHistory,
   pushSessionContext,
   rememberInboundEvent,
+  recordManualFunctionalTextTurn,
   rememberSessionContext,
   summarizeRealtimeEvent,
   updateContextHealthFromHistory,

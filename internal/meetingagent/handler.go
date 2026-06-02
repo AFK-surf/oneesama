@@ -61,6 +61,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	worker.GET("/jobs", h.handleWorkerJobs)
 	worker.POST("/poll-realtime", h.handleWorkerPollRealtime)
 	worker.POST("/poll-slack", h.handleWorkerPollSlack)
+	worker.POST("/mark-realtime-delivered", h.handleWorkerMarkRealtimeDelivered)
 	worker.POST("/mark-slack-delivered", h.handleWorkerMarkSlackDelivered)
 
 	realtime := rg.Group("/realtime")
@@ -68,6 +69,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	realtime.GET("/config", h.handleRealtimeConfig)
 	realtime.GET("/context-health", h.handleRealtimeContextHealth)
 	realtime.POST("/client-secret", h.handleRealtimeClientSecret)
+	realtime.POST("/event", h.handleRealtimeEvent)
+	realtime.POST("/text-turn", h.handleRealtimeTextTurn)
 
 	tools := rg.Group("/tools")
 	tools.Use(h.requireInternalAuth)
