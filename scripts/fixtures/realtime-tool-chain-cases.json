@@ -15,7 +15,7 @@
       "steps": [
         {
           "expectedToolNames": ["current_user_identity"],
-          "responseInstructions": "If the prior user request only asked who they are, answer with the resolved identity in concise Chinese. If the prior user request asked for their own workspace data, tasks, issues, GitHub, Linear, Slack, Notion, calendar, docs, URL, or repo lookup, continue by starting the appropriate background job using the resolved identity context instead of stopping after identity.",
+          "responseInstructions": "If the prior user request only asked who they are, answer with the resolved identity in concise English. If the prior user request asked for their own workspace data, tasks, issues, GitHub, Linear, Slack, Notion, calendar, docs, URL, or repo lookup, continue by starting the appropriate background job using the resolved identity context instead of stopping after identity.",
           "output": {
             "ok": true,
             "current_user": {
@@ -28,7 +28,7 @@
               "role": "founder",
               "aliases": ["Peng", "peng-xiao"]
             },
-            "answer_hint_zh": "当前和你说话的人是 Peng。"
+            "answer_hint_en": "The person speaking to you is Peng."
           }
         },
         {

@@ -7,7 +7,7 @@ import { buildRealtimeBrowserInitScript } from "../packages/core/src/realtime/re
 import { buildWorkerResultInitScript } from "../packages/core/src/realtime/worker-result-init-builder.ts";
 import { realtimeToolSchemas } from "../packages/core/src/realtime/realtime-contract.ts";
 
-const controlTool = realtimeToolSchemas.find((tool) => tool.name === "control_shared_app_window");
+const controlTool = realtimeToolSchemas.find((tool) => tool.name === "kwwk_computer_use");
 const shareTool = realtimeToolSchemas.find((tool) => tool.name === "share_existing_app_window");
 assert.ok(shareTool, "share_existing_app_window must be available to bridge tests");
 
@@ -75,7 +75,7 @@ async function dispatchToolCall(page, callId, args) {
         new CustomEvent("meeting-avatar-realtime-server-event", {
           detail: {
             type: "response.function_call_arguments.done",
-            name: "control_shared_app_window",
+            name: "kwwk_computer_use",
             call_id: id,
             arguments: JSON.stringify(payload),
           },
@@ -89,6 +89,195 @@ async function dispatchToolCall(page, callId, args) {
     callId,
   );
 }
+
+test("Realtime API speech_started stops avatar output without local response.cancel", async () => {
+  await withRealtimeBridge(async (page) => {
+    const result = await page.evaluate(async () => {
+      window.__MAB_INTERRUPTS = [];
+      window.MAB_AVATAR_AUDIO_BUS = {
+        interruptOutput(input) {
+          window.__MAB_INTERRUPTS.push(input);
+          return { ok: true, stoppedBufferedSources: 2, reason: input?.reason || "" };
+        },
+      };
+      window.dispatchEvent(
+        new CustomEvent("meeting-avatar-realtime-server-event", {
+          detail: {
+            type: "response.output_audio.delta",
+            response_id: "resp_native_interrupt",
+            item_id: "item_native_interrupt",
+            content_index: 0,
+            delta: "pcm",
+          },
+        }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("meeting-avatar-realtime-server-event", {
+          detail: { type: "input_audio_buffer.speech_started" },
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return {
+        interruptions: window.__MAB_INTERRUPTS,
+        protection: window.MAB_REALTIME_BRIDGE.protection,
+        outbound: window.MAB_REALTIME_BRIDGE.outbound,
+        timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
+      };
+    });
+
+    assert.equal(result.interruptions.length, 1);
+    assert.equal(result.interruptions[0].reason, "realtime_native_interruption");
+    assert.ok(result.protection.lastInputSpeechStartedAt);
+    assert.ok(result.protection.nativeInterruption.speech_started_at);
+    assert.ok(result.protection.nativeInterruption.avatar_audio_stopped_at);
+    assert.equal(result.protection.nativeInterruption.avatar_audio_stop_count, 1);
+    assert.equal(result.protection.nativeInterruption.last_stop_result.stoppedBufferedSources, 2);
+    assert.equal(
+      result.outbound.some((entry) => entry.event?.type === "response.cancel"),
+      false,
+    );
+    assert.equal(
+      result.outbound.some((entry) => entry.event?.type === "conversation.item.truncate"),
+      false,
+    );
+    assert.ok(result.timelineTypes.includes("realtime_native_interruption_avatar_audio_stop"));
+    assert.ok(result.timelineTypes.includes("realtime_native_interruption"));
+  });
+});
+
+test("Realtime API speech_started from recent avatar output self-echo is suppressed", async () => {
+  await withRealtimeBridge(async (page) => {
+    const result = await page.evaluate(async () => {
+      window.__MAB_INTERRUPTS = [];
+      const now = new Date().toISOString();
+      window.MAB_AVATAR_AUDIO = {
+        syntheticSpeechActive: false,
+        outputEnergy: {
+          observed: true,
+          rms: 0.05,
+          peak: 0.12,
+          lastEnergyAt: now,
+          lastCheckedAt: now,
+        },
+      };
+      window.MAB_AVATAR_AUDIO_BUS = {
+        interruptOutput(input) {
+          window.__MAB_INTERRUPTS.push(input);
+          return { ok: true, stoppedBufferedSources: 2, reason: input?.reason || "" };
+        },
+      };
+      window.dispatchEvent(
+        new CustomEvent("meeting-avatar-realtime-server-event", {
+          detail: {
+            type: "response.output_audio.delta",
+            response_id: "resp_self_echo",
+            item_id: "item_self_echo",
+            content_index: 0,
+            delta: "pcm",
+          },
+        }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("meeting-avatar-realtime-server-event", {
+          detail: { type: "input_audio_buffer.speech_started" },
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return {
+        interruptions: window.__MAB_INTERRUPTS,
+        protection: window.MAB_REALTIME_BRIDGE.protection,
+        outbound: window.MAB_REALTIME_BRIDGE.outbound,
+        timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
+      };
+    });
+
+    assert.equal(result.interruptions.length, 0);
+    assert.equal(result.protection.lastInputSpeechStartedAt, "");
+    assert.equal(result.protection.nativeInterruption.speech_started_at, "");
+    assert.equal(result.protection.nativeInterruption.avatar_audio_stop_count, 0);
+    assert.equal(result.protection.nativeInterruption.self_echo_suppressed_count, 1);
+    assert.equal(
+      result.protection.nativeInterruption.last_self_echo_reason,
+      "avatar_output_energy",
+    );
+    assert.equal(
+      result.outbound.some((entry) => entry.event?.type === "response.cancel"),
+      false,
+    );
+    assert.equal(
+      result.outbound.some((entry) => entry.event?.type === "conversation.item.truncate"),
+      false,
+    );
+    assert.ok(result.timelineTypes.includes("realtime_native_interruption_self_echo_suppressed"));
+    assert.ok(result.timelineTypes.includes("realtime_input_speech_started_self_echo_suppressed"));
+    assert.equal(
+      result.timelineTypes.includes("realtime_native_interruption_avatar_audio_stop"),
+      false,
+    );
+  });
+});
+
+test("Realtime WebSocket fallback truncates the interrupted output item", async () => {
+  await withRealtimeBridge(
+    async (page) => {
+      const result = await page.evaluate(async () => {
+        window.MAB_AVATAR_AUDIO_BUS = {
+          interruptOutput(input) {
+            return { ok: true, stoppedBufferedSources: 1, reason: input?.reason || "" };
+          },
+        };
+        window.dispatchEvent(
+          new CustomEvent("meeting-avatar-realtime-server-event", {
+            detail: {
+              type: "response.output_audio.delta",
+              response_id: "resp_ws_interrupt",
+              item_id: "item_ws_interrupt",
+              content_index: 0,
+              delta: "pcm",
+            },
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        window.dispatchEvent(
+          new CustomEvent("meeting-avatar-realtime-server-event", {
+            detail: { type: "input_audio_buffer.speech_started" },
+          }),
+        );
+        window.dispatchEvent(
+          new CustomEvent("meeting-avatar-realtime-server-event", {
+            detail: {
+              type: "response.cancelled",
+              response_id: "resp_ws_interrupt",
+            },
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return {
+          protection: window.MAB_REALTIME_BRIDGE.protection,
+          outbound: window.MAB_REALTIME_BRIDGE.outbound,
+        };
+      });
+
+      const truncateEvents = result.outbound
+        .map((entry) => entry.event)
+        .filter((event) => event?.type === "conversation.item.truncate");
+      assert.equal(truncateEvents.length, 1);
+      assert.equal(truncateEvents[0].item_id, "item_ws_interrupt");
+      assert.equal(truncateEvents[0].content_index, 0);
+      assert.ok(truncateEvents[0].audio_end_ms >= 0);
+      assert.ok(result.protection.nativeInterruption.speech_started_at);
+      assert.ok(result.protection.nativeInterruption.response_cancelled_at);
+      assert.ok(result.protection.nativeInterruption.truncate_sent_at);
+      assert.equal(result.protection.nativeInterruption.truncate_count, 1);
+      assert.equal(result.protection.nativeInterruption.avatar_audio_stop_count, 2);
+      assert.equal(
+        result.outbound.some((entry) => entry.event?.type === "response.cancel"),
+        false,
+      );
+    },
+    { config: { realtimeTransport: "websocket" } },
+  );
+});
 
 test("Worker result bridge only marks realtime delivered after client injection succeeds", async () => {
   const browser = await chromium.launch({ headless: true });
@@ -481,7 +670,7 @@ test("Realtime custom worker-result events stay diagnostic-only when fixture opt
 test("Realtime app-control terminal job status updates the typed state machine", async () => {
   await withRealtimeBridge(
     async (page) => {
-      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+      await page.route("http://meeting.local/tools/kwwk_computer_use", async (route) => {
         const body = route.request().postDataJSON();
         const jobId = body.job_id || body.jobId;
         await route.fulfill({
@@ -561,6 +750,8 @@ test("Realtime app-control terminal job status updates the typed state machine",
       assert.equal(completed.delivery.meetingEvent.type, "app_control.completed");
       assert.equal(completed.delivery.meetingEvent.jobId, "app_job_done");
       assert.equal(completed.delivery.policy.channel, "voice");
+      assert.match(completed.delivery.modelResult.turnPolicy.instructions, /English/);
+      assert.doesNotMatch(completed.delivery.modelResult.turnPolicy.instructions, /Chinese/);
       assert.equal(completed.result.screenShare.applicationName, "Chrome");
       assert.equal(completed.result.screenShare.windowId, 42);
       assert.equal(completed.result.screenShare.realtimeBridge, undefined);
@@ -576,6 +767,8 @@ test("Realtime app-control terminal job status updates the typed state machine",
       assert.equal(blocked.delivery.meetingEvent.type, "app_control.blocked");
       assert.equal(blocked.delivery.meetingEvent.jobId, "app_job_blocked");
       assert.equal(blocked.delivery.policy.channel, "blocked");
+      assert.match(blocked.delivery.modelResult.turnPolicy.instructions, /English/);
+      assert.doesNotMatch(blocked.delivery.modelResult.turnPolicy.instructions, /Chinese/);
       assert.equal(stateOnly.delivery.meetingEvent.type, "app_control.running");
       assert.equal(stateOnly.delivery.meetingEvent.jobId, "app_job_state_only");
       assert.equal(stateOnly.delivery.policy.channel, "silent");
@@ -594,9 +787,7 @@ test("Realtime app-control terminal job status updates the typed state machine",
         window.MAB_REALTIME_BRIDGE.outbound.some(
           (entry) =>
             entry.event?.type === "response.create" &&
-            entry.event?.response?.instructions?.includes(
-              "Continue by calling control_shared_app_window",
-            ),
+            entry.event?.response?.instructions?.includes("Continue by calling kwwk_computer_use"),
         ),
       );
       assert.equal(responseCreate, false);
@@ -645,6 +836,8 @@ test("Realtime worker results are posted to Meet chat and only briefly acknowled
       assert.equal(delivery.meetingEvent.type, "worker_result.completed");
       assert.equal(delivery.meetingEvent.visibility, "meet_chat");
       assert.equal(delivery.meetingEvent.interruptible, true);
+      assert.match(delivery.policy.responseInstructions, /English/);
+      assert.doesNotMatch(delivery.policy.responseInstructions, /Chinese/);
 
       const state = await page.evaluate(() => ({
         chatMessages: window.__MAB_MEET_FIXTURE.chatMessages,
@@ -663,7 +856,7 @@ test("Realtime worker results are posted to Meet chat and only briefly acknowled
         .map((entry) => entry.event?.item)
         .find((item) => item?.type === "message" && item?.role === "system");
       const voiceText = systemMessage?.content?.[0]?.text || "";
-      assert.match(voiceText, /完整结果我已经发到 Meet chat/);
+      assert.match(voiceText, /I posted the full result to Meet chat/);
       assert.doesNotMatch(voiceText, /General 和 Account/);
     },
     { config: { sessionId: "current_session" } },
@@ -885,7 +1078,7 @@ test("Realtime app-control structured state-only worker results stay silent insi
             entry.event?.type === "conversation.item.create" &&
             entry.event?.item?.metadata?.source === "app_control" &&
             entry.event?.item?.content?.[0]?.text?.includes(
-              "Continue by calling control_shared_app_window",
+              "Continue by calling kwwk_computer_use",
             ),
         ),
         false,
@@ -895,9 +1088,7 @@ test("Realtime app-control structured state-only worker results stay silent insi
           (entry) =>
             entry.event?.type === "response.create" &&
             entry.event?.metadata?.source === "app_control" &&
-            entry.event?.response?.instructions?.includes(
-              "continue by calling control_shared_app_window",
-            ),
+            entry.event?.response?.instructions?.includes("continue by calling kwwk_computer_use"),
         ),
         false,
       );

@@ -10,8 +10,9 @@ func buildAppControlConfig(raw rawAppControl) AppControlConfig {
 		Timeout:       durationOrDefault(raw.Timeout, defaultAppControlTimeout),
 		CodexFallback: boolPtrOrDefault(raw.CodexFallback, defaultAppControlCodexFallback),
 		KWWK: KWWKAppControlConfig{
-			Command: strings.TrimSpace(raw.KWWK.Command),
-			Dir:     strings.TrimSpace(raw.KWWK.Dir),
+			Command:       strings.TrimSpace(raw.KWWK.Command),
+			Dir:           strings.TrimSpace(raw.KWWK.Dir),
+			EnsureCommand: strings.TrimSpace(raw.KWWK.EnsureCommand),
 		},
 	}
 }
@@ -31,6 +32,9 @@ func applyAppControlEnvOverrides(cfg *Config) {
 	}
 	if value := strings.TrimSpace(getenv("ONEESAMA_KWWK_APP_CONTROL_DIR", "MAB_KWWK_APP_CONTROL_DIR")); value != "" {
 		cfg.AppControl.KWWK.Dir = value
+	}
+	if value := strings.TrimSpace(getenv("ONEESAMA_KWWK_APP_CONTROL_ENSURE_COMMAND", "MAB_KWWK_APP_CONTROL_ENSURE_COMMAND")); value != "" {
+		cfg.AppControl.KWWK.EnsureCommand = value
 	}
 }
 

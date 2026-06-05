@@ -157,6 +157,10 @@ test("TS meeting-agent /tools route rejects hidden stale workspace tools", () =>
   assert.equal(hidden.status, 404);
   assert.equal(hidden.body.error, "hidden_realtime_tool_not_exposed");
 
+  const legacyAppControl = realtimeToolRouteRejected("control_shared_app_window", tools);
+  assert.equal(legacyAppControl.status, 404);
+  assert.equal(legacyAppControl.body.error, "hidden_realtime_tool_not_exposed");
+
   const visible = realtimeToolRouteRejected("kwwk_computer_use", tools);
   assert.equal(visible, null);
 });
@@ -352,9 +356,11 @@ test("TS meeting-agent wires live-safe Realtime tool routes to concrete handlers
     "utf8",
   );
   const controlRoute = source.indexOf('toolName === "kwwk_computer_use"');
+  const legacyControlRoute = source.indexOf('toolName === "control_shared_app_window"');
   const workspaceFallback = source.indexOf("handleWorkspaceTool(toolName, body)");
 
   assert.ok(controlRoute > 0, "kwwk_computer_use must not fall through to workspace tools");
+  assert.equal(legacyControlRoute, -1, "legacy app-control tool must not be routed");
   assert.ok(
     controlRoute < workspaceFallback,
     "kwwk_computer_use handler must run before workspace fallback",
@@ -365,6 +371,8 @@ test("TS meeting-agent wires live-safe Realtime tool routes to concrete handlers
   assert.match(source, /joiner\.presentAppShare\(/);
   assert.match(appControlSource, /function queueTSAppControlJob/);
   assert.match(appControlSource, /then\(\(\) => runQueuedTSAppControlJob\(job\)\)/);
+  assert.match(appControlSource, /method: "kwwk\.cu\.execute"/);
+  assert.doesNotMatch(appControlSource, /app_control\.control_shared_app_window/);
   assert.match(appControlSource, /compactMeetingAgentAppControlResult\(rpc\.result \|\| \{\}\)/);
   assert.match(appControlSource, /reports\.create\(\{\s*id: job\.id/s);
   assert.match(appControlSource, /session_kind: "meeting_app_control"/);

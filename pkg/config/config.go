@@ -111,8 +111,9 @@ type AppControlConfig struct {
 }
 
 type KWWKAppControlConfig struct {
-	Command string
-	Dir     string
+	Command       string
+	Dir           string
+	EnsureCommand string
 }
 
 type PersonaRuntimeConfig struct {

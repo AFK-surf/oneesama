@@ -57,3 +57,17 @@ test("waitForMeetAdmission admits on explicit in-meeting page state fallback", a
   assert.equal(result.state, "admitted");
   assert.equal(result.signal, "page_state");
 });
+
+test("waitForMeetAdmission does not admit when Meet still shows pre-join controls", async () => {
+  const result = await waitForMeetAdmission(fakePage({ leaveVisible: true }), {
+    timeoutMs: 2,
+    evaluateMeetPageState: async () => ({
+      inMeeting: true,
+      waitingForAdmit: false,
+      preJoin: true,
+      textHead: "What's your name? Join now",
+    }),
+  });
+
+  assert.equal(result.state, "timeout");
+});

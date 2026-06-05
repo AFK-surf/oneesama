@@ -379,7 +379,7 @@ function mockToolResult(name, input = {}) {
       windowTitle: input.windowTitle || "Google Chrome",
     };
   }
-  if (name === "kwwk_computer_use" || name === "control_shared_app_window") {
+  if (name === "kwwk_computer_use") {
     return { ok: true, status: "queued", jobId: "benchmark_app_control_job" };
   }
   return { ok: true, status: "completed", benchmark: true, tool: name };

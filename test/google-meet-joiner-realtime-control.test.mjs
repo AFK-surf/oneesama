@@ -179,6 +179,48 @@ test("Google Meet joiner reports browser control-event rejection as failure", as
   assert.equal(result.channel, "realtime-control-event-not-allowed");
 });
 
+test("Google Meet joiner can send synthetic transcription events through control API", async () => {
+  let sent = null;
+  const result = await sendRealtimeEventToActive(
+    activeWithSidecarRealtimeClient({
+      sendRealtimeControlEvent: (payload) => {
+        sent = payload;
+        return "trusted-control-event";
+      },
+    }),
+    {
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "synthetic_item",
+      transcript: "Codex build Gomoku web game with sync",
+    },
+    async () => {},
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.channel, "trusted-control-event");
+  assert.deepEqual(sent, {
+    type: "conversation.item.input_audio_transcription.completed",
+    item_id: "synthetic_item",
+    transcript: "Codex build Gomoku web game with sync",
+  });
+});
+
+test("Google Meet joiner reports empty synthetic transcription rejection", async () => {
+  const result = await sendRealtimeEventToActive(
+    activeWithSidecarRealtimeClient({
+      sendRealtimeControlEvent: () => "realtime-control-event-not-allowed",
+    }),
+    {
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "synthetic_item",
+    },
+    async () => {},
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "realtime_event_type_not_allowed");
+});
+
 test("Google Meet joiner sends realtime text turns through the sidecar page", async () => {
   let request = null;
   const result = await requestRealtimeTextTurnFromActive(

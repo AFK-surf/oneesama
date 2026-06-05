@@ -4,7 +4,7 @@ import { chromium } from "playwright";
 import { buildRealtimeBrowserInitScript } from "../packages/core/src/realtime/realtime-browser-init-builder.ts";
 import { realtimeToolSchemas } from "../packages/core/src/realtime/realtime-contract.ts";
 
-const controlTool = realtimeToolSchemas.find((tool) => tool.name === "control_shared_app_window");
+const controlTool = realtimeToolSchemas.find((tool) => tool.name === "kwwk_computer_use");
 
 async function withRealtimeBridge(callback, options = {}) {
   const browser = await chromium.launch({ headless: true });
@@ -37,7 +37,7 @@ async function dispatchToolCall(page, callId, args) {
         new CustomEvent("meeting-avatar-realtime-server-event", {
           detail: {
             type: "response.function_call_arguments.done",
-            name: "control_shared_app_window",
+            name: "kwwk_computer_use",
             call_id: id,
             arguments: JSON.stringify(payload),
           },
@@ -94,7 +94,7 @@ test("Realtime app-control dry-run state result stays inside the executor loop",
         .some(
           (event) =>
             event.type === "response.create" &&
-            event.response?.instructions?.includes("Continue by calling control_shared_app_window"),
+            event.response?.instructions?.includes("Continue by calling kwwk_computer_use"),
         ),
     );
     assert.equal(foregroundFollowup, false);
@@ -128,7 +128,7 @@ test("Realtime app-control dry-run state result stays inside the executor loop",
     assert.ok(
       strippedEvents.some(
         (detail) =>
-          detail.name === "control_shared_app_window" &&
+          detail.name === "kwwk_computer_use" &&
           detail.operations === 4 &&
           detail.topLevel === true &&
           detail.context === true,
@@ -141,7 +141,7 @@ test("Realtime app-control queued result stays silent until job completion event
   await withRealtimeBridge(
     async (page) => {
       const postedBodies = [];
-      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+      await page.route("http://meeting.local/tools/kwwk_computer_use", async (route) => {
         postedBodies.push(route.request().postDataJSON());
         await route.fulfill({
           status: 200,
@@ -182,7 +182,7 @@ test("Realtime app-control cursor feedback uses native helper cursor coordinates
           return input;
         };
       });
-      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+      await page.route("http://meeting.local/tools/kwwk_computer_use", async (route) => {
         await route.fulfill({
           status: 200,
           headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
@@ -249,7 +249,7 @@ test("Realtime app-control awaits host cursor forwarding before returning", asyn
           return { ok: true };
         };
       });
-      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+      await page.route("http://meeting.local/tools/kwwk_computer_use", async (route) => {
         await route.fulfill({
           status: 200,
           headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
@@ -304,7 +304,7 @@ test("Realtime app-control keyboard-only results do not show cursor feedback", a
           return input;
         };
       });
-      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+      await page.route("http://meeting.local/tools/kwwk_computer_use", async (route) => {
         await route.fulfill({
           status: 200,
           headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
@@ -363,7 +363,7 @@ test("Realtime app-control blocked HUD uses compact blocker copy", async () => {
           },
         };
       });
-      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+      await page.route("http://meeting.local/tools/kwwk_computer_use", async (route) => {
         const body = route.request().postDataJSON();
         const match = cases.find(([id]) => body.instruction === id);
         await route.fulfill({
@@ -389,7 +389,7 @@ test("Realtime app-control blocked HUD uses compact blocker copy", async () => {
 test("Realtime feedback surfaces stale app-control jobs before generic output blockers", async () => {
   await withRealtimeBridge(
     async (page) => {
-      await page.route("http://meeting.local/tools/control_shared_app_window", async (route) => {
+      await page.route("http://meeting.local/tools/kwwk_computer_use", async (route) => {
         await route.fulfill({
           status: 200,
           headers: { "content-type": "application/json", "access-control-allow-origin": "*" },

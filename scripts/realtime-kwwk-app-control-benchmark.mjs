@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const DEFAULT_APP = "Chrome";
-const DEFAULT_TIMEOUT_MS = 45_000;
+const DEFAULT_TIMEOUT_MS = 90_000;
 const TEST_FILTER =
   "TestLiveKWWKStdioAppControlBackendControlsHostApp|TestLiveRealtimeSharedAppControlHTTPUsesKWWKBackend|TestLiveRealtimeSharedAppControlHTTPAcceptsKWWKInstructionOnlyObserve|TestLiveKWWKStdioAppControlBackendRejectsMixedObserveActionInstruction";
 

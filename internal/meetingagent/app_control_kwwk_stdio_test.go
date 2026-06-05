@@ -3,6 +3,7 @@ package meetingagent
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,11 +32,6 @@ func TestKWWKStdioAppControlBackendCallsPersistentJSONRPCHelper(t *testing.T) {
 			WindowID:        991,
 			ProcessID:       4242,
 		},
-		Operations: []KWWKAppControlOperation{
-			{Kind: KWWKAppControlState},
-			{Kind: KWWKAppControlClick, X: 10, Y: 20},
-			{Kind: KWWKAppControlDrag, FromX: 20, FromY: 20, ToX: 100, ToY: 20},
-		},
 	}
 	first, err := backend.ControlSharedApp(context.Background(), req)
 	if err != nil {
@@ -46,14 +42,22 @@ func TestKWWKStdioAppControlBackendCallsPersistentJSONRPCHelper(t *testing.T) {
 		t.Fatalf("ControlSharedApp(second) error = %v", err)
 	}
 
-	if !first.OK || first.Provider != "kwwk" || first.Summary != "kwwk handled 3 ops for window 991" {
-		t.Fatalf("first = %#v, want KWWK success with window target", first)
+	if !first.OK || first.Provider != "kwwk" || first.Summary != "kwwk observed instruction-only request: draw a snake mockup" {
+		t.Fatalf("first = %#v, want KWWK success with instruction-only target", first)
 	}
-	if second.Summary != "kwwk handled 3 ops for window 991" {
+	if second.Summary != "kwwk observed instruction-only request: draw a snake mockup" {
 		t.Fatalf("second = %#v, want persistent helper to handle second call", second)
 	}
-	if len(first.Actions) != 3 || first.Actions[0] != "state" || first.Actions[1] != "click" || first.Actions[2] != "drag" {
-		t.Fatalf("actions = %#v, want state/click/drag", first.Actions)
+	if len(first.Actions) != 1 || first.Actions[0] != "observe" {
+		t.Fatalf("actions = %#v, want observe", first.Actions)
+	}
+	raw, ok := first.Raw.(map[string]any)
+	if !ok {
+		t.Fatalf("raw = %#v, want metadata map", first.Raw)
+	}
+	metadata, ok := raw["metadata"].(map[string]any)
+	if !ok || metadata["method"] != kwwkAppControlMethod {
+		t.Fatalf("metadata = %#v, want method %s", raw["metadata"], kwwkAppControlMethod)
 	}
 }
 
@@ -114,6 +118,190 @@ func TestKWWKStdioAppControlBackendPreservesBackgroundAgentStatus(t *testing.T) 
 	}
 	if result.OK || result.Provider != "kwwk" || result.Status != "needs_background_agent" || result.Blocker != "needs_background_agent" {
 		t.Fatalf("result = %#v, want preserved needs_background_agent status", result)
+	}
+}
+
+func TestKWWKStdioAppControlBackendPreservesVerificationFailure(t *testing.T) {
+	t.Parallel()
+
+	helper := writeKWWKAppControlHelperSource(t, `
+import readline from "node:readline";
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
+for await (const line of rl) {
+  const req = JSON.parse(line);
+  console.log(JSON.stringify({
+    jsonrpc: "2.0",
+    id: req.id,
+    result: {
+      ok: false,
+      status: "failed",
+      summary: "post-action verification failed",
+      actions: ["click"],
+      confidence: 0.2,
+      blocker: "failed_verification",
+      operations: [{ kind: "click", x: 10, y: 20 }],
+      metadata: {
+        method: req.method,
+        verification: {
+          schema: "oneesama.kwwk-cu-verification.v1",
+          ok: false,
+          status: "failed",
+          blocker: "failed_verification"
+        }
+      }
+    }
+  }));
+}
+`)
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command: "node " + shellQuote(helper),
+		Timeout: time.Second,
+	})
+	t.Cleanup(func() {
+		_ = backend.Shutdown(context.Background())
+	})
+
+	result, err := backend.ControlSharedApp(context.Background(), AppControlRequest{
+		SessionID:   "meet_session",
+		Instruction: "click the visible button",
+		Timeout:     time.Second,
+		Target:      AppControlTarget{ApplicationName: "Chrome"},
+	})
+	if err != nil {
+		t.Fatalf("ControlSharedApp() error = %v", err)
+	}
+	if result.OK || result.Provider != "kwwk" || result.Status != appControlStatusFailed || result.Blocker != "failed_verification" {
+		t.Fatalf("result = %#v, want preserved failed_verification blocker", result)
+	}
+	raw, ok := result.Raw.(map[string]any)
+	if !ok {
+		t.Fatalf("raw = %#v, want raw map", result.Raw)
+	}
+	metadata, ok := raw["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata = %#v, want metadata map", raw["metadata"])
+	}
+	verification, ok := metadata["verification"].(map[string]any)
+	if !ok || verification["schema"] != "oneesama.kwwk-cu-verification.v1" || verification["blocker"] != "failed_verification" {
+		t.Fatalf("verification = %#v, want KWWK verification evidence", metadata["verification"])
+	}
+}
+
+func TestKWWKStdioAppControlBackendPrewarmsControlFamily(t *testing.T) {
+	t.Parallel()
+
+	helper := writeKWWKAppControlHelper(t)
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command: "node " + shellQuote(helper),
+		Timeout: time.Second,
+	})
+	t.Cleanup(func() {
+		_ = backend.Shutdown(context.Background())
+	})
+
+	result := backend.PrewarmAppControl(context.Background(), AppControlPrewarmRequest{
+		SessionID: "meet_session",
+		Reason:    "meeting_join",
+		Timeout:   time.Second,
+	})
+
+	if !result.OK || result.Provider != "kwwk" || result.Status != "ready" {
+		t.Fatalf("prewarm = %#v, want ready KWWK prewarm", result)
+	}
+	for _, control := range []string{"ping", "session-status", "mode-help", "planner-prewarm", "cursor-prewarm", "permissions-status"} {
+		if result.Evidence[control] == nil {
+			t.Fatalf("prewarm evidence missing %q: %#v", control, result.Evidence)
+		}
+	}
+	if result.Duration <= 0 || result.StartedAt.IsZero() || result.FinishedAt.IsZero() {
+		t.Fatalf("prewarm timing = duration %s started %s finished %s", result.Duration, result.StartedAt, result.FinishedAt)
+	}
+}
+
+func TestKWWKStdioAppControlBackendPrewarmRunsHelperBuildCommand(t *testing.T) {
+	t.Parallel()
+
+	helper := writeKWWKAppControlHelper(t)
+	marker := filepath.Join(t.TempDir(), "helper-built")
+	ensureCommand := fmt.Sprintf(
+		"printf '%%s\\n' '{\"ok\":true,\"schema\":\"oneesama.app-control-helper-build.v1\",\"binary\":\"/tmp/kwwk-helper\",\"compiled\":true,\"durationMs\":3}'; touch %s",
+		shellQuote(marker),
+	)
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command:       "node " + shellQuote(helper),
+		EnsureCommand: ensureCommand,
+		Timeout:       time.Second,
+	})
+	t.Cleanup(func() {
+		_ = backend.Shutdown(context.Background())
+	})
+
+	result := backend.PrewarmAppControl(context.Background(), AppControlPrewarmRequest{
+		SessionID: "meet_session",
+		Reason:    "meeting_join",
+		Timeout:   time.Second,
+	})
+
+	if !result.OK {
+		t.Fatalf("prewarm = %#v, want ready KWWK prewarm", result)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("helper build marker missing: %v", err)
+	}
+	build, ok := result.Evidence["helper-build"].(map[string]any)
+	if !ok || build["configured"] != true || build["status"] != appControlStatusCompleted {
+		t.Fatalf("helper-build evidence = %#v, want completed configured build", result.Evidence["helper-build"])
+	}
+	buildResult, ok := build["result"].(map[string]any)
+	if !ok || buildResult["schema"] != "oneesama.app-control-helper-build.v1" || buildResult["compiled"] != true {
+		t.Fatalf("helper-build result = %#v, want compiled build report", build["result"])
+	}
+}
+
+func TestKWWKStdioAppControlBackendPrewarmUsesPrewarmTimeoutNotActionTimeout(t *testing.T) {
+	t.Parallel()
+
+	helper := writeKWWKAppControlHelper(t)
+	ensureCommand := "sleep 0.05; printf '%s\\n' '{\"ok\":true,\"schema\":\"oneesama.app-control-helper-build.v1\",\"binary\":\"/tmp/kwwk-helper\",\"compiled\":true,\"durationMs\":50}'"
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command:       "node " + shellQuote(helper),
+		EnsureCommand: ensureCommand,
+		Timeout:       time.Millisecond,
+	})
+	t.Cleanup(func() {
+		_ = backend.Shutdown(context.Background())
+	})
+
+	result := backend.PrewarmAppControl(context.Background(), AppControlPrewarmRequest{
+		SessionID: "meet_session",
+		Reason:    "meeting_join",
+		Timeout:   500 * time.Millisecond,
+	})
+
+	if !result.OK {
+		t.Fatalf("prewarm = %#v, want ready KWWK prewarm using request timeout", result)
+	}
+	build, ok := result.Evidence["helper-build"].(map[string]any)
+	if !ok || build["status"] != appControlStatusCompleted {
+		t.Fatalf("helper-build evidence = %#v, want completed build within prewarm timeout", result.Evidence["helper-build"])
+	}
+}
+
+func TestKWWKStdioAppControlBackendInfersHelperBuildCommandForTSLauncher(t *testing.T) {
+	t.Parallel()
+
+	backend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command: "node --import tsx packages/core/src/meeting/app-control-helper.ts --stdio",
+	})
+	if backend.ensureCommand != "node --import tsx packages/core/src/meeting/app-control-helper.ts --ensure-binary-json" {
+		t.Fatalf("ensureCommand = %q, want inferred TS launcher build command", backend.ensureCommand)
+	}
+
+	binaryBackend := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
+		Command: "/usr/local/bin/oneesama-kwwk-helper --stdio",
+	})
+	if binaryBackend.ensureCommand != "" {
+		t.Fatalf("binary ensureCommand = %q, want no inferred build command for binary helper", binaryBackend.ensureCommand)
 	}
 }
 
@@ -382,6 +570,22 @@ const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity,
 for await (const line of rl) {
   const req = JSON.parse(line);
   const p = req.params || {};
+  if (req.method === "kwwk.cu.control") {
+    const control = p.control || "ping";
+    console.log(JSON.stringify({
+      jsonrpc: "2.0",
+      id: req.id,
+      result: {
+        ok: true,
+        schema: "oneesama.kwwk-cu-control.v1",
+        status: "ready",
+        text: control === "ping" ? "pong" : "",
+        methodFamily: "kwwk.cu",
+        control
+      }
+    }));
+    continue;
+  }
   const operations = p.operations || [];
   if (!operations.length) {
     if (/redesign|路线图|roadmap|开发|debug|research/i.test(p.instruction || "")) {

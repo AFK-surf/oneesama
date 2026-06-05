@@ -11,6 +11,11 @@ interface ScreenShareInitOptions {
   subtitle?: string;
   videoUrl?: string;
   imageUrl?: string;
+  sourceApplicationName?: string;
+  sourceBundleIdentifier?: string;
+  sourceWindowTitle?: string;
+  sourceWindowId?: number | string;
+  sourceProcessId?: number | string;
   muted?: boolean;
   autoStart?: boolean;
   showOverlay?: boolean;
@@ -27,6 +32,11 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
     subtitle: options.subtitle || "Shared agent workspace",
     videoUrl: options.videoUrl || "",
     imageUrl: options.imageUrl || "",
+    sourceApplicationName: options.sourceApplicationName || "",
+    sourceBundleIdentifier: options.sourceBundleIdentifier || "",
+    sourceWindowTitle: options.sourceWindowTitle || "",
+    sourceWindowId: Number.parseInt(String(options.sourceWindowId || 0), 10) || 0,
+    sourceProcessId: Number.parseInt(String(options.sourceProcessId || 0), 10) || 0,
     muted: options.muted !== false,
     autoStart: Boolean(options.autoStart),
     showOverlay: Boolean(options.showOverlay),
@@ -51,6 +61,11 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
       subtitle: config.subtitle,
       videoUrl: config.videoUrl,
       imageUrl: config.imageUrl,
+      sourceApplicationName: config.sourceApplicationName,
+      sourceBundleIdentifier: config.sourceBundleIdentifier,
+      sourceWindowTitle: config.sourceWindowTitle,
+      sourceWindowId: config.sourceWindowId,
+      sourceProcessId: config.sourceProcessId,
       width: config.width,
       height: config.height,
       fps: config.fps,
@@ -339,6 +354,11 @@ export function buildScreenShareInitScript(options: ScreenShareInitOptions = {})
         }
         state.title = options.title || state.title || config.title;
         state.subtitle = options.subtitle || state.subtitle || config.subtitle;
+        state.sourceApplicationName = options.sourceApplicationName || state.sourceApplicationName || config.sourceApplicationName;
+        state.sourceBundleIdentifier = options.sourceBundleIdentifier || state.sourceBundleIdentifier || config.sourceBundleIdentifier;
+        state.sourceWindowTitle = options.sourceWindowTitle || state.sourceWindowTitle || config.sourceWindowTitle;
+        state.sourceWindowId = Number.parseInt(String(options.sourceWindowId || state.sourceWindowId || config.sourceWindowId || 0), 10) || 0;
+        state.sourceProcessId = Number.parseInt(String(options.sourceProcessId || state.sourceProcessId || config.sourceProcessId || 0), 10) || 0;
         state.showOverlay = options.showOverlay === undefined ? state.showOverlay : Boolean(options.showOverlay);
         const nextImageUrl = options.imageUrl || options.imagePath || options.framePath || state.imageUrl || config.imageUrl;
         if (nextImageUrl && nextImageUrl !== state.imageUrl) {

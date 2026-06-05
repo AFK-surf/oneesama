@@ -21,16 +21,20 @@ test("KWWK planner/action gate scores deterministic fixture plans", () => {
     ok: true,
     operations: [{ kind: "type_text", text: "hello" }],
     planner: {
-      provider: "deterministic",
-      modelUsed: false,
+      provider: "model_first_local_fixture",
+      modelUsed: true,
+      modelName: "tiny-planner-action-fixture",
       normalizeMs: 1,
+      modelLatencyMs: 0,
       actionKinds: ["type_text"],
     },
   });
 
   assert.equal(score.ok, true);
   assert.equal(score.verifier.operationsMatch, true);
-  assert.equal(score.verifier.modelUnused, true);
+  assert.equal(score.verifier.modelFirst, true);
+  assert.equal(score.verifier.modelUsed, true);
+  assert.equal(score.verifier.modelNamePresent, true);
   assert.equal(score.verifier.mode, "fixture");
   assert.equal(score.verifier.state.passed, true);
   assert.deepEqual(score.verifier.state.evidenceKinds, ["text_appeared"]);
@@ -259,7 +263,7 @@ test("KWWK planner/action report can include optional live macOS fixture evidenc
 
   assert.equal(report.ok, true);
   assert.equal(report.realAppExecution, true);
-  assert.equal(report.evidenceMode, "deterministic_helper_plan_fixture_and_live_macos_fixture");
+  assert.equal(report.evidenceMode, "model_first_helper_plan_fixture_and_live_macos_fixture");
   assert.equal(report.liveMacOSFixture.skipped, false);
   assert.equal(report.liveMacOSFixture.cases.length, 2);
   assert.equal(report.liveBrowserFixture.skipped, true);
@@ -335,7 +339,7 @@ test("KWWK planner/action report can include optional live browser fixture evide
 
   assert.equal(report.ok, true);
   assert.equal(report.realAppExecution, true);
-  assert.equal(report.evidenceMode, "deterministic_helper_plan_fixture_and_live_browser_fixture");
+  assert.equal(report.evidenceMode, "model_first_helper_plan_fixture_and_live_browser_fixture");
   assert.equal(report.liveMacOSFixture.skipped, true);
   assert.equal(report.liveBrowserFixture.skipped, false);
   assert.equal(report.liveBrowserFixture.cases.length, 1);
@@ -368,7 +372,12 @@ test(
       assert.equal(report.ok, true);
       assert.equal(report.gate, "kwwk_planner_action");
       assert.equal(report.cases.length, 14);
-      assert.ok(report.cases.every((testCase) => testCase.planner.modelUsed === false));
+      assert.ok(report.cases.every((testCase) => testCase.planner.modelUsed === true));
+      assert.ok(
+        report.cases.every((testCase) =>
+          String(testCase.planner.provider || "").startsWith("model_first_"),
+        ),
+      );
       assert.ok(report.cases.every((testCase) => testCase.verifier.operationsMatch === true));
       assert.ok(report.cases.every((testCase) => testCase.verifier.mode === "fixture"));
       assert.ok(report.cases.every((testCase) => testCase.verifier.state.passed === true));
@@ -387,9 +396,11 @@ function plan(operations) {
     ok: true,
     operations,
     planner: {
-      provider: "deterministic",
-      modelUsed: false,
+      provider: "model_first_local_fixture",
+      modelUsed: true,
+      modelName: "tiny-planner-action-fixture",
       normalizeMs: 0,
+      modelLatencyMs: 0,
       actionKinds: operations.map((operation) => operation.kind),
     },
   };
@@ -402,9 +413,11 @@ function blockedPlan(blocker, status = "blocked") {
     blocker,
     operations: [],
     planner: {
-      provider: "deterministic",
-      modelUsed: false,
+      provider: "model_first_local_fixture",
+      modelUsed: true,
+      modelName: "tiny-planner-action-fixture",
       normalizeMs: 0,
+      modelLatencyMs: 0,
       actionKinds: [],
     },
   };

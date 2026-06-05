@@ -52,6 +52,7 @@ interface RealtimeBridgeConfig {
   meetAudioCaptureChunkMs?: number;
   meetAudioInputGain?: number;
   meetAudioEnergyStaleMs?: number;
+  selfEchoSuppressionWindowMs?: number;
   instructions: string;
   tools: any[];
   toolChoice?: string;
@@ -123,6 +124,7 @@ const config: RealtimeBridgeConfig = {
   meetAudioCaptureChunkMs: 5000,
   meetAudioInputGain: undefined,
   meetAudioEnergyStaleMs: 10000,
+  selfEchoSuppressionWindowMs: 350,
   instructions: "",
   tools: [],
   session: {},
@@ -192,6 +194,27 @@ const state = {
     activeResponseId: "",
     lastInputSpeechStartedAt: "",
     cancelledResponses: 0,
+    nativeInterruption: {
+      speech_started_at: "",
+      api_interruption_at: "",
+      response_cancelled_at: "",
+      avatar_audio_stopped_at: "",
+      truncate_sent_at: "",
+      last_self_echo_suppressed_at: "",
+      last_self_echo_reason: "",
+      self_echo_suppressed_count: 0,
+      last_self_echo_evidence: null,
+      last_output_item_id: "",
+      last_output_content_index: 0,
+      last_output_audio_started_at: "",
+      last_output_audio_event_at: "",
+      last_output_audio_elapsed_ms: 0,
+      truncate_count: 0,
+      avatar_audio_stop_count: 0,
+      last_event_type: "",
+      last_source: "",
+      last_stop_result: null,
+    },
   },
   avatarTools: {
     calls: [],

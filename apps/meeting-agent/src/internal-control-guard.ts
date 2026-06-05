@@ -31,9 +31,7 @@ export function realtimeToolRouteRejected(
   exposedTools: Array<{ name?: string }>,
 ) {
   const allowed = new Set(exposedTools.map((tool) => String(tool.name || "")));
-  const compatibilityAllowed = new Set(["control_shared_app_window"]);
   if (allowed.has(toolName)) return null;
-  if (compatibilityAllowed.has(toolName)) return null;
   return {
     status: 404,
     body: {

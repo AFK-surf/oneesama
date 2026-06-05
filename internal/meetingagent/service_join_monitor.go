@@ -289,6 +289,9 @@ func runtimeJoinState(active any) runtimeJoinSnapshot {
 }
 
 func runtimeJoinedEvidence(fields map[string]any, meetPage map[string]any, participantCount int) bool {
+	if boolField(meetPage, "waitingForAdmit") || boolField(meetPage, "preJoin") || boolField(meetPage, "signIn") {
+		return false
+	}
 	if boolField(meetPage, "inMeeting") || participantCount > 0 {
 		return true
 	}

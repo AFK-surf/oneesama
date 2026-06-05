@@ -131,6 +131,26 @@ async function simulateRealtimeAgentToolCall(name, args = {}) {
 
 function sendRealtimeControlEvent(event = {}) {
   const type = String((event as { type?: unknown })?.type || "").trim();
+  if (type === "conversation.item.input_audio_transcription.completed") {
+    const transcript = String((event as { transcript?: unknown })?.transcript || "").trim();
+    if (!transcript) {
+      recordTimeline("realtime_control_event_rejected", {
+        type,
+        reason: "realtime_transcript_required",
+      });
+      updateFeedback();
+      return "realtime-control-event-not-allowed";
+    }
+    window.dispatchEvent(
+      new CustomEvent("meeting-avatar-realtime-server-event", {
+        detail: {
+          ...(event as Record<string, unknown>),
+          __meetingAvatarTrustedControlEvent: true,
+        },
+      }),
+    );
+    return "trusted-control-event";
+  }
   if (type !== "response.cancel" && type !== "input_audio_buffer.clear") {
     recordTimeline("realtime_control_event_rejected", {
       type,
@@ -220,8 +240,10 @@ window.addEventListener("meeting-avatar-worker-result", (event: Event) => {
 window.addEventListener("meeting-avatar-realtime-server-event", (event: Event) => {
   const detail = (event as CustomEvent).detail as Record<string, any> & {
     __meetingAvatarInboundRecorded?: boolean;
+    __meetingAvatarTrustedControlEvent?: boolean;
   };
-  if (!allowCustomRealtimeServerEvents()) {
+  const trustedControlEvent = detail?.__meetingAvatarTrustedControlEvent === true;
+  if (!trustedControlEvent && !allowCustomRealtimeServerEvents()) {
     recordTimeline("realtime_custom_server_event_rejected", {
       type: detail?.type || "",
       mode: config.mode || "",
@@ -230,15 +252,21 @@ window.addEventListener("meeting-avatar-realtime-server-event", (event: Event) =
     return;
   }
   if (detail?.__meetingAvatarInboundRecorded !== true) {
-    rememberInboundEvent(detail, "custom-event");
+    rememberInboundEvent(detail, trustedControlEvent ? "control-event" : "custom-event");
   }
   if (detail?.type === "session.created") {
     state.connection.openaiSessionId = String((detail as any).session?.id || "");
     updateFeedback();
   }
   if (detail?.type === "input_audio_buffer.speech_started") {
-    state.protection.lastInputSpeechStartedAt = new Date().toISOString();
-    updateFeedback();
+    if (detail.__meetingAvatarSelfEchoSuppressed === true) {
+      recordTimeline("realtime_input_speech_started_self_echo_suppressed", {
+        source: "meeting-avatar-realtime-server-event",
+      });
+    } else {
+      state.protection.lastInputSpeechStartedAt = new Date().toISOString();
+      updateFeedback();
+    }
   }
   handleLocalToolCallEvent(detail).catch(rememberError);
 });

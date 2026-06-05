@@ -159,6 +159,7 @@ export function getRuntimeConfig(env = process.env) {
     screenshotDir: env.MAB_SCREENSHOT_DIR || "/tmp/meeting-avatar-bot",
     playwrightModulePath: env.MAB_PLAYWRIGHT_MODULE || "",
     chromiumExecutablePath: env.MAB_CHROMIUM_EXECUTABLE || "",
+    browserChannel: env.MAB_BROWSER_CHANNEL || "",
     chromiumExtraArgs: env.MAB_CHROMIUM_EXTRA_ARGS || "",
     browserUserDataDir: env.MAB_BROWSER_USER_DATA_DIR || "",
     browserViewportWidth: Number(env.MAB_BROWSER_VIEWPORT_WIDTH || 1440),

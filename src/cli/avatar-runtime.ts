@@ -745,6 +745,7 @@ export async function runtimeAcceptanceSmoke() {
       installWorkerResultBridge: true,
       installRealtimeBridge: true,
       realtimeBridgeMode: "webrtc-mock",
+      includeParticipantAudio: true,
       autoConnectRealtime: true,
       sendRealtimeSessionUpdate: true,
     });

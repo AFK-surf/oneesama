@@ -27,7 +27,7 @@ func TestRealtimeSharedAppControlStartsComputerUseWorker(t *testing.T) {
 		},
 	}
 	rootDir := t.TempDir()
-	router := newRealtimeTestRouterWithConfig(t, Config{
+	service := NewService(Config{
 		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
 		ArtifactsRootDir: rootDir,
 		InternalAuthKey:  "secret-key",
@@ -48,9 +48,26 @@ func TestRealtimeSharedAppControlStartsComputerUseWorker(t *testing.T) {
 			},
 		},
 	})
-
-	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a small circle in the canvas","executionMode":"delegate","wait":true}`, http.StatusOK)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = service.Shutdown(ctx)
+	})
+	if _, err := service.JoinGoogleMeet(context.Background(), JoinGoogleMeetRequest{
+		SessionID:   "meet_session",
+		MeetingURL:  "https://meet.google.com/abc-defg-hij",
+		DisplayName: "Onee-sama",
+		DryRun:      true,
+	}); err != nil {
+		t.Fatalf("JoinGoogleMeet() error = %v", err)
+	}
+	body := service.ControlRealtimeSharedApp(context.Background(), RealtimeSharedAppControlRequest{
+		SessionID:       "meet_session",
+		ApplicationName: "Pencil",
+		Instruction:     "draw a small circle in the canvas",
+		ExecutionMode:   appControlExecutionModeDelegate,
+		Wait:            true,
+	})
 
 	if body["ok"] != true || body["status"] != string(agentrunner.StatusCompleted) {
 		t.Fatalf("body = %#v, want completed app-control worker", body)
@@ -96,7 +113,7 @@ func TestRealtimeSharedAppControlDelegatesConfiguredKWWKGoalToComputerUseExecuto
 		},
 	}
 	rootDir := t.TempDir()
-	router := newRealtimeTestRouterWithConfig(t, Config{
+	service := NewService(Config{
 		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
 		ArtifactsRootDir: rootDir,
 		InternalAuthKey:  "secret-key",
@@ -121,9 +138,26 @@ func TestRealtimeSharedAppControlDelegatesConfiguredKWWKGoalToComputerUseExecuto
 			},
 		},
 	})
-
-	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a circle without telling me which tool to use","executionMode":"delegate","wait":true}`, http.StatusOK)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = service.Shutdown(ctx)
+	})
+	if _, err := service.JoinGoogleMeet(context.Background(), JoinGoogleMeetRequest{
+		SessionID:   "meet_session",
+		MeetingURL:  "https://meet.google.com/abc-defg-hij",
+		DisplayName: "Onee-sama",
+		DryRun:      true,
+	}); err != nil {
+		t.Fatalf("JoinGoogleMeet() error = %v", err)
+	}
+	body := service.ControlRealtimeSharedApp(context.Background(), RealtimeSharedAppControlRequest{
+		SessionID:       "meet_session",
+		ApplicationName: "Pencil",
+		Instruction:     "draw a circle without telling me which tool to use",
+		ExecutionMode:   appControlExecutionModeDelegate,
+		Wait:            true,
+	})
 
 	if body["ok"] != true || body["provider"] != "codex" || body["summary"] != "Explored Pencil and drew a circle." {
 		t.Fatalf("body = %#v, want instruction-only app-control goal handled by Computer Use executor", body)
@@ -177,7 +211,7 @@ func TestRealtimeSharedAppControlDirectConfiguredKWWKDoesNotStartCodexExecutor(t
 	})
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a circle without telling me which tool to use","executionMode":"direct","wait":true}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a circle without telling me which tool to use","executionMode":"direct","wait":true}`, http.StatusOK)
 
 	if body["ok"] != false || body["provider"] != "kwwk" || body["error"] != "kwwk_app_control_unconfigured" {
 		t.Fatalf("body = %#v, want direct KWWK blocker without Codex fallback", body)
@@ -325,7 +359,7 @@ func TestRealtimeSharedAppControlCompactsRuntimeStatusForComputerUse(t *testing.
 	}
 	hugeTimeline := strings.Repeat("hugeTimelineToken", 5000)
 	rootDir := t.TempDir()
-	router := newRealtimeTestRouterWithConfig(t, Config{
+	service := NewService(Config{
 		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
 		ArtifactsRootDir: rootDir,
 		InternalAuthKey:  "secret-key",
@@ -336,13 +370,17 @@ func TestRealtimeSharedAppControlCompactsRuntimeStatusForComputerUse(t *testing.
 			statusActive: map[string]any{
 				"sessionId": "meet_session",
 				"screenShare": map[string]any{
-					"active":          true,
-					"applicationName": "Chrome",
-					"title":           "Chrome",
-					"subtitle":        "共享 Chrome 窗口",
-					"imageUrl":        "http://127.0.0.1/screen-share.mjpg",
-					"windowId":        2190,
-					"processId":       72417,
+					"active":                true,
+					"applicationName":       "Chrome",
+					"title":                 "Share Google Chrome",
+					"subtitle":              "共享 Chrome 窗口",
+					"imageUrl":              "http://127.0.0.1/screen-share.mjpg",
+					"windowId":              2190,
+					"processId":             72417,
+					"sourceApplicationName": "Chrome",
+					"sourceWindowTitle":     "Oneesama KWWK App Control Target",
+					"sourceWindowId":        4242,
+					"sourceProcessId":       8888,
 				},
 				"realtimeBridge": map[string]any{
 					"timeline": hugeTimeline,
@@ -356,9 +394,26 @@ func TestRealtimeSharedAppControlCompactsRuntimeStatusForComputerUse(t *testing.
 			},
 		},
 	})
-
-	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Chrome","instruction":"点击 Got it 关闭提示","executionMode":"delegate","wait":true}`, http.StatusOK)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = service.Shutdown(ctx)
+	})
+	if _, err := service.JoinGoogleMeet(context.Background(), JoinGoogleMeetRequest{
+		SessionID:   "meet_session",
+		MeetingURL:  "https://meet.google.com/abc-defg-hij",
+		DisplayName: "Onee-sama",
+		DryRun:      true,
+	}); err != nil {
+		t.Fatalf("JoinGoogleMeet() error = %v", err)
+	}
+	body := service.ControlRealtimeSharedApp(context.Background(), RealtimeSharedAppControlRequest{
+		SessionID:       "meet_session",
+		ApplicationName: "Chrome",
+		Instruction:     "点击 Got it 关闭提示",
+		ExecutionMode:   appControlExecutionModeDelegate,
+		Wait:            true,
+	})
 
 	if body["ok"] != true {
 		t.Fatalf("body = %#v, want app-control success", body)
@@ -373,7 +428,10 @@ func TestRealtimeSharedAppControlCompactsRuntimeStatusForComputerUse(t *testing.
 	if _, ok := screenShareStatus["realtimeBridge"]; ok {
 		t.Fatalf("screen_share_status = %#v, must not include realtimeBridge", screenShareStatus)
 	}
-	if screenShareStatus["applicationName"] != "Chrome" || screenShareStatus["windowId"] != 2190.0 && screenShareStatus["windowId"] != 2190 {
+	if screenShareStatus["applicationName"] != "Chrome" ||
+		screenShareStatus["windowTitle"] != "Oneesama KWWK App Control Target" ||
+		screenShareStatus["windowId"] != 4242.0 && screenShareStatus["windowId"] != 4242 ||
+		screenShareStatus["processId"] != 8888.0 && screenShareStatus["processId"] != 8888 {
 		t.Fatalf("screen_share_status = %#v, want compact target fields", screenShareStatus)
 	}
 	screenShareResult := body["screenShare"].(map[string]any)
@@ -411,7 +469,7 @@ func TestRealtimeSharedAppControlRejectsStandaloneToolBypass(t *testing.T) {
 		Runner: runner,
 	})
 
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"standalone":true,"session_id":"cu_case_probe_1","applicationName":"Pencil","instruction":"only observe Pencil; do not edit anything","executionMode":"delegate","wait":true}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"standalone":true,"session_id":"cu_case_probe_1","applicationName":"Pencil","instruction":"only observe Pencil; do not edit anything","executionMode":"delegate","wait":true}`, http.StatusOK)
 
 	if body["ok"] != false || body["error"] != "standalone_app_control_not_allowed" {
 		t.Fatalf("body = %#v, want standalone_app_control_not_allowed", body)
@@ -425,7 +483,7 @@ func TestRealtimeSharedAppControlRejectsStandaloneBeforeTargetValidation(t *test
 	t.Parallel()
 
 	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{RealtimeModel: "gpt-realtime-2"})
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"standalone":true,"instruction":"observe the active app"}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"standalone":true,"instruction":"observe the active app"}`, http.StatusOK)
 	if body["ok"] != false || body["error"] != "standalone_app_control_not_allowed" {
 		t.Fatalf("body = %#v, want standalone_app_control_not_allowed", body)
 	}
@@ -443,7 +501,7 @@ func TestRealtimeSharedAppControlPropagatesWorkerBlocker(t *testing.T) {
 		},
 	}
 	rootDir := t.TempDir()
-	router := newRealtimeTestRouterWithConfig(t, Config{
+	service := NewService(Config{
 		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
 		ArtifactsRootDir: rootDir,
 		InternalAuthKey:  "secret-key",
@@ -463,14 +521,31 @@ func TestRealtimeSharedAppControlPropagatesWorkerBlocker(t *testing.T) {
 			},
 		},
 	})
-
-	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a small circle in the canvas","executionMode":"delegate","wait":true}`, http.StatusOK)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = service.Shutdown(ctx)
+	})
+	if _, err := service.JoinGoogleMeet(context.Background(), JoinGoogleMeetRequest{
+		SessionID:   "meet_session",
+		MeetingURL:  "https://meet.google.com/abc-defg-hij",
+		DisplayName: "Onee-sama",
+		DryRun:      true,
+	}); err != nil {
+		t.Fatalf("JoinGoogleMeet() error = %v", err)
+	}
+	body := service.ControlRealtimeSharedApp(context.Background(), RealtimeSharedAppControlRequest{
+		SessionID:       "meet_session",
+		ApplicationName: "Pencil",
+		Instruction:     "draw a small circle in the canvas",
+		ExecutionMode:   appControlExecutionModeDelegate,
+		Wait:            true,
+	})
 
 	if body["ok"] != false || body["error"] != "app_control_blocked" || body["blocker"] != "computer_use_unavailable" {
 		t.Fatalf("body = %#v, want worker blocker surfaced", body)
 	}
-	if body["displayText"] != "操作失败" || body["answer_hint_zh"] != "操作失败" {
+	if body["displayText"] != "Operation failed." || body["answer_hint_en"] != "Operation failed." {
 		t.Fatalf("body = %#v, want compact human-facing blocker wording", body)
 	}
 }
@@ -485,15 +560,15 @@ func TestAppControlResultMapAddsCompactFailureWording(t *testing.T) {
 		error    string
 		expected string
 	}{
-		{name: "ambiguous", status: "blocked", blocker: "blocked_ambiguous_target", expected: "目标不明确"},
-		{name: "permission", status: "blocked", blocker: "blocked_permission", expected: "需要权限"},
-		{name: "no target", status: "blocked", blocker: "blocked_no_target_app", expected: "找不到窗口"},
-		{name: "unsupported", status: "blocked", blocker: "blocked_unsupported_instruction", expected: "暂不支持"},
-		{name: "background", status: "needs_background_agent", blocker: "needs_background_agent", expected: "交给后台"},
-		{name: "execution", status: "failed", blocker: "failed_execution", expected: "操作失败"},
-		{name: "verification", status: "failed", blocker: "failed_verification", expected: "验证失败"},
-		{name: "timeout", status: string(agentrunner.StatusTimeout), expected: "操作失败"},
-		{name: "error fallback", status: "failed", error: "app_control_blocked", expected: "操作失败"},
+		{name: "ambiguous", status: "blocked", blocker: "blocked_ambiguous_target", expected: "Target is ambiguous."},
+		{name: "permission", status: "blocked", blocker: "blocked_permission", expected: "Permission is required."},
+		{name: "no target", status: "blocked", blocker: "blocked_no_target_app", expected: "Could not find the target window."},
+		{name: "unsupported", status: "blocked", blocker: "blocked_unsupported_instruction", expected: "This action is not supported yet."},
+		{name: "background", status: "needs_background_agent", blocker: "needs_background_agent", expected: "Needs background handling."},
+		{name: "execution", status: "failed", blocker: "failed_execution", expected: "Operation failed."},
+		{name: "verification", status: "failed", blocker: "failed_verification", expected: "Verification failed."},
+		{name: "timeout", status: string(agentrunner.StatusTimeout), expected: "Operation failed."},
+		{name: "error fallback", status: "failed", error: "app_control_blocked", expected: "Operation failed."},
 	}
 	for _, testCase := range cases {
 		testCase := testCase
@@ -510,7 +585,7 @@ func TestAppControlResultMapAddsCompactFailureWording(t *testing.T) {
 			if out["blocker"] != testCase.blocker && testCase.blocker != "" {
 				t.Fatalf("out = %#v, must preserve machine-readable blocker", out)
 			}
-			if out["displayText"] != testCase.expected || out["answer_hint_zh"] != testCase.expected {
+			if out["displayText"] != testCase.expected || out["answer_hint_en"] != testCase.expected {
 				t.Fatalf("out = %#v, want compact wording %q", out, testCase.expected)
 			}
 		})
@@ -567,7 +642,7 @@ func TestRealtimeSharedAppControlStripsStaleOperationsWithWindowTarget(t *testin
 	})
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","instruction":"draw a snake mockup","wait":true,"operations":[{"kind":"state"},{"kind":"click","x":120,"y":80},{"kind":"type_text","text":"snake"},{"kind":"drag","from_x":140,"from_y":120,"to_x":220,"to_y":120}],"context":{"operations":[{"kind":"click","x":1,"y":2}]}}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"session_id":"meet_session","instruction":"draw a snake mockup","wait":true,"operations":[{"kind":"state"},{"kind":"click","x":120,"y":80},{"kind":"type_text","text":"snake"},{"kind":"drag","from_x":140,"from_y":120,"to_x":220,"to_y":120}],"context":{"operations":[{"kind":"click","x":1,"y":2}]}}`, http.StatusOK)
 
 	if body["ok"] != true || body["provider"] != "kwwk" || body["summary"] != "updated the shared Pencil canvas" {
 		t.Fatalf("body = %#v, want KWWK backend success", body)
@@ -646,7 +721,7 @@ func TestRealtimeSharedAppControlBackendUnavailableFailsFast(t *testing.T) {
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
 	start := time.Now()
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Pencil","timeoutMs":5000,"instruction":"draw a snake mockup","wait":true}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"session_id":"meet_session","applicationName":"Pencil","timeoutMs":5000,"instruction":"draw a snake mockup","wait":true}`, http.StatusOK)
 	elapsed := time.Since(start)
 
 	if body["ok"] != false || body["error"] != "kwwk_backend_unavailable" || body["provider"] != "kwwk" {
@@ -693,7 +768,7 @@ func TestRealtimeSharedAppControlQueuesByDefaultAndStatusCompletes(t *testing.T)
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
 	start := time.Now()
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a snake mockup"}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"session_id":"meet_session","applicationName":"Pencil","instruction":"draw a snake mockup"}`, http.StatusOK)
 	elapsed := time.Since(start)
 
 	if body["ok"] != true || body["status"] != appControlStatusQueued || strings.TrimSpace(stringFromAny(body["job_id"])) == "" {
@@ -705,7 +780,7 @@ func TestRealtimeSharedAppControlQueuesByDefaultAndStatusCompletes(t *testing.T)
 	jobID := stringFromAny(body["job_id"])
 	var status map[string]any
 	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		status = performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"job_id":"`+jobID+`"}`, http.StatusOK)
+		status = performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"job_id":"`+jobID+`"}`, http.StatusOK)
 		if status["status"] == appControlStatusCompleted {
 			break
 		}
@@ -853,7 +928,7 @@ func TestRealtimeSharedAppControlQueuedTimeoutReportsFailed(t *testing.T) {
 	})
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","applicationName":"Chrome","instruction":"click Got it"}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"session_id":"meet_session","applicationName":"Chrome","instruction":"click Got it"}`, http.StatusOK)
 	jobID := stringFromAny(body["job_id"])
 	if strings.TrimSpace(jobID) == "" {
 		t.Fatalf("body = %#v, want queued app-control job", body)
@@ -861,7 +936,7 @@ func TestRealtimeSharedAppControlQueuedTimeoutReportsFailed(t *testing.T) {
 
 	var status map[string]any
 	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		status = performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"job_id":"`+jobID+`"}`, http.StatusOK)
+		status = performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"job_id":"`+jobID+`"}`, http.StatusOK)
 		if status["status"] == string(agentrunner.StatusTimeout) {
 			break
 		}
@@ -1004,7 +1079,7 @@ func TestRealtimeSharedAppControlRejectsOperationsWithoutInstruction(t *testing.
 	})
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"session_id":"meet_session","operations":[{"kind":"state"}],"wait":true}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"session_id":"meet_session","operations":[{"kind":"state"}],"wait":true}`, http.StatusOK)
 
 	if body["ok"] != false || body["error"] != "instruction_required" {
 		t.Fatalf("body = %#v, want instruction_required", body)
@@ -1018,7 +1093,7 @@ func TestRealtimeSharedAppControlRequiresInstruction(t *testing.T) {
 	t.Parallel()
 
 	router := newRealtimeTestRouter(t, appconfig.OpenAIConfig{RealtimeModel: "gpt-realtime-2"})
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", `{"applicationName":"Pencil"}`, http.StatusOK)
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", `{"applicationName":"Pencil"}`, http.StatusOK)
 	if body["ok"] != false || body["error"] != "instruction_required" {
 		t.Fatalf("body = %#v, want instruction_required", body)
 	}

@@ -10,9 +10,10 @@ func NewConfiguredAppControlBackend(cfg appconfig.AppControlConfig, service *Ser
 		return codex
 	case "kwwk":
 		kwwk := NewKWWKStdioAppControlBackend(KWWKStdioAppControlConfig{
-			Command: cfg.KWWK.Command,
-			Dir:     cfg.KWWK.Dir,
-			Timeout: cfg.Timeout,
+			Command:       cfg.KWWK.Command,
+			EnsureCommand: cfg.KWWK.EnsureCommand,
+			Dir:           cfg.KWWK.Dir,
+			Timeout:       cfg.Timeout,
 		})
 		if codexFallback {
 			return NewFallbackAppControlBackend(kwwk, codex)

@@ -9,8 +9,19 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const sleep = promisify(setTimeout);
 
-function helperSourcePath() {
-  return fileURLToPath(new URL("./app-control-helper.swift", import.meta.url));
+export function appControlHelperSourcePaths() {
+  return [
+    fileURLToPath(new URL("./kwwk-cu-runtime.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-router.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-protocol.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-planner.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-executor.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-observation.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-cursor.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-verification.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-input.swift", import.meta.url)),
+    fileURLToPath(new URL("./app-control-helper.swift", import.meta.url)),
+  ];
 }
 
 export function appControlHelperBinaryPath() {
@@ -19,10 +30,11 @@ export function appControlHelperBinaryPath() {
   );
 }
 
-function helperNeedsCompile(source: string, binary: string) {
+function helperNeedsCompile(sources: string[], binary: string) {
   if (!existsSync(binary)) return true;
   try {
-    return statSync(binary).mtimeMs < statSync(source).mtimeMs;
+    const binaryMtime = statSync(binary).mtimeMs;
+    return sources.some((source) => binaryMtime < statSync(source).mtimeMs);
   } catch {
     return true;
   }
@@ -32,9 +44,9 @@ export async function ensureAppControlHelperBinary() {
   if (process.platform !== "darwin") {
     throw new Error("app-control helper requires darwin");
   }
-  const source = helperSourcePath();
+  const sources = appControlHelperSourcePaths();
   const binary = appControlHelperBinaryPath();
-  if (!helperNeedsCompile(source, binary)) return binary;
+  if (!helperNeedsCompile(sources, binary)) return binary;
   await mkdir(dirname(binary), { recursive: true });
   const moduleCachePath = join(tmpdir(), "oneesama-swift-module-cache");
   await mkdir(moduleCachePath, { recursive: true });
@@ -52,10 +64,10 @@ export async function ensureAppControlHelperBinary() {
     }
   }
   try {
-    if (!helperNeedsCompile(source, binary)) return binary;
+    if (!helperNeedsCompile(sources, binary)) return binary;
     await execFileAsync(
       "/usr/bin/swiftc",
-      [source, "-module-cache-path", moduleCachePath, "-o", binary],
+      [...sources, "-module-cache-path", moduleCachePath, "-o", binary],
       {
         timeout: 30000,
         maxBuffer: 1024 * 1024,
@@ -67,9 +79,39 @@ export async function ensureAppControlHelperBinary() {
   return binary;
 }
 
+export async function ensureAppControlHelperBinaryReport() {
+  const started = Date.now();
+  const sources = appControlHelperSourcePaths();
+  const binary = appControlHelperBinaryPath();
+  const neededCompileBefore =
+    process.platform === "darwin" ? helperNeedsCompile(sources, binary) : true;
+  const resolvedBinary = await ensureAppControlHelperBinary();
+  const neededCompileAfter = helperNeedsCompile(sources, resolvedBinary);
+  return {
+    ok: true,
+    schema: "oneesama.app-control-helper-build.v1",
+    binary: resolvedBinary,
+    compiled: neededCompileBefore && !neededCompileAfter,
+    alreadyCurrent: !neededCompileBefore,
+    current: !neededCompileAfter,
+    sourceCount: sources.length,
+    durationMs: Date.now() - started,
+  };
+}
+
 async function main() {
   if (process.argv.includes("--help")) {
-    process.stdout.write("usage: tsx packages/core/src/meeting/app-control-helper.ts [--stdio]\n");
+    process.stdout.write(
+      "usage: tsx packages/core/src/meeting/app-control-helper.ts [--stdio|--ensure-binary|--ensure-binary-json]\n",
+    );
+    return;
+  }
+  if (process.argv.includes("--ensure-binary-json")) {
+    process.stdout.write(`${JSON.stringify(await ensureAppControlHelperBinaryReport())}\n`);
+    return;
+  }
+  if (process.argv.includes("--ensure-binary")) {
+    process.stdout.write(`${await ensureAppControlHelperBinary()}\n`);
     return;
   }
   const binary = await ensureAppControlHelperBinary();

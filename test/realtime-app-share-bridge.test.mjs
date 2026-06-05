@@ -35,6 +35,7 @@ async function withRealtimeBridge(callback, options = {}) {
 test("Realtime app-share success stays silent after verified active share evidence", async () => {
   await withRealtimeBridge(
     async (page) => {
+      const prewarmRequests = [];
       await page.route("http://meeting.local/screen-share/app", async (route) => {
         await route.fulfill({
           status: 200,
@@ -81,6 +82,29 @@ test("Realtime app-share success stays silent after verified active share eviden
           }),
         });
       });
+      await page.route("http://meeting.local/tools/kwwk_computer_use", async (route) => {
+        prewarmRequests.push(JSON.parse(route.request().postData() || "{}"));
+        await route.fulfill({
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "access-control-allow-origin": "*",
+          },
+          body: JSON.stringify({
+            ok: true,
+            provider: "kwwk",
+            status: "completed",
+            actions: ["state"],
+            summary: "Prewarmed active shared app target.",
+            screenShare: {
+              active: true,
+              applicationName: "Chrome",
+              windowTitle: "Chrome",
+              windowId: 42,
+            },
+          }),
+        });
+      });
 
       await page.evaluate(() => {
         window.dispatchEvent(
@@ -99,6 +123,9 @@ test("Realtime app-share success stays silent after verified active share eviden
         window.MAB_REALTIME_BRIDGE?.meetTools?.calls?.some(
           (call) => call.callId === "call_share_codex",
         ),
+      );
+      await page.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.kwwkAppControl?.appSharePrewarm?.status === "completed",
       );
 
       const responseCreate = await page.evaluate(() =>
@@ -126,6 +153,21 @@ test("Realtime app-share success stays silent after verified active share eviden
       assert.equal(shareCall.delivery.responseChannel, "");
       assert.equal(shareCall.delivery.meetingEvent.type, "tool_result.visual_only");
       assert.equal(shareCall.delivery.meetingEvent.visibility, "visual_only");
+      assert.equal(prewarmRequests.length, 1);
+      assert.match(prewarmRequests[0].instruction, /target prewarm/i);
+      assert.equal(prewarmRequests[0].applicationName, "Chrome");
+      assert.equal(prewarmRequests[0].windowTitle, "Chrome");
+      assert.equal(prewarmRequests[0].windowId, 42);
+      assert.equal(prewarmRequests[0].wait, true);
+      assert.equal(prewarmRequests[0].context.source, "app_share_target_prewarm");
+      assert.equal(prewarmRequests[0].context.cursor, "do_not_start_foreground_cursor_session");
+      const prewarmState = await page.evaluate(
+        () => window.MAB_REALTIME_BRIDGE.kwwkAppControl.appSharePrewarm,
+      );
+      assert.equal(prewarmState.ok, true);
+      assert.equal(prewarmState.target.applicationName, "Chrome");
+      assert.equal(prewarmState.target.windowId, 42);
+      assert.equal(prewarmState.result.summary, "Prewarmed active shared app target.");
 
       const functionOutput = await page.evaluate(() =>
         window.MAB_REALTIME_BRIDGE.outbound.find(

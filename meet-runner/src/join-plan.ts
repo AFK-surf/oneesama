@@ -8,6 +8,12 @@ export type BrowserIslandOptions = {
   recordMeeting: boolean;
   artifactsDir: string;
   meetAudioBackend: string;
+  browserUserDataDir: string;
+  meetProfileMode: string;
+  meetUIInteractionMode: string;
+  meetJoinLane: string;
+  meetBrowserControlMode: string;
+  retryPolicy: string;
   installAvatar: boolean;
   disableLive2D: boolean;
   installRealtimeBridge: boolean;
@@ -16,6 +22,7 @@ export type BrowserIslandOptions = {
   realtimeRuntimePlacement: string;
   autoConnectRealtime: boolean;
   sendRealtimeSessionUpdate: boolean;
+  dryRunLocalTools: boolean;
   includeParticipantAudio: boolean;
   forwardMeetAudioToRealtime: boolean;
   meetAudioInputGain?: number;
@@ -34,6 +41,18 @@ function normalizeRealtimeRuntimePlacement(value: unknown) {
     .trim()
     .toLowerCase()
     .replace(/_/g, "-");
+}
+
+function normalizeJoinRetryPolicy(value: unknown) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-");
+  if (!normalized || normalized === "default" || normalized === "auto") return "";
+  if (normalized === "none" || normalized === "no-retry" || normalized === "no-retries") {
+    return "none";
+  }
+  throw new Error(`unsupported retry_policy=${String(value)}`);
 }
 
 export function assertRealtimeRuntimePlacementForMeetJoin(
@@ -67,6 +86,20 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
     artifactsDir: typeof params.artifacts_dir === "string" ? params.artifacts_dir.trim() : "",
     meetAudioBackend:
       typeof params.meet_audio_backend === "string" ? params.meet_audio_backend.trim() : "",
+    browserUserDataDir:
+      typeof params.browser_user_data_dir === "string" ? params.browser_user_data_dir.trim() : "",
+    meetProfileMode:
+      typeof params.meet_profile_mode === "string" ? params.meet_profile_mode.trim() : "",
+    meetUIInteractionMode:
+      typeof params.meet_ui_interaction_mode === "string"
+        ? params.meet_ui_interaction_mode.trim()
+        : "",
+    meetJoinLane: typeof params.meet_join_lane === "string" ? params.meet_join_lane.trim() : "",
+    meetBrowserControlMode:
+      typeof params.meet_browser_control_mode === "string"
+        ? params.meet_browser_control_mode.trim()
+        : "",
+    retryPolicy: normalizeJoinRetryPolicy(params.retry_policy),
     installAvatar,
     disableLive2D: !installAvatar,
     installRealtimeBridge,
@@ -81,6 +114,7 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
     autoConnectRealtime: Boolean(params.auto_connect_realtime),
     sendRealtimeSessionUpdate:
       installRealtimeBridge && params.send_realtime_session_update !== false,
+    dryRunLocalTools: Boolean(params.dry_run_local_tools),
     includeParticipantAudio: Boolean(params.include_participant_audio),
     forwardMeetAudioToRealtime:
       installRealtimeBridge && params.forward_meet_audio_to_realtime !== false,
@@ -95,6 +129,8 @@ export function normalizeBrowserIslandOptions(params: PrepareJoinParams): Browse
 export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
   const options = normalizeBrowserIslandOptions(params);
   assertRealtimeRuntimePlacementForMeetJoin(options, meetingUrl);
+  const meetBrowserControlMode = effectiveMeetBrowserControlMode(options, meetingUrl);
+  const meetUIInteractionMode = effectiveMeetUIInteractionMode(options, meetingUrl);
   return {
     entry: "google-meet-joiner.ts",
     mode: "playwright-ts",
@@ -107,6 +143,12 @@ export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
     record_meeting: options.recordMeeting,
     artifacts_dir: options.artifactsDir,
     meet_audio_backend: options.meetAudioBackend,
+    meet_profile_mode: options.meetProfileMode,
+    browser_user_data_dir: options.browserUserDataDir,
+    meet_ui_interaction_mode: meetUIInteractionMode,
+    meet_join_lane: options.meetJoinLane,
+    meet_browser_control_mode: meetBrowserControlMode,
+    retry_policy: options.retryPolicy,
     install_avatar: options.installAvatar,
     disable_live2d: options.disableLive2D,
     install_realtime_bridge: options.installRealtimeBridge,
@@ -115,6 +157,7 @@ export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
     realtime_runtime_placement: options.realtimeRuntimePlacement,
     auto_connect_realtime: options.autoConnectRealtime,
     send_realtime_session_update: options.sendRealtimeSessionUpdate,
+    dry_run_local_tools: options.dryRunLocalTools,
     include_participant_audio: options.includeParticipantAudio,
     forward_meet_audio_to_realtime: options.forwardMeetAudioToRealtime,
     meet_audio_input_gain: options.meetAudioInputGain,
@@ -124,4 +167,40 @@ export function buildPlan(params: PrepareJoinParams, meetingUrl: string) {
     auto_start_screen_share: options.autoStartScreenShare,
     meet_url: meetingUrl,
   };
+}
+
+function effectiveMeetBrowserControlMode(options: BrowserIslandOptions, meetingUrl: string) {
+  if (options.meetBrowserControlMode) return options.meetBrowserControlMode;
+  if (!isGoogleMeetPageUrl(meetingUrl)) return "";
+  if (options.browserUserDataDir || options.meetProfileMode.toLowerCase() === "persistent") {
+    return "";
+  }
+  if (
+    options.installRealtimeBridge ||
+    options.autoConnectRealtime ||
+    options.installLocalDialogBridge ||
+    options.installWorkerResultBridge ||
+    options.installScreenShareBridge
+  ) {
+    return "playwright";
+  }
+  return "";
+}
+
+function effectiveMeetUIInteractionMode(options: BrowserIslandOptions, meetingUrl: string) {
+  if (options.meetUIInteractionMode) return options.meetUIInteractionMode;
+  if (!isGoogleMeetPageUrl(meetingUrl)) return "";
+  if (options.browserUserDataDir || options.meetProfileMode.toLowerCase() === "persistent") {
+    return "";
+  }
+  if (
+    options.installRealtimeBridge ||
+    options.autoConnectRealtime ||
+    options.installLocalDialogBridge ||
+    options.installWorkerResultBridge ||
+    options.installScreenShareBridge
+  ) {
+    return "humanized";
+  }
+  return "";
 }

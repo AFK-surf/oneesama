@@ -58,11 +58,11 @@ function commandExists(command: string): boolean {
   return result.status === 0;
 }
 
-async function waitForChildProcessExit(
+export async function waitForChildProcessExit(
   proc: ChildProcess | ChildProcessWithoutNullStreams | null | undefined,
   timeoutMs: number,
 ): Promise<boolean> {
-  if (!proc || proc.exitCode !== null || proc.killed) return true;
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return true;
   return await new Promise((resolve) => {
     let settled = false;
     const finish = (ok: boolean) => {
@@ -204,9 +204,12 @@ class PulseAudioRecorder {
 
   async stop(): Promise<void> {
     if (this.ffmpegProc) {
-      this.ffmpegProc.kill("SIGINT");
-      if (!(await waitForChildProcessExit(this.ffmpegProc, 10_000)))
-        this.ffmpegProc.kill("SIGKILL");
+      const proc = this.ffmpegProc;
+      proc.kill("SIGINT");
+      if (!(await waitForChildProcessExit(proc, 10_000))) {
+        proc.kill("SIGKILL");
+        await waitForChildProcessExit(proc, 2_000);
+      }
       this.ffmpegProc = null;
     }
     if (this.moduleId) {
@@ -389,9 +392,12 @@ export function createMeetingRecorder(options: MeetingRecorderOptions = {}) {
         releaseRecappiConsumer?.();
         releaseRecappiConsumer = null;
         if (ownsRecappiTap) recappiTap?.stop();
-        if (ffmpegProc?.stdin) ffmpegProc.stdin.end();
-        if (ffmpegProc && !(await waitForChildProcessExit(ffmpegProc, 10_000)))
-          ffmpegProc.kill("SIGKILL");
+        const proc = ffmpegProc;
+        if (proc?.stdin) proc.stdin.end();
+        if (proc && !(await waitForChildProcessExit(proc, 10_000))) {
+          proc.kill("SIGKILL");
+          await waitForChildProcessExit(proc, 2_000);
+        }
       }
       return { ok: true, state: status() };
     } catch (error) {

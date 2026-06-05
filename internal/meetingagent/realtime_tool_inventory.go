@@ -53,11 +53,6 @@ var realtimeForegroundToolInventoryByName = map[string]RealtimeForegroundToolInv
 		Gate:  "active_meeting_session_and_host_computer_use",
 		Notes: "generic KWWK direct Computer Use boundary for simple bounded app/window operations; accepts natural-language instruction, not primitive arrays",
 	},
-	"control_shared_app_window": {
-		Class: RealtimeToolClassStableForeground,
-		Gate:  "active_meeting_session_and_host_computer_use",
-		Notes: "compatibility app-control entrypoint retained for old sessions and delegate-mode app-control requests; prefer kwwk_computer_use for direct simple actions",
-	},
 	"open_shared_browser_surface": {
 		Class: RealtimeToolClassOptionalForeground,
 		Gate:  "demo_surface_realtime_tools_exposed",

@@ -62,6 +62,50 @@ type AppControlBackend interface {
 	ControlSharedApp(ctx context.Context, req AppControlRequest) (AppControlResult, error)
 }
 
+type AppControlPrewarmBackend interface {
+	PrewarmAppControl(ctx context.Context, req AppControlPrewarmRequest) AppControlPrewarmResult
+}
+
+type AppControlPrewarmRequest struct {
+	SessionID string
+	Reason    string
+	Target    AppControlTarget
+	Timeout   time.Duration
+}
+
+type AppControlPrewarmResult struct {
+	OK         bool
+	Provider   string
+	Status     string
+	Error      string
+	Blocker    string
+	Duration   time.Duration
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Evidence   map[string]any
+}
+
+func (r AppControlPrewarmResult) Map() map[string]any {
+	out := map[string]any{
+		"ok":          r.OK,
+		"provider":    strings.TrimSpace(r.Provider),
+		"status":      strings.TrimSpace(r.Status),
+		"duration_ms": r.Duration.Milliseconds(),
+		"started_at":  formatAppControlJobTime(r.StartedAt),
+		"finished_at": formatAppControlJobTime(r.FinishedAt),
+	}
+	if strings.TrimSpace(r.Error) != "" {
+		out["error"] = strings.TrimSpace(r.Error)
+	}
+	if strings.TrimSpace(r.Blocker) != "" {
+		out["blocker"] = strings.TrimSpace(r.Blocker)
+	}
+	if len(r.Evidence) > 0 {
+		out["evidence"] = r.Evidence
+	}
+	return out
+}
+
 type AppControlRequest struct {
 	SessionID     string
 	Instruction   string
@@ -125,19 +169,19 @@ func appControlTargetFromRealtime(input RealtimeSharedAppControlRequest, status 
 	}
 	for _, candidate := range appControlStatusTargetMaps(status) {
 		if target.ApplicationName == "" {
-			target.ApplicationName = firstMapString(candidate, "applicationName", "appName", "name")
+			target.ApplicationName = firstMapString(candidate, "sourceApplicationName", "applicationName", "appName", "name")
 		}
 		if target.BundleIdentifier == "" {
-			target.BundleIdentifier = firstMapString(candidate, "bundleIdentifier", "bundleID", "bundleId")
+			target.BundleIdentifier = firstMapString(candidate, "sourceBundleIdentifier", "bundleIdentifier", "bundleID", "bundleId")
 		}
 		if target.WindowTitle == "" {
-			target.WindowTitle = firstMapString(candidate, "windowTitle", "title")
+			target.WindowTitle = firstMapString(candidate, "sourceWindowTitle", "windowTitle", "title")
 		}
 		if target.WindowID == 0 {
-			target.WindowID = firstMapInt(candidate, "windowId", "windowID")
+			target.WindowID = firstMapInt(candidate, "sourceWindowId", "windowId", "windowID")
 		}
 		if target.ProcessID == 0 {
-			target.ProcessID = firstMapInt(candidate, "processId", "pid")
+			target.ProcessID = firstMapInt(candidate, "sourceProcessId", "processId", "pid")
 		}
 	}
 	return target
@@ -236,9 +280,9 @@ func appControlResultMap(result AppControlResult, screenShare map[string]any) ma
 	if errorText != "" {
 		out["error"] = errorText
 	}
-	if displayText := appControlResultDisplayTextZh(ok, status, blockerText, errorText); displayText != "" {
+	if displayText := appControlResultDisplayTextEn(ok, status, blockerText, errorText); displayText != "" {
 		out["displayText"] = displayText
-		out["answer_hint_zh"] = displayText
+		out["answer_hint_en"] = displayText
 	}
 	if result.Job != nil {
 		out["job"] = result.Job
@@ -256,7 +300,7 @@ func appControlResultMap(result AppControlResult, screenShare map[string]any) ma
 	return out
 }
 
-func appControlResultDisplayTextZh(ok bool, status string, blocker string, errorText string) string {
+func appControlResultDisplayTextEn(ok bool, status string, blocker string, errorText string) string {
 	if ok && !appControlStatusIsTerminalFailure(status) {
 		return ""
 	}
@@ -266,27 +310,27 @@ func appControlResultDisplayTextZh(ok bool, status string, blocker string, error
 		strings.Contains(reason, "permission"),
 		strings.Contains(reason, "accessibility"),
 		strings.Contains(reason, "screen_recording"):
-		return "需要权限"
+		return "Permission is required."
 	case strings.Contains(reason, "blocked_ambiguous_target"),
 		strings.Contains(reason, "ambiguous"):
-		return "目标不明确"
+		return "Target is ambiguous."
 	case strings.Contains(reason, "blocked_no_target_app"),
 		strings.Contains(reason, "no_target"),
 		strings.Contains(reason, "target_app"),
 		strings.Contains(reason, "window_not_found"),
 		strings.Contains(reason, "shared_window_not_found"):
-		return "找不到窗口"
+		return "Could not find the target window."
 	case strings.Contains(reason, "needs_background_agent"):
-		return "交给后台"
+		return "Needs background handling."
 	case strings.Contains(reason, "blocked_unsupported_instruction"),
 		strings.Contains(reason, "instruction_not_directly_executable"),
 		strings.Contains(reason, "unsupported_instruction"),
 		strings.Contains(reason, "unsupported_operation"):
-		return "暂不支持"
+		return "This action is not supported yet."
 	case strings.Contains(reason, "failed_verification"):
-		return "验证失败"
+		return "Verification failed."
 	default:
-		return "操作失败"
+		return "Operation failed."
 	}
 }
 

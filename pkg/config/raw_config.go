@@ -110,8 +110,9 @@ type rawAppControl struct {
 }
 
 type rawKWWKAppControl struct {
-	Command string `json:"command"`
-	Dir     string `json:"dir"`
+	Command       string `json:"command"`
+	Dir           string `json:"dir"`
+	EnsureCommand string `json:"ensure_command"`
 }
 
 type rawPersonaRuntime struct {

@@ -96,6 +96,11 @@ func TestManagerPrepareAndStop(t *testing.T) {
 		CollectFixtureState:        true,
 		CaptureCaptions:            true,
 		CaptionLanguage:            "English",
+		BrowserUserDataDir:         "/tmp/session_live_profile",
+		MeetProfileMode:            "persistent",
+		MeetUIInteractionMode:      "humanized",
+		MeetJoinLane:               "macos_test_humanized",
+		MeetBrowserControlMode:     "playwright",
 		InstallRealtimeBridge:      true,
 		RealtimeBridgeMode:         "webrtc",
 		AutoConnectRealtime:        true,
@@ -114,6 +119,11 @@ func TestManagerPrepareAndStop(t *testing.T) {
 	}
 	if !prepare.Plan.CollectFixtureState || !prepare.Plan.CaptureCaptions ||
 		prepare.Plan.CaptionLanguage != "English" || !prepare.Plan.InstallRealtimeBridge ||
+		prepare.Plan.MeetProfileMode != "persistent" ||
+		prepare.Plan.BrowserUserDataDir != "/tmp/session_live_profile" ||
+		prepare.Plan.MeetUIInteractionMode != "humanized" ||
+		prepare.Plan.MeetJoinLane != "macos_test_humanized" ||
+		prepare.Plan.MeetBrowserControlMode != "playwright" ||
 		!prepare.Plan.InstallAvatar || prepare.Plan.DisableLive2D ||
 		prepare.Plan.RealtimeBridgeMode != "webrtc" || !prepare.Plan.AutoConnectRealtime ||
 		!prepare.Plan.SendRealtimeSessionUpdate || !prepare.Plan.ForwardMeetAudioToRealtime ||
@@ -139,6 +149,59 @@ func TestManagerPrepareAndStop(t *testing.T) {
 	}
 	if !stop.OK || stop.Session.Status != "stopped" {
 		t.Fatalf("stop = %#v, want ok stopped", stop)
+	}
+}
+
+func TestManagerRealtimeEventAllowsSyntheticTranscript(t *testing.T) {
+	t.Parallel()
+	requireMeetRunnerRuntime(t)
+
+	manager := New(Config{Dir: filepath.Join("..", "..", "meet-runner")})
+	sessionID := "session_realtime_synthetic_transcript"
+	if _, err := manager.PrepareGoogleMeet(context.Background(), PrepareGoogleMeetInput{
+		SessionID:                 sessionID,
+		MeetingURL:                "https://meet.google.com/abc-defg-hij",
+		DryRun:                    true,
+		InstallRealtimeBridge:     true,
+		RealtimeRuntimePlacement:  "sidecar",
+		SendRealtimeSessionUpdate: true,
+	}); err != nil {
+		t.Fatalf("PrepareGoogleMeet() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = manager.StopSession(context.Background(), StopSessionInput{
+			SessionID: sessionID,
+			Reason:    "test_done",
+		})
+	})
+
+	result, err := manager.SendRealtimeEvent(context.Background(), RealtimeEventInput{
+		SessionID: sessionID,
+		Event: map[string]any{
+			"type":       "conversation.item.input_audio_transcription.completed",
+			"item_id":    "synthetic_item",
+			"transcript": "Codex build Gomoku web game with sync",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendRealtimeEvent() error = %v", err)
+	}
+	if result["error"] == "realtime_event_type_not_allowed" {
+		t.Fatalf("SendRealtimeEvent() result = %#v, synthetic transcript should pass runner allowlist", result)
+	}
+
+	result, err = manager.SendRealtimeEvent(context.Background(), RealtimeEventInput{
+		SessionID: sessionID,
+		Event: map[string]any{
+			"type":    "conversation.item.input_audio_transcription.completed",
+			"item_id": "synthetic_item",
+		},
+	})
+	if err == nil {
+		t.Fatalf("SendRealtimeEvent() error = nil, result = %#v, want transcript-required rejection", result)
+	}
+	if !strings.Contains(err.Error(), "realtime_transcript_required") {
+		t.Fatalf("SendRealtimeEvent() error = %v, want realtime_transcript_required", err)
 	}
 }
 

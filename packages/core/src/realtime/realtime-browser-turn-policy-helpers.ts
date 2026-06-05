@@ -329,9 +329,14 @@
       assignString(compact, "error", record.error);
       assignString(compact, "blocker", record.blocker);
       assignString(compact, "reason", record.reason);
-      assignString(compact, "displayText", record.displayText || record.display_text, 80);
+      assignString(
+        compact,
+        "displayText",
+        record.displayText || record.display_text || record.answer_hint_en || record.answerHintEn,
+        80,
+      );
       assignString(compact, "summary", record.summary, 800);
-      assignString(compact, "answer_hint_zh", record.answer_hint_zh || record.answerHintZh, 240);
+      assignString(compact, "answer_hint_en", record.answer_hint_en || record.answerHintEn, 240);
       assignString(compact, "created_at", record.created_at || record.createdAt);
       assignString(compact, "started_at", record.started_at || record.startedAt);
       assignString(compact, "finished_at", record.finished_at || record.finishedAt);
@@ -379,7 +384,7 @@
       ) {
         return compactShareResult(input, result);
       }
-      if (input.name === "kwwk_computer_use" || input.name === "control_shared_app_window") {
+      if (input.name === "kwwk_computer_use") {
         return compactAppControlResult(result);
       }
       return result;
@@ -463,14 +468,14 @@
 
     function functionToolPolicy(input: FunctionToolPolicyInput): RealtimeTurnPolicy {
       const { kind, name, result } = input;
-      const appControlTool = name === "kwwk_computer_use" || name === "control_shared_app_window";
+      const appControlTool = name === "kwwk_computer_use";
       if (!appControlTool && resultIsBlocked(result)) {
         return {
           channel: "blocked",
           autoRespond: true,
           reason: `${kind}_tool_blocked`,
           responseInstructions:
-            "The tool result failed or is blocked. State the exact blocker in one short Chinese sentence. Do not mention ids, queues, tools, backends, routing names, or debug state.",
+            "The tool result failed or is blocked. State the exact blocker in one short English sentence. Do not mention ids, queues, tools, backends, routing names, or debug state.",
         };
       }
 
@@ -481,8 +486,8 @@
           reason: name === "delegate_to_worker" ? "worker_delegated" : "worker_status",
           responseInstructions:
             name === "delegate_to_worker"
-              ? "Tell the user briefly in Chinese that you will handle it; if the result is already complete, summarize it now. Do not mention internal routing names."
-              : "Summarize the background status in concise Chinese without mentioning internal routing names.",
+              ? "Tell the user briefly in English that you will handle it; if the result is already complete, summarize it now. Do not mention internal routing names."
+              : "Summarize the background status in concise English without mentioning internal routing names.",
         };
       }
 
@@ -501,7 +506,7 @@
             autoRespond: config.autoRespondToMeetToolCalls !== false,
             reason: "share_lacks_active_evidence",
             responseInstructions:
-              "The screen/app share result lacks active visibility evidence. State the exact blocker in one short Chinese sentence. Do not tell the user to switch views, and do not blame Meet or the receiver.",
+              "The screen/app share result lacks active visibility evidence. State the exact blocker in one short English sentence. Do not tell the user to switch views, and do not blame Meet or the receiver.",
           };
         }
         return {
@@ -510,8 +515,8 @@
           reason: name === "send_meet_chat" ? "meet_chat_sent" : "meet_tool_result",
           responseInstructions:
             name === "send_meet_chat"
-              ? "Confirm briefly in Chinese that the Meet chat message was sent."
-              : "Answer from the returned Meet chat messages/links in concise Chinese.",
+              ? "Confirm briefly in English that the Meet chat message was sent."
+              : "Answer from the returned Meet chat messages/links in concise English.",
         };
       }
 
@@ -522,7 +527,7 @@
             autoRespond: true,
             reason: "workspace_identity_resolved",
             responseInstructions:
-              "If the prior user request only asked who they are, answer with the resolved identity in concise Chinese. If the prior user request asked for their own workspace data, tasks, issues, GitHub, Linear, Slack, Notion, calendar, docs, URL, or repo lookup, continue by starting the appropriate background job using the resolved identity context instead of stopping after identity.",
+              "If the prior user request only asked who they are, answer with the resolved identity in concise English. If the prior user request asked for their own workspace data, tasks, issues, GitHub, Linear, Slack, Notion, calendar, docs, URL, or repo lookup, continue by starting the appropriate background job using the resolved identity context instead of stopping after identity.",
           };
         }
         if (appControlTool) {
@@ -532,7 +537,7 @@
               autoRespond: true,
               reason: "app_control_blocked",
               responseInstructions:
-                "The app-control result failed or is blocked. State the exact blocker in one short Chinese sentence. Do not mention ids, queues, tools, backends, routing names, or debug state.",
+                "The app-control result failed or is blocked. State the exact blocker in one short English sentence. Do not mention ids, queues, tools, backends, routing names, or debug state.",
             };
           }
           if (appControlExecutorStillWorking(result)) {
@@ -556,7 +561,7 @@
             autoRespond: true,
             reason: "app_control_completed",
             responseInstructions:
-              "The app-control result completed. Summarize the visible outcome in one short Chinese sentence without mentioning ids, queues, tools, backends, routing names, or debug state.",
+              "The app-control result completed. Summarize the visible outcome in one short English sentence without mentioning ids, queues, tools, backends, routing names, or debug state.",
           };
         }
         return {
@@ -564,7 +569,7 @@
           autoRespond: true,
           reason: resultIsBlocked(result) ? "workspace_tool_blocked" : "workspace_tool_completed",
           responseInstructions:
-            "Summarize the result in concise Chinese. If it failed, state the exact blocker without mentioning internal routing names.",
+            "Summarize the result in concise English. If it failed, state the exact blocker without mentioning internal routing names.",
         };
       }
 
@@ -628,8 +633,7 @@
     }
 
     function functionToolEventType(input: FunctionToolPolicyInput, policy: RealtimeTurnPolicy) {
-      if (input.name === "kwwk_computer_use" || input.name === "control_shared_app_window")
-        return "";
+      if (input.name === "kwwk_computer_use") return "";
       if (policy.channel === "blocked") return "tool_result.blocked";
       if (policy.channel === "visual_only") return "tool_result.visual_only";
       if (policy.channel === "meet_chat") return "tool_result.meet_chat";
@@ -641,10 +645,7 @@
       input: FunctionToolPolicyInput,
       policy: RealtimeTurnPolicy,
     ) {
-      if (
-        (input.name !== "kwwk_computer_use" && input.name !== "control_shared_app_window") ||
-        policy.reason !== "app_control_executor_running"
-      ) {
+      if (input.name !== "kwwk_computer_use" || policy.reason !== "app_control_executor_running") {
         return input.result;
       }
       const jobId = resultJobId(input.result);
@@ -725,7 +726,7 @@
             }
           : sendFunctionCallOutput(input.callId, outputResult, policy);
       const event =
-        input.name === "kwwk_computer_use" || input.name === "control_shared_app_window"
+        input.name === "kwwk_computer_use"
           ? rememberAppControlEvent(input, policy)
           : meetingEvents.rememberMeetingEvent({
               type: functionToolEventType(input, policy),
@@ -816,7 +817,7 @@
             : "worker_result_voice_summary",
         responseInstructions: appControlExecutorRunning
           ? ""
-          : "Summarize the completed background result proactively in concise Chinese without mentioning internal routing names.",
+          : "Summarize the completed background result proactively in concise English without mentioning internal routing names.",
       };
       let itemChannel = "";
       if (!appControlExecutorRunning && (voiceAck || !sendToMeetChat)) {

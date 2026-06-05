@@ -86,6 +86,191 @@
       return rect.width > 0 && rect.height > 0;
     }
 
+    function recordFromUnknown(value: unknown): Record<string, unknown> {
+      return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    }
+
+    function stringFromRecord(record: Record<string, unknown>, keys: string[]) {
+      for (const key of keys) {
+        const value = String(record[key] || "").trim();
+        if (value) return value;
+      }
+      return "";
+    }
+
+    function numberFromRecord(record: Record<string, unknown>, keys: string[]) {
+      for (const key of keys) {
+        const value = Number(record[key] || 0);
+        if (Number.isFinite(value) && value > 0) return value;
+      }
+      return 0;
+    }
+
+    function collectScreenShareTargetCandidates(
+      value: unknown,
+      depth = 0,
+    ): Record<string, unknown>[] {
+      if (!value || depth > 6) return [];
+      if (Array.isArray(value)) {
+        return value.flatMap((entry) => collectScreenShareTargetCandidates(entry, depth + 1));
+      }
+      const record = recordFromUnknown(value);
+      if (!Object.keys(record).length) return [];
+      const keys = [
+        "active",
+        "ok",
+        "applicationName",
+        "application_name",
+        "appName",
+        "bundleIdentifier",
+        "bundleId",
+        "windowTitle",
+        "title",
+        "windowId",
+        "windowID",
+        "processId",
+        "pid",
+      ];
+      const own = keys.some((key) => Object.prototype.hasOwnProperty.call(record, key))
+        ? [record]
+        : [];
+      return [
+        ...own,
+        ...Object.values(record).flatMap((entry) =>
+          collectScreenShareTargetCandidates(entry, depth + 1),
+        ),
+      ];
+    }
+
+    function appShareTargetFromResult(args: Record<string, unknown>, result: unknown) {
+      const resultRecord = recordFromUnknown(result);
+      const candidates = [
+        ...collectScreenShareTargetCandidates(result),
+        recordFromUnknown(args),
+      ].filter((entry) => Object.keys(entry).length > 0);
+      const active =
+        resultRecord.ok !== false &&
+        candidates.some(
+          (entry) => entry.active === true || recordFromUnknown(entry.screenShare).active === true,
+        );
+      const target = {
+        applicationName: "",
+        bundleIdentifier: "",
+        windowTitle: "",
+        windowId: 0,
+        processId: 0,
+      };
+      for (const candidate of candidates) {
+        if (!target.applicationName) {
+          target.applicationName = stringFromRecord(candidate, [
+            "applicationName",
+            "application_name",
+            "appName",
+            "name",
+            "title",
+          ]);
+        }
+        if (!target.bundleIdentifier) {
+          target.bundleIdentifier = stringFromRecord(candidate, [
+            "bundleIdentifier",
+            "bundle_identifier",
+            "bundleId",
+          ]);
+        }
+        if (!target.windowTitle) {
+          target.windowTitle = stringFromRecord(candidate, [
+            "windowTitle",
+            "window_title",
+            "title",
+          ]);
+        }
+        if (!target.windowId) {
+          target.windowId = numberFromRecord(candidate, ["windowId", "windowID", "window_id"]);
+        }
+        if (!target.processId) {
+          target.processId = numberFromRecord(candidate, ["processId", "process_id", "pid"]);
+        }
+      }
+      return { active, target };
+    }
+
+    function rememberAppSharePrewarm(status: Record<string, unknown>) {
+      state.kwwkAppControl = {
+        ...state.kwwkAppControl,
+        appSharePrewarm: {
+          ts: new Date().toISOString(),
+          ...status,
+        },
+      };
+    }
+
+    async function prewarmKWWKForSharedApp(args: Record<string, unknown>, result: unknown) {
+      if (config.kwwkAppSharePrewarm === false) return;
+      const { active, target } = appShareTargetFromResult(args, result);
+      if (!active) {
+        rememberAppSharePrewarm({
+          ok: false,
+          status: "skipped",
+          reason: "share_not_active",
+          target,
+        });
+        return;
+      }
+      const sessionId = String(
+        args.session_id ||
+          args.sessionId ||
+          (result as Record<string, unknown>)?.session_id ||
+          (result as Record<string, unknown>)?.sessionId ||
+          config.sessionId ||
+          "",
+      ).trim();
+      const body: Record<string, unknown> = {
+        instruction:
+          "Observe the active shared app for KWWK Computer Use target prewarm. Do not click, type, scroll, drag, or change the app.",
+        session_id: sessionId,
+        applicationName: target.applicationName,
+        bundleIdentifier: target.bundleIdentifier,
+        windowTitle: target.windowTitle,
+        windowId: target.windowId,
+        processId: target.processId,
+        wait: true,
+        timeoutMs: Number(config.kwwkAppSharePrewarmTimeoutMs || 5000),
+        context: {
+          source: "app_share_target_prewarm",
+          prewarm: true,
+          cursor: "do_not_start_foreground_cursor_session",
+        },
+      };
+      for (const key of ["applicationName", "bundleIdentifier", "windowTitle", "session_id"]) {
+        if (!String(body[key] || "").trim()) delete body[key];
+      }
+      for (const key of ["windowId", "processId", "timeoutMs"]) {
+        if (!Number.isFinite(Number(body[key])) || Number(body[key]) <= 0) delete body[key];
+      }
+      rememberAppSharePrewarm({ ok: true, status: "running", target });
+      recordTimeline("kwwk_app_share_prewarm_start", { target, sessionId });
+      try {
+        const prewarmResult = await postJson(localServiceUrl("/tools/kwwk_computer_use"), body);
+        rememberAppSharePrewarm({
+          ok: recordFromUnknown(prewarmResult).ok !== false,
+          status: String(recordFromUnknown(prewarmResult).status || "completed"),
+          target,
+          result: prewarmResult as Record<string, unknown>,
+        });
+        recordTimeline("kwwk_app_share_prewarm_done", {
+          ok: recordFromUnknown(prewarmResult).ok !== false,
+          status: String(recordFromUnknown(prewarmResult).status || ""),
+          target,
+        });
+      } catch (error) {
+        const message = String((error as { message?: string })?.message || error).slice(0, 300);
+        rememberAppSharePrewarm({ ok: false, status: "failed", target, error: message });
+        recordTimeline("kwwk_app_share_prewarm_failed", { target, error: message });
+      }
+    }
+
     function findMeetChatInput(): HTMLElement | null {
       const candidates = Array.from(
         document.querySelectorAll<HTMLElement>(
@@ -629,8 +814,11 @@
       if (name === "stop_video_stage") return postJson(localServiceUrl("/screen-share/stop"), args);
       if (name === "list_shareable_windows")
         return postJson(localServiceUrl("/screen-share/apps"), args);
-      if (name === "share_existing_app_window")
-        return postJson(localServiceUrl("/screen-share/app"), args);
+      if (name === "share_existing_app_window") {
+        const result = await postJson(localServiceUrl("/screen-share/app"), args);
+        void prewarmKWWKForSharedApp(args, result);
+        return result;
+      }
       if (name === "read_meet_chat") return readMeetChat(args);
       if (name === "meet_participants" || name === "active_speaker")
         return readMeetingAwarenessTool(name);

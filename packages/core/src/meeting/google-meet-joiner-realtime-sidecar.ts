@@ -20,13 +20,45 @@ export async function startRealtimeSidecarPage({
     installPageDiagnostics(page, diagnostics);
 
     await page.exposeFunction("MAB_HOST_ENQUEUE_REALTIME_PCM", async (payload) => {
-      const targetPage = getMeetPage();
+      const waitForTargetPage = async () => {
+        const deadline = Date.now() + 75_000;
+        while (Date.now() < deadline) {
+          const targetPage = getMeetPage();
+          if (targetPage && !targetPage.isClosed?.()) return targetPage;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        const targetPage = getMeetPage();
+        return targetPage && !targetPage.isClosed?.() ? targetPage : null;
+      };
+      const targetPage = await waitForTargetPage();
       if (!targetPage || targetPage.isClosed?.()) {
         return { ok: false, error: "meet_page_missing_for_realtime_output_audio" };
       }
       const result = await targetPage
-        .evaluate((chunk) => {
-          const bus = window.MAB_AVATAR_AUDIO_BUS;
+        .evaluate(async (chunk) => {
+          const waitForBus = async () => {
+            const existing = window.MAB_AVATAR_AUDIO_BUS;
+            if (typeof existing?.enqueuePcmFrames === "function") return existing;
+            return await new Promise((resolve) => {
+              let done = false;
+              const finish = (bus) => {
+                if (done) return;
+                done = true;
+                window.removeEventListener("meeting-avatar-audio-bus-ready", onReady);
+                clearInterval(interval);
+                clearTimeout(timer);
+                resolve(bus || null);
+              };
+              const onReady = () => finish(window.MAB_AVATAR_AUDIO_BUS);
+              const interval = window.setInterval(() => {
+                const bus = window.MAB_AVATAR_AUDIO_BUS;
+                if (typeof bus?.enqueuePcmFrames === "function") finish(bus);
+              }, 100);
+              const timer = window.setTimeout(() => finish(window.MAB_AVATAR_AUDIO_BUS), 75_000);
+              window.addEventListener("meeting-avatar-audio-bus-ready", onReady, { once: true });
+            });
+          };
+          const bus = (await waitForBus()) as any;
           if (typeof bus?.enqueuePcmFrames !== "function") {
             return { ok: false, error: "avatar_audio_bus_pcm_enqueue_missing" };
           }
@@ -159,6 +191,15 @@ export async function startRealtimeSidecarPage({
         return { ok: false, error: "realtime_sidecar_session_mismatch" };
       }
       const samples = Array.isArray(payload?.samples) ? payload.samples.length : 0;
+      await page
+        .waitForFunction(
+          () => typeof (window as any).MAB_REALTIME_CLIENT?.pushHostMeetAudioSamples === "function",
+          undefined,
+          {
+            timeout: 5000,
+          },
+        )
+        .catch(() => undefined);
       const result = await page
         .evaluate((chunk) => {
           const client = window.MAB_REALTIME_CLIENT;
@@ -177,6 +218,7 @@ export async function startRealtimeSidecarPage({
           chunk: inputPcmChunksForwarded,
           source: payload?.source || "",
           label: payload?.label || "",
+          metadataOnly: payload?.metadataOnly === true,
           samples,
           sampleRate: payload?.sampleRate || 0,
           channels: payload?.channels || 0,

@@ -73,6 +73,30 @@ test("avatar init script can defer heavy renderer startup until after join", () 
   assert.match(script, /avatar renderer deferred until explicit start/);
 });
 
+test("avatar init script hardens media overrides for Meet camera capture", () => {
+  const script = buildAvatarInitScript({
+    deferRendererUntilExplicitStart: true,
+  });
+
+  assert.match(script, /MAB_AVATAR_MEDIA/);
+  assert.match(script, /MediaDevices\.prototype\.getUserMedia/);
+  assert.match(script, /navigator\.webkitGetUserMedia/);
+  assert.match(script, /videoGetUserMediaCalls/);
+  assert.match(script, /returnedVideoTrackCount/);
+  assert.match(script, /lastReturnedTracks/);
+});
+
+test("avatar media override starts before Meet DOMContentLoaded camera probes", async () => {
+  const script = buildAvatarInitScript({
+    deferRendererUntilExplicitStart: true,
+  });
+
+  assert.doesNotMatch(script, /DOMContentLoaded/);
+  assert.match(script, /document\.documentElement \|\| document\.head \|\| document\.body/);
+  assert.match(script, /MAB_AVATAR_BOOT_ERROR/);
+  assert.match(script, /start\(\)\.catch/);
+});
+
 test("avatar audio bus exposes a PCM enqueue API for Realtime sidecar output", () => {
   const script = buildAvatarInitScript();
 

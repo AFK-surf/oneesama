@@ -136,6 +136,60 @@ func TestHandleAvatarCommandJoinCallsMeetingAgent(t *testing.T) {
 	assertStatusCalls(t, assistant.Calls(), []string{"Recording meeting..."})
 }
 
+func TestHandleAvatarCommandJoinTreatsBusinessFailureAsFailed(t *testing.T) {
+	meetURL := "https://meet.google.com/abc-defg-hij"
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/join/google-meet" {
+			t.Fatalf("path = %s, want /join/google-meet", request.URL.Path)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{
+			"ok": false,
+			"accepted": false,
+			"started": false,
+			"error": "cannot_join_meeting",
+			"reason": "cannot_join_meeting",
+			"message": "No one can join a meeting unless invited or admitted by the host",
+			"diagnostics_path": "/tmp/meeting-avatar-bot/session_037b0932-diagnostics.json",
+			"session": {"id":"session_failed","meeting_url":"` + meetURL + `","status":"failed"}
+		}`))
+	}))
+	defer meetingAgent.Close()
+
+	assistant := &recordingAssistant{}
+	router := newTestRouter(t, Config{
+		MeetingAgentURL: meetingAgent.URL,
+		Assistant:       assistant,
+		Slack: appconfig.SlackConfig{
+			SigningSecret:   "secret",
+			InternalAuthKey: "secret-key",
+		},
+	})
+	payload := signAvatarCommand(t, "secret", url.Values{
+		"text":       {`join ` + meetURL + ` --bot-name Onee-sama --dry-run false`},
+		"channel_id": {"C123"},
+		"thread_ts":  {"123.456"},
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/commands/avatar", bytes.NewBufferString(payload.body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
+	request.Header.Set("X-Slack-Signature", payload.signature)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "Join failed: meeting-agent /join/google-meet returned ok=false: cannot_join_meeting") ||
+		!strings.Contains(body, "No one can join a meeting unless invited or admitted by the host") ||
+		strings.Contains(body, ":studio_microphone: *Joined: Google Meet*") {
+		t.Fatalf("body = %s, want join failure, not joined response", body)
+	}
+	assertStatusCalls(t, assistant.Calls(), []string{})
+}
+
 func TestHandleAvatarCommandStopCallsMeetingAgent(t *testing.T) {
 	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/join/stop" {

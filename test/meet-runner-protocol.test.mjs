@@ -46,3 +46,49 @@ test("meet-runner join plan rejects inline Realtime placement for Google Meet", 
     /inline Realtime SDK on Meet has been removed/,
   );
 });
+
+test("meet-runner join plan preserves browser control mode", () => {
+  const plan = buildPlan(
+    {
+      meeting_url: "https://meet.google.com/abc-defg-hij",
+      meet_ui_interaction_mode: "humanized",
+      meet_join_lane: "macos_probe",
+      meet_browser_control_mode: "playwright",
+      retry_policy: "none",
+    },
+    "https://meet.google.com/abc-defg-hij",
+  );
+
+  assert.equal(plan.meet_ui_interaction_mode, "humanized");
+  assert.equal(plan.meet_join_lane, "macos_probe");
+  assert.equal(plan.meet_browser_control_mode, "playwright");
+  assert.equal(plan.retry_policy, "none");
+});
+
+test("meet-runner join plan defaults realtime guest Meet joins to Playwright control", () => {
+  const plan = buildPlan(
+    {
+      meeting_url: "https://meet.google.com/abc-defg-hij",
+      install_realtime_bridge: true,
+      auto_connect_realtime: true,
+    },
+    "https://meet.google.com/abc-defg-hij",
+  );
+
+  assert.equal(plan.meet_browser_control_mode, "playwright");
+  assert.equal(plan.meet_ui_interaction_mode, "humanized");
+});
+
+test("meet-runner join plan does not override persistent profile control mode", () => {
+  const plan = buildPlan(
+    {
+      meeting_url: "https://meet.google.com/abc-defg-hij",
+      install_realtime_bridge: true,
+      meet_profile_mode: "persistent",
+      browser_user_data_dir: "/tmp/oneesama-profile",
+    },
+    "https://meet.google.com/abc-defg-hij",
+  );
+
+  assert.equal(plan.meet_browser_control_mode || "", "");
+});

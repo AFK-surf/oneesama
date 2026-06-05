@@ -427,6 +427,7 @@ export async function meetContractSmoke() {
       installWorkerResultBridge: false,
       installRealtimeBridge: true,
       realtimeBridgeMode: "webrtc-mock",
+      includeParticipantAudio: true,
       autoConnectRealtime: true,
     });
     const first = firstJoin.result;

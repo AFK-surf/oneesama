@@ -80,7 +80,7 @@ test("Realtime sidecar placement keeps the Agents SDK out of Meet surface init",
     tools: [
       {
         type: "function",
-        name: "control_shared_app_window",
+        name: "kwwk_computer_use",
         description: "Sidecar-only app control schema.",
         parameters: { type: "object", properties: {}, required: [] },
       },
@@ -98,7 +98,7 @@ test("Realtime sidecar placement keeps the Agents SDK out of Meet surface init",
   assert.doesNotMatch(meetSurfaceScript, /OpenAIAgentsRealtime/);
   assert.doesNotMatch(meetSurfaceScript, /const Bc=\{jitless:!0\}/);
   assert.doesNotMatch(meetSurfaceScript, /sidecar-only prompt/);
-  assert.doesNotMatch(meetSurfaceScript, /control_shared_app_window/);
+  assert.doesNotMatch(meetSurfaceScript, /kwwk_computer_use/);
   assert.doesNotMatch(meetSurfaceScript, /gpt-realtime-2/);
   assert.doesNotMatch(meetSurfaceScript, /api\.openai\.example/);
 
@@ -244,7 +244,7 @@ async function withToolServer(callback) {
         );
         return;
       }
-      if (request.url === "/tools/control_shared_app_window") {
+      if (request.url === "/tools/kwwk_computer_use") {
         response.end(
           JSON.stringify({
             ok: true,
@@ -1146,6 +1146,41 @@ test("Realtime Agents SDK audio lifecycle does not gate local input", async () =
       });
       assert.equal(removedOutputGateKey in stopped.protection, false);
       assert.ok(stopped.timelineTypes.includes("realtime_agent_sdk_audio_stopped"));
+
+      const interrupted = await page.evaluate(() => {
+        window.__MAB_SDK_AUDIO_INTERRUPTS = [];
+        window.MAB_AVATAR_AUDIO_BUS = {
+          interruptOutput(input) {
+            window.__MAB_SDK_AUDIO_INTERRUPTS.push(input);
+            return { ok: true, stoppedBufferedSources: 3, reason: input?.reason || "" };
+          },
+        };
+        window.__MAB_FAKE_SDK_SESSION.emit("audio_interrupted", { type: "audio_interrupted" });
+        return {
+          interruptions: window.__MAB_SDK_AUDIO_INTERRUPTS,
+          protection: { ...window.MAB_REALTIME_BRIDGE.protection },
+          outbound: window.MAB_REALTIME_BRIDGE.outbound,
+          timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
+        };
+      });
+      assert.equal(interrupted.interruptions.length, 1);
+      assert.equal(interrupted.protection.nativeInterruption.api_interruption_at.length > 0, true);
+      assert.equal(
+        interrupted.protection.nativeInterruption.avatar_audio_stopped_at.length > 0,
+        true,
+      );
+      assert.equal(
+        interrupted.protection.nativeInterruption.last_stop_result.stoppedBufferedSources,
+        3,
+      );
+      assert.equal(
+        interrupted.outbound.some((entry) => entry.event?.type === "response.cancel"),
+        false,
+      );
+      assert.ok(interrupted.timelineTypes.includes("realtime_agent_sdk_audio_interrupted"));
+      assert.ok(
+        interrupted.timelineTypes.includes("realtime_native_interruption_avatar_audio_stop"),
+      );
 
       const toolEvents = await page.evaluate(() => {
         window.__MAB_FAKE_SDK_SESSION.emit(

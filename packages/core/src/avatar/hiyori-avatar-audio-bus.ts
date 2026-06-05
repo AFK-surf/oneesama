@@ -66,6 +66,10 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     routedBuffers: 0,
     routedPcmChunks: 0,
     routedPcmSamples: 0,
+    interruptedOutputs: 0,
+    lastInterruptedAt: "",
+    lastInterruptedReason: "",
+    stoppedBufferedSources: 0,
     injectedTones: 0,
     lastResumeAt: "",
     lastResumeError: "",
@@ -74,6 +78,14 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     errors: [] as Array<Record<string, unknown>>,
   };
   let nextPcmStartTime = 0;
+  const interruptibleSources = new Set<AudioBufferSourceNode | OscillatorNode>();
+
+  function rememberInterruptibleSource(source: AudioBufferSourceNode | OscillatorNode) {
+    interruptibleSources.add(source);
+    source.addEventListener?.("ended", () => {
+      interruptibleSources.delete(source);
+    });
+  }
 
   function rememberError(error: unknown): void {
     const err = error as { message?: string };
@@ -227,6 +239,7 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
       gain.connect(masterGain);
       oscillator.start();
       oscillator.stop(audioContext.currentTime + Number(options.durationMs ?? 120) / 1000);
+      rememberInterruptibleSource(oscillator);
       state.injectedTones += 1;
       touch("tone", { label: options.label || "mock-remote-audio" });
       return { ok: true };
@@ -249,6 +262,7 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
       source.connect(gain);
       gain.connect(masterGain);
       source.start();
+      rememberInterruptibleSource(source);
       state.routedBuffers += 1;
       touch("buffer", {
         label: options.label || "",
@@ -301,6 +315,7 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
       const startAt = Math.max(audioContext.currentTime + 0.01, nextPcmStartTime);
       nextPcmStartTime = startAt + buffer.duration;
       source.start(startAt);
+      rememberInterruptibleSource(source);
       state.routedPcmChunks += 1;
       state.routedPcmSamples += frameCount * channelCount;
       const detail = {
@@ -321,6 +336,28 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     }
   }
 
+  function interruptOutput(options: { reason?: string } = {}) {
+    const reason = String(options.reason || "realtime_interruption");
+    let stopped = 0;
+    for (const source of Array.from(interruptibleSources)) {
+      try {
+        source.stop(0);
+        stopped += 1;
+      } catch {
+        // Already stopped sources are removed by the ended listener.
+      }
+      interruptibleSources.delete(source);
+    }
+    nextPcmStartTime = audioContext.currentTime + 0.01;
+    setSyntheticSpeech(false);
+    state.interruptedOutputs += 1;
+    state.lastInterruptedAt = new Date().toISOString();
+    state.lastInterruptedReason = reason;
+    state.stoppedBufferedSources += stopped;
+    touch("interrupt_output", { reason, stopped });
+    return { ok: true, reason, stoppedBufferedSources: stopped };
+  }
+
   const keeper = audioContext.createConstantSource();
   const keeperGain = audioContext.createGain();
   keeper.offset.value = 0;
@@ -339,6 +376,7 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
     addElement,
     playAudioDataUrl,
     enqueuePcmFrames,
+    interruptOutput,
     injectTone,
     getMouthLevel,
     sampleOutputEnergy,
@@ -346,6 +384,11 @@ export function createAvatarAudioBus({ config, clamp01 }: AudioBusInput) {
   };
   window.MAB_AVATAR_AUDIO_BUS = bus;
   window.MAB_AVATAR_AUDIO = state;
+  window.dispatchEvent(
+    new CustomEvent("meeting-avatar-audio-bus-ready", {
+      detail: { trackId: bus.track?.id || "" },
+    }),
+  );
 
   window.addEventListener("meeting-avatar-audio-stream", (event: Event) => {
     const detail = (event as CustomEvent).detail as

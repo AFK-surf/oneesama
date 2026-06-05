@@ -220,6 +220,25 @@
     }
 
     async function injectMockRemoteAudio(options: MockRemoteAudioOptions = {}) {
+      if (isSidecarRuntime()) {
+        const sampleRate = 48000;
+        const channels = 1;
+        const durationMs = options.durationMs ?? 120;
+        const frames = Math.max(1, Math.round((sampleRate * durationMs) / 1000));
+        const gain = options.gain ?? 0.0001;
+        const frequencyHz = 880;
+        const samples = Array.from({ length: frames * channels }, (_, index) => {
+          const frame = Math.floor(index / channels);
+          return Math.sin((2 * Math.PI * frequencyHz * frame) / sampleRate) * gain;
+        });
+        return await routeSidecarPcmFrames({
+          label: options.label || "webrtc-mock-remote-audio",
+          format: "float32",
+          sampleRate,
+          channels,
+          samples,
+        });
+      }
       const bus = await waitForAvatarAudioBus(options.timeoutMs);
       if (!bus?.injectTone) {
         rememberError(

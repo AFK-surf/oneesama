@@ -38,6 +38,12 @@ type PrepareGoogleMeetInput struct {
 	RecordMeeting              bool             `json:"record_meeting,omitempty"`
 	ArtifactsDir               string           `json:"artifacts_dir,omitempty"`
 	MeetAudioBackend           string           `json:"meet_audio_backend,omitempty"`
+	BrowserUserDataDir         string           `json:"browser_user_data_dir,omitempty"`
+	MeetProfileMode            string           `json:"meet_profile_mode,omitempty"`
+	MeetUIInteractionMode      string           `json:"meet_ui_interaction_mode,omitempty"`
+	MeetJoinLane               string           `json:"meet_join_lane,omitempty"`
+	MeetBrowserControlMode     string           `json:"meet_browser_control_mode,omitempty"`
+	RetryPolicy                string           `json:"retry_policy,omitempty"`
 	InstallAvatar              bool             `json:"install_avatar,omitempty"`
 	DisableLive2D              bool             `json:"disable_live2d,omitempty"`
 	InstallRealtimeBridge      bool             `json:"install_realtime_bridge,omitempty"`
@@ -50,6 +56,7 @@ type PrepareGoogleMeetInput struct {
 	RealtimeSession            map[string]any   `json:"realtime_session,omitempty"`
 	AutoConnectRealtime        bool             `json:"auto_connect_realtime,omitempty"`
 	SendRealtimeSessionUpdate  bool             `json:"send_realtime_session_update,omitempty"`
+	DryRunLocalTools           bool             `json:"dry_run_local_tools,omitempty"`
 	IncludeParticipantAudio    bool             `json:"include_participant_audio,omitempty"`
 	ForwardMeetAudioToRealtime bool             `json:"forward_meet_audio_to_realtime,omitempty"`
 	MeetAudioInputGain         float64          `json:"meet_audio_input_gain,omitempty"`
@@ -95,6 +102,12 @@ type JoinPlan struct {
 	RecordMeeting              bool    `json:"record_meeting,omitempty"`
 	ArtifactsDir               string  `json:"artifacts_dir,omitempty"`
 	MeetAudioBackend           string  `json:"meet_audio_backend,omitempty"`
+	MeetProfileMode            string  `json:"meet_profile_mode,omitempty"`
+	BrowserUserDataDir         string  `json:"browser_user_data_dir,omitempty"`
+	MeetUIInteractionMode      string  `json:"meet_ui_interaction_mode,omitempty"`
+	MeetJoinLane               string  `json:"meet_join_lane,omitempty"`
+	MeetBrowserControlMode     string  `json:"meet_browser_control_mode,omitempty"`
+	RetryPolicy                string  `json:"retry_policy,omitempty"`
 	InstallAvatar              bool    `json:"install_avatar,omitempty"`
 	DisableLive2D              bool    `json:"disable_live2d,omitempty"`
 	InstallRealtimeBridge      bool    `json:"install_realtime_bridge,omitempty"`
@@ -103,6 +116,7 @@ type JoinPlan struct {
 	RealtimeRuntimePlacement   string  `json:"realtime_runtime_placement,omitempty"`
 	AutoConnectRealtime        bool    `json:"auto_connect_realtime,omitempty"`
 	SendRealtimeSessionUpdate  bool    `json:"send_realtime_session_update,omitempty"`
+	DryRunLocalTools           bool    `json:"dry_run_local_tools,omitempty"`
 	IncludeParticipantAudio    bool    `json:"include_participant_audio,omitempty"`
 	ForwardMeetAudioToRealtime bool    `json:"forward_meet_audio_to_realtime,omitempty"`
 	MeetAudioInputGain         float64 `json:"meet_audio_input_gain,omitempty"`
@@ -113,13 +127,20 @@ type JoinPlan struct {
 }
 
 type PrepareGoogleMeetResult struct {
-	OK         bool          `json:"ok"`
-	Accepted   bool          `json:"accepted"`
-	Started    bool          `json:"started"`
-	BridgeMode string        `json:"bridge_mode,omitempty"`
-	Note       string        `json:"note,omitempty"`
-	Session    RunnerSession `json:"session"`
-	Plan       JoinPlan      `json:"plan"`
+	OK              bool          `json:"ok"`
+	Accepted        bool          `json:"accepted"`
+	Started         bool          `json:"started"`
+	BridgeMode      string        `json:"bridge_mode,omitempty"`
+	Note            string        `json:"note,omitempty"`
+	Error           string        `json:"error,omitempty"`
+	Reason          string        `json:"reason,omitempty"`
+	Message         string        `json:"message,omitempty"`
+	DiagnosticsPath string        `json:"diagnostics_path,omitempty"`
+	ScreenshotDir   string        `json:"screenshot_dir,omitempty"`
+	WebDriver       any           `json:"web_driver,omitempty"`
+	MeetPage        any           `json:"meet_page,omitempty"`
+	Session         RunnerSession `json:"session"`
+	Plan            JoinPlan      `json:"plan"`
 }
 
 type StopSessionInput struct {

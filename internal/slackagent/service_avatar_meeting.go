@@ -60,11 +60,16 @@ type meetingAgentSessionSummary struct {
 }
 
 type meetingAgentJoinResponse struct {
-	OK       bool                `json:"ok"`
-	Accepted bool                `json:"accepted"`
-	Started  bool                `json:"started"`
-	Note     string              `json:"note,omitempty"`
-	Session  meetingAgentSession `json:"session"`
+	OK              bool                `json:"ok"`
+	Accepted        bool                `json:"accepted"`
+	Started         bool                `json:"started"`
+	Note            string              `json:"note,omitempty"`
+	Error           string              `json:"error,omitempty"`
+	Reason          string              `json:"reason,omitempty"`
+	Message         string              `json:"message,omitempty"`
+	DiagnosticsPath string              `json:"diagnostics_path,omitempty"`
+	ScreenshotDir   string              `json:"screenshot_dir,omitempty"`
+	Session         meetingAgentSession `json:"session"`
 }
 
 type meetingAgentJoinStatusResponse struct {
@@ -208,7 +213,31 @@ func (s *Service) postMeetingAgentJoin(ctx context.Context, input AvatarCommandI
 	if err := s.postMeetingAgentJSONWithTimeout(ctx, "/join/google-meet", request, &result, meetingAgentJoinTimeout); err != nil {
 		return meetingAgentJoinResponse{}, err
 	}
+	if !result.OK {
+		return meetingAgentJoinResponse{}, meetingAgentJoinFailureError(result)
+	}
 	return result, nil
+}
+
+func meetingAgentJoinFailureError(result meetingAgentJoinResponse) error {
+	reason := firstNonEmpty(result.Error, result.Reason, result.Message, "join failed")
+	var details []string
+	if strings.TrimSpace(result.Reason) != "" && strings.TrimSpace(result.Reason) != strings.TrimSpace(reason) {
+		details = append(details, "reason: "+strings.TrimSpace(result.Reason))
+	}
+	if strings.TrimSpace(result.Message) != "" && strings.TrimSpace(result.Message) != strings.TrimSpace(reason) {
+		details = append(details, strings.TrimSpace(result.Message))
+	}
+	if strings.TrimSpace(result.DiagnosticsPath) != "" {
+		details = append(details, "diagnostics: "+strings.TrimSpace(result.DiagnosticsPath))
+	}
+	if strings.TrimSpace(result.ScreenshotDir) != "" {
+		details = append(details, "screenshots: "+strings.TrimSpace(result.ScreenshotDir))
+	}
+	if len(details) > 0 {
+		return fmt.Errorf("meeting-agent /join/google-meet returned ok=false: %s (%s)", reason, strings.Join(details, "; "))
+	}
+	return fmt.Errorf("meeting-agent /join/google-meet returned ok=false: %s", reason)
 }
 
 func joinMeetingDisplayTitle(meetURL string) string {

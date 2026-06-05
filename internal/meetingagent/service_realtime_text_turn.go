@@ -84,6 +84,11 @@ func validateHostRealtimeEvent(event map[string]any) error {
 		return errors.New("realtime_event_type_required")
 	case "response.cancel", "input_audio_buffer.clear":
 		return nil
+	case "conversation.item.input_audio_transcription.completed":
+		if strings.TrimSpace(stringFromAny(event["transcript"])) == "" {
+			return errors.New("realtime_transcript_required")
+		}
+		return nil
 	default:
 		return errors.New("realtime_event_type_not_allowed")
 	}

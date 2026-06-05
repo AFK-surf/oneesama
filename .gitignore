@@ -10,6 +10,7 @@ runtime/
 tmp/
 logs/
 reports/
+artifacts/
 *.log
 playwright-report/
 test-results/

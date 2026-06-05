@@ -51,10 +51,20 @@ function pageLooksRemovedFromMeeting(meetPage: any): boolean {
   );
 }
 
+function hasJoinedMeetPageEvidence(meetPage: any): boolean {
+  return (
+    meetPage?.inMeeting === true &&
+    meetPage?.waitingForAdmit !== true &&
+    meetPage?.preJoin !== true &&
+    meetPage?.signIn !== true &&
+    meetPage?.cannotJoin !== true
+  );
+}
+
 export function deriveRuntimeSessionStatus(state: RunnerSessionState, active: any): string {
   const meetPage = active?.meetPage || null;
   if (pageLooksRemovedFromMeeting(meetPage)) return "removed_from_meeting";
-  if (meetPage?.inMeeting === true) return "joined";
+  if (hasJoinedMeetPageEvidence(meetPage)) return "joined";
   if (meetPage?.waitingForAdmit === true) return "waiting";
   if (meetPage?.cannotJoin === true) return "failed";
   return state.status;

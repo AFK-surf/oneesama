@@ -501,7 +501,7 @@ test("meet live acceptance validates expected app-control terminal success", () 
     workspaceTools: {
       calls: [
         {
-          name: "control_shared_app_window",
+          name: "kwwk_computer_use",
           callId: "call_app_control",
           result: {
             ok: true,
@@ -520,7 +520,7 @@ test("meet live acceptance validates expected app-control terminal success", () 
     forbidden: [],
     expectedInput: [],
     expectedOutput: [],
-    expectedTools: ["control_shared_app_window"],
+    expectedTools: ["kwwk_computer_use"],
   });
 
   assert.deepEqual(
@@ -534,7 +534,7 @@ test("meet live acceptance accepts expected app-control compact blocker", () => 
     workspaceTools: {
       calls: [
         {
-          name: "control_shared_app_window",
+          name: "kwwk_computer_use",
           callId: "call_app_control",
           result: {
             ok: false,
@@ -554,7 +554,7 @@ test("meet live acceptance accepts expected app-control compact blocker", () => 
     forbidden: [],
     expectedInput: [],
     expectedOutput: [],
-    expectedTools: ["control_shared_app_window"],
+    expectedTools: ["kwwk_computer_use"],
   });
 
   assert.deepEqual(
@@ -568,7 +568,7 @@ test("meet live acceptance rejects app-control compact blocker with contradictor
     workspaceTools: {
       calls: [
         {
-          name: "control_shared_app_window",
+          name: "kwwk_computer_use",
           callId: "call_app_control",
           result: {
             ok: true,
@@ -588,7 +588,7 @@ test("meet live acceptance rejects app-control compact blocker with contradictor
     forbidden: [],
     expectedInput: [],
     expectedOutput: [],
-    expectedTools: ["control_shared_app_window"],
+    expectedTools: ["kwwk_computer_use"],
   });
 
   assert.ok(
@@ -620,7 +620,7 @@ test("meet live acceptance rejects expected app-control blocked without compact 
     workspaceTools: {
       calls: [
         {
-          name: "control_shared_app_window",
+          name: "kwwk_computer_use",
           callId: "call_app_control",
           result: {
             ok: false,
@@ -648,7 +648,7 @@ test("meet live acceptance rejects expected app-control blocked without compact 
     forbidden: [],
     expectedInput: [],
     expectedOutput: [],
-    expectedTools: ["control_shared_app_window"],
+    expectedTools: ["kwwk_computer_use"],
   });
 
   assert.ok(
@@ -678,7 +678,7 @@ test("meet live acceptance rejects expected app-control pending job", () => {
     workspaceTools: {
       calls: [
         {
-          name: "control_shared_app_window",
+          name: "kwwk_computer_use",
           callId: "call_app_control",
           result: {
             ok: true,
@@ -705,7 +705,7 @@ test("meet live acceptance rejects expected app-control pending job", () => {
     forbidden: [],
     expectedInput: [],
     expectedOutput: [],
-    expectedTools: ["control_shared_app_window"],
+    expectedTools: ["kwwk_computer_use"],
   });
 
   assert.ok(
@@ -734,7 +734,7 @@ test("meet live acceptance rejects stale app-control job even with older success
     workspaceTools: {
       calls: [
         {
-          name: "control_shared_app_window",
+          name: "kwwk_computer_use",
           callId: "call_app_control_old",
           result: {
             ok: true,
@@ -765,7 +765,7 @@ test("meet live acceptance rejects stale app-control job even with older success
     forbidden: [],
     expectedInput: [],
     expectedOutput: [],
-    expectedTools: ["control_shared_app_window"],
+    expectedTools: ["kwwk_computer_use"],
   });
 
   assert.ok(

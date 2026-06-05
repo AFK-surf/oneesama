@@ -919,7 +919,8 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
     canvas.height = config.canvasHeight;
     canvas.style.cssText =
       "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;pointer-events:none;";
-    document.documentElement.appendChild(canvas);
+    const root = document.documentElement || document.head || document.body;
+    if (root) root.appendChild(canvas);
     return canvas;
   }
 
@@ -1057,21 +1058,94 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
     };
     const originalGetUserMedia = mediaDevicesAny.getUserMedia?.bind(mediaDevicesAny);
     const originalEnumerateDevices = mediaDevicesAny.enumerateDevices?.bind(mediaDevicesAny);
+    const mediaState = {
+      ok: true,
+      installedAt: new Date().toISOString(),
+      getUserMediaCalls: 0,
+      audioGetUserMediaCalls: 0,
+      videoGetUserMediaCalls: 0,
+      enumerateDevicesCalls: 0,
+      legacyGetUserMediaCalls: 0,
+      lastConstraints: null as MediaStreamConstraints | null,
+      lastAudioConstraints: null as MediaStreamConstraints | null,
+      lastVideoConstraints: null as MediaStreamConstraints | null,
+      lastReturnedTracks: [] as Array<{
+        kind: string;
+        id: string;
+        enabled: boolean;
+        muted: boolean;
+        readyState: string;
+      }>,
+      returnedAudioTrackCount: 0,
+      returnedVideoTrackCount: 0,
+      errors: [] as string[],
+      patchedTargets: [] as string[],
+    };
+    window.MAB_AVATAR_MEDIA = mediaState;
+
+    const rememberError = (label: string, error: unknown) => {
+      const message = (error as { message?: unknown })?.message || error;
+      mediaState.errors.push(`${label}: ${String(message)}`.slice(0, 300));
+    };
+    const setFunction = (target: unknown, key: string, value: unknown, label: string) => {
+      if (!target) return;
+      try {
+        Object.defineProperty(target, key, {
+          configurable: true,
+          writable: true,
+          value,
+        });
+        mediaState.patchedTargets.push(label);
+      } catch (error) {
+        try {
+          (target as Record<string, unknown>)[key] = value;
+          mediaState.patchedTargets.push(`${label}:assign`);
+        } catch (assignError) {
+          rememberError(label, assignError || error);
+        }
+      }
+    };
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       get: () => mediaDevicesAny,
     });
 
-    mediaDevicesAny.getUserMedia = async (constraints: MediaStreamConstraints = {}) => {
+    const fakeGetUserMedia = async (constraints: MediaStreamConstraints = {}) => {
+      mediaState.getUserMediaCalls += 1;
+      mediaState.lastConstraints = constraints;
+      if (constraints.audio) {
+        mediaState.audioGetUserMediaCalls += 1;
+        mediaState.lastAudioConstraints = constraints;
+      }
+      if (constraints.video) {
+        mediaState.videoGetUserMediaCalls += 1;
+        mediaState.lastVideoConstraints = constraints;
+      }
       const tracks: MediaStreamTrack[] = [];
       if (constraints.video) tracks.push(videoTrack.clone());
       if (constraints.audio) tracks.push(audioTrack.clone());
-      if (tracks.length) return new MediaStream(tracks);
+      if (tracks.length) {
+        mediaState.returnedAudioTrackCount += tracks.filter(
+          (track) => track.kind === "audio",
+        ).length;
+        mediaState.returnedVideoTrackCount += tracks.filter(
+          (track) => track.kind === "video",
+        ).length;
+        mediaState.lastReturnedTracks = tracks.map((track) => ({
+          kind: track.kind,
+          id: track.id,
+          enabled: track.enabled,
+          muted: track.muted,
+          readyState: track.readyState,
+        }));
+        return new MediaStream(tracks);
+      }
       if (originalGetUserMedia) return originalGetUserMedia(constraints);
       return new MediaStream();
     };
 
-    mediaDevicesAny.enumerateDevices = async () => {
+    const fakeEnumerateDevices = async () => {
+      mediaState.enumerateDevicesCalls += 1;
       const realDevices = originalEnumerateDevices
         ? await originalEnumerateDevices().catch(() => [] as MediaDeviceInfo[])
         : [];
@@ -1091,6 +1165,49 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
         ...realDevices,
       ];
     };
+
+    const fakeLegacyGetUserMedia = (
+      constraints: MediaStreamConstraints,
+      onSuccess?: (stream: MediaStream) => void,
+      onError?: (error: unknown) => void,
+    ) => {
+      mediaState.legacyGetUserMediaCalls += 1;
+      fakeGetUserMedia(constraints).then(
+        (stream) => onSuccess?.(stream),
+        (error) => {
+          rememberError("legacy_get_user_media", error);
+          onError?.(error);
+        },
+      );
+    };
+
+    setFunction(mediaDevicesAny, "getUserMedia", fakeGetUserMedia, "mediaDevices.getUserMedia");
+    setFunction(
+      mediaDevicesAny,
+      "enumerateDevices",
+      fakeEnumerateDevices,
+      "mediaDevices.enumerateDevices",
+    );
+    const mediaDevicesPrototype = Object.getPrototypeOf(mediaDevicesAny);
+    setFunction(
+      mediaDevicesPrototype,
+      "getUserMedia",
+      fakeGetUserMedia,
+      "MediaDevices.prototype.getUserMedia",
+    );
+    setFunction(
+      mediaDevicesPrototype,
+      "enumerateDevices",
+      fakeEnumerateDevices,
+      "MediaDevices.prototype.enumerateDevices",
+    );
+    setFunction(navigator, "getUserMedia", fakeLegacyGetUserMedia, "navigator.getUserMedia");
+    setFunction(
+      navigator,
+      "webkitGetUserMedia",
+      fakeLegacyGetUserMedia,
+      "navigator.webkitGetUserMedia",
+    );
   }
 
   async function start() {
@@ -1115,6 +1232,7 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
       videoTrackId: videoTrack.id,
       audioTrackId: audioTrack.id,
       audioRoute: window.MAB_AVATAR_AUDIO,
+      mediaOverride: window.MAB_AVATAR_MEDIA,
       avatarState: window.MAB_AVATAR_STATE,
       renderer: window.MAB_AVATAR_RENDERER,
       rendererMode: window.MAB_AVATAR_RENDERER.renderer,
@@ -1146,6 +1264,7 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
         requestAnimationFrame(mirrorRenderCanvas);
         Object.assign(window.MAB_AVATAR_READY, {
           avatarState: window.MAB_AVATAR_STATE,
+          mediaOverride: window.MAB_AVATAR_MEDIA,
           renderer: window.MAB_AVATAR_RENDERER,
           rendererMode: window.MAB_AVATAR_RENDERER.renderer,
           live2dLoaded: window.MAB_AVATAR_RENDERER.live2dLoaded,
@@ -1193,9 +1312,15 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
     }
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
-  } else {
-    start();
-  }
+  start().catch((error) => {
+    window.MAB_AVATAR_BOOT_ERROR = String(error?.message || error);
+    window.MAB_AVATAR_READY = {
+      ok: false,
+      mode: "avatar-renderer",
+      error: window.MAB_AVATAR_BOOT_ERROR,
+      renderer: window.MAB_AVATAR_RENDERER,
+      mediaOverride: window.MAB_AVATAR_MEDIA,
+    };
+    log("avatar bootstrap failed", window.MAB_AVATAR_BOOT_ERROR);
+  });
 })();

@@ -297,6 +297,19 @@ function verifyFixtureState(testCase, operations) {
   };
 }
 
+function modelPlanForCase(testCase) {
+  const status = testCase.expectedStatus || (testCase.expectedOk === false ? "blocked" : "planned");
+  const blocker =
+    testCase.expectedBlocker ||
+    (status === "needs_background_agent" ? "needs_background_agent" : "");
+  return {
+    status,
+    summary: `fixture model plan for ${testCase.id}`,
+    blocker,
+    operations: testCase.expectedOperations || [],
+  };
+}
+
 const LIVE_MACOS_FIXTURE_CASES = [
   {
     id: "live-native-tab-switch",
@@ -472,6 +485,8 @@ async function spawnHelper(dir) {
       env: {
         ...process.env,
         ONEESAMA_APP_CONTROL_HELPER: join(dir, "helper"),
+        ONEESAMA_KWWK_CU_PLANNER_PROVIDER: "local",
+        ONEESAMA_KWWK_CU_PLANNER_MODEL: "tiny-planner-action-fixture",
         ONEESAMA_KWWK_CURSOR_BOOTSTRAP_MS: "1",
         ONEESAMA_KWWK_CURSOR_PRE_MS: "1",
         ONEESAMA_KWWK_CURSOR_HOLD_MS: "1",
@@ -561,9 +576,16 @@ async function runLiveMacOSFixture(args) {
       const result = await callHelperForLiveFixture(helper, {
         jsonrpc: "2.0",
         id: testCase.id,
-        method: "app_control.control_shared_app_window",
+        method: "kwwk.cu.execute",
         params: {
           instruction: testCase.instruction,
+          modelPlan: modelPlanForCase({
+            id: testCase.id,
+            expectedOperations:
+              testCase.id === "live-native-tab-switch"
+                ? [{ kind: "press_key", key: "control+tab" }]
+                : [{ kind: "type_text", text: "hello" }],
+          }),
           target: {
             processId: app.pid,
             applicationName: "KWWKPlannerLiveFixture",
@@ -680,9 +702,13 @@ async function runLiveBrowserFixture() {
     const preObserve = await callHelperForLiveFixture(helper, {
       jsonrpc: "2.0",
       id: "live-browser-observe-before",
-      method: "app_control.control_shared_app_window",
+      method: "kwwk.cu.execute",
       params: {
         instruction: "看一下当前状态",
+        modelPlan: modelPlanForCase({
+          id: "live-browser-observe-before",
+          expectedOperations: [{ kind: "state" }],
+        }),
         target,
       },
     });
@@ -690,9 +716,13 @@ async function runLiveBrowserFixture() {
     const action = await callHelperForLiveFixture(helper, {
       jsonrpc: "2.0",
       id: "live-browser-tab-switch",
-      method: "app_control.control_shared_app_window",
+      method: "kwwk.cu.execute",
       params: {
         instruction: "让他切换 tab",
+        modelPlan: modelPlanForCase({
+          id: "live-browser-tab-switch",
+          expectedOperations: [{ kind: "press_key", key: "control+tab" }],
+        }),
         target,
       },
     });
@@ -700,9 +730,13 @@ async function runLiveBrowserFixture() {
     const postObserve = await callHelperForLiveFixture(helper, {
       jsonrpc: "2.0",
       id: "live-browser-observe-after",
-      method: "app_control.control_shared_app_window",
+      method: "kwwk.cu.execute",
       params: {
         instruction: "看一下当前状态",
+        modelPlan: modelPlanForCase({
+          id: "live-browser-observe-after",
+          expectedOperations: [{ kind: "state" }],
+        }),
         target,
       },
     });
@@ -817,11 +851,14 @@ export function evaluatePlannerActionCase(testCase, result) {
   const fixtureVerification = verifyFixtureState(testCase, operations);
   const statusMatch =
     !testCase.expectedStatus || String(result?.status || "") === String(testCase.expectedStatus);
+  const modelFirst = String(planner.provider || "").startsWith("model_first_");
+  const modelNamePresent = String(planner.modelName || "").trim().length > 0;
   const ok =
     result?.ok === expectedOk &&
     operationsMatch &&
-    planner.provider === "deterministic" &&
-    planner.modelUsed === false &&
+    modelFirst &&
+    planner.modelUsed === true &&
+    modelNamePresent &&
     Array.isArray(planner.actionKinds) &&
     planner.actionKinds.join("\n") === actionKinds.join("\n") &&
     Number.isFinite(Number(planner.normalizeMs)) &&
@@ -843,7 +880,9 @@ export function evaluatePlannerActionCase(testCase, result) {
     planner: {
       provider: planner.provider || "",
       modelUsed: planner.modelUsed === true,
+      modelName: String(planner.modelName || ""),
       normalizeMs: Number(planner.normalizeMs || 0),
+      modelLatencyMs: Number(planner.modelLatencyMs || 0),
       actionKinds: Array.isArray(planner.actionKinds) ? planner.actionKinds : [],
     },
     verifier: {
@@ -852,8 +891,9 @@ export function evaluatePlannerActionCase(testCase, result) {
       blockerMatch:
         expectedOk || String(result?.blocker || "") === String(testCase.expectedBlocker || ""),
       statusMatch,
-      deterministic: planner.provider === "deterministic",
-      modelUnused: planner.modelUsed === false,
+      modelFirst,
+      modelUsed: planner.modelUsed === true,
+      modelNamePresent,
       state: fixtureVerification,
     },
     blocker: ok && statusMatch ? "" : "planner_action_fixture_mismatch",
@@ -895,8 +935,8 @@ export function buildKWWKPlannerActionReport(args, runResult) {
     generatedAt: new Date().toISOString(),
     evidenceMode:
       liveEvidenceModes.length > 0
-        ? `deterministic_helper_plan_fixture_and_${liveEvidenceModes.join("_and_")}`
-        : "deterministic_helper_plan_fixture",
+        ? `model_first_helper_plan_fixture_and_${liveEvidenceModes.join("_and_")}`
+        : "model_first_helper_plan_fixture",
     acceptanceGateScope: "kwwk_planner_action",
     backendProvider: "host_kwwk_app_control_helper_plan_instruction",
     meetRoomRequired: false,
@@ -946,7 +986,12 @@ export async function runKWWKPlannerActionBenchmark(args) {
     ["--import", "tsx", "packages/core/src/meeting/app-control-helper.ts", "--stdio"],
     {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...process.env, ONEESAMA_APP_CONTROL_HELPER: join(dir, "helper") },
+      env: {
+        ...process.env,
+        ONEESAMA_APP_CONTROL_HELPER: join(dir, "helper"),
+        ONEESAMA_KWWK_CU_PLANNER_PROVIDER: "local",
+        ONEESAMA_KWWK_CU_PLANNER_MODEL: "tiny-planner-action-fixture",
+      },
       stdio: ["pipe", "pipe", "pipe"],
     },
   );
@@ -966,11 +1011,12 @@ export async function runKWWKPlannerActionBenchmark(args) {
       `${JSON.stringify({
         jsonrpc: "2.0",
         id: testCase.id,
-        method: "app_control.plan_instruction",
+        method: "kwwk.cu.plan",
         params: {
           instruction: testCase.instruction,
           target: testCase.target || {},
           observation: testCase.observation || {},
+          modelPlan: modelPlanForCase(testCase),
         },
       })}\n`,
     );

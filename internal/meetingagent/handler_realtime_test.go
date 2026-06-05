@@ -744,8 +744,11 @@ func TestRealtimeDemoSurfaceRuntimeFlagEnablesSmoke(t *testing.T) {
 	})
 
 	configBody := performRealtimeJSON(t, router, http.MethodGet, "/realtime/config", "", http.StatusOK)
-	if !toolNamesInclude(configBody["tools"].([]any), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "share_existing_app_window", "kwwk_computer_use", "control_shared_app_window") {
+	if !toolNamesInclude(configBody["tools"].([]any), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "share_existing_app_window", "kwwk_computer_use") {
 		t.Fatalf("tools = %#v, want demo surface tools when flag enabled", configBody["tools"])
+	}
+	if toolNamesInclude(configBody["tools"].([]any), "control_shared_app_window") {
+		t.Fatalf("tools = %#v, legacy app-control tool must not be exposed even when demo surface is enabled", configBody["tools"])
 	}
 	demoSurface := configBody["demoSurface"].(map[string]any)
 	if demoSurface["enabled"] != true || demoSurface["toolsExposed"] != true || demoSurface["configured"] != true || demoSurface["exposeRealtimeTools"] != true {

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import { dismissMeetPrompts } from "./meet-prompts.ts";
 import {
   normalizeSpeakerDisplayName,
@@ -6,6 +7,7 @@ import {
 } from "../realtime/speaker-identity.ts";
 import type { RealtimeCurrentUser } from "../realtime/realtime-contract.ts";
 import { evaluateMeetAccessibilityState, withTimeout } from "./google-meet-joiner-ui.ts";
+import { createMeetUIInteraction, type MeetUIInteraction } from "./google-meet-humanized-input.ts";
 import {
   nowIso,
   type Diagnostics,
@@ -26,19 +28,203 @@ export {
   compactJoinStatusWorkerResultBridge,
 } from "./google-meet-joiner-status-compaction.ts";
 
-export async function fillGuestName(
+const GUEST_NAME_FIELD_SELECTOR = [
+  'input[aria-label*="name" i]',
+  'input[placeholder*="name" i]',
+  'input[type="text"]',
+  "textarea",
+  '[contenteditable="true"]',
+].join(",");
+
+type GuestNameReadiness = GuestNameEvalResult & { fieldIndex?: number };
+
+type JoinClickOutcome = {
+  state:
+    | "admitted"
+    | "waiting_for_admit"
+    | "sign_in_required"
+    | "cannot_join_meeting"
+    | "timeout"
+    | "unknown";
+  signal?: string;
+  textHead?: string;
+  pageState?: MeetPageState;
+  error?: string;
+};
+
+const RESOLVED_JOIN_CLICK_STATES = new Set<JoinClickOutcome["state"]>([
+  "waiting_for_admit",
+  "admitted",
+  "sign_in_required",
+  "cannot_join_meeting",
+]);
+
+function joinClickOutcomeResolved(outcome: JoinClickOutcome): boolean {
+  return RESOLVED_JOIN_CLICK_STATES.has(outcome.state);
+}
+
+async function evaluateGuestNameReadiness(page: Page): Promise<GuestNameReadiness> {
+  return await withTimeout<GuestNameReadiness, GuestNameReadiness>(
+    page.evaluate(() => {
+      const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+      const href = String(location.href || "");
+      const productRedirect =
+        !/meet\.google\.com/i.test(href) &&
+        ((/workspace\.google\.com/i.test(href) && /\/products\/meet/i.test(href)) ||
+          /google\.com\/meet/i.test(href));
+      if (productRedirect) {
+        return {
+          ok: false,
+          reason: "meet_product_redirect",
+          currentUrl: href,
+          textHead: text.slice(0, 500),
+        };
+      }
+      if (
+        /You can't join this video call|No one can join a meeting unless invited or admitted by the host/i.test(
+          text,
+        )
+      ) {
+        return {
+          ok: false,
+          reason: "cannot_join_meeting",
+          textHead: text.slice(0, 500),
+        };
+      }
+      const hasGuestJoinForm = /What'?s your name\?|Ask to join|Join now/i.test(text);
+      const hasAntiBotInterlock =
+        /Getting ready\.\.\./i.test(text) ||
+        (/confirm you'?re not a bot/i.test(text) && !hasGuestJoinForm);
+      if (hasAntiBotInterlock) {
+        return {
+          ok: false,
+          reason: "meet_anti_bot_prejoin",
+          textHead: text.slice(0, 500),
+        };
+      }
+      if (
+        /Forgot email|Create account|Use your Google Account/i.test(text) &&
+        /accounts\.google\.com/i.test(location.href)
+      ) {
+        return {
+          ok: false,
+          reason: "google_sign_in_required",
+          textHead: text.slice(0, 500),
+        };
+      }
+      const isVisible = (node: HTMLElement) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.visibility !== "hidden" &&
+          style.display !== "none"
+        );
+      };
+      const getValueLength = (node: HTMLElement) =>
+        "value" in node && typeof node.value === "string"
+          ? node.value.length
+          : (node.textContent || "").length;
+      const fields = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          [
+            'input[aria-label*="name" i]',
+            'input[placeholder*="name" i]',
+            'input[type="text"]',
+            "textarea",
+            '[contenteditable="true"]',
+          ].join(","),
+        ),
+      );
+      const visibleFields = fields.filter(isVisible);
+      const field =
+        visibleFields.find((node) => {
+          const label =
+            `${node.getAttribute("aria-label") || ""} ${node.getAttribute("placeholder") || ""}`.toLowerCase();
+          return label.includes("name") || label.includes("your name") || fields.length === 1;
+        }) || visibleFields[0];
+      const fieldIndex = fields.indexOf(field);
+      if (!field) {
+        const joinButton = Array.from(
+          document.querySelectorAll<HTMLElement>("button, [role=button]"),
+        )
+          .map((node) => ({
+            node,
+            label:
+              `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""}`
+                .replace(/\s+/g, " ")
+                .trim(),
+          }))
+          .find(
+            ({ node, label }) =>
+              isVisible(node) &&
+              /join now|ask to join|join the call now|join anyway|加入|申请加入/i.test(label) &&
+              !node.hasAttribute("disabled") &&
+              node.getAttribute("aria-disabled") !== "true",
+          );
+        if (joinButton) {
+          return {
+            ok: false,
+            reason: "join_button_ready_without_guest_name",
+            joinButtonReady: true,
+            joinButtonLabel: joinButton.label,
+            textHead: (document.body?.innerText || "").slice(0, 500),
+          };
+        }
+        return {
+          ok: false,
+          reason: "guest_name_field_absent",
+          textHead: (document.body?.innerText || "").slice(0, 500),
+        };
+      }
+      return {
+        ok: true,
+        tag: field.tagName.toLowerCase(),
+        aria: field.getAttribute("aria-label") || "",
+        placeholder: field.getAttribute("placeholder") || "",
+        valueLength: getValueLength(field),
+        fieldIndex,
+      };
+    }),
+    2500,
+    {
+      ok: false,
+      reason: "guest_name_eval_timeout",
+    },
+  ).catch(
+    (error): GuestNameReadiness => ({
+      ok: false,
+      reason: "guest_name_eval_error",
+      error: String(error?.message || error).slice(0, 300),
+    }),
+  );
+}
+
+async function waitForGuestNameReadiness(
   page: Page,
-  botName: string,
-  diagnostics: Diagnostics | null = null,
-  timeoutMs = 35_000,
-) {
-  const deadline = Date.now() + timeoutMs;
-  let lastResult: GuestNameEvalResult | null = null;
-  while (Date.now() < deadline) {
-    await dismissMeetPrompts(page, diagnostics);
-    const result = await withTimeout<GuestNameEvalResult, GuestNameEvalResult>(
-      page.evaluate((name) => {
+  timeoutMs: number,
+): Promise<GuestNameReadiness> {
+  if (typeof page.waitForFunction !== "function") {
+    return await evaluateGuestNameReadiness(page);
+  }
+  try {
+    const handle = await page.waitForFunction(
+      () => {
         const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+        const href = String(location.href || "");
+        const productRedirect =
+          !/meet\.google\.com/i.test(href) &&
+          ((/workspace\.google\.com/i.test(href) && /\/products\/meet/i.test(href)) ||
+            /google\.com\/meet/i.test(href));
+        if (productRedirect) {
+          return {
+            ok: false,
+            reason: "meet_product_redirect",
+            currentUrl: href,
+            textHead: text.slice(0, 500),
+          };
+        }
         if (
           /You can't join this video call|No one can join a meeting unless invited or admitted by the host/i.test(
             text,
@@ -47,17 +233,6 @@ export async function fillGuestName(
           return {
             ok: false,
             reason: "cannot_join_meeting",
-            textHead: text.slice(0, 500),
-          };
-        }
-        const hasGuestJoinForm = /What'?s your name\?|Ask to join|Join now/i.test(text);
-        const hasAntiBotInterlock =
-          /Getting ready\.\.\./i.test(text) ||
-          (/confirm you'?re not a bot/i.test(text) && !hasGuestJoinForm);
-        if (hasAntiBotInterlock) {
-          return {
-            ok: false,
-            reason: "meet_anti_bot_prejoin",
             textHead: text.slice(0, 500),
           };
         }
@@ -71,7 +246,7 @@ export async function fillGuestName(
             textHead: text.slice(0, 500),
           };
         }
-        const isVisible = (node) => {
+        const isVisible = (node: HTMLElement) => {
           const rect = node.getBoundingClientRect();
           const style = getComputedStyle(node);
           return (
@@ -104,91 +279,223 @@ export async function fillGuestName(
             return label.includes("name") || label.includes("your name") || fields.length === 1;
           }) || visibleFields[0];
         if (!field) {
-          return {
-            ok: false,
-            reason: "guest_name_field_absent",
-            textHead: (document.body?.innerText || "").slice(0, 500),
-          };
+          const joinButton = Array.from(
+            document.querySelectorAll<HTMLElement>("button, [role=button]"),
+          )
+            .map((node) => ({
+              node,
+              label:
+                `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""}`
+                  .replace(/\s+/g, " ")
+                  .trim(),
+            }))
+            .find(
+              ({ node, label }) =>
+                isVisible(node) &&
+                /join now|ask to join|join the call now|join anyway|加入|申请加入/i.test(label) &&
+                !node.hasAttribute("disabled") &&
+                node.getAttribute("aria-disabled") !== "true",
+            );
+          return joinButton
+            ? {
+                ok: false,
+                reason: "join_button_ready_without_guest_name",
+                joinButtonReady: true,
+                joinButtonLabel: joinButton.label,
+                textHead: (document.body?.innerText || "").slice(0, 500),
+              }
+            : false;
         }
-        field.focus();
-        if ("value" in field) {
-          field.value = "";
-          field.dispatchEvent(
-            new InputEvent("input", {
-              bubbles: true,
-              inputType: "deleteContentBackward",
-              data: null,
-            }),
-          );
-          field.value = name;
-          field.dispatchEvent(
-            new InputEvent("input", { bubbles: true, inputType: "insertText", data: name }),
-          );
-          field.dispatchEvent(new Event("change", { bubbles: true }));
-        } else {
-          field.textContent = "";
-          field.dispatchEvent(
-            new InputEvent("input", {
-              bubbles: true,
-              inputType: "deleteContentBackward",
-              data: null,
-            }),
-          );
-          field.textContent = name;
-          field.dispatchEvent(
-            new InputEvent("input", { bubbles: true, inputType: "insertText", data: name }),
-          );
-        }
-        field.blur();
         return {
           ok: true,
           tag: field.tagName.toLowerCase(),
           aria: field.getAttribute("aria-label") || "",
           placeholder: field.getAttribute("placeholder") || "",
           valueLength: getValueLength(field),
+          fieldIndex: fields.indexOf(field),
         };
-      }, botName),
-      2500,
-      {
-        ok: false,
-        reason: "guest_name_eval_timeout",
       },
-    ).catch(
-      (error): GuestNameEvalResult => ({
-        ok: false,
-        reason: "guest_name_eval_error",
-        error: String(error?.message || error).slice(0, 300),
-      }),
+      undefined,
+      { polling: 100, timeout: Math.max(1, timeoutMs) },
     );
+    return (await handle.jsonValue()) as GuestNameReadiness;
+  } catch {
+    return await evaluateGuestNameReadiness(page);
+  }
+}
+
+export async function fillGuestName(
+  page: Page,
+  botName: string,
+  diagnostics: Diagnostics | null = null,
+  timeoutMs = 35_000,
+  meetUIInteractionEnv: NodeJS.ProcessEnv = process.env,
+) {
+  const interaction = createMeetUIInteraction(diagnostics, meetUIInteractionEnv);
+  const deadline = Date.now() + timeoutMs;
+  let lastResult: GuestNameEvalResult | null = null;
+  while (Date.now() < deadline) {
+    await dismissMeetPrompts(page, diagnostics);
+    const result = await waitForGuestNameReadiness(page, Math.max(1, deadline - Date.now()));
     lastResult = result;
     if (["cannot_join_meeting", "google_sign_in_required"].includes(result.reason)) {
       diagnostics?.record("guest_name_terminal_state", result);
       return result;
     }
-    if (result.ok) {
-      diagnostics?.record("guest_name_filled", { botName, ...result });
+    if (result.reason === "join_button_ready_without_guest_name") {
+      diagnostics?.record("guest_name_skipped_join_button_ready", result);
       return result;
     }
-    diagnostics?.record("guest_name_wait", result);
-    await page.waitForTimeout(1000);
+    if (result.ok) {
+      const fieldIndex = Number(
+        (result as GuestNameEvalResult & { fieldIndex?: number }).fieldIndex || 0,
+      );
+      try {
+        const locator = page.locator(GUEST_NAME_FIELD_SELECTOR).nth(fieldIndex);
+        let fillError = "";
+        let fillMode = interaction.details.mode === "humanized" ? "humanized" : "playwright";
+        let verify;
+        if (interaction.details.mode === "humanized") {
+          await interaction.fill(locator, botName).catch((error) => {
+            fillError = String(error?.message || error).slice(0, 200);
+          });
+          verify = await waitForGuestNameValue(page, fieldIndex, botName, 2500);
+          if (!verify.ok && verify.joinButtonReady === true) {
+            const filled = {
+              ...result,
+              valueLength: verify.valueLength || result.valueLength,
+              interaction: interaction.details,
+              fillMode,
+              fillError,
+            };
+            diagnostics?.record("guest_name_filled", { botName, ...filled, verify });
+            diagnostics?.record("guest_name_assume_filled", {
+              botName,
+              ...filled,
+              verify,
+              reason: "humanized_fill_completed_join_button_gate_will_verify",
+            });
+            return {
+              ...filled,
+              assumed: true,
+              verify,
+              reason: "humanized_fill_completed_join_button_gate_will_verify",
+            };
+          }
+          if (!verify.ok) {
+            await locator.fill(botName).catch((error) => {
+              fillError = [fillError, String(error?.message || error).slice(0, 200)]
+                .filter(Boolean)
+                .join("; ");
+            });
+            const fallbackVerify = await waitForGuestNameValue(page, fieldIndex, botName, 2500);
+            if (fallbackVerify.ok || !verify.joinButtonReady) {
+              fillMode = "humanized+playwright_fallback";
+              verify = fallbackVerify;
+            }
+          }
+        } else {
+          await locator.fill(botName).catch((error) => {
+            fillError = String(error?.message || error).slice(0, 200);
+          });
+          verify = await waitForGuestNameValue(page, fieldIndex, botName, 2500);
+        }
+        const filled = {
+          ...result,
+          valueLength: verify.valueLength || result.valueLength,
+          interaction: interaction.details,
+          fillMode,
+          fillError,
+        };
+        diagnostics?.record("guest_name_filled", { botName, ...filled, verify });
+        if (verify.ok) return filled;
+        const canAssumeHumanizedFill =
+          interaction.details.mode === "humanized" &&
+          verify.joinButtonReady === true &&
+          Number(verify.valueLength || 0) > 0;
+        if (canAssumeHumanizedFill) {
+          diagnostics?.record("guest_name_assume_filled", {
+            botName,
+            ...filled,
+            verify,
+            reason: "humanized_fill_completed_join_button_gate_will_verify",
+          });
+          return {
+            ...filled,
+            assumed: true,
+            verify,
+            reason: "humanized_fill_completed_join_button_gate_will_verify",
+          };
+        }
+        lastResult = {
+          ok: false,
+          reason: verify.reason || "guest_name_value_mismatch",
+          error: verify.error,
+        };
+        diagnostics?.record("guest_name_wait", { ...lastResult, verify });
+      } catch (error) {
+        lastResult = {
+          ok: false,
+          reason: "guest_name_humanized_fill_error",
+          error: String(error?.message || error).slice(0, 300),
+        };
+        diagnostics?.record("guest_name_wait", { ...lastResult, interaction: interaction.details });
+      }
+    } else {
+      lastResult = result;
+      diagnostics?.record("guest_name_wait", result);
+    }
   }
   diagnostics?.record("guest_name_absent", lastResult || { reason: "timeout" });
   return { ok: false, ...(lastResult || { reason: "timeout" }) };
 }
 
-export async function clickMeetJoinButton(
-  page: Page,
-  diagnostics: Diagnostics | null = null,
-  timeoutMs = 45_000,
-) {
-  const deadline = Date.now() + timeoutMs;
-  let lastCandidates: PresentationButton[] = [];
-  let clickedSelector = "";
-  while (Date.now() < deadline) {
-    await dismissMeetPrompts(page, diagnostics);
-    const result = await withTimeout<MeetJoinButtonEvalResult, MeetJoinButtonEvalResult>(
-      page.evaluate(() => {
-        const isVisible = (node) => {
+export function normalizeGuestNameValueForCompare(value: unknown): string {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[\u00a0\u2007\u202f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function guestNameValuesMatch(actual: unknown, expected: unknown): boolean {
+  return normalizeGuestNameValueForCompare(actual) === normalizeGuestNameValueForCompare(expected);
+}
+
+export function guestNameVerificationLooksAccepted(
+  verify: { value?: unknown; valueLength?: unknown; joinButtonReady?: unknown },
+  expected: unknown,
+): boolean {
+  if (guestNameValuesMatch(verify.value, expected)) {
+    return true;
+  }
+  const expectedLength = normalizeGuestNameValueForCompare(expected).length;
+  const actualLength = Number(verify.valueLength || 0);
+  return Boolean(verify.joinButtonReady) && expectedLength > 0 && actualLength === expectedLength;
+}
+
+async function readGuestNameValueState(page: Page, fieldIndex: number) {
+  return await withTimeout(
+    page.evaluate(
+      ({ fieldIndex: index }) => {
+        const fields = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            [
+              'input[aria-label*="name" i]',
+              'input[placeholder*="name" i]',
+              'input[type="text"]',
+              "textarea",
+              '[contenteditable="true"]',
+            ].join(","),
+          ),
+        );
+        const field = fields[index] || fields[0];
+        if (!field) return { ok: false, reason: "guest_name_field_absent" };
+        const value =
+          "value" in field && typeof field.value === "string"
+            ? field.value
+            : field.textContent || "";
+        const buttonVisible = (node: HTMLElement) => {
           const rect = node.getBoundingClientRect();
           const style = getComputedStyle(node);
           return (
@@ -198,52 +505,473 @@ export async function clickMeetJoinButton(
             style.display !== "none"
           );
         };
-        const buttons = Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]"));
-        const candidates = buttons
-          .map((node, index) => {
-            const label =
+        const joinButton = Array.from(
+          document.querySelectorAll<HTMLElement>("button, [role=button]"),
+        )
+          .map((node) => ({
+            node,
+            label:
               `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""}`
                 .replace(/\s+/g, " ")
-                .trim();
-            const rect = node.getBoundingClientRect();
-            return {
-              index,
-              label: label.slice(0, 160),
-              disabled: Boolean(
-                ("disabled" in node && typeof node.disabled === "boolean" && node.disabled) ||
-                node.getAttribute("aria-disabled") === "true",
-              ),
-              visible: isVisible(node),
-              rect: {
-                x: Math.round(rect.x),
-                y: Math.round(rect.y),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height),
-              },
-            };
-          })
-          .filter(
-            (button) =>
-              button.visible &&
-              /\b(ask to join|join now|join)\b|申请加入|立即加入|加入/i.test(button.label),
+                .trim(),
+          }))
+          .find(
+            ({ node, label }) =>
+              buttonVisible(node) &&
+              /join now|ask to join|join the call now|join anyway|加入|申请加入/i.test(label),
           );
-        const enabled = candidates.find((button) => !button.disabled);
-        if (!enabled) return { ok: false, candidates };
-        buttons[enabled.index].click();
-        return { ok: true, selector: "dom:meet-join-button", button: enabled, candidates };
-      }),
-      2500,
-      {
-        ok: false,
-        error: "join_button_eval_timeout",
-        candidates: [],
+        const joinButtonReady = Boolean(
+          joinButton &&
+          !joinButton.node.hasAttribute("disabled") &&
+          joinButton.node.getAttribute("aria-disabled") !== "true",
+        );
+        return {
+          ok: true,
+          value,
+          valueLength: value.length,
+          joinButtonReady,
+          joinButtonLabel: joinButton?.label || "",
+        };
       },
-    ).catch(
-      (error): MeetJoinButtonEvalResult => ({
-        ok: false,
-        error: String(error?.message || error).slice(0, 300),
-        candidates: [],
-      }),
+      { fieldIndex },
+    ),
+    800,
+    { ok: false, reason: "guest_name_verify_timeout" },
+  ).catch((error) => ({
+    ok: false,
+    reason: "guest_name_verify_error",
+    error: String(error?.message || error).slice(0, 200),
+  }));
+}
+
+async function waitForGuestNameValue(
+  page: Page,
+  fieldIndex: number,
+  expected: string,
+  timeoutMs: number,
+) {
+  let last = null;
+  if (typeof page.waitForFunction === "function") {
+    try {
+      const accepted = await page.waitForFunction(
+        ({ fieldIndex: index, expectedValue }) => {
+          const normalize = (value: unknown) =>
+            String(value || "")
+              .normalize("NFKC")
+              .replace(/[\u00a0\u2007\u202f]/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+          const fields = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              [
+                'input[aria-label*="name" i]',
+                'input[placeholder*="name" i]',
+                'input[type="text"]',
+                "textarea",
+                '[contenteditable="true"]',
+              ].join(","),
+            ),
+          );
+          const field = fields[index] || fields[0];
+          if (!field) return false;
+          const value =
+            "value" in field && typeof field.value === "string"
+              ? field.value
+              : field.textContent || "";
+          const buttonVisible = (node: HTMLElement) => {
+            const rect = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              style.visibility !== "hidden" &&
+              style.display !== "none"
+            );
+          };
+          const joinButton = Array.from(
+            document.querySelectorAll<HTMLElement>("button, [role=button]"),
+          )
+            .map((node) => ({
+              node,
+              label:
+                `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""}`
+                  .replace(/\s+/g, " ")
+                  .trim(),
+            }))
+            .find(
+              ({ node, label }) =>
+                buttonVisible(node) &&
+                /join now|ask to join|join the call now|join anyway|加入|申请加入/i.test(label),
+            );
+          const joinButtonReady = Boolean(
+            joinButton &&
+            !joinButton.node.hasAttribute("disabled") &&
+            joinButton.node.getAttribute("aria-disabled") !== "true",
+          );
+          const normalizedValue = normalize(value);
+          const normalizedExpected = normalize(expectedValue);
+          const valueAccepted =
+            normalizedValue === normalizedExpected ||
+            (joinButtonReady &&
+              normalizedExpected.length > 0 &&
+              normalizedValue.length === normalizedExpected.length);
+          return valueAccepted
+            ? {
+                ok: true,
+                value,
+                valueLength: value.length,
+                joinButtonReady,
+                joinButtonLabel: joinButton?.label || "",
+              }
+            : false;
+        },
+        { fieldIndex, expectedValue: expected },
+        { polling: 100, timeout: Math.max(1, timeoutMs) },
+      );
+      last = await accepted.jsonValue();
+    } catch {
+      last = await readGuestNameValueState(page, fieldIndex);
+    }
+  } else {
+    last = await readGuestNameValueState(page, fieldIndex);
+  }
+  if (last?.ok && guestNameVerificationLooksAccepted(last, expected)) {
+    return { ...last, value: undefined };
+  }
+  return {
+    ...(last || { ok: false }),
+    ok: false,
+    reason: "guest_name_value_mismatch",
+    value: undefined,
+  };
+}
+
+async function waitForMeetJoinButtonCandidate(
+  page: Page,
+  timeoutMs: number,
+): Promise<MeetJoinButtonEvalResult> {
+  if (typeof page.waitForFunction === "function") {
+    try {
+      const handle = await page.waitForFunction(
+        () => {
+          const isVisible = (node: HTMLElement) => {
+            const rect = node.getBoundingClientRect();
+            const style = getComputedStyle(node);
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              style.visibility !== "hidden" &&
+              style.display !== "none"
+            );
+          };
+          const buttons = Array.from(
+            document.querySelectorAll<HTMLElement>("button, [role=button]"),
+          );
+          const candidates = buttons
+            .map((node, index) => {
+              const label =
+                `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""}`
+                  .replace(/\s+/g, " ")
+                  .trim();
+              const rect = node.getBoundingClientRect();
+              return {
+                index,
+                label: label.slice(0, 160),
+                disabled: Boolean(
+                  ("disabled" in node && typeof node.disabled === "boolean" && node.disabled) ||
+                  node.getAttribute("aria-disabled") === "true",
+                ),
+                visible: isVisible(node),
+                rect: {
+                  x: Math.round(rect.x),
+                  y: Math.round(rect.y),
+                  width: Math.round(rect.width),
+                  height: Math.round(rect.height),
+                },
+              };
+            })
+            .filter(
+              (button) =>
+                button.visible &&
+                /\b(ask to join|join now|join)\b|申请加入|立即加入|加入/i.test(button.label),
+            );
+          const enabled = candidates.find((button) => !button.disabled);
+          return enabled
+            ? { selector: "dom:meet-join-button", button: enabled, candidates }
+            : false;
+        },
+        undefined,
+        { polling: 100, timeout: Math.max(1, timeoutMs) },
+      );
+      const result = (await handle.jsonValue()) as {
+        selector: string;
+        button: PresentationButton;
+        candidates: PresentationButton[];
+      };
+      return { ok: true, ...result };
+    } catch {
+      // Fall through to one final synchronous snapshot so diagnostics include candidates.
+    }
+  }
+  return await withTimeout<MeetJoinButtonEvalResult, MeetJoinButtonEvalResult>(
+    page.evaluate(() => {
+      const isVisible = (node: HTMLElement) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.visibility !== "hidden" &&
+          style.display !== "none"
+        );
+      };
+      const buttons = Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]"));
+      const candidates = buttons
+        .map((node, index) => {
+          const label =
+            `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""}`
+              .replace(/\s+/g, " ")
+              .trim();
+          const rect = node.getBoundingClientRect();
+          return {
+            index,
+            label: label.slice(0, 160),
+            disabled: Boolean(
+              ("disabled" in node && typeof node.disabled === "boolean" && node.disabled) ||
+              node.getAttribute("aria-disabled") === "true",
+            ),
+            visible: isVisible(node),
+            rect: {
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            },
+          };
+        })
+        .filter(
+          (button) =>
+            button.visible &&
+            /\b(ask to join|join now|join)\b|申请加入|立即加入|加入/i.test(button.label),
+        );
+      const enabled = candidates.find((button) => !button.disabled);
+      if (!enabled) return { ok: false, candidates };
+      return { ok: true, selector: "dom:meet-join-button", button: enabled, candidates };
+    }),
+    2500,
+    {
+      ok: false,
+      error: "join_button_eval_timeout",
+      candidates: [],
+    },
+  ).catch(
+    (error): MeetJoinButtonEvalResult => ({
+      ok: false,
+      error: String(error?.message || error).slice(0, 300),
+      candidates: [],
+    }),
+  );
+}
+
+async function waitForJoinClickOutcome(page: Page, timeoutMs: number): Promise<JoinClickOutcome> {
+  if (typeof page.waitForFunction !== "function") {
+    const pageState = await evaluateMeetPageState(page);
+    if (pageState.waitingForAdmit) return { state: "waiting_for_admit", pageState };
+    if (pageState.inMeeting && !pageState.preJoin) return { state: "admitted", pageState };
+    if (pageState.signIn) return { state: "sign_in_required", pageState };
+    if (pageState.cannotJoin) return { state: "cannot_join_meeting", pageState };
+    return { state: "unknown", pageState };
+  }
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "";
+  while (Date.now() < deadline) {
+    try {
+      const handle = await page.waitForFunction(
+        () => {
+          const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+          const href = String(location.href || "");
+          if (
+            /accounts\.google\.com/i.test(href) ||
+            /Forgot email|Use your Google Account/i.test(text)
+          ) {
+            return { state: "sign_in_required", signal: "text", textHead: text.slice(0, 240) };
+          }
+          if (
+            /You can't join this video call|No one can join a meeting unless invited or admitted by the host|Returning to home screen/i.test(
+              text,
+            )
+          ) {
+            return { state: "cannot_join_meeting", signal: "text", textHead: text.slice(0, 240) };
+          }
+          const visibleButton = (pattern: RegExp) =>
+            Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]")).some(
+              (node) => {
+                const rect = node.getBoundingClientRect();
+                const style = getComputedStyle(node);
+                if (
+                  rect.width <= 0 ||
+                  rect.height <= 0 ||
+                  style.visibility === "hidden" ||
+                  style.display === "none"
+                ) {
+                  return false;
+                }
+                const label =
+                  `${node.innerText || node.textContent || ""} ${node.getAttribute("aria-label") || ""}`
+                    .replace(/\s+/g, " ")
+                    .trim();
+                return pattern.test(label);
+              },
+            );
+          const captionVisible = visibleButton(/captions?|字幕/i);
+          if (captionVisible) return { state: "admitted", signal: "captions" };
+          const preJoin =
+            /What'?s your name\?/i.test(text) ||
+            visibleButton(/\b(ask to join|join now)\b|申请加入|立即加入/i);
+          const waitingForAdmit =
+            /asking to join|you'?ll join|waiting for.*(?:admit|host)|host.*(?:let|admit).*you|正在请求加入|等待.*(?:主持人|允许)/i.test(
+              text,
+            );
+          if (waitingForAdmit) {
+            return {
+              state: "waiting_for_admit",
+              signal: "waiting_text",
+              textHead: text.slice(0, 240),
+            };
+          }
+          const leaveVisible = visibleButton(/leave (?:call|meeting)|离开通话/i);
+          if (leaveVisible && !preJoin) {
+            return { state: "admitted", signal: "leave_control" };
+          }
+          return false;
+        },
+        undefined,
+        { polling: 100, timeout: Math.min(1500, Math.max(1, deadline - Date.now())) },
+      );
+      const outcome = (await handle.jsonValue()) as JoinClickOutcome;
+      const pageState = await evaluateMeetPageState(page);
+      return { ...outcome, pageState };
+    } catch (error) {
+      lastError = String(error?.message || error).slice(0, 200);
+    }
+    const pageState = await evaluateMeetPageState(page);
+    if (pageState.waitingForAdmit) return { state: "waiting_for_admit", pageState };
+    if (pageState.inMeeting && !pageState.preJoin) return { state: "admitted", pageState };
+    if (pageState.error === "meet_page_state_timeout") {
+      return {
+        state: "unknown",
+        signal: "meet_spa_blocks_runtime_evaluation_after_join_click",
+        pageState,
+      };
+    }
+    if (pageState.signIn) return { state: "sign_in_required", pageState };
+    if (pageState.cannotJoin) return { state: "cannot_join_meeting", pageState };
+  }
+  const pageState = await evaluateMeetPageState(page);
+  return {
+    state: "timeout",
+    pageState,
+    error: lastError,
+  };
+}
+
+async function clickMeetJoinButtonWithPlaywright(page: Page, button?: PresentationButton) {
+  try {
+    const rect = button?.rect;
+    if (
+      rect &&
+      Number.isFinite(rect.x) &&
+      Number.isFinite(rect.y) &&
+      rect.width > 0 &&
+      rect.height > 0
+    ) {
+      const x = rect.x + rect.width / 2;
+      const y = rect.y + rect.height / 2;
+      await page.mouse.click(x, y);
+      return { ok: true, backend: "playwright_mouse", x, y };
+    }
+    if (typeof button?.index === "number") {
+      await page.locator("button, [role=button]").nth(button.index).click({ timeout: 1500 });
+      return { ok: true, backend: "playwright_locator", index: button.index };
+    }
+    return { ok: false, backend: "playwright", error: "join_button_target_missing" };
+  } catch (error) {
+    return {
+      ok: false,
+      backend: "playwright",
+      error: String(error?.message || error).slice(0, 180),
+    };
+  }
+}
+
+async function clickMeetJoinButtonWithPlaywrightAndObserve(
+  page: Page,
+  diagnostics: Diagnostics | null,
+  button: PresentationButton,
+  deadline: number,
+  fallback = false,
+): Promise<JoinClickOutcome> {
+  const syntheticClick = await clickMeetJoinButtonWithPlaywright(page, button);
+  diagnostics?.record("click_attempt", {
+    selector: "playwright:meet-join-button",
+    ok: syntheticClick.ok === true,
+    fallback,
+    result: syntheticClick,
+  });
+  return await waitForJoinClickOutcome(
+    page,
+    Math.min(syntheticClick.ok ? 3500 : 500, deadline - Date.now()),
+  );
+}
+
+async function clickMeetJoinButtonWithHumanizedInputAndObserve(
+  page: Page,
+  diagnostics: Diagnostics | null,
+  button: PresentationButton,
+  interaction: MeetUIInteraction,
+  deadline: number,
+): Promise<JoinClickOutcome> {
+  if (typeof button.index !== "number") {
+    diagnostics?.record("click_miss", {
+      selector: `${interaction.details.backend}:meet-join-button`,
+      error: "join_button_index_missing",
+    });
+    return await waitForJoinClickOutcome(page, Math.min(500, deadline - Date.now()));
+  }
+
+  try {
+    await interaction.click(page.locator("button, [role=button]").nth(button.index));
+    diagnostics?.record("click_attempt", {
+      selector: `${interaction.details.backend}:meet-join-button`,
+      ok: true,
+      fallback: false,
+    });
+  } catch (error) {
+    diagnostics?.record("click_miss", {
+      selector: `${interaction.details.backend}:meet-join-button`,
+      error: String(error?.message || error).slice(0, 180),
+    });
+  }
+  return await waitForJoinClickOutcome(page, Math.min(5000, deadline - Date.now()));
+}
+
+export async function clickMeetJoinButton(
+  page: Page,
+  diagnostics: Diagnostics | null = null,
+  timeoutMs = 45_000,
+  meetUIInteractionEnv: NodeJS.ProcessEnv = process.env,
+  meetUIInteraction?: MeetUIInteraction,
+) {
+  const interaction =
+    meetUIInteraction ?? createMeetUIInteraction(diagnostics, meetUIInteractionEnv);
+  const deadline = Date.now() + timeoutMs;
+  let lastCandidates: PresentationButton[] = [];
+  let clickedSelector = "";
+  while (Date.now() < deadline) {
+    await dismissMeetPrompts(page, diagnostics);
+    const result = await waitForMeetJoinButtonCandidate(
+      page,
+      Math.min(5000, deadline - Date.now()),
     );
     lastCandidates = result.candidates || [];
     if (result.ok) {
@@ -251,33 +979,65 @@ export async function clickMeetJoinButton(
       diagnostics?.record("click", {
         selector: result.selector,
         button: result.button,
+        interaction: interaction.details,
       });
-      if (result.button?.rect) {
-        await page.mouse
-          .click(
-            result.button.rect.x + Math.round(result.button.rect.width / 2),
-            result.button.rect.y + Math.round(result.button.rect.height / 2),
-            { delay: 30 },
-          )
-          .catch((error) => {
-            diagnostics?.record("click_miss", {
-              selector: "mouse:meet-join-button",
-              error: String(error?.message || error).slice(0, 180),
-            });
-          });
+      let outcome: JoinClickOutcome;
+      const humanizedClick = interaction.details.mode === "humanized";
+      if (humanizedClick) {
+        outcome = await clickMeetJoinButtonWithHumanizedInputAndObserve(
+          page,
+          diagnostics,
+          result.button,
+          interaction,
+          deadline,
+        );
+      } else {
+        outcome = await clickMeetJoinButtonWithPlaywrightAndObserve(
+          page,
+          diagnostics,
+          result.button,
+          deadline,
+        );
       }
-      await page.waitForTimeout(3000);
-      const pageState = await evaluateMeetPageState(page);
-      diagnostics?.record("join_after_click_state", { pageState });
-      if (pageState.waitingForAdmit) return result.selector;
-      if (pageState.inMeeting) return result.selector;
-      if (pageState.error === "meet_page_state_timeout") {
+      if (humanizedClick && !joinClickOutcomeResolved(outcome)) {
+        outcome = await clickMeetJoinButtonWithPlaywrightAndObserve(
+          page,
+          diagnostics,
+          result.button,
+          deadline,
+          true,
+        );
+      }
+      diagnostics?.record("join_after_click_state", { outcome, pageState: outcome.pageState });
+      if (outcome.state === "waiting_for_admit") return result.selector;
+      if (outcome.state === "admitted") return result.selector;
+      if (outcome.signal === "meet_spa_blocks_runtime_evaluation_after_join_click") {
         diagnostics?.record("join_state_probe_timeout_assume_clicked", {
           selector: result.selector,
           reason: "meet_spa_blocks_runtime_evaluation_after_join_click",
         });
         return result.selector;
       }
+      if (outcome.state === "sign_in_required") {
+        diagnostics?.record("join_terminal_state", {
+          reason: "google_sign_in_required",
+          pageState: outcome.pageState,
+        });
+        return "";
+      }
+      if (outcome.state === "cannot_join_meeting") {
+        diagnostics?.record("join_terminal_state", {
+          reason: "cannot_join_meeting",
+          pageState: outcome.pageState,
+        });
+        return "terminal:cannot_join_meeting";
+      }
+      continue;
+    }
+    if (clickedSelector) {
+      const pageState = await evaluateMeetPageState(page);
+      if (pageState.waitingForAdmit) return clickedSelector;
+      if (pageState.inMeeting && !pageState.preJoin) return clickedSelector;
       if (pageState.signIn) {
         diagnostics?.record("join_terminal_state", {
           reason: "google_sign_in_required",
@@ -285,19 +1045,12 @@ export async function clickMeetJoinButton(
         });
         return "";
       }
-      await page.waitForTimeout(1000);
-      continue;
-    }
-    if (clickedSelector) {
-      const pageState = await evaluateMeetPageState(page);
-      if (pageState.waitingForAdmit) return clickedSelector;
-      if (pageState.inMeeting) return clickedSelector;
-      if (pageState.signIn) {
+      if (pageState.cannotJoin) {
         diagnostics?.record("join_terminal_state", {
-          reason: "google_sign_in_required",
+          reason: "cannot_join_meeting",
           pageState,
         });
-        return "";
+        return "terminal:cannot_join_meeting";
       }
     }
     diagnostics?.record("join_wait", {
@@ -313,7 +1066,13 @@ export async function clickMeetJoinButton(
       cannotJoin: pageState?.cannotJoin === true,
       textHead: String(pageState?.textHead || "").slice(0, 240),
     });
-    await page.waitForTimeout(1000);
+    if (pageState?.cannotJoin === true) {
+      diagnostics?.record("join_terminal_state", {
+        reason: "cannot_join_meeting",
+        pageState,
+      });
+      return "terminal:cannot_join_meeting";
+    }
   }
   diagnostics?.record("join_wait_timeout", { candidates: lastCandidates.slice(0, 8) });
   return "";
@@ -1072,6 +1831,10 @@ export async function evaluateMeetPageState(page: Page): Promise<MeetPageState> 
           ),
         ),
       ];
+      const fixtureJoined = Boolean(
+        (window as unknown as { __MAB_MEET_FIXTURE?: { joined?: boolean } }).__MAB_MEET_FIXTURE
+          ?.joined,
+      );
       const preJoinSignals = [
         /Join now/i.test(text),
         /Ask to join/i.test(text),
@@ -1084,10 +1847,13 @@ export async function evaluateMeetPageState(page: Page): Promise<MeetPageState> 
         /Sign in/i.test(text) && /Next/i.test(text),
         /accounts\.google\.com/i.test(url),
       ];
-      const inMeeting = !waitingForAdmit && inMeetingSignals.some(Boolean);
+      const preJoin = !fixtureJoined && preJoinSignals.some(Boolean);
+      const inMeeting =
+        !waitingForAdmit && (fixtureJoined || (!preJoin && inMeetingSignals.some(Boolean)));
       const cannotJoin =
         !inMeeting &&
         !waitingForAdmit &&
+        !preJoin &&
         /You can't join this video call|No one can join a meeting unless invited or admitted by the host/i.test(
           text,
         );
@@ -1100,7 +1866,7 @@ export async function evaluateMeetPageState(page: Page): Promise<MeetPageState> 
         participants,
         activeSpeaker,
         waitingForAdmit,
-        preJoin: preJoinSignals.some(Boolean),
+        preJoin,
         signIn: signInSignals.some(Boolean),
         cannotJoin,
         textHead: text.slice(0, 1000),

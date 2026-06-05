@@ -41,6 +41,11 @@ export interface ScreenShareBridgeInput extends VideoStageInput {
   imageUrl?: string;
   imagePath?: string;
   framePath?: string;
+  sourceApplicationName?: string;
+  sourceBundleIdentifier?: string;
+  sourceWindowTitle?: string;
+  sourceWindowId?: number | string;
+  sourceProcessId?: number | string;
 }
 export interface AppShareInput extends ScreenShareBridgeInput {
   windowId?: number | string;
@@ -148,6 +153,7 @@ export interface GuestNameEvalResult {
   ok: boolean;
   reason?: string;
   textHead?: string;
+  currentUrl?: string;
   tag?: string;
   aria?: string;
   placeholder?: string;
@@ -258,6 +264,7 @@ export interface GoogleMeetJoinerOptions {
   allowNonGoogleMeet?: boolean;
   playwrightModulePath?: string;
   chromiumExecutablePath?: string;
+  browserChannel?: string;
 }
 
 export interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
@@ -279,6 +286,7 @@ export interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   meetAudioBackend?: string;
   browserUserDataDir?: string;
   meetProfileMode?: string;
+  browserChannel?: string;
   browserViewportWidth?: number | string;
   browserViewportHeight?: number | string;
   muteLocalPlayback?: boolean;
@@ -295,6 +303,7 @@ export interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   avatarCanvasHeight?: number | string;
   avatarCaptureFps?: number | string;
   realtimeBridgeMode?: string;
+  directTextTurnToolRouting?: boolean;
   realtimeAgentRuntime?: string;
   realtimeRuntimePlacement?: string;
   realtimeToolCallbackToken?: string;
@@ -303,6 +312,7 @@ export interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   realtimeTools?: unknown[];
   realtimeSession?: Record<string, unknown>;
   sendRealtimeSessionUpdate?: boolean;
+  dryRunLocalTools?: boolean;
   includeParticipantAudio?: boolean;
   forwardMeetAudioToRealtime?: boolean;
   meetAudioInputGain?: number | string;
@@ -326,6 +336,10 @@ export interface GoogleMeetJoinInput extends ScreenShareBridgeInput {
   localDialogAcceptanceUtterance?: string;
   collectFixtureState?: boolean;
   browserExtraArgs?: string;
+  meetUIInteractionMode?: string;
+  meetJoinLane?: string;
+  meetBrowserControlMode?: string;
+  retryPolicy?: string;
 }
 
 export function shouldMuteMeetLocalPlayback(input: GoogleMeetJoinInput): boolean {
@@ -957,8 +971,13 @@ export async function withTimeout<T, F>(
   }
 }
 
-export async function gotoMeetWithRetry(page: Page, meetUrl: string, diagnostics: Diagnostics) {
-  const maxAttempts = 2;
+export async function gotoMeetWithRetry(
+  page: Page,
+  meetUrl: string,
+  diagnostics: Diagnostics,
+  options: { maxAttempts?: number } = {},
+) {
+  const maxAttempts = Math.max(1, Math.trunc(Number(options.maxAttempts || 2)));
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     diagnostics.record("goto_attempt", { meetUrl, attempt, maxAttempts });
@@ -980,6 +999,21 @@ export async function gotoMeetWithRetry(page: Page, meetUrl: string, diagnostics
     }
   }
   throw lastError;
+}
+
+export function shouldRetryMeetNavigationAfterProductRedirect(
+  requestedUrl: string,
+  currentUrl: string,
+): boolean {
+  const requested = String(requestedUrl || "").toLowerCase();
+  const current = String(currentUrl || "").toLowerCase();
+  if (!requested.includes("meet.google.com/")) return false;
+  if (current.includes("meet.google.com/")) return false;
+  return (
+    current.includes("workspace.google.com/products/meet") ||
+    (current.includes("workspace.google.com/intl/") && current.includes("/products/meet")) ||
+    current.includes("google.com/meet")
+  );
 }
 
 export async function takeScreenshot(

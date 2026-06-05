@@ -1,10 +1,18 @@
 import { writeFile } from "node:fs/promises";
+import { chromium } from "playwright";
 import { argValue as resolveArgValue, resolveRealMeetUrl } from "./real-meet-url-resolver.mjs";
-import { compactJsonForDiagnostics } from "./real-meet-synthetic-speaker-helpers.mjs";
+import {
+  compactJsonForDiagnostics,
+  realMeetUIInteractionJoinFields,
+} from "./real-meet-synthetic-speaker-helpers.mjs";
 import {
   appControlActionSemanticsPass,
   appControlStatusHasCompactBlocker,
 } from "./real-meet-app-control-semantics.mjs";
+
+const LIVE_MODEL_FIRST_LATENCY_SLO_MS = 2500;
+const DEFAULT_APP_CONTROL_TARGET_LABEL = "Chromium";
+const DEFAULT_APP_CONTROL_TARGET_TITLE = "Oneesama KWWK App Control Target";
 
 export {
   appControlActionSemanticsPass,
@@ -20,6 +28,30 @@ function envMs(name, fallback) {
 
 function envFlag(name) {
   return /^(1|true|yes|on)$/i.test(String(process.env[name] || "").trim());
+}
+
+function envFlagFrom(env, name) {
+  return /^(1|true|yes|on)$/i.test(String(env?.[name] || "").trim());
+}
+
+export function realMeetAppControlManagedTargetConfig(env = process.env) {
+  const rawEnabled = String(env.MAB_REAL_MEET_APP_CONTROL_MANAGED_TARGET || "").trim();
+  const explicitApplication = String(env.MAB_REAL_MEET_APP_CONTROL_APPLICATION || "").trim();
+  const enabled = rawEnabled
+    ? envFlagFrom(env, "MAB_REAL_MEET_APP_CONTROL_MANAGED_TARGET")
+    : !explicitApplication;
+  const targetLabel = String(
+    env.MAB_REAL_MEET_APP_CONTROL_TARGET_LABEL || DEFAULT_APP_CONTROL_TARGET_LABEL,
+  ).trim();
+  const windowTitle = String(
+    env.MAB_REAL_MEET_APP_CONTROL_WINDOW_TITLE || DEFAULT_APP_CONTROL_TARGET_TITLE,
+  ).trim();
+  return {
+    enabled,
+    applicationName: explicitApplication || "Google Chrome for Testing",
+    windowTitle: windowTitle || DEFAULT_APP_CONTROL_TARGET_TITLE,
+    targetLabel: targetLabel || DEFAULT_APP_CONTROL_TARGET_LABEL,
+  };
 }
 
 function requireRealMeetUrl() {
@@ -251,10 +283,105 @@ function compactHudEvidence(value = {}) {
   };
 }
 
-function compactAppControlEvidence(value = {}) {
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    const number = finiteNumber(value);
+    if (number !== null) return number;
+  }
+  return null;
+}
+
+function compactAppControlTimingEvidence(value = {}, result = {}) {
+  const backendResult =
+    value.backendResult && typeof value.backendResult === "object"
+      ? value.backendResult
+      : result.backendResult && typeof result.backendResult === "object"
+        ? result.backendResult
+        : {};
+  const metadata =
+    backendResult.metadata && typeof backendResult.metadata === "object"
+      ? backendResult.metadata
+      : value.metadata && typeof value.metadata === "object"
+        ? value.metadata
+        : result.metadata && typeof result.metadata === "object"
+          ? result.metadata
+          : {};
+  const timings =
+    metadata.timings && typeof metadata.timings === "object"
+      ? metadata.timings
+      : backendResult.timings && typeof backendResult.timings === "object"
+        ? backendResult.timings
+        : {};
+  const planner =
+    metadata.planner && typeof metadata.planner === "object"
+      ? metadata.planner
+      : backendResult.planner && typeof backendResult.planner === "object"
+        ? backendResult.planner
+        : value.planner && typeof value.planner === "object"
+          ? value.planner
+          : {};
+  const observeMs = firstFiniteNumber(timings.observeMs, timings.observe_ms);
+  const planMs = firstFiniteNumber(timings.planMs, timings.plan_ms, planner.latencyMs);
+  const modelPlannerMs = firstFiniteNumber(
+    timings.modelPlannerMs,
+    timings.model_planner_ms,
+    planner.modelLatencyMs,
+  );
+  const executeMs = firstFiniteNumber(timings.executeMs, timings.execute_ms);
+  const cursorMs = firstFiniteNumber(timings.cursorMs, timings.cursor_ms);
+  const verifyMs = firstFiniteNumber(timings.verifyMs, timings.verify_ms);
+  const directToolReceiveToVerifiedActionMs = firstFiniteNumber(
+    timings.toolReceiveToVerifiedActionMs,
+    timings.tool_receive_to_verified_action_ms,
+    timings.totalMs,
+    timings.total_ms,
+  );
+  const summedToolReceiveToVerifiedActionMs =
+    directToolReceiveToVerifiedActionMs ??
+    [observeMs, planMs, executeMs, cursorMs, verifyMs].reduce(
+      (sum, segmentMs) => sum + (segmentMs ?? 0),
+      0,
+    );
+  const toolReceiveToVerifiedActionMs =
+    summedToolReceiveToVerifiedActionMs > 0 ? summedToolReceiveToVerifiedActionMs : null;
+  const timing = {
+    available: toolReceiveToVerifiedActionMs !== null || modelPlannerMs !== null,
+    durationMs: firstFiniteNumber(
+      value.duration_ms,
+      value.durationMs,
+      result.duration_ms,
+      result.durationMs,
+      backendResult.durationMs,
+      backendResult.duration_ms,
+    ),
+    observeMs,
+    planMs,
+    modelPlannerMs,
+    executeMs,
+    cursorMs,
+    verifyMs,
+    toolReceiveToVerifiedActionMs,
+    modelUsed: planner.modelUsed === true,
+    provider: String(planner.provider || metadata.provider || backendResult.provider || ""),
+    modelName: String(planner.modelName || planner.model || metadata.modelName || ""),
+  };
+  timing.withinWarmSlo =
+    timing.toolReceiveToVerifiedActionMs !== null &&
+    timing.toolReceiveToVerifiedActionMs <= LIVE_MODEL_FIRST_LATENCY_SLO_MS;
+  return timing;
+}
+
+export function compactAppControlEvidence(value = {}) {
   const result = value.result && typeof value.result === "object" ? value.result : {};
   const screenShare =
     value.screenShare && typeof value.screenShare === "object" ? value.screenShare : {};
+  const timing = compactAppControlTimingEvidence(value, result);
   return {
     ok: value.ok === true,
     status: String(value.status || ""),
@@ -276,7 +403,57 @@ function compactAppControlEvidence(value = {}) {
       processId: Number(screenShare.processId || screenShare.pid || 0),
     },
     cursor: compactCursorEvidence(value),
+    timing,
     rawChars: JSON.stringify(value).length,
+  };
+}
+
+function percentile(values, p) {
+  const sorted = values.filter((value) => Number.isFinite(value)).toSorted((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[index];
+}
+
+export function buildRealMeetAppControlLiveLatencySummary(suite = []) {
+  const samples = suite
+    .map((testCase) => ({
+      id: testCase.id || "",
+      kind: testCase.kind || "",
+      acceptanceSatisfied: testCase.acceptanceSatisfied === true,
+      timing: testCase.final?.appControl?.timing || testCase.appControl?.timing || {},
+    }))
+    .map((sample) => {
+      sample.toolReceiveToVerifiedActionMs = finiteNumber(
+        sample.timing.toolReceiveToVerifiedActionMs,
+      );
+      sample.modelPlannerMs = finiteNumber(sample.timing.modelPlannerMs);
+      sample.modelUsed = sample.timing.modelUsed === true;
+      sample.withinWarmSlo = sample.timing.withinWarmSlo === true;
+      sample.provider = String(sample.timing.provider || "");
+      sample.modelName = String(sample.timing.modelName || "");
+      return sample;
+    });
+  const executableSamples = samples.filter((sample) => sample.acceptanceSatisfied);
+  const measuredSamples = executableSamples.filter(
+    (sample) => sample.toolReceiveToVerifiedActionMs !== null,
+  );
+  const warmP95Ms = percentile(
+    measuredSamples.map((sample) => sample.toolReceiveToVerifiedActionMs),
+    95,
+  );
+  return {
+    schema: "oneesama.real-meet-app-control-live-latency.v1",
+    ok:
+      executableSamples.length > 0 &&
+      measuredSamples.length === executableSamples.length &&
+      measuredSamples.every((sample) => sample.withinWarmSlo),
+    warmSloMs: LIVE_MODEL_FIRST_LATENCY_SLO_MS,
+    warmP95Ms,
+    sampleCount: samples.length,
+    measuredSampleCount: measuredSamples.length,
+    missingTimingCount: executableSamples.length - measuredSamples.length,
+    samples,
   };
 }
 
@@ -352,10 +529,7 @@ export function compactRealMeetAppControlJoinStatus(status = {}) {
     ...(Array.isArray(bridge?.workerTools?.calls) ? bridge.workerTools.calls : []),
     ...(Array.isArray(bridge?.avatarTools?.calls) ? bridge.avatarTools.calls : []),
   ];
-  const appControlCall =
-    latestToolCall(calls, "kwwk_computer_use") ||
-    latestToolCall(calls, "control_shared_app_window") ||
-    {};
+  const appControlCall = latestToolCall(calls, "kwwk_computer_use") || {};
   const latestFunctionalTurn =
     bridge?.feedback?.checks?.latestFunctionalTurn ||
     bridge?.contextHealth?.latestFunctionalTurn ||
@@ -475,11 +649,88 @@ export function realMeetAppControlSuiteCasePasses(value = {}) {
   return base;
 }
 
-function defaultRealMeetAppControlSuiteCases(applicationName) {
+async function startManagedRealMeetAppControlTarget(config) {
+  if (!config.enabled) return null;
+  let browser = null;
+  const windowTitle = `${config.windowTitle} ${Date.now()}`;
+  try {
+    browser = await chromium.launch({
+      headless: false,
+      args: [
+        "--new-window",
+        "--window-size=980,680",
+        "--window-position=48,72",
+        "--no-first-run",
+        "--no-default-browser-check",
+      ],
+    });
+    const context = await browser.newContext({ viewport: { width: 980, height: 680 } });
+    const page = await context.newPage();
+    const targetLabel = config.targetLabel || DEFAULT_APP_CONTROL_TARGET_LABEL;
+    await page.setContent(
+      `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(windowTitle)}</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f8fb; color: #172033; }
+      main { min-height: 100vh; display: grid; place-items: center; }
+      section { width: min(720px, calc(100vw - 96px)); border: 1px solid #d4d9e5; border-radius: 8px; background: #ffffff; padding: 40px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12); }
+      h1 { margin: 0 0 18px; font-size: 32px; font-weight: 700; letter-spacing: 0; }
+      button { appearance: none; border: 2px solid #1d4ed8; border-radius: 6px; background: #2563eb; color: white; font: inherit; font-size: 26px; font-weight: 700; padding: 18px 28px; min-width: 220px; cursor: pointer; }
+      button:focus { outline: 4px solid #93c5fd; outline-offset: 4px; }
+      p { margin: 20px 0 0; font-size: 16px; color: #475569; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <h1>${escapeHtml(windowTitle)}</h1>
+        <button id="chromium-target" type="button">${escapeHtml(targetLabel)}</button>
+        <p>Stable app-control acceptance target.</p>
+      </section>
+    </main>
+    <script>
+      document.getElementById("chromium-target").addEventListener("click", () => {
+        document.body.dataset.clicked = "true";
+      });
+    </script>
+  </body>
+</html>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    await page.bringToFront();
+    await page.waitForTimeout(500);
+    return {
+      ...config,
+      windowTitle,
+      async close() {
+        await browser?.close().catch(() => {});
+      },
+    };
+  } catch (error) {
+    await browser?.close().catch(() => {});
+    throw error;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function defaultRealMeetAppControlSuiteCases(
+  applicationName,
+  targetLabel = DEFAULT_APP_CONTROL_TARGET_LABEL,
+) {
   const keyboardInstruction =
     process.env.MAB_REAL_MEET_APP_CONTROL_KEYBOARD_INSTRUCTION || "Press Escape";
   const pointerInstruction =
-    process.env.MAB_REAL_MEET_APP_CONTROL_POINTER_INSTRUCTION || "Click Chromium";
+    process.env.MAB_REAL_MEET_APP_CONTROL_POINTER_INSTRUCTION || `Click ${targetLabel}`;
   return [
     {
       id: "keyboard-escape",
@@ -505,6 +756,8 @@ async function startRealMeetAppControlSession({
   sessionId,
   meetUrl,
   applicationName,
+  windowTitle = "",
+  processId = 0,
 }) {
   await postJson(`${meetingAgentUrl}/join/stop`, {
     reason: "real_meet_app_control_smoke_preflight",
@@ -533,14 +786,64 @@ async function startRealMeetAppControlSession({
     include_participant_audio: false,
     forwardMeetAudioToRealtime: true,
     forward_meet_audio_to_realtime: true,
+    ...realMeetUIInteractionJoinFields("macos_app_control_humanized"),
     captureCaptions: false,
     capture_captions: false,
   });
   const share = await postJson(`${meetingAgentUrl}/screen-share/app`, {
     session_id: sessionId,
-    applicationName,
+    windowTitle,
+    processId,
+    ...(!windowTitle && !processId ? { applicationName } : {}),
   });
   return { join, share };
+}
+
+function appControlJobIdFromResult(value = {}) {
+  return String(
+    value.jobId || value.job_id || value.appControlJobId || value.app_control_job_id || "",
+  );
+}
+
+async function prewarmRealMeetAppControlTarget({
+  meetingAgentUrl,
+  sessionId,
+  applicationName,
+  windowTitle = "",
+  processId = 0,
+}) {
+  const attempts = envMs("MAB_REAL_MEET_APP_CONTROL_TARGET_PREWARM_ATTEMPTS", 3);
+  let last = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = await postJson(`${meetingAgentUrl}/tools/kwwk_computer_use`, {
+      session_id: sessionId,
+      applicationName,
+      windowTitle,
+      processId,
+      wait: true,
+      instruction: "Return the current app state for KWWK Computer Use warmup.",
+      context: {
+        source: "real_meet_app_control_target_prewarm",
+        prewarm: true,
+        cursor: "do_not_start_foreground_cursor_session",
+      },
+    });
+    const compact = compactAppControlEvidence(result);
+    last = {
+      ok: compact.ok === true && appControlStatusIsSuccess(compact.status),
+      attempt,
+      attempts,
+      jobId: appControlJobIdFromResult(result) || compact.jobId,
+      status: compact.status,
+      blocker: compact.blocker,
+      timing: compact.timing,
+      result: compact,
+    };
+    if (last.ok) return last;
+    if (!/timeout|unavailable/i.test(String(compact.blocker || compact.error || ""))) return last;
+    await sleep(800);
+  }
+  return last || { ok: false, attempts, error: "target_prewarm_not_attempted" };
 }
 
 async function runRealtimeAppControlTurn({
@@ -661,7 +964,8 @@ export async function runRealMeetAppControlSmokeMain(options = {}) {
   );
   const timeoutMs = envMs("MAB_REAL_MEET_APP_CONTROL_WAIT_MS", 180_000);
   const sessionId = process.env.MAB_REAL_MEET_SESSION_ID || `real_meet_app_control_${Date.now()}`;
-  const applicationName = process.env.MAB_REAL_MEET_APP_CONTROL_APPLICATION || "Chrome";
+  const targetConfig = realMeetAppControlManagedTargetConfig();
+  const applicationName = targetConfig.applicationName;
   const instruction =
     process.env.MAB_REAL_MEET_APP_CONTROL_INSTRUCTION ||
     "Observe the currently shared browser window and report the visible page title or blocker. Do not type, click, navigate, or change the page.";
@@ -669,13 +973,32 @@ export async function runRealMeetAppControlSmokeMain(options = {}) {
     process.env.MAB_REAL_MEET_APP_CONTROL_TEXT ||
     `请通过 Realtime 工具操作当前共享的 ${applicationName} 窗口：${instruction}`;
   let jobId = "";
+  let managedTarget = null;
+  let targetPrewarm = null;
   try {
+    managedTarget = await startManagedRealMeetAppControlTarget(targetConfig);
     const { join, share } = await startRealMeetAppControlSession({
       meetingAgentUrl,
       sessionId,
       meetUrl,
       applicationName,
+      windowTitle:
+        managedTarget?.windowTitle || process.env.MAB_REAL_MEET_APP_CONTROL_WINDOW_TITLE || "",
+      processId: managedTarget?.processId || 0,
     });
+    targetPrewarm = await prewarmRealMeetAppControlTarget({
+      meetingAgentUrl,
+      sessionId,
+      applicationName,
+      windowTitle:
+        managedTarget?.windowTitle || process.env.MAB_REAL_MEET_APP_CONTROL_WINDOW_TITLE || "",
+      processId: managedTarget?.processId || 0,
+    });
+    if (!targetPrewarm.ok) {
+      throw Object.assign(new Error("real Meet app-control target prewarm failed"), {
+        last: { targetPrewarm },
+      });
+    }
     const turn = await runRealtimeAppControlTurn({
       meetingAgentUrl,
       sessionId,
@@ -696,6 +1019,16 @@ export async function runRealMeetAppControlSmokeMain(options = {}) {
       applicationName,
       instruction,
       appControlText,
+      managedTarget: managedTarget
+        ? {
+            enabled: true,
+            applicationName: managedTarget.applicationName,
+            windowTitle: managedTarget.windowTitle,
+            processId: managedTarget.processId,
+            targetLabel: managedTarget.targetLabel,
+          }
+        : { enabled: false },
+      targetPrewarm,
       join,
       share: compactAppControlEvidence(share),
       textTurn: turn.textTurn,
@@ -724,6 +1057,7 @@ export async function runRealMeetAppControlSmokeMain(options = {}) {
     await postJson(`${meetingAgentUrl}/join/stop`, {
       reason: "real_meet_app_control_smoke_done",
     }).catch(() => {});
+    await managedTarget?.close?.();
   }
 }
 
@@ -746,16 +1080,37 @@ export async function runRealMeetAppControlSuiteMain(options = {}) {
   const timeoutMs = envMs("MAB_REAL_MEET_APP_CONTROL_WAIT_MS", 180_000);
   const sessionId =
     process.env.MAB_REAL_MEET_SESSION_ID || `real_meet_app_control_suite_${Date.now()}`;
-  const applicationName = process.env.MAB_REAL_MEET_APP_CONTROL_APPLICATION || "Chrome";
-  const cases = defaultRealMeetAppControlSuiteCases(applicationName);
+  const targetConfig = realMeetAppControlManagedTargetConfig();
+  const applicationName = targetConfig.applicationName;
+  const cases = defaultRealMeetAppControlSuiteCases(applicationName, targetConfig.targetLabel);
   const previousJobIds = new Set();
+  let managedTarget = null;
+  let targetPrewarm = null;
   try {
+    managedTarget = await startManagedRealMeetAppControlTarget(targetConfig);
     const { join, share } = await startRealMeetAppControlSession({
       meetingAgentUrl,
       sessionId,
       meetUrl,
       applicationName,
+      windowTitle:
+        managedTarget?.windowTitle || process.env.MAB_REAL_MEET_APP_CONTROL_WINDOW_TITLE || "",
+      processId: managedTarget?.processId || 0,
     });
+    targetPrewarm = await prewarmRealMeetAppControlTarget({
+      meetingAgentUrl,
+      sessionId,
+      applicationName,
+      windowTitle:
+        managedTarget?.windowTitle || process.env.MAB_REAL_MEET_APP_CONTROL_WINDOW_TITLE || "",
+      processId: managedTarget?.processId || 0,
+    });
+    if (targetPrewarm.jobId) previousJobIds.add(targetPrewarm.jobId);
+    if (!targetPrewarm.ok) {
+      throw Object.assign(new Error("real Meet app-control target prewarm failed"), {
+        last: { targetPrewarm },
+      });
+    }
     const suite = [];
     for (const testCase of cases) {
       const turn = await runRealtimeAppControlTurn({
@@ -786,17 +1141,31 @@ export async function runRealMeetAppControlSuiteMain(options = {}) {
       suite.push(caseResult);
       if (!caseResult.ok) break;
     }
-    const ok =
+    const actionAcceptanceSatisfied =
       suite.length === cases.length && suite.every((testCase) => testCase.acceptanceSatisfied);
+    const liveModelFirstLatency = buildRealMeetAppControlLiveLatencySummary(suite);
+    const ok = actionAcceptanceSatisfied && liveModelFirstLatency.ok;
     const result = {
       ok,
       acceptanceSatisfied: ok,
+      actionAcceptanceSatisfied,
       meetUrl,
       meetUrlSource: realMeetUrl.source || "",
       sessionId,
       applicationName,
+      managedTarget: managedTarget
+        ? {
+            enabled: true,
+            applicationName: managedTarget.applicationName,
+            windowTitle: managedTarget.windowTitle,
+            processId: managedTarget.processId,
+            targetLabel: managedTarget.targetLabel,
+          }
+        : { enabled: false },
+      targetPrewarm,
       join,
       share: compactAppControlEvidence(share),
+      liveModelFirstLatency,
       suite: suite.map((testCase) => ({
         id: testCase.id,
         kind: testCase.kind,
@@ -830,5 +1199,6 @@ export async function runRealMeetAppControlSuiteMain(options = {}) {
     await postJson(`${meetingAgentUrl}/join/stop`, {
       reason: "real_meet_app_control_suite_done",
     }).catch(() => {});
+    await managedTarget?.close?.();
   }
 }

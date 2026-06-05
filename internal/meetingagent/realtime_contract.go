@@ -56,14 +56,18 @@ func buildLegacyRealtimeSession(options RealtimeSessionOptions, model string, in
 }
 
 func buildRealtime2Session(options RealtimeSessionOptions, model string, instructions string, tools []map[string]any, toolChoice string, voice string, reasoningEffort string, turnDetection any) map[string]any {
-	audio := map[string]any{
-		"input": map[string]any{
-			"format": map[string]any{
-				"type": firstNonEmpty(options.InputAudioFormatType, "audio/pcm"),
-				"rate": numberOrDefault(options.InputAudioRate, 24000),
-			},
-			"turn_detection": turnDetectionObject(turnDetection),
+	input := map[string]any{
+		"format": map[string]any{
+			"type": firstNonEmpty(options.InputAudioFormatType, "audio/pcm"),
+			"rate": numberOrDefault(options.InputAudioRate, 24000),
 		},
+		"turn_detection": turnDetectionObject(turnDetection),
+	}
+	if transcription, ok := realtimeInputTranscriptionObject(firstValue(options.InputAudioTranscription, options.InputAudioTranscriptionSnake, "gpt-4o-mini-transcribe")); ok {
+		input["transcription"] = transcription
+	}
+	audio := map[string]any{
+		"input": input,
 		"output": map[string]any{
 			"format": map[string]any{
 				"type": firstNonEmpty(options.OutputAudioFormatType, "audio/pcm"),
@@ -94,6 +98,30 @@ func buildRealtime2Session(options RealtimeSessionOptions, model string, instruc
 		session["reasoning"] = map[string]any{"effort": reasoningEffort}
 	}
 	return session
+}
+
+func realtimeInputTranscriptionObject(value any) (any, bool) {
+	if value == nil {
+		return nil, false
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return cloneMap(typed), true
+	}
+	normalized := strings.TrimSpace(stringFromAny(value))
+	if normalized == "" {
+		return nil, false
+	}
+	switch strings.ToLower(normalized) {
+	case "none", "off", "disabled", "false":
+		return nil, false
+	}
+	if strings.HasPrefix(normalized, "{") {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(normalized), &parsed); err == nil && parsed != nil {
+			return parsed, true
+		}
+	}
+	return map[string]any{"model": normalized}, true
 }
 
 func realtimeTruncationObject(value any) any {
@@ -127,7 +155,7 @@ func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.Ope
 
 	lines := []string{
 		"You are " + botName + ", a low-latency AI meeting avatar.",
-		"Speak concise Chinese by default.",
+		"Always answer in concise English, regardless of the user's language.",
 		"Persona: lively, concise, reliable meeting copilot with a bright on-camera presence. Be warm and playful, but keep answers short and useful.",
 		"Product behavior: keep implementation details invisible. Do not mention internal function names, model/runtime names, background job names, or service routing unless the user explicitly asks for debugging.",
 		"Do not say internal control-plane status aloud, including no-action decisions, backend results, routing state, tool names, background task state, or debug logs.",
@@ -145,7 +173,7 @@ func buildRealtimeInstructions(options RealtimeSessionOptions, cfg appconfig.Ope
 		"Use real meeting/workspace data when available. Never invent names, tasks, calendar facts, documents, links, or code state.",
 		"For identity questions, resolve the current speaker identity first. Do not answer from stale defaults.",
 		"For personal task questions, resolve the current user profile first and use its workspace identifiers.",
-		"For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
+		"For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise English.",
 		"Screen-share routing: if the user names a concrete existing app/window (for example Pencil, VS Code, Chrome, Notion, Terminal, Activity Monitor) and asks to show/share/present/演示 it, share that existing app/window. If the user only gives a category like editor/browser/window/app/design tool, list shareable windows first instead of guessing. Do not create a new workspace and do not invent a URL for the app name.",
 		"Screen-share action mandate: when the newest user request asks to share/show/present a screen, browser, app, or window, your first action in that turn must be list_shareable_windows or share_existing_app_window. Do not answer that a window list is processing, unavailable, or not ready before a tool result exists. Do not say you will try to share Chrome/browser/window unless you actually call the share/list tool in the same turn.",
 		"Fake-execution ban: if the newest user request maps to any functional action, do not speak an acknowledgement, progress sentence, future-result promise, or “稍等/我去找/处理中/结果出来告诉你” before emitting the corresponding tool call in that same turn. If you cannot call the required tool, say one short blocker sentence instead of pretending to work.",

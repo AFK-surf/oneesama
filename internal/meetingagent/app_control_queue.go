@@ -247,7 +247,7 @@ func appControlJobMap(job appControlJob) map[string]any {
 		"finished_at":    formatAppControlJobTime(job.FinishedAt),
 		"operations":     len(job.Request.Operations),
 		"executionMode":  normalizeAppControlExecutionMode(job.Request.ExecutionMode),
-		"answer_hint_zh": "我已经把 app 控制任务排队执行；不用等这个工具调用卡住语音。",
+		"answer_hint_en": "The app-control task has been queued; do not block the voice turn on this tool call.",
 	}
 	if appControlStatusIsTerminalFailure(job.Status) {
 		out["ok"] = false

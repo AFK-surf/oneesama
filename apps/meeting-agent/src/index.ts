@@ -111,6 +111,11 @@ function validateHostRealtimeEvent(event: Record<string, unknown>) {
   const type = String(event.type || "").trim();
   if (!type) return { ok: false, error: "realtime_event_type_required" };
   if (type === "response.cancel" || type === "input_audio_buffer.clear") return { ok: true };
+  if (type === "conversation.item.input_audio_transcription.completed") {
+    return String(event.transcript || "").trim()
+      ? { ok: true }
+      : { ok: false, error: "realtime_transcript_required" };
+  }
   return { ok: false, error: "realtime_event_type_not_allowed" };
 }
 
@@ -585,9 +590,9 @@ const service = createJsonServer({
       const toolName = decodeURIComponent(url.pathname.replace(/^\/tools\/?/, ""));
       const rejected = realtimeToolRouteRejected(toolName, meetingAgentRealtimeToolsForRequest());
       if (rejected) return rejected;
-      if (toolName === "kwwk_computer_use" || toolName === "control_shared_app_window") {
+      if (toolName === "kwwk_computer_use") {
         const b = { ...(body as MeetingAgentInput) };
-        if (toolName === "kwwk_computer_use") b.executionMode = "direct";
+        b.executionMode = "direct";
         const status = await joiner.status().catch(() => null);
         const result = await handleTSAppControlTool(b, status);
         return {
@@ -670,6 +675,7 @@ const service = createJsonServer({
             b.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
           ),
           realtimeSdpUrl: b.realtimeSdpUrl as string | undefined,
+          dryRunLocalTools: Boolean(b.dryRunLocalTools || b.dry_run_local_tools),
           installLocalDialogBridge: Boolean(b.installLocalDialogBridge),
           localDialogTurnUrl: b.localDialogTurnUrl as string | undefined,
           localDialogTtsMode: b.localDialogTtsMode as string | undefined,
@@ -691,6 +697,8 @@ const service = createJsonServer({
           captionLanguage: b.captionLanguage as string | undefined,
           artifactsDir: b.artifactsDir as string | undefined,
           meetAudioBackend: b.meetAudioBackend as string | undefined,
+          browserUserDataDir: String(b.browserUserDataDir || b.browser_user_data_dir || ""),
+          meetProfileMode: String(b.meetProfileMode || b.meet_profile_mode || ""),
         });
       }
       sessions.update(session.id, {
@@ -717,6 +725,7 @@ const service = createJsonServer({
         workerResultMinCreatedAt?: string;
         workerDelegateUrl?: string;
         workerStatusUrl?: string;
+        dryRunLocalTools?: boolean;
         screenShareMode?: string;
         screenShareTitle?: string;
         screenShareSubtitle?: string;
@@ -768,6 +777,7 @@ const service = createJsonServer({
         forwardMeetAudioToRealtime: b.forwardMeetAudioToRealtime !== false,
         realtimeTokenUrl: b.realtimeTokenUrl || `${config.meetingAgentUrl}/realtime/client-secret`,
         realtimeSdpUrl: b.realtimeSdpUrl,
+        dryRunLocalTools: Boolean(b.dryRunLocalTools || b.dry_run_local_tools),
         installLocalDialogBridge: Boolean(b.installLocalDialogBridge),
         localDialogTurnUrl: b.localDialogTurnUrl,
         localDialogTtsMode: b.localDialogTtsMode,
@@ -789,6 +799,10 @@ const service = createJsonServer({
         captionLanguage: b.captionLanguage,
         artifactsDir: b.artifactsDir,
         meetAudioBackend: b.meetAudioBackend,
+        browserUserDataDir: String(b.browserUserDataDir || b.browser_user_data_dir || ""),
+        meetProfileMode: String(b.meetProfileMode || b.meet_profile_mode || ""),
+        meetUIInteractionMode: String(b.meetUIInteractionMode || b.meet_ui_interaction_mode || ""),
+        meetJoinLane: String(b.meetJoinLane || b.meet_join_lane || ""),
       });
       return { ok: true, result };
     }),

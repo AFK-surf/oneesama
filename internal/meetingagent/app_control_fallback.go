@@ -3,6 +3,7 @@ package meetingagent
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 type FallbackAppControlBackend struct {
@@ -56,6 +57,27 @@ func (b *FallbackAppControlBackend) ControlSharedApp(ctx context.Context, req Ap
 		}
 	}
 	return fallbackResult, nil
+}
+
+func (b *FallbackAppControlBackend) PrewarmAppControl(ctx context.Context, req AppControlPrewarmRequest) AppControlPrewarmResult {
+	if b != nil {
+		if prewarmer, ok := b.primary.(AppControlPrewarmBackend); ok {
+			return prewarmer.PrewarmAppControl(ctx, req)
+		}
+		if prewarmer, ok := b.fallback.(AppControlPrewarmBackend); ok {
+			return prewarmer.PrewarmAppControl(ctx, req)
+		}
+	}
+	now := time.Now().UTC()
+	return AppControlPrewarmResult{
+		OK:         false,
+		Provider:   firstNonEmpty(b.Name(), "app_control"),
+		Status:     appControlStatusFailed,
+		Error:      "app_control_prewarm_unavailable",
+		Blocker:    "app_control_prewarm_unavailable",
+		StartedAt:  now,
+		FinishedAt: now,
+	}
 }
 
 func (b *FallbackAppControlBackend) Shutdown(ctx context.Context) error {

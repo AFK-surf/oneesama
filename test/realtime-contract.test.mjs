@@ -49,6 +49,29 @@ test("Realtime contract defaults to steady semantic turn detection", () => {
   });
 });
 
+test("Realtime contract enables input audio transcription by default", () => {
+  const session = buildRealtimeSessionConfig();
+
+  assert.deepEqual(session.audio.input.transcription, {
+    model: "gpt-4o-mini-transcribe",
+  });
+});
+
+test("Realtime contract allows input audio transcription override and disable", () => {
+  const overridden = buildRealtimeSessionConfig({
+    inputAudioTranscription: { model: "custom-transcribe", language: "zh" },
+  });
+  const disabled = buildRealtimeSessionConfig({
+    inputAudioTranscription: "disabled",
+  });
+
+  assert.deepEqual(overridden.audio.input.transcription, {
+    model: "custom-transcribe",
+    language: "zh",
+  });
+  assert.equal(Object.hasOwn(disabled.audio.input, "transcription"), false);
+});
+
 test("Realtime contract applies product truncation defaults", () => {
   const session = buildRealtimeSessionConfig();
 
@@ -134,13 +157,18 @@ test("Realtime contract keeps short voice checks and self-introductions on topic
   assert.match(session.instructions, /Do not answer as the user/);
   assert.match(session.instructions, /room echo/);
   assert.match(session.instructions, /Do not continue your own previous answer/);
+  assert.match(
+    session.instructions,
+    /Always answer in concise English, regardless of the user's language/,
+  );
   assert.match(session.instructions, /Chinese share intent has priority over arithmetic/);
   assert.match(session.instructions, /“共享一下”/);
   assert.match(session.instructions, /“Pencil 这个 app”/);
   assert.match(session.instructions, /Screen-share action mandate:/);
   assert.match(session.instructions, /Fake-execution ban:/);
   assert.match(session.instructions, /before emitting the corresponding tool call/);
-  assert.match(session.instructions, /结果出来告诉你/);
+  assert.doesNotMatch(session.instructions, /Speak concise Chinese by default/);
+  assert.doesNotMatch(session.instructions, /summarize the result in concise Chinese/);
   assert.match(
     session.instructions,
     /first action in that turn must be list_shareable_windows or share_existing_app_window/,
@@ -175,7 +203,7 @@ test("Realtime contract exposes application share tools", () => {
   assert.ok(list);
   assert.ok(present);
   assert.ok(kwwk);
-  assert.ok(control);
+  assert.equal(control, undefined);
   assert.deepEqual(present.parameters.properties.applicationName.type, ["string", "null"]);
   assert.match(present.description, /共享一下/);
   assert.match(present.description, /Pencil\/喷手\/铅笔/);
@@ -189,29 +217,21 @@ test("Realtime contract exposes application share tools", () => {
   assert.match(kwwk.description, /do not invent click coordinates/);
   assert.match(kwwk.description, /operation arrays/);
   assert.match(kwwk.description, /not the human's personal computer/);
-  assert.deepEqual(kwwk.parameters.properties.job_id.type, ["string", "null"]);
   assert.deepEqual(kwwk.parameters.properties.instruction.type, ["string", "null"]);
+  assert.deepEqual(Object.keys(kwwk.parameters.properties).sort(), [
+    "applicationName",
+    "bundleIdentifier",
+    "instruction",
+    "processId",
+    "session_id",
+    "windowId",
+    "windowTitle",
+  ]);
+  assert.equal(kwwk.parameters.properties.job_id, undefined);
   assert.equal(kwwk.parameters.properties.operations, undefined);
   assert.equal(kwwk.parameters.properties.executionMode, undefined);
   assert.equal(kwwk.parameters.properties.wait, undefined);
   assert.equal(kwwk.parameters.properties.timeoutMs, undefined);
-  assert.equal(control.strict, undefined);
-  assert.equal(control.parameters.additionalProperties, false);
-  assert.ok(control.parameters.required.includes("instruction"));
-  assert.match(control.description, /Compatibility app-control entrypoint/);
-  assert.match(control.description, /Prefer kwwk_computer_use/);
-  assert.match(control.description, /Codex Computer Use/);
-  assert.match(control.description, /bot host/);
-  assert.match(control.description, /not the human's personal computer/);
-  assert.match(control.description, /natural language instruction/);
-  assert.match(control.description, /do not invent click coordinates/);
-  assert.deepEqual(control.parameters.properties.job_id.type, ["string", "null"]);
-  assert.deepEqual(control.parameters.properties.instruction.type, ["string", "null"]);
-  assert.deepEqual(control.parameters.properties.executionMode.enum, ["direct", "delegate", null]);
-  assert.equal(control.parameters.properties.executionMode.default, "direct");
-  assert.equal(control.parameters.properties.operations, undefined);
-  assert.equal(control.parameters.properties.wait, undefined);
-  assert.equal(control.parameters.properties.timeoutMs, undefined);
 });
 
 test("Realtime session config defaults to the live-safe tool surface", () => {
@@ -296,121 +316,148 @@ test("KWWK app-control helper accepts explicit internal operations but not hidde
     new URL("../packages/core/src/meeting/app-control-helper.swift", import.meta.url),
     "utf8",
   );
+  const planner = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-planner.swift", import.meta.url),
+    "utf8",
+  );
+  const executor = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-executor.swift", import.meta.url),
+    "utf8",
+  );
 
   assert.doesNotMatch(helper, /Continue with concrete click\/type_text\/press_key\/scroll\/drag/);
   assert.doesNotMatch(helper, /context\["operations"\]/);
-  assert.match(helper, /operationsFromParams\(params\["operations"\]\)/);
+  assert.match(executor, /operationsFromParams\(params\["operations"\]\)/);
   assert.match(
-    helper,
+    planner,
     /operationsFromInstruction\(instruction, target: target, observation: observation\)/,
   );
-  assert.match(helper, /appControlInstructionHasStateIntent/);
-  assert.match(helper, /appControlInstructionHasActionIntent/);
-  assert.match(helper, /&& !appControlInstructionHasActionIntent\(lower\)/);
+  assert.match(planner, /appControlInstructionHasStateIntent/);
+  assert.match(planner, /appControlInstructionHasActionIntent/);
+  assert.match(planner, /&& !appControlInstructionHasActionIntent\(lower\)/);
+  assert.doesNotMatch(helper, /func operationsFromInstruction/);
+  assert.doesNotMatch(helper, /func clickOperationsFromObservation/);
+  assert.doesNotMatch(helper, /func operationsFromParams/);
+  assert.doesNotMatch(helper, /func controlSharedAppWindow/);
 });
 
 test("KWWK app-control helper records native cursor telemetry for pointer actions", () => {
-  const helper = readFileSync(
-    new URL("../packages/core/src/meeting/app-control-helper.swift", import.meta.url),
+  const cursor = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-cursor.swift", import.meta.url),
     "utf8",
   );
 
-  assert.match(helper, /oneesama\.kwwk-cursor-events\.v1/);
-  assert.match(helper, /func cursorCoordinateSpace\(target:/);
-  assert.match(helper, /func requireCursorCoordinateSpace\(target:/);
-  assert.match(helper, /cursor_unmappable/);
-  assert.match(helper, /func cursorEvent\(kind:/);
-  assert.match(helper, /coordinateSpaceId/);
-  assert.match(helper, /normalizedX/);
-  assert.match(helper, /normalizedY/);
-  assert.match(helper, /cursor\.click/);
-  assert.match(helper, /cursor\.double_click/);
-  assert.match(helper, /cursor\.drag\.begin/);
-  assert.match(helper, /cursor\.drag\.end/);
+  assert.match(cursor, /func cursorCoordinateSpace\(target:/);
+  assert.match(cursor, /func requireCursorCoordinateSpace\(target:/);
+  assert.match(cursor, /cursor_unmappable/);
+  assert.match(cursor, /func cursorEvent\(kind:/);
+  assert.match(cursor, /coordinateSpaceId/);
+  assert.match(cursor, /normalizedX/);
+  assert.match(cursor, /normalizedY/);
+  assert.match(cursor, /cursor\.click/);
+  assert.match(cursor, /cursor\.double_click/);
+  assert.match(cursor, /cursor\.drag\.begin/);
+  assert.match(cursor, /cursor\.drag\.end/);
 });
 
 test("KWWK app-control helper materializes a native foreground cursor overlay", () => {
-  const helper = readFileSync(
-    new URL("../packages/core/src/meeting/app-control-helper.swift", import.meta.url),
+  const router = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-router.swift", import.meta.url),
+    "utf8",
+  );
+  const cursor = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-cursor.swift", import.meta.url),
     "utf8",
   );
 
-  assert.match(helper, /final class KWWKForegroundCursorPanel: NSPanel/);
-  assert.match(helper, /override var canBecomeKey: Bool\s*\{\s*false\s*\}/);
-  assert.match(helper, /override var canBecomeMain: Bool\s*\{\s*false\s*\}/);
-  assert.match(helper, /final class KWWKForegroundCursorView: NSView/);
-  assert.match(helper, /override func hitTest\(_: NSPoint\) -> NSView\?\s*\{\s*nil\s*\}/);
-  assert.match(helper, /styleMask: \[\.borderless, \.nonactivatingPanel\]/);
-  assert.match(helper, /newPanel\.backgroundColor = \.clear/);
-  assert.match(helper, /newPanel\.isOpaque = false/);
-  assert.match(helper, /newPanel\.ignoresMouseEvents = true/);
-  assert.match(helper, /renderSize: CGFloat = 28/);
-  assert.match(helper, /hotspot = CGPoint\(x: 17\.0 \/ 101\.0, y: 13\.0 \/ 101\.0\)/);
+  assert.match(cursor, /final class KWWKForegroundCursorPanel: NSPanel/);
+  assert.match(cursor, /override var canBecomeKey: Bool\s*\{\s*false\s*\}/);
+  assert.match(cursor, /override var canBecomeMain: Bool\s*\{\s*false\s*\}/);
+  assert.match(cursor, /final class KWWKForegroundCursorView: NSView/);
+  assert.match(cursor, /override func hitTest\(_: NSPoint\) -> NSView\?\s*\{\s*nil\s*\}/);
+  assert.match(cursor, /styleMask: \[\.borderless, \.nonactivatingPanel\]/);
+  assert.match(cursor, /newPanel\.backgroundColor = \.clear/);
+  assert.match(cursor, /newPanel\.isOpaque = false/);
+  assert.match(cursor, /newPanel\.ignoresMouseEvents = true/);
+  assert.match(cursor, /renderSize: CGFloat = 28/);
+  assert.match(cursor, /hotspot = CGPoint\(x: 17\.0 \/ 101\.0, y: 13\.0 \/ 101\.0\)/);
   assert.match(
-    helper,
+    cursor,
     /KWWKForegroundCursorOverlay\.shared\.present\(quartzPoint: point, kind: "click"/,
   );
   assert.match(
-    helper,
+    cursor,
     /KWWKForegroundCursorOverlay\.shared\.present\(quartzPoint: point, kind: "double_click"/,
   );
-  assert.match(helper, /func nativeCursorOverlayProbe\(params:/);
-  assert.match(helper, /case "app_control\.native_cursor_overlay_probe"/);
+  assert.match(cursor, /func nativeCursorOverlayProbe\(params:/);
+  assert.match(router, /case "app_control\.native_cursor_overlay_probe"/);
 });
 
 test("KWWK app-control helper attaches coordinate metadata to screenshots", () => {
-  const helper = readFileSync(
-    new URL("../packages/core/src/meeting/app-control-helper.swift", import.meta.url),
+  const observation = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-observation.swift", import.meta.url),
     "utf8",
   );
 
-  assert.match(helper, /screenshot\["coordinateSpaceId"\] = "kwwk_window_points"/);
-  assert.match(helper, /screenshot\["coordinateSpace"\] = cursorCoordinateSpace\(target: target\)/);
+  assert.match(observation, /screenshot\["coordinateSpaceId"\] = "kwwk_window_points"/);
+  assert.match(
+    observation,
+    /screenshot\["coordinateSpace"\] = cursorCoordinateSpace\(target: target\)/,
+  );
 });
 
-test("KWWK app-control helper records action and latency telemetry", () => {
-  const helper = readFileSync(
-    new URL("../packages/core/src/meeting/app-control-helper.swift", import.meta.url),
+test("KWWK app-control helper records action, verification, and latency telemetry", () => {
+  const executor = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-executor.swift", import.meta.url),
+    "utf8",
+  );
+  const verification = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-verification.swift", import.meta.url),
     "utf8",
   );
 
-  assert.match(helper, /func actionTelemetryEntry\(operation:/);
-  assert.match(helper, /"actionTelemetry": actionTelemetry/);
-  assert.match(helper, /oneesama\.kwwk-app-control-timings\.v1/);
-  assert.match(helper, /func appControlTimingSegments\(totalStarted:/);
-  assert.match(helper, /"observeMs"/);
-  assert.match(helper, /"executeMs"/);
-  assert.match(helper, /"verifyMs"/);
+  assert.match(executor, /func actionTelemetryEntry\(operation:/);
+  assert.match(executor, /"actionTelemetry": actionTelemetry/);
+  assert.match(executor, /verifyPostActionState/);
+  assert.match(executor, /"verification": verification/);
+  assert.match(verification, /func verifyPostActionState/);
+  assert.match(verification, /oneesama\.kwwk-cu-verification\.v1/);
+  assert.match(verification, /failed_verification/);
+  assert.match(executor, /oneesama\.kwwk-app-control-timings\.v1/);
+  assert.match(executor, /func appControlTimingSegments\(totalStarted:/);
+  assert.match(executor, /"observeMs"/);
+  assert.match(executor, /"executeMs"/);
+  assert.match(executor, /"verifyMs"/);
 });
 
 test("KWWK app-control helper captures focused app and target window metadata", () => {
-  const helper = readFileSync(
-    new URL("../packages/core/src/meeting/app-control-helper.swift", import.meta.url),
+  const observation = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-observation.swift", import.meta.url),
     "utf8",
   );
 
-  assert.match(helper, /func focusedApplicationPayload\(\)/);
-  assert.match(helper, /NSWorkspace\.shared\.frontmostApplication/);
-  assert.match(helper, /result\["focusedApplication"\] = focusedApplication/);
-  assert.match(helper, /result\["window"\] = window/);
+  assert.match(observation, /func focusedApplicationPayload\(\)/);
+  assert.match(observation, /NSWorkspace\.shared\.frontmostApplication/);
+  assert.match(observation, /result\["focusedApplication"\] = focusedApplication/);
+  assert.match(observation, /result\["window"\] = window/);
 });
 
 test("KWWK visible cursor helper preserves Bridge-style marker and coordinate assumptions", () => {
-  const helper = readFileSync(
-    new URL("../packages/core/src/meeting/app-control-helper.swift", import.meta.url),
+  const cursor = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-cursor.swift", import.meta.url),
     "utf8",
   );
 
-  assert.match(helper, /private final class AutomationClickIndicatorView: NSView/);
-  assert.match(helper, /override func hitTest\(_: NSPoint\) -> NSView\?/);
-  assert.match(helper, /nil\s*\n\s*}/);
-  assert.match(helper, /func showClickIndicator\(at point: CGPoint, in rootView: NSView\)/);
-  assert.match(helper, /DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ \.seconds\(3\)\)/);
-  assert.match(helper, /indicator\.removeFromSuperview\(\)/);
-  assert.match(helper, /func capturedPixelScale\(capturedWidth:/);
-  assert.match(helper, /capturedWidth \/ windowFrameWidth/);
-  assert.match(helper, /func capturedPixelToAppKitPoint\(/);
-  assert.match(helper, /flipped \? flippedY : unflippedY/);
+  assert.match(cursor, /private final class AutomationClickIndicatorView: NSView/);
+  assert.match(cursor, /override func hitTest\(_: NSPoint\) -> NSView\?/);
+  assert.match(cursor, /nil\s*\n\s*}/);
+  assert.match(cursor, /func showClickIndicator\(at point: CGPoint, in rootView: NSView\)/);
+  assert.match(cursor, /DispatchQueue\.main\.asyncAfter\(deadline: \.now\(\) \+ \.seconds\(3\)\)/);
+  assert.match(cursor, /indicator\.removeFromSuperview\(\)/);
+  assert.match(cursor, /func capturedPixelScale\(capturedWidth:/);
+  assert.match(cursor, /capturedWidth \/ windowFrameWidth/);
+  assert.match(cursor, /func capturedPixelToAppKitPoint\(/);
+  assert.match(cursor, /flipped \? flippedY : unflippedY/);
 });
 
 function assertStrictObjectSchema(schema, path) {

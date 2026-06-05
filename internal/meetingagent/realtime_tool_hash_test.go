@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	wantRealtimeToolHashWithoutDemoSurface = "57bc362b5d8010f9ea6c4a9ab09cb3cbe72f6c2e0cde18e06c8897a5958094e6"
-	wantRealtimeToolHashWithDemoSurface    = "0b2de1ee670204b2deabbddabeeb818bf363da37a78d2e274ddb3ede68567ab4"
+	wantRealtimeToolHashWithoutDemoSurface = "3005385a188e080f02482901301d7b5a18037e365a1a1935275d23349589dac2"
+	wantRealtimeToolHashWithDemoSurface    = "1b570d3c4e7f1ac38f1a87f00cab91e3d7201429513952f5c9928b5a63c99c01"
 )
 
 func TestRealtimeToolSchemaStableHashIsDeterministic(t *testing.T) {

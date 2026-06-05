@@ -326,7 +326,7 @@ async function runCase(args, config, variant, tools, testCase, iteration) {
       const instructions =
         step.responseInstructions ||
         testCase.responseInstructions ||
-        "Summarize the result in concise Chinese. If it failed, state the exact blocker without mentioning internal routing names.";
+        "Summarize the result in concise English. If it failed, state the exact blocker without mentioning internal routing names.";
       sendFunctionOutput(ws, call.callId, step.output, instructions);
     }
   } finally {

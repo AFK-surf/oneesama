@@ -609,7 +609,7 @@ export async function handleWorkspaceTool(toolName: string, body: MeetingAgentTo
         github: currentUser.github,
         role: currentUser.role,
       },
-      answer_hint_zh: `当前和你说话的人是 ${currentUser.name}（英文账号 ${currentUser.englishName}）。他的 Linear 是 ${currentUser.linear}，GitHub 是 ${currentUser.github}。`,
+      answer_hint_en: `The person speaking to you is ${currentUser.name}. Their English account name is ${currentUser.englishName}. Their Linear handle is ${currentUser.linear}, and their GitHub handle is ${currentUser.github}.`,
     };
   }
   if (toolName === "resolve_speaker_identity") {
@@ -621,9 +621,9 @@ export async function handleWorkspaceTool(toolName: string, body: MeetingAgentTo
       display_name: displayName,
       source: String(body.source || "unknown"),
       identity,
-      answer_hint_zh: identity?.resolved
-        ? `当前说话者可按 ${identity.preferredName || identity.canonicalName} 理解。`
-        : "无法可靠匹配工作区身份；请简短确认对方是谁，不要猜测。",
+      answer_hint_en: identity?.resolved
+        ? `Treat the current speaker as ${identity.preferredName || identity.canonicalName}.`
+        : "The workspace identity could not be matched reliably; ask a brief clarification instead of guessing.",
     };
   }
   if (toolName === "search_team_members") return handleSearchTeamMembers(body);

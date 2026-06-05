@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 (() => {
   interface RealtimeEventSummary {
     type: string;
@@ -88,12 +89,17 @@
       "list_shareable_windows",
       "share_existing_app_window",
       "kwwk_computer_use",
-      "control_shared_app_window",
+      "delegate_to_worker",
+      "read_meet_chat",
     ]);
     const shareIntentPattern =
       /(共享|分享|演示|展示|给.*看|share|present|show).*(浏览器|chrome|窗口|屏幕|app|应用|pencil|vscode|vs code|notion|terminal)|((浏览器|chrome|窗口|屏幕|app|应用|pencil|vscode|vs code|notion|terminal).*(共享|分享|演示|展示|share|present|show))/i;
     const controlIntentPattern =
       /(控制|操作|点击|输入|回车|滚动|切到|处理.*卡住|画|涂|编辑|修改|control|click|type|scroll|press|draw|edit)/i;
+    const delegateIntentPattern =
+      /(后台|codex|写脚本|脚本|调研|报告|处理.*文件|跑.*测试|查代码|改.*repo|研究|research|script|debug|investigate|五子棋|gomoku|实现.*web|开发.*web|build.*web|implement.*web|create.*web)/i;
+    const meetChatIntentPattern =
+      /(会议|meet|聊天|chat).*(说了啥|说什么|刚说|聊天|消息|内容|read|what)|(read|what).*(meeting|meet).*(chat|message)/i;
 
     function historyToolName(item: unknown): string {
       const entry = (item || {}) as Record<string, unknown>;
@@ -119,12 +125,16 @@
       const value = String(text || "");
       if (controlIntentPattern.test(value)) return "control";
       if (shareIntentPattern.test(value)) return "share";
+      if (delegateIntentPattern.test(value)) return "delegate";
+      if (meetChatIntentPattern.test(value)) return "meet_chat";
       return "";
     }
 
     function expectedToolsForIntent(intent: string) {
-      if (intent === "control") return ["kwwk_computer_use", "control_shared_app_window"];
+      if (intent === "control") return ["kwwk_computer_use"];
       if (intent === "share") return ["list_shareable_windows", "share_existing_app_window"];
+      if (intent === "delegate") return ["delegate_to_worker"];
+      if (intent === "meet_chat") return ["read_meet_chat"];
       return [];
     }
 
@@ -198,7 +208,7 @@
       const fakeExecution = !toolCalled && modelTurnObserved;
       return {
         observed: true,
-        source: "manual_text_turn",
+        source: String(turn.source || "manual_text_turn"),
         historyObserved,
         intent: turn.intent || "",
         userIndex: -1,
@@ -304,6 +314,59 @@
       });
       updateContextHealthFromHistory(currentHistorySnapshot());
       return { ok: true, ...entry };
+    }
+
+    function recordAudioFunctionalTranscript(text: string, detail: Record<string, unknown> = {}) {
+      const userText = String(text || "").trim();
+      const intent = functionalIntentForText(userText);
+      if (!intent) return { ok: true, skipped: true, reason: "not_functional_audio_transcript" };
+      const entry = {
+        ts: new Date().toISOString(),
+        source: "audio_transcript",
+        userText: userText.slice(0, 800),
+        intent,
+        expectedToolNames: expectedToolsForIntent(intent),
+        baselineModelTurnSignals: modelTurnSignalCount(),
+        baselineMeetToolCalls: state.meetTools.calls.length,
+        baselineWorkspaceToolCalls: state.workspaceTools.calls.length,
+        ...detail,
+      };
+      state.turnPolicy.manualFunctionalTurns.push(entry);
+      state.turnPolicy.manualFunctionalTurns = state.turnPolicy.manualFunctionalTurns.slice(-40);
+      recordTimeline("realtime_audio_functional_turn_recorded", {
+        intent,
+        chars: userText.length,
+        baselineModelTurnSignals: entry.baselineModelTurnSignals,
+        baselineMeetToolCalls: entry.baselineMeetToolCalls,
+        baselineWorkspaceToolCalls: entry.baselineWorkspaceToolCalls,
+      });
+      updateContextHealthFromHistory(currentHistorySnapshot());
+      return { ok: true, ...entry };
+    }
+
+    function maybeDirectRouteAudioFunctionalTranscript(text: string) {
+      if (config.directTextTurnToolRouting !== true) {
+        return { ok: true, skipped: true, reason: "direct_audio_tool_routing_disabled" };
+      }
+      const router = (window as any).__MAB_REALTIME_DIRECT_TOOL_ROUTING || {};
+      if (
+        typeof router.preferredToolChoice !== "function" ||
+        typeof router.shouldDirectRouteTool !== "function" ||
+        typeof router.queue !== "function"
+      ) {
+        return { ok: false, skipped: true, reason: "direct_tool_router_missing" };
+      }
+      const toolChoice = router.preferredToolChoice(text);
+      const toolName = String(toolChoice?.name || "");
+      if (!toolName || !router.shouldDirectRouteTool(toolName)) {
+        return { ok: true, skipped: true, reason: "no_direct_audio_tool_choice" };
+      }
+      router.queue(toolName, text, { source: "audio_transcript" });
+      recordTimeline("realtime_audio_transcript_direct_tool_requested", {
+        toolName,
+        chars: String(text || "").length,
+      });
+      return { ok: true, toolName };
     }
 
     function currentHistorySnapshot(): unknown[] {
@@ -556,6 +619,11 @@
             text: text.slice(0, 2000),
           });
           state.transcripts.input = state.transcripts.input.slice(-20);
+          recordAudioFunctionalTranscript(text, {
+            itemId: String(event.item_id || event.itemId || ""),
+            eventType: type,
+          });
+          maybeDirectRouteAudioFunctionalTranscript(text);
         }
         state.transcripts.currentInput = "";
         return;
@@ -583,6 +651,255 @@
 
     function responseIdFromEvent(event): string {
       return String(event?.response?.id || event?.response_id || event?.responseId || "").trim();
+    }
+
+    function nativeInterruptionState() {
+      state.protection.nativeInterruption = state.protection.nativeInterruption || {
+        speech_started_at: "",
+        api_interruption_at: "",
+        response_cancelled_at: "",
+        avatar_audio_stopped_at: "",
+        truncate_sent_at: "",
+        last_self_echo_suppressed_at: "",
+        last_self_echo_reason: "",
+        self_echo_suppressed_count: 0,
+        last_self_echo_evidence: null,
+        last_output_item_id: "",
+        last_output_content_index: 0,
+        last_output_audio_started_at: "",
+        last_output_audio_event_at: "",
+        last_output_audio_elapsed_ms: 0,
+        truncate_count: 0,
+        avatar_audio_stop_count: 0,
+        last_event_type: "",
+        last_source: "",
+        last_stop_result: null,
+      };
+      return state.protection.nativeInterruption;
+    }
+
+    function outputItemIdFromEvent(event): string {
+      return String(
+        event?.item_id ||
+          event?.itemId ||
+          event?.output_item?.id ||
+          event?.outputItem?.id ||
+          event?.item?.id ||
+          "",
+      ).trim();
+    }
+
+    function outputContentIndexFromEvent(event): number {
+      const raw = Number(event?.content_index ?? event?.contentIndex ?? 0);
+      return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+    }
+
+    function rememberRealtimeOutputAudioEvent(event) {
+      const type = String(event?.type || "");
+      if (
+        type !== "response.output_audio.delta" &&
+        type !== "response.output_audio.done" &&
+        type !== "response.output_audio_transcript.delta" &&
+        type !== "response.output_audio_transcript.done" &&
+        type !== "response.output_item.added" &&
+        type !== "response.output_item.done"
+      ) {
+        return;
+      }
+      const itemId = outputItemIdFromEvent(event);
+      const contentIndex = outputContentIndexFromEvent(event);
+      const interruption = nativeInterruptionState();
+      if (itemId) interruption.last_output_item_id = itemId;
+      interruption.last_output_content_index = contentIndex;
+      interruption.last_output_audio_event_at = new Date().toISOString();
+      if (type === "response.output_audio.delta" && !interruption.last_output_audio_started_at) {
+        interruption.last_output_audio_started_at = new Date().toISOString();
+      }
+    }
+
+    function selfEchoSuppressionWindowMs(): number {
+      const raw = Number(config.selfEchoSuppressionWindowMs ?? 350);
+      return Number.isFinite(raw) && raw > 0 ? raw : 0;
+    }
+
+    function selfEchoEventMarker(event): string {
+      const values = [
+        event?.source,
+        event?.reason,
+        event?.origin,
+        event?.audio_source,
+        event?.audioSource,
+        event?.meeting_avatar_source,
+        event?.meetingAvatarSource,
+      ].map((value) => String(value || "").toLowerCase());
+      if (event?.self_echo === true || event?.selfEcho === true) return "explicit_self_echo";
+      if (event?.avatar_feedback === true || event?.avatarFeedback === true) {
+        return "explicit_avatar_feedback";
+      }
+      if (values.some((value) => value.includes("avatar") || value.includes("self_echo"))) {
+        return "event_source_avatar_feedback";
+      }
+      return "";
+    }
+
+    function avatarOutputSelfEchoEvidence(windowMs: number) {
+      const avatarAudio = (window as any).MAB_AVATAR_AUDIO || {};
+      const avatarBusState = (window as any).MAB_AVATAR_AUDIO_BUS?.state || {};
+      const outputEnergy = avatarAudio.outputEnergy || avatarBusState.outputEnergy || {};
+      const lastEnergyAt = String(outputEnergy.lastEnergyAt || "");
+      const energyAgeMs = lastEnergyAt ? millisSinceIso(lastEnergyAt) : Number.POSITIVE_INFINITY;
+      const syntheticSpeechActive =
+        avatarAudio.syntheticSpeechActive === true || avatarBusState.syntheticSpeechActive === true;
+      const recentEnergy =
+        outputEnergy.observed === true &&
+        lastEnergyAt &&
+        Number.isFinite(energyAgeMs) &&
+        energyAgeMs <= windowMs;
+      return {
+        recent: Boolean(syntheticSpeechActive || recentEnergy),
+        reason: syntheticSpeechActive ? "avatar_synthetic_speech_active" : "avatar_output_energy",
+        windowMs,
+        energyAgeMs: Number.isFinite(energyAgeMs) ? Math.round(energyAgeMs) : null,
+        outputEnergyObserved: outputEnergy.observed === true,
+        outputEnergyRms: Number(outputEnergy.rms || 0),
+        outputEnergyPeak: Number(outputEnergy.peak || 0),
+        outputEnergyLastAt: lastEnergyAt,
+        syntheticSpeechActive,
+      };
+    }
+
+    function suppressSelfEchoSpeechStartedIfNeeded(event, source, now, interruption) {
+      if (String(event?.type || "") !== "input_audio_buffer.speech_started") {
+        return false;
+      }
+      const windowMs = selfEchoSuppressionWindowMs();
+      if (windowMs <= 0) return false;
+      const explicitMarker = selfEchoEventMarker(event);
+      const avatarEvidence = avatarOutputSelfEchoEvidence(windowMs);
+      if (!explicitMarker && !avatarEvidence.recent) return false;
+      const reason = explicitMarker || avatarEvidence.reason;
+      interruption.last_event_type = "input_audio_buffer.speech_started";
+      interruption.last_source = source;
+      interruption.last_self_echo_suppressed_at = now;
+      interruption.last_self_echo_reason = reason;
+      interruption.self_echo_suppressed_count =
+        Number(interruption.self_echo_suppressed_count || 0) + 1;
+      interruption.last_self_echo_evidence = avatarEvidence;
+      try {
+        (event as any).__meetingAvatarSelfEchoSuppressed = true;
+      } catch {
+        // Event summaries are best effort; immutable SDK payloads can still be suppressed locally.
+      }
+      recordTimeline("realtime_native_interruption_self_echo_suppressed", {
+        type: "input_audio_buffer.speech_started",
+        source,
+        reason,
+        evidence: avatarEvidence,
+      });
+      return true;
+    }
+
+    function shouldUseWebSocketTruncationFallback() {
+      const mode = String(state.connection?.mode || config.mode || "").toLowerCase();
+      const transport = String(config.transport || config.realtimeTransport || "").toLowerCase();
+      return mode === "websocket" || transport === "websocket";
+    }
+
+    function computePlayedAudioMs(interruption) {
+      const started = Date.parse(String(interruption.last_output_audio_started_at || ""));
+      if (!Number.isFinite(started) || started <= 0) return 0;
+      return Math.max(0, Math.round(Date.now() - started));
+    }
+
+    function maybeSendRealtimeTruncate(interruption) {
+      if (!shouldUseWebSocketTruncationFallback()) {
+        return { ok: true, skipped: true, reason: "server_managed_transport" };
+      }
+      const itemId = String(interruption.last_output_item_id || "").trim();
+      if (!itemId) return { ok: false, skipped: true, reason: "missing_output_item_id" };
+      const truncated = (interruption.truncated_output_item_ids || []) as string[];
+      if (truncated.includes(itemId)) {
+        return { ok: true, skipped: true, reason: "already_truncated", itemId };
+      }
+      const audioEndMs = computePlayedAudioMs(interruption);
+      const channel = sendRealtimeEvent({
+        type: "conversation.item.truncate",
+        item_id: itemId,
+        content_index: Number(interruption.last_output_content_index || 0),
+        audio_end_ms: audioEndMs,
+      });
+      interruption.truncated_output_item_ids = [...truncated, itemId].slice(-20);
+      interruption.truncate_sent_at = new Date().toISOString();
+      interruption.truncate_count = Number(interruption.truncate_count || 0) + 1;
+      interruption.last_output_audio_elapsed_ms = audioEndMs;
+      recordTimeline("realtime_native_interruption_truncate_sent", {
+        itemId,
+        audioEndMs,
+        channel,
+      });
+      return { ok: true, channel, itemId, audioEndMs };
+    }
+
+    function stopAvatarAudioForRealtimeInterruption(event, source) {
+      const interruption = nativeInterruptionState();
+      const bus = (window as any).MAB_AVATAR_AUDIO_BUS;
+      const result =
+        typeof bus?.interruptOutput === "function"
+          ? bus.interruptOutput({ reason: "realtime_native_interruption" })
+          : { ok: false, error: "avatar_audio_bus_interrupt_missing" };
+      interruption.avatar_audio_stopped_at = new Date().toISOString();
+      interruption.avatar_audio_stop_count = Number(interruption.avatar_audio_stop_count || 0) + 1;
+      interruption.last_stop_result = result;
+      recordTimeline("realtime_native_interruption_avatar_audio_stop", {
+        type: String(event?.type || ""),
+        source,
+        ok: result?.ok !== false,
+        stoppedBufferedSources: Number(result?.stoppedBufferedSources || 0),
+        error: String(result?.error || ""),
+      });
+      return result;
+    }
+
+    function handleRealtimeNativeInterruption(event, source = "data-channel") {
+      const type = String(event?.type || "");
+      if (
+        type !== "input_audio_buffer.speech_started" &&
+        type !== "response.cancelled" &&
+        type !== "agents_sdk.audio_interrupted" &&
+        type !== "audio_interrupted"
+      ) {
+        return;
+      }
+      const now = new Date().toISOString();
+      const interruption = nativeInterruptionState();
+      if (suppressSelfEchoSpeechStartedIfNeeded(event, source, now, interruption)) {
+        return;
+      }
+      interruption.last_event_type = type;
+      interruption.last_source = source;
+      if (type === "input_audio_buffer.speech_started") {
+        state.protection.lastInputSpeechStartedAt = now;
+        interruption.speech_started_at = now;
+      }
+      if (
+        type === "response.cancelled" ||
+        type === "agents_sdk.audio_interrupted" ||
+        type === "audio_interrupted"
+      ) {
+        interruption.api_interruption_at = now;
+      }
+      if (type === "response.cancelled") {
+        interruption.response_cancelled_at = now;
+      }
+      const stopResult = stopAvatarAudioForRealtimeInterruption(event, source);
+      const truncateResult = maybeSendRealtimeTruncate(interruption);
+      recordTimeline("realtime_native_interruption", {
+        type,
+        source,
+        transport: String(state.connection?.mode || config.mode || ""),
+        stopOk: stopResult?.ok !== false,
+        truncate: truncateResult,
+      });
     }
 
     function rememberResponseLifecycleEvent(event) {
@@ -1193,7 +1510,9 @@
       state.connection.lastInboundEventAt = new Date().toISOString();
       state.connection.lastInboundEventType = summary.type || "";
       rememberTranscriptEvent(event);
+      rememberRealtimeOutputAudioEvent(event);
       rememberResponseLifecycleEvent(event);
+      handleRealtimeNativeInterruption(event, source);
       recordTimeline("realtime_inbound", { source, ...summary });
       updateFeedback();
     }

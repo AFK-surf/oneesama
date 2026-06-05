@@ -1,9 +1,16 @@
 # RFC: KWWK CU Internal Action Planner
 
 Date: 2026-06-02
-Status: accepted implementation plan
+Status: accepted historical plan; partially superseded
 Owner: @劲霸仁波切
 Implementation driver: local Codex session
+
+> Superseded note: model-first planner decisions in
+> `notes/rfc/realtime-low-latency-cueboard-cu-execution-plane-rfc-2026-06-02.md`
+> override this RFC where they conflict. In particular, the planner model is no
+> longer optional/deterministic-first for live KWWK CU turns; every
+> natural-language CU turn must go through the configured planner model, with
+> local rules used only as hints/validation.
 
 ## Summary
 
@@ -28,12 +35,14 @@ Realtime-facing instruction tool backed by a KWWK-side action planner.
   `{"instruction":"切换到下一个 tab","applicationName":"Chrome"}`.
 - KWWK CU owns instruction normalization, observation, planning, action
   execution, verification, and blocker wording.
-- Deterministic planner rules cover high-frequency primitives first:
-  tab switching, keyboard shortcuts, typing, enter/escape, scrolling, click by
-  accessible label, and simple focus changes.
-- An optional fast planner model may be used only for ambiguous visual/action
-  decisions. The model is configured by policy/env, not hard-coded in the
-  Realtime tool schema.
+- Historical pre-rewrite plan used deterministic planner rules for
+  high-frequency primitives first: tab switching, keyboard shortcuts, typing,
+  enter/escape, scrolling, click by accessible label, and simple focus changes.
+  This is superseded for live natural-language CU turns; local rules now feed
+  hints, validation, and safety only.
+- Historical optional-model posture is superseded. The rewrite requires the
+  configured planner model for every live natural-language CU turn, with
+  blocker behavior instead of local fallback when the model is unavailable.
 - Complex multi-step tasks still delegate to Codex/background app-control. The
   KWWK planner is for short, bounded, foreground operations.
 
@@ -434,15 +443,16 @@ to Realtime.
 - 2026-06-02: pointer actions now carry native foreground cursor evidence from the executor/presentation layer; keyboard-only planner actions remain pointer-free.
 - 2026-06-02: real-room app-control suite `MAB_REAL_MEET_URL=https://meet.google.com/yza-vjpx-qto MAB_REAL_MEET_APP_CONTROL_WAIT_MS=240000 MAB_REAL_MEET_APP_CONTROL_CURSOR_WAIT_MS=25000 vp exec tsx scripts/real-meet-synthetic-speaker-smoke.mjs --real-meet-app-control-suite --require-real-meet-url --json-out /tmp/oneesama-realtime-real-app-control-suite-yza-vjpx-qto-cursor-json-envelope-2026-06-02.json` passed both the keyboard-only `Press Escape` case and the pointer `Click Chromium` case through `kwwk_computer_use`. This covered the Realtime-generated Chinese target wording path (`可见目标：Click Chromium`), AX label parsing for `Chromium`, app-control worker terminal-result redelivery, and cursor/HUD telemetry propagation from the KWWK planner/executor result.
 
-## Open Questions
+## Superseded / Resolved Questions
 
-- What exact model name should be used for the optional fast planner once the
-  project config confirms availability?
-- Should browser tab switching use app-specific browser automation when a
-  browser surface is owned by the bot, or stay with keyboard shortcuts for all
-  foreground apps?
-- How many actions should the default KWWK budget allow before returning
-  `needs_background_agent`?
-- Keyboard-only actions should not show a fake pointer. They may show compact
-  CU status while active; only pointer actions trigger Cueboard-style cursor
-  feedback.
+- The planner model is no longer optional for live natural-language KWWK CU
+  turns. The rewrite RFC makes `gpt-5.3-codex-spark` the desired default, with
+  env/config override and hard blocker behavior when the configured model is
+  unavailable.
+- Browser tab switching remains a planner-selected structured action. The
+  Realtime tool does not grow a browser-specific tab-switch tool.
+- The default action budget is owned by the rewrite RFC and planner schema; a
+  task that exceeds the short foreground budget returns `needs_background_agent`.
+- Keyboard-only actions must not show fake pointer motion. Pointer actions use
+  Cueboard-style cursor feedback; keyboard/scroll actions use compact action
+  and verification state.

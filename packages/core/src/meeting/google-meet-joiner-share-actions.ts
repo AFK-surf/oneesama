@@ -455,6 +455,11 @@ export function createGoogleMeetShareActions(ctx: any) {
     const firstFrame = await captureMacWindowToSynthetic(app, baseInput, 1);
     const shareInput: AppShareInput = {
       ...baseInput,
+      sourceApplicationName: app.applicationName || app.name || "",
+      sourceBundleIdentifier: app.bundleIdentifier || "",
+      sourceWindowTitle: app.title || app.name || "",
+      sourceWindowId: app.windowId || app.windowID || 0,
+      sourceProcessId: app.processId || app.pid || 0,
       width: firstFrame.dimensions.width,
       height: firstFrame.dimensions.height,
     };
@@ -560,6 +565,11 @@ export function createGoogleMeetShareActions(ctx: any) {
           subtitle: bridgeInput.subtitle || "Agent screen share",
           videoUrl: bridgeInput.videoUrl || bridgeInput.url || bridgeInput.path || "",
           imageUrl,
+          sourceApplicationName: bridgeInput.sourceApplicationName || "",
+          sourceBundleIdentifier: bridgeInput.sourceBundleIdentifier || "",
+          sourceWindowTitle: bridgeInput.sourceWindowTitle || "",
+          sourceWindowId: bridgeInput.sourceWindowId || 0,
+          sourceProcessId: bridgeInput.sourceProcessId || 0,
           width:
             positiveInteger(bridgeInput.width ?? bridgeInput.screenShareWidth) ||
             DEFAULT_SYNTHETIC_SCREEN_SHARE_WIDTH,

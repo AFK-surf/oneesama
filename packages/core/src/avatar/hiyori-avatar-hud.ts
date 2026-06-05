@@ -149,7 +149,7 @@ function toolStepLabel(name: unknown) {
   const text = String(name || "");
   if (text === "list_shareable_windows") return "列窗口";
   if (text === "share_existing_app_window") return "共享";
-  if (text === "kwwk_computer_use" || text === "control_shared_app_window") return "控制";
+  if (text === "kwwk_computer_use") return "控制";
   if (text === "delegate_to_worker") return "后台";
   if (text === "worker_status") return "查进度";
   if (text === "read_meet_chat") return "读聊天";

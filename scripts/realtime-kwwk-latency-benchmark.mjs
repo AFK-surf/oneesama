@@ -9,6 +9,10 @@ import { pathToFileURL } from "node:url";
 import { ensureAppControlHelperBinary } from "../packages/core/src/meeting/app-control-helper.ts";
 
 const WARM_RUNS = 8;
+const WARM_P95_SLO_MS = 2500;
+const PLANNER_MODEL_P95_SLO_MS = 1200;
+const NONVISUAL_EXECUTE_OBSERVE_SLO_MS = 500;
+const NONVISUAL_EXECUTE_VERIFY_SLO_MS = 500;
 
 function parseArgs(argv) {
   const args = { jsonOut: "", warmRuns: WARM_RUNS, timeoutMs: 30_000 };
@@ -50,10 +54,22 @@ async function callPlanOnce(child, id) {
   return callHelperOnce(child, {
     id,
     caseId: "deterministic-plan",
-    method: "app_control.plan_instruction",
-    params: { instruction: "输入 hello" },
+    method: "kwwk.cu.plan",
+    params: {
+      instruction: "输入 hello",
+      modelPlan: modelPlan([{ kind: "type_text", text: "hello" }]),
+    },
     expectedOk: true,
   });
+}
+
+function modelPlan(operations, summary = "Local fixture planner produced a model-first CU plan.") {
+  return {
+    status: "planned",
+    summary,
+    blocker: "",
+    operations,
+  };
 }
 
 async function callHelperOnce(child, testCase) {
@@ -68,22 +84,21 @@ async function callHelperOnce(child, testCase) {
   );
   const response = await child.nextResponse();
   const result = response.result || {};
+  const planner = result?.planner || result?.metadata?.planner || {};
+  const timings = result?.metadata?.timings || {};
   return {
     caseId: testCase.caseId,
     roundTripMs: Math.round(performance.now() - started),
-    normalizeMs: Number(result?.planner?.normalizeMs || 0),
-    modelUsed: result?.planner?.modelUsed === true,
-    modelName: String(result?.planner?.modelName || result?.planner?.optionalModel?.model || ""),
-    modelLatencyMs: Number(result?.planner?.modelLatencyMs || 0),
-    observeMs: Number(result?.metadata?.timings?.observeMs || 0),
-    planMs: Number(
-      result?.metadata?.timings?.planMs ??
-        result?.planner?.latencyMs ??
-        result?.planner?.normalizeMs ??
-        0,
-    ),
-    executeMs: Number(result?.metadata?.timings?.executeMs || 0),
-    verifyMs: Number(result?.metadata?.timings?.verifyMs || 0),
+    normalizeMs: Number(planner?.normalizeMs || 0),
+    modelUsed: planner?.modelUsed === true,
+    modelName: String(planner?.modelName || planner?.optionalModel?.model || ""),
+    modelLatencyMs: Number(planner?.modelLatencyMs || 0),
+    observationMode: String(result?.metadata?.observationMode || ""),
+    observeMs: Number(timings?.observeMs || 0),
+    planMs: Number(timings?.planMs ?? planner?.latencyMs ?? planner?.normalizeMs ?? 0),
+    executeMs: Number(timings?.executeMs || 0),
+    verifyMs: Number(timings?.verifyMs || 0),
+    actions: Array.isArray(result?.actions) ? result.actions : [],
     ok: testCase.expectedOk === false ? result?.ok === false : result?.ok === true,
   };
 }
@@ -93,23 +108,32 @@ function warmLatencyCases(iteration) {
     {
       id: `warm-plan-${iteration}`,
       caseId: "deterministic-plan",
-      method: "app_control.plan_instruction",
-      params: { instruction: "输入 hello" },
+      method: "kwwk.cu.plan",
+      params: {
+        instruction: "输入 hello",
+        modelPlan: modelPlan([{ kind: "type_text", text: "hello" }]),
+      },
       expectedOk: true,
     },
     {
       id: `warm-observe-${iteration}`,
       caseId: "observe-state-intent",
-      method: "app_control.plan_instruction",
-      params: { instruction: "看一下当前状态" },
+      method: "kwwk.cu.plan",
+      params: {
+        instruction: "看一下当前状态",
+        modelPlan: modelPlan([{ kind: "state" }], "Local fixture planner chose observe/state."),
+      },
       expectedOk: true,
     },
     {
       id: `warm-visual-${iteration}`,
       caseId: "visual-screenshot-fallback-plan",
-      method: "app_control.plan_instruction",
+      method: "kwwk.cu.plan",
       params: {
         instruction: "点击发送按钮",
+        modelPlan: modelPlan([
+          { kind: "click", x: 260, y: 120, targetRole: "button", targetLabel: "发送" },
+        ]),
         observation: {
           screenshot: {
             elements: [
@@ -120,6 +144,19 @@ function warmLatencyCases(iteration) {
       },
       expectedOk: true,
     },
+    {
+      id: `warm-nonvisual-execute-${iteration}`,
+      caseId: "nonvisual-execute-light",
+      method: "kwwk.cu.execute",
+      params: {
+        instruction: "Press Escape once.",
+        modelPlan: modelPlan(
+          [{ kind: "press_key", key: "escape" }],
+          "Local fixture planner chose a non-visual key action.",
+        ),
+      },
+      expectedOk: true,
+    },
   ];
 }
 
@@ -127,8 +164,11 @@ function optionalModelLatencyCase() {
   return {
     id: "optional-local-model",
     caseId: "optional-local-model-plan",
-    method: "app_control.plan_instruction",
-    params: { instruction: "用小模型规划这个可见操作" },
+    method: "kwwk.cu.plan",
+    params: {
+      instruction: "用小模型规划这个可见操作",
+      modelPlan: modelPlan([{ kind: "press_key", key: "return" }]),
+    },
     expectedOk: true,
   };
 }
@@ -164,21 +204,41 @@ function spawnHelper(binary, timeoutMs, env = {}) {
 
 export function buildKWWKLatencyReport(args, result) {
   const warmRoundTrips = result.warmSamples.map((sample) => sample.roundTripMs);
+  const warmP95Ms = percentile(warmRoundTrips, 95);
   const optionalModelSamples = Array.isArray(result.optionalModelSamples)
     ? result.optionalModelSamples
     : [];
+  const modelSamples = [...result.warmSamples, ...optionalModelSamples];
+  const modelLatencies = modelSamples.map((sample) => sample.modelLatencyMs || 0);
+  const plannerModelP95Ms = percentile(modelLatencies, 95);
   const samplesByCase = {};
   for (const sample of result.warmSamples) {
     const caseId = sample.caseId || "unknown";
     samplesByCase[caseId] ||= [];
     samplesByCase[caseId].push(sample);
   }
+  const nonVisualExecuteSamples = samplesByCase["nonvisual-execute-light"] || [];
+  const nonVisualExecuteLight =
+    nonVisualExecuteSamples.length === args.warmRuns &&
+    nonVisualExecuteSamples.every(
+      (sample) =>
+        sample.ok &&
+        sample.modelUsed &&
+        sample.modelName &&
+        sample.observationMode === "light" &&
+        sample.observeMs <= NONVISUAL_EXECUTE_OBSERVE_SLO_MS &&
+        sample.verifyMs <= NONVISUAL_EXECUTE_VERIFY_SLO_MS &&
+        sample.actions.includes("press_key"),
+    );
   const ok =
     result.ok === true &&
     result.compileMs >= 0 &&
     result.coldFirstPlanMs >= 0 &&
-    result.warmSamples.length === args.warmRuns * 3 &&
-    result.warmSamples.every((sample) => sample.ok) &&
+    warmP95Ms <= WARM_P95_SLO_MS &&
+    plannerModelP95Ms <= PLANNER_MODEL_P95_SLO_MS &&
+    result.warmSamples.length === args.warmRuns * 4 &&
+    result.warmSamples.every((sample) => sample.ok && sample.modelUsed && sample.modelName) &&
+    nonVisualExecuteLight &&
     optionalModelSamples.length === 1 &&
     optionalModelSamples.every((sample) => sample.ok && sample.modelUsed && sample.modelName);
   return {
@@ -186,7 +246,7 @@ export function buildKWWKLatencyReport(args, result) {
     gate: "cold_warm_latency",
     ok,
     generatedAt: new Date().toISOString(),
-    evidenceMode: "host_kwwk_helper_deterministic_plan_latency",
+    evidenceMode: "host_kwwk_helper_model_first_fixture_latency",
     acceptanceGateScope: "cold_warm_latency",
     meetRoomRequired: false,
     realAppExecution: false,
@@ -201,21 +261,41 @@ export function buildKWWKLatencyReport(args, result) {
       coldFirstPlanMs: result.coldFirstPlanMs,
       warmRoundTripMs: warmRoundTrips,
       warmP50Ms: percentile(warmRoundTrips, 50),
-      warmP95Ms: percentile(warmRoundTrips, 95),
+      warmP95Ms,
       normalizeMs: result.warmSamples.map((sample) => sample.normalizeMs),
       observeMs: result.warmSamples.map((sample) => sample.observeMs || 0),
       planMs: result.warmSamples.map((sample) => sample.planMs || 0),
-      modelMs: optionalModelSamples.map((sample) => sample.modelLatencyMs || 0),
+      modelMs: modelLatencies,
+      plannerModelP95Ms,
       executeMs: result.warmSamples.map((sample) => sample.executeMs || 0),
       verifyMs: result.warmSamples.map((sample) => sample.verifyMs || 0),
       wrapperMs: 0,
       realtimeMs: 0,
     },
+    nonVisualExecuteLight: {
+      ok: nonVisualExecuteLight,
+      observeSloMs: NONVISUAL_EXECUTE_OBSERVE_SLO_MS,
+      verifySloMs: NONVISUAL_EXECUTE_VERIFY_SLO_MS,
+      samples: nonVisualExecuteSamples.map((sample) => ({
+        roundTripMs: sample.roundTripMs,
+        observationMode: sample.observationMode,
+        observeMs: sample.observeMs,
+        executeMs: sample.executeMs,
+        verifyMs: sample.verifyMs,
+        actions: sample.actions,
+        modelUsed: sample.modelUsed,
+        modelName: sample.modelName,
+      })),
+      blocker: nonVisualExecuteLight
+        ? ""
+        : result.error || "nonvisual_execute_light_latency_failed",
+    },
     proofBoundary: {
       proves: [
-        "helper compile/startup and deterministic warm latency are measurable",
-        "observe/state-intent and visual screenshot-fallback planner calls are sampled",
-        "local optional model planner fixture reports model name and model latency",
+        "helper compile/startup and model-first warm latency are measurable",
+        "observe/state-intent and visual screenshot-fallback planner calls are sampled through kwwk.cu.plan",
+        "non-visual model-first execute calls use light observation without AX/window/screenshot slow path",
+        "local fixture planner reports modelUsed, model name, and model latency for every warm case",
       ],
       doesNotProve: [
         "Realtime wrapper latency",
@@ -223,22 +303,40 @@ export function buildKWWKLatencyReport(args, result) {
         "remote OpenAI planner latency",
       ],
     },
-    cases: ["deterministic-plan", "observe-state-intent", "visual-screenshot-fallback-plan"].map(
-      (caseId) => {
-        const samples = samplesByCase[caseId] || [];
-        return {
-          id: caseId,
-          ok: samples.length === args.warmRuns && samples.every((sample) => sample.ok),
-          warmRuns: samples.length,
-          modelUsed: false,
-          warmRoundTripMs: samples.map((sample) => sample.roundTripMs),
-          blocker:
-            samples.length === args.warmRuns && samples.every((sample) => sample.ok)
-              ? ""
-              : result.error || "latency_benchmark_failed",
-        };
-      },
-    ),
+    cases: [
+      "deterministic-plan",
+      "observe-state-intent",
+      "visual-screenshot-fallback-plan",
+      "nonvisual-execute-light",
+    ].map((caseId) => {
+      const samples = samplesByCase[caseId] || [];
+      const modelUsed = samples.length > 0 && samples.every((sample) => sample.modelUsed === true);
+      return {
+        id: caseId,
+        ok:
+          samples.length === args.warmRuns &&
+          samples.every((sample) => sample.ok && sample.modelUsed === true && sample.modelName) &&
+          (caseId !== "nonvisual-execute-light" || nonVisualExecuteLight),
+        warmRuns: samples.length,
+        modelUsed,
+        modelName: samples[0]?.modelName || "",
+        warmRoundTripMs: samples.map((sample) => sample.roundTripMs),
+        observeMs: samples.map((sample) => sample.observeMs || 0),
+        verifyMs: samples.map((sample) => sample.verifyMs || 0),
+        observationModes: [
+          ...new Set(samples.map((sample) => sample.observationMode).filter(Boolean)),
+        ],
+        blocker:
+          samples.length === args.warmRuns &&
+          samples.every((sample) => sample.ok && sample.modelUsed === true && sample.modelName) &&
+          (caseId !== "nonvisual-execute-light" || nonVisualExecuteLight)
+            ? ""
+            : result.error ||
+              (caseId === "nonvisual-execute-light"
+                ? "nonvisual_execute_light_latency_failed"
+                : "latency_benchmark_failed"),
+      };
+    }),
     optionalModelCases: optionalModelSamples.map((sample) => ({
       id: sample.caseId || "optional-local-model-plan",
       ok: sample.ok === true && sample.modelUsed === true && Boolean(sample.modelName),
@@ -267,7 +365,10 @@ export async function runKWWKLatencyBenchmark(args) {
     const binary = await ensureAppControlHelperBinary();
     const compileMs = Math.round(performance.now() - compileStarted);
     const startupStarted = performance.now();
-    const helper = spawnHelper(binary, args.timeoutMs);
+    const helper = spawnHelper(binary, args.timeoutMs, {
+      ONEESAMA_KWWK_CU_PLANNER_PROVIDER: "local",
+      ONEESAMA_KWWK_CU_PLANNER_MODEL: "tiny-planner-latency-fixture",
+    });
     const startupMs = Math.round(performance.now() - startupStarted);
     const cold = await callPlanOnce(helper, "cold");
     const warmSamples = [];
@@ -279,8 +380,13 @@ export async function runKWWKLatencyBenchmark(args) {
     await helper.closeHelper();
     const modelHelper = spawnHelper(binary, args.timeoutMs, {
       ONEESAMA_KWWK_PLANNER_PROVIDER: "local",
+      ONEESAMA_KWWK_CU_PLANNER_PROVIDER: "local",
       ONEESAMA_KWWK_PLANNER_MODEL: "tiny-planner-latency-fixture",
+      ONEESAMA_KWWK_CU_PLANNER_MODEL: "tiny-planner-latency-fixture",
       ONEESAMA_KWWK_PLANNER_LOCAL_PLAN_JSON: JSON.stringify({
+        operations: [{ kind: "press_key", key: "return" }],
+      }),
+      ONEESAMA_KWWK_CU_PLANNER_LOCAL_PLAN_JSON: JSON.stringify({
         operations: [{ kind: "press_key", key: "return" }],
       }),
     });

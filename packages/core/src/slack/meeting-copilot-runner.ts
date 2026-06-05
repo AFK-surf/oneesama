@@ -144,7 +144,6 @@ export function containsMeetingCopilotRealtimeControlRequest(transcript: unknown
     "computer use",
     "kwwk_computer_use",
     "control shared app",
-    "control_shared_app_window",
     "activity monitor",
     "活动监视器",
     "共享屏幕",

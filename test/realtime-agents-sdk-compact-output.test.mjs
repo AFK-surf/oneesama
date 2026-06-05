@@ -58,7 +58,7 @@ test("Realtime Agents SDK execute return keeps turn policy out of model-visible 
           tools: [
             {
               type: "function",
-              name: "control_shared_app_window",
+              name: "kwwk_computer_use",
               description: "Control the currently shared app window.",
               parameters: { type: "object", properties: {}, required: [] },
             },
@@ -78,7 +78,7 @@ test("Realtime Agents SDK execute return keeps turn policy out of model-visible 
 
       const result = await page.evaluate(async () => {
         const tool = window.__MAB_FAKE_SDK_TOOLS.find(
-          (entry) => entry.name === "control_shared_app_window",
+          (entry) => entry.name === "kwwk_computer_use",
         );
         const output = await tool.execute(
           { instruction: "observe the shared window" },
@@ -97,8 +97,9 @@ test("Realtime Agents SDK execute return keeps turn policy out of model-visible 
       assert.equal(parsed.status, "queued");
       assert.equal(parsed.job_id, "job_sdk_app_control_queued");
       assert.equal(parsed.summary, "Queued app control job.");
-      assert.equal(parsed.displayText, "交给后台");
-      assert.equal(parsed.answer_hint_zh, "交给后台");
+      assert.equal(parsed.displayText, "Needs background handling.");
+      assert.equal(parsed.answer_hint_en, "Needs background handling.");
+      assert.equal(parsed.answer_hint_zh, undefined);
       assert.equal(parsed.turnPolicy, undefined);
       assert.doesNotMatch(outputText, /turnPolicy|autoRespond|responseInstructions|instructions/);
       assert.equal(result.bridge.turnPolicy.decisions.at(-1).reason, "app_control_async_accepted");
@@ -139,15 +140,15 @@ async function withCompactOutputToolServer(callback) {
         response.end(JSON.stringify({ ok: true, client_secret: { value: "ek_mock_sdk" } }));
         return;
       }
-      if (request.url === "/tools/control_shared_app_window") {
+      if (request.url === "/tools/kwwk_computer_use") {
         response.end(
           JSON.stringify({
             ok: true,
             status: "queued",
             jobId: "job_sdk_app_control_queued",
             summary: "Queued app control job.",
-            displayText: "交给后台",
-            answer_hint_zh: "交给后台",
+            displayText: "Needs background handling.",
+            answer_hint_en: "Needs background handling.",
           }),
         );
         return;

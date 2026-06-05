@@ -42,58 +42,65 @@ type Config struct {
 	HTTPClient         *http.Client
 	DemoBridge         *RealtimeDemoBridge
 	AppControlBackend  AppControlBackend
+
+	// Tests can shorten this to prove the warm lifecycle without waiting for
+	// the production cadence.
+	AppControlPrewarmKeepaliveInterval time.Duration
 }
 
 type Service struct {
-	logger              *slog.Logger
-	persistence         appconfig.PersistenceConfig
-	internalAuthKey     string
-	pipeline            *postmeeting.Pipeline
-	webhookSender       *postmeeting.WebhookSender
-	meetRunner          meetrunner.Runner
-	runner              agentrunner.Runner
-	runnerErr           error
-	sessionMu           sync.Mutex
-	sessionStore        *persistence.TypedCollection[SessionRecord]
-	workerMu            sync.Mutex
-	workerStore         *persistence.TypedCollection[WorkerReport]
-	meetdMu             sync.Mutex
-	meetdWriteMu        sync.Mutex
-	meetdStore          *persistence.TypedCollection[MeetdMeetingRecord]
-	meetdCaptionStore   *persistence.TypedCollection[MeetdCaptionRecord]
-	meetdSummaryStore   *persistence.TypedCollection[MeetdMeetingSummaryRecord]
-	identityMu          sync.Mutex
-	identityStore       *persistence.TypedCollection[IdentityUserRecord]
-	slackUsersMu        sync.Mutex
-	slackUsersCache     []IdentityUserRecord
-	slackUsersFetchedAt time.Time
-	meetdWebhook        MeetdWebhookSender
-	meetdWebhookURL     string
-	meetdWebhookSecret  string
-	meetdWatchInterval  time.Duration
-	demoSurface         appconfig.DemoSurfaceConfig
-	captionLanguage     string
-	openai              appconfig.OpenAIConfig
-	slackBotToken       string
-	slackAPIBaseURL     string
-	dialog              appconfig.DialogConfig
-	httpClient          *http.Client
-	demoBridge          *RealtimeDemoBridge
-	appControlBackend   AppControlBackend
-	appControlCustom    bool
-	appControlQueue     chan appControlQueuedJob
-	appControlJobsMu    sync.Mutex
-	appControlJobs      map[string]appControlJob
-	appControlJobSeq    uint64
-	meetdWake           chan struct{}
-	meetdRuntimeMu      sync.Mutex
-	meetdRuntimeCancel  context.CancelFunc
-	meetdRuntimeDone    chan struct{}
-	backgroundMu        sync.Mutex
-	backgroundCtx       context.Context
-	backgroundCancel    context.CancelFunc
-	backgroundWG        sync.WaitGroup
-	backgroundStopping  bool
+	logger                             *slog.Logger
+	persistence                        appconfig.PersistenceConfig
+	internalAuthKey                    string
+	pipeline                           *postmeeting.Pipeline
+	webhookSender                      *postmeeting.WebhookSender
+	meetRunner                         meetrunner.Runner
+	runner                             agentrunner.Runner
+	runnerErr                          error
+	sessionMu                          sync.Mutex
+	sessionStore                       *persistence.TypedCollection[SessionRecord]
+	workerMu                           sync.Mutex
+	workerStore                        *persistence.TypedCollection[WorkerReport]
+	meetdMu                            sync.Mutex
+	meetdWriteMu                       sync.Mutex
+	meetdStore                         *persistence.TypedCollection[MeetdMeetingRecord]
+	meetdCaptionStore                  *persistence.TypedCollection[MeetdCaptionRecord]
+	meetdSummaryStore                  *persistence.TypedCollection[MeetdMeetingSummaryRecord]
+	identityMu                         sync.Mutex
+	identityStore                      *persistence.TypedCollection[IdentityUserRecord]
+	slackUsersMu                       sync.Mutex
+	slackUsersCache                    []IdentityUserRecord
+	slackUsersFetchedAt                time.Time
+	meetdWebhook                       MeetdWebhookSender
+	meetdWebhookURL                    string
+	meetdWebhookSecret                 string
+	meetdWatchInterval                 time.Duration
+	demoSurface                        appconfig.DemoSurfaceConfig
+	captionLanguage                    string
+	openai                             appconfig.OpenAIConfig
+	slackBotToken                      string
+	slackAPIBaseURL                    string
+	dialog                             appconfig.DialogConfig
+	httpClient                         *http.Client
+	demoBridge                         *RealtimeDemoBridge
+	appControlBackend                  AppControlBackend
+	appControlCustom                   bool
+	appControlQueue                    chan appControlQueuedJob
+	appControlJobsMu                   sync.Mutex
+	appControlJobs                     map[string]appControlJob
+	appControlJobSeq                   uint64
+	appControlPrewarmKeepaliveInterval time.Duration
+	appControlPrewarmMu                sync.Mutex
+	appControlPrewarmKeepalives        map[string]struct{}
+	meetdWake                          chan struct{}
+	meetdRuntimeMu                     sync.Mutex
+	meetdRuntimeCancel                 context.CancelFunc
+	meetdRuntimeDone                   chan struct{}
+	backgroundMu                       sync.Mutex
+	backgroundCtx                      context.Context
+	backgroundCancel                   context.CancelFunc
+	backgroundWG                       sync.WaitGroup
+	backgroundStopping                 bool
 }
 
 type shutdownRunner interface {
@@ -123,33 +130,39 @@ func NewService(cfg Config) *Service {
 	if watchInterval <= 0 {
 		watchInterval = time.Minute
 	}
+	appControlPrewarmKeepaliveInterval := cfg.AppControlPrewarmKeepaliveInterval
+	if appControlPrewarmKeepaliveInterval <= 0 {
+		appControlPrewarmKeepaliveInterval = defaultAppControlPrewarmKeepaliveInterval
+	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	service := &Service{
-		logger:             logger,
-		persistence:        cfg.Persistence,
-		internalAuthKey:    strings.TrimSpace(cfg.InternalAuthKey),
-		pipeline:           pipeline,
-		webhookSender:      webhookSender,
-		meetRunner:         meetRunner,
-		meetdWebhook:       cfg.MeetdWebhook,
-		meetdWebhookURL:    strings.TrimSpace(cfg.MeetdWebhookURL),
-		meetdWebhookSecret: strings.TrimSpace(cfg.MeetdWebhookSecret),
-		meetdWatchInterval: watchInterval,
-		demoSurface:        normalizeDemoSurfaceConfig(cfg.DemoSurface),
-		captionLanguage:    strings.TrimSpace(cfg.CaptionLanguage),
-		openai:             cfg.OpenAI,
-		slackBotToken:      strings.TrimSpace(cfg.SlackBotToken),
-		slackAPIBaseURL:    strings.TrimRight(strings.TrimSpace(cfg.SlackAPIBaseURL), "/"),
-		dialog:             cfg.Dialog,
-		httpClient:         cfg.HTTPClient,
-		demoBridge:         cfg.DemoBridge,
-		appControlBackend:  cfg.AppControlBackend,
-		appControlCustom:   cfg.AppControlBackend != nil,
-		appControlQueue:    make(chan appControlQueuedJob, 32),
-		appControlJobs:     map[string]appControlJob{},
-		meetdWake:          make(chan struct{}, 1),
-		backgroundCtx:      backgroundCtx,
-		backgroundCancel:   backgroundCancel,
+		logger:                             logger,
+		persistence:                        cfg.Persistence,
+		internalAuthKey:                    strings.TrimSpace(cfg.InternalAuthKey),
+		pipeline:                           pipeline,
+		webhookSender:                      webhookSender,
+		meetRunner:                         meetRunner,
+		meetdWebhook:                       cfg.MeetdWebhook,
+		meetdWebhookURL:                    strings.TrimSpace(cfg.MeetdWebhookURL),
+		meetdWebhookSecret:                 strings.TrimSpace(cfg.MeetdWebhookSecret),
+		meetdWatchInterval:                 watchInterval,
+		demoSurface:                        normalizeDemoSurfaceConfig(cfg.DemoSurface),
+		captionLanguage:                    strings.TrimSpace(cfg.CaptionLanguage),
+		openai:                             cfg.OpenAI,
+		slackBotToken:                      strings.TrimSpace(cfg.SlackBotToken),
+		slackAPIBaseURL:                    strings.TrimRight(strings.TrimSpace(cfg.SlackAPIBaseURL), "/"),
+		dialog:                             cfg.Dialog,
+		httpClient:                         cfg.HTTPClient,
+		demoBridge:                         cfg.DemoBridge,
+		appControlBackend:                  cfg.AppControlBackend,
+		appControlCustom:                   cfg.AppControlBackend != nil,
+		appControlQueue:                    make(chan appControlQueuedJob, 32),
+		appControlJobs:                     map[string]appControlJob{},
+		appControlPrewarmKeepaliveInterval: appControlPrewarmKeepaliveInterval,
+		appControlPrewarmKeepalives:        map[string]struct{}{},
+		meetdWake:                          make(chan struct{}, 1),
+		backgroundCtx:                      backgroundCtx,
+		backgroundCancel:                   backgroundCancel,
 	}
 	if service.httpClient == nil {
 		service.httpClient = httputil.NewHTTPClient(10 * time.Second)

@@ -201,7 +201,7 @@ async function runKWWKDirectAppControl(body: MeetingAgentInput, status: unknown 
   const payload = {
     jsonrpc: "2.0",
     id: `ts_app_control_${Date.now()}`,
-    method: "app_control.control_shared_app_window",
+    method: "kwwk.cu.execute",
     params: {
       session_id: String(body.session_id || body.sessionId || ""),
       instruction,

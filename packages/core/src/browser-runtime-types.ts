@@ -334,6 +334,8 @@ declare global {
     MAB_AVATAR_AUDIO_BUS?: AvatarAudioBus;
     MAB_AVATAR_CONFIG?: HiyoriAvatarConfig | null;
     MAB_AVATAR_CONTROLLER?: AvatarController;
+    MAB_AVATAR_BOOT_ERROR?: string;
+    MAB_AVATAR_MEDIA?: Record<string, unknown> | null;
     MAB_AVATAR_READY?: Record<string, unknown> | null;
     MAB_AVATAR_START_RENDERER?: (() => Promise<unknown>) | null;
     MAB_AVATAR_THREE_VRM_DEPS?: Record<string, any> | null;

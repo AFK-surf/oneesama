@@ -63,6 +63,22 @@ test("local browser surface runs avatar dialog without Google Meet", async () =>
       window.MAB_LOCAL_BROWSER_SURFACE.sendText("不用 Meet 直接跑一下"),
     );
     assert.equal(result.ok, true);
+    const avatarMediaStream = await page.evaluate(async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const tracks = stream.getTracks().map((track) => ({
+        kind: track.kind,
+        id: track.id,
+        enabled: track.enabled,
+        muted: track.muted,
+        readyState: track.readyState,
+      }));
+      stream.getTracks().forEach((track) => track.stop());
+      return {
+        tracks,
+        media: window.MAB_AVATAR_MEDIA,
+        readyMedia: window.MAB_AVATAR_READY?.mediaOverride,
+      };
+    });
 
     await page.waitForFunction(
       () => window.MAB_LOCAL_DIALOG?.lastTurn?.status === "completed",
@@ -83,6 +99,24 @@ test("local browser surface runs avatar dialog without Google Meet", async () =>
     assert.equal(state.ready.ok, true);
     assert.equal(state.ready.rendererMode, "fallback");
     assert.equal(state.ready.fallbackReason, "disabled_by_config");
+    assert.deepEqual(avatarMediaStream.tracks.map((track) => track.kind).sort(), [
+      "audio",
+      "video",
+    ]);
+    assert.ok(avatarMediaStream.media.getUserMediaCalls >= 1, JSON.stringify(avatarMediaStream));
+    assert.ok(
+      avatarMediaStream.media.videoGetUserMediaCalls >= 1,
+      JSON.stringify(avatarMediaStream),
+    );
+    assert.ok(
+      avatarMediaStream.media.returnedVideoTrackCount >= 1,
+      JSON.stringify(avatarMediaStream),
+    );
+    assert.equal(avatarMediaStream.readyMedia.ok, true);
+    assert.ok(
+      avatarMediaStream.media.patchedTargets.includes("MediaDevices.prototype.getUserMedia"),
+      JSON.stringify(avatarMediaStream.media),
+    );
     assert.equal(state.localSurfaceReady, true);
     assert.equal(state.videoPaused, false);
     assert.equal(state.videoTrackCount, 1);

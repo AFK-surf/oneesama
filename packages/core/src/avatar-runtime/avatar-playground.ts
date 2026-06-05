@@ -800,7 +800,7 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
                     { ts: toolCallTs, name: "list_shareable_windows" },
                     { ts: toolCallTs, name: "share_existing_app_window" },
                   ],
-                  workspace: [{ ts: toolCallTs, name: "control_shared_app_window" }],
+                  workspace: [{ ts: toolCallTs, name: "kwwk_computer_use" }],
                 };
           return {
             connected: true,

@@ -4,14 +4,17 @@ import { test } from "vite-plus/test";
 import {
   deriveStartedStatus,
   hasJoinAcceptedEvidence,
+  joinFailureDetails,
   joinFailureMessage,
   recoverAcceptedJoinAfterError,
 } from "../meet-runner/src/join-result.ts";
 import { deriveRuntimeSessionStatus } from "../meet-runner/src/session-status.ts";
+import { shouldRetryMeetNavigationAfterProductRedirect } from "../packages/core/src/meeting/google-meet-joiner-base.ts";
 
 test("meet-runner join result status treats admitted and in-meeting evidence as accepted", () => {
   assert.equal(deriveStartedStatus({ admission: { state: "admitted" } }), "joined");
   assert.equal(deriveStartedStatus({ meetPage: { inMeeting: true } }), "joined");
+  assert.equal(deriveStartedStatus({ meetPage: { inMeeting: true, preJoin: true } }), "starting");
   assert.equal(deriveStartedStatus({ meetPage: { waitingForAdmit: true } }), "waiting");
   assert.equal(
     deriveStartedStatus({ clickedJoinSelector: "dom:meet-join-button" }),
@@ -55,6 +58,26 @@ test("meet-runner preserves real join failures without accepted runtime evidence
   assert.equal(joinFailureMessage({}), "google meet join failed");
 });
 
+test("meet-runner preserves WebDriver hard-block diagnostics in terminal join failures", () => {
+  const details = joinFailureDetails({
+    ok: false,
+    error: "cannot_join_meeting",
+    diagnosticsPath: "/tmp/meeting-avatar-bot/session-hard-blocked-diagnostics.json",
+    webDriver: {
+      status: "hard_blocked",
+      message: "You can't join this video call / Return to home screen",
+    },
+  });
+
+  assert.equal(details.error, "cannot_join_meeting");
+  assert.equal(details.reason, "hard_blocked");
+  assert.equal(details.message, "You can't join this video call / Return to home screen");
+  assert.equal(
+    details.diagnostics_path,
+    "/tmp/meeting-avatar-bot/session-hard-blocked-diagnostics.json",
+  );
+});
+
 test("meet-runner runtime status detects kicked or removed meeting page", () => {
   const state = {
     id: "session_kicked",
@@ -80,5 +103,45 @@ test("meet-runner runtime status detects kicked or removed meeting page", () => 
       meetPage: { url: state.meeting_url, inMeeting: true },
     }),
     "joined",
+  );
+  assert.equal(
+    deriveRuntimeSessionStatus(
+      { ...state, status: "starting" },
+      {
+        meetPage: { url: state.meeting_url, inMeeting: true, preJoin: true },
+      },
+    ),
+    "starting",
+  );
+});
+
+test("google meet joiner retries when guest navigation lands on Workspace Meet product page", () => {
+  assert.equal(
+    shouldRetryMeetNavigationAfterProductRedirect(
+      "https://meet.google.com/abc-defg-hij",
+      "https://workspace.google.com/products/meet/",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldRetryMeetNavigationAfterProductRedirect(
+      "https://meet.google.com/abc-defg-hij",
+      "https://workspace.google.com/intl/ja/products/meet/",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldRetryMeetNavigationAfterProductRedirect(
+      "https://meet.google.com/abc-defg-hij",
+      "https://meet.google.com/abc-defg-hij?authuser=0",
+    ),
+    false,
+  );
+  assert.equal(
+    shouldRetryMeetNavigationAfterProductRedirect(
+      "http://127.0.0.1:3000/fixture",
+      "https://workspace.google.com/products/meet/",
+    ),
+    false,
   );
 });

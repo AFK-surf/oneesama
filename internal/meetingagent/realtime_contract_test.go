@@ -1,6 +1,8 @@
 package meetingagent
 
 import (
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -57,6 +59,38 @@ func TestBuildRealtimeSessionMergesAudioAndReasoningOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildRealtimeSessionEnablesInputAudioTranscriptionByDefault(t *testing.T) {
+	session := buildRealtimeSessionConfig(RealtimeSessionOptions{}, testRealtimeOpenAIConfig())
+	audio := session["audio"].(map[string]any)
+	input := audio["input"].(map[string]any)
+	transcription := input["transcription"].(map[string]any)
+	if transcription["model"] != "gpt-4o-mini-transcribe" {
+		t.Fatalf("transcription = %#v, want default model", transcription)
+	}
+}
+
+func TestBuildRealtimeSessionAllowsInputAudioTranscriptionOverrideAndDisable(t *testing.T) {
+	overridden := buildRealtimeSessionConfig(RealtimeSessionOptions{
+		InputAudioTranscription: map[string]any{"model": "custom-transcribe", "language": "zh"},
+	}, testRealtimeOpenAIConfig())
+	disabled := buildRealtimeSessionConfig(RealtimeSessionOptions{
+		InputAudioTranscription: "disabled",
+	}, testRealtimeOpenAIConfig())
+
+	overriddenAudio := overridden["audio"].(map[string]any)
+	overriddenInput := overriddenAudio["input"].(map[string]any)
+	transcription := overriddenInput["transcription"].(map[string]any)
+	if transcription["model"] != "custom-transcribe" || transcription["language"] != "zh" {
+		t.Fatalf("transcription = %#v, want override", transcription)
+	}
+
+	disabledAudio := disabled["audio"].(map[string]any)
+	disabledInput := disabledAudio["input"].(map[string]any)
+	if _, ok := disabledInput["transcription"]; ok {
+		t.Fatalf("transcription = %#v, want omitted", disabledInput["transcription"])
+	}
+}
+
 func TestBuildRealtimeSessionAppliesProductTruncationDefault(t *testing.T) {
 	session := buildRealtimeSessionConfig(RealtimeSessionOptions{}, testRealtimeOpenAIConfig())
 	truncation, ok := session["truncation"].(map[string]any)
@@ -85,6 +119,45 @@ func TestBuildRealtimeSessionDefaultsToLiveSafeToolSurface(t *testing.T) {
 	}
 	if toolNamesInclude(realtimeToolMapsAsAny(tools), "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface") {
 		t.Fatalf("tools = %#v, default session must not include demo/browser-surface tools", tools)
+	}
+}
+
+func TestRealtimeKWWKToolSchemaOnlyExposesGoalAndTargetHints(t *testing.T) {
+	t.Parallel()
+
+	var kwwk map[string]any
+	for _, tool := range defaultRealtimeToolSchemas() {
+		if tool["name"] == "kwwk_computer_use" {
+			kwwk = tool
+			break
+		}
+	}
+	if kwwk == nil {
+		t.Fatal("kwwk_computer_use missing from default Realtime tools")
+	}
+	parameters := kwwk["parameters"].(map[string]any)
+	properties := parameters["properties"].(map[string]any)
+	keys := make([]string, 0, len(properties))
+	for key := range properties {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	want := []string{
+		"applicationName",
+		"bundleIdentifier",
+		"instruction",
+		"processId",
+		"session_id",
+		"windowId",
+		"windowTitle",
+	}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("kwwk_computer_use properties = %#v, want only goal and target hints %#v", keys, want)
+	}
+	for _, hidden := range []string{"job_id", "operations", "executionMode", "wait", "timeoutMs", "x", "y"} {
+		if _, ok := properties[hidden]; ok {
+			t.Fatalf("kwwk_computer_use must not expose %q to Realtime: %#v", hidden, properties)
+		}
 	}
 }
 
@@ -135,6 +208,7 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 	}, testRealtimeOpenAIConfig())
 
 	for _, want := range []string{
+		"Always answer in concise English, regardless of the user's language.",
 		"Addressing contract:",
 		"Do not say internal control-plane status",
 		"Do not announce what you are about to do",
@@ -152,7 +226,6 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 		"Do not answer that a window list is processing",
 		"Fake-execution ban:",
 		"before emitting the corresponding tool call",
-		"结果出来告诉你",
 		"App-control identity boundary:",
 		"bot's host Mac",
 		"这台 Mac mini",
@@ -163,6 +236,14 @@ func TestBuildRealtimeInstructionsIncludesRealtimeQualityGuards(t *testing.T) {
 	} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("instructions missing %q:\n%s", want, instructions)
+		}
+	}
+	for _, unwanted := range []string{
+		"Speak concise Chinese by default.",
+		"summarize the result in concise Chinese",
+	} {
+		if strings.Contains(instructions, unwanted) {
+			t.Fatalf("instructions contain obsolete Chinese-output requirement %q:\n%s", unwanted, instructions)
 		}
 	}
 }

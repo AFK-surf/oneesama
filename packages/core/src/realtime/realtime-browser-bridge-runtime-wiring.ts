@@ -110,7 +110,7 @@ async function mintRealtimeClientSecretForSDK(connectionConfig) {
     const error = new Error(`Realtime client secret fetch failed: ${detail.error}`);
     const typedError = error as Error & { realtimeTokenError?: Record<string, unknown> };
     typedError.realtimeTokenError = detail;
-    throw error;
+    throw typedError;
   }
   const text = await readResponseText(response);
   const body = parseJsonObject(text);

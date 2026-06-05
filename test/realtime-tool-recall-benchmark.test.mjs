@@ -33,8 +33,11 @@ test("Realtime tool recall fixtures cover KWWK positive and negative routing", a
     const testCase = cases.get(id);
     assert.deepEqual(testCase.expectedToolNames, []);
     assert.ok(testCase.disallowedToolNames.includes("kwwk_computer_use"), id);
-    assert.ok(testCase.disallowedToolNames.includes("control_shared_app_window"), id);
   }
+  const complex = cases.get("complex_shared_doc_redesign_zh");
+  assert.deepEqual(complex?.variants, ["full"]);
+  assert.ok(complex?.expectedToolNames.includes("delegate_to_worker"));
+  assert.ok(complex?.disallowedToolNames.includes("kwwk_computer_use"));
   assert.ok(
     fixture.variants
       .find((variant) => variant.name === "share-control-only")

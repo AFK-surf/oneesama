@@ -2,19 +2,21 @@
   function truncateText(text: unknown, maxChars = 3500): string {
     const raw = String(text || "");
     if (raw.length <= maxChars) return raw;
-    return `${raw.slice(0, maxChars).trimEnd()}\n\n...(已截断，原文 ${raw.length} 字符)`;
+    return `${raw.slice(0, maxChars).trimEnd()}\n\n...(truncated from ${raw.length} characters)`;
   }
 
   function workerResultStatusLabel(job) {
-    if (job.status === "failed") return "失败";
-    if (job.status === "timeout") return "超时";
-    return "完成";
+    if (job.status === "failed") return "failed";
+    if (job.status === "timeout") return "timed out";
+    return "completed";
   }
 
   function buildWorkerResultChatText(job) {
     const status = workerResultStatusLabel(job);
     const result = workerResultChatBody(job);
-    return truncateText([`后台任务${status}：${job.task || job.id}`, "", result].join("\n"));
+    return truncateText(
+      [`Background task ${status}: ${job.task || job.id}`, "", result].join("\n"),
+    );
   }
 
   function shouldSendWorkerResultToMeetChat(job) {
@@ -22,7 +24,7 @@
     return result.trim().length > 0;
   }
 
-  function workerResultChatBody(job, fallback = "没有返回详细结果。") {
+  function workerResultChatBody(job, fallback = "No detailed result was returned.") {
     if (isMeetingAppControlWorkerJob(job)) {
       const envelope = job?.resultEnvelope || job?.result_envelope || {};
       return envelope.summary || envelope.error || job.error || job.result || fallback;
@@ -54,35 +56,35 @@
     const status = workerResultStatusLabel(job);
     if (chatDelivery?.ok) {
       return [
-        `后台任务${status}。`,
-        "完整结果我已经发到 Meet chat，不在语音里整段念。",
-        "你可以先看聊天里的结果，需要我继续处理再直接说。",
+        `The background task ${status}.`,
+        "I posted the full result to Meet chat, so I will not read the whole thing aloud.",
+        "Check the chat first; tell me directly if you want me to keep going.",
       ].join("\n");
     }
     if (chatDelivery && chatDelivery.ok === false) {
       return [
-        `后台任务${status}，但结果太长，Meet chat 发送失败。`,
-        `发送失败原因：${chatDelivery.error || "unknown"}`,
-        "我先不整段朗读，避免打断会议。",
+        `The background task ${status}, but sending the long result to Meet chat failed.`,
+        `Send failure reason: ${chatDelivery.error || "unknown"}`,
+        "I will not read the whole result aloud to avoid disrupting the meeting.",
       ].join("\n");
     }
-    const result = job.result || job.error || "没有返回详细结果。";
+    const result = job.result || job.error || "No detailed result was returned.";
     return [
-      `后台任务 ${status}。`,
-      `任务：${job.task || job.id}`,
-      `结果：${result}`,
-      "请用 1-2 句中文主动汇报给会议里的用户。",
+      `Background task ${status}.`,
+      `Task: ${job.task || job.id}`,
+      `Result: ${result}`,
+      "Briefly report this to the meeting user in 1-2 English sentences.",
     ].join("\n");
   }
 
   function buildWorkerResultText(job) {
-    const status = job.status === "failed" ? "失败" : "完成";
-    const result = job.result || job.error || "没有返回详细结果。";
+    const status = job.status === "failed" ? "failed" : "completed";
+    const result = job.result || job.error || "No detailed result was returned.";
     return [
-      `后台任务 ${status}。`,
-      `任务：${job.task || job.id}`,
-      `结果：${result}`,
-      "请用 1-2 句中文主动汇报给会议里的用户。",
+      `Background task ${status}.`,
+      `Task: ${job.task || job.id}`,
+      `Result: ${result}`,
+      "Briefly report this to the meeting user in 1-2 English sentences.",
     ].join("\n");
   }
 

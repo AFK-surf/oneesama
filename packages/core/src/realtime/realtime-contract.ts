@@ -3,7 +3,7 @@ const rawRealtimeToolSchemas = [
     type: "function",
     name: "delegate_to_worker",
     description:
-      "Start a background workspace job for async workspace/code/research/debug/planning work or external workspace lookup that is not handled by a live meeting tool. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo/GitHub/Linear/Slack/Notion/calendar/docs/URL lookup or otherwise requests work that should continue outside the short voice turn. For vague file batches or missing details, still start the background job with the user's wording instead of staying silent or asking for every file up front. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, or direct Meet-chat read/send requests.",
+      "Start a background workspace job for async workspace/code/research/debug/planning work or external workspace lookup that is not handled by a live meeting tool. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo/GitHub/Linear/Slack/Notion/calendar/docs/URL lookup, or asks to implement/build/create a web app/game such as synced Gomoku/五子棋, or otherwise requests work that should continue outside the short voice turn. For build/implement/create web app/game requests, set mode to code and allowCodeChanges to true. For vague file batches or missing details, still start the background job with the user's wording instead of staying silent or asking for every file up front. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, or direct Meet-chat read/send requests.",
     parameters: {
       type: "object",
       properties: {
@@ -147,67 +147,10 @@ const rawRealtimeToolSchemas = [
     parameters: {
       type: "object",
       properties: {
-        job_id: {
-          type: "string",
-          description:
-            "Existing KWWK app-control job id to check. When set, instruction is not required.",
-        },
         instruction: {
           type: "string",
           description:
             "Natural-language app/window operation to perform. Preserve the user's wording and do not translate it into low-level primitives.",
-        },
-        applicationName: {
-          type: "string",
-          description:
-            "Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal.",
-        },
-        bundleIdentifier: {
-          type: "string",
-          description: "Optional macOS bundle identifier when known.",
-        },
-        windowTitle: {
-          type: "string",
-          description: "Optional visible window title when known.",
-        },
-        windowId: {
-          type: "integer",
-          description:
-            "Optional macOS window id from the active app share, preferred over app-name guessing when known.",
-        },
-        processId: {
-          type: "integer",
-          description: "Optional process id from list_shareable_windows.",
-        },
-        session_id: { type: "string", description: "Current meeting session id when known." },
-      },
-      required: [],
-    },
-  },
-  {
-    type: "function",
-    name: "control_shared_app_window",
-    description:
-      "Compatibility app-control entrypoint for the currently shared existing macOS app/window on the bot host. Prefer kwwk_computer_use for simple direct KWWK operations. Use this only for legacy callers or explicit delegate-mode app-control requests that need Codex Computer Use. Put the user's goal in natural language instruction; do not invent click coordinates or low-level UI primitives in the Realtime turn. This tool operates the bot host's shared window, not the human's personal computer.",
-    parameters: {
-      type: "object",
-      properties: {
-        executionMode: {
-          type: "string",
-          description:
-            "direct runs the configured KWWK/direct app-control backend for simple actions; delegate starts the Codex app-control worker for complex tasks.",
-          enum: ["direct", "delegate"],
-          default: "direct",
-        },
-        job_id: {
-          type: "string",
-          description:
-            "Existing app-control job id to check. When set, instruction is not required.",
-        },
-        instruction: {
-          type: "string",
-          description:
-            "Concrete user-facing operation to perform in the shared app/window. Preserve important wording; for implicit targets, put the full user goal here.",
         },
         applicationName: {
           type: "string",
@@ -549,7 +492,7 @@ export const demoSurfaceRealtimeToolNames = new Set([
   "stop_shared_browser_surface",
 ]);
 
-export const compatibilityRealtimeToolNames = new Set(["control_shared_app_window"]);
+export const compatibilityRealtimeToolNames = new Set();
 
 export const defaultRealtimeToolSchemas = realtimeToolSchemas.filter(
   (tool) =>
@@ -597,6 +540,8 @@ export interface RealtimeSessionOptions {
   outputAudioFormatType?: string;
   inputAudioRate?: number | string;
   outputAudioRate?: number | string;
+  inputAudioTranscription?: unknown;
+  input_audio_transcription?: unknown;
   reasoningEffort?: string;
   reasoning_effort?: string;
   reasoning?: Record<string, unknown>;
@@ -635,6 +580,8 @@ export interface RealtimeSessionConfig {
   openaiRealtimeVoice?: string;
   openaiRealtimeReasoningEffort?: string;
   openaiRealtimeTurnDetection?: unknown;
+  openaiRealtimeTranscriptionModel?: string;
+  asrModel?: string;
   openaiRealtimeSessionSchema?: string;
   botName?: string;
   realtimePersonalityContext?: string;
@@ -775,6 +722,27 @@ function normalizeTurnDetectionConfig(value: unknown) {
   return { type: normalized };
 }
 
+function normalizeRealtimeInputTranscription(value: unknown) {
+  if (value === null || value === false) return null;
+  if (typeof value === "object" && value !== undefined) {
+    return Array.isArray(value) ? null : { ...(value as Record<string, unknown>) };
+  }
+  const normalized = String(value || "").trim();
+  if (!normalized) return null;
+  if (/^(none|off|disabled|false)$/i.test(normalized)) return null;
+  if (normalized.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(normalized);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return { ...parsed };
+      }
+    } catch {
+      // Fall through to treating the value as a transcription model name.
+    }
+  }
+  return { model: normalized };
+}
+
 function normalizeRealtimeTruncation(value: unknown) {
   if (value !== undefined && value !== null && value !== "") {
     if (typeof value === "string") {
@@ -821,6 +789,13 @@ export function buildRealtimeSessionConfig(
     options.turn_detection ||
     config.openaiRealtimeTurnDetection ||
     DEFAULT_REALTIME_TURN_DETECTION;
+  const inputTranscription = normalizeRealtimeInputTranscription(
+    options.inputAudioTranscription ??
+      options.input_audio_transcription ??
+      config.openaiRealtimeTranscriptionModel ??
+      config.asrModel ??
+      "gpt-4o-mini-transcribe",
+  );
   const sessionSchema =
     options.sessionSchema ||
     options.session_schema ||
@@ -858,6 +833,7 @@ export function buildRealtimeSessionConfig(
           rate: Number(options.inputAudioRate || 24000),
         },
         turn_detection: normalizeTurnDetectionConfig(turnDetection),
+        ...(inputTranscription ? { transcription: inputTranscription } : {}),
       },
       output: {
         format: {
@@ -915,7 +891,7 @@ export function buildRealtimeInstructions({
     toolNames.has("control_shared_browser_surface");
   const lines = [
     `You are ${botName}, a low-latency AI meeting avatar.`,
-    "Speak concise Chinese by default.",
+    "Always answer in concise English, regardless of the user's language.",
     "Persona: lively, concise, reliable meeting copilot with a bright on-camera presence. Be warm and playful, but keep answers short and useful.",
     "Product behavior: keep implementation details invisible. Do not mention internal function names, model/runtime names, background job names, or service routing unless the user explicitly asks for debugging.",
     "Do not say internal control-plane status aloud, including no-action decisions, backend results, routing state, tool names, background task state, or debug logs.",
@@ -934,7 +910,7 @@ export function buildRealtimeInstructions({
     "Use real meeting/workspace data when available. Never invent names, tasks, calendar facts, documents, links, or code state.",
     "For identity questions, resolve the current speaker identity first. Do not answer from stale defaults.",
     "For personal task questions, resolve the current user profile first and use its workspace identifiers.",
-    "For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise Chinese.",
+    "For screen share, video playback, links, meeting chat, calendar, tasks, documents, code, research, or long-running work, use the available internal actions silently and summarize the result in concise English.",
     "Screen-share routing: if the user names a concrete existing app/window (for example Pencil, VS Code, Chrome, Notion, Terminal, Activity Monitor) and asks to show/share/present/演示 it, share that existing app/window. If the user only gives a category like editor/browser/window/app/design tool, list shareable windows first instead of guessing. Do not create a new workspace and do not invent a URL for the app name.",
     "Screen-share action mandate: when the newest user request asks to share/show/present a screen, browser, app, or window, your first action in that turn must be list_shareable_windows or share_existing_app_window. Do not answer that a window list is processing, unavailable, or not ready before a tool result exists. Do not say you will try to share Chrome/browser/window unless you actually call the share/list tool in the same turn.",
     "Chinese share intent has priority over arithmetic: phrases like “共享一下”, “分享一下”, “共享屏幕”, “分享窗口”, “把 Pencil 共享一下”, “喷手这个 App”, or “Pencil 这个 app” mean screen/app sharing, even if noisy audio sounds like “算一下”. Do not answer with math unless the user explicitly asks a math question with numbers/operators such as “二乘二/2+2/怎么算”.",

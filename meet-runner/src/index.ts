@@ -4,6 +4,7 @@ import { createGoogleMeetJoiner } from "../../packages/core/src/meeting/google-m
 import {
   deriveStartedStatus,
   hasJoinAcceptedEvidence,
+  joinFailureDetails,
   joinFailureMessage,
   recoverAcceptedJoinAfterError,
 } from "./join-result.ts";
@@ -55,6 +56,11 @@ function validateHostRealtimeEvent(event: Record<string, unknown>): {
   const type = String(event.type || "").trim();
   if (!type) return { ok: false, error: "realtime_event_type_required" };
   if (type === "response.cancel" || type === "input_audio_buffer.clear") return { ok: true };
+  if (type === "conversation.item.input_audio_transcription.completed") {
+    return String(event.transcript || "").trim()
+      ? { ok: true }
+      : { ok: false, error: "realtime_transcript_required" };
+  }
   return { ok: false, error: "realtime_event_type_not_allowed" };
 }
 
@@ -142,6 +148,12 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     recordMeeting: options.recordMeeting,
     artifactsDir: options.artifactsDir,
     meetAudioBackend: options.meetAudioBackend,
+    browserUserDataDir: options.browserUserDataDir,
+    meetProfileMode: options.meetProfileMode,
+    meetUIInteractionMode: options.meetUIInteractionMode,
+    meetJoinLane: options.meetJoinLane,
+    meetBrowserControlMode: options.meetBrowserControlMode,
+    retryPolicy: options.retryPolicy,
     installAvatar: options.installAvatar,
     installRealtimeBridge: options.installRealtimeBridge,
     realtimeBridgeMode: options.realtimeBridgeMode,
@@ -156,6 +168,7 @@ async function handleJoinRequest(params: PrepareJoinParams) {
         : undefined,
     autoConnectRealtime: options.autoConnectRealtime,
     sendRealtimeSessionUpdate: options.sendRealtimeSessionUpdate,
+    dryRunLocalTools: options.dryRunLocalTools,
     includeParticipantAudio: options.includeParticipantAudio,
     forwardMeetAudioToRealtime: options.forwardMeetAudioToRealtime,
     meetAudioInputGain: options.meetAudioInputGain,
@@ -189,7 +202,25 @@ async function handleJoinRequest(params: PrepareJoinParams) {
     recoveredAfterError = String(joinResult.recovered_after_error || "");
   }
   if (!joinResult?.ok && !hasJoinAcceptedEvidence(joinResult)) {
-    throw new Error(joinFailureMessage(joinResult));
+    const details = joinFailureDetails(joinResult);
+    const session = setSession({
+      id: sessionId,
+      meeting_url: meetingUrl,
+      status: "failed",
+      title,
+      updated_at: now(),
+      started: false,
+    });
+    return {
+      ok: false,
+      accepted: false,
+      started: false,
+      bridge_mode: bridgeMode,
+      note: details.message,
+      session,
+      plan: buildPlan(params, meetingUrl),
+      ...details,
+    };
   }
   if (!joinResult?.ok) {
     recoveredAfterError = joinFailureMessage(joinResult);

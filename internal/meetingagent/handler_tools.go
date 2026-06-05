@@ -76,6 +76,13 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			"aliases", currentUser.Aliases,
 			"preferred_address", preferredAddress,
 		)
+		identityHint := "The person speaking to you is " + preferredAddress + "."
+		if strings.TrimSpace(currentUser.EnglishName) != "" && currentUser.EnglishName != preferredAddress {
+			identityHint += " Their English account name is " + currentUser.EnglishName + "."
+		}
+		if len(currentUser.Aliases) > 0 {
+			identityHint += " Aliases: " + strings.Join(currentUser.Aliases, " / ") + "."
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"ok": true,
 			"current_user": gin.H{
@@ -89,7 +96,7 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 				"aliases":           currentUser.Aliases,
 				"identity":          identity,
 			},
-			"answer_hint_zh": "当前和你说话的人是 " + preferredAddress + "（英文账号 " + currentUser.EnglishName + "；别名 " + strings.Join(currentUser.Aliases, " / ") + "）。",
+			"answer_hint_en": identityHint,
 		})
 	case "resolve_speaker_identity":
 		var input resolveSpeakerIdentityInput
@@ -192,7 +199,7 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, result)
-	case "kwwk_computer_use", "control_shared_app_window":
+	case "kwwk_computer_use":
 		var input RealtimeSharedAppControlRequest
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -201,9 +208,7 @@ func (h *Handler) handleRealtimeWorkspaceTool(c *gin.Context) {
 			})
 			return
 		}
-		if toolName == "kwwk_computer_use" {
-			input.ExecutionMode = appControlExecutionModeDirect
-		}
+		input.ExecutionMode = appControlExecutionModeDirect
 		c.JSON(http.StatusOK, h.service.ControlRealtimeSharedApp(c.Request.Context(), input))
 	case "stop_shared_browser_surface":
 		if h.rejectHiddenRealtimeDemoSurfaceTool(c, toolName) {

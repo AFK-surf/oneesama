@@ -87,6 +87,9 @@ test("Realtime sidecar accepts host-forwarded Meet surface PCM for non-Google fi
       });
 
       await sidecarPage.waitForFunction(
+        () => window.MAB_REALTIME_BRIDGE?.connection?.participantAudioTracksDiscovered > 0,
+      );
+      await sidecarPage.waitForFunction(
         () => window.MAB_REALTIME_BRIDGE?.connection?.hostMeetAudioInput?.chunks > 0,
       );
       await sidecarPage.waitForFunction(
@@ -107,6 +110,13 @@ test("Realtime sidecar accepts host-forwarded Meet surface PCM for non-Google fi
 
       assert.equal(meetState.sdkGlobal, false);
       assert.ok(meetState.surfaceAudioInput?.chunks > 0);
+      assert.ok(meetState.surfaceAudioInput?.metadataRegistrations > 0);
+      assert.ok(sidecarState.connection.participantAudioTracksDiscovered > 0);
+      assert.ok(
+        sidecarState.connection.participantAudioSources.some(
+          (source) => source.source === "host_meet_audio_pcm",
+        ),
+      );
       assert.equal(sidecarState.connection.hostMeetAudioInput.connected, true);
       assert.ok(sidecarState.connection.hostMeetAudioInput.samplesReceived > 0);
       assert.equal(sidecarState.connection.currentRealtimeInputSource, "host_meet_audio_pcm");
@@ -125,6 +135,68 @@ test("Realtime sidecar accepts host-forwarded Meet surface PCM for non-Google fi
       assert.ok(sidecarState.timelineTypes.includes("host_meet_audio_input_connected"));
     } finally {
       await context.close().catch(() => {});
+      await browser.close().catch(() => {});
+    }
+  });
+});
+
+test("Realtime sidecar records host-forwarded Meet surface metadata before PCM samples", async () => {
+  await withSurfaceAudioServer(async ({ baseUrl }) => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.addInitScript({
+        content: buildRealtimeBrowserInitScript({
+          mode: "webrtc-mock",
+          agentRuntime: "mock",
+          realtimeRuntimePlacement: "sidecar",
+          realtimePageRole: "sidecar",
+          sessionId: "sidecar-surface-audio-metadata-session",
+          tokenUrl: `${baseUrl}/realtime/client-secret`,
+          autoConnect: false,
+          includeParticipantAudio: true,
+          forwardMeetAudioToRealtime: true,
+          meetAudioInputSource: "webrtc",
+          allowHostMeetAudioPcmInput: true,
+          tools: [],
+          session: {},
+        }),
+      });
+      await page.goto(`${baseUrl}/sidecar`);
+      await page.waitForFunction(
+        () => typeof window.MAB_REALTIME_CLIENT?.pushHostMeetAudioSamples === "function",
+      );
+
+      const result = await page.evaluate(() =>
+        window.MAB_REALTIME_CLIENT.pushHostMeetAudioSamples({
+          source: "host_meet_audio_pcm",
+          label: "fixture-surface-metadata",
+          streamId: "metadata-stream-1",
+          trackIds: ["track-a", "track-b"],
+          sampleRate: 48000,
+          channels: 0,
+          samples: [],
+          metadataOnly: true,
+        }),
+      );
+      const state = await page.evaluate(() => ({
+        connection: window.MAB_REALTIME_BRIDGE.connection,
+        timelineTypes: window.MAB_REALTIME_BRIDGE.timeline.map((entry) => entry.type),
+      }));
+
+      assert.deepEqual(result, {
+        ok: true,
+        source: "host_meet_audio_pcm",
+        metadataOnly: true,
+        participantAudioTracksDiscovered: 2,
+      });
+      assert.equal(state.connection.participantAudioTracksDiscovered, 2);
+      assert.equal(state.connection.hostMeetAudioInput.enabled, true);
+      assert.equal(state.connection.hostMeetAudioInput.connected, false);
+      assert.equal(state.connection.hostMeetAudioInput.chunks, 0);
+      assert.equal(state.connection.hostMeetAudioInput.samplesReceived, 0);
+      assert.ok(state.timelineTypes.includes("participant_audio_discovered"));
+    } finally {
       await browser.close().catch(() => {});
     }
   });

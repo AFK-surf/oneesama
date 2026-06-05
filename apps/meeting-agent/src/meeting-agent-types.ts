@@ -43,6 +43,8 @@ export interface MeetingAgentInput {
   reason?: string;
   preview?: boolean;
   dryRun?: boolean;
+  dryRunLocalTools?: boolean;
+  dry_run_local_tools?: boolean;
   dry_run_joiner?: boolean;
   dryRunJoiner?: boolean;
   recordMeeting?: boolean;
@@ -57,6 +59,14 @@ export interface MeetingAgentInput {
   realtimeSdpUrl?: string;
   realtimeTokenUrl?: string;
   meetAudioBackend?: string;
+  browserUserDataDir?: string;
+  browser_user_data_dir?: string;
+  meetProfileMode?: string;
+  meet_profile_mode?: string;
+  meetUIInteractionMode?: string;
+  meet_ui_interaction_mode?: string;
+  meetJoinLane?: string;
+  meet_join_lane?: string;
   forwardMeetAudioToRealtime?: boolean;
   includeParticipantAudio?: boolean;
   autoConnectRealtime?: boolean;

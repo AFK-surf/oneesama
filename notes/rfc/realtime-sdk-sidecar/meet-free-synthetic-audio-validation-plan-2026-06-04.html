@@ -1,0 +1,1074 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meet-free Synthetic Audio Validation Plan</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #5b6472;
+        --line: #d9e0e8;
+        --panel: #ffffff;
+        --page: #f5f7fa;
+        --green: #1d8a58;
+        --green-soft: #e6f5ee;
+        --blue: #2563eb;
+        --blue-soft: #e8f0ff;
+        --amber: #b7791f;
+        --amber-soft: #fff3d8;
+        --red: #c24135;
+        --red-soft: #ffe8e5;
+        --violet: #6d4aff;
+        --violet-soft: #eee9ff;
+        --shadow: 0 16px 42px rgba(23, 32, 42, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 247, 250, 0.98)),
+          radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.12), transparent 32%),
+          radial-gradient(circle at 86% 6%, rgba(29, 138, 88, 0.12), transparent 30%);
+        color: var(--ink);
+        font:
+          15px/1.55 Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      .page {
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 36px 24px 56px;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 24px;
+        align-items: end;
+        padding: 12px 0 28px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 34px;
+        line-height: 1.12;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        max-width: 860px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .stamp {
+        min-width: 220px;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: var(--shadow);
+      }
+
+      .stamp strong,
+      .stamp span {
+        display: block;
+      }
+
+      .stamp span {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .section {
+        margin-top: 30px;
+      }
+
+      .section-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .section-title h2 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: 0;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .badge.green {
+        color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .badge.blue {
+        color: var(--blue);
+        background: var(--blue-soft);
+      }
+
+      .badge.amber {
+        color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .badge.red {
+        color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .badge.violet {
+        color: var(--violet);
+        background: var(--violet-soft);
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .panel.pad {
+        padding: 18px;
+      }
+
+      .panel h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+
+      .panel p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(118px, 1fr));
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .node {
+        position: relative;
+        min-height: 112px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      .node::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: -10px;
+        width: 10px;
+        border-top: 2px solid #9aa8b8;
+      }
+
+      .node:last-child::after {
+        display: none;
+      }
+
+      .node .step {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .node strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 15px;
+      }
+
+      .node small {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      th,
+      td {
+        padding: 12px 11px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+      }
+
+      th {
+        color: #354151;
+        background: #edf2f7;
+        font-size: 12px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+
+      td {
+        font-size: 14px;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      code {
+        padding: 1px 5px;
+        border-radius: 5px;
+        background: #eef2f7;
+        color: #233044;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .checklist {
+        display: grid;
+        gap: 9px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .checklist li {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr);
+        gap: 8px;
+        color: var(--muted);
+      }
+
+      .tick {
+        display: inline-grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        color: #fff;
+        background: var(--green);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .cross {
+        display: inline-grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        color: #fff;
+        background: var(--red);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .artifact {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+
+      pre {
+        min-height: 100%;
+        margin: 0;
+        padding: 14px;
+        overflow: auto;
+        border-radius: 8px;
+        background: #17202a;
+        color: #eaf0f7;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .evidence-shot-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .evidence-shot {
+        overflow: hidden;
+      }
+
+      .evidence-shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-bottom: 1px solid var(--line);
+        background: #f4efe6;
+      }
+
+      .evidence-shot figcaption {
+        margin: 0;
+        padding: 10px 12px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .callout {
+        border-left: 4px solid var(--red);
+        padding: 14px 16px;
+        border-radius: 8px;
+        background: var(--red-soft);
+      }
+
+      .callout p {
+        margin: 0;
+        color: #6c241f;
+      }
+
+      .arena {
+        display: grid;
+        grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
+        gap: 16px;
+        align-items: stretch;
+      }
+
+      .board-card {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid #ccb47a;
+        border-radius: 8px;
+        background:
+          linear-gradient(90deg, rgba(93, 58, 14, 0.16) 1px, transparent 1px) 0 0 / 24px 24px,
+          linear-gradient(0deg, rgba(93, 58, 14, 0.16) 1px, transparent 1px) 0 0 / 24px 24px,
+          linear-gradient(135deg, #f3d58e, #e7bd68);
+        box-shadow: var(--shadow);
+        min-height: 316px;
+      }
+
+      .board-card::before {
+        content: "GOMOKU SYNC";
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        padding: 4px 7px;
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.74);
+        color: #533712;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+      }
+
+      .stone {
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        box-shadow: 0 5px 12px rgba(53, 35, 18, 0.26);
+      }
+
+      .stone.black {
+        background: radial-gradient(circle at 32% 28%, #515151, #070707 68%);
+      }
+
+      .stone.white {
+        background: radial-gradient(circle at 30% 26%, #fff, #d9dde6 70%);
+        border: 1px solid rgba(23, 32, 42, 0.18);
+      }
+
+      .sync-line {
+        position: absolute;
+        right: 18px;
+        bottom: 16px;
+        left: 18px;
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 10px;
+        align-items: center;
+        color: #52360f;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .sync-line::before,
+      .sync-line::after {
+        content: "";
+        height: 2px;
+        background: rgba(82, 54, 15, 0.5);
+      }
+
+      .scenario {
+        display: grid;
+        gap: 10px;
+      }
+
+      .scenario-step {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 11px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      .scenario-step b {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: #17202a;
+        color: #fff;
+        font-size: 12px;
+      }
+
+      .scenario-step strong {
+        display: block;
+        margin-bottom: 3px;
+      }
+
+      .scenario-step span {
+        color: var(--muted);
+      }
+
+      @media (max-width: 980px) {
+        header,
+        .grid.two,
+        .grid.three,
+        .artifact,
+        .evidence-shot-grid,
+        .arena {
+          grid-template-columns: 1fr;
+        }
+
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        .node::after {
+          top: auto;
+          right: 50%;
+          bottom: -10px;
+          width: 0;
+          height: 10px;
+          border-top: 0;
+          border-left: 2px solid #9aa8b8;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <div>
+          <h1>Meet-free Gomoku Build-and-Play 验证方式</h1>
+          <p class="subtitle">
+            主 case 不是简单工具召回，而是：用户用合成语音要求 bot 自动化实现一个带同步的 web
+            版五子棋，bot 启动应用、把结果带回 Realtime，然后用户和 bot 能在两个客户端里一起下。
+            这才是本轮 meet-free acceptance 的真实口径。
+          </p>
+        </div>
+        <aside class="stamp">
+          <strong>Scope: meet-free acceptance</strong>
+          <span>2026-06-04 · local fixture + real Realtime</span>
+          <span>Primary case: sync Gomoku build + play</span>
+        </aside>
+      </header>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>主验收 Case</h2>
+          <span class="badge red">primary gate</span>
+          <span class="badge green">真实 worker</span>
+          <span class="badge blue">双客户端同步</span>
+        </div>
+        <div class="panel pad">
+          <h3><code>gomoku_sync_build_and_play_en</code></h3>
+          <p>
+            合成语音输入： “Codex build Gomoku web game with sync run locally play Gomoku with me
+            Codex build Gomoku web game with sync” 通过标准不是 bot 说“可以”，而是 artifact
+            证明它真的完成了可交互应用，并能参与对局。 中文版本
+            <code>gomoku_sync_build_and_play_zh_asr_probe</code> 单独作为 ASR
+            probe，不混入主验收结论。
+          </p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>对局验收剧本</h2>
+          <span class="badge red">不是 smoke</span>
+          <span class="badge green">真实共玩</span>
+        </div>
+        <div class="arena">
+          <div class="board-card" aria-label="Gomoku board validation sketch">
+            <i class="stone black" style="left: 136px; top: 136px"></i>
+            <i class="stone white" style="left: 160px; top: 160px"></i>
+            <i class="stone black" style="left: 184px; top: 136px"></i>
+            <i class="stone white" style="left: 208px; top: 160px"></i>
+            <i class="stone black" style="left: 232px; top: 136px"></i>
+            <div class="sync-line">player A == player B</div>
+          </div>
+          <div class="scenario">
+            <div class="scenario-step">
+              <b>1</b>
+              <span
+                ><strong>用户语音提出复杂目标</strong>“自动化实现 web
+                版五子棋，带同步，跑起来后你和我一起下。”音频能量、Realtime connection、response
+                event 都必须是真的。</span
+              >
+            </div>
+            <div class="scenario-step">
+              <b>2</b>
+              <span
+                ><strong>Realtime 只做路由</strong>它必须委托 <code>delegate_to_worker</code>，并把
+                artifact contract 交给 worker；不能让
+                <code>kwwk_computer_use</code> 直接承担开发任务。</span
+              >
+            </div>
+            <div class="scenario-step">
+              <b>3</b>
+              <span
+                ><strong>Worker 真实实现应用</strong>产物必须是可运行 web
+                app，包含棋盘、落子、胜负检测、双端同步和测试 API；返回
+                <code>ONEESAMA_GOMOKU_ARTIFACT</code>。</span
+              >
+            </div>
+            <div class="scenario-step">
+              <b>4</b>
+              <span
+                ><strong>Harness 双客户端验收</strong>在同一个 browser context 内打开两个
+                page/tab，模拟同源双客户端：用户端落黑子；bot 端必须通过
+                <code>requestBotMove()</code> 或等价 bot controller 自己落白子。两边
+                <code>getState()</code> 必须一致，截图和 move log 入 artifact。</span
+              >
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Gomoku 验证链路</h2>
+          <span class="badge green">end to end</span>
+          <span class="badge amber">无真实 Meet 房间</span>
+        </div>
+        <div class="flow">
+          <div class="node">
+            <span class="step">01</span>
+            <strong>合成语音请求</strong>
+            <small
+              >local fixture participant 发出长任务音频；主 case 用确定性 transcript 锁定语义，中文
+              ASR 另测。</small
+            >
+          </div>
+          <div class="node">
+            <span class="step">02</span>
+            <strong>Realtime 委托</strong>
+            <small>必须调用 <code>delegate_to_worker</code>，禁止直接用 KWWK 硬做长任务。</small>
+          </div>
+          <div class="node">
+            <span class="step">03</span>
+            <strong>Worker 实现应用</strong>
+            <small>真实生成/修改 web app：棋盘、落子规则、胜负检测、同步层。</small>
+          </div>
+          <div class="node">
+            <span class="step">04</span>
+            <strong>启动本地服务</strong>
+            <small>artifact 必须有可访问 URL，不能只是代码片段或口头说明。</small>
+          </div>
+          <div class="node">
+            <span class="step">05</span>
+            <strong>双客户端同步</strong>
+            <small>Playwright 打开 player A/B，A 落子后 B 看到同一棋盘状态。</small>
+          </div>
+          <div class="node">
+            <span class="step">06</span>
+            <strong>Bot 参与对局</strong>
+            <small
+              >bot 必须通过 worker 生成应用里的 bot controller/app engine 自己落至少一手；harness
+              不直接伪造 bot 落子。</small
+            >
+          </div>
+          <div class="node">
+            <span class="step">07</span>
+            <strong>证据回传</strong>
+            <small
+              >Realtime 英文反馈包含 URL/状态；artifact 记录 transcript、tools、board state。</small
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="section grid three">
+        <div class="panel pad">
+          <h3>必须证明</h3>
+          <ul class="checklist">
+            <li>
+              <span class="tick">✓</span
+              ><span><code>delegate_to_worker</code> 被真实调用，task 包含同步五子棋要求。</span>
+            </li>
+            <li>
+              <span class="tick">✓</span
+              ><span>worker 产物包含可运行 web app，不接受纯计划/纯说明。</span>
+            </li>
+            <li>
+              <span class="tick">✓</span><span>两个独立 browser client 的棋盘状态可同步。</span>
+            </li>
+            <li>
+              <span class="tick">✓</span
+              ><span
+                >user 至少下一手，bot 必须通过 bot controller / app engine 至少下一手，最终 board
+                state 一致。</span
+              >
+            </li>
+          </ul>
+        </div>
+        <div class="panel pad">
+          <h3>必须禁止</h3>
+          <ul class="checklist">
+            <li>
+              <span class="cross">×</span
+              ><span>不能用 <code>dryRunLocalTools</code> 让 worker 假成功。</span>
+            </li>
+            <li>
+              <span class="cross">×</span><span>不能只验证工具名，不验证应用和同步行为。</span>
+            </li>
+            <li>
+              <span class="cross">×</span><span>不能把 text-turn fallback 当语音 acceptance。</span>
+            </li>
+            <li>
+              <span class="cross">×</span
+              ><span>不能让 KWWK 接复杂开发任务；KWWK 只参与跑起来后的交互。</span>
+            </li>
+            <li>
+              <span class="cross">×</span
+              ><span>不能由 harness 直接伪造 bot move；测试 API 只能驱动用户落子和读取状态。</span>
+            </li>
+          </ul>
+        </div>
+        <div class="panel pad">
+          <h3>失败样例</h3>
+          <ul class="checklist">
+            <li>
+              <span class="cross">×</span
+              ><span>只调用了 <code>kwwk_computer_use</code>，没有委托 worker。</span>
+            </li>
+            <li><span class="cross">×</span><span>worker 写了单机版棋盘，没有同步。</span></li>
+            <li>
+              <span class="cross">×</span><span>同步只在内存里声明，两个页面实际不同步。</span>
+            </li>
+            <li>
+              <span class="cross">×</span><span>bot 只能回答 URL，不能实际进入棋局落子。</span>
+            </li>
+            <li>
+              <span class="cross">×</span
+              ><span
+                >move log 有 <code>actor: "bot"</code>，但 source 是 harness direct play。</span
+              >
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Latest Visual Evidence</h2>
+          <span class="badge green">actual artifact</span>
+        </div>
+        <div class="evidence-shot-grid">
+          <figure class="panel evidence-shot">
+            <img
+              src="../../../runtime/meeting-artifacts/gomoku-sync-1780564960182/gomoku-sync-screenshots/player-a-after-sync.png"
+              alt="Player A after synced user and bot Gomoku moves"
+            />
+            <figcaption>Player A: user black at row 7 col 7, bot white at row 6 col 7.</figcaption>
+          </figure>
+          <figure class="panel evidence-shot">
+            <img
+              src="../../../runtime/meeting-artifacts/gomoku-sync-1780564960182/gomoku-sync-screenshots/player-b-after-sync.png"
+              alt="Player B after synced user and bot Gomoku moves"
+            />
+            <figcaption>
+              Player B: same board state after BroadcastChannel/localStorage sync.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="callout">
+          <p>
+            重要边界：本主 case 验证的是“语义明确之后”的 Realtime/tool/worker/app/play 链路。 主
+            case 用 carrier tone 证明音频链路活着，用 trusted synthetic transcript 固定语义； raw
+            ASR 稳定性另由辅助 probe 覆盖。当前主 gate 会拒绝任何非 worker foreground/meeting tool
+            噪声，并要求输出 transcript 不含中文。
+          </p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>辅助探针链路</h2>
+          <span class="badge blue">secondary probes</span>
+          <span class="badge amber">不能代表主验收</span>
+        </div>
+        <div class="flow">
+          <div class="node">
+            <span class="step">01</span>
+            <strong>生成合成语音</strong>
+            <small
+              >主 case 生成 carrier tone WAV；辅助 ASR probes 继续用 <code>say</code> +
+              <code>afconvert</code> 生成自然语言 WAV。</small
+            >
+          </div>
+          <div class="node">
+            <span class="step">02</span>
+            <strong>本地 meeting fixture</strong>
+            <small>启动非 Meet 页面，注入一个会“说话”的 synthetic participant。</small>
+          </div>
+          <div class="node">
+            <span class="step">03</span>
+            <strong>Browser bridge</strong>
+            <small>采集 participant audio，走现有 browser bridge / sidecar audio input。</small>
+          </div>
+          <div class="node">
+            <span class="step">04</span>
+            <strong>Realtime turn</strong>
+            <small>真实 Realtime SDK 连接、VAD、input transcription、response events。</small>
+          </div>
+          <div class="node">
+            <span class="step">05</span>
+            <strong>工具路由</strong>
+            <small>模型选择工具；同时记录 transcript direct-route 是否介入。</small>
+          </div>
+          <div class="node">
+            <span class="step">06</span>
+            <strong>执行器</strong>
+            <small
+              >辅助 probes 可 dry-run；Gomoku 主 case 必须真实 worker + 真实本地 web
+              artifact。</small
+            >
+          </div>
+          <div class="node">
+            <span class="step">07</span>
+            <strong>硬门槛判定</strong>
+            <small
+              >required tools、forbidden tools、no fallback、transcript、latency artifact。</small
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="section grid two">
+        <div class="panel pad">
+          <h3>这轮保留的真实部分</h3>
+          <ul class="checklist">
+            <li>
+              <span class="tick">✓</span
+              ><span>真实 Realtime session、真实音频输入、真实 VAD/response event。</span>
+            </li>
+            <li>
+              <span class="tick">✓</span
+              ><span>真实 browser bridge audio forwarding，不用文本 turn 代替语音。</span>
+            </li>
+            <li>
+              <span class="tick">✓</span
+              ><span>Share 和 KWWK 默认走真实本地工具路径，能暴露慢/错/权限问题。</span>
+            </li>
+            <li>
+              <span class="tick">✓</span
+              ><span>Gomoku 主 case 走真实 worker；只有辅助 delegate probe 可以 dry-run。</span>
+            </li>
+          </ul>
+        </div>
+        <div class="panel pad">
+          <h3>这轮故意不覆盖</h3>
+          <ul class="checklist">
+            <li>
+              <span class="cross">×</span
+              ><span>真实 Google Meet admission、host approval、邀请策略。</span>
+            </li>
+            <li>
+              <span class="cross">×</span
+              ><span>真实 Chrome profile 登录状态、账号选择、房间权限。</span>
+            </li>
+            <li>
+              <span class="cross">×</span
+              ><span>Meet 网页本身的临时 UI 变化，例如 join screen 文案变化。</span>
+            </li>
+            <li>
+              <span class="cross">×</span
+              ><span>真实房间里的网络抖动和多人声场，这些放到后续 real-room gate。</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>辅助 Case Matrix</h2>
+          <span class="badge blue">probes</span>
+          <span class="badge amber">不能替代 Gomoku gate</span>
+        </div>
+        <p class="subtitle" style="margin-bottom: 14px">
+          下面这些只用来定位问题：share intent、KWWK tab switch、chat tool、negative no-CU。
+          它们可以帮助 debug，但全部通过也不能宣称 meet-free acceptance 通过。
+        </p>
+        <div class="panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Spoken input</th>
+                <th>必须看到</th>
+                <th>禁止看到</th>
+                <th>为什么要测</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>share_chrome_window_en</code></td>
+                <td>English: share Chrome window</td>
+                <td><code>share_existing_app_window</code></td>
+                <td><code>kwwk_computer_use</code>, <code>delegate_to_worker</code></td>
+                <td>证明语音 share intent 不会被误路由成 CU 或后台任务。</td>
+              </tr>
+              <tr>
+                <td><code>share_chrome_window_zh</code></td>
+                <td>中文：共享 Chrome 浏览器窗口</td>
+                <td><code>share_existing_app_window</code></td>
+                <td><code>kwwk_computer_use</code>, <code>delegate_to_worker</code></td>
+                <td>覆盖中文 ASR + 中文 intent，不再只测英文 happy path。</td>
+              </tr>
+              <tr>
+                <td><code>switch_chrome_tab_en</code></td>
+                <td>English: use computer, switch next Chrome tab</td>
+                <td><code>kwwk_computer_use</code></td>
+                <td><code>share_existing_app_window</code>, <code>delegate_to_worker</code></td>
+                <td>直接压用户刚才失败的“切 tab 没触发 KWWK CU”。</td>
+              </tr>
+              <tr>
+                <td><code>switch_chrome_tab_zh</code></td>
+                <td>中文：操作 Chrome，切换到下一个 tab</td>
+                <td><code>kwwk_computer_use</code></td>
+                <td><code>share_existing_app_window</code>, <code>delegate_to_worker</code></td>
+                <td>覆盖中文短指令和中英混合词 <code>tab</code>。</td>
+              </tr>
+              <tr>
+                <td><code>read_meet_chat_en</code></td>
+                <td>English: read the meeting chat messages</td>
+                <td><code>read_meet_chat</code></td>
+                <td><code>share_existing_app_window</code>, <code>kwwk_computer_use</code></td>
+                <td>证明不是所有“meeting”请求都跑去 CU。</td>
+              </tr>
+              <tr>
+                <td><code>delegate_complex_work_en</code></td>
+                <td>English: investigate repo and write a report</td>
+                <td><code>delegate_to_worker</code></td>
+                <td><code>share_existing_app_window</code>, <code>kwwk_computer_use</code></td>
+                <td>证明复杂任务走 Codex worker，不让 KWWK 硬做长任务。</td>
+              </tr>
+              <tr>
+                <td><code>negative_status_no_cu_en</code></td>
+                <td>English: can you hear me / voice status</td>
+                <td>语音响应；不要求工具</td>
+                <td>
+                  <code>share_existing_app_window</code>, <code>list_shareable_windows</code>,
+                  <code>kwwk_computer_use</code>, <code>delegate_to_worker</code>
+                </td>
+                <td>抓误触发：普通对话不能因为有音频就乱开工具。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section grid three">
+        <div class="panel pad">
+          <h3>硬门槛 1：语音链路</h3>
+          <p>
+            每个 case 必须有 <code>meetEnergyOk</code>、<code>speechStarted</code>、 Realtime
+            交互证据。主 case 的音频输入是 carrier tone，语义 transcript 用 trusted synthetic
+            transcript 固定；VAD 自动 response 被关闭，所以主 case 接受 tool-only response
+            evidence，但不接受无任务启动问候。真实 ASR 可靠性另由中英文 probe 记录，不混进 Gomoku
+            主结论。
+          </p>
+        </div>
+        <div class="panel pad">
+          <h3>硬门槛 2：工具证据</h3>
+          <p>
+            不再用“expected tools 里任意一个出现”糊弄；每个 case 有
+            <code>requiredToolNames</code> 和 <code>forbiddenToolNames</code>。
+          </p>
+        </div>
+        <div class="panel pad">
+          <h3>硬门槛 3：拒绝假阳性</h3>
+          <p>
+            <code>textTurnFallback</code> 不能让 acceptance 变绿；direct-route 会记录来源， 但必须在
+            artifact 中可见。
+          </p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-title">
+          <h2>Artifact Shape</h2>
+          <span class="badge violet">per case evidence</span>
+        </div>
+        <div class="artifact">
+          <div class="panel pad">
+            <h3>主 case 必须输出</h3>
+            <ul class="checklist">
+              <li>
+                <span class="tick">✓</span
+                ><span><code>inputTranscriptTail</code>：语音里确实要求同步五子棋。</span>
+              </li>
+              <li>
+                <span class="tick">✓</span
+                ><span
+                  ><code>toolCalls.worker</code>：真实 <code>delegate_to_worker</code> 调用和
+                  function output。</span
+                >
+              </li>
+              <li>
+                <span class="tick">✓</span
+                ><span><code>workerArtifact.appUrl</code>：本地 web 五子棋可访问。</span>
+              </li>
+              <li>
+                <span class="tick">✓</span
+                ><span
+                  ><code>syncProbe.playerAState</code> /
+                  <code>playerBState</code>：两端状态一致。</span
+                >
+              </li>
+              <li>
+                <span class="tick">✓</span
+                ><span
+                  ><code>moveLog</code>：user move 和 bot move 都存在，且 bot move source 不是
+                  harness fake。</span
+                >
+              </li>
+              <li>
+                <span class="tick">✓</span
+                ><span><code>screenshots</code>：棋盘和同步后的局面截图。</span>
+              </li>
+              <li>
+                <span class="tick">✓</span
+                ><span
+                  ><code>toolCalls.all</code> 只能包含 <code>delegate_to_worker</code>，输出
+                  transcript 必须保持英文，且不能出现 startup chatter。</span
+                >
+              </li>
+            </ul>
+          </div>
+          <pre>
+{
+  "lastVerifiedAt": "2026-06-04T09:29Z",
+  "artifact": "/tmp/oneesama-realtime-synthetic-audio-suite-latest.json",
+  "id": "gomoku_sync_build_and_play_en",
+  "ok": true,
+  "sessionId": "synthetic_audio_gomoku_sync_build_and_play_en_1780564960182",
+  "syntheticSpeakerText": "Synthetic audio carrier tone for Realtime input liveness.",
+  "evaluation": {
+    "speechAndResponseObserved": true,
+    "expectedToolCalled": true,
+    "requiredToolsSatisfied": true,
+    "forbiddenToolsAbsent": true,
+    "noTextTurnFallback": true,
+    "appBuilt": true,
+    "appUrlReachable": true,
+    "twoClientSyncPass": true,
+    "botMoveObserved": true,
+    "botMoveSourceObserved": true,
+    "userMoveObserved": true,
+    "screenshotsObserved": true,
+    "englishOutputOnly": true,
+    "forbiddenOutputTextPatternsHit": [],
+    "forbiddenToolNamesCalled": []
+  },
+  "result": {
+    "toolCalls": {
+      "all": ["delegate_to_worker"],
+      "meet": [],
+      "worker": ["delegate_to_worker"]
+    },
+    "workerArtifact": {
+      "jobId": "job_f1bc2ef0",
+      "appDir": "/Users/pengx17/Documents/Github/oneesama/runtime/meeting-artifacts/gomoku-sync-1780564960182",
+      "appUrl": "http://127.0.0.1:51231/",
+      "files": ["index.html"],
+      "notes": "static synced 15x15 Gomoku with bot engine API; sync shim tests passed"
+    },
+    "syncProbe": {
+      "twoClientSyncPass": true,
+      "botMoveSource": "app_bot_engine",
+      "screenshots": [
+        "/Users/pengx17/Documents/Github/oneesama/runtime/meeting-artifacts/gomoku-sync-1780564960182/gomoku-sync-screenshots/player-a-after-sync.png",
+        "/Users/pengx17/Documents/Github/oneesama/runtime/meeting-artifacts/gomoku-sync-1780564960182/gomoku-sync-screenshots/player-b-after-sync.png"
+      ]
+    },
+    "moveLog": [
+      { "actor": "user", "move": [7, 7, "black"], "source": "user_input" },
+      { "actor": "bot", "move": [6, 7, "white"], "source": "app_bot_engine" }
+    ],
+    "outputTranscriptTail": []
+  }
+}</pre
+          >
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="callout">
+          <p>
+            结论口径：只有 <code>gomoku_sync_build_and_play_en</code> 主 case 通过，才算这轮
+            meet-free acceptance 通过。辅助 probes 全绿只能说明局部工具路由健康。真实 Meet
+            admission/profile 仍然不在本轮目标里，之后单独作为 real-room gate。
+          </p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

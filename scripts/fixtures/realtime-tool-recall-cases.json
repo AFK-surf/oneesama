@@ -67,14 +67,20 @@
       "expectedToolNames": ["kwwk_computer_use", "share_existing_app_window"]
     },
     {
+      "id": "complex_shared_doc_redesign_zh",
+      "variants": ["full"],
+      "utterance": "把共享的 roadmap 文档重新设计一下，整理结构并优化排版。",
+      "expectedToolNames": ["delegate_to_worker"],
+      "disallowedToolNames": ["kwwk_computer_use"]
+    },
+    {
       "id": "negative_time_zh",
       "utterance": "现在几点了？",
       "expectedToolNames": [],
       "disallowedToolNames": [
         "list_shareable_windows",
         "share_existing_app_window",
-        "kwwk_computer_use",
-        "control_shared_app_window"
+        "kwwk_computer_use"
       ]
     },
     {
@@ -84,21 +90,20 @@
       "disallowedToolNames": [
         "list_shareable_windows",
         "share_existing_app_window",
-        "kwwk_computer_use",
-        "control_shared_app_window"
+        "kwwk_computer_use"
       ]
     },
     {
       "id": "negative_stop_share_zh",
       "utterance": "停止共享当前窗口。",
       "expectedToolNames": [],
-      "disallowedToolNames": ["kwwk_computer_use", "control_shared_app_window"]
+      "disallowedToolNames": ["kwwk_computer_use"]
     },
     {
       "id": "negative_meeting_control_mute_zh",
       "utterance": "把会议里的麦克风静音。",
       "expectedToolNames": [],
-      "disallowedToolNames": ["kwwk_computer_use", "control_shared_app_window"]
+      "disallowedToolNames": ["kwwk_computer_use"]
     }
   ]
 }

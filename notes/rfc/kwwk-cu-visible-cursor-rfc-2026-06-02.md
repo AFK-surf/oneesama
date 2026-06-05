@@ -1,9 +1,16 @@
 # RFC: KWWK CU Meeting-Visible Cursor
 
 Date: 2026-06-02
-Status: accepted implementation plan; Cueboard source refreshed 2026-06-02
+Status: accepted historical plan; partially superseded
 Owner: @劲霸仁波切
 Implementation driver: local Codex session
+
+> Superseded note: the helper-rewrite and action-type cursor decisions in
+> `notes/rfc/realtime-low-latency-cueboard-cu-execution-plane-rfc-2026-06-02.md`
+> override this RFC where they conflict. The current app-control helper is not
+> the foundation for the new cursor/executor path; pointer actions get
+> Cueboard-style cursor feedback, while keyboard/scroll actions use short
+> action/verification state without fake pointer motion.
 
 ## Summary
 
@@ -469,15 +476,19 @@ action result, and HUD state.
 - 2026-06-02: `MAB_REAL_MEET_URL=https://meet.google.com/yza-vjpx-qto MAB_REAL_MEET_APP_CONTROL_WAIT_MS=240000 MAB_REAL_MEET_APP_CONTROL_CURSOR_WAIT_MS=25000 vp exec tsx scripts/real-meet-synthetic-speaker-smoke.mjs --real-meet-app-control-suite --require-real-meet-url --json-out /tmp/oneesama-realtime-real-app-control-suite-yza-vjpx-qto-cursor-json-envelope-2026-06-02.json` passed with `ok:true` and `acceptanceSatisfied:true`. The suite covered `keyboard-escape` and `pointer-visible-click`; keyboard-only had `kwwkCursor.eventCount:0` and `noisySpeechOrConnectionVisible:false`, while pointer had `kwwkCursor.eventCount:1`, `eventKinds:["cursor.click"]`, `hasClick:true`, `latestVisible:true`, `persistentCursor:true`, `clickPulse:true`, and HUD `visibleText:"done 完成 "` with no connection/audio/speech noise.
 - 2026-06-02: the real-room cursor gate initially failed even after KWWK clicked successfully because terminal app-control worker results were delivered as JSON strings inside `resultEnvelope.result`; the browser cursor collector only traversed objects. The bridge now parses JSON-string envelopes before extracting `backendResult.metadata.cursor.events`, and `test/realtime-app-control-bridge.test.mjs` covers the Go-shaped JSON-string envelope path.
 
-## Open Questions
+## Superseded / Resolved Questions
 
-- Should the overlay be rendered in the shared app surface, the avatar HUD, or a
-  composited video stage?
-- Should Cueboard cursor code become a shared macOS automation module, or
-  be copied into the KWWK helper first and deduplicated later?
-- Can mousedo's cursor/pointer presentation still add anything after
-  Cueboard foreground cursor rendering is ported?
-- Should keyboard shortcuts show a focus ring on the affected window/tab, or
-  only pointer actions get visible effects?
-- What visual language should distinguish "assistant is looking" from
-  "assistant is clicking"?
+- The accepted path is both native foreground cursor evidence and
+  shared-surface mirror evidence. Native overlay alone is not enough, and a HUD
+  mirror alone is not enough.
+- Cueboard cursor code should be copied/ported into the KWWK helper first, with
+  no Cueboard external runtime dependency. Deduplication can be considered only
+  after the Oneesama rewrite passes.
+- Mousedo remains useful as product inspiration, but the accepted implementation
+  target is Cueboard-style foreground cursor rendering with target ring, click
+  pulse, drag trail, and pose telemetry.
+- Keyboard shortcuts and scroll actions should not show fake pointer motion.
+  They may show compact CU status and verification result only.
+- The visual language is defined by the rewrite RFC: pointer actions get native
+  cursor, target ring, click pulse, drag/approach trail, and shared-surface
+  mirror; non-pointer actions get short action/blocker/verification state.

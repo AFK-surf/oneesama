@@ -25,6 +25,21 @@ func TestRuntimeJoinStateDetectsSoloParticipantCount(t *testing.T) {
 	}
 }
 
+func TestRuntimeJoinStateDoesNotJoinWhileStillPreJoin(t *testing.T) {
+	t.Parallel()
+
+	state := runtimeJoinState(map[string]any{
+		"meetPage": map[string]any{
+			"inMeeting": true,
+			"preJoin":   true,
+			"textHead":  "What's your name? Join now",
+		},
+	})
+	if state.Joined || state.Failed || state.Left {
+		t.Fatalf("state = %+v, want non-terminal prejoin", state)
+	}
+}
+
 func TestJoinDigestTranscriptPrefersCumulativeCaptionJSONOverTail(t *testing.T) {
 	t.Parallel()
 

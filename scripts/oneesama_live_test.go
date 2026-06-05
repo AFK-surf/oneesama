@@ -258,6 +258,7 @@ func TestOneesamaLivePreflightFailsConflictingStateProviderAliases(t *testing.T)
 	envFile := filepath.Join(dir, "live-env.sh")
 	writeFile(t, envFile, strings.Join([]string{
 		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_KWWK_CU_PLANNER_PROVIDER=local",
 		"ONEESAMA_STATE_PROVIDER=json-file",
 		"MAB_STATE_PROVIDER=sqlite",
 		"",
@@ -575,10 +576,22 @@ func TestOneesamaLivePreflightSkipsSlackTokensForMeetingAgent(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
+	cueboardConfig := filepath.Join(dir, "config.cueboard.staging.json")
+	writeFile(t, cueboardConfig, strings.Join([]string{
+		`{"copilot":{"llm":{"providers":[{`,
+		`"name":"openrouter",`,
+		`"base_url":"https://openrouter.ai/api/v1",`,
+		`"api_key":"sk-or-test",`,
+		`"headers":{"HTTP-Referer":"https://bridge.surf","X-Title":"Bridge Backend"}`,
+		`}]}}}`,
+		"",
+	}, "\n"))
 	envFile := filepath.Join(dir, "live-env.sh")
 	writeFile(t, envFile, strings.Join([]string{
 		"ONEESAMA_AGENT_RUNNER=dry-run",
 		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
+		"ONEESAMA_KWWK_CU_PLANNER_PROVIDER=openrouter",
+		"ONEESAMA_KWWK_CU_PLANNER_CUEBOARD_CONFIG_PATH=" + cueboardConfig,
 		"",
 	}, "\n"))
 
@@ -592,6 +605,41 @@ func TestOneesamaLivePreflightSkipsSlackTokensForMeetingAgent(t *testing.T) {
 	if !strings.Contains(output, "OpenAI Realtime runtime placement defaults to sidecar") {
 		t.Fatalf("output = %s, want sidecar placement default", output)
 	}
+	if !strings.Contains(output, "KWWK CU planner OpenRouter config loaded from cueboard config") ||
+		!strings.Contains(output, "KWWK CU OpenRouter planner API key exported via ONEESAMA_OPENROUTER_API_KEY") {
+		t.Fatalf("output = %s, want KWWK OpenRouter planner config loaded", output)
+	}
+}
+
+func TestOneesamaLiveMeetingAgentPreflightLoadsDefaultGeminiPlannerConfig(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cueboardConfig := filepath.Join(dir, "config.cueboard.staging.json")
+	writeFile(t, cueboardConfig, strings.Join([]string{
+		`{"copilot":{"llm":{"providers":[{`,
+		`"name":"gemini",`,
+		`"base_url":"https://generativelanguage.googleapis.com/v1beta/openai",`,
+		`"api_key":"gemini-test-key"`,
+		`}]}}}`,
+		"",
+	}, "\n"))
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
+		"ONEESAMA_KWWK_CU_PLANNER_CUEBOARD_CONFIG_PATH=" + cueboardConfig,
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "meeting-agent")
+	if err != nil {
+		t.Fatalf("oneesama-live meeting-agent preflight failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "KWWK CU planner Gemini config loaded from cueboard config") ||
+		!strings.Contains(output, "KWWK CU planner provider=gemini model=gemini-3.5-flash") {
+		t.Fatalf("output = %s, want KWWK Gemini planner config loaded", output)
+	}
 }
 
 func TestOneesamaLiveCheckPidRequiresMeetingAgentRealtimeEnv(t *testing.T) {
@@ -603,6 +651,12 @@ func TestOneesamaLiveCheckPidRequiresMeetingAgentRealtimeEnv(t *testing.T) {
 		"ONEESAMA_AGENT_RUNNER=dry-run",
 		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
 		"ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT=sidecar",
+		"ONEESAMA_KWWK_CU_PLANNER_PROVIDER=openrouter",
+		"ONEESAMA_KWWK_CU_PLANNER_MODEL=google/gemini-3.5-flash",
+		"ONEESAMA_OPENROUTER_API_KEY=sk-or-test",
+		"ONEESAMA_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1",
+		"ONEESAMA_OPENROUTER_HTTP_REFERER=https://bridge.surf",
+		"ONEESAMA_OPENROUTER_X_TITLE=BridgeBackend",
 		"",
 	}, "\n"))
 
@@ -611,6 +665,12 @@ func TestOneesamaLiveCheckPidRequiresMeetingAgentRealtimeEnv(t *testing.T) {
 		"ONEESAMA_AGENT_RUNNER=dry-run",
 		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
 		"ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT=sidecar",
+		"ONEESAMA_KWWK_CU_PLANNER_PROVIDER=openrouter",
+		"ONEESAMA_KWWK_CU_PLANNER_MODEL=google/gemini-3.5-flash",
+		"ONEESAMA_OPENROUTER_API_KEY=sk-or-test",
+		"ONEESAMA_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1",
+		"ONEESAMA_OPENROUTER_HTTP_REFERER=https://bridge.surf",
+		"ONEESAMA_OPENROUTER_X_TITLE=BridgeBackend",
 	})
 	output, err := runLiveScript(t, "--env", envFile, "--check-pid", good, "meeting-agent")
 	if err != nil {
@@ -639,7 +699,11 @@ func TestOneesamaLivePreflightRequiresOpenAIForMeetingAgent(t *testing.T) {
 
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, "live-env.sh")
-	writeFile(t, envFile, "ONEESAMA_AGENT_RUNNER=dry-run\n")
+	writeFile(t, envFile, strings.Join([]string{
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_KWWK_CU_PLANNER_PROVIDER=local",
+		"",
+	}, "\n"))
 
 	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "meeting-agent")
 	if err == nil {
@@ -647,6 +711,28 @@ func TestOneesamaLivePreflightRequiresOpenAIForMeetingAgent(t *testing.T) {
 	}
 	if !strings.Contains(output, "OpenAI Realtime API key is required") {
 		t.Fatalf("output = %s, want missing OpenAI Realtime API key", output)
+	}
+}
+
+func TestOneesamaLivePreflightRequiresKwwkPlannerOpenRouterKeyForMeetingAgent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "live-env.sh")
+	writeFile(t, envFile, strings.Join([]string{
+		"ONEESAMA_AGENT_RUNNER=dry-run",
+		"ONEESAMA_OPENAI_API_KEY=test-openai-key",
+		"ONEESAMA_KWWK_CU_PLANNER_PROVIDER=openrouter",
+		"ONEESAMA_KWWK_CU_PLANNER_CUEBOARD_CONFIG_PATH=" + filepath.Join(dir, "missing-cueboard-config.json"),
+		"",
+	}, "\n"))
+
+	output, err := runLiveScript(t, "--env", envFile, "--preflight-only", "meeting-agent")
+	if err == nil {
+		t.Fatalf("oneesama-live meeting-agent preflight succeeded unexpectedly:\n%s", output)
+	}
+	if !strings.Contains(output, "KWWK CU OpenRouter planner API key is required") {
+		t.Fatalf("output = %s, want missing KWWK OpenRouter planner key", output)
 	}
 }
 
@@ -658,6 +744,7 @@ func TestOneesamaLivePreflightRejectsInlineMeetSDK(t *testing.T) {
 	writeFile(t, envFile, strings.Join([]string{
 		"MAB_OPENAI_API_KEY=test-openai-key",
 		"MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT=inline",
+		"ONEESAMA_KWWK_CU_PLANNER_PROVIDER=local",
 		"",
 	}, "\n"))
 
@@ -679,6 +766,7 @@ func TestOneesamaLivePreflightRejectsInlineMeetSDKDespiteStaleEmergencyOverride(
 		"MAB_OPENAI_API_KEY=test-openai-key",
 		"MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT=inline",
 		"ONEESAMA_OPENAI_REALTIME_ALLOW_INLINE_MEET_SDK=1",
+		"ONEESAMA_KWWK_CU_PLANNER_PROVIDER=local",
 		"",
 	}, "\n"))
 

@@ -58,7 +58,7 @@ test("caption-only Meet joins force camera off before and after admission", asyn
     "join flow must re-check fake camera after admission",
   );
   assert.ok(
-    source.indexOf(preJoinCall) < source.indexOf("let clicked = await clickMeetJoinButton"),
+    source.indexOf(preJoinCall) < source.indexOf("clicked = await clickMeetJoinButton"),
     "camera must be disabled before clicking the Meet join button",
   );
   assert.ok(
@@ -160,5 +160,104 @@ test("Realtime Recappi Meet joins keep raw audio on native server VAD", async ()
     source.indexOf("buildRealtimeSessionConfig") <
       source.indexOf("const runtimeInitScripts = buildAvatarRuntimeInitScripts"),
     "native Realtime session config must be built before the browser init script",
+  );
+});
+
+test("WebDriver handoff installs Meet runtime with CDP before script-tag fallback", async () => {
+  const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+  const helperName = "async function installRuntimeInitScriptForPage";
+  const cdpMethod = 'cdp.send("Runtime.evaluate"';
+  const cspBypass = "allowUnsafeEvalBlockedByCSP: true";
+  const fallback = ".addScriptTag({ content: script.content })";
+  const call =
+    "await installRuntimeInitScriptForPage(page, script, { diagnostics, webDriverPreJoined });";
+
+  assert.ok(
+    source.includes(helperName),
+    "WebDriver joins need a dedicated current-page runtime installer",
+  );
+  assert.ok(
+    source.includes(cdpMethod) && source.includes(cspBypass),
+    "late runtime install must use CDP Runtime.evaluate with CSP unsafe-eval bypass",
+  );
+  assert.ok(
+    source.includes(fallback),
+    "script-tag fallback should remain for non-Meet or non-CDP diagnostic pages",
+  );
+  assert.ok(source.includes(call), "runtime init loop should use the shared late-install helper");
+  assert.ok(
+    source.indexOf(cdpMethod) < source.indexOf(fallback),
+    "CDP install must run before the Trusted Types-sensitive script-tag fallback",
+  );
+});
+
+test("Realtime avatar joins do not default to Chrome built-in fake camera", async () => {
+  const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+
+  assert.ok(
+    source.includes("function shouldUseChromeFakeMediaDevice"),
+    "joiner should centralize Chrome fake media device policy",
+  );
+  assert.ok(
+    source.includes("return !input.installAvatar;"),
+    "avatar joins should rely on avatar runtime tracks, not Chrome's green fake camera",
+  );
+  assert.ok(
+    source.includes("useFakeMediaDevice: shouldUseChromeFakeMediaDevice"),
+    "launcher args should receive the avatar-aware fake media policy",
+  );
+  assert.ok(
+    source.includes("--use-file-for-fake-audio-capture"),
+    "explicit synthetic-audio diagnostics may still request Chrome fake media",
+  );
+});
+
+test("WebDriver realtime avatar joins pass prejoin avatar runtime into admission lane", async () => {
+  const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+
+  assert.ok(
+    source.includes("preJoinRuntimeScripts:") &&
+      source.includes("installRealtimeBridge: false") &&
+      source.includes("installScreenShareBridge: false"),
+    "WebDriver prejoin install should pass only the avatar media runtime before admission",
+  );
+  assert.ok(
+    source.includes("requirePreJoinRuntimeScripts: installAvatar"),
+    "avatar joins should fail before Join if prejoin media runtime is not ready",
+  );
+  assert.ok(
+    source.includes("turnOffMicBeforeJoin: !installAvatar") &&
+      source.includes("turnOffCameraBeforeJoin: !installAvatar"),
+    "avatar joins must keep Meet mic/camera enabled so avatar tracks are published",
+  );
+  assert.ok(
+    source.indexOf("const avatarConfig = await buildMeetAvatarConfig") <
+      source.indexOf("webDriverSession = await runWebDriverJoinLane"),
+    "avatar config must be available before WebDriver starts Meet admission",
+  );
+});
+
+test("WebDriver Meet hard blocks retry without losing the hard-block reason", async () => {
+  const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+
+  assert.ok(
+    source.includes('boundedEnvInt("MAB_MEET_WEBDRIVER_HARD_BLOCK_RETRIES", 2, 0, 3)'),
+    "WebDriver hard-block retries should default to two bounded fresh attempts",
+  );
+  assert.ok(
+    source.includes('diagnostics.record("webdriver_hard_block_retry"'),
+    "hard-block retries should be visible in diagnostics",
+  );
+  assert.ok(
+    source.includes("emitStatus: (status, message, detail = {})") && source.includes("...detail"),
+    "WebDriver lane stage timing details should be preserved in top-level diagnostics",
+  );
+  assert.ok(
+    source.includes('webDriverFailure?.status !== "hard_blocked"'),
+    "generic WebDriver error statuses must not overwrite a prior hard_blocked status",
+  );
+  assert.ok(
+    source.includes('error: failure.status === "hard_blocked" ? "cannot_join_meeting"'),
+    "terminal hard-block failures should surface as cannot_join_meeting, not generic error",
   );
 });

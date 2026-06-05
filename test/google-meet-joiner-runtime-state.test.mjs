@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { test } from "vite-plus/test";
 import { chromium } from "playwright";
 
@@ -7,15 +9,194 @@ import {
   compactJoinStatusRealtimeBridge,
   compactJoinStatusWorkerResultBridge,
   compactRuntimeState,
+  clickMeetJoinButton,
   evaluateRealtimeBridgeState,
   evaluateWorkerResultBridgeState,
   evaluateMeetPageState,
+  fillGuestName,
+  guestNameVerificationLooksAccepted,
+  guestNameValuesMatch,
+  normalizeGuestNameValueForCompare,
   publishMeetingAwarenessToPage,
 } from "../packages/core/src/meeting/google-meet-joiner-runtime-state.ts";
 
 function many(count, build) {
   return Array.from({ length: count }, (_, index) => build(index));
 }
+
+test("Google Meet guest-name verification normalizes equivalent spaces", () => {
+  assert.equal(normalizeGuestNameValueForCompare(" Onee\u00a0Sama "), "Onee Sama");
+  assert.equal(guestNameValuesMatch("Onee\u202fSama", "Onee Sama"), true);
+  assert.equal(guestNameValuesMatch("Onee Sama", "Other Sama"), false);
+  assert.equal(
+    guestNameVerificationLooksAccepted(
+      { value: "not-readable", valueLength: "Onee Sama".length, joinButtonReady: true },
+      "Onee Sama",
+    ),
+    true,
+  );
+  assert.equal(
+    guestNameVerificationLooksAccepted(
+      { value: "not-readable", valueLength: "Onee Sama".length - 1, joinButtonReady: true },
+      "Onee Sama",
+    ),
+    false,
+  );
+});
+
+test("Google Meet humanized guest-name fill can proceed to join-button verification", async () => {
+  const sourcePath = fileURLToPath(
+    new URL("../packages/core/src/meeting/google-meet-joiner-runtime-state.ts", import.meta.url),
+  );
+  const source = await readFile(sourcePath, "utf8");
+
+  assert.match(source, /guest_name_assume_filled/);
+  assert.match(source, /humanized_fill_completed_join_button_gate_will_verify/);
+  assert.match(source, /interaction\.details\.mode === "humanized"/);
+});
+
+test("Google Meet guest-name wait skips promptly when join button is already ready", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const events = [];
+  try {
+    await page.setContent(`
+      <!doctype html>
+      <button aria-label="Join now">Join now</button>
+    `);
+    const startedAt = Date.now();
+    const result = await fillGuestName(
+      page,
+      "No Name Field Bot",
+      { record: (type, detail) => events.push({ type, detail }) },
+      5000,
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "join_button_ready_without_guest_name");
+    assert.equal(result.joinButtonReady, true);
+    assert.ok(elapsedMs < 1000, `expected prompt skip, got ${elapsedMs}ms`);
+    assert.ok(events.some((event) => event.type === "guest_name_skipped_join_button_ready"));
+  } finally {
+    await browser.close().catch(() => {});
+  }
+});
+
+test("Google Meet join click uses prompt Playwright click for synthetic mode", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const events = [];
+  try {
+    await page.setContent(`
+      <!doctype html>
+      <button aria-label="Join now" onclick="
+        this.remove();
+        const captions = document.createElement('button');
+        captions.setAttribute('aria-label', 'Captions');
+        captions.textContent = 'Captions';
+        document.body.appendChild(captions);
+      ">Join now</button>
+    `);
+    const startedAt = Date.now();
+    const clicked = await clickMeetJoinButton(
+      page,
+      { record: (type, detail) => events.push({ type, detail }) },
+      5000,
+      { MEET_UI_INTERACTION_MODE: "synthetic" },
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.equal(clicked, "dom:meet-join-button");
+    assert.ok(elapsedMs < 1000, `expected prompt join click, got ${elapsedMs}ms`);
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "click_attempt" &&
+          event.detail?.selector === "playwright:meet-join-button" &&
+          event.detail?.ok === true,
+      ),
+    );
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "join_after_click_state" && event.detail?.outcome?.state === "admitted",
+      ),
+    );
+  } finally {
+    await browser.close().catch(() => {});
+  }
+});
+
+test("Google Meet join click uses humanized input before Playwright fallback", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const events = [];
+  try {
+    await page.setContent(`
+      <!doctype html>
+      <button aria-label="Join now" onclick="
+        this.remove();
+        const captions = document.createElement('button');
+        captions.setAttribute('aria-label', 'Captions');
+        captions.textContent = 'Captions';
+        document.body.appendChild(captions);
+      ">Join now</button>
+    `);
+    const fakeHumanizedInteraction = {
+      details: {
+        mode: "humanized",
+        requested: "humanized",
+        backend: "cliclick",
+        lane: "test_humanized_first",
+        reason: "test override",
+      },
+      async click(locator) {
+        await locator.evaluate((node) => node.click());
+      },
+      async fill(locator, text) {
+        await locator.fill(text);
+      },
+      async pressKey(pageInstance, key) {
+        await pageInstance.keyboard.press(key);
+      },
+    };
+    const clicked = await clickMeetJoinButton(
+      page,
+      { record: (type, detail) => events.push({ type, detail }) },
+      5000,
+      {},
+      fakeHumanizedInteraction,
+    );
+
+    assert.equal(clicked, "dom:meet-join-button");
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "click_attempt" &&
+          event.detail?.selector === "cliclick:meet-join-button" &&
+          event.detail?.ok === true &&
+          event.detail?.fallback === false,
+      ),
+    );
+    assert.equal(
+      events.some(
+        (event) =>
+          event.type === "click_attempt" &&
+          event.detail?.selector === "playwright:meet-join-button",
+      ),
+      false,
+    );
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "join_after_click_state" && event.detail?.outcome?.state === "admitted",
+      ),
+    );
+  } finally {
+    await browser.close().catch(() => {});
+  }
+});
 
 test("Google Meet runtime diagnostics preserve Realtime SDK history tail", () => {
   const compact = compactRuntimeState({

@@ -33,7 +33,7 @@ async function evaluatePromptClick(page) {
       .find(
         ({ node, label }) =>
           isVisible(node) &&
-          /^(got it|continue|continue without.*|dismiss|ok|okay|allow|close|not now|maybe later|skip)$/i.test(
+          /^(got it|continue|continue without.*|dismiss|ok|okay|allow|close|not now|maybe later|skip|i agree|agree|accept all|reject all|同意する|同意しない|承諾|拒否|すべて拒否|すべて許可)$/i.test(
             label,
           ),
       );
@@ -77,7 +77,7 @@ export async function installMeetPromptAutoDismisser(page, diagnostics = null) {
       const queryButtons = () =>
         Array.from(document.querySelectorAll<HTMLElement>("button, [role=button]"));
       const buttonPattern =
-        /^(got it|continue|continue without.*|dismiss|ok|okay|allow|close|not now|maybe later|skip)$/i;
+        /^(got it|continue|continue without.*|dismiss|ok|okay|allow|close|not now|maybe later|skip|i agree|agree|accept all|reject all|同意する|同意しない|承諾|拒否|すべて拒否|すべて許可)$/i;
       const isVisible = (node) => {
         const rect = node.getBoundingClientRect();
         const style = getComputedStyle(node);

@@ -117,7 +117,7 @@ const functionalTools = [
   },
   {
     type: "function",
-    name: "control_shared_app_window",
+    name: "kwwk_computer_use",
     description: "Control a shared app window.",
     parameters: { type: "object", properties: {}, required: [] },
   },
@@ -295,7 +295,7 @@ test("Realtime Agents SDK treats share/control fake execution as hard failure wi
             type: "function_call_output",
             call_id: "call_share_windows",
             output:
-              '{"ok":true,"result":{"app":{"applicationName":"Chrome","windowTitle":"Chrome 浏览器窗口"},"note":"control_shared_app_window is available after sharing"}}',
+              '{"ok":true,"result":{"app":{"applicationName":"Chrome","windowTitle":"Chrome 浏览器窗口"},"note":"kwwk_computer_use is available after sharing"}}',
           },
         ];
         window.__MAB_FAKE_REALTIME_SESSION.history = history;
@@ -464,7 +464,7 @@ test("Realtime text-turn fallback counts workspace app-control calls", async () 
         });
         window.MAB_REALTIME_BRIDGE.workspaceTools.calls.push({
           ts: new Date().toISOString(),
-          name: "control_shared_app_window",
+          name: "kwwk_computer_use",
           callId: "call_control_workspace",
           result: { ok: true, status: "queued" },
         });
@@ -483,7 +483,7 @@ test("Realtime text-turn fallback counts workspace app-control calls", async () 
       assert.equal(result.manualTurns[0].baselineWorkspaceToolCalls, 0);
       assert.equal(result.health.latestFunctionalTurn.source, "manual_text_turn");
       assert.equal(result.health.latestFunctionalTurn.intent, "control");
-      assert.deepEqual(result.health.latestFunctionalTurn.toolNames, ["control_shared_app_window"]);
+      assert.deepEqual(result.health.latestFunctionalTurn.toolNames, ["kwwk_computer_use"]);
       assert.equal(result.health.latestFunctionalTurn.toolCalled, true);
       assert.equal(result.health.latestFunctionalTurn.fakeExecution, false);
       assert.equal(

@@ -55,7 +55,7 @@ async function withToolServer(callback) {
         );
         return;
       }
-      if (request.url === "/tools/control_shared_app_window") {
+      if (request.url === "/tools/kwwk_computer_use") {
         response.end(
           JSON.stringify({
             ok: true,
@@ -107,7 +107,7 @@ test("Realtime Agents SDK local app-control tools record silent turn policy", as
           tools: [
             {
               type: "function",
-              name: "control_shared_app_window",
+              name: "kwwk_computer_use",
               description: "Control the currently shared app window.",
               parameters: { type: "object", properties: {}, required: [] },
             },
@@ -128,7 +128,7 @@ test("Realtime Agents SDK local app-control tools record silent turn policy", as
       );
 
       const toolResult = await page.evaluate(() =>
-        window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("control_shared_app_window", {
+        window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("kwwk_computer_use", {
           operation: "type_text",
         }),
       );

@@ -67,6 +67,11 @@ func TestRuntimeMeetPageStatusUsesJoinLifecycleStatuses(t *testing.T) {
 			want:   joinSessionStatusJoined,
 		},
 		{
+			name:   "prejoin wins over misleading in meeting signal",
+			active: map[string]any{"meetPage": map[string]any{"inMeeting": true, "preJoin": true}},
+			want:   "",
+		},
+		{
 			name: "navigated away after kick maps removed even with stale captions",
 			active: map[string]any{
 				"meetPage": map[string]any{

@@ -30,6 +30,12 @@ export type PrepareJoinParams = {
   record_meeting?: boolean;
   artifacts_dir?: string;
   meet_audio_backend?: string;
+  browser_user_data_dir?: string;
+  meet_profile_mode?: string;
+  meet_ui_interaction_mode?: string;
+  meet_join_lane?: string;
+  meet_browser_control_mode?: string;
+  retry_policy?: string;
   install_realtime_bridge?: boolean;
   realtime_bridge_mode?: string;
   realtime_agent_runtime?: string;
@@ -40,6 +46,7 @@ export type PrepareJoinParams = {
   realtime_session?: Record<string, unknown>;
   auto_connect_realtime?: boolean;
   send_realtime_session_update?: boolean;
+  dry_run_local_tools?: boolean;
   include_participant_audio?: boolean;
   forward_meet_audio_to_realtime?: boolean;
   meet_audio_input_gain?: number | string;

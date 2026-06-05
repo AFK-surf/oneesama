@@ -687,6 +687,7 @@ export async function realtimeAudioRouteSmoke() {
       installWorkerResultBridge: false,
       installRealtimeBridge: true,
       realtimeBridgeMode: "webrtc-mock",
+      includeParticipantAudio: true,
       autoConnectRealtime: true,
     });
     assertSmoke(

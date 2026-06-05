@@ -102,7 +102,9 @@ async function connectRealtime(options = {}) {
   } catch (error) {
     rememberError(error);
     if (error?.realtimeTokenError?.retryable === true) {
-      scheduleRealtimeReconnect("realtime_token_retryable_failure", 750);
+      window.setTimeout(() => {
+        scheduleRealtimeReconnect("realtime_token_retryable_failure", 750);
+      }, 0);
     }
     return { ok: false, error: String((error && error.message) || error) };
   } finally {

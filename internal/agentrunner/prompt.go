@@ -22,10 +22,41 @@ func buildPrompt(input StartInput) string {
 	if isMeetingAppControlStart(input) {
 		return buildMeetingAppControlPrompt(input, contextJSON)
 	}
+	if stringFromContext(input.Context, "acceptanceScenario", "acceptance_scenario") == "gomoku_sync_build_and_play" {
+		return buildGomokuAcceptancePrompt(input, contextJSON)
+	}
 
 	return strings.Join([]string{
 		"You are a background worker for the oneesama Go rewrite.",
 		"Answer in concise Chinese. If you cannot complete the task, explain the blocker clearly.",
+		"Mode: " + defaultMode(input.Mode),
+		"Allow code changes: " + yesNo(input.AllowCodeChanges),
+		"Task: " + strings.TrimSpace(input.Task),
+		"Context:\n" + contextJSON,
+	}, "\n\n")
+}
+
+func buildGomokuAcceptancePrompt(input StartInput, contextJSON string) string {
+	artifactContract := strings.TrimSpace(stringFromContext(input.Context, "artifactContract", "artifact_contract"))
+	if artifactContract == "" {
+		artifactContract = "Return one line starting with ONEESAMA_GOMOKU_ARTIFACT followed by JSON: {\"appDir\":\"absolute path to app directory\",\"entry\":\"index.html\",\"notes\":\"short\"}."
+	}
+	return strings.Join([]string{
+		"You are a background code worker for Oneesama's meet-free Realtime acceptance gate.",
+		"Build the requested synced web Gomoku game now. Keep it minimal and deterministic; do not browse the web, do not use external packages, and do not wait for clarification.",
+		"Create a new app directory under the current repository's runtime/meeting-artifacts/ directory or under /tmp. Use a single static index.html with inline CSS and JavaScript unless a tiny local server is strictly necessary.",
+		"Required app behavior:",
+		"- render a playable 15x15 Gomoku board",
+		"- support two browser tabs/clients syncing through BroadcastChannel plus localStorage fallback",
+		"- expose window.__GOMOKU_TEST_API__ with getState(), playMove(row,col,actor), requestBotMove(), and reset()",
+		"- playMove(row,col,\"user\") must record a user move",
+		"- requestBotMove() must choose a legal bot move itself and record that move with actor \"bot\" and source \"app_bot_engine\" or another source containing bot/engine/controller",
+		"- getState() must return an object with a moves array containing row, col, actor, color/player, and source fields",
+		"- reset() must clear the board in all synced clients",
+		"- include basic win detection, but the benchmark only requires sync and one move from user plus one move from bot",
+		"Required final output:",
+		artifactContract,
+		"Print that marker line as the final line of your response. Do not wrap it in Markdown fences. Do not only describe a plan.",
 		"Mode: " + defaultMode(input.Mode),
 		"Allow code changes: " + yesNo(input.AllowCodeChanges),
 		"Task: " + strings.TrimSpace(input.Task),

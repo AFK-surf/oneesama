@@ -42,7 +42,7 @@ function appControlStatusIsTerminalFailure(status: string) {
   return true;
 }
 
-function appControlDisplayTextZh(ok: boolean, status: string, blocker: string, error: string) {
+function appControlDisplayTextEn(ok: boolean, status: string, blocker: string, error: string) {
   if (ok) return "";
   const reason = `${blocker} ${error} ${status}`.trim().toLowerCase();
   if (
@@ -51,10 +51,10 @@ function appControlDisplayTextZh(ok: boolean, status: string, blocker: string, e
     reason.includes("accessibility") ||
     reason.includes("screen_recording")
   ) {
-    return "需要权限";
+    return "Permission is required.";
   }
   if (reason.includes("blocked_ambiguous_target") || reason.includes("ambiguous")) {
-    return "目标不明确";
+    return "Target is ambiguous.";
   }
   if (
     reason.includes("blocked_no_target_app") ||
@@ -63,19 +63,19 @@ function appControlDisplayTextZh(ok: boolean, status: string, blocker: string, e
     reason.includes("window_not_found") ||
     reason.includes("shared_window_not_found")
   ) {
-    return "找不到窗口";
+    return "Could not find the target window.";
   }
-  if (reason.includes("needs_background_agent")) return "交给后台";
+  if (reason.includes("needs_background_agent")) return "Needs background handling.";
   if (
     reason.includes("blocked_unsupported_instruction") ||
     reason.includes("instruction_not_directly_executable") ||
     reason.includes("unsupported_instruction") ||
     reason.includes("unsupported_operation")
   ) {
-    return "暂不支持";
+    return "This action is not supported yet.";
   }
-  if (reason.includes("failed_verification")) return "验证失败";
-  return "操作失败";
+  if (reason.includes("failed_verification")) return "Verification failed.";
+  return "Operation failed.";
 }
 
 export function compactMeetingAgentAppControlResult(result: unknown) {
@@ -99,11 +99,11 @@ export function compactMeetingAgentAppControlResult(result: unknown) {
   if (blocker) compact.blocker = blocker;
   if (error) compact.error = error;
   const displayText =
-    compactString(record.displayText || record.answer_hint_zh, 80) ||
-    appControlDisplayTextZh(ok, status, blocker, error);
+    compactString(record.displayText || record.answer_hint_en || record.answer_hint_zh, 80) ||
+    appControlDisplayTextEn(ok, status, blocker, error);
   if (displayText) {
     compact.displayText = displayText;
-    compact.answer_hint_zh = displayText;
+    compact.answer_hint_en = displayText;
   }
   return compact;
 }

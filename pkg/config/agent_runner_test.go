@@ -132,7 +132,7 @@ func TestLoadParsesAppControlConfigFile(t *testing.T) {
     "provider": "kwwk",
     "timeout": "1500ms",
     "codex_fallback": false,
-    "kwwk": {"command": "/usr/local/bin/oneesama-kwwk-helper --stdio", "dir": "/tmp/kwwk"}
+    "kwwk": {"command": "/usr/local/bin/oneesama-kwwk-helper --stdio", "dir": "/tmp/kwwk", "ensure_command": "node --import tsx packages/core/src/meeting/app-control-helper.ts --ensure-binary-json"}
   }
 }`
 	if err := os.WriteFile(configPath, []byte(payload), 0o644); err != nil {
@@ -147,7 +147,9 @@ func TestLoadParsesAppControlConfigFile(t *testing.T) {
 	if cfg.AppControl.Provider != "kwwk" || cfg.AppControl.Timeout != 1500*time.Millisecond || cfg.AppControl.CodexFallback {
 		t.Fatalf("AppControl = %#v, want file values", cfg.AppControl)
 	}
-	if cfg.AppControl.KWWK.Command != "/usr/local/bin/oneesama-kwwk-helper --stdio" || cfg.AppControl.KWWK.Dir != "/tmp/kwwk" {
+	if cfg.AppControl.KWWK.Command != "/usr/local/bin/oneesama-kwwk-helper --stdio" ||
+		cfg.AppControl.KWWK.Dir != "/tmp/kwwk" ||
+		cfg.AppControl.KWWK.EnsureCommand != "node --import tsx packages/core/src/meeting/app-control-helper.ts --ensure-binary-json" {
 		t.Fatalf("KWWK app control = %#v, want file values", cfg.AppControl.KWWK)
 	}
 }
@@ -159,12 +161,15 @@ func TestLoadHonorsAppControlEnvOverrides(t *testing.T) {
 	t.Setenv("ONEESAMA_APP_CONTROL_CODEX_FALLBACK", "false")
 	t.Setenv("ONEESAMA_KWWK_APP_CONTROL_COMMAND", "kwwk-helper --stdio")
 	t.Setenv("ONEESAMA_KWWK_APP_CONTROL_DIR", "/tmp/kwwk-env")
+	t.Setenv("ONEESAMA_KWWK_APP_CONTROL_ENSURE_COMMAND", "kwwk-helper --ensure-binary-json")
 
 	cfg := loadInTempDir(t)
 	if cfg.AppControl.Provider != "codex" || cfg.AppControl.Timeout != 1200*time.Millisecond || cfg.AppControl.CodexFallback {
 		t.Fatalf("AppControl env = %#v, want env values", cfg.AppControl)
 	}
-	if cfg.AppControl.KWWK.Command != "kwwk-helper --stdio" || cfg.AppControl.KWWK.Dir != "/tmp/kwwk-env" {
+	if cfg.AppControl.KWWK.Command != "kwwk-helper --stdio" ||
+		cfg.AppControl.KWWK.Dir != "/tmp/kwwk-env" ||
+		cfg.AppControl.KWWK.EnsureCommand != "kwwk-helper --ensure-binary-json" {
 		t.Fatalf("KWWK app control env = %#v, want env values", cfg.AppControl.KWWK)
 	}
 }

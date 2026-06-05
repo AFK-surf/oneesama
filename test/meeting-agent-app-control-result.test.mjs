@@ -53,8 +53,8 @@ test("TS meeting-agent app-control compaction keeps compact blockers", () => {
     summary: "Could not inspect the shared app/window.",
     blocker: "instruction_not_directly_executable",
     error: "instruction_not_directly_executable",
-    displayText: "暂不支持",
-    answer_hint_zh: "暂不支持",
+    displayText: "This action is not supported yet.",
+    answer_hint_en: "This action is not supported yet.",
   });
 });
 
@@ -73,20 +73,20 @@ test("TS meeting-agent app-control compaction treats terminal failure status as 
     summary: "Helper reported ok but status says blocked.",
     blocker: "permission_required",
     error: "permission_required",
-    displayText: "需要权限",
-    answer_hint_zh: "需要权限",
+    displayText: "Permission is required.",
+    answer_hint_en: "Permission is required.",
   });
 });
 
 test("TS meeting-agent app-control compaction adds compact failure wording", () => {
   const cases = [
-    ["blocked_ambiguous_target", "目标不明确"],
-    ["blocked_permission", "需要权限"],
-    ["blocked_no_target_app", "找不到窗口"],
-    ["blocked_unsupported_instruction", "暂不支持"],
-    ["needs_background_agent", "交给后台"],
-    ["failed_execution", "操作失败"],
-    ["failed_verification", "验证失败"],
+    ["blocked_ambiguous_target", "Target is ambiguous."],
+    ["blocked_permission", "Permission is required."],
+    ["blocked_no_target_app", "Could not find the target window."],
+    ["blocked_unsupported_instruction", "This action is not supported yet."],
+    ["needs_background_agent", "Needs background handling."],
+    ["failed_execution", "Operation failed."],
+    ["failed_verification", "Verification failed."],
   ];
 
   for (const [blocker, expected] of cases) {
@@ -98,6 +98,7 @@ test("TS meeting-agent app-control compaction adds compact failure wording", () 
 
     assert.equal(compact.blocker, blocker);
     assert.equal(compact.displayText, expected);
-    assert.equal(compact.answer_hint_zh, expected);
+    assert.equal(compact.answer_hint_en, expected);
+    assert.equal(compact.answer_hint_zh, undefined);
   }
 });

@@ -16,6 +16,14 @@ test("Google Meet launcher avoids host audio devices by default", () => {
   assert.equal(args.includes("--mute-audio"), false);
 });
 
+test("Google Meet launcher can disable Chrome fake media device for avatar tracks", () => {
+  const args = buildGoogleMeetChromiumArgs({ useFakeMediaDevice: false });
+
+  assert.ok(args.includes("--use-fake-ui-for-media-stream"));
+  assert.equal(args.includes("--use-fake-device-for-media-stream"), false);
+  assert.ok(args.includes("--disable-features=AudioServiceOutOfProcess"));
+});
+
 test("Google Meet launcher preserves caller-supplied Chromium args", () => {
   const args = buildGoogleMeetChromiumArgs({
     avatarUseSwiftShader: true,

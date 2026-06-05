@@ -65,3 +65,29 @@ test("keeps Chinese pre-join device controls out of the in-call state", async ()
     await page.close();
   }
 });
+
+test("keeps English pre-join Join now page out of the in-call state", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`
+      <main>
+        <button aria-label="more_vert More options">more_vert</button>
+        <button aria-label="Turn off microphone">mic</button>
+        <button aria-label="Turn off camera">camera</button>
+        <label>What's your name? <input value="Onee Sama"></label>
+        <button>Join now</button>
+      </main>
+    `);
+    await page.evaluate(() => {
+      globalThis.__name = (fn) => fn;
+    });
+
+    const state = await evaluateMeetPageState(page);
+
+    assert.equal(state.ok, true);
+    assert.equal(state.inMeeting, false);
+    assert.equal(state.preJoin, true);
+  } finally {
+    await page.close();
+  }
+});

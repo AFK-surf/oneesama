@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,21 +17,25 @@ import (
 	"github.com/AFK-surf/oneesama/internal/processutil"
 )
 
-const kwwkAppControlMethod = "app_control.control_shared_app_window"
+const kwwkAppControlMethod = "kwwk.cu.execute"
+const kwwkCUControlMethod = "kwwk.cu.control"
 const maxKWWKAppControlMessageBytes = 1 << 20
 const defaultKWWKAppControlTimeout = 15 * time.Second
+const defaultKWWKAppControlPrewarmTimeout = 30 * time.Second
 const kwwkRPCResponseBuffer = 16
 
 type KWWKStdioAppControlConfig struct {
-	Command string
-	Dir     string
-	Timeout time.Duration
+	Command       string
+	EnsureCommand string
+	Dir           string
+	Timeout       time.Duration
 }
 
 type KWWKStdioAppControlBackend struct {
-	command string
-	dir     string
-	timeout time.Duration
+	command       string
+	ensureCommand string
+	dir           string
+	timeout       time.Duration
 
 	mu      sync.Mutex
 	session *kwwkStdioSession
@@ -41,15 +46,179 @@ func NewKWWKStdioAppControlBackend(cfg KWWKStdioAppControlConfig) *KWWKStdioAppC
 	if timeout <= 0 {
 		timeout = defaultKWWKAppControlTimeout
 	}
-	return &KWWKStdioAppControlBackend{
-		command: strings.TrimSpace(cfg.Command),
-		dir:     strings.TrimSpace(cfg.Dir),
-		timeout: timeout,
+	command := strings.TrimSpace(cfg.Command)
+	ensureCommand := strings.TrimSpace(cfg.EnsureCommand)
+	if ensureCommand == "" {
+		ensureCommand = inferredKWWKEnsureCommand(command)
 	}
+	return &KWWKStdioAppControlBackend{
+		command:       command,
+		ensureCommand: ensureCommand,
+		dir:           strings.TrimSpace(cfg.Dir),
+		timeout:       timeout,
+	}
+}
+
+func inferredKWWKEnsureCommand(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" ||
+		!strings.Contains(command, "app-control-helper.ts") ||
+		!strings.Contains(command, "--stdio") {
+		return ""
+	}
+	return strings.Replace(command, "--stdio", "--ensure-binary-json", 1)
 }
 
 func (b *KWWKStdioAppControlBackend) Name() string {
 	return "kwwk"
+}
+
+func (b *KWWKStdioAppControlBackend) PrewarmAppControl(ctx context.Context, req AppControlPrewarmRequest) AppControlPrewarmResult {
+	started := time.Now().UTC()
+	result := AppControlPrewarmResult{
+		Provider:  "kwwk",
+		Status:    "starting",
+		StartedAt: started,
+		Evidence:  map[string]any{},
+	}
+	finish := func() AppControlPrewarmResult {
+		result.FinishedAt = time.Now().UTC()
+		result.Duration = result.FinishedAt.Sub(started)
+		return result
+	}
+	if b == nil || strings.TrimSpace(b.command) == "" {
+		result.Status = appControlStatusFailed
+		result.Error = "kwwk_app_control_unconfigured"
+		result.Blocker = "kwwk_app_control_unconfigured"
+		return finish()
+	}
+	timeout := req.Timeout
+	if timeout <= 0 {
+		timeout = defaultKWWKAppControlPrewarmTimeout
+	}
+	buildEvidence, err := b.ensureHelperBuild(ctx, timeout)
+	if len(buildEvidence) > 0 {
+		result.Evidence["helper-build"] = buildEvidence
+	}
+	if err != nil {
+		result.Status = appControlStatusFailed
+		result.Error = "kwwk_app_control_helper_build_failed"
+		result.Blocker = err.Error()
+		return finish()
+	}
+	session, err := b.ensureSession(ctx)
+	if err != nil {
+		result.Status = appControlStatusFailed
+		result.Error = "kwwk_app_control_start_failed"
+		result.Blocker = err.Error()
+		return finish()
+	}
+	controls := []map[string]any{
+		{"control": "ping", "session_id": req.SessionID},
+		{"control": "session-status", "session_id": req.SessionID},
+		{"control": "mode-help", "mode": "foreground", "session_id": req.SessionID},
+		{"control": "planner-prewarm", "session_id": req.SessionID},
+		{"control": "cursor-prewarm", "session_id": req.SessionID},
+		{"control": "permissions-status", "session_id": req.SessionID},
+	}
+	for _, params := range controls {
+		control := strings.TrimSpace(stringFromAny(params["control"]))
+		var response map[string]any
+		if err := session.Call(ctx, timeout, kwwkCUControlMethod, params, &response); err != nil {
+			b.resetSession()
+			result.Status = appControlStatusFailed
+			result.Error = "kwwk_app_control_prewarm_failed"
+			result.Blocker = err.Error()
+			result.Evidence[control] = map[string]any{"ok": false, "error": err.Error()}
+			return finish()
+		}
+		result.Evidence[control] = response
+		if strings.TrimSpace(stringFromAny(response["status"])) == "missing_permissions" {
+			result.Status = "missing_permissions"
+			result.Blocker = "missing_permissions"
+		}
+	}
+	if result.Status == "starting" {
+		result.Status = "ready"
+	}
+	result.OK = true
+	return finish()
+}
+
+func (b *KWWKStdioAppControlBackend) ensureHelperBuild(ctx context.Context, timeout time.Duration) (map[string]any, error) {
+	if b == nil || strings.TrimSpace(b.ensureCommand) == "" {
+		return map[string]any{
+			"configured": false,
+			"status":     "skipped",
+		}, nil
+	}
+	if timeout <= 0 {
+		timeout = defaultKWWKAppControlPrewarmTimeout
+	}
+	started := time.Now().UTC()
+	buildCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	command := exec.CommandContext(buildCtx, "/bin/sh", "-c", b.ensureCommand)
+	if b.dir != "" {
+		command.Dir = b.dir
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	finished := time.Now().UTC()
+	evidence := map[string]any{
+		"configured":  true,
+		"status":      "completed",
+		"duration_ms": finished.Sub(started).Milliseconds(),
+		"started_at":  formatAppControlJobTime(started),
+		"finished_at": formatAppControlJobTime(finished),
+	}
+	stdoutText := strings.TrimSpace(stdout.String())
+	stderrText := strings.TrimSpace(stderr.String())
+	if parsed := parseKWWKHelperBuildOutput(stdoutText); len(parsed) > 0 {
+		evidence["result"] = parsed
+		if ok, okSet := parsed["ok"].(bool); okSet && !ok && err == nil {
+			err = fmt.Errorf("helper build reported ok=false")
+		}
+	} else if stdoutText != "" {
+		evidence["stdout"] = trimKWWKHelperBuildOutput(stdoutText)
+	}
+	if stderrText != "" {
+		evidence["stderr"] = trimKWWKHelperBuildOutput(stderrText)
+	}
+	if err != nil {
+		evidence["status"] = appControlStatusFailed
+		evidence["error"] = err.Error()
+		if buildCtx.Err() != nil {
+			evidence["error"] = buildCtx.Err().Error()
+		}
+		return evidence, fmt.Errorf("helper build prewarm: %w", err)
+	}
+	return evidence, nil
+}
+
+func parseKWWKHelperBuildOutput(output string) map[string]any {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(line), &parsed); err == nil {
+			return parsed
+		}
+	}
+	return nil
+}
+
+func trimKWWKHelperBuildOutput(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 4096 {
+		return value
+	}
+	return value[:4096] + "...<truncated " + strconv.Itoa(len(value)-4096) + " bytes>"
 }
 
 func (b *KWWKStdioAppControlBackend) ControlSharedApp(ctx context.Context, req AppControlRequest) (AppControlResult, error) {
@@ -80,7 +249,6 @@ func (b *KWWKStdioAppControlBackend) ControlSharedApp(ctx context.Context, req A
 		SessionID:   req.SessionID,
 		Instruction: req.Instruction,
 		Target:      KWWKTargetFromAppControl(req.Target),
-		Operations:  append([]KWWKAppControlOperation(nil), req.Operations...),
 		Context:     req.Context,
 	}
 	var response kwwkAppControlResponse
@@ -136,11 +304,10 @@ func (b *KWWKStdioAppControlBackend) resetSession() {
 }
 
 type kwwkAppControlRequest struct {
-	SessionID   string                    `json:"session_id,omitempty"`
-	Instruction string                    `json:"instruction"`
-	Target      KWWKAppControlTarget      `json:"target"`
-	Operations  []KWWKAppControlOperation `json:"operations,omitempty"`
-	Context     map[string]any            `json:"context,omitempty"`
+	SessionID   string               `json:"session_id,omitempty"`
+	Instruction string               `json:"instruction"`
+	Target      KWWKAppControlTarget `json:"target"`
+	Context     map[string]any       `json:"context,omitempty"`
 }
 
 type kwwkAppControlResponse struct {

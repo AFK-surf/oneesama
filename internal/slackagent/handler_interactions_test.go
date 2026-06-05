@@ -324,6 +324,83 @@ func TestHandleInteractionJoinSetupFailureKeepsMetadataNilSafe(t *testing.T) {
 	}
 }
 
+func TestHandleInteractionJoinSetupBusinessFailureUpdatesResponseURL(t *testing.T) {
+	meetURL := "https://meet.google.com/abc-defg-hij"
+	meetingAgent := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/join/google-meet" {
+			t.Fatalf("path = %s, want /join/google-meet", request.URL.Path)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{
+			"ok": false,
+			"accepted": false,
+			"started": false,
+			"error": "cannot_join_meeting",
+			"reason": "cannot_join_meeting",
+			"message": "No one can join a meeting unless invited or admitted by the host",
+			"diagnostics_path": "/tmp/meeting-avatar-bot/session_037b0932-diagnostics.json",
+			"session": {"id":"session_failed","meeting_url":"` + meetURL + `","status":"failed"}
+		}`))
+	}))
+	defer meetingAgent.Close()
+	finalResponseCh := make(chan string, 1)
+	responseURLServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		raw, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read response url body: %v", err)
+		}
+		finalResponseCh <- string(raw)
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer responseURLServer.Close()
+	router := newTestRouter(t, Config{
+		MeetingAgentURL: meetingAgent.URL,
+		Slack: appconfig.SlackConfig{
+			SigningSecret:   "secret",
+			InternalAuthKey: "secret-key",
+		},
+	})
+
+	buttonValue := joinSetupActionValueJSON(joinSetupActionValue{
+		Kind:        joinSetupKind,
+		MeetingURL:  meetURL,
+		DryRun:      false,
+		Realtime:    true,
+		ConfirmJoin: true,
+	})
+	rawPayload := fmt.Sprintf(`{
+		"team":{"id":"T123"},
+		"channel":{"id":"C123"},
+		"user":{"id":"U123","username":"peng"},
+		"message":{"thread_ts":"123.456"},
+		"response_url":%q,
+		"actions":[{"action_id":%q,"value":%q}]
+	}`, responseURLServer.URL, joinSetupRealtimeActionID, buttonValue)
+	payload := signAvatarCommand(t, "secret", url.Values{"payload": {rawPayload}})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/slack/interactions", bytes.NewBufferString(payload.body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("X-Slack-Request-Timestamp", payload.timestamp)
+	request.Header.Set("X-Slack-Signature", payload.signature)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+
+	select {
+	case finalBody := <-finalResponseCh:
+		if !strings.Contains(finalBody, `"replace_original":true`) ||
+			!strings.Contains(finalBody, "Join failed: meeting-agent /join/google-meet returned ok=false: cannot_join_meeting") ||
+			!strings.Contains(finalBody, "No one can join a meeting unless invited or admitted by the host") ||
+			strings.Contains(finalBody, ":studio_microphone: *Joined: Google Meet*") {
+			t.Fatalf("final body = %s, want business failure replacement", finalBody)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for response_url failure update")
+	}
+}
+
 func TestHandleInteractionRejectsInvalidPayload(t *testing.T) {
 	router := newTestRouter(t, Config{
 		Slack: appconfig.SlackConfig{SigningSecret: "secret"},

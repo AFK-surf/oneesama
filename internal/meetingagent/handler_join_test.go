@@ -69,6 +69,12 @@ func (fakeMeetRunner) PrepareGoogleMeet(_ context.Context, input meetrunner.Prep
 			RecordMeeting:              input.RecordMeeting,
 			ArtifactsDir:               input.ArtifactsDir,
 			MeetAudioBackend:           input.MeetAudioBackend,
+			MeetProfileMode:            input.MeetProfileMode,
+			BrowserUserDataDir:         input.BrowserUserDataDir,
+			MeetUIInteractionMode:      input.MeetUIInteractionMode,
+			MeetJoinLane:               input.MeetJoinLane,
+			MeetBrowserControlMode:     input.MeetBrowserControlMode,
+			RetryPolicy:                input.RetryPolicy,
 			InstallRealtimeBridge:      input.InstallRealtimeBridge,
 			RealtimeBridgeMode:         input.RealtimeBridgeMode,
 			RealtimeRuntimePlacement:   input.RealtimeRuntimePlacement,
@@ -127,6 +133,109 @@ type fakeMissingStatusMeetRunner struct{ fakeMeetRunner }
 
 func (fakeMissingStatusMeetRunner) StatusSession(context.Context, meetrunner.StatusSessionInput) (meetrunner.StatusSessionResult, error) {
 	return meetrunner.StatusSessionResult{}, errors.New("meet-runner session session_join_stale not found")
+}
+
+type fakeTerminalJoinFailureRunner struct{ fakeMeetRunner }
+
+func (fakeTerminalJoinFailureRunner) PrepareGoogleMeet(_ context.Context, input meetrunner.PrepareGoogleMeetInput) (meetrunner.PrepareGoogleMeetResult, error) {
+	return meetrunner.PrepareGoogleMeetResult{
+		OK:              false,
+		Accepted:        false,
+		Started:         false,
+		BridgeMode:      "persistent-session",
+		Note:            "You can't join this video call / Return to home screen",
+		Error:           "cannot_join_meeting",
+		Reason:          "hard_blocked",
+		Message:         "You can't join this video call / Return to home screen",
+		DiagnosticsPath: "/tmp/meeting-avatar-bot/session-hard-blocked-diagnostics.json",
+		WebDriver: map[string]any{
+			"status":  "hard_blocked",
+			"message": "You can't join this video call / Return to home screen",
+		},
+		Session: meetrunner.RunnerSession{
+			ID:         firstNonEmpty(input.SessionID, "session_hard_blocked"),
+			MeetingURL: input.MeetingURL,
+			Status:     "failed",
+			Title:      firstNonEmpty(input.Title, "Join Failed"),
+		},
+		Plan: meetrunner.JoinPlan{
+			Entry: "google-meet-joiner.ts",
+			Mode:  "playwright-ts",
+		},
+	}, nil
+}
+
+type fakeAnonymousTerminalCannotJoinRunner struct {
+	fakeMeetRunner
+	prepares int
+	stops    int
+}
+
+func (r *fakeAnonymousTerminalCannotJoinRunner) PrepareGoogleMeet(_ context.Context, input meetrunner.PrepareGoogleMeetInput) (meetrunner.PrepareGoogleMeetResult, error) {
+	r.prepares++
+	return meetrunner.PrepareGoogleMeetResult{
+		OK:         false,
+		Accepted:   false,
+		Started:    false,
+		BridgeMode: "persistent-session",
+		Error:      "cannot_join_meeting",
+		Reason:     "cannot_join_meeting",
+		Message:    "You can't join this video call. No one can join a meeting unless invited or admitted by the host.",
+		MeetPage: map[string]any{
+			"cannotJoin": true,
+			"textHead":   "You can't join this video call. No one can join a meeting unless invited or admitted by the host.",
+		},
+		Session: meetrunner.RunnerSession{
+			ID:         firstNonEmpty(input.SessionID, "session_anonymous_hard_blocked"),
+			MeetingURL: input.MeetingURL,
+			Status:     "failed",
+			Title:      "Join Failed",
+		},
+		Plan: meetrunner.JoinPlan{Entry: "google-meet-joiner.ts", Mode: "playwright-ts"},
+	}, nil
+}
+
+func (r *fakeAnonymousTerminalCannotJoinRunner) StopSession(ctx context.Context, input meetrunner.StopSessionInput) (meetrunner.StopSessionResult, error) {
+	r.stops++
+	return r.fakeMeetRunner.StopSession(ctx, input)
+}
+
+type fakeTransientCannotJoinRunner struct {
+	fakeMeetRunner
+	diagnosticsPath string
+	prepares        int
+	stops           int
+}
+
+func (r *fakeTransientCannotJoinRunner) PrepareGoogleMeet(ctx context.Context, input meetrunner.PrepareGoogleMeetInput) (meetrunner.PrepareGoogleMeetResult, error) {
+	r.prepares++
+	if r.prepares == 1 {
+		if r.diagnosticsPath != "" {
+			_ = os.WriteFile(r.diagnosticsPath, []byte(`{"events":[{"type":"join_failed_terminal_state_after_click"}]}`), 0o644)
+		}
+		return meetrunner.PrepareGoogleMeetResult{
+			OK:              false,
+			Accepted:        false,
+			Started:         false,
+			BridgeMode:      "persistent-session",
+			Error:           "cannot_join_meeting",
+			Message:         "Admission state did not settle before the join attempt timed out.",
+			DiagnosticsPath: r.diagnosticsPath,
+			Session: meetrunner.RunnerSession{
+				ID:         firstNonEmpty(input.SessionID, "session_transient_cannot_join"),
+				MeetingURL: input.MeetingURL,
+				Status:     "failed",
+				Title:      "Transient Admission Failure",
+			},
+			Plan: meetrunner.JoinPlan{Entry: "google-meet-joiner.ts", Mode: "playwright-ts"},
+		}, nil
+	}
+	return r.fakeMeetRunner.PrepareGoogleMeet(ctx, input)
+}
+
+func (r *fakeTransientCannotJoinRunner) StopSession(ctx context.Context, input meetrunner.StopSessionInput) (meetrunner.StopSessionResult, error) {
+	r.stops++
+	return r.fakeMeetRunner.StopSession(ctx, input)
 }
 
 type fakeClosedPipeStatusMeetRunner struct {
@@ -284,6 +393,155 @@ func TestHandleJoinLifecycle(t *testing.T) {
 	}
 	if strings.Contains(cleanStatusResponse.Body.String(), `"active"`) {
 		t.Fatalf("body = %s, want stopped session not exposed as active", cleanStatusResponse.Body.String())
+	}
+}
+
+func TestHandleJoinReturnsTerminalMeetFailureWithoutInternalError(t *testing.T) {
+	t.Parallel()
+
+	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", fakeTerminalJoinFailureRunner{})
+
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_hard_blocked","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama"}`)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, body = %s, want 200 terminal business result", joinResponse.Code, joinResponse.Body.String())
+	}
+	body := joinResponse.Body.String()
+	if !strings.Contains(body, `"ok":false`) ||
+		!strings.Contains(body, `"error":"cannot_join_meeting"`) ||
+		!strings.Contains(body, `"reason":"hard_blocked"`) ||
+		!strings.Contains(body, `"diagnostics_path":"/tmp/meeting-avatar-bot/session-hard-blocked-diagnostics.json"`) {
+		t.Fatalf("body = %s, want structured terminal join failure", body)
+	}
+
+	statusResponse := performMeetingRequest(router, http.MethodGet, "/meetings/session?id=session_hard_blocked", "")
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body = %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	if !strings.Contains(statusResponse.Body.String(), `"status":"failed"`) ||
+		!strings.Contains(statusResponse.Body.String(), `"join_reason":"hard_blocked"`) {
+		t.Fatalf("body = %s, want failed session metadata", statusResponse.Body.String())
+	}
+}
+
+func TestHandleJoinRetriesTerminalLookingCannotJoinAdmission(t *testing.T) {
+	runner := &fakeAnonymousTerminalCannotJoinRunner{}
+	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", runner)
+
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_anonymous_hard_blocked","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama"}`)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, body = %s, want 200 terminal business result", joinResponse.Code, joinResponse.Body.String())
+	}
+	if runner.prepares != 3 {
+		t.Fatalf("PrepareGoogleMeet calls = %d, want 3 for bounded default retry", runner.prepares)
+	}
+	if runner.stops != 2 {
+		t.Fatalf("StopSession calls = %d, want cleanup before each retry", runner.stops)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(joinResponse.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	session, ok := body["session"].(map[string]any)
+	if !ok {
+		t.Fatalf("session = %T, want object", body["session"])
+	}
+	metadata, ok := session["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata = %T, want object", session["metadata"])
+	}
+	if metadata["admission_retry_count"] != float64(2) {
+		t.Fatalf("metadata = %#v, want two admission retries for terminal-looking cannot_join", metadata)
+	}
+	if metadata["join_error"] != "cannot_join_meeting" || metadata["join_reason"] != "cannot_join_meeting" {
+		t.Fatalf("metadata = %#v, want terminal cannot_join_meeting metadata", metadata)
+	}
+}
+
+func TestHandleJoinRetriesTransientCannotJoinAdmission(t *testing.T) {
+	rootDir := t.TempDir()
+	diagnosticsPath := filepath.Join(rootDir, "session-transient-diagnostics.json")
+	runner := &fakeTransientCannotJoinRunner{diagnosticsPath: diagnosticsPath}
+	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", runner)
+
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_transient_cannot_join","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama"}`)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, body = %s, want 200", joinResponse.Code, joinResponse.Body.String())
+	}
+	if runner.prepares != 2 {
+		t.Fatalf("PrepareGoogleMeet calls = %d, want 2", runner.prepares)
+	}
+	if runner.stops != 1 {
+		t.Fatalf("StopSession calls = %d, want 1 cleanup before retry", runner.stops)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(joinResponse.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	session, ok := body["session"].(map[string]any)
+	if !ok {
+		t.Fatalf("session = %T, want object", body["session"])
+	}
+	metadata, ok := session["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata = %T, want object", session["metadata"])
+	}
+	if metadata["admission_retry_count"] != float64(1) {
+		t.Fatalf("metadata = %#v, want one admission retry", metadata)
+	}
+	retries, ok := metadata["admission_retries"].([]any)
+	if !ok || len(retries) != 1 {
+		t.Fatalf("admission_retries = %#v, want one retry entry", metadata["admission_retries"])
+	}
+	retry, ok := retries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("retry entry = %T, want object", retries[0])
+	}
+	if retry["error"] != "cannot_join_meeting" || retry["stop"] == nil {
+		t.Fatalf("retry entry = %#v, want cannot_join_meeting cleanup evidence", retry)
+	}
+	if snapshotPath, _ := retry["diagnostics_snapshot_path"].(string); snapshotPath == "" {
+		t.Fatalf("retry entry = %#v, want diagnostics snapshot path", retry)
+	} else if _, err := os.Stat(snapshotPath); err != nil {
+		t.Fatalf("diagnostics snapshot missing at %s: %v", snapshotPath, err)
+	}
+}
+
+func TestHandleJoinRetryPolicyNoneDoesNotRetryTransientAdmission(t *testing.T) {
+	rootDir := t.TempDir()
+	diagnosticsPath := filepath.Join(rootDir, "session-no-retry-diagnostics.json")
+	runner := &fakeTransientCannotJoinRunner{diagnosticsPath: diagnosticsPath}
+	router := newJoinTestRouterWithWebhookAndRunner(t, "", "", runner)
+
+	joinResponse := performMeetingRequest(router, http.MethodPost, "/join/google-meet", `{"session_id":"session_no_retry_transient","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","retry_policy":"none"}`)
+	if joinResponse.Code != http.StatusOK {
+		t.Fatalf("join status = %d, body = %s, want 200", joinResponse.Code, joinResponse.Body.String())
+	}
+	if runner.prepares != 1 {
+		t.Fatalf("PrepareGoogleMeet calls = %d, want 1 with retry_policy none", runner.prepares)
+	}
+	if runner.stops != 0 {
+		t.Fatalf("StopSession calls = %d, want 0 with retry_policy none", runner.stops)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(joinResponse.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	session, ok := body["session"].(map[string]any)
+	if !ok {
+		t.Fatalf("session = %T, want object", body["session"])
+	}
+	metadata, ok := session["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata = %T, want object", session["metadata"])
+	}
+	if _, ok := metadata["admission_retry_count"]; ok {
+		t.Fatalf("metadata = %#v, want no admission retry count with retry_policy none", metadata)
+	}
+	if metadata["retry_policy"] != "none" {
+		t.Fatalf("metadata retry_policy = %#v, want none", metadata["retry_policy"])
 	}
 }
 

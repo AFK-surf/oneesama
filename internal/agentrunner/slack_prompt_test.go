@@ -62,6 +62,42 @@ func TestBuildPromptUsesDemoSurfaceWorkerForDemoSurfaceSessions(t *testing.T) {
 	}
 }
 
+func TestBuildPromptUsesGomokuAcceptanceContract(t *testing.T) {
+	prompt := buildPrompt(WithSessionCapabilities(StartInput{
+		Task:             "Codex build Gomoku web game with sync",
+		Mode:             "code",
+		AllowCodeChanges: true,
+		Context: map[string]any{
+			"acceptanceScenario": "gomoku_sync_build_and_play",
+			"artifactContract":   "Return ONEESAMA_GOMOKU_ARTIFACT with appDir and entry.",
+		},
+	}, SessionKindMeetingCopilot))
+
+	for _, want := range []string{
+		"meet-free Realtime acceptance gate",
+		"single static index.html",
+		"BroadcastChannel plus localStorage fallback",
+		"window.__GOMOKU_TEST_API__",
+		"requestBotMove()",
+		`actor "bot"`,
+		`source "app_bot_engine"`,
+		"ONEESAMA_GOMOKU_ARTIFACT",
+		"Do not only describe a plan.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"Answer in concise Chinese",
+		"workspace assistant operating inside a Slack workspace",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("gomoku prompt leaked forbidden phrase %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestBuildPromptUsesReadOnlySecretaryBoundaryForSecretaryLookup(t *testing.T) {
 	prompt := buildPrompt(WithSessionCapabilities(StartInput{
 		Task:             "Identify this linked HN profile from thread and memory evidence.",

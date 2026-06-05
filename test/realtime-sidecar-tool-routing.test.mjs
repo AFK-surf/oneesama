@@ -373,7 +373,7 @@ test("Realtime sidecar routes app-control tools through local app-control wrappe
           tools: [
             {
               type: "function",
-              name: "control_shared_app_window",
+              name: "kwwk_computer_use",
               description: "Control the currently shared app window.",
               parameters: {
                 type: "object",
@@ -391,7 +391,7 @@ test("Realtime sidecar routes app-control tools through local app-control wrappe
         () => window.MAB_REALTIME_BRIDGE?.agentRuntime?.sdkConnected === true,
       );
       const toolResult = await sidecarPage.evaluate(() =>
-        window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("control_shared_app_window", {
+        window.MAB_REALTIME_CLIENT.simulateRealtimeAgentToolCall("kwwk_computer_use", {
           instruction: "click the login button",
         }),
       );
@@ -401,9 +401,7 @@ test("Realtime sidecar routes app-control tools through local app-control wrappe
         fixture: window.__MAB_MEET_FIXTURE,
       }));
       const sidecarState = await sidecarPage.evaluate(() => window.MAB_REALTIME_BRIDGE);
-      const appControlCalls = calls.filter(
-        (entry) => entry.path === "/tools/control_shared_app_window",
-      );
+      const appControlCalls = calls.filter((entry) => entry.path === "/tools/kwwk_computer_use");
 
       assert.equal(meetState.hasSDKGlobal, false);
       assert.equal(meetState.bridge.agentRuntime.sdkSuppressedOnMeetSurface, true);
@@ -414,9 +412,7 @@ test("Realtime sidecar routes app-control tools through local app-control wrappe
       assert.equal(appControlCalls[0].auth, "test-session-token");
       assert.equal(appControlCalls[0].body.instruction, "click the login button");
       assert.ok(
-        sidecarState.workspaceTools.calls.some(
-          (entry) => entry.name === "control_shared_app_window",
-        ),
+        sidecarState.workspaceTools.calls.some((entry) => entry.name === "kwwk_computer_use"),
       );
       assert.equal(
         sidecarState.turnPolicy.appControlJobs.job_sidecar_app_control.visibility,
@@ -911,7 +907,7 @@ async function withToolRoutingServer(callback) {
         response.end(JSON.stringify({ ok: true, client_secret: { value: "ek_mock_sdk" } }));
         return;
       }
-      if (request.url === "/tools/control_shared_app_window") {
+      if (request.url === "/tools/kwwk_computer_use") {
         response.end(
           JSON.stringify({
             ok: true,

@@ -260,10 +260,66 @@ function normalizeRecappiSamples(value: unknown) {
   return [];
 }
 
+function rememberHostMeetAudioParticipantSource(payload: Record<string, unknown>) {
+  const label = String(payload.label || "host-meet-audio");
+  const streamId = String(payload.streamId || "");
+  const trackIds = Array.isArray(payload.trackIds)
+    ? payload.trackIds.map((trackId) => String(trackId || "")).filter(Boolean)
+    : [];
+  const knownParticipantSource = state.connection.participantAudioSources.some(
+    (source) =>
+      (streamId && source.streamId === streamId) ||
+      (!streamId && source.label === label && source.source === "host_meet_audio_pcm"),
+  );
+  if (!knownParticipantSource) {
+    state.connection.participantAudioTracksDiscovered += Math.max(1, trackIds.length || 1);
+    state.connection.participantAudioSources.push({
+      ts: new Date().toISOString(),
+      label,
+      streamId,
+      trackIds,
+      source: "host_meet_audio_pcm",
+    });
+    state.connection.participantAudioSources = state.connection.participantAudioSources.slice(-20);
+    recordTimeline("participant_audio_discovered", {
+      forwardingEnabled: state.connection.participantAudioForwardingEnabled === true,
+      meetAudioForwardingEnabled: state.connection.meetAudioForwardingEnabled === true,
+      label,
+      streamId,
+      trackIds,
+      source: "host_meet_audio_pcm",
+      metadataOnly: Boolean(payload.metadataOnly),
+    });
+  }
+  return { label, streamId, trackIds };
+}
+
 function pushExternalMeetAudioSamples(payload: Record<string, unknown> = {}) {
   const source = String(payload.source || "recappi_process_audio");
   const samples = normalizeRecappiSamples(payload.samples);
+  const metadataOnly = source === "host_meet_audio_pcm" && payload.metadataOnly === true;
+  if (source === "host_meet_audio_pcm") {
+    rememberHostMeetAudioParticipantSource(payload);
+  }
   if (!samples.length) {
+    if (metadataOnly) {
+      recappiConnection.hostMeetAudioInput = {
+        ...recappiConnection.hostMeetAudioInput,
+        enabled: true,
+        sampleRate: Number(
+          payload.sampleRate || recappiConnection.hostMeetAudioInput?.sampleRate || 0,
+        ),
+        channels: Number(payload.channels || recappiConnection.hostMeetAudioInput?.channels || 0),
+        source: "host_meet_audio_pcm",
+      };
+      updateFeedback();
+      return {
+        ok: true,
+        source,
+        metadataOnly: true,
+        participantAudioTracksDiscovered: state.connection.participantAudioTracksDiscovered,
+      };
+    }
     return {
       ok: false,
       error:

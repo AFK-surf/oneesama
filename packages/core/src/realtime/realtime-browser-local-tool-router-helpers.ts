@@ -71,7 +71,6 @@
     "open_shared_browser_surface",
     "create_shared_workspace",
     "kwwk_computer_use",
-    "control_shared_app_window",
     "control_shared_browser_surface",
     "stop_shared_browser_surface",
     "start_demo_surface",
@@ -100,7 +99,7 @@
   }
 
   function shouldStoreCompactToolResult(kind: LocalToolKind, name: string) {
-    if (name === "kwwk_computer_use" || name === "control_shared_app_window") return true;
+    if (name === "kwwk_computer_use") return true;
     return (
       kind === "meet" &&
       [

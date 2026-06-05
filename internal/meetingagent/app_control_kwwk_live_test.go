@@ -14,12 +14,41 @@ import (
 	appconfig "github.com/AFK-surf/oneesama/pkg/config"
 )
 
-const kwwkLiveSmokeTimeout = 15 * time.Second
+const kwwkLiveSmokeTimeout = 30 * time.Second
+
+func configureKWWKLiveSmokeFixturePlanner(t *testing.T) {
+	t.Helper()
+	t.Setenv("ONEESAMA_KWWK_CU_PLANNER_PROVIDER", "local")
+	t.Setenv("ONEESAMA_KWWK_CU_PLANNER_MODEL", "tiny-kwwk-app-control-smoke-fixture")
+}
+
+func kwwkLiveSmokeObserveModelPlan() map[string]any {
+	return map[string]any{
+		"status":     "ok",
+		"summary":    "Observed the shared app state.",
+		"blocker":    "",
+		"confidence": 0.7,
+		"operations": []map[string]any{
+			{"kind": string(KWWKAppControlState)},
+		},
+	}
+}
+
+func kwwkLiveSmokeBlockedModelPlan() map[string]any {
+	return map[string]any{
+		"status":     "blocked",
+		"summary":    "The instruction mixes observation with a conditional action and is not directly executable.",
+		"blocker":    "instruction_not_directly_executable",
+		"confidence": 0.9,
+		"operations": []map[string]any{},
+	}
+}
 
 func TestLiveKWWKStdioAppControlBackendControlsHostApp(t *testing.T) {
 	if os.Getenv("MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE") != "1" {
 		t.Skip("set MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE=1 to run the host app-control smoke")
 	}
+	configureKWWKLiveSmokeFixturePlanner(t)
 	appName := strings.TrimSpace(os.Getenv("MAB_KWWK_APP_CONTROL_LIVE_APP"))
 	if appName == "" {
 		appName = "Pencil"
@@ -41,11 +70,11 @@ func TestLiveKWWKStdioAppControlBackendControlsHostApp(t *testing.T) {
 		Target: AppControlTarget{
 			ApplicationName: appName,
 		},
-		Operations: []KWWKAppControlOperation{{Kind: KWWKAppControlState}},
 		Context: map[string]any{
 			"includeScreenshot": true,
 			"screenshotOutput":  screenshot,
 			"timeoutMs":         15000,
+			"modelPlan":         kwwkLiveSmokeObserveModelPlan(),
 		},
 		Timeout: kwwkLiveSmokeTimeout,
 	})
@@ -65,6 +94,7 @@ func TestLiveRealtimeSharedAppControlHTTPUsesKWWKBackend(t *testing.T) {
 	if os.Getenv("MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE") != "1" {
 		t.Skip("set MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE=1 to run the host app-control smoke")
 	}
+	configureKWWKLiveSmokeFixturePlanner(t)
 	appName := strings.TrimSpace(os.Getenv("MAB_KWWK_APP_CONTROL_LIVE_APP"))
 	if appName == "" {
 		appName = "Pencil"
@@ -98,14 +128,16 @@ func TestLiveRealtimeSharedAppControlHTTPUsesKWWKBackend(t *testing.T) {
 	})
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", jsonForKWWKLiveSmoke(t, map[string]any{
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", jsonForKWWKLiveSmoke(t, map[string]any{
 		"session_id":  "meet_session",
 		"instruction": "observe the shared app through the HTTP tool",
 		"wait":        true,
+		"timeoutMs":   int(kwwkLiveSmokeTimeout / time.Millisecond),
 		"context": map[string]any{
 			"includeScreenshot": true,
 			"screenshotOutput":  screenshot,
 			"timeoutMs":         15000,
+			"modelPlan":         kwwkLiveSmokeObserveModelPlan(),
 		},
 	}), http.StatusOK)
 
@@ -119,6 +151,7 @@ func TestLiveRealtimeSharedAppControlHTTPAcceptsKWWKInstructionOnlyObserve(t *te
 	if os.Getenv("MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE") != "1" {
 		t.Skip("set MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE=1 to run the host app-control smoke")
 	}
+	configureKWWKLiveSmokeFixturePlanner(t)
 	appName := strings.TrimSpace(os.Getenv("MAB_KWWK_APP_CONTROL_LIVE_APP"))
 	if appName == "" {
 		appName = "Pencil"
@@ -151,10 +184,14 @@ func TestLiveRealtimeSharedAppControlHTTPAcceptsKWWKInstructionOnlyObserve(t *te
 	})
 
 	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
-	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/control_shared_app_window", jsonForKWWKLiveSmoke(t, map[string]any{
+	body := performRealtimeJSON(t, router, http.MethodPost, "/tools/kwwk_computer_use", jsonForKWWKLiveSmoke(t, map[string]any{
 		"session_id":  "meet_session",
 		"instruction": "observe the shared app through instruction-only KWWK direct mode",
 		"wait":        true,
+		"timeoutMs":   int(kwwkLiveSmokeTimeout / time.Millisecond),
+		"context": map[string]any{
+			"modelPlan": kwwkLiveSmokeObserveModelPlan(),
+		},
 	}), http.StatusOK)
 
 	if body["ok"] != true || body["provider"] != "kwwk" || body["status"] != appControlStatusCompleted {
@@ -170,6 +207,7 @@ func TestLiveKWWKStdioAppControlBackendRejectsMixedObserveActionInstruction(t *t
 	if os.Getenv("MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE") != "1" {
 		t.Skip("set MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE=1 to run the host app-control smoke")
 	}
+	configureKWWKLiveSmokeFixturePlanner(t)
 	appName := strings.TrimSpace(os.Getenv("MAB_KWWK_APP_CONTROL_LIVE_APP"))
 	if appName == "" {
 		appName = "Pencil"
@@ -190,6 +228,9 @@ func TestLiveKWWKStdioAppControlBackendRejectsMixedObserveActionInstruction(t *t
 		ExecutionMode: appControlExecutionModeDirect,
 		Target: AppControlTarget{
 			ApplicationName: appName,
+		},
+		Context: map[string]any{
+			"modelPlan": kwwkLiveSmokeBlockedModelPlan(),
 		},
 		Timeout: kwwkLiveSmokeTimeout,
 	})

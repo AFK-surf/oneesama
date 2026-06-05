@@ -527,6 +527,12 @@ function pickTools(allTools, variant) {
   return allTools.filter((tool) => allowed.has(tool.name));
 }
 
+function caseAppliesToVariant(testCase, variant) {
+  const onlyVariants = Array.isArray(testCase?.variants) ? testCase.variants : [];
+  if (onlyVariants.length === 0) return true;
+  return onlyVariants.map((name) => String(name || "")).includes(String(variant?.name || ""));
+}
+
 function wrapperMatchesRawSdkEvent(wrapper, event) {
   if (!wrapper || !event) return false;
   const wrapperCallId = String(wrapper.callId || "");
@@ -564,8 +570,8 @@ function runtimeFailureReason(testCase, result) {
   if (expectedWrapperResultProduced && functionOutput.delivered === false) {
     return "function_call_output_missing";
   }
-  const expectsAppControl = (testCase.expectedToolNames || []).some((name) =>
-    ["kwwk_computer_use", "control_shared_app_window"].includes(name),
+  const expectsAppControl = (testCase.expectedToolNames || []).some(
+    (name) => name === "kwwk_computer_use",
   );
   if (expectsAppControl) {
     const failedAppControl = (runtime.appControlTelemetry || []).find((job) =>
@@ -1150,6 +1156,9 @@ async function main() {
       const tools = pickTools(allTools, variant);
       const rows = [];
       for (const testCase of selectedCases) {
+        if (!caseAppliesToVariant(testCase, variant)) {
+          continue;
+        }
         for (let iteration = 1; iteration <= args.iterations; iteration += 1) {
           try {
             rows.push(await runCaseWithRetries(args, config, variant, tools, testCase, iteration));

@@ -52,7 +52,7 @@ func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
 	out := make([]realtimeToolSchema, 0, len(definitions))
 	for _, definition := range definitions {
 		switch definition.Name {
-		case "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface", "control_shared_app_window":
+		case "open_shared_browser_surface", "create_shared_workspace", "control_shared_browser_surface", "stop_shared_browser_surface":
 			continue
 		default:
 			out = append(out, definition)
@@ -63,7 +63,7 @@ func realtimeToolDefinitions(includeDemoSurface bool) []realtimeToolSchema {
 
 func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 	return []realtimeToolSchema{
-		realtimeTool("delegate_to_worker", "Start a background workspace job for async workspace/code/research/debug/planning work or external workspace lookup that is not handled by a live meeting tool. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo/GitHub/Linear/Slack/Notion/calendar/docs/URL lookup or otherwise requests work that should continue outside the short voice turn. For vague file batches or missing details, still start the background job with the user's wording instead of staying silent or asking for every file up front. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, or direct Meet-chat read/send requests.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
+		realtimeTool("delegate_to_worker", "Start a background workspace job for async workspace/code/research/debug/planning work or external workspace lookup that is not handled by a live meeting tool. Use immediately when the user asks to 后台/开个后台任务/跑个调研/写报告/用 Codex/codex/写脚本/处理一批文件/查代码/跑测试/改 repo/GitHub/Linear/Slack/Notion/calendar/docs/URL lookup, or asks to implement/build/create a web app/game such as synced Gomoku/五子棋, or otherwise requests work that should continue outside the short voice turn. For build/implement/create web app/game requests, set mode to code and allowCodeChanges to true. For vague file batches or missing details, still start the background job with the user's wording instead of staying silent or asking for every file up front. Do not use for direct meeting app share, screen/window share, browser/Pencil UI control, avatar visuals, simple spoken answers, or direct Meet-chat read/send requests.", objectSchema([]string{"task"}, map[string]realtimeJSONSchema{
 			"task":             stringSchema("Clear task, including URLs, file paths, expected output, and any user wording that matters."),
 			"context":          stringSchema("Useful meeting/workspace context. Include Meet chat links or prior results when relevant."),
 			"mode":             enumStringSchema("analysis", "analysis", "code", "research", "debug", "plan"),
@@ -96,19 +96,7 @@ func defaultRealtimeToolDefinitions() []realtimeToolSchema {
 			"mode":             stringSchema("Native app-share mode. Usually omit; the service defaults to native."),
 		})),
 		realtimeTool("kwwk_computer_use", "Use KWWK Computer Use for a simple bounded operation in the bot host's currently shared or named macOS app/window. This is the generic direct app-operation tool: put the user's exact UI goal in instruction, optionally include the target app/window fields, and do not invent click coordinates, screenshots, operation arrays, or low-level primitives. Use it for simple app actions such as click/type/press/scroll/select/switch/change within the shared app. Do not use this for Google Meet's own meeting controls such as muting/unmuting the meeting microphone or camera, leaving the call, toggling captions, admitting/removing people, or changing participant controls. For complex visual goals that require exploration, multi-step planning, unfamiliar UI reasoning, or slow delegated Computer Use, use the long-running background app-control path instead. This tool operates the bot host's shared window, not the human's personal computer.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"job_id":           stringSchema("Existing KWWK app-control job id to check. When set, instruction is not required."),
 			"instruction":      stringSchema("Natural-language app/window operation to perform. Preserve the user's wording and do not translate it into low-level primitives."),
-			"applicationName":  stringSchema("Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal."),
-			"bundleIdentifier": stringSchema("Optional macOS bundle identifier when known."),
-			"windowTitle":      stringSchema("Optional visible window title when known."),
-			"windowId":         integerSchema("Optional macOS window id from the active app share, preferred over app-name guessing when known.", nil),
-			"processId":        integerSchema("Optional process id from list_shareable_windows.", nil),
-			"session_id":       stringSchema("Current meeting session id when known."),
-		})),
-		realtimeTool("control_shared_app_window", "Compatibility app-control entrypoint for the currently shared existing macOS app/window on the bot host. Prefer kwwk_computer_use for simple direct KWWK operations. Use this only for legacy callers or explicit delegate-mode app-control requests that need Codex Computer Use. Put the user's goal in natural language instruction; do not invent click coordinates or low-level UI primitives in the Realtime turn. This tool operates the bot host's shared window, not the human's personal computer.", objectSchema(nil, map[string]realtimeJSONSchema{
-			"executionMode":    enumStringSchemaWithDescription("direct", "direct runs the configured KWWK/direct app-control backend for simple actions; delegate starts the Codex app-control worker for complex tasks.", "direct", "delegate"),
-			"job_id":           stringSchema("Existing app-control job id to check. When set, instruction is not required."),
-			"instruction":      stringSchema("Concrete user-facing operation to perform in the shared app/window. Preserve important wording; for implicit targets, put the full user goal here."),
 			"applicationName":  stringSchema("Target app name when known, e.g. Pencil, VS Code, Chrome, Notion, Terminal."),
 			"bundleIdentifier": stringSchema("Optional macOS bundle identifier when known."),
 			"windowTitle":      stringSchema("Optional visible window title when known."),

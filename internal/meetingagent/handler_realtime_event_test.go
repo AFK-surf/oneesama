@@ -59,6 +59,46 @@ func TestRealtimeEventRouteRequiresEvent(t *testing.T) {
 	}
 }
 
+func TestRealtimeEventRouteAllowsSyntheticTranscriptionEvent(t *testing.T) {
+	t.Parallel()
+
+	runner := &recordingRealtimeEventRunner{}
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: t.TempDir(),
+		MeetRunner:       runner,
+	})
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
+
+	body := performRealtimeJSON(t, router, http.MethodPost, "/realtime/event", `{"event":{"type":"conversation.item.input_audio_transcription.completed","item_id":"synthetic_item","transcript":"Codex build Gomoku web game with sync"}}`, http.StatusOK)
+	if body["ok"] != true || body["type"] != "conversation.item.input_audio_transcription.completed" {
+		t.Fatalf("body = %#v, want proxied transcription event", body)
+	}
+	if runner.calls != 1 || runner.input.Event["transcript"] != "Codex build Gomoku web game with sync" {
+		t.Fatalf("runner calls=%d input=%#v, want transcription proxied", runner.calls, runner.input)
+	}
+}
+
+func TestRealtimeEventRouteRejectsSyntheticTranscriptionWithoutTranscript(t *testing.T) {
+	t.Parallel()
+
+	runner := &recordingRealtimeEventRunner{}
+	router := newRealtimeTestRouterWithConfig(t, Config{
+		Persistence:      appconfig.PersistenceConfig{Provider: "memory"},
+		ArtifactsRootDir: t.TempDir(),
+		MeetRunner:       runner,
+	})
+	performRealtimeRequest(t, router, http.MethodPost, "/join/google-meet", `{"session_id":"meet_session","meeting_url":"https://meet.google.com/abc-defg-hij","display_name":"Onee-sama","dry_run":true}`, http.StatusOK)
+
+	body := performRealtimeJSON(t, router, http.MethodPost, "/realtime/event", `{"event":{"type":"conversation.item.input_audio_transcription.completed","item_id":"synthetic_item"}}`, http.StatusBadRequest)
+	if body["ok"] != false || body["error"] != "realtime_transcript_required" {
+		t.Fatalf("body = %#v, want realtime_transcript_required", body)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner calls = %d, want 0", runner.calls)
+	}
+}
+
 func TestRealtimeEventRouteRejectsRawTurnInjection(t *testing.T) {
 	t.Parallel()
 

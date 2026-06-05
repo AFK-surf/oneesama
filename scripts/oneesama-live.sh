@@ -158,6 +158,15 @@ first_env_name_with_value() {
   return 1
 }
 
+set_env_default() {
+  local name="$1"
+  local value="$2"
+  [[ -n "$value" ]] || return 0
+  if [[ -z "${!name:-}" ]]; then
+    export "$name=$value"
+  fi
+}
+
 check_env_alias_conflict() {
   local label="$1"
   shift
@@ -216,6 +225,70 @@ sanitize_live_env() {
       unset MAB_DISABLE_EMPTY_ROOM_AUTO_STOP
       log "ok: cleared empty-room auto-stop disable flags for live meeting-agent"
     fi
+  fi
+}
+
+load_kwwk_planner_config() {
+  if [[ "$subcommand" != "meeting-agent" ]]; then
+    return 0
+  fi
+
+  local provider
+  provider="$(first_env_value ONEESAMA_KWWK_CU_PLANNER_PROVIDER ONEESAMA_KWWK_PLANNER_PROVIDER MAB_KWWK_CU_PLANNER_PROVIDER MAB_KWWK_PLANNER_PROVIDER || true)"
+  provider="$(normalize_provider "${provider:-gemini}")"
+  if [[ "$provider" != "openrouter" && "$provider" != "gemini" ]]; then
+    return 0
+  fi
+
+  local config_path
+  config_path="$(first_env_value ONEESAMA_KWWK_CU_PLANNER_CUEBOARD_CONFIG_PATH MAB_KWWK_CU_PLANNER_CUEBOARD_CONFIG_PATH || true)"
+  config_path="${config_path:-/Users/pengx17/Desktop/config.cueboard.staging.json}"
+  if [[ ! -f "$config_path" ]]; then
+    log "warn: KWWK CU planner cueboard config not found: $config_path"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    log "warn: jq is required to load KWWK CU planner cueboard config"
+    return 0
+  fi
+
+  local provider_json
+  provider_json="$(jq -cer --arg provider "$provider" '
+    .copilot.llm.providers[]?
+    | select((.name // "") == $provider)
+    | {
+        api_key: (.api_key // ""),
+        base_url: (.base_url // ""),
+        http_referer: ((.headers // {})["HTTP-Referer"] // ""),
+        x_title: ((.headers // {})["X-Title"] // "")
+      }
+    | select(.api_key != "")
+  ' "$config_path" | head -n 1 || true)"
+  if [[ -z "$provider_json" ]]; then
+    log "warn: KWWK CU planner cueboard config has no usable ${provider} provider"
+    return 0
+  fi
+
+  local api_key base_url http_referer x_title
+  api_key="$(jq -r '.api_key' <<<"$provider_json")"
+  base_url="$(jq -r '.base_url' <<<"$provider_json")"
+  http_referer="$(jq -r '.http_referer' <<<"$provider_json")"
+  x_title="$(jq -r '.x_title' <<<"$provider_json")"
+
+  if [[ "$provider" == "openrouter" ]]; then
+    set_env_default ONEESAMA_KWWK_CU_PLANNER_PROVIDER "openrouter"
+    set_env_default ONEESAMA_KWWK_CU_PLANNER_MODEL "google/gemini-3.5-flash"
+    set_env_default ONEESAMA_OPENROUTER_API_KEY "$api_key"
+    set_env_default ONEESAMA_OPENROUTER_BASE_URL "$base_url"
+    set_env_default ONEESAMA_OPENROUTER_HTTP_REFERER "$http_referer"
+    set_env_default ONEESAMA_OPENROUTER_X_TITLE "$x_title"
+    log "ok: KWWK CU planner OpenRouter config loaded from cueboard config via ONEESAMA_OPENROUTER_API_KEY"
+  elif [[ "$provider" == "gemini" ]]; then
+    set_env_default ONEESAMA_KWWK_CU_PLANNER_PROVIDER "gemini"
+    set_env_default ONEESAMA_KWWK_CU_PLANNER_MODEL "gemini-3.5-flash"
+    set_env_default ONEESAMA_GEMINI_API_KEY "$api_key"
+    set_env_default ONEESAMA_GEMINI_BASE_URL "$base_url"
+    log "ok: KWWK CU planner Gemini config loaded from cueboard config via ONEESAMA_GEMINI_API_KEY"
   fi
 }
 
@@ -508,9 +581,23 @@ preflight_env() {
   elif [[ "$subcommand" == "meeting-agent" ]]; then
     require_env_any "OpenAI Realtime API key" ONEESAMA_OPENAI_API_KEY MAB_OPENAI_API_KEY OPENAI_API_KEY
     check_live_meeting_realtime_placement
+    local kwwk_planner_provider kwwk_planner_model
+    kwwk_planner_provider="$(first_env_value ONEESAMA_KWWK_CU_PLANNER_PROVIDER ONEESAMA_KWWK_PLANNER_PROVIDER MAB_KWWK_CU_PLANNER_PROVIDER MAB_KWWK_PLANNER_PROVIDER || true)"
+    kwwk_planner_provider="$(normalize_provider "${kwwk_planner_provider:-gemini}")"
+    if [[ "$kwwk_planner_provider" == "openrouter" ]]; then
+      require_env_any "KWWK CU OpenRouter planner API key" ONEESAMA_OPENROUTER_API_KEY MAB_OPENROUTER_API_KEY OPENROUTER_API_KEY ONEESAMA_KWWK_CU_PLANNER_OPENROUTER_API_KEY MAB_KWWK_CU_PLANNER_OPENROUTER_API_KEY
+      kwwk_planner_model="$(first_env_value ONEESAMA_KWWK_CU_PLANNER_MODEL ONEESAMA_KWWK_PLANNER_MODEL MAB_KWWK_CU_PLANNER_MODEL MAB_KWWK_PLANNER_MODEL || true)"
+      log "ok: KWWK CU planner provider=openrouter model=${kwwk_planner_model:-google/gemini-3.5-flash}"
+    elif [[ "$kwwk_planner_provider" == "gemini" ]]; then
+      require_env_any "KWWK CU Gemini planner API key" ONEESAMA_GEMINI_API_KEY MAB_GEMINI_API_KEY GEMINI_API_KEY ONEESAMA_KWWK_CU_PLANNER_GEMINI_API_KEY MAB_KWWK_CU_PLANNER_GEMINI_API_KEY
+      kwwk_planner_model="$(first_env_value ONEESAMA_KWWK_CU_PLANNER_MODEL ONEESAMA_KWWK_PLANNER_MODEL MAB_KWWK_CU_PLANNER_MODEL MAB_KWWK_PLANNER_MODEL || true)"
+      log "ok: KWWK CU planner provider=gemini model=${kwwk_planner_model:-gemini-3.5-flash}"
+    else
+      log "ok: KWWK CU planner provider=${kwwk_planner_provider}"
+    fi
   fi
-	local required_codex_env
-	required_codex_env="$(codex_required_env_key || true)"
+  local required_codex_env
+  required_codex_env="$(codex_required_env_key || true)"
   if [[ -n "$required_codex_env" ]]; then
     require_env_name "$required_codex_env"
   else
@@ -550,10 +637,27 @@ check_process_env() {
   [[ -n "$slack_bot" ]] && names+=("$slack_bot")
   [[ -n "$slack_app" ]] && names+=("$slack_app")
   if [[ "$subcommand" == "meeting-agent" ]]; then
+    local kwwk_planner_provider kwwk_planner_model kwwk_openrouter_key kwwk_openrouter_base kwwk_openrouter_referer kwwk_openrouter_title kwwk_gemini_key kwwk_gemini_base
     openai_realtime_key="$(first_env_name_with_value ONEESAMA_OPENAI_API_KEY MAB_OPENAI_API_KEY OPENAI_API_KEY || true)"
     realtime_placement="$(first_env_name_with_value ONEESAMA_OPENAI_REALTIME_RUNTIME_PLACEMENT ONEESAMA_REALTIME_RUNTIME_PLACEMENT MAB_OPENAI_REALTIME_RUNTIME_PLACEMENT MAB_REALTIME_RUNTIME_PLACEMENT || true)"
     [[ -n "$openai_realtime_key" ]] && names+=("$openai_realtime_key")
     [[ -n "$realtime_placement" ]] && names+=("$realtime_placement")
+    kwwk_planner_provider="$(first_env_name_with_value ONEESAMA_KWWK_CU_PLANNER_PROVIDER ONEESAMA_KWWK_PLANNER_PROVIDER MAB_KWWK_CU_PLANNER_PROVIDER MAB_KWWK_PLANNER_PROVIDER || true)"
+    kwwk_planner_model="$(first_env_name_with_value ONEESAMA_KWWK_CU_PLANNER_MODEL ONEESAMA_KWWK_PLANNER_MODEL MAB_KWWK_CU_PLANNER_MODEL MAB_KWWK_PLANNER_MODEL || true)"
+    kwwk_openrouter_key="$(first_env_name_with_value ONEESAMA_OPENROUTER_API_KEY MAB_OPENROUTER_API_KEY OPENROUTER_API_KEY ONEESAMA_KWWK_CU_PLANNER_OPENROUTER_API_KEY MAB_KWWK_CU_PLANNER_OPENROUTER_API_KEY || true)"
+    kwwk_openrouter_base="$(first_env_name_with_value ONEESAMA_OPENROUTER_BASE_URL MAB_OPENROUTER_BASE_URL OPENROUTER_BASE_URL ONEESAMA_KWWK_CU_PLANNER_OPENROUTER_BASE_URL MAB_KWWK_CU_PLANNER_OPENROUTER_BASE_URL || true)"
+    kwwk_openrouter_referer="$(first_env_name_with_value ONEESAMA_OPENROUTER_HTTP_REFERER MAB_OPENROUTER_HTTP_REFERER OPENROUTER_HTTP_REFERER ONEESAMA_KWWK_CU_PLANNER_OPENROUTER_HTTP_REFERER MAB_KWWK_CU_PLANNER_OPENROUTER_HTTP_REFERER || true)"
+    kwwk_openrouter_title="$(first_env_name_with_value ONEESAMA_OPENROUTER_X_TITLE MAB_OPENROUTER_X_TITLE OPENROUTER_X_TITLE ONEESAMA_KWWK_CU_PLANNER_OPENROUTER_X_TITLE MAB_KWWK_CU_PLANNER_OPENROUTER_X_TITLE || true)"
+    kwwk_gemini_key="$(first_env_name_with_value ONEESAMA_GEMINI_API_KEY MAB_GEMINI_API_KEY GEMINI_API_KEY ONEESAMA_KWWK_CU_PLANNER_GEMINI_API_KEY MAB_KWWK_CU_PLANNER_GEMINI_API_KEY || true)"
+    kwwk_gemini_base="$(first_env_name_with_value ONEESAMA_GEMINI_BASE_URL MAB_GEMINI_BASE_URL GEMINI_BASE_URL ONEESAMA_KWWK_CU_PLANNER_GEMINI_BASE_URL MAB_KWWK_CU_PLANNER_GEMINI_BASE_URL || true)"
+    [[ -n "$kwwk_planner_provider" ]] && names+=("$kwwk_planner_provider")
+    [[ -n "$kwwk_planner_model" ]] && names+=("$kwwk_planner_model")
+    [[ -n "$kwwk_openrouter_key" ]] && names+=("$kwwk_openrouter_key")
+    [[ -n "$kwwk_openrouter_base" ]] && names+=("$kwwk_openrouter_base")
+    [[ -n "$kwwk_openrouter_referer" ]] && names+=("$kwwk_openrouter_referer")
+    [[ -n "$kwwk_openrouter_title" ]] && names+=("$kwwk_openrouter_title")
+    [[ -n "$kwwk_gemini_key" ]] && names+=("$kwwk_gemini_key")
+    [[ -n "$kwwk_gemini_base" ]] && names+=("$kwwk_gemini_base")
   fi
   required_codex_env="$(codex_required_env_key || true)"
   [[ -n "$required_codex_env" ]] && names+=("$required_codex_env")
@@ -590,6 +694,7 @@ for env_file in "${env_files[@]}"; do
 done
 
 sanitize_live_env
+load_kwwk_planner_config
 check_live_env_conflicts
 preflight_env
 

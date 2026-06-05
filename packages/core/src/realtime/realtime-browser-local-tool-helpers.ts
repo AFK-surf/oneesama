@@ -450,7 +450,7 @@
       name: string,
       args: Record<string, unknown> = {},
     ): Record<string, unknown> {
-      if (name !== "kwwk_computer_use" && name !== "control_shared_app_window") {
+      if (name !== "kwwk_computer_use") {
         return args;
       }
       const context =
@@ -497,7 +497,7 @@
     }
 
     function dryRunWorkspaceToolResult(name: string, args: Record<string, unknown> = {}) {
-      if (name !== "kwwk_computer_use" && name !== "control_shared_app_window") {
+      if (name !== "kwwk_computer_use") {
         return { ok: true, dryRun: true, tool: name, arguments: args };
       }
       return {
@@ -545,9 +545,13 @@
       const displayText = String(
         record.displayText ||
           record.display_text ||
+          record.answer_hint_en ||
+          record.answerHintEn ||
           record.answer_hint_zh ||
           nested.displayText ||
           nested.display_text ||
+          nested.answer_hint_en ||
+          nested.answerHintEn ||
           nested.answer_hint_zh ||
           "",
       )
@@ -604,7 +608,7 @@
           action: "think",
           holdMs: 30000,
         });
-      } else if (name === "kwwk_computer_use" || name === "control_shared_app_window") {
+      } else if (name === "kwwk_computer_use") {
         updateAvatarHudStatus("opening_preview", `正在操作 ${appControlTargetLabel(toolArgs)}`, {
           mood: "thinking",
           action: "lean_forward",
@@ -636,7 +640,7 @@
           });
         }
       }
-      if (name === "kwwk_computer_use" || name === "control_shared_app_window") {
+      if (name === "kwwk_computer_use") {
         rememberKWWKActionTelemetry(result);
         const cursorPoint = latestKWWKCursorFeedbackPoint(result);
         const status = String((result as { status?: unknown })?.status || "")

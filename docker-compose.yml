@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: meeting-avatar-bot:local
+    platform: "${MAB_DOCKER_PLATFORM:-linux/amd64}"
     command: ["npm", "run", "dev:meeting"]
     init: true
     shm_size: 1gb
@@ -12,6 +13,7 @@ services:
       - ${MAB_ENV_FILE:-.env}
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
+      MAB_MEETING_HOST: "0.0.0.0"
       MAB_MEETING_PORT: "8781"
       MAB_MEETING_AGENT_URL: "http://meeting-agent:8781"
       MAB_DATA_DIR: "/data"
@@ -19,7 +21,15 @@ services:
       MAB_STATE_SQLITE_PATH: "/data/meeting-avatar-bot.sqlite3"
       MAB_SCREENSHOT_DIR: "/screenshots"
       MAB_MEETING_ARTIFACTS_DIR: "/artifacts"
-      MAB_BROWSER_HEADLESS: "${MAB_BROWSER_HEADLESS:-true}"
+      MAB_BROWSER_HEADLESS: "${MAB_BROWSER_HEADLESS:-false}"
+      MAB_DOCKER_CONTAINER: "1"
+      MAB_MEET_BROWSER_CONTROL_MODE: "${MAB_MEET_BROWSER_CONTROL_MODE:-webdriver_chromedriver}"
+      MAB_MEET_UI_INTERACTION_MODE: "${MAB_MEET_UI_INTERACTION_MODE:-auto}"
+      MAB_MEET_XTEST_INPUT_COMMAND: "${MAB_MEET_XTEST_INPUT_COMMAND:-/usr/local/bin/cueboard-xtest-input}"
+      MEET_XTEST_INPUT_COMMAND: "${MEET_XTEST_INPUT_COMMAND:-/usr/local/bin/cueboard-xtest-input}"
+      MAB_CHROMIUM_EXECUTABLE: "${MAB_CHROMIUM_EXECUTABLE:-/usr/bin/google-chrome}"
+      CHROMEDRIVER_PATH: "${CHROMEDRIVER_PATH:-/usr/local/bin/chromedriver}"
+      DISPLAY: "${MAB_DOCKER_DISPLAY:-:99}"
     ports:
       - "${MAB_MEETING_PORT:-8781}:8781"
     volumes:
@@ -41,6 +51,7 @@ services:
 
   slack-agent:
     image: meeting-avatar-bot:local
+    platform: "${MAB_DOCKER_PLATFORM:-linux/amd64}"
     build:
       context: .
       dockerfile: Dockerfile

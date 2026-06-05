@@ -1,18 +1,23 @@
+/* eslint-disable max-lines */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vite-plus/test";
 import {
+  buildSidecarAcceptancePreflight,
+  buildAdmissionRecipes,
   compactAppControlResult,
   compactSyntheticResult,
   extractRealMeetUrlFromJoinStatus as extractSidecarRealMeetUrlFromJoinStatus,
   gateRunErrorResult,
   normalizeRealMeetUrl as normalizeSidecarRealMeetUrl,
   parseGateJsonResult,
+  prepareSyntheticSpeakerProfileClone,
+  summarizeSidecarBlocker,
   waitForChildExit,
 } from "../scripts/real-meet-sidecar-acceptance.mjs";
 import {
@@ -27,13 +32,17 @@ import {
   appControlStatusHasCompactBlocker,
   appControlStatusIsFailure,
   appControlStatusIsSuccess,
+  buildRealMeetAppControlLiveLatencySummary,
+  compactAppControlEvidence,
   compactRealMeetAppControlJoinStatus,
   extractRealMeetUrlFromJoinStatus,
   gateStatus,
   normalizeRealMeetUrl,
   realMeetAppControlEvidencePasses,
+  realMeetAppControlManagedTargetConfig,
   realMeetAppControlRealtimeEvidencePasses,
   realMeetAppControlSuiteCasePasses,
+  validateSyntheticSpeakerProfileIsolation,
 } from "../scripts/real-meet-synthetic-speaker-smoke.mjs";
 import { buildKWWKAppControlBenchmarkReport } from "../scripts/realtime-kwwk-app-control-benchmark.mjs";
 
@@ -140,7 +149,7 @@ function passingRealtimeJoinStatus(overrides = {}) {
         workspaceTools: {
           calls: [
             {
-              name: "control_shared_app_window",
+              name: "kwwk_computer_use",
               callId: "call_real_app_control",
               result: {
                 jobId: "job_real_app_control",
@@ -210,6 +219,14 @@ test("npm real Meet app-control benchmark is a strict live gate with optional sk
     /real-meet-sidecar-acceptance\.mjs/,
   );
   assert.match(packageJson.scripts["acceptance:realtime-live-sidecar"], /--require-real-meet-url/);
+  assert.match(
+    packageJson.scripts["acceptance:realtime-live-sidecar:prepare-speaker-profile"],
+    /--prepare-speaker-profile/,
+  );
+  assert.match(
+    packageJson.scripts["acceptance:realtime-live-sidecar:preflight"],
+    /--preflight-only/,
+  );
   assert.match(
     packageJson.scripts["acceptance:realtime-live-sidecar:optional"],
     /real-meet-sidecar-acceptance\.mjs/,
@@ -506,6 +523,7 @@ test("real Meet live sidecar acceptance compacts app-control suite evidence", ()
     sessionId: "suite_session",
     applicationName: "Chrome",
     childExit: { code: 0, signal: null },
+    liveModelFirstLatency: { ok: true, warmP95Ms: 900 },
     suite: [
       {
         id: "keyboard-escape",
@@ -513,7 +531,12 @@ test("real Meet live sidecar acceptance compacts app-control suite evidence", ()
         ok: true,
         acceptanceSatisfied: true,
         final: {
-          appControl: { status: "completed", actions: ["press_key"], jobId: "job_keyboard" },
+          appControl: {
+            status: "completed",
+            actions: ["press_key"],
+            jobId: "job_keyboard",
+            timing: { toolReceiveToVerifiedActionMs: 500, withinWarmSlo: true },
+          },
           joinStatus: { avatarHud: { noisySpeechOrConnectionVisible: false } },
         },
       },
@@ -542,7 +565,93 @@ test("real Meet live sidecar acceptance compacts app-control suite evidence", ()
   assert.equal(summary.acceptanceSatisfied, true);
   assert.equal(summary.suite.length, 2);
   assert.equal(summary.suite[0].kind, "keyboard");
+  assert.equal(summary.suite[0].timing.toolReceiveToVerifiedActionMs, 500);
   assert.deepEqual(summary.suite[1].actions, ["click"]);
+  assert.equal(summary.liveModelFirstLatency.warmP95Ms, 900);
+});
+
+test("real Meet app-control evidence preserves model-first timing", () => {
+  const evidence = compactAppControlEvidence({
+    ok: true,
+    status: "completed",
+    provider: "kwwk",
+    backendResult: {
+      metadata: {
+        planner: {
+          modelUsed: true,
+          provider: "model_first_openrouter",
+          modelName: "google/gemini-3.5-flash-20260519",
+          modelLatencyMs: 380,
+        },
+        timings: {
+          observeMs: 90,
+          planMs: 420,
+          executeMs: 70,
+          cursorMs: 20,
+          verifyMs: 40,
+        },
+      },
+    },
+  });
+
+  assert.equal(evidence.timing.available, true);
+  assert.equal(evidence.timing.modelUsed, true);
+  assert.equal(evidence.timing.modelPlannerMs, 380);
+  assert.equal(evidence.timing.toolReceiveToVerifiedActionMs, 640);
+  assert.equal(evidence.timing.withinWarmSlo, true);
+  assert.equal(evidence.timing.modelName, "google/gemini-3.5-flash-20260519");
+});
+
+test("real Meet app-control suite summarizes live latency evidence", () => {
+  const passing = buildRealMeetAppControlLiveLatencySummary([
+    {
+      id: "keyboard-escape",
+      kind: "keyboard",
+      acceptanceSatisfied: true,
+      final: {
+        appControl: {
+          timing: {
+            modelUsed: true,
+            toolReceiveToVerifiedActionMs: 600,
+            modelPlannerMs: 300,
+            withinWarmSlo: true,
+          },
+        },
+      },
+    },
+    {
+      id: "pointer-visible-click",
+      kind: "pointer",
+      acceptanceSatisfied: true,
+      final: {
+        appControl: {
+          timing: {
+            modelUsed: true,
+            toolReceiveToVerifiedActionMs: 900,
+            modelPlannerMs: 450,
+            withinWarmSlo: true,
+          },
+        },
+      },
+    },
+  ]);
+  const missing = buildRealMeetAppControlLiveLatencySummary([
+    {
+      id: "keyboard-escape",
+      kind: "keyboard",
+      acceptanceSatisfied: true,
+      final: {
+        appControl: {},
+      },
+    },
+  ]);
+
+  assert.equal(passing.ok, true);
+  assert.equal(passing.warmP95Ms, 900);
+  assert.equal(passing.measuredSampleCount, 2);
+  assert.equal(missing.ok, false);
+  assert.equal(missing.missingTimingCount, 1);
+  assert.equal(missing.samples[0].modelPlannerMs, null);
 });
 
 test("real Meet live sidecar acceptance requires explicit child acceptance", () => {
@@ -561,6 +670,303 @@ test("real Meet live sidecar acceptance requires explicit child acceptance", () 
     }).acceptanceSatisfied,
     true,
   );
+});
+
+test("real Meet live sidecar acceptance preserves synthetic speaker failure diagnostics", () => {
+  const summary = compactSyntheticResult({
+    ok: false,
+    acceptanceSatisfied: false,
+    sessionId: "synthetic_session",
+    childExit: { code: 1, signal: null },
+    failure: {
+      reason: "speaker_room_admission_required",
+      hostAdmissionRequired: true,
+      requiredFix: "Use a Meet room/profile that can admit the synthetic speaker.",
+    },
+    mainBotProfile: {
+      profileMode: "persistent",
+      browserUserDataDirConfigured: true,
+    },
+    syntheticSpeakerProfile: {
+      profileMode: "guest",
+      browserUserDataDirConfigured: false,
+    },
+  });
+
+  assert.equal(summary.ok, false);
+  assert.equal(summary.acceptanceSatisfied, false);
+  assert.equal(summary.failure.reason, "speaker_room_admission_required");
+  assert.equal(summary.mainBotProfile.profileMode, "persistent");
+  assert.equal(summary.syntheticSpeakerProfile.profileMode, "guest");
+});
+
+test("real Meet live sidecar acceptance lifts synthetic speaker admission blocker", () => {
+  const summary = compactSyntheticResult({
+    ok: false,
+    acceptanceSatisfied: false,
+    childExit: { code: 1, signal: null },
+    failure: {
+      reason: "speaker_room_admission_required",
+      requiredFix: "Use a Meet room/profile that can admit the synthetic speaker.",
+    },
+  });
+  const blocker = summarizeSidecarBlocker({
+    syntheticSpeaker: summary,
+    appControl: {
+      acceptanceSatisfied: true,
+    },
+  });
+
+  assert.equal(blocker.blockerSource, "synthetic_speaker");
+  assert.equal(blocker.blocker, "speaker_room_admission_required");
+  assert.match(blocker.requiredFix, /admit the synthetic speaker/);
+});
+
+test("real Meet live sidecar compact app-control records waiting-room admission", () => {
+  const summary = compactAppControlResult({
+    ok: false,
+    acceptanceSatisfied: false,
+    childExit: { code: 1, signal: null },
+    error: "HTTP 400 /screen-share/app: not_in_meeting",
+    errorBody: {
+      postcheck: {
+        meetPage: {
+          waitingForAdmit: true,
+          inMeeting: false,
+          participantCount: 1,
+          textHead: "Please wait until a meeting host brings you into the call",
+        },
+      },
+    },
+  });
+
+  assert.equal(summary.acceptanceSatisfied, false);
+  assert.equal(summary.blocker, "room_admission_required");
+  assert.equal(summary.meetingAdmission.waitingForAdmit, true);
+  assert.equal(summary.meetingAdmission.inMeeting, false);
+  assert.match(summary.meetingAdmission.textHead, /meeting host/);
+});
+
+test("real Meet live sidecar summarizes shared room admission failure", () => {
+  const blocker = summarizeSidecarBlocker({
+    syntheticSpeaker: {
+      acceptanceSatisfied: false,
+      failure: { reason: "speaker_room_admission_required" },
+    },
+    appControl: {
+      acceptanceSatisfied: false,
+      meetingAdmission: { waitingForAdmit: true },
+    },
+  });
+
+  assert.equal(blocker.blockerSource, "real_meet_admission");
+  assert.equal(blocker.blocker, "real_meet_room_admission_required");
+  assert.match(blocker.requiredFix, /authenticated profiles/);
+});
+
+test("real Meet live sidecar preflight rejects shared persistent speaker profile", () => {
+  const preflight = buildSidecarAcceptancePreflight({
+    meetUrl: "https://meet.google.com/abc-defg-hij",
+    meetUrlSource: "test",
+    env: {
+      MAB_MEET_PROFILE_MODE: "persistent",
+      MAB_BROWSER_USER_DATA_DIR: "/tmp/oneesama-profile",
+      MAB_SYNTHETIC_SPEAKER_PROFILE_MODE: "persistent",
+      MAB_SYNTHETIC_SPEAKER_BROWSER_USER_DATA_DIR: "/tmp/oneesama-profile",
+    },
+  });
+
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.preflightSatisfied, false);
+  assert.equal(preflight.acceptanceSatisfied, false);
+  assert.equal(preflight.blockerSource, "synthetic_speaker");
+  assert.equal(preflight.blocker, "synthetic_speaker_profile_conflicts_with_main_bot");
+  assert.match(preflight.requiredFix, /separate authenticated Chrome profile/);
+});
+
+test("real Meet live sidecar preflight warns for guest speaker profile", () => {
+  const preflight = buildSidecarAcceptancePreflight({
+    meetUrl: "https://meet.google.com/abc-defg-hij",
+    meetUrlSource: "test",
+    env: {},
+  });
+
+  assert.equal(preflight.ok, true);
+  assert.equal(preflight.preflightSatisfied, true);
+  assert.equal(preflight.syntheticSpeakerProfile.profileMode, "guest");
+  assert.equal(preflight.warnings[0].reason, "synthetic_speaker_guest_profile");
+});
+
+test("real Meet live sidecar preflight records room admission as unverified", () => {
+  const preflight = buildSidecarAcceptancePreflight({
+    meetUrl: "https://meet.google.com/abc-defg-hij",
+    meetUrlSource: "test",
+    env: {
+      MAB_MEET_PROFILE_MODE: "persistent",
+      MAB_BROWSER_USER_DATA_DIR: "/tmp/oneesama-main-profile",
+      MAB_SYNTHETIC_SPEAKER_PROFILE_MODE: "persistent",
+      MAB_SYNTHETIC_SPEAKER_BROWSER_USER_DATA_DIR: "/tmp/oneesama-speaker-profile",
+    },
+  });
+
+  assert.equal(preflight.ok, true);
+  assert.equal(preflight.admissionPreconditions.roomAdmissionVerified, false);
+  assert.equal(preflight.admissionPreconditions.profilesConfiguredOnly, true);
+  assert.equal(preflight.admissionPreconditions.syntheticSpeakerMustBeAdmitted, true);
+  assert.match(preflight.admissionPreconditions.message, /admits the synthetic speaker/);
+});
+
+test("real Meet live sidecar auto-room preflight requires an admission path", () => {
+  const preflight = buildSidecarAcceptancePreflight({
+    meetUrl: "",
+    meetUrlSource: "",
+    env: {},
+    calendarMeetCreation: {
+      requested: true,
+      preflightOnly: true,
+      config: {
+        ok: true,
+        attendeeCount: 0,
+      },
+    },
+  });
+
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.blockerSource, "calendar_meet");
+  assert.equal(preflight.blocker, "calendar_auto_room_admission_path_missing");
+  assert.equal(preflight.admissionPreconditions.calendarAutoRoomRequested, true);
+  assert.equal(preflight.admissionPreconditions.calendarAutoRoomAdmissionPathConfigured, false);
+  assert.ok(preflight.admissionRecipes.some((recipe) => recipe.id === "main_bot_host_profile"));
+  assert.ok(
+    preflight.admissionRecipes.some((recipe) => recipe.id === "invited_synthetic_speaker_profile"),
+  );
+  assert.ok(preflight.admissionRecipes.some((recipe) => recipe.id === "host_admission_actor"));
+});
+
+test("real Meet live sidecar auto-room preflight accepts configured admission paths", () => {
+  const mainHost = buildSidecarAcceptancePreflight({
+    meetUrl: "",
+    meetUrlSource: "",
+    env: {
+      MAB_MEET_PROFILE_MODE: "persistent",
+      MAB_BROWSER_USER_DATA_DIR: "/tmp/main-host-profile",
+    },
+    calendarMeetCreation: {
+      requested: true,
+      preflightOnly: true,
+      config: {
+        ok: true,
+        attendeeCount: 0,
+      },
+    },
+  });
+  const invitedSpeaker = buildSidecarAcceptancePreflight({
+    meetUrl: "",
+    meetUrlSource: "",
+    env: {
+      MAB_SYNTHETIC_SPEAKER_PROFILE_MODE: "persistent",
+      MAB_SYNTHETIC_SPEAKER_BROWSER_USER_DATA_DIR: "/tmp/speaker-profile",
+    },
+    calendarMeetCreation: {
+      requested: true,
+      preflightOnly: true,
+      config: {
+        ok: true,
+        attendeeCount: 1,
+      },
+    },
+  });
+
+  assert.equal(mainHost.ok, true);
+  assert.equal(mainHost.admissionPreconditions.calendarAutoRoomAdmissionPathConfigured, true);
+  assert.equal(invitedSpeaker.ok, true);
+  assert.equal(invitedSpeaker.admissionPreconditions.calendarAutoRoomAdmissionPathConfigured, true);
+});
+
+test("real Meet live sidecar admission recipes are explicit env templates only", () => {
+  const recipes = buildAdmissionRecipes({
+    calendarMeetCreation: { requested: true },
+  });
+  const rendered = JSON.stringify(recipes);
+
+  assert.equal(recipes.length, 3);
+  assert.match(rendered, /MAB_BROWSER_USER_DATA_DIR=\/path\/to\/authenticated-main-bot-profile/);
+  assert.match(rendered, /MAB_REAL_MEET_CALENDAR_ATTENDEES=speaker@example.com/);
+  assert.doesNotMatch(rendered, /Users\/pengx17/);
+  assert.doesNotMatch(rendered, /@gmail\.com/);
+  assert.doesNotMatch(rendered, /@cue\.surf/);
+});
+
+test("real Meet live sidecar can prepare an isolated speaker profile clone", async () => {
+  const tmpDir = mkdtempSync(pathJoin(tmpdir(), "oneesama-speaker-profile-test-"));
+  const source = pathJoin(tmpDir, "main-profile");
+  const target = pathJoin(tmpDir, "speaker-profile");
+  mkdirSync(pathJoin(source, "Default", "Cache"), { recursive: true });
+  mkdirSync(pathJoin(source, "Default"), { recursive: true });
+  writeFileSync(pathJoin(source, "Local State"), "{}");
+  writeFileSync(pathJoin(source, "Default", "Preferences"), "{}");
+  writeFileSync(pathJoin(source, "Default", "Cache", "ignored"), "cache");
+  writeFileSync(pathJoin(source, "SingletonLock"), "locked");
+  try {
+    rmSync(pathJoin(source, "SingletonLock"), { force: true });
+    const result = await prepareSyntheticSpeakerProfileClone({
+      env: {
+        MAB_MEET_PROFILE_MODE: "persistent",
+        MAB_BROWSER_USER_DATA_DIR: source,
+        MAB_SYNTHETIC_SPEAKER_BROWSER_USER_DATA_DIR: target,
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.env.MAB_SYNTHETIC_SPEAKER_PROFILE_MODE, "persistent");
+    assert.equal(result.env.MAB_SYNTHETIC_SPEAKER_BROWSER_USER_DATA_DIR, target);
+    assert.equal(existsSync(pathJoin(target, "Local State")), true);
+    assert.equal(existsSync(pathJoin(target, "Default", "Preferences")), true);
+    assert.equal(existsSync(pathJoin(target, "Default", "Cache", "ignored")), false);
+    assert.equal(existsSync(pathJoin(target, "SingletonLock")), false);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("real Meet live sidecar speaker profile clone requires main persistent profile", async () => {
+  const result = await prepareSyntheticSpeakerProfileClone({
+    env: {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "main_bot_persistent_profile_required");
+});
+
+test("real Meet synthetic speaker preflight rejects shared persistent profile", () => {
+  const failure = validateSyntheticSpeakerProfileIsolation(
+    {
+      profileMode: "persistent",
+      browserUserDataDir: "/tmp/oneesama-profile",
+    },
+    {
+      profileMode: "persistent",
+      browserUserDataDir: "/tmp/oneesama-profile",
+    },
+  );
+
+  assert.equal(failure.reason, "synthetic_speaker_profile_conflicts_with_main_bot");
+  assert.match(failure.requiredFix, /separate authenticated Chrome profile/);
+});
+
+test("real Meet synthetic speaker preflight allows distinct persistent profiles", () => {
+  const failure = validateSyntheticSpeakerProfileIsolation(
+    {
+      profileMode: "persistent",
+      browserUserDataDir: "/tmp/oneesama-main-profile",
+    },
+    {
+      profileMode: "persistent",
+      browserUserDataDir: "/tmp/oneesama-speaker-profile",
+    },
+  );
+
+  assert.equal(failure, null);
 });
 
 test("real Meet synthetic fixture text-turn fallback cannot satisfy acceptance", () => {
@@ -875,6 +1281,31 @@ test("real Meet app-control suite distinguishes keyboard-only and pointer cursor
     false,
     "noisy speech/listening HUD labels must fail the real-room suite gate",
   );
+});
+
+test("real Meet app-control suite defaults to a managed stable target window", () => {
+  const defaults = realMeetAppControlManagedTargetConfig({});
+  assert.equal(defaults.enabled, true);
+  assert.equal(defaults.applicationName, "Google Chrome for Testing");
+  assert.equal(defaults.windowTitle, "Oneesama KWWK App Control Target");
+  assert.equal(defaults.targetLabel, "Chromium");
+
+  const external = realMeetAppControlManagedTargetConfig({
+    MAB_REAL_MEET_APP_CONTROL_APPLICATION: "Chrome",
+  });
+  assert.equal(external.enabled, false);
+  assert.equal(external.applicationName, "Chrome");
+
+  const forced = realMeetAppControlManagedTargetConfig({
+    MAB_REAL_MEET_APP_CONTROL_APPLICATION: "Chrome",
+    MAB_REAL_MEET_APP_CONTROL_MANAGED_TARGET: "1",
+    MAB_REAL_MEET_APP_CONTROL_WINDOW_TITLE: "Custom CU Target",
+    MAB_REAL_MEET_APP_CONTROL_TARGET_LABEL: "Click Me",
+  });
+  assert.equal(forced.enabled, true);
+  assert.equal(forced.applicationName, "Chrome");
+  assert.equal(forced.windowTitle, "Custom CU Target");
+  assert.equal(forced.targetLabel, "Click Me");
 });
 
 test("real Meet app-control acceptance requires sidecar tool telemetry and Meet SDK negative probe", () => {
