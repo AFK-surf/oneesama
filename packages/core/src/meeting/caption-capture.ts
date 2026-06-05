@@ -5,36 +5,20 @@ import type {
   CaptionEvent,
   LocalDialogInput,
 } from "../browser-runtime-types.ts";
+import {
+  CAPTION_CONTAINERS,
+  CAPTION_LANGUAGE_COMBOBOX_XPATH,
+  CAPTION_LANGUAGE_LABEL,
+  INLINE_CAPTION_SETTINGS_SELECTOR,
+  SPEAKER_BADGE,
+  compactCaptionEvent,
+  escapeRegExp,
+  isCaptionSettingsUiText,
+  isLocalMeetCaptionSpeaker,
+  normalizeCaptionText,
+  nowIso,
+} from "./caption-capture-helpers.ts";
 
-const CAPTION_CONTAINERS = [
-  'div[role="region"][aria-label="Captions"]',
-  'div[role="region"][aria-label*="字幕"]',
-  ".a4cQT",
-];
-
-const SPEAKER_BADGE = ".NWpY1d, .xoMHSc, .zs7s8d";
-const INLINE_CAPTION_SETTINGS_SELECTOR = [
-  'button[aria-label*="Open caption settings" i]',
-  '[role="button"][aria-label*="Open caption settings" i]',
-  'button[aria-label*="caption settings" i]',
-  '[role="button"][aria-label*="caption settings" i]',
-  'button[aria-label*="字幕设置" i]',
-  '[role="button"][aria-label*="字幕设置" i]',
-  'button[aria-label*="字幕設定" i]',
-  '[role="button"][aria-label*="字幕設定" i]',
-].join(", ");
-const CAPTION_LANGUAGE_LABEL = /Language of the meeting|meeting language|会议语言|會議語言/i;
-const CAPTION_LANGUAGE_COMBOBOX_XPATH = [
-  "xpath=(",
-  "//*[self::div or self::span or self::label]",
-  "[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'language of the meeting')",
-  " or contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'meeting language')",
-  " or contains(normalize-space(.), '会议语言')",
-  " or contains(normalize-space(.), '會議語言')",
-  "]",
-  "/following::*[@role='combobox'][1]",
-  ")[1]",
-].join("");
 type Diagnostics = { record?: (type: string, detail?: Record<string, unknown>) => void } | null;
 type CaptionToggleProbe = {
   ok: boolean;
@@ -43,53 +27,6 @@ type CaptionToggleProbe = {
   candidates: Array<{ index: number; aria: string; text: string; visible: boolean }>;
   error?: string;
 };
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function normalizeCaptionText(text: unknown): string {
-  return String(text || "")
-    .replace(/\u00a0/g, " ")
-    .split("\n")
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-}
-
-function isLocalMeetCaptionSpeaker(speaker: unknown): boolean {
-  const normalized = normalizeCaptionText(speaker)
-    .toLowerCase()
-    .replace(/[：:]\s*$/, "");
-  if (!normalized) return false;
-  if (["you", "me", "myself", "我", "你", "您", "自己", "本人"].includes(normalized)) {
-    return true;
-  }
-  return /^you\s*\(.+\)$/.test(normalized);
-}
-
-function isCaptionSettingsUiText(text: unknown): boolean {
-  const normalized = normalizeCaptionText(text);
-  if (!normalized) return true;
-  return /^(English|Chinese, Mandarin \(Simplified\)|Chinese \(Simplified\)|Chinese \(Traditional\)|Japanese|Korean|French|German|Spanish|Portuguese|Italian|Dutch|Russian)$/i.test(
-    normalized,
-  );
-}
-
-function compactCaptionEvent(event: CaptionEvent): CaptionEvent {
-  return {
-    ts: event.ts,
-    speaker: event.speaker,
-    text: event.text,
-    streamId: event.streamId,
-    source: event.source || "google-meet-caption-dom",
-  };
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 export async function enableMeetCaptions(
   page: import("playwright").Page,

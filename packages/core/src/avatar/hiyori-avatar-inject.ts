@@ -3,23 +3,27 @@ import { createAvatarHud } from "./hiyori-avatar-hud.js";
 import { createAvatarVisualTestHooks } from "./hiyori-avatar-visual-test-hooks.js";
 import * as videoHold from "./hiyori-avatar-video-hold.js";
 import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
+import {
+  ACTION_DURATIONS_MS,
+  ALLOWED_ACTIONS,
+  ALLOWED_MOODS,
+  ALLOWED_STATUS_KINDS,
+  DEFAULT_GLTF_LOADER_MODULE_URL,
+  DEFAULT_HIYORI_MODEL_FALLBACK_URLS,
+  DEFAULT_HIYORI_MODEL_URL,
+  DEFAULT_THREE_MODULE_URL,
+  DEFAULT_THREE_VRM_MODULE_URL,
+  DEFAULT_VRM_MODEL_URL,
+  EXPRESSION_PRESETS,
+  STATUS_LABELS,
+  clamp,
+  clamp01,
+  normalizeEnum,
+} from "./hiyori-avatar-constants.js";
 (() => {
   if (window.__meetingAvatarBotInjected) return;
   if (window.top !== window) return;
   window.__meetingAvatarBotInjected = true;
-  const DEFAULT_HIYORI_MODEL_URL =
-    "https://fastly.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json";
-  const DEFAULT_HIYORI_MODEL_FALLBACK_URLS = [
-    "https://cdn.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json",
-    "https://gcore.jsdelivr.net/gh/Live2D/CubismWebSamples@develop/Samples/Resources/Hiyori/Hiyori.model3.json",
-    "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Hiyori/Hiyori.model3.json",
-  ];
-  const DEFAULT_VRM_MODEL_URL =
-    "https://raw.githubusercontent.com/trinhtanphat/AMI-Chat-AI/main/public/models/3d/Sendagaya_Shibu.vrm";
-  const DEFAULT_THREE_MODULE_URL = "https://esm.sh/three@0.164.1";
-  const DEFAULT_GLTF_LOADER_MODULE_URL =
-    "https://esm.sh/three@0.164.1/examples/jsm/loaders/GLTFLoader.js";
-  const DEFAULT_THREE_VRM_MODULE_URL = "https://esm.sh/@pixiv/three-vrm@2.1.3?deps=three@0.164.1";
   const config = {
     modelUrl: DEFAULT_HIYORI_MODEL_URL,
     modelFallbackUrls: DEFAULT_HIYORI_MODEL_FALLBACK_URLS,
@@ -49,111 +53,6 @@ import { createVideoAvatarRenderer } from "./hiyori-avatar-video-renderer.js";
     ...window.MAB_AVATAR_CONFIG,
   };
   const log = (...args) => console.log("[meeting-avatar]", ...args);
-  const ALLOWED_MOODS = ["neutral", "happy", "surprised", "thinking", "sad", "shy"];
-  const ALLOWED_ACTIONS = [
-    "idle",
-    "nod",
-    "shake",
-    "wave",
-    "think",
-    "lean_forward",
-    "emphasize",
-    "shrug",
-    "speak",
-  ];
-  const ALLOWED_STATUS_KINDS = [
-    "idle",
-    "thinking",
-    "writing_code",
-    "opening_preview",
-    "blocked",
-    "done",
-  ];
-  const STATUS_LABELS: Record<string, string> = {
-    idle: "",
-    thinking: "Thinking",
-    writing_code: "Writing code",
-    opening_preview: "Opening preview",
-    blocked: "Blocked",
-    done: "Done",
-  };
-  const EXPRESSION_PRESETS = {
-    neutral: {
-      ParamMouthForm: 0,
-      ParamMouthOpenY: 0,
-      ParamEyeOpen: 1,
-      ParamEyeSmile: 0,
-      ParamCheek: 0,
-      ParamBrowAngle: 0,
-      ParamBrowY: 0,
-    },
-    happy: {
-      ParamMouthForm: 1,
-      ParamMouthOpenY: 0.16,
-      ParamEyeOpen: 0.82,
-      ParamEyeSmile: 1,
-      ParamCheek: 1,
-      ParamBrowAngle: 0.55,
-      ParamBrowY: 0.28,
-    },
-    surprised: {
-      ParamMouthForm: 0.05,
-      ParamMouthOpenY: 0.42,
-      ParamEyeOpen: 1.45,
-      ParamEyeSmile: 0,
-      ParamCheek: 0.25,
-      ParamBrowAngle: 1.1,
-      ParamBrowY: 0.75,
-    },
-    thinking: {
-      ParamMouthForm: 0.12,
-      ParamMouthOpenY: 0.05,
-      ParamEyeOpen: 0.72,
-      ParamEyeSmile: 0,
-      ParamCheek: 0,
-      ParamBrowAngle: -0.75,
-      ParamBrowY: -0.32,
-    },
-    sad: {
-      ParamMouthForm: -1,
-      ParamMouthOpenY: 0.04,
-      ParamEyeOpen: 0.58,
-      ParamEyeSmile: 0,
-      ParamCheek: 0,
-      ParamBrowAngle: -1.05,
-      ParamBrowY: -0.52,
-    },
-    shy: {
-      ParamMouthForm: 0.45,
-      ParamMouthOpenY: 0.06,
-      ParamEyeOpen: 0.55,
-      ParamEyeSmile: 0.62,
-      ParamCheek: 1,
-      ParamBrowAngle: -0.65,
-      ParamBrowY: -0.22,
-    },
-  };
-  const ACTION_DURATIONS_MS = {
-    idle: 200,
-    nod: 1000,
-    shake: 1000,
-    wave: 1700,
-    think: 2200,
-    lean_forward: 1400,
-    emphasize: 1100,
-    shrug: 1200,
-    speak: 1800,
-  };
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, Number(value) || 0));
-  }
-  function clamp01(value) {
-    return clamp(value, 0, 1);
-  }
-  function normalizeEnum(value, allowed, fallback) {
-    const normalized = String(value || fallback);
-    return allowed.includes(normalized) ? normalized : fallback;
-  }
   function setLive2DParam(core, id, value) {
     try {
       core.setParameterValueById(id, value);

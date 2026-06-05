@@ -99,12 +99,18 @@ function sendRealtimeEvent(event) {
   updateFeedback();
   const wireEvent = sanitizeRealtimeEventForWire(stamped);
 
-  if (state.agentRuntime.active === "agents-sdk" && activeRealtimeAgentTransport?.sendEvent) {
+  if (
+    state.agentRuntime.active === "agents-sdk" &&
+    mutableRealtimeBridgeState.activeRealtimeAgentTransport?.sendEvent
+  ) {
     try {
-      if (stamped.type === "response.cancel" && activeRealtimeAgentSession?.interrupt) {
-        activeRealtimeAgentSession.interrupt();
+      if (
+        stamped.type === "response.cancel" &&
+        mutableRealtimeBridgeState.activeRealtimeAgentSession?.interrupt
+      ) {
+        mutableRealtimeBridgeState.activeRealtimeAgentSession.interrupt();
       } else {
-        activeRealtimeAgentTransport.sendEvent(wireEvent);
+        mutableRealtimeBridgeState.activeRealtimeAgentTransport.sendEvent(wireEvent);
       }
     } catch (error) {
       return handleRealtimeAgentSDKSendError(error, stamped.type || "");

@@ -59,37 +59,38 @@ function rememberMeetAudioCaptureError(stage, error) {
 }
 
 function uploadMeetAudioBlob(blob) {
-  if (!blob?.size) return meetAudioCaptureUploadChain;
-  meetAudioCaptureSequence += 1;
-  const sequence = meetAudioCaptureSequence;
-  meetAudioCaptureUploadChain = meetAudioCaptureUploadChain
-    .then(async () => {
-      const base64 = await blobToBase64(blob);
-      const payload = {
-        sessionId: state.sessionId,
-        sequence,
-        mimeType: blob.type || state.connection.meetAudioCapture?.mimeType || "",
-        bytes: blob.size,
-        base64,
-      };
-      const result = (await window.__meetingAvatarMeetAudioCaptureChunk(payload)) as {
-        ok?: boolean;
-        error?: string;
-        reason?: string;
-        chunks?: number;
-        bytes?: number;
-      };
-      if (!result?.ok) throw new Error(result?.error || result?.reason || "audio_chunk_rejected");
-      return updateMeetAudioCaptureState({
-        chunks: result.chunks || sequence,
-        bytes: result.bytes || (state.connection.meetAudioCapture?.bytes || 0) + blob.size,
-        lastChunkAt: new Date().toISOString(),
+  if (!blob?.size) return mutableRealtimeBridgeState.meetAudioCaptureUploadChain;
+  mutableRealtimeBridgeState.meetAudioCaptureSequence += 1;
+  const sequence = mutableRealtimeBridgeState.meetAudioCaptureSequence;
+  mutableRealtimeBridgeState.meetAudioCaptureUploadChain =
+    mutableRealtimeBridgeState.meetAudioCaptureUploadChain
+      .then(async () => {
+        const base64 = await blobToBase64(blob);
+        const payload = {
+          sessionId: state.sessionId,
+          sequence,
+          mimeType: blob.type || state.connection.meetAudioCapture?.mimeType || "",
+          bytes: blob.size,
+          base64,
+        };
+        const result = (await window.__meetingAvatarMeetAudioCaptureChunk(payload)) as {
+          ok?: boolean;
+          error?: string;
+          reason?: string;
+          chunks?: number;
+          bytes?: number;
+        };
+        if (!result?.ok) throw new Error(result?.error || result?.reason || "audio_chunk_rejected");
+        return updateMeetAudioCaptureState({
+          chunks: result.chunks || sequence,
+          bytes: result.bytes || (state.connection.meetAudioCapture?.bytes || 0) + blob.size,
+          lastChunkAt: new Date().toISOString(),
+        });
+      })
+      .catch((error) => {
+        rememberMeetAudioCaptureError("chunk_upload", error);
       });
-    })
-    .catch((error) => {
-      rememberMeetAudioCaptureError("chunk_upload", error);
-    });
-  return meetAudioCaptureUploadChain;
+  return mutableRealtimeBridgeState.meetAudioCaptureUploadChain;
 }
 
 async function emitMeetAudioCaptureEvent(type, detail = {}) {
@@ -115,13 +116,14 @@ function startMeetAudioRecorderFromStream(stream, reason, detail = {}) {
   });
   if (!sinkAvailable) return { ok: false, error: "capture_sink_unavailable" };
   if (!mimeType) return { ok: false, error: "media_recorder_audio_webm_unsupported" };
-  if (meetAudioRecorder?.state === "recording") return { ok: true, recording: true };
+  if (mutableRealtimeBridgeState.meetAudioRecorder?.state === "recording")
+    return { ok: true, recording: true };
   try {
-    meetAudioRecorder = new MediaRecorder(stream, { mimeType });
-    meetAudioRecorder.addEventListener("dataavailable", (event) => {
+    mutableRealtimeBridgeState.meetAudioRecorder = new MediaRecorder(stream, { mimeType });
+    mutableRealtimeBridgeState.meetAudioRecorder.addEventListener("dataavailable", (event) => {
       uploadMeetAudioBlob(event.data);
     });
-    meetAudioRecorder.addEventListener("start", () => {
+    mutableRealtimeBridgeState.meetAudioRecorder.addEventListener("start", () => {
       const startedAt = new Date().toISOString();
       updateMeetAudioCaptureState({
         recording: true,
@@ -135,8 +137,8 @@ function startMeetAudioRecorderFromStream(stream, reason, detail = {}) {
       );
       recordTimeline("meet_audio_capture_started", { reason, mimeType, ...detail });
     });
-    meetAudioRecorder.addEventListener("stop", () => {
-      meetAudioCaptureUploadChain
+    mutableRealtimeBridgeState.meetAudioRecorder.addEventListener("stop", () => {
+      mutableRealtimeBridgeState.meetAudioCaptureUploadChain
         .then(() => emitMeetAudioCaptureEvent("stopped", { mimeType, ...detail }))
         .catch((error) => rememberMeetAudioCaptureError("event_stop", error))
         .finally(() => {
@@ -144,15 +146,17 @@ function startMeetAudioRecorderFromStream(stream, reason, detail = {}) {
             recording: false,
             stoppedAt: new Date().toISOString(),
           });
-          const resolve = meetAudioRecorderStopResolve;
-          meetAudioRecorderStopResolve = null;
+          const resolve = mutableRealtimeBridgeState.meetAudioRecorderStopResolve;
+          mutableRealtimeBridgeState.meetAudioRecorderStopResolve = null;
           if (resolve) resolve(state.connection.meetAudioCapture);
         });
     });
-    meetAudioRecorder.addEventListener("error", (event) => {
+    mutableRealtimeBridgeState.meetAudioRecorder.addEventListener("error", (event) => {
       rememberMeetAudioCaptureError("media_recorder", event.error || "media_recorder_error");
     });
-    meetAudioRecorder.start(Number(config.meetAudioCaptureChunkMs || 5000) || 5000);
+    mutableRealtimeBridgeState.meetAudioRecorder.start(
+      Number(config.meetAudioCaptureChunkMs || 5000) || 5000,
+    );
     return { ok: true, started: true, mimeType };
   } catch (error) {
     rememberMeetAudioCaptureError("start", error);
@@ -162,10 +166,15 @@ function startMeetAudioRecorderFromStream(stream, reason, detail = {}) {
 
 function maybeStartMeetAudioCapture(reason = "meet-audio-forwarded") {
   if (!config.captureMeetAudioForTranscript) return { ok: true, skipped: true, reason: "disabled" };
-  if (!routingDestination) return { ok: false, error: "routing_destination_missing" };
-  return startMeetAudioRecorderFromStream(routingDestination.stream, reason, {
-    captureMode: "routing_mix",
-  });
+  if (!mutableRealtimeBridgeState.routingDestination)
+    return { ok: false, error: "routing_destination_missing" };
+  return startMeetAudioRecorderFromStream(
+    mutableRealtimeBridgeState.routingDestination.stream,
+    reason,
+    {
+      captureMode: "routing_mix",
+    },
+  );
 }
 
 function maybeStartMeetAudioTrackCapture(track, reason = "meet-audio-track") {
@@ -180,7 +189,10 @@ function maybeStartMeetAudioTrackCapture(track, reason = "meet-audio-track") {
 }
 
 function stopMeetAudioCapture(reason = "manual_stop") {
-  if (!meetAudioRecorder || meetAudioRecorder.state === "inactive") {
+  if (
+    !mutableRealtimeBridgeState.meetAudioRecorder ||
+    mutableRealtimeBridgeState.meetAudioRecorder.state === "inactive"
+  ) {
     updateMeetAudioCaptureState({ recording: false });
     return Promise.resolve({
       ok: true,
@@ -189,13 +201,13 @@ function stopMeetAudioCapture(reason = "manual_stop") {
     });
   }
   return new Promise((resolve) => {
-    meetAudioRecorderStopResolve = (captureState) =>
+    mutableRealtimeBridgeState.meetAudioRecorderStopResolve = (captureState) =>
       resolve({ ok: true, stopped: true, reason, state: captureState });
     try {
-      meetAudioRecorder.requestData?.();
-      meetAudioRecorder.stop();
+      mutableRealtimeBridgeState.meetAudioRecorder.requestData?.();
+      mutableRealtimeBridgeState.meetAudioRecorder.stop();
     } catch (error) {
-      meetAudioRecorderStopResolve = null;
+      mutableRealtimeBridgeState.meetAudioRecorderStopResolve = null;
       rememberMeetAudioCaptureError("stop", error);
       resolve({
         ok: false,

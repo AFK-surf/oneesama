@@ -163,8 +163,8 @@ function markRecappiAudioInputConnected(payload: Record<string, unknown> = {}) {
       label: inputDescriptor.label,
     },
   ].slice(-10);
-  if (routingDestination) {
-    const [mixedTrack] = routingDestination.stream.getAudioTracks();
+  if (mutableRealtimeBridgeState.routingDestination) {
+    const [mixedTrack] = mutableRealtimeBridgeState.routingDestination.stream.getAudioTracks();
     rememberRealtimeInputTrack(inputDescriptor.realtimeInputSource, mixedTrack, {
       lastRealtimeInputReplaceReason: inputDescriptor.replaceReason,
       lastRealtimeInputReplaceAt: new Date().toISOString(),
@@ -197,14 +197,18 @@ function fillRecappiAudioOutput(output: Float32Array) {
 function ensureRecappiAudioInputNode(payload: Record<string, unknown> = {}) {
   ensureMeetAudioRoutingContext();
   if (recappiAudioInputProcessor) return;
-  recappiAudioInputProcessor = routingAudioContext.createScriptProcessor(4096, 1, 1);
+  recappiAudioInputProcessor = mutableRealtimeBridgeState.routingAudioContext.createScriptProcessor(
+    4096,
+    1,
+    1,
+  );
   recappiAudioInputProcessor.onaudioprocess = (event) => {
     fillRecappiAudioOutput(event.outputBuffer.getChannelData(0));
   };
-  recappiAudioInputSource = routingAudioContext.createConstantSource();
+  recappiAudioInputSource = mutableRealtimeBridgeState.routingAudioContext.createConstantSource();
   recappiAudioInputSource.offset.value = 0;
   recappiAudioInputSource.connect(recappiAudioInputProcessor);
-  recappiAudioInputProcessor.connect(routingInputGate);
+  recappiAudioInputProcessor.connect(mutableRealtimeBridgeState.routingInputGate);
   recappiAudioInputSource.start();
   markRecappiAudioInputConnected(payload);
   const source = String(payload.source || "recappi_process_audio");
@@ -333,10 +337,10 @@ function pushExternalMeetAudioSamples(payload: Record<string, unknown> = {}) {
   const queued = resampleRecappiSamples(
     mono,
     Number(payload.sampleRate || 0),
-    routingAudioContext.sampleRate,
+    mutableRealtimeBridgeState.routingAudioContext.sampleRate,
   );
   const gain = adaptiveRecappiProcessInputGain(queued);
-  const maxQueuedSamples = routingAudioContext.sampleRate * 2;
+  const maxQueuedSamples = mutableRealtimeBridgeState.routingAudioContext.sampleRate * 2;
   if (recappiAudioQueuedSamples + queued.length > maxQueuedSamples) {
     const drop = recappiAudioQueuedSamples + queued.length - maxQueuedSamples;
     let remaining = drop;

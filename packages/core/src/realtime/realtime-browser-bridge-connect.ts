@@ -3,7 +3,7 @@ function installMockRealtimeInputSender(reason = "webrtc-mock") {
   if (state.connection.mode !== "webrtc-mock") return false;
   if (state.connection.meetAudioForwardingEnabled === false) return false;
   ensureMeetAudioRoutingContext();
-  const [placeholderTrack] = routingDestination.stream.getAudioTracks();
+  const [placeholderTrack] = mutableRealtimeBridgeState.routingDestination.stream.getAudioTracks();
   if (!placeholderTrack) return false;
   const mockSender = {
     track: placeholderTrack,
@@ -12,11 +12,11 @@ function installMockRealtimeInputSender(reason = "webrtc-mock") {
       return Promise.resolve();
     },
   };
-  realtimeAudioSender = mockSender;
+  mutableRealtimeBridgeState.realtimeAudioSender = mockSender;
   rememberRealtimeInputTrack("silent_placeholder", placeholderTrack);
   ensureRealtimeAudioSenderStatsMonitor("mock-placeholder");
   state.connection.realtimeInputPlaceholderAdded = true;
-  silentMeetAudioTrack = placeholderTrack.clone();
+  mutableRealtimeBridgeState.silentMeetAudioTrack = placeholderTrack.clone();
   recordTimeline("realtime_input_mock_placeholder_added", {
     reason,
     trackId: placeholderTrack.id,
@@ -90,7 +90,7 @@ async function connectRealtime(options = {}) {
   configureRealtimeConnectionOptions(connectionConfig);
   try {
     if (
-      activePeerConnection &&
+      mutableRealtimeBridgeState.activePeerConnection &&
       ["failed", "closed", "disconnected"].includes(state.connection.peerConnectionState)
     ) {
       cleanupRealtimeConnection(`preconnect_${state.connection.peerConnectionState}`);

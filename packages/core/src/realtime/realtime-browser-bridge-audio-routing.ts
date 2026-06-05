@@ -6,55 +6,77 @@ const {
 } = (window as any).__MAB_REALTIME_AUDIO_SENDER_STATS_HELPERS.create({
   state,
   updateFeedback,
-  getRealtimeAudioSender: () => realtimeAudioSender,
+  getRealtimeAudioSender: () => mutableRealtimeBridgeState.realtimeAudioSender,
 });
 
 function ensureMeetAudioRoutingContext() {
-  if (routingDestination) return routingDestination;
+  if (mutableRealtimeBridgeState.routingDestination)
+    return mutableRealtimeBridgeState.routingDestination;
   const AudioContextImpl = window.AudioContext || window.webkitAudioContext;
-  routingAudioContext = routingAudioContext || new AudioContextImpl({ sampleRate: 48000 });
-  state.connection.meetAudioContextState = routingAudioContext.state || "";
-  routingInputGate = routingInputGate || routingAudioContext.createGain();
+  mutableRealtimeBridgeState.routingAudioContext =
+    mutableRealtimeBridgeState.routingAudioContext || new AudioContextImpl({ sampleRate: 48000 });
+  state.connection.meetAudioContextState =
+    mutableRealtimeBridgeState.routingAudioContext.state || "";
+  mutableRealtimeBridgeState.routingInputGate =
+    mutableRealtimeBridgeState.routingInputGate ||
+    mutableRealtimeBridgeState.routingAudioContext.createGain();
   state.connection.meetAudioInputGain = meetAudioInputGain();
-  routingInputGate.gain.value = state.connection.meetAudioInputGain;
-  routingDestination = routingDestination || routingAudioContext.createMediaStreamDestination();
-  realtimeInputDestination =
-    realtimeInputDestination || routingAudioContext.createMediaStreamDestination();
-  routingInputGate.connect(routingDestination);
-  routingInputGate.connect(realtimeInputDestination);
+  mutableRealtimeBridgeState.routingInputGate.gain.value = state.connection.meetAudioInputGain;
+  mutableRealtimeBridgeState.routingDestination =
+    mutableRealtimeBridgeState.routingDestination ||
+    mutableRealtimeBridgeState.routingAudioContext.createMediaStreamDestination();
+  mutableRealtimeBridgeState.realtimeInputDestination =
+    mutableRealtimeBridgeState.realtimeInputDestination ||
+    mutableRealtimeBridgeState.routingAudioContext.createMediaStreamDestination();
+  mutableRealtimeBridgeState.routingInputGate.connect(
+    mutableRealtimeBridgeState.routingDestination,
+  );
+  mutableRealtimeBridgeState.routingInputGate.connect(
+    mutableRealtimeBridgeState.realtimeInputDestination,
+  );
   ensureMeetAudioEnergyMonitor();
   ensureRealtimeInputEnergyMonitor();
-  routingSilenceSource = routingSilenceSource || routingAudioContext.createConstantSource();
-  routingSilenceSource.offset.value = 0;
-  routingSilenceSource.connect(routingInputGate);
-  routingSilenceSource.start();
+  mutableRealtimeBridgeState.routingSilenceSource =
+    mutableRealtimeBridgeState.routingSilenceSource ||
+    mutableRealtimeBridgeState.routingAudioContext.createConstantSource();
+  mutableRealtimeBridgeState.routingSilenceSource.offset.value = 0;
+  mutableRealtimeBridgeState.routingSilenceSource.connect(
+    mutableRealtimeBridgeState.routingInputGate,
+  );
+  mutableRealtimeBridgeState.routingSilenceSource.start();
   recordTimeline("meet_audio_routing_ready", {
-    outputTrackId: routingDestination.stream.getAudioTracks()[0]?.id || "",
-    audioContextState: routingAudioContext.state || "",
+    outputTrackId:
+      mutableRealtimeBridgeState.routingDestination.stream.getAudioTracks()[0]?.id || "",
+    audioContextState: mutableRealtimeBridgeState.routingAudioContext.state || "",
   });
   installMeetAudioResumeListeners();
   resumeMeetAudioRoutingContext("routing-ready");
-  return routingDestination;
+  return mutableRealtimeBridgeState.routingDestination;
 }
 
 function ensureRealtimeInputDestination(reason = "realtime-input") {
   ensureMeetAudioRoutingContext();
-  const [track] = realtimeInputDestination?.stream?.getAudioTracks?.() || [];
+  const [track] =
+    mutableRealtimeBridgeState.realtimeInputDestination?.stream?.getAudioTracks?.() || [];
   if (track && track.readyState !== "ended") {
     ensureRealtimeInputEnergyMonitor();
-    return realtimeInputDestination;
+    return mutableRealtimeBridgeState.realtimeInputDestination;
   }
-  realtimeInputDestination = routingAudioContext.createMediaStreamDestination();
-  routingInputGate.connect(realtimeInputDestination);
-  realtimeInputAnalyser = null;
-  realtimeInputAnalyserBuffer = null;
-  realtimeInputMonitorSource = null;
+  mutableRealtimeBridgeState.realtimeInputDestination =
+    mutableRealtimeBridgeState.routingAudioContext.createMediaStreamDestination();
+  mutableRealtimeBridgeState.routingInputGate.connect(
+    mutableRealtimeBridgeState.realtimeInputDestination,
+  );
+  mutableRealtimeBridgeState.realtimeInputAnalyser = null;
+  mutableRealtimeBridgeState.realtimeInputAnalyserBuffer = null;
+  mutableRealtimeBridgeState.realtimeInputMonitorSource = null;
   ensureRealtimeInputEnergyMonitor();
   recordTimeline("meet_audio_realtime_input_destination_ready", {
     reason,
-    outputTrackId: realtimeInputDestination.stream.getAudioTracks()[0]?.id || "",
+    outputTrackId:
+      mutableRealtimeBridgeState.realtimeInputDestination.stream.getAudioTracks()[0]?.id || "",
   });
-  return realtimeInputDestination;
+  return mutableRealtimeBridgeState.realtimeInputDestination;
 }
 
 function isMeetAudioSourceRoutable(entry) {
@@ -66,7 +88,7 @@ function isMeetAudioSourceRoutable(entry) {
     track?.readyState === "live" &&
     track.muted !== true &&
     track.enabled !== false &&
-    routingInputGate
+    mutableRealtimeBridgeState.routingInputGate
   );
 }
 
@@ -100,7 +122,7 @@ function connectMeetAudioSource(entry, reason = "") {
   if (!entry || entry.connected || !isMeetAudioSourceRoutable(entry)) return false;
   try {
     entry.source.connect(entry.gain);
-    entry.gain.connect(routingInputGate);
+    entry.gain.connect(mutableRealtimeBridgeState.routingInputGate);
     entry.connected = true;
     entry.connectedAt = new Date().toISOString();
     entry.disconnectReason = "";
@@ -188,16 +210,22 @@ function installMeetAudioSourceLifecycle(entry) {
 }
 
 function sampleMeetAudioEnergy() {
-  if (!routingAnalyser || !routingAnalyserBuffer) return;
-  routingAnalyser.getFloatTimeDomainData(routingAnalyserBuffer);
+  if (
+    !mutableRealtimeBridgeState.routingAnalyser ||
+    !mutableRealtimeBridgeState.routingAnalyserBuffer
+  )
+    return;
+  mutableRealtimeBridgeState.routingAnalyser.getFloatTimeDomainData(
+    mutableRealtimeBridgeState.routingAnalyserBuffer,
+  );
   let sumSquares = 0;
   let peak = 0;
-  for (const sample of routingAnalyserBuffer) {
+  for (const sample of mutableRealtimeBridgeState.routingAnalyserBuffer) {
     const abs = Math.abs(sample);
     if (abs > peak) peak = abs;
     sumSquares += sample * sample;
   }
-  const rms = Math.sqrt(sumSquares / routingAnalyserBuffer.length);
+  const rms = Math.sqrt(sumSquares / mutableRealtimeBridgeState.routingAnalyserBuffer.length);
   const now = new Date();
   const thresholdRms = Number(state.connection.meetAudioEnergy?.thresholdRms || 0.003);
   const thresholdPeak = Number(state.connection.meetAudioEnergy?.thresholdPeak || 0.01);
@@ -231,28 +259,42 @@ function sampleMeetAudioEnergy() {
 }
 
 function ensureMeetAudioEnergyMonitor() {
-  if (!routingInputGate || !routingAudioContext || routingAnalyser) return;
-  routingAnalyser = routingAudioContext.createAnalyser();
-  routingAnalyser.fftSize = 2048;
-  routingAnalyserBuffer = new Float32Array(routingAnalyser.fftSize);
-  routingInputGate.connect(routingAnalyser);
-  if (!routingEnergyTimer) {
-    routingEnergyTimer = window.setInterval(sampleMeetAudioEnergy, 250);
+  if (
+    !mutableRealtimeBridgeState.routingInputGate ||
+    !mutableRealtimeBridgeState.routingAudioContext ||
+    mutableRealtimeBridgeState.routingAnalyser
+  )
+    return;
+  mutableRealtimeBridgeState.routingAnalyser =
+    mutableRealtimeBridgeState.routingAudioContext.createAnalyser();
+  mutableRealtimeBridgeState.routingAnalyser.fftSize = 2048;
+  mutableRealtimeBridgeState.routingAnalyserBuffer = new Float32Array(
+    mutableRealtimeBridgeState.routingAnalyser.fftSize,
+  );
+  mutableRealtimeBridgeState.routingInputGate.connect(mutableRealtimeBridgeState.routingAnalyser);
+  if (!mutableRealtimeBridgeState.routingEnergyTimer) {
+    mutableRealtimeBridgeState.routingEnergyTimer = window.setInterval(sampleMeetAudioEnergy, 250);
   }
   sampleMeetAudioEnergy();
 }
 
 function sampleRealtimeInputEnergy() {
-  if (!realtimeInputAnalyser || !realtimeInputAnalyserBuffer) return;
-  realtimeInputAnalyser.getFloatTimeDomainData(realtimeInputAnalyserBuffer);
+  if (
+    !mutableRealtimeBridgeState.realtimeInputAnalyser ||
+    !mutableRealtimeBridgeState.realtimeInputAnalyserBuffer
+  )
+    return;
+  mutableRealtimeBridgeState.realtimeInputAnalyser.getFloatTimeDomainData(
+    mutableRealtimeBridgeState.realtimeInputAnalyserBuffer,
+  );
   let sumSquares = 0;
   let peak = 0;
-  for (const sample of realtimeInputAnalyserBuffer) {
+  for (const sample of mutableRealtimeBridgeState.realtimeInputAnalyserBuffer) {
     const abs = Math.abs(sample);
     if (abs > peak) peak = abs;
     sumSquares += sample * sample;
   }
-  const rms = Math.sqrt(sumSquares / realtimeInputAnalyserBuffer.length);
+  const rms = Math.sqrt(sumSquares / mutableRealtimeBridgeState.realtimeInputAnalyserBuffer.length);
   const now = new Date();
   const energetic = rms >= 0.003 || peak >= 0.01;
   state.connection.realtimeInputEnergy = {
@@ -268,17 +310,31 @@ function sampleRealtimeInputEnergy() {
 }
 
 function ensureRealtimeInputEnergyMonitor() {
-  if (!routingAudioContext || !realtimeInputDestination || realtimeInputAnalyser) return;
+  if (
+    !mutableRealtimeBridgeState.routingAudioContext ||
+    !mutableRealtimeBridgeState.realtimeInputDestination ||
+    mutableRealtimeBridgeState.realtimeInputAnalyser
+  )
+    return;
   try {
-    realtimeInputMonitorSource = routingAudioContext.createMediaStreamSource(
-      realtimeInputDestination.stream,
+    mutableRealtimeBridgeState.realtimeInputMonitorSource =
+      mutableRealtimeBridgeState.routingAudioContext.createMediaStreamSource(
+        mutableRealtimeBridgeState.realtimeInputDestination.stream,
+      );
+    mutableRealtimeBridgeState.realtimeInputAnalyser =
+      mutableRealtimeBridgeState.routingAudioContext.createAnalyser();
+    mutableRealtimeBridgeState.realtimeInputAnalyser.fftSize = 2048;
+    mutableRealtimeBridgeState.realtimeInputAnalyserBuffer = new Float32Array(
+      mutableRealtimeBridgeState.realtimeInputAnalyser.fftSize,
     );
-    realtimeInputAnalyser = routingAudioContext.createAnalyser();
-    realtimeInputAnalyser.fftSize = 2048;
-    realtimeInputAnalyserBuffer = new Float32Array(realtimeInputAnalyser.fftSize);
-    realtimeInputMonitorSource.connect(realtimeInputAnalyser);
-    if (!realtimeInputEnergyTimer) {
-      realtimeInputEnergyTimer = window.setInterval(sampleRealtimeInputEnergy, 250);
+    mutableRealtimeBridgeState.realtimeInputMonitorSource.connect(
+      mutableRealtimeBridgeState.realtimeInputAnalyser,
+    );
+    if (!mutableRealtimeBridgeState.realtimeInputEnergyTimer) {
+      mutableRealtimeBridgeState.realtimeInputEnergyTimer = window.setInterval(
+        sampleRealtimeInputEnergy,
+        250,
+      );
     }
     sampleRealtimeInputEnergy();
   } catch (error) {
@@ -289,16 +345,18 @@ function ensureRealtimeInputEnergyMonitor() {
 }
 
 function resumeMeetAudioRoutingContext(reason = "") {
-  if (!routingAudioContext) return;
-  state.connection.meetAudioContextState = routingAudioContext.state || "";
-  if (routingAudioContext.state !== "suspended") return;
-  routingAudioContext
+  if (!mutableRealtimeBridgeState.routingAudioContext) return;
+  state.connection.meetAudioContextState =
+    mutableRealtimeBridgeState.routingAudioContext.state || "";
+  if (mutableRealtimeBridgeState.routingAudioContext.state !== "suspended") return;
+  mutableRealtimeBridgeState.routingAudioContext
     .resume()
     .then(() => {
-      state.connection.meetAudioContextState = routingAudioContext.state || "";
+      state.connection.meetAudioContextState =
+        mutableRealtimeBridgeState.routingAudioContext.state || "";
       recordTimeline("meet_audio_context_resumed", {
         reason,
-        state: routingAudioContext.state || "",
+        state: mutableRealtimeBridgeState.routingAudioContext.state || "",
       });
       return updateFeedback();
     })
@@ -311,8 +369,8 @@ function resumeMeetAudioRoutingContext(reason = "") {
 }
 
 function installMeetAudioResumeListeners() {
-  if (routingAudioResumeListenersInstalled) return;
-  routingAudioResumeListenersInstalled = true;
+  if (mutableRealtimeBridgeState.routingAudioResumeListenersInstalled) return;
+  mutableRealtimeBridgeState.routingAudioResumeListenersInstalled = true;
   const resume = () => resumeMeetAudioRoutingContext("user-gesture");
   window.addEventListener("pointerdown", resume, { capture: true, passive: true });
   window.addEventListener("keydown", resume, { capture: true });
@@ -320,10 +378,10 @@ function installMeetAudioResumeListeners() {
 }
 
 function isRealtimeRoutingMixTrack(track) {
-  if (!track || !routingDestination) return false;
+  if (!track || !mutableRealtimeBridgeState.routingDestination) return false;
   return (
-    routingDestination.stream.getAudioTracks().includes(track) ||
-    realtimeInputDestination?.stream?.getAudioTracks?.().includes(track)
+    mutableRealtimeBridgeState.routingDestination.stream.getAudioTracks().includes(track) ||
+    mutableRealtimeBridgeState.realtimeInputDestination?.stream?.getAudioTracks?.().includes(track)
   );
 }
 
@@ -335,17 +393,23 @@ function rememberRealtimeInputTrack(source, track, detail = {}) {
 }
 
 function preferredRealtimeInputMixTrack() {
-  const [realtimeTrack] = realtimeInputDestination?.stream?.getAudioTracks?.() || [];
+  const [realtimeTrack] =
+    mutableRealtimeBridgeState.realtimeInputDestination?.stream?.getAudioTracks?.() || [];
   if (realtimeTrack && realtimeTrack.readyState !== "ended") return realtimeTrack;
-  const [routingTrack] = routingDestination?.stream?.getAudioTracks?.() || [];
+  const [routingTrack] =
+    mutableRealtimeBridgeState.routingDestination?.stream?.getAudioTracks?.() || [];
   return routingTrack || null;
 }
 
 function replaceRealtimeInputWithRoutingMix(reason = "meet-audio") {
-  if (!realtimeAudioSender || !routingDestination) return false;
+  if (
+    !mutableRealtimeBridgeState.realtimeAudioSender ||
+    !mutableRealtimeBridgeState.routingDestination
+  )
+    return false;
   const mixedTrack = preferredRealtimeInputMixTrack();
   if (!mixedTrack) return false;
-  realtimeAudioSender
+  mutableRealtimeBridgeState.realtimeAudioSender
     .replaceTrack(mixedTrack)
     .then(() => {
       rememberRealtimeInputTrack("meet_audio_mix", mixedTrack, {
@@ -416,8 +480,8 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
   ensureMeetAudioRoutingContext();
   try {
     const stream = new MediaStream([track]);
-    const source = routingAudioContext.createMediaStreamSource(stream);
-    const gain = routingAudioContext.createGain();
+    const source = mutableRealtimeBridgeState.routingAudioContext.createMediaStreamSource(stream);
+    const gain = mutableRealtimeBridgeState.routingAudioContext.createGain();
     gain.gain.value = 1;
     const entry = {
       track,
@@ -441,7 +505,7 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
       sourcesRetained: routedMeetAudioSources.length,
       ...detail,
     });
-    if (!realtimeAudioSender) {
+    if (!mutableRealtimeBridgeState.realtimeAudioSender) {
       pendingMeetAudioTracks.push(track);
       state.connection.pendingMeetAudioTrackCount = pendingMeetAudioTracks.length;
       recordTimeline("meet_audio_track_pending", { trackId: track.id });
@@ -460,7 +524,7 @@ function forwardMeetAudioTrackToRealtime(track, detail = {}) {
 }
 
 function flushPendingMeetAudioTracks() {
-  if (!realtimeAudioSender || !pendingMeetAudioTracks.length) return;
+  if (!mutableRealtimeBridgeState.realtimeAudioSender || !pendingMeetAudioTracks.length) return;
   pendingMeetAudioTracks.splice(0);
   state.connection.pendingMeetAudioTrackCount = 0;
   replaceRealtimeInputWithRoutingMix("pending-meet-audio-flush");

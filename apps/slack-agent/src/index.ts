@@ -339,14 +339,14 @@ const legacyTools = createLegacySlackToolRegistry({
   runtimeStatus: () => ({
     service: "slack-agent",
     sessions: sessions.list().length,
-    jobs: runner?.listJobs?.().length || 0,
+    jobs: runnerRef.current?.listJobs?.().length || 0,
     socketMode: slackInbound.socketMode,
     eventBuffer: slackInbound.eventBuffer,
     memory: localSlackMemory.summary(),
     domainStore: slackDomainStore?.stats?.() || { enabled: false },
   }),
 });
-let runner;
+const runnerRef: { current?: ReturnType<typeof createAgentRunner> } = {};
 const slackInbound = {
   socketMode: {
     enabled: config.slackSocketMode,
@@ -488,23 +488,31 @@ function rememberSlackCommand({
   }
   return { slackContext, domainContext };
 }
-let workerResultHandlers: any;
+const workerResultHandlersRef: { current?: ReturnType<typeof createSlackWorkerResultHandlers> } =
+  {};
+function requireWorkerResultHandlers() {
+  if (!workerResultHandlersRef.current) {
+    throw new Error("Slack worker result handlers are not initialized");
+  }
+  return workerResultHandlersRef.current;
+}
 const reportFinishedWorkerJob = (job: SlackJobLike) =>
-  workerResultHandlers.reportFinishedWorkerJob(job);
+  requireWorkerResultHandlers().reportFinishedWorkerJob(job);
 const updateSlackAssistantStatusForWorkerJob = (job: SlackJobLike) =>
-  workerResultHandlers.updateSlackAssistantStatusForWorkerJob(job);
+  requireWorkerResultHandlers().updateSlackAssistantStatusForWorkerJob(job);
 const pollMeetingWorkerResults = (input = {}) =>
-  workerResultHandlers.pollMeetingWorkerResults(input);
+  requireWorkerResultHandlers().pollMeetingWorkerResults(input);
 const postMeetingWorkerResultsToSlack = (input = {}) =>
-  workerResultHandlers.postMeetingWorkerResultsToSlack(input);
+  requireWorkerResultHandlers().postMeetingWorkerResultsToSlack(input);
 const slackImmediateWorkerAckText = (body: SlackWorkerResponseBody = {}) =>
-  workerResultHandlers.slackImmediateWorkerAckText(body);
+  requireWorkerResultHandlers().slackImmediateWorkerAckText(body);
 const shouldKeepAssistantStatusUntilWorkerDone = (body: SlackWorkerResponseBody = {}) =>
-  workerResultHandlers.shouldKeepAssistantStatusUntilWorkerDone(body);
-runner = createAgentRunner({
+  requireWorkerResultHandlers().shouldKeepAssistantStatusUntilWorkerDone(body);
+const runner: any = createAgentRunner({
   onJobUpdate: reportFinishedWorkerJob,
   onJobProgress: updateSlackAssistantStatusForWorkerJob,
 } as unknown as Parameters<typeof createAgentRunner>[0]);
+runnerRef.current = runner;
 const meetingCopilotRunner = createMeetingCopilotRunner({
   agentRunner: runner,
 } as Parameters<typeof createMeetingCopilotRunner>[0]);
@@ -566,7 +574,7 @@ const {
   shouldKeepAssistantStatusUntilWorkerDone,
   slackImmediateWorkerAckText,
 });
-workerResultHandlers = createSlackWorkerResultHandlers({
+workerResultHandlersRef.current = createSlackWorkerResultHandlers({
   config,
   finalizedWorkerJobReports,
   poster,
@@ -1059,7 +1067,7 @@ const service = createJsonServer({
         mode: String(b.mode || "analysis"),
         allowCodeChanges: Boolean(b.allowCodeChanges),
       });
-      const report = await reportFinishedWorkerJob(job);
+      const report = await reportFinishedWorkerJob(job as SlackJobLike);
       return { ok: true, job, meetingReport: (report as { body?: unknown } | null)?.body || null };
     },
     "GET /jobs": () => ({ ok: true, jobs: runner.listJobs() }),

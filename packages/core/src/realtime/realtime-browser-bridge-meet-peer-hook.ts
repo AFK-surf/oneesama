@@ -2,8 +2,8 @@
 const avatarAudioBusSenderTrackClones = new WeakSet();
 
 function isRoutingDestinationTrack(track: MediaStreamTrack | null | undefined) {
-  if (!track || !routingDestination) return false;
-  return routingDestination.stream.getAudioTracks().includes(track);
+  if (!track || !mutableRealtimeBridgeState.routingDestination) return false;
+  return mutableRealtimeBridgeState.routingDestination.stream.getAudioTracks().includes(track);
 }
 
 function avatarAudioBusTrack() {
@@ -83,7 +83,7 @@ async function probeMeetOutboundAudioSenderByStats(pc, pcId, sender, source) {
 }
 
 async function samplePrimaryMeetAudioSenderStats(reason = "interval") {
-  const sender = primaryMeetAudioSender;
+  const sender = mutableRealtimeBridgeState.primaryMeetAudioSender;
   const now = new Date().toISOString();
   if (!sender?.getStats) {
     state.connection.primaryMeetAudioSenderStats = {
@@ -132,26 +132,34 @@ async function samplePrimaryMeetAudioSenderStats(reason = "interval") {
 }
 
 function ensurePrimaryMeetAudioSenderStatsMonitor(reason = "sender-ready") {
-  if (!primaryMeetAudioSender || primaryMeetAudioSenderStatsTimer) return;
+  if (
+    !mutableRealtimeBridgeState.primaryMeetAudioSender ||
+    mutableRealtimeBridgeState.primaryMeetAudioSenderStatsTimer
+  )
+    return;
   samplePrimaryMeetAudioSenderStats(reason);
-  primaryMeetAudioSenderStatsTimer = window.setInterval(
+  mutableRealtimeBridgeState.primaryMeetAudioSenderStatsTimer = window.setInterval(
     () => samplePrimaryMeetAudioSenderStats("interval"),
     1000,
   );
 }
 
 function schedulePrimaryMeetAudioAttachRetry(pcId, source) {
-  if (primaryMeetAudioSenderAttachRetryTimer) return;
-  primaryMeetAudioSenderAttachRetryTimer = window.setTimeout(() => {
-    primaryMeetAudioSenderAttachRetryTimer = 0;
-    if (primaryMeetAudioSender) {
-      attachAvatarAudioToPrimaryMeetSender(primaryMeetAudioSender, pcId, `${source}.retry`);
+  if (mutableRealtimeBridgeState.primaryMeetAudioSenderAttachRetryTimer) return;
+  mutableRealtimeBridgeState.primaryMeetAudioSenderAttachRetryTimer = window.setTimeout(() => {
+    mutableRealtimeBridgeState.primaryMeetAudioSenderAttachRetryTimer = 0;
+    if (mutableRealtimeBridgeState.primaryMeetAudioSender) {
+      attachAvatarAudioToPrimaryMeetSender(
+        mutableRealtimeBridgeState.primaryMeetAudioSender,
+        pcId,
+        `${source}.retry`,
+      );
     }
   }, 250);
 }
 
 function attachAvatarAudioToPrimaryMeetSender(sender, pcId, source) {
-  if (!sender || sender !== primaryMeetAudioSender) return;
+  if (!sender || sender !== mutableRealtimeBridgeState.primaryMeetAudioSender) return;
   updatePrimaryMeetAudioSenderState(sender);
   const avatarTrack = avatarAudioBusTrack();
   if (!avatarTrack) {
@@ -196,9 +204,14 @@ function attachAvatarAudioToPrimaryMeetSender(sender, pcId, source) {
 }
 
 function silenceDuplicateMeetAudioSender(sender, pcId, source) {
-  if (!sender || !silentMeetAudioTrack || sender === primaryMeetAudioSender) return;
+  if (
+    !sender ||
+    !mutableRealtimeBridgeState.silentMeetAudioTrack ||
+    sender === mutableRealtimeBridgeState.primaryMeetAudioSender
+  )
+    return;
   sender
-    .replaceTrack(silentMeetAudioTrack.clone())
+    .replaceTrack(mutableRealtimeBridgeState.silentMeetAudioTrack.clone())
     .then(() => {
       state.connection.duplicateMeetAudioSendersMuted += 1;
       recordTimeline("duplicate_meet_audio_sender_muted", { pcId, source });
@@ -209,19 +222,19 @@ function silenceDuplicateMeetAudioSender(sender, pcId, source) {
 
 function handleMeetOutboundAudioSender(pc, pcId, sender, track, source) {
   if (!sender || !track || track.kind !== "audio") return;
-  if (pc === activePeerConnection) return;
-  if (!primaryMeetAudioSender) {
-    primaryMeetAudioSender = sender;
+  if (pc === mutableRealtimeBridgeState.activePeerConnection) return;
+  if (!mutableRealtimeBridgeState.primaryMeetAudioSender) {
+    mutableRealtimeBridgeState.primaryMeetAudioSender = sender;
     recordTimeline("primary_meet_audio_sender_selected", { pcId, source, trackId: track.id });
     ensurePrimaryMeetAudioSenderStatsMonitor("primary-selected");
     attachAvatarAudioToPrimaryMeetSender(sender, pcId, source);
     return;
   }
-  if (sender === primaryMeetAudioSender) {
+  if (sender === mutableRealtimeBridgeState.primaryMeetAudioSender) {
     attachAvatarAudioToPrimaryMeetSender(sender, pcId, source);
     return;
   }
-  if (sender !== primaryMeetAudioSender) {
+  if (sender !== mutableRealtimeBridgeState.primaryMeetAudioSender) {
     silenceDuplicateMeetAudioSender(sender, pcId, source);
   }
 }
@@ -246,7 +259,11 @@ function isMeetingAvatarScreenShareTrack(track) {
 
 function handleMeetOutboundVideoSender(pc, pcId, sender, track, source) {
   if (!sender || !track || track.kind !== "video") return;
-  if (pc === activePeerConnection || !isMeetingAvatarScreenShareTrack(track)) return;
+  if (
+    pc === mutableRealtimeBridgeState.activePeerConnection ||
+    !isMeetingAvatarScreenShareTrack(track)
+  )
+    return;
   try {
     track.contentHint = "detail";
   } catch {
@@ -317,13 +334,18 @@ function instrumentMeetSender(pc, pcId, sender, source) {
 }
 
 function scanMeetOutboundSenders(pc, pcId) {
-  if (pc === activePeerConnection || typeof pc.getSenders !== "function") return;
+  if (pc === mutableRealtimeBridgeState.activePeerConnection || typeof pc.getSenders !== "function")
+    return;
   pc.getSenders().forEach((sender, index) =>
     instrumentMeetSender(pc, pcId, sender, `scan[${index}]`),
   );
 }
 function scanMeetInboundReceivers(pc, pcId) {
-  if (pc === activePeerConnection || typeof pc.getReceivers !== "function") return;
+  if (
+    pc === mutableRealtimeBridgeState.activePeerConnection ||
+    typeof pc.getReceivers !== "function"
+  )
+    return;
   pc.getReceivers().forEach((receiver, index) => {
     const track = receiver?.track;
     if (track?.kind === "audio" && track.readyState !== "ended") {
@@ -430,7 +452,11 @@ function installMeetMediaElementAudioDiscovery() {
 }
 
 function installMeetPeerConnectionHook() {
-  if (peerConnectionHookInstalled || window.__meetingAvatarRealtimePeerConnectionHook) return;
+  if (
+    mutableRealtimeBridgeState.peerConnectionHookInstalled ||
+    window.__meetingAvatarRealtimePeerConnectionHook
+  )
+    return;
   if (typeof window.RTCPeerConnection !== "function") return;
   const OriginalRTCPeerConnection = window.RTCPeerConnection;
   let pcCounter = 0;
@@ -478,7 +504,7 @@ function installMeetPeerConnectionHook() {
     }
 
     pc.addEventListener("track", (event) => {
-      if (pc === activePeerConnection) return;
+      if (pc === mutableRealtimeBridgeState.activePeerConnection) return;
       if (!event.track || event.track.kind !== "audio") return;
       forwardMeetAudioTrackToRealtime(event.track, { pcId, source: "pc.track" });
     });
@@ -498,7 +524,7 @@ function installMeetPeerConnectionHook() {
   Object.setPrototypeOf(HookedRTCPeerConnection, OriginalRTCPeerConnection);
   window.RTCPeerConnection = HookedRTCPeerConnection as unknown as typeof RTCPeerConnection;
   window.__meetingAvatarRealtimePeerConnectionHook = true;
-  peerConnectionHookInstalled = true;
+  mutableRealtimeBridgeState.peerConnectionHookInstalled = true;
   recordTimeline("meet_peer_connection_hook_installed");
   installMeetMediaElementAudioDiscovery();
 }

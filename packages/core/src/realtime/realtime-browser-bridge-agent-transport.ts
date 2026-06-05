@@ -86,8 +86,8 @@ function attachRealtimeAgentSDKInputSender(pc, reason = "agents-sdk-peer-connect
     });
     return false;
   }
-  const alreadyAttached = realtimeAudioSender === sender;
-  realtimeAudioSender = sender;
+  const alreadyAttached = mutableRealtimeBridgeState.realtimeAudioSender === sender;
+  mutableRealtimeBridgeState.realtimeAudioSender = sender;
   state.connection.realtimeAgentSDKInputSenderTrackId = sender.track.id || "";
   rememberRealtimeInputTrack("meet_audio_mix", sender.track, {
     lastRealtimeInputReplaceReason: "agents-sdk-media-stream",
@@ -116,7 +116,7 @@ function attachRealtimeAgentSDKInputSender(pc, reason = "agents-sdk-peer-connect
 function captureRealtimeAgentSDKInputSender(pc, reason = "agents-sdk-peer-connection") {
   if (attachRealtimeAgentSDKInputSender(pc, reason)) return;
   const retry = (retryReason) => {
-    if (realtimeAudioSender) return;
+    if (mutableRealtimeBridgeState.realtimeAudioSender) return;
     attachRealtimeAgentSDKInputSender(pc, retryReason);
   };
   if (typeof window.queueMicrotask === "function") {
@@ -179,7 +179,7 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
     audioElement: createRealtimeAgentSDKDecodeElement(),
     baseUrl: endpointUrl,
     changePeerConnection: async (pc) => {
-      activePeerConnection = pc;
+      mutableRealtimeBridgeState.activePeerConnection = pc;
       window.MAB_REALTIME_PEER_CONNECTION = pc;
       state.connection.peerConnectionState = pc.connectionState || "new";
       captureRealtimeAgentSDKInputSender(pc, "change-peer-connection");
@@ -189,12 +189,12 @@ function createRealtimeAgentSDKTransport(namespace, connectionConfig) {
       pc.addEventListener("connectionstatechange", () => {
         state.connection.peerConnectionState = pc.connectionState;
         state.connected = pc.connectionState === "connected" || pc.connectionState === "completed";
-        if (!realtimeAudioSender) {
+        if (!mutableRealtimeBridgeState.realtimeAudioSender) {
           captureRealtimeAgentSDKInputSender(pc, "connectionstatechange");
         }
         recordTimeline("realtime_agent_sdk_peer_connection", { state: pc.connectionState });
         if (
-          pc === activePeerConnection &&
+          pc === mutableRealtimeBridgeState.activePeerConnection &&
           ["failed", "closed", "disconnected"].includes(String(pc.connectionState || ""))
         ) {
           markRealtimeAgentSDKTransportDisconnected(`agents_sdk_peer_${pc.connectionState}`, {
@@ -332,8 +332,8 @@ async function connectRealtimeAgentSDK(connectionConfig) {
     groupId: state.sessionId || String(config.sessionId || ""),
     traceMetadata: { session_id: state.sessionId || String(config.sessionId || "") },
   });
-  activeRealtimeAgentSession = session;
-  activeRealtimeAgentTransport = transport;
+  mutableRealtimeBridgeState.activeRealtimeAgentSession = session;
+  mutableRealtimeBridgeState.activeRealtimeAgentTransport = transport;
   installRealtimeAgentSDKEventHandlers(session, transport);
   (window as any).__MAB_CREATING_REALTIME_AGENT_PEER_CONNECTION = true;
   try {
@@ -385,19 +385,19 @@ async function connectRealtimeAgentSDK(connectionConfig) {
 }
 
 function cleanupRealtimeConnection(reason = "cleanup") {
-  reconnectGeneration += 1;
+  mutableRealtimeBridgeState.reconnectGeneration += 1;
   clearRealtimeSessionRenewalTimer();
   clearRealtimeAudioSenderStatsMonitor();
   clearRealtimeRemoteAudioTrackStats();
-  const peerConnection = activePeerConnection;
-  activePeerConnection = null;
+  const peerConnection = mutableRealtimeBridgeState.activePeerConnection;
+  mutableRealtimeBridgeState.activePeerConnection = null;
   try {
-    activeRealtimeAgentSession?.close?.();
+    mutableRealtimeBridgeState.activeRealtimeAgentSession?.close?.();
   } catch {
     // Best-effort close before reconnecting.
   }
   try {
-    activeRealtimeAgentTransport?.close?.();
+    mutableRealtimeBridgeState.activeRealtimeAgentTransport?.close?.();
   } catch {
     // Best-effort close before reconnecting.
   }
@@ -411,7 +411,7 @@ function cleanupRealtimeConnection(reason = "cleanup") {
     peerConnection?.getSenders?.().forEach((sender) => {
       if (
         sender.track &&
-        sender.track !== silentMeetAudioTrack &&
+        sender.track !== mutableRealtimeBridgeState.silentMeetAudioTrack &&
         !isRealtimeRoutingMixTrack(sender.track)
       ) {
         sender.track.stop?.();
@@ -425,9 +425,9 @@ function cleanupRealtimeConnection(reason = "cleanup") {
   } catch {
     // Best-effort cleanup.
   }
-  activeRealtimeAgentSession = null;
-  activeRealtimeAgentTransport = null;
-  realtimeAudioSender = null;
+  mutableRealtimeBridgeState.activeRealtimeAgentSession = null;
+  mutableRealtimeBridgeState.activeRealtimeAgentTransport = null;
+  mutableRealtimeBridgeState.realtimeAudioSender = null;
   window.MAB_REALTIME_DATA_CHANNEL = null;
   window.MAB_REALTIME_DC = null;
   window.MAB_REALTIME_PEER_CONNECTION = null;
@@ -448,8 +448,16 @@ function scheduleRealtimeReconnect(reason = "peer_connection_failed", delayMs = 
   if (state.connection.mode === "mock" || state.connection.mode === "webrtc-mock") {
     return { ok: false, skipped: true, reason: "mock_mode" };
   }
-  if (reconnectTimer || state.connection.reconnecting || state.connecting) {
-    return { ok: true, scheduled: Boolean(reconnectTimer), reason: "already_reconnecting" };
+  if (
+    mutableRealtimeBridgeState.reconnectTimer ||
+    state.connection.reconnecting ||
+    state.connecting
+  ) {
+    return {
+      ok: true,
+      scheduled: Boolean(mutableRealtimeBridgeState.reconnectTimer),
+      reason: "already_reconnecting",
+    };
   }
   state.connection.reconnectAttempts += 1;
   state.connection.reconnecting = true;
@@ -461,8 +469,8 @@ function scheduleRealtimeReconnect(reason = "peer_connection_failed", delayMs = 
     delayMs,
   });
   updateFeedback();
-  reconnectTimer = window.setTimeout(async () => {
-    reconnectTimer = null;
+  mutableRealtimeBridgeState.reconnectTimer = window.setTimeout(async () => {
+    mutableRealtimeBridgeState.reconnectTimer = null;
     cleanupRealtimeConnection(reason);
     try {
       await connectRealtime();

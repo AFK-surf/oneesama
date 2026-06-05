@@ -88,58 +88,6 @@ export default defineConfig({
         },
       ],
     },
-    overrides: [
-      {
-        files: ["src/cli.ts"],
-        rules: {
-          "max-lines": ["error", { max: 11783, skipBlankLines: true }],
-        },
-      },
-      {
-        files: ["packages/core/src/meeting/google-meet-joiner.ts"],
-        rules: {
-          "prefer-const": "allow",
-          "max-lines": ["error", { max: 4071, skipBlankLines: true }],
-        },
-      },
-      {
-        files: ["apps/slack-agent/src/index.ts"],
-        rules: {
-          "prefer-const": "allow",
-          "max-lines": ["error", { max: 3741, skipBlankLines: true }],
-        },
-      },
-      {
-        files: ["packages/core/src/slack/legacy-slack-domain-store.ts"],
-        rules: {
-          "max-lines": ["error", { max: 1720, skipBlankLines: true }],
-        },
-      },
-      {
-        files: ["apps/meeting-agent/src/index.ts"],
-        rules: {
-          "max-lines": ["error", { max: 1680, skipBlankLines: true }],
-        },
-      },
-      {
-        files: ["packages/core/src/avatar/hiyori-avatar-inject.ts"],
-        rules: {
-          "max-lines": ["error", { max: 1639, skipBlankLines: true }],
-        },
-      },
-      {
-        files: ["packages/core/src/meeting/caption-capture.ts"],
-        rules: {
-          "max-lines": ["error", { max: 1244, skipBlankLines: true }],
-        },
-      },
-      {
-        files: ["packages/core/src/realtime/realtime-browser-bridge.ts"],
-        rules: {
-          "prefer-const": "allow",
-        },
-      },
-    ],
   },
   run: {
     cache: {
