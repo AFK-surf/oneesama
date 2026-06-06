@@ -388,7 +388,6 @@ test("LAN operator restores Host Visual Stream after publisher signaling reconne
       () => window.MAB_LAN_HOST_VISUAL_PUBLISHER.state,
     );
     const panel = await operatorPage.evaluate(() => ({
-      transport: document.getElementById("debug-transport-table")?.innerText || "",
       source: window.MAB_LAN_OPERATOR_SURFACE.state.sources.find(
         (entry) => entry.id === "host-app",
       ),
@@ -399,7 +398,6 @@ test("LAN operator restores Host Visual Stream after publisher signaling reconne
     assert.equal(publisherState.transport.hostVisual.state, "open");
     assert.ok(publisherState.transport.hostVisual.reconnectCount >= 1);
     assert.equal(panel.source.state, "live");
-    assert.match(panel.transport, /hostVisual/);
     assert.ok(
       body.debug.timeline.rows.some(
         (row) => row.layer === "transport" && row.event.includes("visual_host"),

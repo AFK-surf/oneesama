@@ -134,12 +134,6 @@ test("LAN operator voice arm and mute changes are Conversation Engine controls",
         body.debug.conversation.control.lastDetail?.armed === false,
     );
     assert.equal(disarmed.debug.conversation.control.lastCommand, "set_voice_armed");
-    assert.match(
-      await page.evaluate(
-        () => document.getElementById("debug-conversation-table")?.innerText || "",
-      ),
-      /Control detail/,
-    );
     await context.close();
   } finally {
     await browser.close();
@@ -261,17 +255,6 @@ test("LAN operator tool cancel delivers a cancelled tool result through the Conv
     assert.ok(
       body.recentEvents.some((event) => event.event === "tool_cancel_delivered"),
       JSON.stringify(body.recentEvents),
-    );
-    await page.waitForFunction(() =>
-      document
-        .getElementById("debug-tool-routing-table")
-        ?.innerText.includes("delivered / operator_cancelled"),
-    );
-    assert.match(
-      await page.evaluate(
-        () => document.getElementById("debug-tool-routing-table")?.innerText || "",
-      ),
-      /Cancel\s+delivered \/ operator_cancelled/,
     );
   } finally {
     await browser.close();

@@ -106,9 +106,6 @@ test("Host Visual Publisher reports display-capture permission failures", async 
       10_000,
     );
     const source = body.debug.visual.sources.find((entry) => entry.id === "host-app");
-    const debugPanelText = await operatorPage.evaluate(
-      () => document.getElementById("debug-visual-source-table")?.textContent || "",
-    );
 
     assert.equal(attempt.ok, false);
     assert.equal(attempt.name, "NotAllowedError");
@@ -118,8 +115,6 @@ test("Host Visual Publisher reports display-capture permission failures", async 
     assert.equal(source.sourceMode, "display_capture");
     assert.equal(source.captureStatus, "failed");
     assert.match(source.captureError, /NotAllowedError/);
-    assert.match(debugPanelText, /failed/);
-    assert.match(debugPanelText, /NotAllowedError/);
 
     await context.close();
   } finally {

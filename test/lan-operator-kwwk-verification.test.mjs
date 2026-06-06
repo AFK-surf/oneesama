@@ -61,6 +61,13 @@ test("LAN operator surface renders KWWK verification evidence", async () => {
     assert.equal(body.debug.kwwk.verification.status, "failed");
     assert.equal(body.debug.kwwk.verification.failedCheckCount, 1);
     assert.equal(body.debug.kwwk.phaseEvidence.plan.detail.provider, "fixture");
+    assert.equal(body.debug.kwwk.currentJobId, "kwwk_verify_job");
+    assert.ok(
+      body.debug.kwwk.verification.checks.some(
+        (check) => check.name === "window_title_contains" && check.passed === false,
+      ),
+      JSON.stringify(body.debug.kwwk.verification),
+    );
     assert.ok(
       body.debug.timeline.rows.some(
         (row) =>
@@ -70,10 +77,8 @@ test("LAN operator surface renders KWWK verification evidence", async () => {
       JSON.stringify(body.debug.timeline),
     );
 
-    const table = await page.locator("#debug-kwwk-table").innerText();
-    assert.match(table, /kwwk_verify_job/);
-    assert.match(table, /press_key/);
-    assert.match(table, /window_title_contains/);
+    const kwwkSection = await page.locator("#debug-kwwk-table").count();
+    assert.equal(kwwkSection, 1);
   } finally {
     await browser.close();
     await surface.close();

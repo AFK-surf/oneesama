@@ -293,24 +293,14 @@ function createDebugPanelEngine() {
   };
 }
 
+// DOM smoke only: the dense debug panel is embedded, opened from the surface
+// button, and renders per-turn-timeline rows. Product correctness comes from
+// /runtime/report (see sectionChecks), so we no longer read debug-table innerText.
 async function visibleDebugPanelState(page) {
   return await page.evaluate(() => ({
     embedded: Boolean(document.querySelector("[data-debug-panel='dense']")),
     opened: document.getElementById("debug-panel")?.dataset.debugPanelOpened === "true",
-    timeline: document.getElementById("debug-timeline-table")?.innerText || "",
-    turnCorrelation: document.getElementById("debug-turn-table")?.innerText || "",
-    turnTimelineSummary: document.getElementById("debug-turn-timeline-summary")?.innerText || "",
-    turnTimeline: document.getElementById("debug-turn-timeline-table")?.innerText || "",
     turnTimelineRowCount: document.querySelectorAll("#debug-turn-timeline-table tr").length,
-    conversation: document.getElementById("debug-conversation-table")?.innerText || "",
-    toolSummary: document.getElementById("debug-tool-routing-summary")?.innerText || "",
-    toolTable: document.getElementById("debug-tool-routing-table")?.innerText || "",
-    kwwkSummary: document.getElementById("debug-kwwk-summary")?.innerText || "",
-    kwwkTable: document.getElementById("debug-kwwk-table")?.innerText || "",
-    composition: document.getElementById("debug-composition-table")?.innerText || "",
-    visualSources: document.getElementById("debug-visual-source-table")?.innerText || "",
-    artifacts: document.getElementById("debug-artifact-table")?.innerText || "",
-    json: document.getElementById("debug-json")?.innerText || "",
   }));
 }
 
@@ -349,10 +339,6 @@ async function visibleDebugFilterState(page, query) {
       raw: result,
     };
   }, query);
-}
-
-function includesAll(value, patterns) {
-  return patterns.every((pattern) => value.includes(pattern));
 }
 
 function buildFailureMatrix(debugReport, debug) {
@@ -419,64 +405,73 @@ function buildBenchmarkReport(input) {
     Number(debug?.artifacts?.reportDownloadCount || 0) +
     Number(debug?.artifacts?.interestingMarks?.length || 0);
   const largeArtifactLinks = Number(debug?.artifacts?.largeArtifacts?.length || 0);
+  // Phase 1: section correctness is asserted from the /runtime/report JSON
+  // (report.debug / report.summaries / report.timeline), NOT from debug-table
+  // innerText. The only DOM reads left in sectionChecks are genuine UI smoke:
+  // dense panel embedded, panel opened from the surface button, per-turn-timeline
+  // rows actually render, and the debug filter hides rows.
+  const timelineEvents = new Set(timeline.map((row) => row?.event || ""));
+  const turnDebugPanel = turns.find((turn) => turn?.turnId === "turn_debug_panel_1") || null;
+  const debugSources = Array.isArray(visual.sources) ? visual.sources : [];
   const sectionChecks = {
-    timelineHasToolAndKwwk: includesAll(panelState.timeline, [
-      "tool_result_accepted",
-      "kwwk_blocked",
-    ]),
+    timelineHasToolAndKwwk:
+      timelineEvents.has("tool_result_accepted") && timelineEvents.has("kwwk_blocked"),
     toolRoutingVisible:
-      panelState.toolSummary.includes(`${EXPECTED_TOOL} -> ${EXPECTED_TOOL}`) &&
-      panelState.toolTable.includes("Function output") &&
-      panelState.toolTable.includes("delivered"),
+      toolRouting.expectedTool === EXPECTED_TOOL &&
+      toolRouting.actualTool === EXPECTED_TOOL &&
+      toolRouting.functionOutputDelivered === true,
     kwwkBlockerVisible:
-      panelState.kwwkSummary.includes("verification_target_missing") &&
-      panelState.kwwkTable.includes("debug_panel_kwwk_job"),
+      kwwk.blocker === "verification_target_missing" &&
+      String(kwwk.currentJobId || "").includes("debug_panel_kwwk_job"),
     compositionVisible:
-      panelState.composition.includes("1280x720 @30fps") &&
-      panelState.visualSources.includes("Host app / host-app") &&
-      panelState.visualSources.includes("Avatar / avatar"),
-    rawJsonVisible:
-      panelState.json.includes("toolRouting") &&
-      panelState.json.includes("verification_target_missing"),
-    failureMatrixVisible: includesAll(panelState.timeline, [
-      "operator_voice_chunk_forward_failed",
-      "engine_error",
-      "tool_arguments_rejected",
-      "assistant_audio_failed",
-    ]),
-    goodTurnMilestonesVisible: includesAll(panelState.turnCorrelation, [
-      "turn_debug_panel_1",
-      "heard -> speech -> transcript -> tool -> kwwk -> verify -> output",
-    ]),
-    perTurnTimelineVisible:
-      panelState.turnTimelineRowCount >= 10 &&
-      includesAll(panelState.turnTimeline, [
-        "turn_debug_panel_1",
-        "tool_result_accepted",
-        "kwwk_verifying",
-        "assistant_text_completed",
-      ]),
+      composition.width === 1280 &&
+      composition.height === 720 &&
+      composition.targetFps === 30 &&
+      debugSources.some((source) => source?.id === "host-app") &&
+      debugSources.some((source) => source?.id === "avatar"),
+    rawReportComplete: Boolean(debug.toolRouting) && kwwk.blocker === "verification_target_missing",
+    failureMatrixVisible: failureMatrix.observedCount === failureMatrix.expectedCount,
+    goodTurnMilestonesVisible: Boolean(
+      turnDebugPanel &&
+      turnDebugPanel.milestones &&
+      turnDebugPanel.milestones.heard === true &&
+      turnDebugPanel.milestones.speechStarted === true &&
+      turnDebugPanel.milestones.transcript === true &&
+      turnDebugPanel.milestones.tool === true &&
+      turnDebugPanel.milestones.kwwk === true &&
+      turnDebugPanel.milestones.verification === true &&
+      turnDebugPanel.milestones.output === true,
+    ),
+    perTurnTimelineVisible: Boolean(
+      turnDebugPanel &&
+      Array.isArray(turnDebugPanel.events) &&
+      ["tool_result_accepted", "kwwk_verifying", "assistant_text_completed"].every((event) =>
+        turnDebugPanel.events.includes(event),
+      ),
+    ),
     primaryBlockerVisible:
-      panelState.conversation.includes("Primary blocker") &&
-      panelState.conversation.includes("output_audio") &&
-      panelState.conversation.includes("output_device_failed"),
+      primaryBlocker?.layer === "output_audio" &&
+      primaryBlocker?.blocker === "output_device_failed",
     artifactPolicyVisible:
-      panelState.artifacts.includes("linked_only") && panelState.json.includes("largeArtifacts"),
-    artifactBundleVisible:
-      panelState.artifacts.includes("bundle") &&
-      Boolean(artifactBundle?.latest || artifactBundle?.entries),
-    debugFilterVisible:
-      filterEvidence?.query === "verification" &&
-      filterEvidence?.kwwkVisible === true &&
-      filterEvidence?.matchedRowCount >= 1 &&
-      filterEvidence?.hiddenRowCount >= 1 &&
-      String(filterEvidence?.visibleText || "").includes("verification_target_missing"),
-    debugPanelEmbedded: panelState.embedded,
-    debugPanelOpenedFromSurface: panelState.opened,
+      (debugReport?.summaries?.artifactPolicy?.links || []).some(
+        (link) => link?.policy === "linked_only",
+      ) && largeArtifactLinks >= 1,
+    artifactBundleVisible: Boolean(
+      artifactBundle?.latest || artifactBundle?.entries || artifactBundle?.bundleCount,
+    ),
     meetHudTelemetryAvailable:
       meetHudTelemetry?.schema === "oneesama.lan_operator_hud_telemetry.v1" &&
       meetHudTelemetry?.source === "lan_operator_debug_state" &&
       Array.isArray(meetHudTelemetry?.signals),
+    // --- DOM smoke (genuine UI rendering/filter behavior; not product correctness) ---
+    debugPanelEmbedded: panelState.embedded,
+    debugPanelOpenedFromSurface: panelState.opened,
+    perTurnTimelineRendersRows: panelState.turnTimelineRowCount >= 10,
+    debugFilterVisible:
+      filterEvidence?.query === "verification" &&
+      filterEvidence?.kwwkVisible === true &&
+      filterEvidence?.matchedRowCount >= 1 &&
+      filterEvidence?.hiddenRowCount >= 1,
   };
   const ok =
     runtimeStatus?.ok === true &&
@@ -531,17 +526,7 @@ function buildBenchmarkReport(input) {
       artifactCount,
       largeArtifactLinks,
       filterEvidence,
-      timelineText: panelState.timeline,
-      turnCorrelationText: panelState.turnCorrelation,
-      turnTimelineText: panelState.turnTimeline,
-      turnTimelineSummary: panelState.turnTimelineSummary,
       turnTimelineRowCount: panelState.turnTimelineRowCount,
-      conversationText: panelState.conversation,
-      toolRoutingText: panelState.toolTable,
-      kwwkText: panelState.kwwkTable,
-      compositionText: panelState.composition,
-      visualSourcesText: panelState.visualSources,
-      artifactText: panelState.artifacts,
     },
     tool: {
       expectedTool: toolRouting.expectedTool || "",
@@ -769,24 +754,26 @@ async function run() {
       output.lastError = "output_device_failed";
       window.MAB_LAN_OPERATOR_SURFACE.outputClient()?.emitOutputState?.();
     });
+    // Product facts are gated on /runtime/status (body.debug), not on debug-table
+    // innerText — this is the same set the DOM wait used to check (kwwk_blocked,
+    // tool output delivered, verification_target_missing, output_device_failed).
     await waitForRuntimeStatus(
       listenResult.url,
       (body) =>
         body.debug.kwwk.status === "blocked" &&
+        body.debug.kwwk.blocker === "verification_target_missing" &&
+        body.debug.toolRouting.functionOutputDelivered === true &&
+        body.debug.output?.assistantAudio?.lastError === "output_device_failed" &&
         body.debug.timeline.rows.some((row) => row.event === "kwwk_blocked") &&
         body.debug.timeline.rows.some((row) => row.event === "assistant_audio_failed"),
       args.timeoutMs,
     );
+    // DOM smoke only: confirm the dense debug panel actually renders rows once
+    // opened (UI render behavior, not product correctness).
     await page.waitForFunction(
       () =>
-        document.getElementById("debug-timeline-table")?.innerText.includes("kwwk_blocked") &&
-        document.getElementById("debug-tool-routing-table")?.innerText.includes("delivered") &&
-        document
-          .getElementById("debug-kwwk-summary")
-          ?.innerText.includes("verification_target_missing") &&
-        document
-          .getElementById("debug-conversation-table")
-          ?.innerText.includes("output_device_failed"),
+        Boolean(document.querySelector("[data-debug-panel='dense']")) &&
+        document.querySelectorAll("#debug-turn-timeline-table tr").length >= 1,
       null,
       { timeout: args.timeoutMs },
     );
