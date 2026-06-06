@@ -2,6 +2,7 @@ export function buildLanOperatorTextInputClientScript() {
   return `(() => {
   function create(input) {
     const state = input.state;
+    const inputDock = document.getElementById("operator-input-dock");
     const toolbar = document.querySelector(".stage-toolbar");
     const voiceTools = document.querySelector(".voice-tools");
     const form = document.createElement("form");
@@ -13,14 +14,17 @@ export function buildLanOperatorTextInputClientScript() {
     textInput.type = "text";
     textInput.placeholder = "Type debug input";
     textInput.autocomplete = "off";
-    textInput.style.minWidth = "190px";
     const sendButton = document.createElement("button");
     sendButton.id = "operator-text-send-button";
     sendButton.className = "btn";
     sendButton.type = "submit";
     sendButton.textContent = "Send Text";
     form.append(textInput, sendButton);
-    toolbar?.insertBefore(form, voiceTools || null);
+    if (inputDock) {
+      inputDock.append(form);
+    } else {
+      toolbar?.insertBefore(form, voiceTools || null);
+    }
 
     function nextInputId() {
       return "text_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
