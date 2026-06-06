@@ -1382,11 +1382,6 @@ func capturedPixelToAppKitPoint(
   return CGPoint(x: pointX, y: flipped ? flippedY : unflippedY)
 }
 
-func postMouse(_ type: CGEventType, point: CGPoint, button: CGMouseButton = .left) {
-  CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button)?
-    .post(tap: .cghidEventTap)
-}
-
 func cursorCoordinateSpace(window: [String: Any]?, target: [String: Any]) -> [String: Any] {
   let frame = window?["frame"] as? [String: Any] ?? [:]
   let width = max(1, doubleValue(frame["width"]))
@@ -1425,13 +1420,6 @@ func requireCursorCoordinateSpace(target: [String: Any]) throws -> [String: Any]
   return cursorCoordinateSpace(window: window, target: target)
 }
 
-func windowPoint(coordinateSpace: [String: Any], x: Double, y: Double) -> CGPoint {
-  CGPoint(
-    x: doubleValue(coordinateSpace["originX"]) + x,
-    y: doubleValue(coordinateSpace["originY"]) + y
-  )
-}
-
 func cursorEvent(kind: String, coordinateSpace: [String: Any], x: Double, y: Double, label: String = "") -> [String: Any] {
   let width = max(1, doubleValue(coordinateSpace["width"]))
   let height = max(1, doubleValue(coordinateSpace["height"]))
@@ -1446,51 +1434,6 @@ func cursorEvent(kind: String, coordinateSpace: [String: Any], x: Double, y: Dou
     "coordinateSpaceId": text(coordinateSpace["id"]),
     "coordinateSpace": coordinateSpace,
   ]
-}
-
-func click(target: [String: Any], x: Double, y: Double) throws -> [String: Any] {
-  let coordinateSpace = try requireCursorCoordinateSpace(target: target)
-  try requireAccessibility()
-  activateTarget(target)
-  let point = windowPoint(coordinateSpace: coordinateSpace, x: x, y: y)
-  let nativeCursor = KWWKForegroundCursorOverlay.shared.present(quartzPoint: point, kind: "click", label: "click")
-  postMouse(.leftMouseDown, point: point)
-  postMouse(.leftMouseUp, point: point)
-  var event = cursorEvent(kind: "cursor.click", coordinateSpace: coordinateSpace, x: x, y: y, label: "click")
-  event["nativeForegroundCursor"] = nativeCursor
-  return event
-}
-
-func doubleClick(target: [String: Any], x: Double, y: Double) throws -> [String: Any] {
-  let coordinateSpace = try requireCursorCoordinateSpace(target: target)
-  try requireAccessibility()
-  activateTarget(target)
-  let point = windowPoint(coordinateSpace: coordinateSpace, x: x, y: y)
-  let nativeCursor = KWWKForegroundCursorOverlay.shared.present(quartzPoint: point, kind: "double_click", label: "double click")
-  postMouse(.leftMouseDown, point: point)
-  postMouse(.leftMouseUp, point: point)
-  postMouse(.leftMouseDown, point: point)
-  postMouse(.leftMouseUp, point: point)
-  var event = cursorEvent(kind: "cursor.double_click", coordinateSpace: coordinateSpace, x: x, y: y, label: "double click")
-  event["nativeForegroundCursor"] = nativeCursor
-  return event
-}
-
-func drag(target: [String: Any], fromX: Double, fromY: Double, toX: Double, toY: Double) throws -> [[String: Any]] {
-  let coordinateSpace = try requireCursorCoordinateSpace(target: target)
-  try requireAccessibility()
-  activateTarget(target)
-  let start = windowPoint(coordinateSpace: coordinateSpace, x: fromX, y: fromY)
-  let end = windowPoint(coordinateSpace: coordinateSpace, x: toX, y: toY)
-  let nativeCursor = KWWKForegroundCursorOverlay.shared.drag(fromQuartzPoint: start, toQuartzPoint: end, label: "drag")
-  postMouse(.leftMouseDown, point: start)
-  postMouse(.leftMouseDragged, point: end)
-  postMouse(.leftMouseUp, point: end)
-  var begin = cursorEvent(kind: "cursor.drag.begin", coordinateSpace: coordinateSpace, x: fromX, y: fromY, label: "drag")
-  begin["nativeForegroundCursor"] = nativeCursor
-  var finish = cursorEvent(kind: "cursor.drag.end", coordinateSpace: coordinateSpace, x: toX, y: toY, label: "drag")
-  finish["nativeForegroundCursor"] = nativeCursor
-  return [begin, finish]
 }
 
 func nativeCursorPrewarmPayload() -> [String: Any] {

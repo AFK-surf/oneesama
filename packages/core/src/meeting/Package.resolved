@@ -1,0 +1,15 @@
+{
+  "originHash" : "3c3dcffc1bfe92a45db4c2055c3893e6c99b1cd1e190cddbcd3200142ae9874c",
+  "pins" : [
+    {
+      "identity" : "kwwk-computer-use-core",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/EYHN/kwwk-computer-use-core.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "eddd9e5475095de58bcb81cafbad79d1f5c5495d"
+      }
+    }
+  ],
+  "version" : 3
+}

@@ -199,7 +199,7 @@ test("Realtime avatar joins do not default to Chrome built-in fake camera", asyn
     "joiner should centralize Chrome fake media device policy",
   );
   assert.ok(
-    source.includes("return !input.installAvatar;"),
+    source.includes("if (input.installAvatar) return false;"),
     "avatar joins should rely on avatar runtime tracks, not Chrome's green fake camera",
   );
   assert.ok(
@@ -207,8 +207,10 @@ test("Realtime avatar joins do not default to Chrome built-in fake camera", asyn
     "launcher args should receive the avatar-aware fake media policy",
   );
   assert.ok(
-    source.includes("--use-file-for-fake-audio-capture"),
-    "explicit synthetic-audio diagnostics may still request Chrome fake media",
+    source.includes("--use-file-for-fake-audio-capture") &&
+      source.indexOf("if (input.installAvatar) return false;") <
+        source.indexOf("--use-file-for-fake-audio-capture"),
+    "explicit synthetic-audio diagnostics may still request Chrome fake media only outside avatar joins",
   );
 });
 
@@ -249,7 +251,8 @@ test("WebDriver Meet hard blocks retry without losing the hard-block reason", as
     "hard-block retries should be visible in diagnostics",
   );
   assert.ok(
-    source.includes("emitStatus: (status, message, detail = {})") && source.includes("...detail"),
+    source.includes("emitStatus: (webdriverStatus, message, detail = {})") &&
+      source.includes("...detail"),
     "WebDriver lane stage timing details should be preserved in top-level diagnostics",
   );
   assert.ok(

@@ -128,7 +128,44 @@ test("Google Meet join click uses prompt Playwright click for synthetic mode", a
   }
 });
 
-test("Google Meet join click uses humanized input before Playwright fallback", async () => {
+test("Google Meet join click accepts local fixture joined state", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const events = [];
+  try {
+    await page.setContent(`
+      <!doctype html>
+      <script>
+        window.__MAB_MEET_FIXTURE = { joined: false, events: [] };
+      </script>
+      <button aria-label="Join now" onclick="
+        window.__MAB_MEET_FIXTURE.joined = true;
+        window.__MAB_MEET_FIXTURE.events.push({ type: 'joined' });
+        this.remove();
+      ">Join now</button>
+    `);
+    const clicked = await clickMeetJoinButton(
+      page,
+      { record: (type, detail) => events.push({ type, detail }) },
+      5000,
+      { MEET_UI_INTERACTION_MODE: "synthetic" },
+    );
+
+    assert.equal(clicked, "dom:meet-join-button");
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "join_after_click_state" &&
+          event.detail?.outcome?.state === "admitted" &&
+          event.detail?.outcome?.signal === "fixture_joined",
+      ),
+    );
+  } finally {
+    await browser.close().catch(() => {});
+  }
+});
+
+test("Google Meet join click uses humanized input without Playwright fallback", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const events = [];
@@ -192,6 +229,59 @@ test("Google Meet join click uses humanized input before Playwright fallback", a
         (event) =>
           event.type === "join_after_click_state" && event.detail?.outcome?.state === "admitted",
       ),
+    );
+  } finally {
+    await browser.close().catch(() => {});
+  }
+});
+
+test("Google Meet unresolved humanized join click does not fall back to Playwright", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const events = [];
+  try {
+    await page.setContent(`
+      <!doctype html>
+      <button aria-label="Join now">Join now</button>
+    `);
+    const fakeHumanizedInteraction = {
+      details: {
+        mode: "humanized",
+        requested: "humanized",
+        backend: "cliclick",
+        lane: "test_humanized_no_playwright_fallback",
+        reason: "test override",
+      },
+      async click() {},
+      async fill(locator, text) {
+        await locator.fill(text);
+      },
+      async pressKey(pageInstance, key) {
+        await pageInstance.keyboard.press(key);
+      },
+    };
+    const clicked = await clickMeetJoinButton(
+      page,
+      { record: (type, detail) => events.push({ type, detail }) },
+      1200,
+      {},
+      fakeHumanizedInteraction,
+    );
+
+    assert.equal(clicked, "");
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "click_attempt" && event.detail?.selector === "cliclick:meet-join-button",
+      ),
+    );
+    assert.equal(
+      events.some(
+        (event) =>
+          event.type === "click_attempt" &&
+          event.detail?.selector === "playwright:meet-join-button",
+      ),
+      false,
     );
   } finally {
     await browser.close().catch(() => {});

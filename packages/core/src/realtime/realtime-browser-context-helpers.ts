@@ -38,6 +38,12 @@
     signals: Record<string, unknown>;
   }
 
+  type AvatarHudFeedbackStatus = {
+    statusKind: "blocked" | "thinking";
+    statusText: string;
+    holdMs: number;
+  };
+
   function create(deps: RealtimeContextHelperDeps) {
     const { config, state, getRealtimeAgentSession, recordTimeline, sendRealtimeEvent } = deps;
 
@@ -987,6 +993,127 @@
       return { status, reason, signals };
     }
 
+    function statusProblem(entry: FailureMatrixCell | null | undefined): boolean {
+      return entry?.status === "blocked" || entry?.status === "waiting";
+    }
+
+    function hudStatusForFeedback(feedback: Record<string, any>): AvatarHudFeedbackStatus | null {
+      const matrix = (feedback.failureMatrix || {}) as Record<string, FailureMatrixCell>;
+      const checks = (feedback.checks || {}) as Record<string, any>;
+      const transport = matrix.transport;
+      if (statusProblem(transport)) {
+        const reason = String(transport?.reason || "");
+        return {
+          statusKind: transport?.status === "blocked" ? "blocked" : "thinking",
+          statusText:
+            reason === "peer_not_connected" || reason === "data_channel_not_open"
+              ? "Realtime 未连接"
+              : "Realtime 连接中",
+          holdMs: 6000,
+        };
+      }
+
+      const audioInput = matrix.audioInput;
+      if (statusProblem(audioInput)) {
+        const reason = String(audioInput?.reason || "");
+        return {
+          statusKind: audioInput?.status === "blocked" ? "blocked" : "thinking",
+          statusText:
+            reason.includes("energy") || reason.includes("audio") ? "等待会议音频" : "音频未就绪",
+          holdMs: 6000,
+        };
+      }
+
+      const audioOutput = matrix.audioOutput;
+      const hasModelOutput =
+        Number(checks.outputTranscriptChars || 0) > 0 || Number(checks.responseEvents || 0) > 0;
+      if (
+        statusProblem(audioOutput) &&
+        hasModelOutput &&
+        audioOutput?.reason !== "waiting_for_model_response"
+      ) {
+        return {
+          statusKind: "blocked",
+          statusText: "语音输出无声",
+          holdMs: 6000,
+        };
+      }
+
+      const toolTurns = matrix.toolTurns;
+      if (toolTurns?.status === "blocked") {
+        return {
+          statusKind: "blocked",
+          statusText: "工具卡住",
+          holdMs: 6000,
+        };
+      }
+
+      return null;
+    }
+
+    function publishFeedbackHudStatus(feedback: Record<string, any>) {
+      const hudState = ((state as any).feedbackHud ||= {
+        lastKey: "",
+        lastSentAt: 0,
+      });
+      const status = hudStatusForFeedback(feedback);
+      const key = status ? `${status.statusKind}:${status.statusText}` : "";
+      const now = Date.now();
+      if (!key && !hudState.lastKey) return;
+      if (key && key === hudState.lastKey && now - Number(hudState.lastSentAt || 0) < 5000) {
+        return;
+      }
+
+      hudState.lastKey = key;
+      hudState.lastSentAt = now;
+      const payload = status
+        ? {
+            statusKind: status.statusKind,
+            statusText: status.statusText,
+            holdMs: status.holdMs,
+          }
+        : { statusKind: "idle", statusText: "", holdMs: 0 };
+
+      const controller = (window as any).MAB_AVATAR_CONTROLLER;
+      if (typeof controller?.updateState === "function") {
+        const result = controller.updateState({
+          status_kind: payload.statusKind,
+          status_text: payload.statusText,
+          status_hold_ms: payload.holdMs,
+        });
+        recordTimeline("realtime_feedback_hud", {
+          statusKind: payload.statusKind,
+          statusText: payload.statusText,
+          hostForwarded: false,
+          ok: result?.ok !== false,
+        });
+        return;
+      }
+
+      const host = (window as any).MAB_HOST_UPDATE_AVATAR_HUD;
+      if (typeof host !== "function") return;
+      Promise.resolve(host(payload))
+        .then((result: any) => {
+          recordTimeline("realtime_feedback_hud", {
+            statusKind: payload.statusKind,
+            statusText: payload.statusText,
+            hostForwarded: true,
+            ok: result?.ok === true,
+            error: result?.ok === false ? result?.error || result?.reason || "" : "",
+          });
+          return undefined;
+        })
+        .catch((error) => {
+          recordTimeline("realtime_feedback_hud", {
+            statusKind: payload.statusKind,
+            statusText: payload.statusText,
+            hostForwarded: true,
+            ok: false,
+            error: String((error && error.message) || error).slice(0, 240),
+          });
+        });
+    }
+
     function millisSinceIso(value: unknown) {
       const parsed = Date.parse(String(value || ""));
       if (!Number.isFinite(parsed)) return 0;
@@ -1491,6 +1618,7 @@
       state.feedback = classifyRealtimeFeedback();
       state.audioInputPolicy = state.feedback.audioInputPolicy;
       state.runtimeState = state.feedback.runtimeState;
+      publishFeedbackHudStatus(state.feedback);
       return state.feedback;
     }
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "vite-plus/test";
 
 import {
@@ -26,6 +27,8 @@ const DEFAULT_ENV_KEYS = [
   "MAB_UI_INTERACTION_MODE",
   "MAB_MEET_JOIN_LANE",
 ];
+
+const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 function withSyntheticShareEnvCleared(fn) {
   const previous = new Map(DEFAULT_ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -165,6 +168,19 @@ test("synthetic audio suite covers share, KWWK, delegate, and negative spoken ca
   assert.ok(primary.forbiddenToolNames.includes("stop_video_stage"));
   assert.ok(primary.forbiddenToolNames.includes("read_meet_chat"));
   assert.equal(primary.dryRunLocalTools, false);
+});
+
+test("meet-free routing benchmark pins the short synthetic audio regression set", () => {
+  const script = packageJson.scripts["benchmark:realtime-meet-free-routing"];
+
+  assert.ok(script);
+  assert.match(script, /--local-fixture-synthetic-audio-suite/);
+  assert.match(
+    script,
+    /--cases share_chrome_window_en,switch_chrome_tab_en,switch_chrome_tab_zh,delegate_complex_work_en,negative_status_no_cu_en/,
+  );
+  assert.match(script, /--timeout-ms 120000/);
+  assert.match(script, /oneesama-realtime-meet-free-routing-latest\.json/);
 });
 
 test("synthetic audio suite env encodes tool requirements and dry-run worker isolation", () => {

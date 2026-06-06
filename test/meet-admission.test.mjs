@@ -36,12 +36,24 @@ test("waitForMeetAdmission keeps waiting when only waiting-room leave controls a
   assert.equal(result.state, "timeout");
 });
 
-test("waitForMeetAdmission admits when the caption toggle is visible", async () => {
+test("waitForMeetAdmission keeps waiting when caption controls are visible in the waiting room", async () => {
+  const result = await waitForMeetAdmission(
+    fakePage({ captionVisible: true, leaveVisible: true }),
+    {
+      timeoutMs: 2,
+      evaluateMeetPageState: async () => ({ inMeeting: false, waitingForAdmit: true }),
+    },
+  );
+
+  assert.equal(result.state, "timeout");
+});
+
+test("waitForMeetAdmission admits when the caption toggle is visible outside the waiting room", async () => {
   const result = await waitForMeetAdmission(
     fakePage({ captionVisible: true, leaveVisible: true }),
     {
       timeoutMs: 100,
-      evaluateMeetPageState: async () => ({ inMeeting: false, waitingForAdmit: true }),
+      evaluateMeetPageState: async () => ({ inMeeting: true, waitingForAdmit: false }),
     },
   );
 

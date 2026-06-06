@@ -46,6 +46,32 @@ test("surface and transport aliases normalize independently", () => {
   assert.equal(result.config.conversationTransport, "agents_sdk");
 });
 
+test("OpenAI Realtime transport aliases normalize for LAN operator selection", () => {
+  for (const alias of ["openai_realtime", "openai-realtime", "realtime"]) {
+    const result = validateRuntimeSessionConfig(
+      baseConfig({
+        surfaceKind: "lan-operator",
+        conversationTransport: alias,
+        inputPolicy: {
+          audioInputs: ["local_mic"],
+          textInputs: ["local_text"],
+          continuousMic: true,
+          explicitLoopGuard: "headphones_required",
+        },
+        outputPolicy: {
+          audioOutputs: ["local_speaker"],
+          videoOutputs: ["dom_canvas", "capture_track"],
+          allowLocalSpeaker: true,
+        },
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.config.surfaceKind, "lan_operator");
+    assert.equal(result.config.conversationTransport, "openai_realtime");
+  }
+});
+
 test("google_meet rejects local_mic and local_speaker", () => {
   const result = validateRuntimeSessionConfig(
     baseConfig({

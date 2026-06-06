@@ -5,12 +5,25 @@ function splitChromiumArgs(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function filterFakeMediaDeviceArgs(args: string[], useFakeMediaDevice?: boolean): string[] {
+  if (useFakeMediaDevice !== false) return args;
+  return args.filter(
+    (arg) =>
+      !/^--use-fake-device-for-media-stream(?:=|$)/.test(arg) &&
+      !/^--use-file-for-fake-audio-capture(?:=|$)/.test(arg),
+  );
+}
+
 export function buildGoogleMeetChromiumArgs(input: {
   avatarUseSwiftShader?: boolean;
   browserExtraArgs?: unknown;
   chromiumExtraArgs?: unknown;
   useFakeMediaDevice?: boolean;
 }): string[] {
+  const callerArgs = filterFakeMediaDeviceArgs(
+    [...splitChromiumArgs(input.browserExtraArgs), ...splitChromiumArgs(input.chromiumExtraArgs)],
+    input.useFakeMediaDevice,
+  );
   return [
     "--use-fake-ui-for-media-stream",
     ...(input.useFakeMediaDevice === false ? [] : ["--use-fake-device-for-media-stream"]),
@@ -30,7 +43,6 @@ export function buildGoogleMeetChromiumArgs(input: {
     "--autoplay-policy=no-user-gesture-required",
     "--no-first-run",
     "--no-default-browser-check",
-    ...splitChromiumArgs(input.browserExtraArgs),
-    ...splitChromiumArgs(input.chromiumExtraArgs),
+    ...callerArgs,
   ];
 }

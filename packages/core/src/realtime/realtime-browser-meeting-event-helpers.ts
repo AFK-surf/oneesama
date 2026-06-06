@@ -26,6 +26,12 @@
     visibility: MeetingEventVisibility;
     interruptible: boolean;
     reason: string;
+    toolName?: string;
+    stage?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    durationMs?: number;
+    blocker?: string;
   }
 
   interface WorkerResultScope {
@@ -167,6 +173,12 @@
         visibility: input.visibility,
         interruptible: input.interruptible,
         reason: input.reason,
+        toolName: input.toolName || "kwwk_computer_use",
+        stage: input.stage || input.status,
+        startedAt: input.startedAt || "",
+        finishedAt: input.finishedAt || "",
+        durationMs: input.durationMs,
+        blocker: input.blocker || "",
       };
       return state.turnPolicy.appControlJobs[input.jobId];
     }

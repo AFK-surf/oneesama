@@ -40,7 +40,7 @@ export const DEFAULT_KWWK_PLANNER_ACTION_CASES = [
     id: "scroll-zh",
     instruction: "滚动一下",
     fixture: { kind: "scroll-view", scrollY: 0 },
-    expectedOperations: [{ kind: "scroll", direction: "down" }],
+    expectedOperations: [{ kind: "scroll", direction: "down", elementIndex: 0 }],
   },
   {
     id: "observe-zh",

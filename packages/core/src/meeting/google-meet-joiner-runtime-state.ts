@@ -52,17 +52,6 @@ type JoinClickOutcome = {
   error?: string;
 };
 
-const RESOLVED_JOIN_CLICK_STATES = new Set<JoinClickOutcome["state"]>([
-  "waiting_for_admit",
-  "admitted",
-  "sign_in_required",
-  "cannot_join_meeting",
-]);
-
-function joinClickOutcomeResolved(outcome: JoinClickOutcome): boolean {
-  return RESOLVED_JOIN_CLICK_STATES.has(outcome.state);
-}
-
 async function evaluateGuestNameReadiness(page: Page): Promise<GuestNameReadiness> {
   return await withTimeout<GuestNameReadiness, GuestNameReadiness>(
     page.evaluate(() => {
@@ -353,8 +342,9 @@ export async function fillGuestName(
       try {
         const locator = page.locator(GUEST_NAME_FIELD_SELECTOR).nth(fieldIndex);
         let fillError = "";
-        let fillMode = interaction.details.mode === "humanized" ? "humanized" : "playwright";
+        const fillMode = interaction.details.mode === "humanized" ? "humanized" : "playwright";
         let verify;
+        const fillStartedAt = Date.now();
         if (interaction.details.mode === "humanized") {
           await interaction.fill(locator, botName).catch((error) => {
             fillError = String(error?.message || error).slice(0, 200);
@@ -367,6 +357,7 @@ export async function fillGuestName(
               interaction: interaction.details,
               fillMode,
               fillError,
+              fillElapsedMs: Date.now() - fillStartedAt,
             };
             diagnostics?.record("guest_name_filled", { botName, ...filled, verify });
             diagnostics?.record("guest_name_assume_filled", {
@@ -382,18 +373,6 @@ export async function fillGuestName(
               reason: "humanized_fill_completed_join_button_gate_will_verify",
             };
           }
-          if (!verify.ok) {
-            await locator.fill(botName).catch((error) => {
-              fillError = [fillError, String(error?.message || error).slice(0, 200)]
-                .filter(Boolean)
-                .join("; ");
-            });
-            const fallbackVerify = await waitForGuestNameValue(page, fieldIndex, botName, 2500);
-            if (fallbackVerify.ok || !verify.joinButtonReady) {
-              fillMode = "humanized+playwright_fallback";
-              verify = fallbackVerify;
-            }
-          }
         } else {
           await locator.fill(botName).catch((error) => {
             fillError = String(error?.message || error).slice(0, 200);
@@ -406,6 +385,7 @@ export async function fillGuestName(
           interaction: interaction.details,
           fillMode,
           fillError,
+          fillElapsedMs: Date.now() - fillStartedAt,
         };
         diagnostics?.record("guest_name_filled", { botName, ...filled, verify });
         if (verify.ok) return filled;
@@ -774,8 +754,24 @@ async function waitForMeetJoinButtonCandidate(
 }
 
 async function waitForJoinClickOutcome(page: Page, timeoutMs: number): Promise<JoinClickOutcome> {
+  const fixtureAdmissionOutcome = async (
+    pageState?: MeetPageState,
+  ): Promise<JoinClickOutcome | null> => {
+    const fixtureState = await evaluateFixtureState(page);
+    if (fixtureState?.joined !== true) return null;
+    return {
+      state: "admitted",
+      signal: "fixture_joined",
+      pageState: pageState ?? (await evaluateMeetPageState(page)),
+    };
+  };
+  const initialFixtureOutcome = await fixtureAdmissionOutcome();
+  if (initialFixtureOutcome) return initialFixtureOutcome;
+
   if (typeof page.waitForFunction !== "function") {
     const pageState = await evaluateMeetPageState(page);
+    const fixtureOutcome = await fixtureAdmissionOutcome(pageState);
+    if (fixtureOutcome) return fixtureOutcome;
     if (pageState.waitingForAdmit) return { state: "waiting_for_admit", pageState };
     if (pageState.inMeeting && !pageState.preJoin) return { state: "admitted", pageState };
     if (pageState.signIn) return { state: "sign_in_required", pageState };
@@ -823,13 +819,11 @@ async function waitForJoinClickOutcome(page: Page, timeoutMs: number): Promise<J
                 return pattern.test(label);
               },
             );
-          const captionVisible = visibleButton(/captions?|字幕/i);
-          if (captionVisible) return { state: "admitted", signal: "captions" };
           const preJoin =
             /What'?s your name\?/i.test(text) ||
             visibleButton(/\b(ask to join|join now)\b|申请加入|立即加入/i);
           const waitingForAdmit =
-            /asking to join|you'?ll join|waiting for.*(?:admit|host)|host.*(?:let|admit).*you|正在请求加入|等待.*(?:主持人|允许)/i.test(
+            /please wait until a meeting host brings you into the call|someone will let you in soon|asking to join|you'?ll join|waiting for.*(?:admit|host)|host.*(?:let|admit).*you|正在请求加入|等待.*(?:主持人|允许)/i.test(
               text,
             );
           if (waitingForAdmit) {
@@ -839,6 +833,8 @@ async function waitForJoinClickOutcome(page: Page, timeoutMs: number): Promise<J
               textHead: text.slice(0, 240),
             };
           }
+          const captionVisible = visibleButton(/captions?|字幕/i);
+          if (captionVisible && !preJoin) return { state: "admitted", signal: "captions" };
           const leaveVisible = visibleButton(/leave (?:call|meeting)|离开通话/i);
           if (leaveVisible && !preJoin) {
             return { state: "admitted", signal: "leave_control" };
@@ -850,11 +846,18 @@ async function waitForJoinClickOutcome(page: Page, timeoutMs: number): Promise<J
       );
       const outcome = (await handle.jsonValue()) as JoinClickOutcome;
       const pageState = await evaluateMeetPageState(page);
+      const fixtureOutcome = await fixtureAdmissionOutcome(pageState);
+      if (fixtureOutcome) return fixtureOutcome;
+      if (pageState.waitingForAdmit) {
+        return { state: "waiting_for_admit", signal: "page_state_waiting", pageState };
+      }
       return { ...outcome, pageState };
     } catch (error) {
       lastError = String(error?.message || error).slice(0, 200);
     }
     const pageState = await evaluateMeetPageState(page);
+    const fixtureOutcome = await fixtureAdmissionOutcome(pageState);
+    if (fixtureOutcome) return fixtureOutcome;
     if (pageState.waitingForAdmit) return { state: "waiting_for_admit", pageState };
     if (pageState.inMeeting && !pageState.preJoin) return { state: "admitted", pageState };
     if (pageState.error === "meet_page_state_timeout") {
@@ -940,11 +943,13 @@ async function clickMeetJoinButtonWithHumanizedInputAndObserve(
   }
 
   try {
+    const startedAt = Date.now();
     await interaction.click(page.locator("button, [role=button]").nth(button.index));
     diagnostics?.record("click_attempt", {
       selector: `${interaction.details.backend}:meet-join-button`,
       ok: true,
       fallback: false,
+      elapsedMs: Date.now() - startedAt,
     });
   } catch (error) {
     diagnostics?.record("click_miss", {
@@ -997,15 +1002,6 @@ export async function clickMeetJoinButton(
           diagnostics,
           result.button,
           deadline,
-        );
-      }
-      if (humanizedClick && !joinClickOutcomeResolved(outcome)) {
-        outcome = await clickMeetJoinButtonWithPlaywrightAndObserve(
-          page,
-          diagnostics,
-          result.button,
-          deadline,
-          true,
         );
       }
       diagnostics?.record("join_after_click_state", { outcome, pageState: outcome.pageState });

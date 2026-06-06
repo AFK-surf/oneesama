@@ -3,7 +3,13 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join as pathJoin, relative as pathRelative } from "node:path";
+import {
+  basename,
+  dirname,
+  join as pathJoin,
+  relative as pathRelative,
+  resolve as pathResolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateSyntheticSpeakerProfileIsolation } from "./real-meet-synthetic-speaker-smoke.mjs";
 import {
@@ -37,6 +43,20 @@ function requireRealMeetUrl() {
     envFlag("MAB_REAL_MEET_REQUIRED") ||
     process.argv.includes("--require-real-meet-url")
   );
+}
+
+function meetCompatMode() {
+  return process.argv.includes("--meet-compat");
+}
+
+function withAcceptanceLane(result) {
+  if (!meetCompatMode()) return result;
+  return {
+    gate: "meet_compat",
+    acceptanceLane: "meet_compat_secondary",
+    primaryAcceptanceLane: "lan_operator",
+    ...result,
+  };
 }
 
 function argValue(name) {
@@ -462,14 +482,16 @@ async function skipMissingRealMeetUrl(resolution = {}) {
     checkedSources: resolution.checkedSources || [],
     discoveryError: resolution.discoveryError || "",
     activeBrowserRecordError: resolution.activeBrowserRecordError || "",
-    command:
-      "MAB_REAL_MEET_URL=https://meet.google.com/... npm run acceptance:realtime-live-sidecar",
+    command: meetCompatMode()
+      ? "MAB_REAL_MEET_URL=https://meet.google.com/... npm run acceptance:realtime-meet-compat"
+      : "MAB_REAL_MEET_URL=https://meet.google.com/... npm run acceptance:realtime-live-sidecar",
     message:
       "Set MAB_REAL_MEET_URL, pass --real-meet-url, or keep a meeting-agent session active so /join/status exposes the real Meet URL.",
   };
-  await emitJsonResult(result, { error: strict });
+  const output = withAcceptanceLane(result);
+  await emitJsonResult(output, { error: strict });
   if (strict) process.exitCode = 1;
-  return result;
+  return output;
 }
 
 function forwardChildOutput(label, stream) {
@@ -497,12 +519,15 @@ async function runGate(label, args, sessionId, meetUrl) {
     );
     forwardChildOutput(label, child.stdout);
     forwardChildOutput(`${label}:stderr`, child.stderr);
-    const exit = await waitForChildExit(child);
+    const exit = await waitForChildExit(child, realMeetChildTimeoutMs());
     if (!existsSync(jsonOut)) {
       return {
         ok: false,
         acceptanceSatisfied: false,
-        error: `${label} did not write ${jsonOut}`,
+        reason: exit.timedOut ? "gate_timeout" : "missing_json",
+        error: exit.timedOut
+          ? `${label} timed out after ${exit.timeoutMs}ms before writing ${jsonOut}`
+          : `${label} did not write ${jsonOut}`,
         childExit: exit,
       };
     }
@@ -512,6 +537,15 @@ async function runGate(label, args, sessionId, meetUrl) {
   } finally {
     if (tmpDir) await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+function realMeetChildTimeoutMs() {
+  const value =
+    process.env.MAB_REAL_MEET_COMPAT_CHILD_TIMEOUT_MS ||
+    process.env.MAB_REAL_MEET_CHILD_TIMEOUT_MS ||
+    "";
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 export function gateRunErrorResult(label, error) {
@@ -524,12 +558,17 @@ export function gateRunErrorResult(label, error) {
   };
 }
 
-export async function waitForChildExit(child) {
+export async function waitForChildExit(child, timeoutMs = 0) {
   return await new Promise((resolve, reject) => {
     let settled = false;
+    let timedOut = false;
+    let killTimer = null;
+    let hardKillTimer = null;
     const cleanup = () => {
       child.off("error", fail);
       child.off("exit", finish);
+      if (killTimer) clearTimeout(killTimer);
+      if (hardKillTimer) clearTimeout(hardKillTimer);
     };
     const settle = (callback, value) => {
       if (settled) return;
@@ -538,9 +577,16 @@ export async function waitForChildExit(child) {
       callback(value);
     };
     const fail = (error) => settle(reject, error);
-    const finish = (code, signal) => settle(resolve, { code, signal });
+    const finish = (code, signal) => settle(resolve, { code, signal, timedOut, timeoutMs });
     child.once("error", fail);
     child.once("exit", finish);
+    if (timeoutMs > 0) {
+      killTimer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        hardKillTimer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      }, timeoutMs);
+    }
   });
 }
 
@@ -757,7 +803,7 @@ export async function runRealMeetSidecarAcceptanceMain() {
       config: calendarRoom.config || calendarMeetCreation?.config || null,
     };
     if (!calendarRoom.ok) {
-      const result = {
+      const result = withAcceptanceLane({
         ok: false,
         skipped: false,
         diagnosticOnly: false,
@@ -771,7 +817,7 @@ export async function runRealMeetSidecarAcceptanceMain() {
         error: calendarRoom.error || "",
         status: calendarRoom.status || 0,
         completedAt: new Date().toISOString(),
-      };
+      });
       await emitJsonResult(result, { error: true });
       process.exitCode = 1;
       return result;
@@ -794,9 +840,10 @@ export async function runRealMeetSidecarAcceptanceMain() {
     calendarMeetCreation,
   });
   if (process.argv.includes("--preflight-only")) {
-    await emitJsonResult(preflight, { error: !preflight.ok });
+    const output = withAcceptanceLane(preflight);
+    await emitJsonResult(output, { error: !output.ok });
     if (!preflight.ok) process.exitCode = 1;
-    return preflight;
+    return output;
   }
   if (!preflight.ok) {
     const calendarCleanup = calendarRoom?.cleanup
@@ -805,11 +852,11 @@ export async function runRealMeetSidecarAcceptanceMain() {
           error: String(error?.message || error),
         }))
       : null;
-    const result = {
+    const result = withAcceptanceLane({
       ...preflight,
       calendarCleanup,
       completedAt: new Date().toISOString(),
-    };
+    });
     await emitJsonResult(result, { error: true });
     process.exitCode = 1;
     return result;
@@ -843,7 +890,7 @@ export async function runRealMeetSidecarAcceptanceMain() {
         error: String(error?.message || error),
       }));
   }
-  const result = {
+  const result = withAcceptanceLane({
     ok,
     acceptanceSatisfied: ok,
     skipped: false,
@@ -863,7 +910,7 @@ export async function runRealMeetSidecarAcceptanceMain() {
       syntheticSpeaker,
       appControl,
     },
-  };
+  });
   await emitJsonResult(result, { error: !ok });
   if (!ok) process.exitCode = 1;
   return result;

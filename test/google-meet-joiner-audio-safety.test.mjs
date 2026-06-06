@@ -24,6 +24,22 @@ test("Google Meet launcher can disable Chrome fake media device for avatar track
   assert.ok(args.includes("--disable-features=AudioServiceOutOfProcess"));
 });
 
+test("Google Meet launcher strips caller fake media args when avatar tracks own media", () => {
+  const args = buildGoogleMeetChromiumArgs({
+    useFakeMediaDevice: false,
+    browserExtraArgs: "--foo --use-fake-device-for-media-stream",
+    chromiumExtraArgs: "--use-file-for-fake-audio-capture=/tmp/fake.wav --bar",
+  });
+
+  assert.ok(args.includes("--foo"));
+  assert.ok(args.includes("--bar"));
+  assert.equal(args.includes("--use-fake-device-for-media-stream"), false);
+  assert.equal(
+    args.some((arg) => arg.startsWith("--use-file-for-fake-audio-capture")),
+    false,
+  );
+});
+
 test("Google Meet launcher preserves caller-supplied Chromium args", () => {
   const args = buildGoogleMeetChromiumArgs({
     avatarUseSwiftShader: true,

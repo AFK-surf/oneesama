@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 
 import {
+  compactHumanizedTimedPointsForCliclick,
   computeScreenPoint,
   generateHumanizedTrajectory,
   resolveMeetUIInteractionDetails,
@@ -82,6 +83,18 @@ test("Humanized trajectory starts and ends on the requested points", () => {
   assert.equal(Math.round(points.at(-1).x), 300);
   assert.equal(Math.round(points.at(-1).y), 180);
   assert.ok(points.length >= 25);
+});
+
+test("macOS cliclick humanized trajectory is compact enough for live joins", () => {
+  const points = generateHumanizedTrajectory({ x: 10, y: 20 }, { x: 1200, y: 800 }, 1234);
+  const compacted = compactHumanizedTimedPointsForCliclick(points);
+
+  assert.ok(points.length > compacted.length);
+  assert.ok(compacted.length <= 7);
+  assert.deepEqual(compacted[0], { ...points[0], t: 0 });
+  assert.equal(Math.round(compacted.at(-1).x), Math.round(points.at(-1).x));
+  assert.equal(Math.round(compacted.at(-1).y), Math.round(points.at(-1).y));
+  assert.ok(compacted.at(-1).t <= 420);
 });
 
 test("Screen point computation accounts for browser chrome", () => {

@@ -110,6 +110,34 @@
         .toLowerCase();
     }
 
+    function resultBlocker(result: unknown): string {
+      for (const record of appControlResultRecords(result)) {
+        const blocker = firstNonEmptyString(record.blocker, record.error, record.reason);
+        if (blocker) return blocker;
+      }
+      return "";
+    }
+
+    function resultTimingMs(result: unknown): number | undefined {
+      for (const record of appControlResultRecords(result)) {
+        const metadata = resultRecord(record.metadata);
+        const timings = resultRecord(metadata.timings);
+        const total = numberOrUndefined(timings.totalMs);
+        if (total !== undefined) return total;
+        const duration = numberOrUndefined(record.durationMs);
+        if (duration !== undefined) return duration;
+      }
+      return undefined;
+    }
+
+    function resultStage(result: unknown, status: string, policy: RealtimeTurnPolicy): string {
+      if (policy.reason === "app_control_executor_running") return "running";
+      if (status === "completed") return "verified";
+      if (status === "blocked") return "blocked";
+      if (status === "accepted") return "queued";
+      return status || "running";
+    }
+
     function resultJobId(result: unknown): string {
       const record = resultRecord(result);
       return firstNonEmptyString(
@@ -627,6 +655,10 @@
           visibility: policy.channel,
           interruptible: Boolean(event.interruptible),
           reason: policy.reason,
+          toolName: input.name,
+          stage: resultStage(input.result, status, policy),
+          durationMs: resultTimingMs(input.result),
+          blocker: resultBlocker(input.result),
         });
       }
       return event;

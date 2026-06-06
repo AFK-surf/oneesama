@@ -150,6 +150,7 @@ function warmLatencyCases(iteration) {
       method: "kwwk.cu.execute",
       params: {
         instruction: "Press Escape once.",
+        target: { applicationName: "Finder" },
         modelPlan: modelPlan(
           [{ kind: "press_key", key: "escape" }],
           "Local fixture planner chose a non-visual key action.",

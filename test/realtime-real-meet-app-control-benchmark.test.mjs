@@ -215,6 +215,28 @@ test("npm real Meet app-control benchmark is a strict live gate with optional sk
     /--real-meet-app-control-suite/,
   );
   assert.match(
+    packageJson.scripts["acceptance:realtime-meet-compat"],
+    /real-meet-sidecar-acceptance\.mjs/,
+  );
+  assert.match(packageJson.scripts["acceptance:realtime-meet-compat"], /--meet-compat/);
+  assert.match(packageJson.scripts["acceptance:realtime-meet-compat"], /--require-real-meet-url/);
+  assert.match(
+    packageJson.scripts["acceptance:realtime-meet-compat"],
+    /--json-out \/tmp\/oneesama-realtime-meet-compat-latest\.json/,
+  );
+  assert.match(
+    packageJson.scripts["acceptance:realtime-meet-compat:preflight"],
+    /--preflight-only/,
+  );
+  assert.match(
+    packageJson.scripts["acceptance:realtime-meet-compat:auto-room"],
+    /--create-calendar-meet/,
+  );
+  assert.doesNotMatch(
+    packageJson.scripts["acceptance:realtime-meet-compat:optional"],
+    /--require-real-meet-url/,
+  );
+  assert.match(
     packageJson.scripts["acceptance:realtime-live-sidecar"],
     /real-meet-sidecar-acceptance\.mjs/,
   );
@@ -456,6 +478,21 @@ test("real Meet live sidecar acceptance can produce diagnostic skipped evidence"
   assert.equal(summary.diagnosticOnly, true);
   assert.equal(summary.acceptanceSatisfied, false);
   assert.deepEqual(summary.missingEnv, ["MAB_REAL_MEET_URL"]);
+});
+
+test("Meet compatibility acceptance emits secondary-lane skipped evidence", () => {
+  const result = runRealMeetSidecarAcceptance(["--meet-compat"]);
+
+  assert.equal(result.status, 0, result.stderr);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.gate, "meet_compat");
+  assert.equal(summary.acceptanceLane, "meet_compat_secondary");
+  assert.equal(summary.primaryAcceptanceLane, "lan_operator");
+  assert.equal(summary.ok, false);
+  assert.equal(summary.skipped, true);
+  assert.equal(summary.diagnosticOnly, true);
+  assert.equal(summary.acceptanceSatisfied, false);
+  assert.match(summary.command, /acceptance:realtime-meet-compat/);
 });
 
 test("real Meet live sidecar acceptance writes diagnostic skipped json-out evidence", () => {
@@ -1036,7 +1073,7 @@ test("real Meet live sidecar acceptance child wait handles exit and error events
   const exited = new EventEmitter();
   const exitPromise = waitForChildExit(exited);
   exited.emit("exit", 0, null);
-  assert.deepEqual(await exitPromise, { code: 0, signal: null });
+  assert.deepEqual(await exitPromise, { code: 0, signal: null, timedOut: false, timeoutMs: 0 });
 
   const errored = new EventEmitter();
   const errorPromise = waitForChildExit(errored);

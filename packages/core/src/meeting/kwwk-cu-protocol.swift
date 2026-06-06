@@ -20,12 +20,18 @@ func operationFromCUActionEnvelope(_ value: Any?) -> [String: Any] {
     return ["kind": "state"]
   case "click":
     return merged("click")
+  case "double-click", "double_click":
+    return merged("double_click")
   case "type-text":
     return merged("type_text")
+  case "set-value", "set_value":
+    return merged("set_value")
   case "press-key":
     return merged("press_key")
   case "scroll":
     return merged("scroll")
+  case "perform-secondary-action", "perform_secondary_action":
+    return merged("perform_secondary_action")
   case "drag":
     return merged("drag")
   default:
@@ -219,12 +225,14 @@ func cuControl(params: [String: Any]) -> [String: Any] {
     return base
   case "stop":
     guard let active = kwwkCUActiveSession else {
+      finishKWWKCUCoreSession()
       base["ok"] = true
       base["status"] = "idle"
       base["text"] = "no active session"
       return base
     }
     kwwkCUActiveSession = nil
+    finishKWWKCUCoreSession()
     base["ok"] = true
     base["status"] = "stopped"
     base["text"] = "session stopped"

@@ -76,6 +76,74 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
       false,
     );
 
+    const blockedConnectionCells = await page.evaluate(() => {
+      window.MAB_AVATAR_CONTROLLER?.updateState?.({
+        status_kind: "idle",
+        status_text: "",
+        status_hold_ms: 0,
+      });
+      window.MAB_REALTIME_BRIDGE = {
+        connected: false,
+        connection: {
+          peerConnectionState: "failed",
+          dataChannelReadyState: "closed",
+        },
+        feedback: {
+          failureMatrix: {
+            transport: { status: "blocked", reason: "peer_not_connected" },
+          },
+        },
+      };
+      return window.MAB_AVATAR_HUD_VISIBLE_CELLS();
+    });
+    assert.equal(blockedConnectionCells.find((cell) => cell.key === "rt")?.value, "卡住");
+    assert.equal(blockedConnectionCells.find((cell) => cell.key === "err")?.level, "blocked");
+
+    const blockedAudioCells = await page.evaluate(() => {
+      window.MAB_REALTIME_BRIDGE = {
+        connected: true,
+        connection: {
+          peerConnectionState: "connected",
+          dataChannelReadyState: "open",
+          currentRealtimeInputSource: "",
+        },
+        feedback: {
+          failureMatrix: {
+            audioInput: { status: "blocked", reason: "host_meet_audio_pcm_missing" },
+          },
+        },
+      };
+      return window.MAB_AVATAR_HUD_VISIBLE_CELLS();
+    });
+    assert.equal(blockedAudioCells.find((cell) => cell.key === "audio")?.value, "卡住");
+    assert.equal(blockedAudioCells.find((cell) => cell.key === "err")?.level, "blocked");
+
+    const lanOperatorHudCells = await page.evaluate(() => {
+      window.MAB_REALTIME_BRIDGE = {
+        lanOperatorHudTelemetry: {
+          schema: "oneesama.lan_operator_hud_telemetry.v1",
+          source: "lan_operator_debug_state",
+          signals: [
+            { key: "rt", label: "连接", value: "在线", level: "ok" },
+            {
+              key: "tool",
+              label: "工具",
+              value: "verification_target_missing",
+              level: "blocked",
+              visibleWhenOk: true,
+            },
+            { key: "err", label: "错误", value: "1", level: "blocked" },
+          ],
+        },
+      };
+      return window.MAB_AVATAR_HUD_VISIBLE_CELLS();
+    });
+    assert.equal(
+      lanOperatorHudCells.find((cell) => cell.key === "tool")?.value,
+      "verification_target_missing",
+    );
+    assert.equal(lanOperatorHudCells.find((cell) => cell.key === "err")?.level, "blocked");
+
     const speakingCells = await page.evaluate(() => {
       window.MAB_AVATAR_PLAYGROUND.applyPreset("speaking");
       return window.MAB_AVATAR_HUD_VISIBLE_CELLS();
@@ -118,7 +186,10 @@ test("avatar playground renders runtime HUD signals and state presets", async ()
 
     const tool = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("tool"));
     assert.equal(tool.signals.find((signal) => signal.label === "工具")?.level, "active");
-    assert.equal(tool.signals.find((signal) => signal.label === "工具")?.value, "列窗口→共享→控制");
+    assert.match(
+      tool.signals.find((signal) => signal.label === "工具")?.value || "",
+      /kwwk_computer_use · running · 1\.3s/,
+    );
 
     const blocked = await page.evaluate(() => window.MAB_AVATAR_PLAYGROUND.applyPreset("blocked"));
     assert.equal(blocked.signals.find((signal) => signal.label === "错误")?.level, "blocked");

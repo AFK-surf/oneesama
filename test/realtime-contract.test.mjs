@@ -346,6 +346,10 @@ test("KWWK app-control helper records native cursor telemetry for pointer action
     new URL("../packages/core/src/meeting/kwwk-cu-cursor.swift", import.meta.url),
     "utf8",
   );
+  const core = readFileSync(
+    new URL("../packages/core/src/meeting/kwwk-cu-core.swift", import.meta.url),
+    "utf8",
+  );
 
   assert.match(cursor, /func cursorCoordinateSpace\(target:/);
   assert.match(cursor, /func requireCursorCoordinateSpace\(target:/);
@@ -354,10 +358,16 @@ test("KWWK app-control helper records native cursor telemetry for pointer action
   assert.match(cursor, /coordinateSpaceId/);
   assert.match(cursor, /normalizedX/);
   assert.match(cursor, /normalizedY/);
-  assert.match(cursor, /cursor\.click/);
-  assert.match(cursor, /cursor\.double_click/);
-  assert.match(cursor, /cursor\.drag\.begin/);
-  assert.match(cursor, /cursor\.drag\.end/);
+  assert.doesNotMatch(cursor, /func click\(target:/);
+  assert.doesNotMatch(cursor, /func doubleClick\(target:/);
+  assert.doesNotMatch(cursor, /func drag\(target:/);
+  assert.doesNotMatch(cursor, /\.post\(tap: \.cghidEventTap\)/);
+  assert.match(core, /func kwwkCursorEvidenceEvents/);
+  assert.match(core, /cursor\.click/);
+  assert.match(core, /cursor\.double_click/);
+  assert.match(core, /cursor\.drag\.begin/);
+  assert.match(core, /cursor\.drag\.end/);
+  assert.match(core, /executionSurface"\] = "kwwk_computer_use_core"/);
 });
 
 test("KWWK app-control helper materializes a native foreground cursor overlay", () => {
@@ -381,15 +391,9 @@ test("KWWK app-control helper materializes a native foreground cursor overlay", 
   assert.match(cursor, /newPanel\.ignoresMouseEvents = true/);
   assert.match(cursor, /renderSize: CGFloat = 28/);
   assert.match(cursor, /hotspot = CGPoint\(x: 17\.0 \/ 101\.0, y: 13\.0 \/ 101\.0\)/);
-  assert.match(
-    cursor,
-    /KWWKForegroundCursorOverlay\.shared\.present\(quartzPoint: point, kind: "click"/,
-  );
-  assert.match(
-    cursor,
-    /KWWKForegroundCursorOverlay\.shared\.present\(quartzPoint: point, kind: "double_click"/,
-  );
   assert.match(cursor, /func nativeCursorOverlayProbe\(params:/);
+  assert.match(cursor, /KWWKForegroundCursorOverlay\.shared\.present\(/);
+  assert.match(cursor, /KWWKForegroundCursorOverlay\.shared\.drag\(/);
   assert.match(router, /case "app_control\.native_cursor_overlay_probe"/);
 });
 

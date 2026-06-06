@@ -128,7 +128,7 @@ test(
     assert.equal(report.ok, true);
     assert.equal(report.schema, "oneesama.app-control-helper-build.v1");
     assert.equal(report.current, true);
-    assert.equal(report.sourceCount, 10);
+    assert.equal(report.sourceCount, 11);
     assert.match(report.binary, /helper$/);
     assert.equal(typeof report.durationMs, "number");
   },
@@ -388,6 +388,10 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
     new URL("../packages/core/src/meeting/kwwk-cu-executor.swift", import.meta.url),
     "utf8",
   );
+  const coreSource = await readFile(
+    new URL("../packages/core/src/meeting/kwwk-cu-core.swift", import.meta.url),
+    "utf8",
+  );
   const observationSource = await readFile(
     new URL("../packages/core/src/meeting/kwwk-cu-observation.swift", import.meta.url),
     "utf8",
@@ -400,10 +404,6 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
     new URL("../packages/core/src/meeting/kwwk-cu-verification.swift", import.meta.url),
     "utf8",
   );
-  const inputSource = await readFile(
-    new URL("../packages/core/src/meeting/kwwk-cu-input.swift", import.meta.url),
-    "utf8",
-  );
   const helperSource = await readFile(
     new URL("../packages/core/src/meeting/app-control-helper.swift", import.meta.url),
     "utf8",
@@ -412,6 +412,17 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
     new URL("../packages/core/src/meeting/app-control-helper.ts", import.meta.url),
     "utf8",
   );
+  const kwwkSwiftSources = [
+    ["protocol", protocolSource],
+    ["runtime", runtimeSource],
+    ["router", routerSource],
+    ["planner", plannerSource],
+    ["executor", executorSource],
+    ["core", coreSource],
+    ["observation", observationSource],
+    ["cursor", cursorSource],
+    ["verification", verificationSource],
+  ];
 
   assert.match(protocolSource, /func cuControl\(params:/);
   assert.match(protocolSource, /func operationFromCUActionEnvelope/);
@@ -433,7 +444,7 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
   assert.match(launcherSource, /kwwk-cu-observation\.swift/);
   assert.match(launcherSource, /kwwk-cu-cursor\.swift/);
   assert.match(launcherSource, /kwwk-cu-verification\.swift/);
-  assert.match(launcherSource, /kwwk-cu-input\.swift/);
+  assert.doesNotMatch(launcherSource, /kwwk-cu-input\.swift/);
   assert.match(launcherSource, /appControlHelperSourcePaths/);
   assert.match(runtimeSource, /enum HelperError/);
   assert.match(runtimeSource, /func text/);
@@ -470,6 +481,11 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
   assert.match(plannerSource, /blocked_planner_model_model_not_found|blocked_planner_model_/);
   assert.match(executorSource, /func operationsFromParams/);
   assert.match(executorSource, /func executeOperation/);
+  assert.match(
+    executorSource,
+    /executeKWWKCUCoreOperation\(operation: operation, target: target\)/,
+  );
+  assert.doesNotMatch(executorSource, /CGEvent|AXUIElementPerformAction|cliclick|cghidEventTap/);
   assert.match(executorSource, /func cursorPolicyPayload/);
   assert.match(executorSource, /func actionTelemetryEntry/);
   assert.match(executorSource, /func appControlInstructionNeedsVisualObservation/);
@@ -480,6 +496,12 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
   assert.match(executorSource, /func controlSharedAppWindow/);
   assert.match(executorSource, /func appControlTimingSegments/);
   assert.match(executorSource, /oneesama\.kwwk-app-control-timings\.v1/);
+  assert.match(coreSource, /import KWWKComputerUseCore/);
+  assert.match(coreSource, /executeKWWKCUCoreOperation/);
+  assert.match(coreSource, /runAsync\(timeoutMs: kwwkCoreActionTimeoutMs\(\)\)/);
+  assert.match(coreSource, /ONEESAMA_KWWK_CU_CORE_ACTION_TIMEOUT_MS/);
+  assert.match(coreSource, /kwwk_core_action_timeout/);
+  assert.match(coreSource, /executionSurface": "kwwk_computer_use_core"/);
   assert.match(observationSource, /func listRunningApps/);
   assert.match(observationSource, /func focusedApplicationPayload/);
   assert.match(observationSource, /func findWindow/);
@@ -495,9 +517,10 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
   assert.match(cursorSource, /func cursorCoordinateSpace\(target:/);
   assert.match(cursorSource, /func requireCursorCoordinateSpace\(target:/);
   assert.match(cursorSource, /func cursorEvent\(kind:/);
-  assert.match(cursorSource, /func click\(target:/);
-  assert.match(cursorSource, /func doubleClick\(target:/);
-  assert.match(cursorSource, /func drag\(target:/);
+  assert.doesNotMatch(cursorSource, /func click\(target:/);
+  assert.doesNotMatch(cursorSource, /func doubleClick\(target:/);
+  assert.doesNotMatch(cursorSource, /func drag\(target:/);
+  assert.doesNotMatch(cursorSource, /\.post\(tap: \.cghidEventTap\)/);
   assert.match(cursorSource, /func nativeCursorOverlayProbe/);
   assert.match(cursorSource, /func nativeCursorRenderProbe/);
   assert.match(cursorSource, /func nativeCursorPrewarmPayload/);
@@ -507,11 +530,19 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
   assert.match(verificationSource, /oneesama\.kwwk-cu-verification\.v1/);
   assert.match(verificationSource, /failed_verification/);
   assert.match(executorSource, /verifyPostActionState/);
-  assert.match(inputSource, /func pasteText/);
-  assert.match(inputSource, /func keyCode/);
-  assert.match(inputSource, /func keySpec/);
-  assert.match(inputSource, /func pressKey/);
-  assert.match(inputSource, /func scroll/);
+  for (const [label, source] of kwwkSwiftSources) {
+    assert.doesNotMatch(source, /CGEvent/, `${label} must not implement local CGEvent app actions`);
+    assert.doesNotMatch(
+      source,
+      /CGWarpMouseCursorPosition|CGDisplayMoveCursorToPoint/,
+      `${label} must not move the system cursor outside KWWK core`,
+    );
+    assert.doesNotMatch(
+      source,
+      /\.post\(tap:\s*\.cghidEventTap\)|AXUIElementPerformAction|cliclick/,
+      `${label} must not bypass KWWK core for app actions`,
+    );
+  }
   assert.doesNotMatch(helperSource, /func plannerModelSchema/);
   assert.doesNotMatch(helperSource, /func validatePlanOperations/);
   assert.doesNotMatch(helperSource, /func compactPlannerContext/);
@@ -554,11 +585,6 @@ test("app-control helper compiles a separate KWWK CU protocol Swift module", asy
   assert.doesNotMatch(helperSource, /func nativeCursorRenderProbe/);
   assert.doesNotMatch(helperSource, /func showClickIndicator/);
   assert.doesNotMatch(helperSource, /func verifyPostActionState/);
-  assert.doesNotMatch(helperSource, /func pasteText/);
-  assert.doesNotMatch(helperSource, /func keyCode/);
-  assert.doesNotMatch(helperSource, /func keySpec/);
-  assert.doesNotMatch(helperSource, /func pressKey/);
-  assert.doesNotMatch(helperSource, /func scroll/);
 });
 
 test(
@@ -702,6 +728,8 @@ test(
     assert.deepEqual(byId.get("enter").operations, [{ kind: "press_key", key: "return" }]);
     assert.deepEqual(byId.get("escape").operations, [{ kind: "press_key", key: "escape" }]);
     assert.deepEqual(byId.get("scroll").operations, [{ kind: "scroll", direction: "down" }]);
+    assert.equal(byId.get("scroll").ok, true);
+    assert.equal(byId.get("scroll").blocker, "");
     assert.deepEqual(byId.get("search").operations, [
       { kind: "press_key", key: "command+l" },
       { kind: "type_text", text: "oneesama" },
@@ -1098,7 +1126,10 @@ test(
     assert.equal(byId.get("missing-text").ok, false);
     assert.equal(byId.get("missing-text").blocker, "type_text_requires_text");
     assert.equal(byId.get("missing-double-click-point").ok, false);
-    assert.equal(byId.get("missing-double-click-point").blocker, "double_click_requires_x_y");
+    assert.equal(
+      byId.get("missing-double-click-point").blocker,
+      "double_click_requires_element_index_or_x_y",
+    );
     assert.equal(byId.get("valid").ok, true);
     assert.deepEqual(byId.get("valid").validation.actionKinds, ["press_key"]);
   },
@@ -1171,7 +1202,7 @@ test(
         jsonrpc: "2.0",
         id: "verified-state-action",
         method: "kwwk.cu.action",
-        params: { operation: { kind: "state" } },
+        params: { target: { applicationName: "Finder" }, operation: { kind: "state" } },
       },
     ]);
 
@@ -1186,10 +1217,7 @@ test(
     assert.equal(response.result.metadata.cursor.pointerAction, false);
     assert.equal(response.result.metadata.cursor.foregroundSessionStarted, false);
     assert.deepEqual(response.result.metadata.cursor.events, []);
-    assert.equal(
-      response.result.metadata.cursor.policy,
-      "no_foreground_cursor_for_keyboard_scroll_or_state",
-    );
+    assert.equal(response.result.metadata.cursor.policy, "kwwk_core_background_action_no_pointer");
     assert.ok(
       response.result.metadata.verification.checks.some(
         (check) => check.name === "post_state_observed" && check.passed === true,
@@ -1209,6 +1237,7 @@ test(
         method: "kwwk.cu.action",
         params: {
           operation: { kind: "state" },
+          target: { applicationName: "Finder" },
           verification: { expectedWindowTitleContains: "__oneesama_missing_title_probe__" },
         },
       },

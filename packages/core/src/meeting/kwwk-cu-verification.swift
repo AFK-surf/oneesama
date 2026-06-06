@@ -76,11 +76,14 @@ func verifyPostActionState(
   target: [String: Any],
   operations: [[String: Any]],
   beforeState: [String: Any],
-  actions: [String]
+  actions: [String],
+  actionTelemetry: [[String: Any]] = []
 ) -> [String: Any] {
   let started = Date()
   let expectations = verificationExpectationsFromParams(params)
-  let fullObservation = appControlNeedsFullObservation(params: params, operations: operations)
+  let fullObservation =
+    appControlNeedsFullObservation(params: params, operations: operations) &&
+    !boolValue(expectations["useLightObservation"])
   var checks: [[String: Any]] = []
   let postState: [String: Any]
   do {
@@ -113,6 +116,19 @@ func verifyPostActionState(
     "expected": expectedActionCount,
     "actual": actions.count,
   ]))
+
+  let stateChangingOperations = operations.filter { text($0["kind"]) != "state" }
+  if !stateChangingOperations.isEmpty {
+    let kwwkSurfaceCount = actionTelemetry.filter { entry in
+      guard boolValue(entry["success"]) else { return false }
+      guard let target = entry["target"] as? [String: Any] else { return false }
+      return text(target["executionSurface"]) == "kwwk_computer_use_core"
+    }.count
+    checks.append(verificationCheck("kwwk_core_executed_actions", passed: kwwkSurfaceCount >= stateChangingOperations.count, details: [
+      "expected": stateChangingOperations.count,
+      "actual": kwwkSurfaceCount,
+    ]))
+  }
 
   let expectedTitle = text(expectations["expectedWindowTitleContains"])
   if !expectedTitle.isEmpty {

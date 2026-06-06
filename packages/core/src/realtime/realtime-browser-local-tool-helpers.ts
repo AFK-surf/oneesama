@@ -609,11 +609,13 @@
           holdMs: 30000,
         });
       } else if (name === "kwwk_computer_use") {
-        updateAvatarHudStatus("opening_preview", `正在操作 ${appControlTargetLabel(toolArgs)}`, {
+        const targetLabel = appControlTargetLabel(toolArgs);
+        updateAvatarHudStatus("opening_preview", `正在操作 ${targetLabel}`, {
           mood: "thinking",
           action: "lean_forward",
           holdMs: 45000,
         });
+        await updateKWWKCursorFeedback("move", `正在操作 ${targetLabel}`);
       } else if (
         name === "open_shared_browser_surface" ||
         name === "control_shared_browser_surface"
@@ -656,17 +658,21 @@
             action: "lean_forward",
             holdMs: 45000,
           });
-          if (cursorPoint) await updateKWWKCursorFeedback("move", "操作中", cursorPoint);
+          await updateKWWKCursorFeedback("move", "操作中", cursorPoint || undefined);
         } else if (appControlExecutorStillWorking(result)) {
           updateAvatarHudStatus("thinking", "正在操作应用", {
             mood: "thinking",
             action: "think",
             holdMs: 45000,
           });
-          if (cursorPoint) await updateKWWKCursorFeedback("move", "操作中", cursorPoint);
+          await updateKWWKCursorFeedback("move", "操作中", cursorPoint || undefined);
         } else {
           updateAvatarHudStatus("done", "操作完成", { mood: "happy", action: "emphasize" });
-          if (cursorPoint) await updateKWWKCursorFeedback(cursorPoint.kind, "完成", cursorPoint);
+          await updateKWWKCursorFeedback(
+            cursorPoint?.kind || "done",
+            "完成",
+            cursorPoint || undefined,
+          );
         }
       }
       return result;

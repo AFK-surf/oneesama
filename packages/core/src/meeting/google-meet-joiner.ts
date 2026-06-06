@@ -213,10 +213,11 @@ function shouldUseChromeFakeMediaDevice(input: {
   browserExtraArgs?: unknown;
   chromiumExtraArgs?: unknown;
 }): boolean {
+  if (input.installAvatar) return false;
   const callerArgs = `${String(input.browserExtraArgs || "")} ${String(input.chromiumExtraArgs || "")}`;
   if (/\b--use-fake-device-for-media-stream\b/.test(callerArgs)) return true;
   if (/\b--use-file-for-fake-audio-capture(?:=|\b)/.test(callerArgs)) return true;
-  return !input.installAvatar;
+  return true;
 }
 
 function runtimeScriptSourceUrl(script: RuntimeInitScript): string {
@@ -973,12 +974,15 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
                 maxAttempts: maxWebDriverJoinAttempts,
                 ...detail,
               });
-              if (status === "hard_blocked" || status === "prejoin_navigation_blocked") {
-                webDriverFailure = { status, message };
+              if (
+                webdriverStatus === "hard_blocked" ||
+                webdriverStatus === "prejoin_navigation_blocked"
+              ) {
+                webDriverFailure = { status: webdriverStatus, message };
                 return;
               }
-              if (status === "error" && webDriverFailure?.status !== "hard_blocked") {
-                webDriverFailure = { status, message };
+              if (webdriverStatus === "error" && webDriverFailure?.status !== "hard_blocked") {
+                webDriverFailure = { status: webdriverStatus, message };
               }
             },
             isStopped: () => false,
@@ -1422,10 +1426,10 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
         await collectButtonInventory(page, diagnostics, "pre-join-click-after-product-redirect");
       }
       const preJoinSettleInteraction = resolveMeetUIInteractionDetails(meetUIInteractionEnv);
-      const preJoinSettleMs =
-        preJoinSettleInteraction.mode === "humanized"
-          ? boundedEnvInt("MAB_MEET_HUMANIZED_PREJOIN_SETTLE_MS", 500, 0, 12_000)
-          : 0;
+      const useHumanizedMeetUI = preJoinSettleInteraction.mode === "humanized";
+      const preJoinSettleMs = useHumanizedMeetUI
+        ? boundedEnvInt("MAB_MEET_HUMANIZED_PREJOIN_SETTLE_MS", 500, 0, 12_000)
+        : 0;
       if (preJoinSettleMs > 0) {
         diagnostics.record("humanized_prejoin_settle", {
           ms: preJoinSettleMs,
@@ -1453,7 +1457,7 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           meetPage,
         };
       }
-      if (!clicked)
+      if (!clicked && !useHumanizedMeetUI) {
         clicked = await clickFirstVisible(
           page,
           [
@@ -1471,7 +1475,8 @@ export function createGoogleMeetJoiner(options: GoogleMeetJoinerOptions = {}) {
           2500,
           diagnostics,
         );
-      if (!clicked) {
+      }
+      if (!clicked && !useHumanizedMeetUI) {
         const enterFallback = await page.keyboard
           .press("Enter")
           .then(() => true)

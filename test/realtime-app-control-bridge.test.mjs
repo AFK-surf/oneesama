@@ -85,7 +85,10 @@ async function dispatchToolCall(page, callId, args) {
     { callId, args },
   );
   await page.waitForFunction(
-    (id) => window.MAB_REALTIME_BRIDGE?.workspaceTools?.calls?.some((call) => call.callId === id),
+    (id) =>
+      window.MAB_REALTIME_BRIDGE?.workspaceTools?.calls?.some(
+        (call) => call.callId === id && call.delivery,
+      ),
     callId,
   );
 }
@@ -743,9 +746,10 @@ test("Realtime app-control terminal job status updates the typed state machine",
       });
 
       const calls = await page.evaluate(() => window.MAB_REALTIME_BRIDGE.workspaceTools.calls);
-      const completed = calls.find((call) => call.callId === "call_completed_app_control");
-      const blocked = calls.find((call) => call.callId === "call_blocked_app_control");
-      const stateOnly = calls.find((call) => call.callId === "call_state_only_app_control");
+      const latestCall = (callId) => calls.findLast((call) => call.callId === callId);
+      const completed = latestCall("call_completed_app_control");
+      const blocked = latestCall("call_blocked_app_control");
+      const stateOnly = latestCall("call_state_only_app_control");
 
       assert.equal(completed.delivery.meetingEvent.type, "app_control.completed");
       assert.equal(completed.delivery.meetingEvent.jobId, "app_job_done");
@@ -778,10 +782,15 @@ test("Realtime app-control terminal job status updates the typed state machine",
       const jobs = await page.evaluate(() => window.MAB_REALTIME_BRIDGE.turnPolicy.appControlJobs);
       assert.equal(jobs.app_job_done.status, "completed");
       assert.equal(jobs.app_job_done.visibility, "voice");
+      assert.equal(jobs.app_job_done.toolName, "kwwk_computer_use");
+      assert.equal(jobs.app_job_done.stage, "verified");
       assert.equal(jobs.app_job_blocked.status, "blocked");
       assert.equal(jobs.app_job_blocked.visibility, "blocked");
+      assert.equal(jobs.app_job_blocked.stage, "blocked");
+      assert.equal(jobs.app_job_blocked.blocker, "accessibility permission denied");
       assert.equal(jobs.app_job_state_only.status, "running");
       assert.equal(jobs.app_job_state_only.visibility, "silent");
+      assert.equal(jobs.app_job_state_only.stage, "running");
 
       const responseCreate = await page.evaluate(() =>
         window.MAB_REALTIME_BRIDGE.outbound.some(

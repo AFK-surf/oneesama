@@ -106,6 +106,26 @@ function bridgeFailureMatrix(bridge: any) {
   return bridge?.feedback?.failureMatrix || bridge?.failureMatrix || {};
 }
 
+function bridgeLanOperatorHudSignals(bridge: any): HudSignal[] {
+  const telemetry = bridge?.lanOperatorHudTelemetry || bridge?.operatorHudTelemetry;
+  const signals = Array.isArray(telemetry?.signals) ? telemetry.signals : [];
+  return signals
+    .map((signal: any) => {
+      const level = String(signal?.level || "idle");
+      if (!["ok", "active", "warn", "blocked", "idle"].includes(level)) return null;
+      return {
+        key: String(signal?.key || ""),
+        label: String(signal?.label || ""),
+        value: String(signal?.value || ""),
+        level: level as HudSignal["level"],
+        visibleWhenOk: signal?.visibleWhenOk === true,
+      };
+    })
+    .filter((signal: HudSignal | null): signal is HudSignal =>
+      Boolean(signal?.key && signal.label),
+    );
+}
+
 function isSidecarMeetSurfacePlaceholder(bridge: any) {
   const placement = String(bridge?.runtimePlacement || bridge?.realtimeRuntimePlacement || "");
   const pageRole = String(bridge?.pageRole || bridge?.realtimePageRole || "");
@@ -145,23 +165,28 @@ function millisSinceIso(value: unknown) {
   return Date.now() - time;
 }
 
-function toolStepLabel(name: unknown) {
+function formatDurationMs(value: unknown, fallbackStartedAt?: unknown) {
+  let ms = Number(value);
+  if (!Number.isFinite(ms) && fallbackStartedAt) {
+    ms = millisSinceIso(fallbackStartedAt);
+  }
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+}
+
+function toolDisplayName(name: unknown) {
   const text = String(name || "");
-  if (text === "list_shareable_windows") return "列窗口";
-  if (text === "share_existing_app_window") return "共享";
-  if (text === "kwwk_computer_use") return "控制";
-  if (text === "delegate_to_worker") return "后台";
-  if (text === "worker_status") return "查进度";
-  if (text === "read_meet_chat") return "读聊天";
-  if (text === "send_meet_chat") return "发聊天";
-  if (text === "present_video_stage") return "放视频";
-  if (text === "stop_video_stage") return "停视频";
-  return (
-    text
-      .replace(/_window$/, "")
-      .replace(/_/g, " ")
-      .slice(0, 14) || "tool"
-  );
+  return text.slice(0, 28) || "tool";
+}
+
+function toolStageText(value: unknown, status?: unknown) {
+  const stage = String(value || status || "")
+    .trim()
+    .toLowerCase();
+  if (stage === "completed") return "verified";
+  if (stage === "accepted") return "queued";
+  return stage || "running";
 }
 
 function allToolCalls(bridge: any) {
@@ -177,7 +202,47 @@ function allToolCalls(bridge: any) {
 
 function latestToolChain(bridge: any) {
   const recent = allToolCalls(bridge).filter((call: any) => millisSinceIso(call.ts) < 45_000);
-  return recent.slice(-3).map((call: any) => toolStepLabel(call.name));
+  return recent.slice(-3).map((call: any) => toolDisplayName(call.name));
+}
+
+function latestToolActivity(bridge: any) {
+  const appJobs = Object.values(bridge?.turnPolicy?.appControlJobs || {}) as any[];
+  const jobActivities = appJobs.map((job: any) => ({
+    name: job.toolName || "kwwk_computer_use",
+    status: String(job.status || "").toLowerCase(),
+    stage: toolStageText(job.stage, job.status),
+    blocker: String(job.blocker || job.reason || ""),
+    duration: formatDurationMs(job.durationMs, job.startedAt || job.updatedAt),
+    ts: job.updatedAt || job.finishedAt || job.startedAt,
+    source: "app_control",
+  }));
+  const callActivities = allToolCalls(bridge).map((call: any) => ({
+    name: call.name,
+    status: String(call.status || "").toLowerCase(),
+    stage: toolStageText(call.stage, call.status),
+    blocker: String(call.error || call.result?.blocker || call.delivery?.policy?.reason || ""),
+    duration: formatDurationMs(call.durationMs, call.startedAt || call.ts),
+    ts: call.finishedAt || call.ts || call.startedAt,
+    source: "tool_call",
+  }));
+  const candidates = [...jobActivities, ...callActivities]
+    .filter((entry) => entry.name && millisSinceIso(entry.ts) < 45_000)
+    .toSorted((left, right) => Date.parse(left.ts || "") - Date.parse(right.ts || ""));
+  const blocked = candidates.filter((entry) =>
+    ["failed", "timeout", "blocked", "error"].includes(entry.status),
+  );
+  if (blocked.length) return { ...blocked.at(-1), level: "blocked" as const };
+  const active = candidates.filter((entry) =>
+    ["accepted", "queued", "running", "started"].includes(entry.status),
+  );
+  if (active.length) return { ...active.at(-1), level: "active" as const };
+  const completed = candidates.filter((entry) =>
+    ["completed", "done", "success", "succeeded"].includes(entry.status),
+  );
+  if (completed.length && millisSinceIso(completed.at(-1)?.ts) < 20_000) {
+    return { ...completed.at(-1), level: "ok" as const };
+  }
+  return null;
 }
 
 function realtimeSignal(bridge: any, failures: any): HudSignal {
@@ -244,11 +309,28 @@ function speakingSignal(bridge: any, failures: any): HudSignal {
 function toolSignal(bridge: any, failures: any): HudSignal {
   const jobs = countAppControlJobs(bridge);
   const level = failureLevel(failures.toolTurns);
+  const activity = latestToolActivity(bridge);
+  if (activity) {
+    const parts = [
+      toolDisplayName(activity.name),
+      activity.level === "blocked"
+        ? activity.blocker || activity.stage || "blocked"
+        : activity.stage,
+      activity.duration,
+    ].filter(Boolean);
+    return {
+      key: "tool",
+      label: "工具",
+      value: parts.join(" · "),
+      level: activity.level,
+      visibleWhenOk: true,
+    };
+  }
   if (jobs.blocked > 0 || level === "blocked") {
     return { key: "tool", label: "工具", value: "卡住", level: "blocked" };
   }
   const chain = latestToolChain(bridge);
-  const chainValue = chain.length > 0 ? chain.join("→") : "";
+  const chainValue = chain.length > 0 ? chain.join(" · ") : "";
   if (jobs.active > 0)
     return {
       key: "tool",
@@ -277,6 +359,8 @@ function errorSignal(bridge: any, failures: any): HudSignal {
 
 function collectSignals(): HudSignal[] {
   const bridge = bridgeState();
+  const lanOperatorSignals = bridgeLanOperatorHudSignals(bridge);
+  if (lanOperatorSignals.length) return lanOperatorSignals;
   const failures = bridgeFailureMatrix(bridge);
   return [
     realtimeSignal(bridge, failures),

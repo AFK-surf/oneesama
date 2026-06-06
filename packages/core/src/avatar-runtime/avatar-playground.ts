@@ -779,15 +779,28 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
         function bridgeFromPreset(preset) {
           const toolJobs = {};
           if (preset.tool !== "idle") {
+            const now = new Date().toISOString();
             toolJobs["playground_tool"] = {
               id: "playground_tool",
+              jobId: "playground_tool",
+              toolName: "kwwk_computer_use",
               status:
                 preset.tool === "running"
                   ? "running"
                   : preset.tool === "blocked"
                     ? "blocked"
                     : "completed",
-              updatedAt: new Date().toISOString(),
+              stage:
+                preset.tool === "running"
+                  ? "running"
+                  : preset.tool === "blocked"
+                    ? "failed_verification"
+                    : "verified",
+              blocker: preset.tool === "blocked" ? "failed_verification" : "",
+              durationMs: preset.tool === "running" ? 1250 : 2380,
+              updatedAt: now,
+              startedAt: now,
+              finishedAt: preset.tool === "running" ? "" : now,
               visibility: "silent",
             };
           }
@@ -800,7 +813,15 @@ export function buildAvatarPlaygroundHtml(input: { botName: string; selectedAvat
                     { ts: toolCallTs, name: "list_shareable_windows" },
                     { ts: toolCallTs, name: "share_existing_app_window" },
                   ],
-                  workspace: [{ ts: toolCallTs, name: "kwwk_computer_use" }],
+                  workspace: [
+                    {
+                      ts: toolCallTs,
+                      name: "kwwk_computer_use",
+                      status: preset.tool === "running" ? "running" : preset.tool,
+                      stage: preset.tool === "done" ? "verified" : preset.tool,
+                      durationMs: preset.tool === "running" ? 1250 : 2380,
+                    },
+                  ],
                 };
           return {
             connected: true,

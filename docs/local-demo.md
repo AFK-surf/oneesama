@@ -23,6 +23,8 @@ vp run ci
 This verifies:
 
 - local session + dry-run background work routing
+- Local Operator Surface startup, operator-side visual composition, debug panel,
+  KWWK overlay, and voice WebSocket telemetry
 - agent runner provider seam for dry-run, Codex, Claude Code, Ollama, Slack Agent D bridge, command, and HTTP backends
 - state provider seam for `memory`, `json-file`, and WAL-backed `sqlite`, including restart restoration of sessions and worker delivery markers
 - persistent local session/job store across service restart
@@ -66,6 +68,382 @@ Terminal B:
 
 ```bash
 vp run dev:slack
+```
+
+Terminal C, for the single-machine Local Operator Surface:
+
+```bash
+vp run dev:local-operator
+```
+
+`dev:local-operator` binds to `127.0.0.1:18913` by default. Open
+`http://127.0.0.1:18913/operator` on the same Mac that runs Oneesama. The root
+path remains a compatibility alias for the same app. Non-loopback
+binding is a legacy diagnostic mode and is not the Local Operator RFC
+acceptance path. Runtime status and debug reports expose bind mode,
+`localOnlyMode`, loopback URL, and reachability blockers in
+`summaries.surfaceContext`.
+
+By default the Local Operator Surface is key-aware: if `MAB_OPENAI_API_KEY` or
+`OPENAI_API_KEY` is configured, `dev:local-operator` selects
+`openai_realtime`; without a key it starts the Diagnostic Conversation Engine
+and marks the fallback as `openai_realtime_api_key_missing` in startup JSON,
+runtime status, and Debug Reports. To force a specific replaceable Conversation
+Engine transport, set `MAB_LAN_OPERATOR_TRANSPORT` explicitly:
+
+```bash
+MAB_LAN_OPERATOR_TRANSPORT=openai_realtime \
+MAB_OPENAI_API_KEY=... \
+MAB_LAN_OPENAI_REALTIME_MODEL=gpt-realtime-2 \
+vp run dev:local-operator
+```
+
+The local live transport uses the GA Realtime WebSocket endpoint and forwards
+operator PCM chunks as `input_audio_buffer.append`. It does not use the removed
+`OpenAI-Beta: realtime=v1` header. `OPENAI_API_KEY` is accepted when
+`MAB_OPENAI_API_KEY` is not set. For deterministic local gate runs without a
+provider, set `MAB_LAN_OPERATOR_TRANSPORT=mock` or use the gate scripts, which
+construct the Diagnostic Conversation Engine explicitly.
+
+To collect a strict live-provider evidence report from the Local Operator
+Surface, run:
+
+```bash
+MAB_OPENAI_API_KEY=... \
+vp run acceptance:realtime-local-openai-live
+```
+
+This starts the Local Operator Surface with `openai_realtime`, connects to the
+GA Realtime WebSocket transport, sends a typed operator turn through the same
+surface event port as the Debug Panel, requests text-only `response.create`, and
+requires `session.created`, provider text-response events, raw-event drill-down
+summaries, canonical event mapping, and no diagnostic fallback. It writes
+`/tmp/oneesama-realtime-local-openai-live-latest.json`. Without an OpenAI key,
+the strict command fails; use `vp run acceptance:realtime-local-openai-live:optional`
+only for local diagnostics. The optional command exits 0 for a missing-key skip
+but still writes `ok:false` and `acceptanceSatisfied:false`, so it does not count
+as acceptance evidence.
+
+The operator UI includes microphone device selection, explicit arm/disarm,
+mute/unmute, diagnostic push-to-talk, typed debug text input, and an optional
+Local VAD telemetry toggle. Local VAD defaults off because Realtime turn
+formation belongs to the configured Conversation Engine; when enabled, it is
+UI/debug telemetry only. Typed text is also a feedback/debug aid, and the
+primary local voice gates still require Operator Voice Input evidence.
+
+To publish a one-way Host Visual Stream from the host Mac, open
+`http://127.0.0.1:18913/host-visual` on the host and click `Share Display`.
+The Local Operator Surface receives the source over WebRTC and composes it into
+the movable operator-side canvas/video track. Raw Host Visual Stream tracks are
+inputs; the Operator Composed Video Track synthesized by the Local Operator
+Surface is the user-side synthesized output for local layout, future sharing,
+recording, or export. Move/resize/focus changes happen in that browser before
+`canvas.captureStream()`, so the host does not need to recapture when the
+operator changes the layout. For an automated diagnostic track that does not
+require display-capture permission, open
+`http://127.0.0.1:18913/host-visual?diagnostic=1`.
+To publish the avatar renderer over the same Host Visual Stream lane, open
+`http://127.0.0.1:18913/host-visual?avatar=1&sourceId=avatar&label=Avatar&kind=avatar`.
+For fallback/debug-only evidence, the older diagnostic avatar canvas can still
+be opened with `diagnostic=1&sourceId=avatar&label=Avatar&kind=avatar`.
+The local Host Visual Stream acceptance gate opens both host-app and avatar
+publishers, moves/resizes the avatar source in the operator browser, emits a
+KWWK overlay, and requires both WebRTC tracks plus the local Operator Composed
+Video Track to stay live. The avatar source must report
+`avatarSourceMode:"avatar_renderer"` and a renderer name, so diagnostic avatar
+canvas evidence cannot satisfy Gate 2 by itself. The report records
+`layoutRevision`, `focusedSourceId`, `sourceRects`, `overlayCount`,
+`trackReadyState`, and explicit `operatorScreenBackflow:false` evidence.
+If the publisher's signaling WebSocket drops, the page reconnects and
+renegotiates the current display/canvas stream automatically, so a transient
+local WebSocket hiccup should not require sharing the source again.
+
+To make Host Visual Stream a real display/app-capture gate, use `Share Display`
+for the host-app publisher, then run:
+
+```bash
+vp run acceptance:realtime-local-host-visual-stream:display
+```
+
+That stricter mode adds `--require-display-capture`, requires
+`visual.hostSourceMode:"display_capture"` plus
+`visual.hostCaptureStatus:"live"`, and writes
+`/tmp/oneesama-realtime-local-host-visual-stream-display-latest.json`. A
+diagnostic host-app canvas or failed screen-share permission prompt cannot
+satisfy this stricter gate. Capture attempts, status, and errors are copied into
+the Debug Panel and report as `captureStatus`, `captureError`, and
+`captureAttemptCount`.
+
+The Debug Panel can copy or download a JSON report for a live run. The same
+payload is available at `http://127.0.0.1:18913/runtime/report`; use
+`Open Debug` in the surface toolbar to focus the embedded panel, and use `Mark`
+in the panel to tag interesting moments before exporting.
+Use the Debug Panel filter box to narrow dense rows by blocker, layer, event,
+tool, or source text such as `verification`, `output_audio`, `kwwk`, or
+`display_capture`. Gate 5 exercises this browser-visible filter and requires
+`debug_panel_filter_observed` in the SLO report.
+Gate 5 also records `conversationEngine.diagnosticCanonicalParity` and requires
+`diagnostic_canonical_event_parity_observed`, proving the Diagnostic
+Conversation Engine emitted the same canonical event vocabulary needed by live
+engines, including failure injection through `engine_error`, without leaking
+provider raw events across the port boundary.
+Its Transport section shows the local surface/session id, host URL, events/voice/
+visual WebSocket state, reconnect/connect counts, last packet time, and
+event-channel RTT, which is the first place to look when the operator UI
+feels quiet or stale.
+Its Voice Input section shows mic permission/device, energy, Local VAD telemetry
+state, capture mode, chunk/drop counts, host chunks/gaps, voice reconnects, and
+host receive lag plus voice chunk ACK RTT. The report exposes the same evidence
+as `audio.hostReceiveLagMs` / `audio.maxHostReceiveLagMs`, measured from
+operator-browser `sentAt` to host `receivedAt`, and `audio.voiceAckRttMs` /
+`audio.maxVoiceAckRttMs`, measured on the operator browser's own clock from
+chunk send to host ack. It also shows the active voice stream generation and
+stale chunk rejection count so reconnects cannot silently mix old audio into a
+new stream.
+Its Turn Correlation section groups timeline rows by `turnId` and shows whether
+the latest utterance reached heard, speech, transcript, tool, KWWK, and output
+milestones, including explicit KWWK verification when the helper reports
+verification evidence.
+Its Turn Timeline section expands recent turns into row-level timelines, so a
+single turn shows every `layer/event`, turn-relative duration, blocker/status,
+response id, row id, and compact detail keys instead of only a milestone chain.
+Its Conversation Turn section expands the latest turn into engine/transport,
+session, response id, user transcript, assistant transcript, speech-start count,
+and cancel/interruption state.
+Its Conversation Engine Port section shows canonical event counts, the latest
+canonical event, provider adapter kind, provider event-type counts, and raw-event
+drill-down availability. Provider rows are summarized by provider/source label
+and event type. The Provider Raw Event Drilldown table adds safe raw-event
+summaries such as provider event id, call id, tool name, status/reason/error,
+and detail keys; raw provider payloads stay out of the default panel and
+acceptance scoring remains canonical-first.
+Conversation Engine lifecycle controls are available through
+`window.MAB_LAN_OPERATOR_SURFACE.sendEngineControl(...)` for `connect`,
+`disconnect`, `reconnect`, `cancel_response`, `clear_audio_buffer`,
+`reset_session`, `set_voice_armed`, and `set_voice_muted`. The visible Debug
+Panel buttons currently expose cancel, clear, and reset; arm/disarm and
+mute/unmute controls emit the voice-mode controls automatically after local
+capture state changes. All controls report command counts, in-flight state,
+latest result, detail payload, and canonical lifecycle events through the same
+debug state.
+The `Cancel Tool` control sends a `tool_cancel` request for the current tool
+call/KWWK job and delivers a `status:"cancelled"` tool result back through the
+Conversation Engine Port, so the model does not keep waiting for a missing
+function output. Gate 4 also records executor-level hard-stop evidence from a
+running KWWK/CU helper process: `kwwk.hardCancel` captures the cancelled job id,
+call id, requested signal, exit signal, whether a response arrived before
+cancel, and duration, and the SLO row `kwwk_hard_cancel_observed` is required.
+The exported report also includes `summaries.surfaceContext`, which captures the
+current focused visual source, Host Visual Stream state, Operator Visual
+Composition track/layout state, local bind mode, and voice/operator mode at the
+port boundary.
+The Debug Panel benchmark also emits a Gate 5 `failureMatrix` covering audio
+input, Conversation Engine, tool routing, KWWK planner, KWWK execution,
+verification, and output audio. Each observed layer records the timeline layer,
+event, blocker, row id, and timestamp; the SLO gate fails if any layer is
+missing or if no report copy/download artifact was observed.
+For bad turns, the report exposes `summaries.primaryBlocker` and the panel shows
+a `Primary blocker` row in Conversation Turn. The V1 policy chooses the latest
+blocker row inside the latest blocked/failed turn, then maps KWWK blockers into
+operator-facing layers (`kwwk_planner`, `kwwk_execution`, or `verification`) so
+the operator sees exactly one first place to look while the timeline keeps all
+candidate blockers.
+Large artifacts stay out of the copied/downloaded report body. Use
+`window.MAB_LAN_OPERATOR_SURFACE.registerArtifactLink(...)` to attach a
+linked-only manifest entry with label, kind, href, byte count, content type, and
+reason. The exported report exposes these under
+`summaries.artifactPolicy` with `inlineByteLimit:64000`; Gate 5 SLO fails if
+large artifact payloads are inlined instead of linked.
+Use `window.MAB_LAN_OPERATOR_SURFACE.createDebugBundle(...)` to create a bundle
+manifest that indexes the debug report, timeline rows, turn correlation,
+summaries, failure matrix, SLO scoring, and linked large artifacts. The report
+exposes this under `summaries.artifactBundle`; Gate 5 requires the manifest so
+live debugging artifacts are navigable instead of being a single opaque JSON
+blob.
+Gate 5 also records `debugPanel.embedded` and `debugPanel.openedFromSurface`;
+the benchmark clicks the surface `Open Debug` control before scoring, so a
+detached or unreachable panel fails even if telemetry rows still exist.
+
+To run the current single-machine Local Operator acceptance artifacts:
+
+```bash
+vp run acceptance:realtime-local-voice
+vp run preflight:realtime-local-real-mic # fast system/browser mic readiness probe
+vp run acceptance:realtime-local-voice:real-mic # headed human-device mic gate
+vp run acceptance:realtime-local-host-visual-stream
+vp run benchmark:realtime-local-tool-routing
+vp run benchmark:realtime-local-kwwk-action
+vp run acceptance:realtime-local-kwwk-action:real-mic # headed spoken app-control gate
+vp run benchmark:realtime-local-debug-panel
+vp run benchmark:realtime-local-slo-suite
+vp run acceptance:realtime-local-openai-live # strict live-provider gate, requires key
+vp run acceptance:realtime-local-rfc:audit # strict final RFC evidence audit
+```
+
+The RFC audit writes
+`/tmp/oneesama-realtime-local-rfc-acceptance-audit-latest.json`. It is expected
+to fail until all required local artifacts are present: the five automated
+local gates, the two human-device real-mic gates, the local SLO suite, real
+display-capture Host Visual Stream evidence, and strict valid-key OpenAI
+text/voice/tool reports.
+When a real-mic gate fails with
+`real_microphone_input_energy_below_threshold`, the audit copies the selected
+mic label, browser-visible input labels, max energy, threshold, and
+`MAB_LAN_OPERATOR_MIC_LABEL` / `MAB_LAN_OPERATOR_MIC_DEVICE_ID` recovery
+commands into `requiredFailures[].failureDetail` and `nextActions[]`.
+Run `vp run preflight:realtime-local-real-mic` first when debugging input
+device state; it writes
+`/tmp/oneesama-realtime-local-real-mic-preflight-latest.json` with macOS
+`system_profiler` input devices, browser `audioinput` devices, default input,
+and a blocker such as `macos_no_real_microphone_input` before spending time on
+the longer human-device gates.
+
+These write `/tmp/oneesama-realtime-local-voice-latest.json` and
+`/tmp/oneesama-realtime-local-host-visual-stream-latest.json` plus
+`/tmp/oneesama-realtime-local-tool-routing-latest.json` and
+`/tmp/oneesama-realtime-local-kwwk-action-latest.json` plus
+`/tmp/oneesama-realtime-local-debug-panel-latest.json` with local report
+schemas. They use Chromium fake mic, the Diagnostic Conversation Engine,
+host-app diagnostic plus avatar-runtime WebRTC publishers, diagnostic tool-call
+events, a lightweight host KWWK/CU helper action, and a browser-visible dense
+Debug Panel assertion, so they validate the Local Operator Surface
+voice/visual/tool-routing/KWWK/debug contracts before live OpenAI Realtime is
+required.
+Gate 5 also proves diagnostic canonical parity with all required canonical
+voice, transcript, assistant, tool, tool-result, and error events. Gate 1 and
+Gate 2 reports also include
+`local_operator_surface_reachability_observed`, backed by
+`host.reachability` / `summaries.surfaceContext.lanReachability`. This proves
+the surface advertises how it can be reached.
+report now separates
+`functionalOk` from `slo.ok`; the final `ok` is true only when the functional
+gate passes and required UX SLO evidence is present and under threshold.
+Each report also includes `perceivedUx`, a compact operator-facing summary of
+required stages: first feedback timing, measured/missing stage counts, failed
+stage ids, and the slowest required stage. Use this before scanning raw
+`slo.entries` when a run passed but still felt quiet or slow. The SLO suite
+also aggregates `perceivedUx.firstFeedbackP50Ms` and
+`perceivedUx.firstFeedbackP95Ms` across reports.
+Gate 1 runs with Local VAD disabled by default and requires
+`operator_voice_local_vad_not_required`, proving WebSocket PCM chunks still
+forward and produce Conversation Engine speech/output while local VAD is not
+active. Use `vp exec tsx scripts/lan-operator-voice-acceptance.mjs --local-vad enabled`
+only to diagnose the telemetry UI; that mode does not prove the V1 acceptance
+invariant.
+To run the human-device microphone check, use:
+
+```bash
+vp run acceptance:realtime-local-voice:real-mic
+```
+
+This headed gate opens `/operator`, does not pass Chromium
+`--use-fake-device-for-media-stream`, requires the browser to record
+`microphone_pcm16`, and fails unless `audio.maxInputEnergy` crosses
+`audio.inputEnergyThreshold` at least once. It writes
+`/tmp/oneesama-realtime-local-voice-real-mic-latest.json` and adds the required
+SLO row `operator_voice_real_microphone_energy_observed` only for real-mic
+runs. Speak a short prompt after the window opens; the default automated gate
+remains `acceptance:realtime-local-voice` because it is deterministic and does
+not depend on a physical microphone or OS permission state.
+If Chromium selects the wrong input device, set
+`MAB_LAN_OPERATOR_MIC_LABEL` or pass `--mic-label <label-fragment>` to the
+underlying script. The real-mic report records selected device label, browser
+audioinput candidates, `audio.maxInputEnergy`, and
+`real_microphone_input_energy_below_threshold` when the browser is only hearing
+silence or a virtual input.
+Gate 1 also records `audio.hostReceiveLagMs` and requires
+`operator_voice_host_receive_lag_ms` to stay under threshold, so audio ingress
+delay is separated from Conversation Engine or output latency.
+It also records `audio.voiceAckRttMs` and requires
+`operator_voice_ack_rtt_ms`, measured on the operator browser's own clock.
+Gate 1 also requires `operator_voice_fresh_stream_observed`: the report must
+show an active `audio.voiceStreamId`, a stream generation, and zero stale chunk
+rejections for the accepted run.
+Gate 1 now also requires `assistant_audio_playback_observed` when assistant
+audio output is enabled. The acceptance report records
+`output.assistantAudio.chunksReceivedDelta`,
+`output.assistantAudio.chunksPlayedDelta`, received bytes, playback status, and
+RMS/peak output energy so the run proves the Local Operator Surface actually
+played assistant audio, not only rendered assistant text.
+The KWWK action benchmark submits the host helper result back through the
+Conversation Engine Port as `tool_result`, so missing post-action assistant
+follow-up can be distinguished from missing host execution.
+For the spoken app-control human-device check, use:
+
+```bash
+vp run acceptance:realtime-local-kwwk-action:real-mic
+```
+
+This headed gate opens `/operator`, requests the real microphone, waits until
+`spokenInput.maxInputEnergy` crosses `spokenInput.inputEnergyThreshold`, then
+routes the bounded fixture command through the same canonical
+`kwwk_computer_use` path. It writes
+`/tmp/oneesama-realtime-local-kwwk-action-real-mic-latest.json` and requires
+`spoken_app_control_real_microphone_observed` only in real-mic mode.
+It accepts the same `MAB_LAN_OPERATOR_MIC_LABEL` /
+`MAB_LAN_OPERATOR_MIC_DEVICE_ID` environment variables as the voice gate when a
+specific browser audioinput must be selected before arming the microphone.
+It also requires a compact assistant follow-up after verified action:
+`operator_final_response_after_verified_action_ms` measures the time from a
+`kwwk_completed` timeline row to the next `assistant_text_completed`, and
+`kwwk_compact_followup_observed` requires the exported
+`output.compactFollowUpText` to be short and present.
+The same report separates `kwwk.cold` and `kwwk.warm`: cold timing includes
+helper binary setup/spawn plus the first request, while warm timing is the
+second request in the same helper process. The SLO gate requires both
+`cold_simple_app_action_verified_ms` and `warm_simple_app_action_verified_ms`.
+The TextEdit fixture keeps full screenshot/context observation on the cold
+request only; warm uses AX/light observation so the steady-state latency SLO
+does not repeatedly pay ScreenCaptureKit capture cost.
+It also requires `kwwk_phase_evidence_observed`, backed by compact
+`metadata.state`, `metadata.planner`, and `metadata.actionTelemetry`, plus
+`real_kwwk_job_state_observed`, backed by cold/warm helper state source,
+KWWK core execution surface, verification schema, and verified host mutation,
+plus
+`kwwk_in_flight_phase_progress_observed`, backed by
+`kwwk.inFlightProgress.phasesBeforeResponse` and timeline rows whose phase
+evidence source is `host_helper_in_flight_stream`, plus
+`kwwk_cursor_action_feedback_observed`, backed by latest action kind/count,
+cursor event count, and cursor policy for pointer or no-pointer actions, plus
+`kwwk_hard_cancel_observed`, backed by `kwwk.hardCancel` process-termination
+evidence from the helper hard-cancel probe, plus
+`kwwk_phase_blocker_matrix_observed`, backed by
+`kwwk.phaseBlockers.entries` for observe/plan/execute/verify blockers and
+rejecting helper-timeout-only evidence, plus
+`kwwk_verification_evidence_observed`, backed by the helper's
+`metadata.verification` and the Debug Panel `kwwk_verifying` timeline rows.
+Gate 3 and Gate 4 also require `canonical_tool_boundary_observed`. The report
+field `tool.canonicalBoundary` proves KWWK receives provider-agnostic
+Conversation Engine Port tool events, not provider raw events, raw operation
+arrays, or exposed coordinates.
+By default the benchmark opens a disposable TextEdit temp file, types a unique
+marker through the real KWWK/CU helper, and requires at least one
+`kwwk_app_mutation_verified` sample. Cold and warm helper verification remain
+separate SLO evidence; app mutation evidence can come from helper accessibility
+state after the previous sample, direct System Events text-area reads, or
+fixture cleanup. The fixture focuses the target TextEdit text area before each
+helper action and records `accessibilityTextIncludesMarker` after each sample,
+so mutation evidence does not depend on a later warm pre-state happening to
+include the previous marker. Inspect `kwwk.mutation` for the marker, fixture
+window, verification source, and check.
+`kwwk.mutationCleanup` is cleanup evidence and may be diagnostic when TextEdit
+does not write the temp file before close.
+Inspect `perceivedUx`, `slo.entries`, `slo.failures`, and `slo.slowest` when a
+benchmark feels worse than the final state suggests.
+Entries prefixed with `turn_` are same-turn checks; if one fails, the report had
+events but could not prove they belonged to the same utterance/action chain.
+The live OpenAI gate is intentionally separate from the default five-gate local
+SLO suite because it requires a real provider credential. It proves transport
+and provider-to-canonical mapping, not host KWWK execution.
+
+`benchmark:realtime-local-slo-suite` runs the five local gates sequentially once
+by default and writes `/tmp/oneesama-realtime-local-slo-suite-latest.json` with
+per-gate p50/p95 aggregation over the collected reports. For meaningful p95
+sampling during focused latency work, run the underlying script with a larger
+sample count, for example:
+
+```bash
+vp exec tsx scripts/lan-operator-slo-suite.mjs --samples 5 --json-out /tmp/oneesama-realtime-local-slo-suite-5x.json
 ```
 
 ## 4. Exercise Slack Commands Without Slack
@@ -145,6 +523,28 @@ MAB_REQUIRE_REAL_MEET=1 MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz v
 ```
 
 The real-room smoke is not part of default CI. It launches Playwright Chromium, injects the Hiyori/fake mic-cam runtime, fills the guest name, clicks `Join now` or `Ask to join`, waits briefly for in-call controls or participant audio discovery, writes screenshots/diagnostics under `/tmp/meeting-avatar-bot`, and automatically leaves the room in cleanup.
+
+Legacy optional: after the Local Operator lane is green, a separate real-room
+diagnostic can compare local baseline timing with meeting-room behavior. This is
+not part of the current Local Operator RFC acceptance path:
+
+```bash
+vp run benchmark:realtime-local-slo-suite
+MAB_REAL_MEET_URL=https://meet.google.com/xxx-yyyy-zzz \
+vp run acceptance:realtime-meet-compat
+vp run acceptance:realtime-meet-latency-attribution
+```
+
+The attribution command reads
+`/tmp/oneesama-realtime-local-slo-suite-latest.json` and
+`/tmp/oneesama-realtime-meet-compat-latest.json`, writes
+`/tmp/oneesama-realtime-meet-latency-attribution-latest.json`, and compares
+Meet app-control warm p95 against the local warm KWWK baseline. Missing or failed
+Meet evidence is reported as a Meet-side blocker such as `missing_meet_report`
+or `real_meet_admission`; it does not invalidate Local Operator acceptance. Use
+`vp run acceptance:realtime-meet-latency-attribution:optional` to generate the
+same diagnostic report without failing the shell when no real Meet report is
+available.
 
 If a live Google Meet room blocks guest automation at the prejoin anti-bot check, use a dedicated logged-in browser profile instead of the disposable Playwright profile:
 

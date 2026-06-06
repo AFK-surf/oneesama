@@ -117,6 +117,13 @@ function argValue(name) {
   return resolveArgValue(process.argv, name);
 }
 
+function joinStatusUrl(meetingAgentUrl, sessionId = "") {
+  const trimmedSessionId = String(sessionId || "").trim();
+  if (!trimmedSessionId) return `${meetingAgentUrl}/join/status`;
+  const params = new URLSearchParams({ session_id: trimmedSessionId });
+  return `${meetingAgentUrl}/join/status?${params.toString()}`;
+}
+
 function envOrArgInt(envName, argName, fallback) {
   const parsed = Number.parseInt(argValue(argName) || process.env[envName] || "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -1115,7 +1122,7 @@ async function waitForBotReadyForSyntheticSpeaker(meetingAgentUrl, sessionId, ti
   return await waitFor(
     "real Meet bot join before synthetic speaker",
     async () => {
-      const status = await fetchJson(`${meetingAgentUrl}/join/status`);
+      const status = await fetchJson(joinStatusUrl(meetingAgentUrl, sessionId));
       const compact = compactBridgeStatus(status);
       const activeMatches = !sessionId || compact.activeSessionId === sessionId;
       return {
@@ -1255,7 +1262,7 @@ async function runMain(options = {}) {
     const final = await waitFor(
       "real Meet synthetic speaker gate",
       async () => {
-        const status = await fetchJson(`${meetingAgentUrl}/join/status`);
+        const status = await fetchJson(joinStatusUrl(meetingAgentUrl, sessionId));
         const compact = compactBridgeStatus(status);
         const gates = gateStatus(compact, { expectedToolNames });
         return {
@@ -1409,6 +1416,8 @@ async function runLocalFixtureMain(options = {}) {
       dry_run: false,
       allowNonGoogleMeet: true,
       allow_non_google_meet: true,
+      meetUIInteractionMode: "synthetic",
+      meet_ui_interaction_mode: "synthetic",
       collectFixtureState: true,
       collect_fixture_state: true,
       disableLive2D: process.env.MAB_REAL_MEET_DISABLE_LIVE2D !== "0",
@@ -1438,7 +1447,7 @@ async function runLocalFixtureMain(options = {}) {
     const final = await waitFor(
       "local fixture synthetic speech gate",
       async () => {
-        const status = await fetchJson(`${meetingAgentUrl}/join/status`);
+        const status = await fetchJson(joinStatusUrl(meetingAgentUrl, sessionId));
         const compact = compactBridgeStatus(status);
         const gates = gateStatus(compact, {
           expectedToolNames,
@@ -1604,6 +1613,20 @@ function syntheticSuiteCaseFilter() {
     .filter(Boolean);
 }
 
+function syntheticSuiteCaseTimeoutMs(testCase, cliTimeoutMs) {
+  if (cliTimeoutMs && !testCase.timeoutMs) return String(cliTimeoutMs);
+  if (testCase.timeoutMs) return String(testCase.timeoutMs);
+  return "";
+}
+
+function syntheticSuiteProgress(event, fields = {}) {
+  const payload = Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => `${key}=${value}`)
+    .join(" ");
+  console.error(`[synthetic-audio-suite] ${event}${payload ? ` ${payload}` : ""}`);
+}
+
 async function withEnvOverrides(overrides, fn) {
   const keys = Object.keys(overrides);
   const previous = new Map(keys.map((key) => [key, process.env[key]]));
@@ -1638,16 +1661,27 @@ async function runLocalFixtureSyntheticAudioSuiteMain() {
   const cliTimeoutMs = argValue("--timeout-ms");
   const originalSessionId = process.env.MAB_REALTIME_SYNTHETIC_SESSION_ID || "";
   const results = [];
+  syntheticSuiteProgress("start", {
+    cases: cases.map((testCase) => testCase.id).join(","),
+    count: cases.length,
+  });
   for (const testCase of cases) {
+    const caseStarted = Date.now();
     const env = envForLocalFixtureSyntheticAudioSuiteCase(testCase);
     env.MAB_REALTIME_SYNTHETIC_SESSION_ID = originalSessionId
       ? `${originalSessionId}_${testCase.id}`
       : `synthetic_audio_${testCase.id}_${Date.now()}`;
-    if (cliTimeoutMs && !testCase.timeoutMs) {
-      env.MAB_REALTIME_SYNTHETIC_SPEECH_WAIT_MS = cliTimeoutMs;
-    } else if (testCase.timeoutMs) {
-      env.MAB_REALTIME_SYNTHETIC_SPEECH_WAIT_MS = String(testCase.timeoutMs);
+    const caseTimeoutMs = syntheticSuiteCaseTimeoutMs(testCase, cliTimeoutMs);
+    if (caseTimeoutMs) {
+      env.MAB_REALTIME_SYNTHETIC_SPEECH_WAIT_MS = caseTimeoutMs;
     }
+    syntheticSuiteProgress("case-start", {
+      id: testCase.id,
+      category: testCase.category,
+      timeoutMs: caseTimeoutMs,
+      workerTimeoutMs: testCase.workerTimeoutMs || "",
+      primary: testCase.primaryAcceptance === true ? "true" : "false",
+    });
     const result = await withEnvOverrides(
       env,
       async () =>
@@ -1680,6 +1714,13 @@ async function runLocalFixtureSyntheticAudioSuiteMain() {
       ok: evaluation.ok,
       evaluation,
       result: compact,
+    });
+    syntheticSuiteProgress(evaluation.ok ? "case-pass" : "case-fail", {
+      id: testCase.id,
+      elapsedMs: Date.now() - caseStarted,
+      tools: (compact.toolCalls?.all || []).join(","),
+      missing: evaluation.missingRequiredToolNames.join(","),
+      forbidden: evaluation.forbiddenToolNamesCalled.join(","),
     });
   }
   const failed = results.filter((result) => !result.ok);

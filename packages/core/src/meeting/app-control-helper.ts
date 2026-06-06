@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { chmod, copyFile, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,15 +11,16 @@ const sleep = promisify(setTimeout);
 
 export function appControlHelperSourcePaths() {
   return [
+    fileURLToPath(new URL("./Package.swift", import.meta.url)),
     fileURLToPath(new URL("./kwwk-cu-runtime.swift", import.meta.url)),
     fileURLToPath(new URL("./kwwk-cu-router.swift", import.meta.url)),
     fileURLToPath(new URL("./kwwk-cu-protocol.swift", import.meta.url)),
     fileURLToPath(new URL("./kwwk-cu-planner.swift", import.meta.url)),
+    fileURLToPath(new URL("./kwwk-cu-core.swift", import.meta.url)),
     fileURLToPath(new URL("./kwwk-cu-executor.swift", import.meta.url)),
     fileURLToPath(new URL("./kwwk-cu-observation.swift", import.meta.url)),
     fileURLToPath(new URL("./kwwk-cu-cursor.swift", import.meta.url)),
     fileURLToPath(new URL("./kwwk-cu-verification.swift", import.meta.url)),
-    fileURLToPath(new URL("./kwwk-cu-input.swift", import.meta.url)),
     fileURLToPath(new URL("./app-control-helper.swift", import.meta.url)),
   ];
 }
@@ -30,14 +31,31 @@ export function appControlHelperBinaryPath() {
   );
 }
 
+function appControlHelperSwiftPMBuiltBinaryPath() {
+  return "/tmp/oneesama-app-control-helper-swiftpm/release/OneesamaAppControlHelper";
+}
+
 function helperNeedsCompile(sources: string[], binary: string) {
   if (!existsSync(binary)) return true;
   try {
-    const binaryMtime = statSync(binary).mtimeMs;
+    const binaryStat = statSync(binary);
+    const binaryMtime = binaryStat.mtimeMs;
+    const builtBinary = appControlHelperSwiftPMBuiltBinaryPath();
+    if (existsSync(builtBinary)) {
+      const builtStat = statSync(builtBinary);
+      if (binaryMtime < builtStat.mtimeMs) return true;
+    }
     return sources.some((source) => binaryMtime < statSync(source).mtimeMs);
   } catch {
     return true;
   }
+}
+
+async function signAppControlHelperBinary(binary: string) {
+  await execFileAsync("/usr/bin/codesign", ["--force", "--sign", "-", binary], {
+    timeout: 30000,
+    maxBuffer: 1024 * 1024,
+  });
 }
 
 export async function ensureAppControlHelperBinary() {
@@ -46,17 +64,37 @@ export async function ensureAppControlHelperBinary() {
   }
   const sources = appControlHelperSourcePaths();
   const binary = appControlHelperBinaryPath();
-  if (!helperNeedsCompile(sources, binary)) return binary;
+  if (!helperNeedsCompile(sources, binary)) {
+    await signAppControlHelperBinary(binary);
+    return binary;
+  }
   await mkdir(dirname(binary), { recursive: true });
   const moduleCachePath = join(tmpdir(), "oneesama-swift-module-cache");
   await mkdir(moduleCachePath, { recursive: true });
   const lockDir = join(tmpdir(), "oneesama-app-control-helper-compile.lock");
+  const lockStarted = Date.now();
   for (;;) {
     try {
       await mkdir(lockDir);
       break;
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+        const stale = (() => {
+          try {
+            return Date.now() - statSync(lockDir).mtimeMs > 120000;
+          } catch {
+            return true;
+          }
+        })();
+        if (stale) {
+          await rm(lockDir, { recursive: true, force: true });
+          continue;
+        }
+        if (Date.now() - lockStarted > 60000) {
+          throw new Error(`app-control helper compile lock timeout: ${lockDir}`, {
+            cause: error,
+          });
+        }
         await sleep(50);
         continue;
       }
@@ -64,15 +102,40 @@ export async function ensureAppControlHelperBinary() {
     }
   }
   try {
-    if (!helperNeedsCompile(sources, binary)) return binary;
-    await execFileAsync(
-      "/usr/bin/swiftc",
-      [...sources, "-module-cache-path", moduleCachePath, "-o", binary],
-      {
-        timeout: 30000,
-        maxBuffer: 1024 * 1024,
-      },
-    );
+    if (!helperNeedsCompile(sources, binary)) {
+      await signAppControlHelperBinary(binary);
+      return binary;
+    }
+    const packagePath = dirname(fileURLToPath(new URL("./Package.swift", import.meta.url)));
+    const scratchPath = dirname(dirname(appControlHelperSwiftPMBuiltBinaryPath()));
+    const builtBinary = appControlHelperSwiftPMBuiltBinaryPath();
+    if (helperNeedsCompile(sources, builtBinary)) {
+      await execFileAsync(
+        "/usr/bin/swift",
+        [
+          "build",
+          "--package-path",
+          packagePath,
+          "--scratch-path",
+          scratchPath,
+          "-c",
+          "release",
+          "--product",
+          "OneesamaAppControlHelper",
+          "-Xswiftc",
+          "-module-cache-path",
+          "-Xswiftc",
+          moduleCachePath,
+        ],
+        {
+          timeout: 180000,
+          maxBuffer: 4 * 1024 * 1024,
+        },
+      );
+    }
+    await copyFile(builtBinary, binary);
+    await chmod(binary, 0o755);
+    await signAppControlHelperBinary(binary);
   } finally {
     await rm(lockDir, { recursive: true, force: true });
   }

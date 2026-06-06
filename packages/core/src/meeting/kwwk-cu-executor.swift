@@ -5,44 +5,14 @@ func operationsFromParams(_ value: Any?) -> [[String: Any]] {
   return operations
 }
 
-func executeOperation(_ operation: [String: Any], target: [String: Any]) throws -> (action: String, cursorEvents: [[String: Any]]) {
-  let kind = text(operation["kind"])
-  switch kind {
-  case "state":
-    _ = try state(params: ["target": target])
-    return ("state", [])
-  case "click":
-    let event = try click(target: target, x: doubleValue(operation["x"]), y: doubleValue(operation["y"]))
-    return ("click", [event])
-  case "double_click":
-    let event = try doubleClick(target: target, x: doubleValue(operation["x"]), y: doubleValue(operation["y"]))
-    return ("double_click", [event])
-  case "type_text":
-    try pasteText(target: target, value: text(operation["text"]))
-    return ("type_text", [])
-  case "press_key":
-    try pressKey(target: target, key: text(operation["key"]))
-    return ("press_key", [])
-  case "scroll":
-    try scroll(target: target, direction: text(operation["direction"]).isEmpty ? "down" : text(operation["direction"]))
-    return ("scroll", [])
-  case "drag":
-    let events = try drag(
-      target: target,
-      fromX: doubleValue(operation["from_x"]),
-      fromY: doubleValue(operation["from_y"]),
-      toX: doubleValue(operation["to_x"]),
-      toY: doubleValue(operation["to_y"])
-    )
-    return ("drag", events)
-  default:
-    throw HelperError.unsupported("unsupported_operation:\(kind)")
-  }
+func executeOperation(_ operation: [String: Any], target: [String: Any]) throws -> (action: String, cursorEvents: [[String: Any]], metadata: [String: Any]) {
+  let executed = try executeKWWKCUCoreOperation(operation: operation, target: target)
+  return (executed.action, executed.cursorEvents, executed.metadata)
 }
 
 func operationUsesForegroundCursor(_ operation: [String: Any]) -> Bool {
   switch text(operation["kind"]) {
-  case "click", "double_click", "drag":
+  case "click", "double_click", "drag", "scroll":
     return true
   default:
     return false
@@ -58,11 +28,12 @@ func cursorPolicyPayload(operations: [[String: Any]], cursorEvents: [[String: An
     "actionKinds": actionKinds,
     "pointerAction": pointerAction,
     "foregroundSessionStarted": pointerAction && !cursorEvents.isEmpty,
-    "policy": pointerAction ? "native_foreground_cursor_for_pointer_action" : "no_foreground_cursor_for_keyboard_scroll_or_state",
+    "executionSurface": "kwwk_computer_use_core",
+    "policy": pointerAction ? "kwwk_core_visual_effects_for_pointer_action" : "kwwk_core_background_action_no_pointer",
   ]
 }
 
-func actionTelemetryEntry(operation: [String: Any], action: String, durationMs: Int, success: Bool, error: String = "") -> [String: Any] {
+func actionTelemetryEntry(operation: [String: Any], action: String, durationMs: Int, success: Bool, error: String = "", metadata: [String: Any] = [:]) -> [String: Any] {
   var target: [String: Any] = [:]
   for key in ["targetRole", "targetLabel", "key", "direction"] {
     let value = text(operation[key])
@@ -73,6 +44,9 @@ func actionTelemetryEntry(operation: [String: Any], action: String, durationMs: 
   }
   if action == "type_text" {
     target["textLength"] = text(operation["text"]).count
+  }
+  for (key, value) in metadata {
+    target[key] = value
   }
   var entry: [String: Any] = [
     "kind": action,
@@ -188,6 +162,29 @@ func targetForExecution(target: [String: Any], snapshot: [String: Any]) -> [Stri
   return merged
 }
 
+func plannerObservationWithKWWKState(
+  target: [String: Any],
+  observation: [String: Any],
+  instruction: String
+) -> [String: Any] {
+  var merged = observation
+  if !text(merged["kwwkAppStateText"]).isEmpty || merged["kwwkAppState"] != nil {
+    return merged
+  }
+  let includeScreenshot = appControlInstructionNeedsVisualObservation(instruction)
+  do {
+    let kwwkState = try observeKWWKCUCoreState(target: target, includeScreenshot: includeScreenshot)
+    merged["kwwkAppState"] = kwwkState
+    merged["kwwkAppStateText"] = text(kwwkState["text"])
+    merged["kwwkCorePlannerSeeded"] = true
+    return merged
+  } catch {
+    merged["kwwkCorePlannerSeeded"] = false
+    merged["kwwkCorePlannerSeedBlocker"] = String(describing: error)
+    return merged
+  }
+}
+
 func controlSharedAppWindow(params: [String: Any]) throws -> [String: Any] {
   let callStarted = Date()
   let target = targetFromParams(params)
@@ -241,7 +238,11 @@ func controlSharedAppWindow(params: [String: Any]) throws -> [String: Any] {
   }
   let planStarted = Date()
   let plannerContext = contextFromParams(params)
-  let plannerObservation = preObservedSnapshot ?? explicitObservation
+  let plannerObservation = plannerObservationWithKWWKState(
+    target: target,
+    observation: preObservedSnapshot ?? explicitObservation,
+    instruction: instruction
+  )
   var plan = explicitOperations.isEmpty
     ? planInstruction(params: [
       "instruction": instruction,
@@ -348,7 +349,11 @@ func controlSharedAppWindow(params: [String: Any]) throws -> [String: Any] {
     let observedPlan = planInstruction(params: [
       "instruction": instruction,
       "target": target,
-      "observation": snapshot,
+      "observation": plannerObservationWithKWWKState(
+        target: target,
+        observation: snapshot,
+        instruction: instruction
+      ),
       "context": plannerContext,
     ])
     let observedOperations = operationsFromParams(observedPlan["operations"])
@@ -446,7 +451,8 @@ func controlSharedAppWindow(params: [String: Any]) throws -> [String: Any] {
         operation: operation,
         action: executed.action,
         durationMs: durationMs,
-        success: true
+        success: true,
+        metadata: executed.metadata
       ))
     } catch {
       let failedAction = text(operation["kind"]).isEmpty ? "unknown" : text(operation["kind"])
@@ -487,7 +493,8 @@ func controlSharedAppWindow(params: [String: Any]) throws -> [String: Any] {
     target: executionTarget,
     operations: operations,
     beforeState: snapshot,
-    actions: actions
+    actions: actions,
+    actionTelemetry: actionTelemetry
   )
   let verifyMs = intValue(verification["durationMs"])
   if verification["ok"] as? Bool != true {

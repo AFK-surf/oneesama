@@ -78,6 +78,8 @@ export interface UIInteraction {
 }
 
 const defaultStepMs = 16;
+const defaultMacCliclickMaxMovePoints = 7;
+const defaultMacCliclickMaxMoveMs = 420;
 
 export function defaultCommandRunner(command: string, args: string[]): CommandResult {
   return spawnSync(command, args, {
@@ -333,6 +335,18 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function envInt(names: string[], fallback: number, min: number, max: number): number {
+  for (const name of names) {
+    const value = String(process.env[name] || "").trim();
+    if (!value) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.trunc(clamp(parsed, min, max));
+    }
+  }
+  return fallback;
+}
+
 function minimumJerk(t: number): number {
   return 10 * t ** 3 - 15 * t ** 4 + 6 * t ** 5;
 }
@@ -406,6 +420,62 @@ export function generateHumanizedClickPlan(
     preClickDelayMs: Math.round(70 + random() * 180),
     holdMs: Math.round(55 + random() * 135),
   };
+}
+
+export function compactHumanizedTimedPointsForCliclick(
+  points: TimedPoint[],
+  maxPoints = defaultMacCliclickMaxMovePoints,
+  maxDurationMs = defaultMacCliclickMaxMoveMs,
+): TimedPoint[] {
+  if (points.length <= 2) return points;
+  const pointBudget = Math.trunc(clamp(maxPoints, 2, 32));
+  const durationBudget = Math.trunc(clamp(maxDurationMs, 80, 4000));
+  const targetCount = Math.min(points.length, pointBudget);
+  const selected: TimedPoint[] = [];
+  let lastSourceIndex = -1;
+  for (let i = 0; i < targetCount; i += 1) {
+    const sourceIndex = Math.round((i * (points.length - 1)) / Math.max(1, targetCount - 1));
+    const source = points[sourceIndex];
+    if (!source || sourceIndex === lastSourceIndex) {
+      continue;
+    }
+    selected.push(source);
+    lastSourceIndex = sourceIndex;
+  }
+  const final = points[points.length - 1];
+  if (selected[selected.length - 1] !== final) {
+    selected.push(final);
+  }
+
+  const originalDuration = Math.max(1, final.t);
+  const scale = originalDuration > durationBudget ? durationBudget / originalDuration : 1;
+  const compacted = selected.map((point, index) =>
+    Object.assign({}, point, { t: index === 0 ? 0 : Math.round(point.t * scale) }),
+  );
+  for (let i = 1; i < compacted.length; i += 1) {
+    if (compacted[i].t <= compacted[i - 1].t) {
+      compacted[i] = { ...compacted[i], t: compacted[i - 1].t + 4 };
+    }
+  }
+  return compacted;
+}
+
+function macCliclickMaxMovePoints(): number {
+  return envInt(
+    ["MAB_MEET_HUMANIZED_CLICLICK_MAX_MOVE_POINTS", "MEET_HUMANIZED_CLICLICK_MAX_MOVE_POINTS"],
+    defaultMacCliclickMaxMovePoints,
+    2,
+    32,
+  );
+}
+
+function macCliclickMaxMoveMs(): number {
+  return envInt(
+    ["MAB_MEET_HUMANIZED_CLICLICK_MAX_MOVE_MS", "MEET_HUMANIZED_CLICLICK_MAX_MOVE_MS"],
+    defaultMacCliclickMaxMoveMs,
+    80,
+    4000,
+  );
 }
 
 function addSettleMotion(
@@ -728,7 +798,11 @@ class MacHumanizedInteraction implements UIInteraction {
 
   private moveToAndClick(target: Point): void {
     const start = this.currentMouseLocation() || { x: target.x - 140, y: target.y + 80 };
-    const points = generateHumanizedTrajectory(start, target);
+    const points = compactHumanizedTimedPointsForCliclick(
+      generateHumanizedTrajectory(start, target),
+      macCliclickMaxMovePoints(),
+      macCliclickMaxMoveMs(),
+    );
     const args: string[] = [];
 
     for (let i = 1; i < points.length; i++) {

@@ -59,9 +59,6 @@ async function waitForAdmissionSignal(page, timeoutMs) {
               return pattern.test(label);
             },
           );
-        if (visibleButton(/captions?|字幕/i)) {
-          return { state: "admitted", signal: "captions" };
-        }
         const deniedPatterns = [
           /you can't join this video call/i,
           /no one can join a meeting unless invited or admitted by the host/i,
@@ -91,10 +88,13 @@ async function waitForAdmissionSignal(page, timeoutMs) {
           /What'?s your name\?/i.test(text) ||
           visibleButton(/\b(ask to join|join now)\b|申请加入|立即加入/i);
         const waitingForAdmit =
-          /asking to join|you'?ll join|waiting for.*(?:admit|host)|host.*(?:let|admit).*you|正在请求加入|等待.*(?:主持人|允许)/i.test(
+          /please wait until a meeting host brings you into the call|someone will let you in soon|asking to join|you'?ll join|waiting for.*(?:admit|host)|host.*(?:let|admit).*you|正在请求加入|等待.*(?:主持人|允许)/i.test(
             text,
           );
         if (waitingForAdmit || preJoin) return false;
+        if (visibleButton(/captions?|字幕/i)) {
+          return { state: "admitted", signal: "captions" };
+        }
         if (visibleButton(/leave (?:call|meeting)|离开通话/i)) {
           return { state: "admitted", signal: "page_controls" };
         }
@@ -143,6 +143,17 @@ export async function waitForMeetAdmission(page, options) {
       Math.min(1500, Math.max(1, deadline - Date.now())),
     );
     if (observed?.state === "admitted") {
+      const pageState = await evaluateMeetPageState(page);
+      if (pageState?.waitingForAdmit || pageState?.preJoin) {
+        diagnostics?.record?.("admission_wait", {
+          signal: observed.signal || "page_observer",
+          inMeeting: pageState?.inMeeting === true,
+          waitingForAdmit: pageState?.waitingForAdmit === true,
+          preJoin: pageState?.preJoin === true,
+          textHead: String(pageState?.textHead || "").slice(0, 240),
+        });
+        continue;
+      }
       const result = { state: "admitted", signal: observed.signal || "page_observer" };
       diagnostics?.record?.("admission_state", result);
       return result;
@@ -169,11 +180,6 @@ export async function waitForMeetAdmission(page, options) {
         .isVisible({ timeout: 1000 })
         .catch(() => false),
     ]);
-    if (captionVisible) {
-      const result = { state: "admitted", signal: "captions" };
-      diagnostics?.record?.("admission_state", result);
-      return result;
-    }
     const denialMessage = await detectAdmissionDeniedMessage(page);
     if (denialMessage) {
       const result = { state: "denied", message: denialMessage };
@@ -181,6 +187,11 @@ export async function waitForMeetAdmission(page, options) {
       return result;
     }
     const pageState = await evaluateMeetPageState(page);
+    if (captionVisible && !pageState?.waitingForAdmit && !pageState?.preJoin) {
+      const result = { state: "admitted", signal: "captions" };
+      diagnostics?.record?.("admission_state", result);
+      return result;
+    }
     // The old Cueboard joiner waited for the CC button before declaring
     // admission. A waiting-room page can still expose Leave/More controls, so
     // never treat those controls alone as admission. Keep pageState as a

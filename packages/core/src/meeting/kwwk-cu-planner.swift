@@ -58,24 +58,29 @@ func plannerModelSchema(allowedOperations: [[String: Any]] = [], fixedDeterminis
         properties: [
           "x": ["type": "number"],
           "y": ["type": "number"],
+          "elementIndex": ["type": "number"],
           "targetRole": ["type": "string"],
           "targetLabel": ["type": "string"],
         ],
-        required: ["x", "y", "targetRole", "targetLabel"]
+        required: []
       ),
       actionSchema(
         kind: "double_click",
         properties: [
           "x": ["type": "number"],
           "y": ["type": "number"],
+          "elementIndex": ["type": "number"],
           "targetRole": ["type": "string"],
           "targetLabel": ["type": "string"],
         ],
-        required: ["x", "y", "targetRole", "targetLabel"]
+        required: []
       ),
       actionSchema(
         kind: "type_text",
-        properties: ["text": ["type": "string"]],
+        properties: [
+          "text": ["type": "string"],
+          "elementIndex": ["type": "number"],
+        ],
         required: ["text"]
       ),
       actionSchema(
@@ -85,7 +90,11 @@ func plannerModelSchema(allowedOperations: [[String: Any]] = [], fixedDeterminis
       ),
       actionSchema(
         kind: "scroll",
-        properties: ["direction": ["type": "string", "enum": ["up", "down", "left", "right"]]],
+        properties: [
+          "direction": ["type": "string", "enum": ["up", "down", "left", "right"]],
+          "elementIndex": ["type": "number"],
+          "pages": ["type": "number"],
+        ],
         required: ["direction"]
       ),
       actionSchema(
@@ -140,14 +149,18 @@ func compactPlannerModelSchema() -> [String: Any] {
           "type": "object",
           "additionalProperties": false,
           "properties": [
-            "kind": ["type": "string", "enum": ["state", "click", "double_click", "type_text", "press_key", "scroll", "drag"]],
+            "kind": ["type": "string", "enum": ["state", "click", "double_click", "type_text", "press_key", "scroll", "drag", "set_value", "perform_secondary_action"]],
             "x": ["type": "number"],
             "y": ["type": "number"],
+            "elementIndex": ["type": "number"],
             "targetRole": ["type": "string"],
             "targetLabel": ["type": "string"],
             "text": ["type": "string"],
+            "value": ["type": "string"],
+            "action": ["type": "string"],
             "key": ["type": "string"],
             "direction": ["type": "string", "enum": ["up", "down", "left", "right"]],
+            "pages": ["type": "number"],
             "from_x": ["type": "number"],
             "from_y": ["type": "number"],
             "to_x": ["type": "number"],
@@ -167,11 +180,15 @@ func geminiCompactOperation(_ operation: [String: Any]) -> [String: Any] {
   if !text(operation["kind"]).isEmpty { compact["k"] = text(operation["kind"]) }
   if operation["x"] != nil { compact["x"] = doubleValue(operation["x"]) }
   if operation["y"] != nil { compact["y"] = doubleValue(operation["y"]) }
+  if let elementIndex = kwwkElementIndex(operation) { compact["i"] = elementIndex }
   if !text(operation["targetRole"]).isEmpty { compact["r"] = text(operation["targetRole"]) }
   if !text(operation["targetLabel"]).isEmpty { compact["l"] = text(operation["targetLabel"]) }
   if !text(operation["text"]).isEmpty { compact["t"] = text(operation["text"]) }
+  if !text(operation["value"]).isEmpty { compact["v"] = text(operation["value"]) }
+  if !text(operation["action"]).isEmpty { compact["a"] = text(operation["action"]) }
   if !text(operation["key"]).isEmpty { compact["key"] = text(operation["key"]) }
   if !text(operation["direction"]).isEmpty { compact["d"] = text(operation["direction"]) }
+  if operation["pages"] != nil { compact["p"] = doubleValue(operation["pages"]) }
   if operation["from_x"] != nil { compact["fx"] = doubleValue(operation["from_x"]) }
   if operation["from_y"] != nil { compact["fy"] = doubleValue(operation["from_y"]) }
   if operation["to_x"] != nil { compact["tx"] = doubleValue(operation["to_x"]) }
@@ -184,11 +201,15 @@ func operationFromGeminiCompact(_ operation: [String: Any]) -> [String: Any] {
   if !text(operation["k"]).isEmpty { expanded["kind"] = text(operation["k"]) }
   if operation["x"] != nil { expanded["x"] = doubleValue(operation["x"]) }
   if operation["y"] != nil { expanded["y"] = doubleValue(operation["y"]) }
+  if operation["i"] != nil { expanded["elementIndex"] = intValue(operation["i"]) }
   if !text(operation["r"]).isEmpty { expanded["targetRole"] = text(operation["r"]) }
   if !text(operation["l"]).isEmpty { expanded["targetLabel"] = text(operation["l"]) }
   if !text(operation["t"]).isEmpty { expanded["text"] = text(operation["t"]) }
+  if !text(operation["v"]).isEmpty { expanded["value"] = text(operation["v"]) }
+  if !text(operation["a"]).isEmpty { expanded["action"] = text(operation["a"]) }
   if !text(operation["key"]).isEmpty { expanded["key"] = text(operation["key"]) }
   if !text(operation["d"]).isEmpty { expanded["direction"] = text(operation["d"]) }
+  if operation["p"] != nil { expanded["pages"] = doubleValue(operation["p"]) }
   if operation["fx"] != nil { expanded["from_x"] = doubleValue(operation["fx"]) }
   if operation["fy"] != nil { expanded["from_y"] = doubleValue(operation["fy"]) }
   if operation["tx"] != nil { expanded["to_x"] = doubleValue(operation["tx"]) }
@@ -414,10 +435,14 @@ func operationValidationError(_ operation: [String: Any]) -> String {
   case "state":
     return ""
   case "click":
-    if operation["x"] == nil || operation["y"] == nil { return "click_requires_x_y" }
+    if kwwkElementIndex(operation) == nil && (operation["x"] == nil || operation["y"] == nil) {
+      return "click_requires_element_index_or_x_y"
+    }
     return ""
   case "double_click":
-    if operation["x"] == nil || operation["y"] == nil { return "double_click_requires_x_y" }
+    if kwwkElementIndex(operation) == nil && (operation["x"] == nil || operation["y"] == nil) {
+      return "double_click_requires_element_index_or_x_y"
+    }
     return ""
   case "type_text":
     return text(operation["text"]).isEmpty ? "type_text_requires_text" : ""
@@ -425,6 +450,12 @@ func operationValidationError(_ operation: [String: Any]) -> String {
     return text(operation["key"]).isEmpty ? "press_key_requires_key" : ""
   case "scroll":
     return validScrollDirection(text(operation["direction"])) ? "" : "scroll_direction_invalid"
+  case "set_value":
+    if kwwkElementIndex(operation) == nil { return "set_value_requires_element_index" }
+    return text(operation["value"]).isEmpty ? "set_value_requires_value" : ""
+  case "perform_secondary_action":
+    if kwwkElementIndex(operation) == nil { return "perform_secondary_action_requires_element_index" }
+    return text(operation["action"]).isEmpty ? "perform_secondary_action_requires_action" : ""
   case "drag":
     for key in ["from_x", "from_y", "to_x", "to_y"] {
       if operation[key] == nil { return "drag_requires_\(key)" }
@@ -854,7 +885,16 @@ func compactPlannerContext(instruction: String, target: [String: Any], observati
     ],
     "constraints": [
       "maxActions": intValue(plannerConfig()["maxActions"]),
-      "allowedKinds": ["state", "click", "double_click", "type_text", "press_key", "scroll", "drag"],
+      "allowedKinds": ["state", "click", "double_click", "type_text", "press_key", "scroll", "drag", "set_value", "perform_secondary_action"],
+      "kwwkActionSurface": [
+        "state": "Use get-app-state.",
+        "click": "Prefer elementIndex from observation.kwwkAppState.text. Coordinates are accepted only when sourced from a KWWK screenshot snapshot.",
+        "double_click": "Prefer elementIndex from observation.kwwkAppState.text. Coordinates are accepted only when sourced from a KWWK screenshot snapshot.",
+        "type_text": "Use text and optional elementIndex; without elementIndex it types into the focused editable element in the latest KWWK app_state.",
+        "press_key": "Use key combinations like cmd+1, ctrl+tab, esc, enter.",
+        "scroll": "Use direction. Prefer elementIndex from the latest KWWK app_state when obvious; without elementIndex the executor falls back to window-level scroll.",
+        "drag": "Uses coordinates from a KWWK screenshot snapshot.",
+      ],
       "returnNeedsBackgroundAgentForComplexTasks": true,
     ],
   ]
@@ -1309,7 +1349,7 @@ func geminiPlannerPlan(instruction: String, target: [String: Any], observation: 
   let contextText = (try? String(data: jsonData(contextForModel), encoding: .utf8)) ?? "{}"
   let providerSchema = geminiResponseSchema(schema) as? [String: Any] ?? schema
   let systemPrompt = deterministicOperations.isEmpty
-    ? "KWWK CU planner. Output JSON only. Plan <=3 short safe macOS actions. Complex/open-ended tasks => needs_background_agent. Do not invent typed text."
+    ? "KWWK CU planner. Output JSON only. Plan <=3 short safe macOS actions. Use elementIndex from observation.kwwkAppState.text for element actions. Do not invent click or scroll coordinates. Complex/open-ended tasks => needs_background_agent. Do not invent typed text."
     : "Return schema JSON. s=planned b=none o exactly context.localHints.operationIds."
   let reasoningEffort = text(planner["reasoningEffort"]).lowercased()
   let thinkingConfig: [String: Any] = ["low", "medium", "high"].contains(reasoningEffort)
@@ -1595,6 +1635,8 @@ func openAIPlannerPlan(instruction: String, target: [String: Any], observation: 
           You are the KWWK Computer Use planner. Return only a short bounded macOS app-control action plan.
           The user instruction may contain routing wrapper text such as "use the Realtime tool" or "currently shared window"; ignore that wrapper and plan the actual requested app operation.
           If context.localHints.deterministicOperations is non-empty and the task is short, safe, and bounded, copy those operations exactly into the plan.
+          For element actions, prefer elementIndex values from context.observation.kwwkAppState.text. Do not invent click or scroll coordinates.
+          For scroll actions, include direction and prefer elementIndex when an obvious scrollable element is available; otherwise omit elementIndex and let the executor use window-level scroll.
           For keyboard requests, output press_key actions, for example "Press Escape" -> {"kind":"press_key","key":"escape"}.
           Use needs_background_agent for complex or open-ended tasks. Do not invent text that the user did not ask to type.
           """,
@@ -1689,7 +1731,7 @@ func openRouterPlannerPlan(instruction: String, target: [String: Any], observati
     ? compactPlannerModelSchema()
     : plannerModelSchema(allowedOperations: deterministicOperations)
   let systemPrompt = """
-    KWWK CU planner. Output JSON only. Plan <=3 short safe macOS actions. Ignore routing wrapper text. Copy context.localHints.deterministicOperations exactly when non-empty. Complex/open-ended tasks => needs_background_agent. Do not invent typed text.
+    KWWK CU planner. Output JSON only. Plan <=3 short safe macOS actions. Ignore routing wrapper text. Copy context.localHints.deterministicOperations exactly when non-empty. Use elementIndex from context.observation.kwwkAppState.text for element/scroll actions. Do not invent click or scroll coordinates. Complex/open-ended tasks => needs_background_agent. Do not invent typed text.
     """
   var payload: [String: Any] = [
     "model": model,

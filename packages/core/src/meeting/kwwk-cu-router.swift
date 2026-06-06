@@ -9,29 +9,17 @@ func resultFor(method: String, params: [String: Any]) throws -> Any {
   case "state":
     return try state(params: params)
   case "click":
-    let event = try click(target: targetFromParams(params), x: doubleValue(params["x"]), y: doubleValue(params["y"]))
-    return ["ok": true, "actions": ["click"], "metadata": ["cursor": ["schema": "oneesama.kwwk-cursor-events.v1", "events": [event]]]]
+    return try directOperationResult(kind: "click", params: params)
   case "double_click":
-    let event = try doubleClick(target: targetFromParams(params), x: doubleValue(params["x"]), y: doubleValue(params["y"]))
-    return ["ok": true, "actions": ["double_click"], "metadata": ["cursor": ["schema": "oneesama.kwwk-cursor-events.v1", "events": [event]]]]
+    return try directOperationResult(kind: "double_click", params: params)
   case "type", "type_text":
-    try pasteText(target: targetFromParams(params), value: text(params["text"]))
-    return ["ok": true, "actions": ["type_text"]]
+    return try directOperationResult(kind: "type_text", params: params)
   case "press_key":
-    try pressKey(target: targetFromParams(params), key: text(params["key"]))
-    return ["ok": true, "actions": ["press_key"]]
+    return try directOperationResult(kind: "press_key", params: params)
   case "scroll":
-    try scroll(target: targetFromParams(params), direction: text(params["direction"]).isEmpty ? "down" : text(params["direction"]))
-    return ["ok": true, "actions": ["scroll"]]
+    return try directOperationResult(kind: "scroll", params: params)
   case "drag":
-    let events = try drag(
-      target: targetFromParams(params),
-      fromX: doubleValue(params["from_x"]),
-      fromY: doubleValue(params["from_y"]),
-      toX: doubleValue(params["to_x"]),
-      toY: doubleValue(params["to_y"])
-    )
-    return ["ok": true, "actions": ["drag"], "metadata": ["cursor": ["schema": "oneesama.kwwk-cursor-events.v1", "events": events]]]
+    return try directOperationResult(kind: "drag", params: params)
   case "app_control.native_cursor_overlay_probe":
     return nativeCursorOverlayProbe(params: params)
   case "app_control.native_cursor_render_probe":
@@ -66,13 +54,24 @@ func resultFor(method: String, params: [String: Any]) throws -> Any {
       "target": target,
       "context": contextFromParams(params),
     ])) ?? [:]
+    let executeStarted = Date()
     let executed = try executeOperation(operation, target: target)
+    let actionTelemetry = [
+      actionTelemetryEntry(
+        operation: operation,
+        action: executed.action,
+        durationMs: Int(Date().timeIntervalSince(executeStarted) * 1000),
+        success: true,
+        metadata: executed.metadata
+      ),
+    ]
     let verification = verifyPostActionState(
       params: params,
       target: target,
       operations: [operation],
       beforeState: beforeState,
-      actions: [executed.action]
+      actions: [executed.action],
+      actionTelemetry: actionTelemetry
     )
     if verification["ok"] as? Bool != true {
       return [
@@ -82,6 +81,7 @@ func resultFor(method: String, params: [String: Any]) throws -> Any {
         "actions": [executed.action],
         "metadata": [
           "cursor": cursorPolicyPayload(operations: [operation], cursorEvents: executed.cursorEvents),
+          "actionTelemetry": actionTelemetry,
           "verification": verification,
         ],
       ]
@@ -92,6 +92,7 @@ func resultFor(method: String, params: [String: Any]) throws -> Any {
       "actions": [executed.action],
       "metadata": [
         "cursor": cursorPolicyPayload(operations: [operation], cursorEvents: executed.cursorEvents),
+        "actionTelemetry": actionTelemetry,
         "verification": verification,
       ],
     ]
@@ -106,6 +107,44 @@ func resultFor(method: String, params: [String: Any]) throws -> Any {
   default:
     throw HelperError.methodNotFound(method)
   }
+}
+
+func directOperationResult(kind: String, params: [String: Any]) throws -> [String: Any] {
+  var operation = params["operation"] as? [String: Any] ?? params
+  operation["kind"] = kind
+  let validation = validatePlanOperations([operation], planner: plannerConfig())
+  guard validation["ok"] as? Bool == true else {
+    return [
+      "ok": false,
+      "status": "blocked",
+      "blocker": text(validation["blocker"]),
+      "actions": [],
+      "metadata": [
+        "validation": validation["validation"] ?? [:],
+      ],
+    ]
+  }
+  let target = targetFromParams(params)
+  let started = Date()
+  let executed = try executeOperation(operation, target: target)
+  let durationMs = Int(Date().timeIntervalSince(started) * 1000)
+  return [
+    "ok": true,
+    "status": "completed",
+    "actions": [executed.action],
+    "metadata": [
+      "cursor": cursorPolicyPayload(operations: [operation], cursorEvents: executed.cursorEvents),
+      "actionTelemetry": [
+        actionTelemetryEntry(
+          operation: operation,
+          action: executed.action,
+          durationMs: durationMs,
+          success: true,
+          metadata: executed.metadata
+        ),
+      ],
+    ],
+  ]
 }
 
 func errorCode(_ error: Error) -> Int {

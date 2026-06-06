@@ -98,6 +98,26 @@
     return "avatar";
   }
 
+  function resultRecord(value: unknown): Record<string, any> {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, any>)
+      : {};
+  }
+
+  function compactToolStatus(result: unknown) {
+    const record = resultRecord(result);
+    const status = String(record.status || "")
+      .trim()
+      .toLowerCase();
+    if (record.ok === false || ["failed", "blocked", "timeout", "error"].includes(status)) {
+      return status || "blocked";
+    }
+    if (["completed", "done", "success", "succeeded"].includes(status)) return "completed";
+    if (["accepted", "queued", "running", "started"].includes(status)) return status;
+    if (record.ok === true) return "completed";
+    return status || "completed";
+  }
+
   function shouldStoreCompactToolResult(kind: LocalToolKind, name: string) {
     if (name === "kwwk_computer_use") return true;
     return (
@@ -193,6 +213,19 @@
     async function runLocalToolForSDK(name: string, args = {}, callId = "") {
       deps.recordTimeline("realtime_agent_sdk_tool_start", { name, callId });
       const kind = localToolKind(name);
+      const startedAt = new Date().toISOString();
+      const startedMs = Date.now();
+      rememberLocalToolCallByKind(kind, {
+        name,
+        callId,
+        arguments: args,
+        runtime: "agents-sdk",
+        status: "running",
+        stage: "running",
+        startedAt,
+        ts: startedAt,
+      });
+      deps.updateFeedback();
       try {
         assertLocalToolExposed(kind, name, callId, "agents_sdk_execute");
         const result = await runLocalToolByKind(kind, name, args, {
@@ -213,6 +246,11 @@
           result: storedResult,
           resultCompacted: storedResult !== result || undefined,
           runtime: "agents-sdk",
+          status: compactToolStatus(result),
+          stage: compactToolStatus(result) === "completed" ? "verified" : compactToolStatus(result),
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedMs,
           delivery,
         };
         rememberLocalToolCallByKind(kind, call);
@@ -220,11 +258,23 @@
         deps.updateFeedback();
         return { result, delivery };
       } catch (error) {
+        const finishedAt = new Date().toISOString();
         deps.recordTimeline("realtime_agent_sdk_tool_end", {
           name,
           callId,
           ok: false,
           error: String((error as { message?: string })?.message || error).slice(0, 300),
+        });
+        rememberLocalToolCallByKind(kind, {
+          name,
+          callId,
+          arguments: args,
+          runtime: "agents-sdk",
+          status: "blocked",
+          stage: "blocked",
+          startedAt,
+          finishedAt,
+          durationMs: Date.now() - startedMs,
         });
         rememberLocalToolErrorByKind(kind, error, { name, callId });
         const delivery = deps.prepareFunctionToolError(
@@ -262,6 +312,18 @@
         ).slice(-80);
       }
       const kind = localToolKind(toolCall.name);
+      const startedAt = new Date().toISOString();
+      const startedMs = Date.now();
+      rememberLocalToolCallByKind(kind, {
+        name: toolCall.name,
+        callId: toolCall.callId,
+        arguments: toolCall.arguments,
+        status: "running",
+        stage: "running",
+        startedAt,
+        ts: startedAt,
+      });
+      deps.updateFeedback();
       return Promise.resolve()
         .then(() => {
           assertLocalToolExposed(
@@ -276,6 +338,7 @@
           });
         })
         .then((result) => {
+          const finishedAt = new Date().toISOString();
           const delivery = deps.deliverFunctionToolResult({
             kind,
             name: toolCall.name,
@@ -291,11 +354,28 @@
             arguments: toolCall.arguments,
             result: storedResult,
             resultCompacted: storedResult !== result || undefined,
+            status: compactToolStatus(result),
+            stage:
+              compactToolStatus(result) === "completed" ? "verified" : compactToolStatus(result),
+            startedAt,
+            finishedAt,
+            durationMs: Date.now() - startedMs,
             delivery,
           });
           return { ok: true, result, delivery };
         })
         .catch((error) => {
+          const finishedAt = new Date().toISOString();
+          rememberLocalToolCallByKind(kind, {
+            name: toolCall.name,
+            callId: toolCall.callId,
+            arguments: toolCall.arguments,
+            status: "blocked",
+            stage: "blocked",
+            startedAt,
+            finishedAt,
+            durationMs: Date.now() - startedMs,
+          });
           rememberLocalToolErrorByKind(kind, error, {
             name: toolCall.name,
             callId: toolCall.callId,
