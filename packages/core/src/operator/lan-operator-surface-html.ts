@@ -111,6 +111,9 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       main[data-dock="bottom"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 14px var(--dock-h, 40vh); }
       main[data-dock="hidden"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
       main[data-dock="hidden"] .dock-splitter, main[data-dock="hidden"] .debug-shell { display: none; }
+      /* Clean mode (debug hidden): the stage reads as a clean shared-screen Meet —
+         drop the debug-oriented control dock; keep the canvas + voice controls. */
+      main[data-dock="hidden"] .control-dock { display: none; }
       .dock-splitter { position: relative; align-self: stretch; justify-self: stretch; background: transparent; }
       main[data-dock="right"] .dock-splitter { cursor: col-resize; }
       main[data-dock="bottom"] .dock-splitter { cursor: row-resize; }
@@ -390,7 +393,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
               <span class="dock-controls" role="group" aria-label="Debug dock layout">
                 <button class="dock-btn" id="dock-right-button" type="button" title="Dock right" aria-pressed="true">⇥</button>
                 <button class="dock-btn" id="dock-bottom-button" type="button" title="Dock bottom" aria-pressed="false">⤓</button>
-                <button class="dock-btn" id="dock-hide-button" type="button" title="Hide debug (\`)">✕</button>
+                <button class="dock-btn" id="dock-hide-button" type="button" title="Clean mode — hide debug (\`)">✕</button>
               </span>
             </div>
             <section class="conversation-panel tabpanel active" id="tabpanel-ledger" role="tabpanel" aria-labelledby="debug-tab-ledger" data-tab="ledger">
@@ -512,7 +515,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       </main>
       <button class="dock-summon" id="dock-summon" type="button" hidden title="Show debug (\`)">
         <span class="dock-summon-dot" id="dock-summon-dot"></span>
-        <span id="dock-summon-text">debug hidden</span>
+        <span id="dock-summon-text">clean mode</span>
         <span class="dock-summon-cue">show \`</span>
       </button>
     </div>
@@ -1109,7 +1112,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             label = conv.status === "connected" ? "live" : conv.status || "idle";
           }
           dot.className = "dock-summon-dot" + (tone ? " " + tone : "");
-          text.textContent = "debug hidden · " + label;
+          text.textContent = "clean mode · " + label;
         }
         function startDockResize(event) {
           if (!dockMain) return;

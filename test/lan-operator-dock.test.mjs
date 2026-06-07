@@ -15,6 +15,14 @@ async function dockState(page) {
     dockW: getComputedStyle(document.querySelector("main")).getPropertyValue("--dock-w").trim(),
     splitterOrient:
       document.getElementById("dock-splitter")?.getAttribute("aria-orientation") || "",
+    controlDockVisible: (() => {
+      const cd = document.querySelector(".control-dock");
+      return Boolean(cd) && getComputedStyle(cd).display !== "none";
+    })(),
+    canvasVisible: (() => {
+      const c = document.getElementById("composition");
+      return Boolean(c) && getComputedStyle(c).display !== "none";
+    })(),
   }));
 }
 
@@ -40,6 +48,8 @@ test("LAN operator debug dock is open by default and supports right/bottom/hidde
     assert.equal(initial.summonHidden, true, JSON.stringify(initial));
     assert.equal(initial.debugVisible, true, JSON.stringify(initial));
     assert.equal(initial.splitterOrient, "vertical", JSON.stringify(initial));
+    // Debug-first default: the debug-oriented control dock is visible.
+    assert.equal(initial.controlDockVisible, true, JSON.stringify(initial));
 
     // Resize: dragging the splitter left widens the debug dock (sets --dock-w).
     const box = await page.locator("#dock-splitter").boundingBox();
@@ -63,6 +73,9 @@ test("LAN operator debug dock is open by default and supports right/bottom/hidde
     assert.equal(hidden.dock, "hidden", JSON.stringify(hidden));
     assert.equal(hidden.summonHidden, false, JSON.stringify(hidden));
     assert.equal(hidden.debugVisible, false, JSON.stringify(hidden));
+    // Clean mode: debug control dock is gone, but the shared-screen stage remains.
+    assert.equal(hidden.controlDockVisible, false, JSON.stringify(hidden));
+    assert.equal(hidden.canvasVisible, true, JSON.stringify(hidden));
 
     // Summon restores the last open dock state (bottom).
     await page.click("#dock-summon");
