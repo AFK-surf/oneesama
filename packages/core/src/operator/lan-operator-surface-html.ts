@@ -270,6 +270,26 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       .tl-status.running { color: #90c8ff; background: #15233a; }
       .tl-status.error { color: #ff8b8b; background: #3a171d; }
       .tl-raw { margin-top: 6px; padding: 8px 9px; border-radius: 6px; background: #0a0a0c; border: 1px solid var(--line); color: #c9c9cf; font-family: var(--mono); font-size: 10px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+      .tl-row.selected { background: color-mix(in srgb, var(--accent) 13%, transparent); border-left-color: var(--accent); }
+      .tl-row.selected .tl-summary { color: var(--ink); }
+      .verdict-pipeline .stage { cursor: pointer; }
+      .verdict-pipeline .stage:hover { background: var(--elevated); color: var(--ink); }
+      /* ----- selected-event inspector (Phase 5) ----- */
+      .event-inspector { flex: 0 0 auto; max-height: 46%; display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--line-2); background: linear-gradient(180deg, var(--panel-2), var(--surface)); padding: 9px 11px; overflow: auto; }
+      .inspector-head { display: flex; align-items: center; gap: 8px; }
+      .inspector-head .tl-chip { color: var(--muted); }
+      .inspector-owner { font-family: var(--mono); font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+      .inspector-spacer { flex: 1; }
+      .inspector-head .btn { height: 24px; padding: 0 9px; }
+      #inspector-close { min-width: 26px; padding: 0; font-size: 15px; line-height: 1; }
+      .inspector-evidence { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px 12px; }
+      .insp-kv { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+      .insp-kv b { color: var(--faint); font-size: 8.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+      .insp-kv span { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 11px; color: var(--ink); overflow-wrap: anywhere; }
+      .inspector-next { font-family: var(--mono); font-size: 10.5px; color: #e9d9b0; background: #2a2310; border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); border-radius: 6px; padding: 5px 8px; }
+      .inspector-next.bad { color: #ff8b8b; background: #3a171d; border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
+      .inspector-next b { color: var(--ink); font-weight: 600; }
+      .inspector-raw { margin: 0; padding: 8px 9px; border-radius: 6px; background: #0a0a0c; border: 1px solid var(--line); color: #c9c9cf; font-family: var(--mono); font-size: 10px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
       /* ----- telemetry (secondary) ----- */
       .debug-panel-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .debug-tablist { display: inline-flex; gap: 3px; }
@@ -406,6 +426,19 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
               <div class="conversation-stream" id="operator-conversation-stream">
                 <div class="conversation-empty">No messages yet. Arm the mic and speak, or type below and hit Send Text.</div>
               </div>
+              <aside class="event-inspector" id="operator-event-inspector" data-inspector-open="false" aria-live="polite" hidden>
+                <div class="inspector-head" id="inspector-head">
+                  <span class="tl-chip" id="inspector-chip">event</span>
+                  <span class="inspector-owner" id="inspector-owner"></span>
+                  <span class="tl-status" id="inspector-status">info</span>
+                  <span class="inspector-spacer"></span>
+                  <button class="btn" id="inspector-copy" type="button">Copy</button>
+                  <button class="btn" id="inspector-close" type="button" aria-label="Close inspector">×</button>
+                </div>
+                <div class="inspector-evidence" id="inspector-evidence"></div>
+                <div class="inspector-next" id="inspector-next" hidden></div>
+                <pre class="inspector-raw" id="inspector-raw"></pre>
+              </aside>
             </section>
             <section class="telemetry-wrap tabpanel" id="tabpanel-telemetry" role="tabpanel" aria-labelledby="debug-tab-telemetry" data-tab="telemetry" hidden>
               <div class="telemetry-head">

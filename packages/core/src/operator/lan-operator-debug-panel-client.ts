@@ -368,9 +368,118 @@ export function buildLanOperatorDebugPanelClientScript() {
     return s;
   }
 
+  var INSP_NEXT = {
+    mic: "check input device / speak near mic",
+    transcript: "check provider / key / session",
+    assistant: "check engine / provider events",
+    tool: "check tool routing / args",
+    app: "check KWWK phase / app permissions",
+    final: "check output pipeline",
+  };
+  function stageOf(row) {
+    if (!row) return "";
+    if (row.kind === "user") return "transcript";
+    if (row.kind === "assistant") return "assistant";
+    if (row.kind === "tool") return row.type === "app-control" ? "app" : "tool";
+    return "assistant";
+  }
+  function rowForStage(stage, rows) {
+    var firstAsst = null, lastAsst = null, firstTool = null, firstApp = null, firstUser = null;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r.kind === "user") { if (!firstUser) firstUser = r; }
+      else if (r.kind === "assistant") { if (!firstAsst) firstAsst = r; lastAsst = r; }
+      else if (r.kind === "tool") { if (!firstTool) firstTool = r; if (r.type === "app-control" && !firstApp) firstApp = r; }
+    }
+    if (stage === "mic" || stage === "transcript") return firstUser;
+    if (stage === "assistant") return firstAsst;
+    if (stage === "final") return lastAsst || firstAsst;
+    if (stage === "app") return firstApp || firstTool;
+    if (stage === "tool") return firstTool;
+    return null;
+  }
+  function evkv(label, value) {
+    var kv = document.createElement("div"); kv.className = "insp-kv";
+    var b = document.createElement("b"); b.textContent = label;
+    var s = document.createElement("span"); s.textContent = value;
+    kv.appendChild(b); kv.appendChild(s); return kv;
+  }
+  function renderEventInspector(input, row) {
+    var box = document.getElementById("operator-event-inspector");
+    if (!box) return;
+    if (!row) { box.hidden = true; box.dataset.inspectorOpen = "false"; return; }
+    box.hidden = false; box.dataset.inspectorOpen = "true";
+    var head = document.getElementById("inspector-head");
+    if (head) head.className = "inspector-head " + (row.lane || "");
+    var chip = document.getElementById("inspector-chip");
+    if (chip) chip.textContent = row.type || row.kind || "event";
+    var owner = document.getElementById("inspector-owner");
+    if (owner) owner.textContent = row.owner || "—";
+    var stat = document.getElementById("inspector-status");
+    if (stat) { stat.className = "tl-status " + (row.statusTone || "neutral"); stat.textContent = row.status || "info"; }
+    var stage = stageOf(row);
+    var raws = row.raws || [];
+    var first = raws[0] || {};
+    var detail = first.detail || {};
+    var ev = document.getElementById("inspector-evidence");
+    if (ev) {
+      ev.innerHTML = "";
+      ev.appendChild(evkv("stage", stage || "—"));
+      ev.appendChild(evkv("time", row.ts ? convClock(row.ts) : "live"));
+      ev.appendChild(evkv("duration", convDur(row.durMs)));
+      ev.appendChild(evkv("events", String(raws.length)));
+      var turnId = first.turnId || detail.turnId;
+      if (turnId) ev.appendChild(evkv("turn", String(turnId)));
+      var respId = first.responseId || detail.responseId;
+      if (respId) ev.appendChild(evkv("response", String(respId)));
+      var callId = detail.callId || detail.call_id || first.itemId;
+      if (callId) ev.appendChild(evkv("call/item", String(callId)));
+    }
+    var errText = "";
+    for (var k = 0; k < raws.length; k++) { if (raws[k] && raws[k].error) { errText = String(raws[k].error); break; } }
+    var nextEl = document.getElementById("inspector-next");
+    if (nextEl) {
+      var bad = row.statusTone === "error" || !!errText;
+      if (bad || row.statusTone === "running") {
+        nextEl.hidden = false;
+        nextEl.className = "inspector-next" + (bad ? " bad" : "");
+        nextEl.innerHTML = "";
+        var nb = document.createElement("b"); nb.textContent = bad ? "blocked → next: " : "running → ";
+        nextEl.appendChild(nb);
+        nextEl.appendChild(document.createTextNode(errText ? convClip(errText, 120) : (INSP_NEXT[stage] || "in progress")));
+      } else {
+        nextEl.hidden = true;
+      }
+    }
+    var rawText = "";
+    try { rawText = JSON.stringify(raws.length === 1 ? raws[0] : raws, null, 2); } catch (err) { rawText = String(row.summary || ""); }
+    var rawEl = document.getElementById("inspector-raw");
+    if (rawEl) rawEl.textContent = rawText;
+    box.__rawText = rawText;
+  }
+  function wireInspector(stream) {
+    var box = document.getElementById("operator-event-inspector");
+    if (!box || box.__wired) return;
+    box.__wired = true;
+    var closeBtn = document.getElementById("inspector-close");
+    if (closeBtn) closeBtn.addEventListener("click", function () {
+      stream.__selectedId = null;
+      var inp = stream.__lastInput;
+      if (inp) renderConversationStream(inp); else renderEventInspector(null, null);
+    });
+    var copyBtn = document.getElementById("inspector-copy");
+    if (copyBtn) copyBtn.addEventListener("click", function () {
+      var t = box.__rawText || "";
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).catch(function () {});
+      copyBtn.textContent = "Copied";
+      setTimeout(function () { copyBtn.textContent = "Copy"; }, 1200);
+    });
+  }
   function renderConversationStream(input) {
     var stream = input.stream || document.getElementById("operator-conversation-stream");
     if (!stream) return;
+    stream.__lastInput = input;
+    wireInspector(stream);
     var state = input.state || {};
     var conv = state.conversation || {};
     var out = state.output || {};
@@ -493,6 +602,21 @@ export function buildLanOperatorDebugPanelClientScript() {
         var stTone = stageState[order[p]];
         st.className = "stage" + (stTone !== "idle" ? " " + stTone : "");
         st.textContent = order[p];
+        st.dataset.stage = order[p];
+        st.setAttribute("role", "button");
+        st.tabIndex = 0;
+        st.title = "Jump to " + order[p] + " evidence";
+        (function (stageName) {
+          function jump() {
+            var target = rowForStage(stageName, rows);
+            if (!target) return;
+            stream.__selectedId = target.id;
+            stream.__scrollToSelected = true;
+            renderConversationStream(input);
+          }
+          st.addEventListener("click", jump);
+          st.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jump(); } });
+        })(order[p]);
         pipe.appendChild(st);
         if (p < order.length - 1) { var arr = document.createElement("span"); arr.className = "stage-arrow"; arr.textContent = "›"; pipe.appendChild(arr); }
       }
@@ -506,23 +630,27 @@ export function buildLanOperatorDebugPanelClientScript() {
       empty.className = "conversation-empty";
       empty.textContent = "No messages yet. Arm the mic and speak, or type below and hit Send Text.";
       stream.appendChild(empty);
+      stream.__selectedId = null;
+      renderEventInspector(input, null);
       return;
     }
 
     var atBottom = (stream.scrollHeight - stream.scrollTop - stream.clientHeight) < 56;
-    stream.__openRaw = stream.__openRaw || {};
-    var openIds = stream.__openRaw;
     stream.innerHTML = "";
     var prevMs = null;
+    var selRow = null, selDom = null;
     for (var j = 0; j < rows.length; j++) {
       var r = rows[j];
       var rowId = r.id || (r.kind + ":" + j);
+      var isSel = stream.__selectedId === rowId;
       var delta = (prevMs != null && r.firstMs && r.firstMs < 8.64e15) ? "+" + Math.max(0, (r.firstMs - prevMs) / 1000).toFixed(1) + "s" : "";
       if (r.firstMs && r.firstMs < 8.64e15) prevMs = r.firstMs;
       var row = document.createElement("div");
-      row.className = "tl-row " + r.lane + (openIds[rowId] ? " open" : "");
+      row.className = "tl-row " + r.lane + (isSel ? " selected" : "");
       row.setAttribute("role", "button");
+      row.setAttribute("aria-pressed", String(isSel));
       row.tabIndex = 0;
+      if (isSel) { selRow = r; selDom = row; }
       var main = document.createElement("div"); main.className = "tl-main";
       var chip = document.createElement("span"); chip.className = "tl-chip"; chip.textContent = r.type || "event";
       var sumCell = document.createElement("span"); sumCell.className = "tl-summary"; sumCell.textContent = convClip(r.summary || "—", 200);
@@ -536,20 +664,19 @@ export function buildLanOperatorDebugPanelClientScript() {
       var rawType = (r.raws && r.raws[0] && r.raws[0].type) ? String(r.raws[0].type) : "";
       if (rawType && rawType !== r.type) { var metaRaw = document.createElement("span"); metaRaw.textContent = rawType; meta.appendChild(metaRaw); }
       row.appendChild(main); row.appendChild(meta);
-      if (openIds[rowId]) {
-        var raw = document.createElement("div"); raw.className = "tl-raw";
-        try { raw.textContent = JSON.stringify(r.raws.length === 1 ? r.raws[0] : r.raws, null, 2); } catch (err) { raw.textContent = String(r.summary || ""); }
-        row.appendChild(raw);
-      }
       (function (id, rowEl) {
-        rowEl.addEventListener("click", function () {
-          if (stream.__openRaw[id]) delete stream.__openRaw[id]; else stream.__openRaw[id] = true;
+        function toggle() {
+          stream.__selectedId = stream.__selectedId === id ? null : id;
           renderConversationStream(input);
-        });
+        }
+        rowEl.addEventListener("click", toggle);
+        rowEl.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
       })(rowId, row);
       stream.appendChild(row);
     }
-    if (atBottom) stream.scrollTop = stream.scrollHeight;
+    renderEventInspector(input, selRow);
+    if (stream.__scrollToSelected && selDom) { selDom.scrollIntoView({ block: "nearest" }); stream.__scrollToSelected = false; }
+    else if (atBottom && !selRow) stream.scrollTop = stream.scrollHeight;
   }
 
   window.MAB_LAN_OPERATOR_DEBUG_PANEL = { applyFilter, renderTurnsAndConversation, renderToolAndKwwk, renderConversationStream };
