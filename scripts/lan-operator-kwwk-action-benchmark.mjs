@@ -171,6 +171,17 @@ function spokenKwwkBlocker(args, spokenInput, error) {
   return "spoken_kwwk_action_failed";
 }
 
+export function lanOperatorKwwkActionTurnContextFromStatus(status) {
+  const rows = Array.isArray(status?.debug?.timeline?.rows) ? status.debug.timeline.rows : [];
+  const toolRow = [...rows]
+    .reverse()
+    .find((row) => row?.event === "tool_call_started" && row?.turnId && row?.responseId);
+  return {
+    turnId: String(toolRow?.turnId || "turn_lan_kwwk_action_1"),
+    responseId: String(toolRow?.responseId || "response_lan_kwwk_action_1"),
+  };
+}
+
 function appleScriptString(value) {
   return JSON.stringify(String(value || ""));
 }
@@ -1369,7 +1380,7 @@ async function run() {
         }),
       );
     }
-    await waitForRuntimeStatus(
+    const spokenReadyStatus = await waitForRuntimeStatus(
       listenResult.url,
       (body) => {
         observeSpokenInputEnergy(spokenInput, body);
@@ -1386,10 +1397,9 @@ async function run() {
         window.MAB_LAN_OPERATOR_SURFACE.stopMicrophone("spoken_kwwk_action_ready"),
       );
     }
-    const kwwkResult = await runKwwkAction(args, page, {
-      turnId: "turn_lan_kwwk_action_1",
-      responseId: "response_lan_kwwk_action_1",
-    });
+    const turnContext = lanOperatorKwwkActionTurnContextFromStatus(spokenReadyStatus);
+    spokenInput.turnContext = turnContext;
+    const kwwkResult = await runKwwkAction(args, page, turnContext);
     mutationCleanup = kwwkResult.mutationCleanup || null;
     const runtimeStatus = await waitForRuntimeStatus(
       listenResult.url,

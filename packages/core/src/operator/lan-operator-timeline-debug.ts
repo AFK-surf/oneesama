@@ -4,6 +4,17 @@ import type { LanOperatorVoiceChunk } from "./lan-operator-voice.ts";
 
 type TimelineRow = DebugState["timeline"]["rows"][number];
 type TurnSummary = DebugState["timeline"]["turns"][number];
+type TurnMilestone = keyof TurnSummary["milestones"];
+
+const TURN_MILESTONES: TurnMilestone[] = [
+  "heard",
+  "speechStarted",
+  "transcript",
+  "tool",
+  "kwwk",
+  "verification",
+  "output",
+];
 
 function rowId(debug: DebugState) {
   return `timeline_${Date.now().toString(36)}_${debug.timeline.rows.length.toString(36)}`;
@@ -41,6 +52,89 @@ function turnStatus(rows: TimelineRow[]): TurnSummary["status"] {
   return "active";
 }
 
+function milestoneForRow(row: TimelineRow): TurnMilestone | null {
+  if (row.event === "operator_voice_chunk_received") return "heard";
+  if (row.event === "speech_started") return "speechStarted";
+  if (row.event === "transcript_delta" || row.event === "transcript_completed") {
+    return "transcript";
+  }
+  if (row.layer === "tool_routing" || row.event.startsWith("tool_")) return "tool";
+  if (row.layer === "kwwk" || row.event.startsWith("kwwk_")) {
+    return hasVerificationEvidence(row) ? "verification" : "kwwk";
+  }
+  if (
+    row.layer === "output_audio" ||
+    row.event === "assistant_text_delta" ||
+    row.event === "assistant_text_completed" ||
+    row.event.startsWith("assistant_audio")
+  ) {
+    return "output";
+  }
+  return null;
+}
+
+function milestoneFlags(rows: TimelineRow[]): TurnSummary["milestones"] {
+  return {
+    heard: rows.some((row) => row.event === "operator_voice_chunk_received"),
+    speechStarted: rows.some((row) => row.event === "speech_started"),
+    transcript: rows.some(
+      (row) => row.event === "transcript_delta" || row.event === "transcript_completed",
+    ),
+    tool: rows.some((row) => row.layer === "tool_routing" || row.event.startsWith("tool_")),
+    kwwk: rows.some((row) => row.layer === "kwwk" || row.event.startsWith("kwwk_")),
+    verification: rows.some((row) => row.layer === "kwwk" && hasVerificationEvidence(row)),
+    output: rows.some(
+      (row) =>
+        row.layer === "output_audio" ||
+        row.event === "assistant_text_delta" ||
+        row.event === "assistant_text_completed" ||
+        row.event.startsWith("assistant_audio"),
+    ),
+  };
+}
+
+function milestoneAts(rows: TimelineRow[]) {
+  const ats: TurnSummary["milestoneAts"] = {};
+  for (const row of rows) {
+    const milestone = milestoneForRow(row);
+    if (milestone && !ats[milestone]) ats[milestone] = row.at;
+  }
+  return ats;
+}
+
+function milestoneDurationsMs(rows: TimelineRow[]) {
+  const durations: TurnSummary["milestoneDurationsMs"] = {};
+  for (const row of rows) {
+    const milestone = milestoneForRow(row);
+    if (milestone && !(milestone in durations)) durations[milestone] = row.durationMs;
+  }
+  return durations;
+}
+
+function mergeMilestones(
+  previous: TurnSummary | null,
+  current: TurnSummary["milestones"],
+): TurnSummary["milestones"] {
+  const merged = { ...current };
+  for (const milestone of TURN_MILESTONES) {
+    merged[milestone] = Boolean(previous?.milestones?.[milestone] || current[milestone]);
+  }
+  return merged;
+}
+
+function mergeMilestoneRecord<T>(
+  previous: Partial<Record<TurnMilestone, T>> | undefined,
+  current: Partial<Record<TurnMilestone, T>>,
+) {
+  const merged: Partial<Record<TurnMilestone, T>> = { ...previous };
+  for (const milestone of TURN_MILESTONES) {
+    if (merged[milestone] == null && current[milestone] != null) {
+      merged[milestone] = current[milestone];
+    }
+  }
+  return merged;
+}
+
 function hasVerificationEvidence(row: TimelineRow) {
   if (row.event === "kwwk_verifying") return true;
   const verification = row.detail.verification;
@@ -61,13 +155,16 @@ function rebuildTurnSummary(debug: DebugState, turnId: string | null) {
   if (!turnId) return;
   const rows = debug.timeline.rows.filter((row) => row.turnId === turnId);
   if (rows.length === 0) return;
+  const previous = debug.timeline.turns.find((turn) => turn.turnId === turnId) || null;
   const first = rows[0];
   const last = rows[rows.length - 1];
-  const startedAtMs = Date.parse(first.at);
+  const startedAt = previous?.startedAt || first.at;
+  const startedAtMs = Date.parse(startedAt);
   const lastAtMs = Date.parse(last.at);
+  const currentMilestones = milestoneFlags(rows);
   const summary: TurnSummary = {
     turnId,
-    startedAt: first.at,
+    startedAt,
     lastEventAt: last.at,
     durationMs:
       Number.isFinite(startedAtMs) && Number.isFinite(lastAtMs)
@@ -77,24 +174,13 @@ function rebuildTurnSummary(debug: DebugState, turnId: string | null) {
     responseIds: uniqueStrings(rows.map((row) => row.responseId)),
     latestEvent: last.event,
     blocker: rows.findLast((row) => row.blocker)?.blocker || null,
-    milestones: {
-      heard: rows.some((row) => row.event === "operator_voice_chunk_received"),
-      speechStarted: rows.some((row) => row.event === "speech_started"),
-      transcript: rows.some(
-        (row) => row.event === "transcript_delta" || row.event === "transcript_completed",
-      ),
-      tool: rows.some((row) => row.layer === "tool_routing" || row.event.startsWith("tool_")),
-      kwwk: rows.some((row) => row.layer === "kwwk" || row.event.startsWith("kwwk_")),
-      verification: rows.some((row) => row.layer === "kwwk" && hasVerificationEvidence(row)),
-      output: rows.some(
-        (row) =>
-          row.layer === "output_audio" ||
-          row.event === "assistant_text_delta" ||
-          row.event === "assistant_text_completed" ||
-          row.event.startsWith("assistant_audio"),
-      ),
-    },
-    events: rows.map((row) => row.event).slice(-24),
+    milestones: mergeMilestones(previous, currentMilestones),
+    milestoneAts: mergeMilestoneRecord(previous?.milestoneAts, milestoneAts(rows)),
+    milestoneDurationsMs: mergeMilestoneRecord(
+      previous?.milestoneDurationsMs,
+      milestoneDurationsMs(rows),
+    ),
+    events: [...(previous?.events || []), ...rows.map((row) => row.event)].slice(-24),
   };
   debug.timeline.turns = [...debug.timeline.turns.filter((turn) => turn.turnId !== turnId), summary]
     .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt))

@@ -51,6 +51,14 @@ function timelineRows(report) {
   return Array.isArray(report?.timeline) ? report.timeline : [];
 }
 
+function reportTurnSummaries(report) {
+  return Array.isArray(report?.turns)
+    ? report.turns
+    : Array.isArray(report?.debugReport?.debug?.timeline?.turns)
+      ? report.debugReport.debug.timeline.turns
+      : [];
+}
+
 function turnRows(report) {
   const rows = timelineRows(report);
   const grouped = new Map();
@@ -71,6 +79,46 @@ function firstDuration(report, events) {
     const duration = numberOrNull(firstRow(report, event)?.durationMs);
     if (duration != null) return duration;
   }
+  for (const turn of reportTurnSummaries(report)) {
+    const duration = firstTurnMilestoneDuration(turn, events);
+    if (duration != null) return duration;
+  }
+  return null;
+}
+
+function eventMilestone(event) {
+  if (event === "operator_voice_chunk_received") return "heard";
+  if (event === "speech_started") return "speechStarted";
+  if (event === "transcript_delta" || event === "transcript_completed") return "transcript";
+  if (event === "assistant_text_delta" || event === "assistant_text_completed") return "output";
+  if (String(event || "").startsWith("assistant_audio")) return "output";
+  if (String(event || "").startsWith("tool_")) return "tool";
+  if (String(event || "").startsWith("kwwk_")) {
+    return event === "kwwk_verifying" ? "verification" : "kwwk";
+  }
+  return null;
+}
+
+function firstTurnMilestoneAt(turn, events) {
+  for (const event of events) {
+    const milestone = eventMilestone(event);
+    if (!milestone) continue;
+    const at = Date.parse(String(turn?.milestoneAts?.[milestone] || ""));
+    if (Number.isFinite(at)) return at;
+  }
+  return null;
+}
+
+function firstTurnMilestoneDuration(turn, events) {
+  for (const event of events) {
+    const milestone = eventMilestone(event);
+    if (!milestone) continue;
+    const duration = numberOrNull(turn?.milestoneDurationsMs?.[milestone]);
+    if (duration != null) return duration;
+    const at = Date.parse(String(turn?.milestoneAts?.[milestone] || ""));
+    const startedAt = Date.parse(String(turn?.startedAt || ""));
+    if (Number.isFinite(at) && Number.isFinite(startedAt)) return Math.max(0, at - startedAt);
+  }
   return null;
 }
 
@@ -84,6 +132,11 @@ function deltaWithinTurn(report, fromEvents, toEvents) {
     const toTime = Date.parse(String(toRow?.at || ""));
     if (!Number.isFinite(toTime)) continue;
     return Math.max(0, toTime - fromTime);
+  }
+  for (const turn of reportTurnSummaries(report)) {
+    const fromTime = firstTurnMilestoneAt(turn, fromEvents);
+    const toTime = firstTurnMilestoneAt(turn, toEvents);
+    if (fromTime != null && toTime != null) return Math.max(0, toTime - fromTime);
   }
   return null;
 }
@@ -105,12 +158,7 @@ function minDeltaWithinTurn(report, fromEvents, toEvents) {
 }
 
 function requiredTurnMilestoneCount(report, milestones) {
-  const turnSummaries = Array.isArray(report?.turns)
-    ? report.turns
-    : Array.isArray(report?.debugReport?.debug?.timeline?.turns)
-      ? report.debugReport.debug.timeline.turns
-      : [];
-  for (const turn of turnSummaries) {
+  for (const turn of reportTurnSummaries(report)) {
     if (milestones.every((milestone) => turn?.milestones?.[milestone] === true)) {
       return milestones.length;
     }
@@ -637,7 +685,8 @@ function gateEntries(report) {
       entry({
         id: "conversation_speech_start_ms",
         label: "Conversation Engine speech-start/user-turn observed",
-        actual: report?.conversationEngine?.speechStartMs,
+        actual:
+          report?.conversationEngine?.speechStartMs ?? firstDuration(report, ["speech_started"]),
         threshold: THRESHOLDS.conversationSpeechStartMs,
         required: true,
         source: "conversationEngine.speechStartMs",

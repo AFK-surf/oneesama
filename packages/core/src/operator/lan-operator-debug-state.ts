@@ -323,6 +323,18 @@ export type DebugState = {
         verification: boolean;
         output: boolean;
       };
+      milestoneAts?: Partial<
+        Record<
+          "heard" | "speechStarted" | "transcript" | "tool" | "kwwk" | "verification" | "output",
+          string
+        >
+      >;
+      milestoneDurationsMs?: Partial<
+        Record<
+          "heard" | "speechStarted" | "transcript" | "tool" | "kwwk" | "verification" | "output",
+          number | null
+        >
+      >;
       events: string[];
     }>;
     rows: Array<{

@@ -530,6 +530,89 @@ test("LAN voice-loop SLO requires input energy evidence in real-mic mode", () =>
   );
 });
 
+test("LAN voice-loop SLO uses turn milestones after rolling timeline drops early voice rows", () => {
+  const report = attachLanAcceptanceSlo({
+    schema: "oneesama.local_voice_acceptance.v1",
+    gate: "local_voice",
+    ok: true,
+    conversationEngine: {
+      speechStartMs: null,
+      canonicalEventCounts: {
+        speech_started: 1,
+        assistant_text_completed: 1,
+      },
+    },
+    audio: {
+      transport: "websocket_pcm",
+      turnDetectionOwner: "conversation_engine",
+      localVadEnabled: false,
+      localVadRole: "disabled",
+      forwardedChunks: 250,
+      forwardedChunksDelta: 250,
+      hostReceiveLagMs: 12,
+      voiceAckRttMs: 18,
+      voiceStreamId: "voice_stream_rolled",
+      voiceStreamGeneration: 1,
+      voiceStreamOpenCount: 1,
+      staleChunksRejected: 0,
+      realMicrophoneRequired: true,
+      realMicrophoneEvidenceOk: true,
+      inputEnergyThreshold: 0.02,
+      maxInputEnergy: 0.024,
+      inputEnergySamplesAboveThreshold: 1,
+    },
+    timeline: [
+      {
+        at: at(180),
+        event: "transcript_delta",
+        turnId: "turn_rolled",
+        durationMs: 0,
+        ok: true,
+      },
+      {
+        at: at(310),
+        event: "assistant_text_delta",
+        turnId: "turn_rolled",
+        durationMs: 130,
+        ok: true,
+      },
+      {
+        at: at(320),
+        event: "assistant_audio_started",
+        turnId: "turn_rolled",
+        durationMs: 140,
+        ok: true,
+      },
+    ],
+    turns: [
+      {
+        turnId: "turn_rolled",
+        startedAt: at(0),
+        lastEventAt: at(320),
+        durationMs: 320,
+        milestones: { heard: true, speechStarted: true, transcript: true, output: true },
+        milestoneAts: {
+          heard: at(0),
+          speechStarted: at(120),
+          transcript: at(180),
+          output: at(310),
+        },
+        milestoneDurationsMs: {
+          heard: null,
+          speechStarted: 120,
+          transcript: 180,
+          output: 310,
+        },
+      },
+    ],
+  });
+
+  assert.equal(report.functionalOk, true);
+  assert.equal(report.slo.ok, true);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.slo.failures, []);
+});
+
 test("LAN voice-loop SLO fails when Local VAD is required for forwarding", () => {
   const report = attachLanAcceptanceSlo({
     schema: "oneesama.lan_voice_acceptance.v1",

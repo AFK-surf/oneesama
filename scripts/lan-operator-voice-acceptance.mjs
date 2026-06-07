@@ -257,6 +257,20 @@ function firstTimelineDuration(timeline, event) {
   return row?.durationMs ?? null;
 }
 
+function firstTurnMilestoneDuration(turns, milestone) {
+  for (const turn of Array.isArray(turns) ? turns : []) {
+    const rawDuration = turn?.milestoneDurationsMs?.[milestone];
+    if (rawDuration != null && rawDuration !== "") {
+      const duration = Number(rawDuration);
+      if (Number.isFinite(duration)) return duration;
+    }
+    const at = Date.parse(String(turn?.milestoneAts?.[milestone] || ""));
+    const startedAt = Date.parse(String(turn?.startedAt || ""));
+    if (Number.isFinite(at) && Number.isFinite(startedAt)) return Math.max(0, at - startedAt);
+  }
+  return null;
+}
+
 function countFrom(status, path) {
   let current = status;
   for (const key of path) current = current?.[key];
@@ -436,7 +450,9 @@ function buildAcceptanceReport(input) {
       transport: "mock",
       sessionId: runtimeStatus?.snapshot?.sessionId || "",
       connected: conversation.status === "connected",
-      speechStartMs: firstTimelineDuration(timeline, "speech_started"),
+      speechStartMs:
+        firstTimelineDuration(timeline, "speech_started") ??
+        firstTurnMilestoneDuration(turns, "speechStarted"),
       canonicalEventCounts: conversation.eventCounts || {},
       latestCanonicalEvent: conversation.canonicalEvents?.at(-1)?.type || "",
       rawProviderEventsAvailable: false,
