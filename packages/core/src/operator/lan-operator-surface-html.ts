@@ -3,6 +3,7 @@ import type { AvatarRuntimeSessionConfig } from "../avatar-runtime/contracts.ts"
 import { DEFAULT_SOURCE_RECTS } from "./lan-operator-debug-state.ts";
 import { buildLanOperatorArtifactClientScript } from "./lan-operator-artifact-client.ts";
 import { buildLanOperatorDebugPanelClientScript } from "./lan-operator-debug-panel-client.ts";
+import { buildLanOperatorKwwkCursorClientScript } from "./lan-operator-kwwk-cursor-client.ts";
 import { buildLanOperatorOutputClientScript } from "./lan-operator-output-client.ts";
 import { buildLanOperatorTextInputClientScript } from "./lan-operator-text-input-client.ts";
 import { buildLanOperatorVoiceControlsClientScript } from "./lan-operator-voice-controls-client.ts";
@@ -41,7 +42,8 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
   const outputClientSource = buildLanOperatorOutputClientScript(),
     visualClientSource = buildLanOperatorVisualClientScript(),
     textInputClientSource = buildLanOperatorTextInputClientScript(),
-    debugPanelClientSource = buildLanOperatorDebugPanelClientScript();
+    debugPanelClientSource = buildLanOperatorDebugPanelClientScript(),
+    kwwkCursorClientSource = buildLanOperatorKwwkCursorClientScript();
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -390,6 +392,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             <div class="dock-group">
               <span class="dock-label">Session</span>
               <button class="btn" id="overlay-button" type="button">Ping Overlay</button>
+              <button class="btn" id="cu-cursor-button" type="button">CU Cursor</button>
               <button class="btn" id="cancel-response-button" type="button">Cancel</button>
               <button class="btn" id="cancel-tool-button" type="button">Cancel Tool</button>
               <button class="btn" id="clear-audio-button" type="button">Clear Audio</button>
@@ -562,6 +565,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
     <script>${outputClientSource}</script>
     <script>${visualClientSource}</script><script>${textInputClientSource}</script>
     <script>${debugPanelClientSource}</script>
+    <script>${kwwkCursorClientSource}</script>
     <script>
       (() => {
         const boot = ${boot};
@@ -1038,9 +1042,51 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           };
           state.overlays.push(overlay);
           state.overlays = state.overlays.slice(-40);
+          // Feed the Cueboard-standard cursor renderer with canvas-normalized
+          // coords (map source-relative overlay → full-canvas normalized).
+          const rect = state.sourceRects[sourceId];
+          const cursorApi = window.MAB_LAN_OPERATOR_KWWK_CURSOR;
+          if (cursorApi) {
+            cursorApi.update({
+              x: rect ? rect.x + overlay.x * rect.width : overlay.x,
+              y: rect ? rect.y + overlay.y * rect.height : overlay.y,
+              kind: overlay.kind === "cursor" ? "move" : overlay.kind,
+              label: overlay.label,
+              holdMs: input.holdMs,
+            });
+          }
           sendOperatorEvent({ type: "visual_overlay_event", overlay });
           syncDebug();
           return overlay;
+        }
+        // Pointer (click/drag) demo fixture — drives a realistic KWWK cursor
+        // sequence (approach → click pulse → drag with trail → done) so the
+        // Cueboard cursor can be seen/benchmarked on the operator stage.
+        function runKwwkCursorFixture(opts = {}) {
+          const sourceId = opts.sourceId || state.focusedSourceId || "host-app";
+          const steps = [
+            { x: 0.3, y: 0.3, kind: "move", label: "approach" },
+            { x: 0.38, y: 0.36, kind: "move", label: "approach" },
+            { x: 0.42, y: 0.4, kind: "click", label: "click save" },
+            { x: 0.48, y: 0.45, kind: "drag", label: "drag" },
+            { x: 0.56, y: 0.52, kind: "drag", label: "drag" },
+            { x: 0.62, y: 0.58, kind: "drag", label: "drag selection" },
+            { x: 0.62, y: 0.58, kind: "done", label: "done" },
+          ];
+          if (opts.animated === false) {
+            for (const step of steps) emitKwwkOverlay({ sourceId, ...step });
+            return steps.length;
+          }
+          let i = 0;
+          const stepMs = Number(opts.stepMs) || 150;
+          const tick = () => {
+            if (i >= steps.length) return;
+            emitKwwkOverlay({ sourceId, ...steps[i] });
+            i += 1;
+            window.setTimeout(tick, stepMs);
+          };
+          tick();
+          return steps.length;
         }
 
         function emitKwwkJobState(input = {}) {
@@ -1431,32 +1477,11 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         }
 
         function drawOverlays() {
-          const now = Date.now();
-          for (const overlay of state.overlays) {
-            const rect = state.sourceRects[overlay.sourceId];
-            if (!rect) continue;
-            const age = now - overlay.ts;
-            const alpha = clamp(1 - age / 3000, 0.18, 1);
-            const x = (rect.x + overlay.x * rect.width) * canvas.width;
-            const y = (rect.y + overlay.y * rect.height) * canvas.height;
-            ctx.save();
-            ctx.globalAlpha = alpha;
-            ctx.strokeStyle = "#facc15";
-            ctx.fillStyle = "#facc15";
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.arc(x, y, 18, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(x - 28, y);
-            ctx.lineTo(x + 28, y);
-            ctx.moveTo(x, y - 28);
-            ctx.lineTo(x, y + 28);
-            ctx.stroke();
-            ctx.font = "700 14px system-ui, sans-serif";
-            ctx.fillText(overlay.label, x + 24, y - 18);
-            ctx.restore();
-          }
+          // Cueboard-standard cursor: persistent foreground arrow + colored ring
+          // + click pulse + target ring + drag trail + label box. Replaces the
+          // old flat yellow crosshair. Fed via emitKwwkOverlay (canvas-normalized).
+          const cursorApi = window.MAB_LAN_OPERATOR_KWWK_CURSOR;
+          if (cursorApi) cursorApi.draw(ctx, canvas.width, canvas.height);
         }
 
         function render() {
@@ -1559,6 +1584,9 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
 
         document.getElementById("overlay-button").addEventListener("click", () => {
           emitKwwkOverlay({ kind: "click", label: "KWWK", x: 0.5, y: 0.5 });
+        });
+        document.getElementById("cu-cursor-button")?.addEventListener("click", () => {
+          runKwwkCursorFixture();
         });
         document.getElementById("cancel-response-button").addEventListener("click", () => {
           sendEngineControl("cancel_response");
@@ -1677,7 +1705,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         })();
 
         window.MAB_LAN_OPERATOR_SURFACE = {
-          state, moveSource, setFocusedSource, emitKwwkOverlay, sendSyntheticVoiceChunk,
+          state, moveSource, setFocusedSource, emitKwwkOverlay, runKwwkCursorFixture, sendSyntheticVoiceChunk,
           emitKwwkJobState, submitToolResult, cancelTool, sendEngineControl, fetchDebugReport, copyDiagnostics, downloadReport,
           createDebugBundle, markInterestingRun, registerArtifactLink, openDebugPanel, currentComposition, startMicrophone, stopMicrophone, setVoiceMuted,
           setDebugFilter: (query) => { debugFilterInput.value = String(query || ""); return applyDebugFilter(); },

@@ -350,6 +350,50 @@ integration of the already-built cursor stack, not new rendering):
 6. Emit a live operator-stage artifact linking cursor events + rendered frames + host
    mutation + HUD, analogous to the realtime `real-meet-app-control-suite` evidence.
 
+### Phase 3b status (2026-06-07) — operator shared-surface cursor parity DONE, native lane tracked
+
+The **operator stage (shared-surface mirror)** now has Cueboard parity with
+rendered-pixel proof. What landed (commit on `codex/local-operator-handoff-2026-06-06`):
+
+- **Step 1 (SLO escape closed) — done.** `scripts/lan-operator-acceptance-slo.mjs`
+  `kwwkCursorActionFeedbackCount` now requires `cursorEventCount >= 1` for any pointer
+  action (click/drag/scroll/move); the bare `cursorPolicy` label and `pointerAction`
+  truthiness no longer satisfy it. The `pointerAction === false` pass survives only for
+  genuinely keyboard-only actions (e.g. `type_text`). Locked by a new regression test
+  (`test/lan-operator-acceptance-slo.test.mjs`: pointer w/ 0 cursor → fails; w/ evidence → passes).
+- **Step 3 (flat crosshair → Cueboard renderer) — done.** `drawOverlays` no longer paints
+  the `#facc15` crosshair; it now calls the ported Cueboard renderer
+  `packages/core/src/operator/lan-operator-kwwk-cursor-client.ts` (a faithful port of the
+  shared-surface `hiyori-avatar-cursor-feedback.ts`: persistent arrow + per-kind colored
+  ring + click pulse + target ring + drag trail + label box). `emitKwwkOverlay` maps
+  source-relative coords → canvas-normalized and feeds the renderer.
+- **Step 4 (pointer click/drag fixture) — done.** `runKwwkCursorFixture()` drives a real
+  approach → click → drag-with-trail → done sequence; exposed on the surface API + a
+  "CU Cursor" toolbar button.
+- **Step 5 (rendered-pixel assertions) — done.** New gate
+  `scripts/lan-operator-cursor-benchmark.mjs` (`npm run benchmark:realtime-local-operator-cursor`)
+  diffs composition-canvas pixels before/after the fixture and fails if the cursor does not
+  actually paint (measured ~0.75% non-background footprint / 6.8k px, 7-point trail,
+  click+drag events, 0 console errors). Mirrored by `test/lan-operator-cursor.test.mjs`.
+
+Remaining (NOT signed off — native lane, needs macOS app-control-helper + real run, not
+verifiable headless in this environment):
+
+- **Step 2 (native foreground NSPanel end-to-end) — partial.** The operator now renders the
+  Cueboard **shared-surface mirror** with pixel proof. Driving the **native** cursor
+  (`kwwk-cu-cursor.swift` NSPanel) from real `metadata.cursor.events` and feeding
+  `cursorEventCountDelta` into the acceptance runtime so the tightened SLO passes on a real
+  macOS run is still open. The existing native benchmarks
+  (`benchmark:realtime-kwwk-{native-cursor,cursor-visible}`) require the app-control-helper +
+  accessibility/display permissions; treat as a human/native gate (like the real-mic gate).
+- **Step 6 (single linked live artifact)** — the cursor benchmark emits a JSON artifact +
+  screenshot; folding cursor events + rendered frames + host mutation + HUD into one
+  `real-meet-app-control-suite`-style artifact remains a follow-up.
+
+Net: the audit finding "operator cursor path is effectively dead / flat crosshair / SLO
+passes with zero cursor" is **resolved for the operator stage** with rendered-pixel proof
+and a closed SLO escape; the native NSPanel end-to-end remains a tracked macOS gate.
+
 ## Phasing (incremental, ship-safe)
 
 Each phase is independently shippable and keeps gates green.

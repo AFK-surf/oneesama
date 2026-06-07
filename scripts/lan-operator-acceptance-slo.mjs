@@ -278,12 +278,16 @@ function kwwkCursorActionFeedbackCount(report) {
     kwwk.actionCount || executeDetail.actionCount || actionKinds.length || 0,
   );
   const cursorEventCount = Number(kwwk.cursorEventCount || executeDetail.cursorEventCount || 0);
-  const cursorPolicy = String(kwwk.cursorPolicy || executeDetail.cursorPolicy || "");
-  return actionCount >= 1 &&
-    actionKinds.length >= 1 &&
-    (cursorEventCount >= 1 || cursorPolicy || executeDetail.pointerAction === false)
-    ? 1
-    : 0;
+  // A pointer action (click/drag/scroll/move) MUST produce real rendered cursor
+  // evidence — it can no longer pass on a cursorPolicy label alone or on
+  // pointerAction===false. A genuine non-pointer/background action (e.g.
+  // type_text) does not require cursor feedback.
+  const pointerAction =
+    executeDetail.pointerAction === true ||
+    actionKinds.some((kind) => /click|drag|scroll|mouse|move|pointer|cursor/i.test(String(kind)));
+  if (actionCount < 1 || actionKinds.length < 1) return 0;
+  if (pointerAction) return cursorEventCount >= 1 ? 1 : 0;
+  return executeDetail.pointerAction === false ? 1 : 0;
 }
 
 function kwwkCompactFollowUpCount(report) {

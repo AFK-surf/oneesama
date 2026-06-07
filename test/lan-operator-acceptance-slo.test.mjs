@@ -1601,6 +1601,90 @@ test("LAN acceptance SLO scoring fails when KWWK cursor/action feedback is missi
   );
 });
 
+test("LAN acceptance SLO: a pointer action must show real cursor evidence (no cursorPolicy escape)", () => {
+  function pointerEvidence(cursorEventCount) {
+    return {
+      ...kwwkPhaseEvidence(),
+      execute: {
+        status: "executed",
+        summary: "1/1 actions succeeded",
+        detail: {
+          actionCount: 1,
+          successCount: 1,
+          actionKinds: ["click"],
+          executionSurface: "kwwk_computer_use_core",
+          // A cursorPolicy label alone must NOT satisfy the gate any more.
+          cursorPolicy: "kwwk_core_visual_effects_for_pointer_action",
+          pointerAction: true,
+          cursorEventCount,
+        },
+      },
+    };
+  }
+  const cursorTimeline = [
+    {
+      at: at(0),
+      event: "operator_voice_chunk_received",
+      turnId: "turn_cursor",
+      durationMs: null,
+      ok: true,
+    },
+    { at: at(90), event: "speech_started", turnId: "turn_cursor", durationMs: 90, ok: true },
+    {
+      at: at(130),
+      event: "transcript_completed",
+      turnId: "turn_cursor",
+      durationMs: 130,
+      ok: true,
+    },
+    { at: at(180), event: "tool_call_started", turnId: "turn_cursor", durationMs: 180, ok: true },
+    {
+      at: at(200),
+      event: "tool_result_accepted",
+      turnId: "turn_cursor",
+      durationMs: 200,
+      ok: true,
+    },
+    { at: at(240), event: "kwwk_observing", turnId: "turn_cursor", durationMs: 240, ok: true },
+  ];
+  const cursorTurns = [
+    {
+      turnId: "turn_cursor",
+      milestones: { heard: true, speechStarted: true, transcript: true, tool: true, kwwk: true },
+    },
+  ];
+  function buildReport(cursorEventCount) {
+    return attachLanAcceptanceSlo({
+      schema: "oneesama.lan_voice_acceptance.v1",
+      gate: "lan_kwwk_action",
+      ok: true,
+      kwwk: {
+        cold: { ...verifiedKwwkSample(1800), phaseEvidence: pointerEvidence(cursorEventCount) },
+        warm: { ...verifiedKwwkSample(620), phaseEvidence: pointerEvidence(cursorEventCount) },
+        hardCancel: hardCancelEvidence(),
+        inFlightProgress: inFlightProgress(),
+        totalMs: 1800,
+      },
+      timeline: cursorTimeline,
+      turns: cursorTurns,
+    });
+  }
+
+  // Pointer action with zero rendered cursor evidence → gate fails (escape closed).
+  const blocked = buildReport(0);
+  assert.ok(
+    blocked.slo.failures.some((failure) => failure.id === "kwwk_cursor_action_feedback_observed"),
+    JSON.stringify(blocked.slo),
+  );
+
+  // Pointer action with real cursor evidence → gate is satisfied.
+  const proven = buildReport(2);
+  assert.ok(
+    !proven.slo.failures.some((failure) => failure.id === "kwwk_cursor_action_feedback_observed"),
+    JSON.stringify(proven.slo),
+  );
+});
+
 test("LAN acceptance SLO scoring fails when KWWK hard-cancel evidence is missing", () => {
   const report = attachLanAcceptanceSlo({
     schema: "oneesama.lan_voice_acceptance.v1",
