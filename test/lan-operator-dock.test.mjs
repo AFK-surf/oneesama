@@ -169,3 +169,86 @@ test("LAN operator debug dock tabs (Ledger/Telemetry/Sources) switch without los
     await surface.close();
   }
 });
+
+async function waitReady(page) {
+  await page.waitForFunction(() => window.MAB_LAN_OPERATOR_SURFACE?.state?.ready === true, null, {
+    timeout: 10_000,
+  });
+}
+
+test("LAN operator layout persists to URL hash + localStorage and restores on reload", async () => {
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-dock-persist-smoke",
+    botName: "LAN Oneesama",
+  });
+  const { url } = await surface.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
+    await page.goto(url);
+    await waitReady(page);
+
+    // Change layout: dock bottom + Telemetry tab. Both are persisted.
+    await page.click("#dock-bottom-button");
+    await page.click("#debug-tab-telemetry");
+
+    const persisted = await page.evaluate(() => ({
+      hash: location.hash,
+      stored: localStorage.getItem("mab.operator.layout.v1"),
+    }));
+    assert.match(persisted.hash, /dock=bottom/, JSON.stringify(persisted));
+    assert.match(persisted.hash, /tab=telemetry/, JSON.stringify(persisted));
+    assert.ok(persisted.stored, "layout should be saved to localStorage");
+    const parsed = JSON.parse(persisted.stored);
+    assert.equal(parsed.dock, "bottom", persisted.stored);
+    assert.equal(parsed.tab, "telemetry", persisted.stored);
+
+    // Reload (same context keeps URL hash + localStorage) → state is restored.
+    await page.reload();
+    await waitReady(page);
+    const restored = await dockState(page);
+    assert.equal(restored.dock, "bottom", JSON.stringify(restored));
+    const restoredTab = await tabState(page);
+    assert.equal(restoredTab.telemetry, true, JSON.stringify(restoredTab));
+    assert.equal(restoredTab.telemetrySelected, "true", JSON.stringify(restoredTab));
+  } finally {
+    await browser.close();
+    await surface.close();
+  }
+});
+
+test("LAN operator layout: URL hash wins over localStorage (shareable links)", async () => {
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-dock-hash-precedence-smoke",
+    botName: "LAN Oneesama",
+  });
+  const { url } = await surface.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
+    // Seed localStorage with a "hidden" layout via real interaction.
+    await page.goto(url);
+    await waitReady(page);
+    await page.click("#dock-hide-button");
+    const seeded = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("mab.operator.layout.v1")),
+    );
+    assert.equal(seeded.dock, "hidden", JSON.stringify(seeded));
+
+    // Open a shared link whose hash disagrees with localStorage → hash wins.
+    await page.goto(url + "#dock=bottom&tab=sources&w=520");
+    await waitReady(page);
+    const restored = await dockState(page);
+    assert.equal(restored.dock, "bottom", JSON.stringify(restored));
+    assert.match(restored.dockW, /520px/, JSON.stringify(restored));
+    const tab = await tabState(page);
+    assert.equal(tab.sources, true, JSON.stringify(tab));
+  } finally {
+    await browser.close();
+    await surface.close();
+  }
+});

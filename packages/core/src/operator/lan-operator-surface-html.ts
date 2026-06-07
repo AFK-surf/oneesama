@@ -1065,6 +1065,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           // The benchmark gate clicks #open-debug-panel-button and expects this flag
           // to be true with the dense telemetry sections rendered.
           if (debugShell) debugShell.dataset.debugPanelOpened = String(name === "telemetry");
+          persistLayout();
         }
         function openDebugPanel() {
           setDebugTab("telemetry");
@@ -1090,6 +1091,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             splitter.setAttribute("aria-orientation", stateName === "bottom" ? "horizontal" : "vertical");
           }
           updateDockSummonStatus();
+          persistLayout();
         }
         function toggleDockHidden() {
           setDock(dockMain && dockMain.dataset.dock === "hidden" ? dockLastOpen : "hidden");
@@ -1114,6 +1116,69 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           dot.className = "dock-summon-dot" + (tone ? " " + tone : "");
           text.textContent = "clean mode · " + label;
         }
+        const LAYOUT_KEY = "mab.operator.layout.v1";
+        function currentLayout() {
+          const cs = dockMain ? getComputedStyle(dockMain) : null;
+          let tab = "ledger";
+          for (const [, , tabName] of DEBUG_TABS) {
+            if (document.getElementById("debug-tab-" + tabName)?.getAttribute("aria-selected") === "true") {
+              tab = tabName;
+              break;
+            }
+          }
+          return {
+            dock: (dockMain && dockMain.dataset.dock) || "right",
+            tab,
+            w: cs ? cs.getPropertyValue("--dock-w").trim() : "",
+            h: cs ? cs.getPropertyValue("--dock-h").trim() : "",
+          };
+        }
+        let restoringLayout = false;
+        function persistLayout() {
+          if (restoringLayout) return;
+          const layout = currentLayout();
+          try {
+            localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+          } catch (err) {}
+          const parts = ["dock=" + layout.dock, "tab=" + layout.tab];
+          if (layout.w) parts.push("w=" + parseInt(layout.w, 10));
+          if (layout.h) parts.push("h=" + parseInt(layout.h, 10));
+          try {
+            history.replaceState(null, "", "#" + parts.join("&"));
+          } catch (err) {}
+        }
+        function readLayout() {
+          const hash = (location.hash || "").replace(/^#/, "");
+          if (hash) {
+            const params = {};
+            for (const kv of hash.split("&")) {
+              const [k, v] = kv.split("=");
+              if (k) params[k] = v;
+            }
+            if (params.dock || params.tab) return params;
+          }
+          try {
+            const raw = localStorage.getItem(LAYOUT_KEY);
+            if (raw) return JSON.parse(raw);
+          } catch (err) {}
+          return null;
+        }
+        function restoreLayout() {
+          const layout = readLayout();
+          restoringLayout = true;
+          const tab = ["ledger", "telemetry", "sources"].includes(layout?.tab) ? layout.tab : "ledger";
+          const dock = ["right", "bottom", "hidden"].includes(layout?.dock) ? layout.dock : "right";
+          if (layout?.w && dockMain) {
+            dockMain.style.setProperty("--dock-w", /px$/.test(String(layout.w)) ? layout.w : layout.w + "px");
+          }
+          if (layout?.h && dockMain) {
+            dockMain.style.setProperty("--dock-h", /px$/.test(String(layout.h)) ? layout.h : layout.h + "px");
+          }
+          setDebugTab(tab);
+          setDock(dock);
+          restoringLayout = false;
+          persistLayout();
+        }
         function startDockResize(event) {
           if (!dockMain) return;
           const stateName = dockMain.dataset.dock;
@@ -1134,6 +1199,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
             document.body.style.userSelect = "";
+            persistLayout();
           }
           document.body.style.userSelect = "none";
           window.addEventListener("pointermove", onMove);
@@ -1472,12 +1538,13 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         for (const [tabId, , tabName] of DEBUG_TABS) {
           document.getElementById(tabId)?.addEventListener("click", () => setDebugTab(tabName));
         }
-        setDebugTab("ledger");
         document.getElementById("dock-right-button")?.addEventListener("click", () => setDock("right"));
         document.getElementById("dock-bottom-button")?.addEventListener("click", () => setDock("bottom"));
         document.getElementById("dock-hide-button")?.addEventListener("click", () => setDock("hidden"));
         document.getElementById("dock-summon")?.addEventListener("click", () => setDock(dockLastOpen));
         document.getElementById("dock-splitter")?.addEventListener("pointerdown", startDockResize);
+        restoreLayout();
+        window.addEventListener("hashchange", restoreLayout);
         window.addEventListener("keydown", (event) => {
           if (event.key === "\`" && !event.metaKey && !event.ctrlKey && !event.altKey) {
             const tag = (event.target && event.target.tagName) || "";
