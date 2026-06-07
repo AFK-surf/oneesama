@@ -177,17 +177,20 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       .source-tabs button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--blue) 65%, transparent); color: #bfdbfe; background: color-mix(in srgb, var(--blue) 16%, transparent); }
 
       /* ----- stage grid: source list + canvas ----- */
-      .stage-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 150px 1fr; }
-      aside { border-right: 1px solid var(--line); background: var(--surface); padding: 10px; overflow: auto; min-height: 0; }
+      .stage-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 128px 1fr; }
+      aside { border-right: 1px solid var(--line); background: var(--surface); padding: 7px 6px; overflow: auto; min-height: 0; }
       .source-row {
-        width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center;
-        margin-bottom: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2);
-        padding: 6px 8px; color: var(--ink); text-align: left; cursor: pointer; transition: border-color .12s, background .12s;
+        width: 100%; display: flex; align-items: center; gap: 6px;
+        margin-bottom: 3px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2);
+        padding: 4px 7px; color: var(--ink); text-align: left; cursor: pointer; transition: border-color .12s, background .12s;
       }
       .source-row:hover { border-color: var(--line-2); background: var(--elevated); }
-      .source-row strong { display: block; font-size: 11.5px; line-height: 1.2; font-weight: 600; }
-      .source-row span { color: var(--faint); font-size: 9px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+      .source-row .src-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 99px; background: var(--faint); }
+      .source-row .src-name { flex: 1; min-width: 0; font-size: 11px; line-height: 1.25; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .source-row .src-focus { flex: 0 0 auto; font-size: 7.5px; font-family: var(--mono); text-transform: uppercase; color: var(--blue); opacity: 0; }
       .source-row[aria-pressed="true"] { border-color: color-mix(in srgb, var(--blue) 70%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 55%, transparent); background: color-mix(in srgb, var(--blue) 12%, transparent); }
+      .source-row[aria-pressed="true"] .src-dot { background: var(--blue); }
+      .source-row[aria-pressed="true"] .src-focus { opacity: 1; }
       .canvas-wrap { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 10px; overflow: hidden; background: radial-gradient(120% 120% at 50% 0%, #121216, #08080a); }
       .stage-hud { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; padding: 6px 11px; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--line-2) 70%, transparent); background: color-mix(in srgb, #000 52%, transparent); backdrop-filter: blur(8px) saturate(130%); font-family: var(--mono); font-size: 10px; color: var(--muted); }
       .hud-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -961,10 +964,12 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             row.type = "button";
             row.className = "source-row";
             row.setAttribute("aria-pressed", source.id === state.focusedSourceId ? "true" : "false");
-            row.innerHTML = "<div><strong></strong><span></span></div><span></span>";
-            row.querySelector("strong").textContent = source.label;
-            row.querySelector("div span").textContent = source.kind;
-            row.querySelector(":scope > span").textContent = source.id === state.focusedSourceId ? "focus" : "";
+            // Compact single-line chip: status dot + short name + focus tag.
+            // The kind / source detail lives in the tooltip + stage HUD, not always-on.
+            row.title = source.label + " · " + source.kind;
+            row.innerHTML =
+              '<span class="src-dot"></span><span class="src-name"></span><span class="src-focus">focus</span>';
+            row.querySelector(".src-name").textContent = source.label;
             row.addEventListener("click", () => setFocusedSource(source.id));
             sourceList.appendChild(row);
 
