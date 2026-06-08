@@ -42,7 +42,7 @@ export function buildLanOperatorHostVisualPublisherHtml(
     webrtcIceServers,
     source: {
       id: String(options.sourceId || "host-app"),
-      label: String(options.label || "Host app"),
+      label: String(options.label || "App view"),
       kind: String(options.kind || "desktop_app"),
     },
     diagnostic: Boolean(options.diagnostic),

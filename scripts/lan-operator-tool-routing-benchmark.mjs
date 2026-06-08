@@ -174,7 +174,7 @@ function createToolRoutingEngine(command) {
             engineId: this.id,
             turnId,
             responseId,
-            text: "queued the host app-control job",
+            text: "queued the app-control job",
           },
         ],
       };

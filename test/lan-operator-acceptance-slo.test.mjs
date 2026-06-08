@@ -1247,7 +1247,7 @@ test("LAN KWWK action SLO requires real microphone evidence in spoken mode", () 
     },
     output: {
       compactFollowUpDelivered: true,
-      compactFollowUpText: "Done. I verified the host app update.",
+      compactFollowUpText: "Done. I verified the focused app update.",
       compactFollowUpMaxChars: 240,
     },
     timeline: [
@@ -1406,7 +1406,7 @@ test("LAN acceptance SLO scoring requires cold and warm KWWK action timings", ()
     ],
     output: {
       compactFollowUpDelivered: true,
-      compactFollowUpText: "Done. I verified the host app update.",
+      compactFollowUpText: "Done. I verified the focused app update.",
       compactFollowUpMaxChars: 240,
     },
   });

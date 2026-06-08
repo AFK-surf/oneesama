@@ -1107,7 +1107,7 @@ function gateEntries(report) {
       }),
       entry({
         id: "kwwk_app_mutation_verified",
-        label: "KWWK host app mutation verified",
+        label: "KWWK focused app mutation verified",
         unit: "count",
         comparator: "gte",
         actual: mutationVerifiedCount(report),

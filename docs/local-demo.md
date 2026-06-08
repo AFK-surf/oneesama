@@ -146,26 +146,27 @@ formation belongs to the configured Conversation Engine; when enabled, it is
 UI/debug telemetry only. Typed text is also a feedback/debug aid, and the
 primary local voice gates still require Operator Voice Input evidence.
 
-To publish a one-way Host Visual Stream from the host Mac, open
+The operator's main stage is the bot's focused app/system view. In local mode,
+the concrete adapter is the Host Visual Stream: open
 `http://127.0.0.1:18913/host-visual` on the host and click `Share Display`.
-The Local Operator Surface receives the source over WebRTC and composes it into
-the movable operator-side canvas/video track. Raw Host Visual Stream tracks are
-inputs; the Operator Composed Video Track synthesized by the Local Operator
-Surface is the user-side synthesized output for local layout, future sharing,
-recording, or export. Move/resize/focus changes happen in that browser before
-`canvas.captureStream()`, so the host does not need to recapture when the
-operator changes the layout. For an automated diagnostic track that does not
-require display-capture permission, open
+The Local Operator Surface receives the local app view over WebRTC and composes
+it into the movable operator-side canvas/video track. Raw Host Visual Stream
+tracks are inputs; the Operator Composed Video Track synthesized by the Local
+Operator Surface is the user-side synthesized output for local layout, future
+sharing, recording, or export. Move/resize/focus changes happen in that browser
+before `canvas.captureStream()`, so the local source does not need to recapture
+when the operator changes the layout. For an automated diagnostic track that
+does not require display-capture permission, open
 `http://127.0.0.1:18913/host-visual?diagnostic=1`.
 The normal `dev:local-operator` startup opens the avatar renderer automatically.
 For diagnostic/manual checks, the same Host Visual Stream lane is:
 `http://127.0.0.1:18913/host-visual?avatar=1&sourceId=avatar&label=Avatar&kind=avatar&avatarPreset=fallback-canvas`.
 For fallback/debug-only evidence, the older diagnostic avatar canvas can still
 be opened with `diagnostic=1&sourceId=avatar&label=Avatar&kind=avatar`.
-The local Host Visual Stream acceptance gate opens both host-app and avatar
-publishers, moves/resizes the avatar source in the operator browser, emits a
-KWWK overlay, and requires both WebRTC tracks plus the local Operator Composed
-Video Track to stay live. The avatar source must report
+The local Host Visual Stream acceptance gate opens both app-view (`host-app`
+source id) and avatar publishers, moves/resizes the avatar source in the
+operator browser, emits a KWWK overlay, and requires both WebRTC tracks plus the
+local Operator Composed Video Track to stay live. The avatar source must report
 `avatarSourceMode:"avatar_renderer"` and a renderer name, so diagnostic avatar
 canvas evidence cannot satisfy Gate 2 by itself. The report records
 `layoutRevision`, `focusedSourceId`, `sourceRects`, `overlayCount`,
@@ -174,8 +175,8 @@ If the publisher's signaling WebSocket drops, the page reconnects and
 renegotiates the current display/canvas stream automatically, so a transient
 local WebSocket hiccup should not require sharing the source again.
 
-To make Host Visual Stream a real display/app-capture gate, use `Share Display`
-for the host-app publisher, then run:
+To make Host Visual Stream a real focused app-view capture gate, use
+`Share Display` for the `host-app` publisher, then run:
 
 ```bash
 vp run acceptance:realtime-local-host-visual-stream:display
@@ -185,7 +186,7 @@ That stricter mode adds `--require-display-capture`, requires
 `visual.hostSourceMode:"display_capture"` plus
 `visual.hostCaptureStatus:"live"`, and writes
 `/tmp/oneesama-realtime-local-host-visual-stream-display-latest.json`. A
-diagnostic host-app canvas or failed screen-share permission prompt cannot
+diagnostic `host-app` canvas or failed screen-share permission prompt cannot
 satisfy this stricter gate. Capture attempts, status, and errors are copied into
 the Debug Panel and report as `captureStatus`, `captureError`, and
 `captureAttemptCount`.
@@ -588,7 +589,7 @@ MAB_KWWK_APP_CONTROL_COMMAND="node --import tsx packages/core/src/meeting/app-co
 
 The bundled helper compiles a small Swift stdio JSON-RPC binary into the system temp directory. It supports `list_apps`, `list_windows`, `state`, `click`, `type`/`type_text`, `press_key`, `scroll`, `drag`, and `app_control.control_shared_app_window`. `state` accepts `includeScreenshot:true` and writes a PNG to `screenshotOutput` or a temp path, returning the path and dimensions instead of inlining image bytes. For normal user goals, send `instruction` and omit `operations`; the foreground Realtime model should not invent click/drag primitives or ask the user to provide them. Use `operations` only for debug, harnesses, or direct-adapter tests where the caller already has exact safe primitives. When the screen-share path knows `windowId` or `processId`, Meeting Agent forwards that stable target so the executor/helper can control the shared app/window without guessing by app name. The helper needs macOS Accessibility permission for input events.
 
-Host app-control live smokes are opt-in because they inspect or mutate the local GUI:
+Local app-control live smokes are opt-in because they inspect or mutate the local GUI:
 
 ```bash
 MAB_RUN_KWWK_APP_CONTROL_LIVE_SMOKE=1 \
@@ -608,7 +609,7 @@ MAB_RUN_REALTIME_LIVE_ROUTING=1 vp run smoke:realtime-live-routing
 
 This smoke uses real OpenAI Realtime but dry-runs local tools. It proves routing, queued/running turn policy, and argument shape, not visible Pencil mutation.
 
-Final app-control acceptance still needs a real-room manual smoke because it crosses Google Meet admission, native app sharing, Realtime speech input, and host app mutation:
+Final app-control acceptance still needs a real-room manual smoke because it crosses Google Meet admission, native app sharing, Realtime speech input, and local app mutation:
 
 1. Open Pencil to a disposable `.pen` file and keep the canvas visible.
 2. Start the Meeting Agent with the KWWK app-control env above and a real OpenAI Realtime key.

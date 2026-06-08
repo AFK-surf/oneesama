@@ -73,7 +73,7 @@ test("Host Visual Publisher reports display-capture permission failures", async 
     });
     const publisherUrl = new URL("/host-visual", url);
     publisherUrl.searchParams.set("sourceId", "host-app");
-    publisherUrl.searchParams.set("label", "Host app");
+    publisherUrl.searchParams.set("label", "App view");
     publisherUrl.searchParams.set("kind", "desktop_app");
     await publisherPage.goto(publisherUrl.toString());
     await publisherPage.waitForFunction(

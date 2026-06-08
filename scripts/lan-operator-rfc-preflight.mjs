@@ -79,7 +79,7 @@ function command(label, value, where = "repo") {
 function recipe() {
   return [
     command("Start host LAN surface", "vp run dev:lan-operator -- --host 0.0.0.0", "host_mac"),
-    command("Open host app publisher", "open http://<host-lan-ip>:18913/host-visual", "host_mac"),
+    command("Open app-view publisher", "open http://<host-lan-ip>:18913/host-visual", "host_mac"),
     command(
       "Open avatar publisher",
       "open 'http://<host-lan-ip>:18913/host-visual?avatar=1&sourceId=avatar&label=Avatar&kind=avatar'",

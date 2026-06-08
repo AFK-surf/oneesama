@@ -1480,7 +1480,7 @@ export function createLanOperatorSurfaceServer(
           res,
           buildLanOperatorHostVisualPublisherHtml(config, {
             sourceId: url.searchParams.get("sourceId") || "host-app",
-            label: url.searchParams.get("label") || "Host app",
+            label: url.searchParams.get("label") || "App view",
             kind: url.searchParams.get("kind") || "desktop_app",
             diagnostic: url.searchParams.get("diagnostic") === "1",
             avatar: url.searchParams.get("avatar") === "1",

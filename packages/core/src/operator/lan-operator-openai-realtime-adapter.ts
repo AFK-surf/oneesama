@@ -624,7 +624,7 @@ function defaultSessionUpdate(
       type: "realtime",
       instructions:
         options.instructions ||
-        "You are Oneesama's realtime Local Operator Surface conversation engine. Respond concisely and use tools when the user asks you to control the host app.",
+        "You are Oneesama's realtime Local Operator Surface conversation engine. Respond concisely and use tools when the user asks you to control the focused app/system view.",
       ...session,
     },
   };

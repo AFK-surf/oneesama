@@ -581,7 +581,7 @@ function createToolRoutingEngine(args) {
       const ts = new Date().toISOString();
       const followUpText =
         String(input.status || "") === "completed"
-          ? "Done. I verified the host app update."
+          ? "Done. I verified the focused app update."
           : `I stopped at ${String(input.status || "unknown")}.`;
       return {
         result: { ok: true, engineId: this.id, accepted: true, inputMode: "tool_result" },

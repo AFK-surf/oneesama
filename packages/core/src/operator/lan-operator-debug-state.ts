@@ -502,7 +502,7 @@ export function defaultDebugState(): DebugState {
       hostPublisherConnections: 0,
       trackCount: 0,
       sources: [
-        { id: "host-app", label: "Host app", kind: "desktop_app", state: "synthetic" },
+        { id: "host-app", label: "App view", kind: "desktop_app", state: "synthetic" },
         { id: "avatar", label: "Avatar", kind: "avatar", state: "synthetic" },
       ],
       composition: {

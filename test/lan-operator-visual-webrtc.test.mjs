@@ -55,7 +55,7 @@ test("LAN operator receives Host Visual Stream over WebRTC and composes the trac
       );
       return publisherPage;
     }
-    await openPublisher("host-app", "Host app", "desktop_app");
+    await openPublisher("host-app", "App view", "desktop_app");
     const avatarPublisher = await openPublisher("avatar", "Avatar", "avatar", { avatar: true });
 
     const body = await waitForRuntimeStatus(
@@ -237,7 +237,7 @@ test("LAN operator records Host Visual source metrics from receiver video frames
     const publisherUrl = new URL("/host-visual", url);
     publisherUrl.searchParams.set("diagnostic", "1");
     publisherUrl.searchParams.set("sourceId", "host-app");
-    publisherUrl.searchParams.set("label", "Host app");
+    publisherUrl.searchParams.set("label", "App view");
     publisherUrl.searchParams.set("kind", "desktop_app");
     await publisherPage.goto(publisherUrl.toString());
     await publisherPage.waitForFunction(
@@ -315,7 +315,7 @@ test("Host Visual publishers republish when the operator receiver joins late", a
     }
 
     await Promise.all([
-      openPublisher("host-app", "Host app", "desktop_app"),
+      openPublisher("host-app", "App view", "desktop_app"),
       openPublisher("avatar", "Avatar", "avatar", { avatar: true }),
     ]);
 
@@ -383,7 +383,7 @@ test("LAN operator restores Host Visual Stream after publisher signaling reconne
     const publisherUrl = new URL("/host-visual", url);
     publisherUrl.searchParams.set("diagnostic", "1");
     publisherUrl.searchParams.set("sourceId", "host-app");
-    publisherUrl.searchParams.set("label", "Host app");
+    publisherUrl.searchParams.set("label", "App view");
     publisherUrl.searchParams.set("kind", "desktop_app");
     await publisherPage.goto(publisherUrl.toString());
     await publisherPage.waitForFunction(

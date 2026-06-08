@@ -787,7 +787,7 @@ async function run() {
     let publisherEvidence = null;
     if (!useExternalSurface) {
       const [hostPublisherPage, avatarPublisherPage] = await Promise.all([
-        openPublisher("host-app", "Host app", "desktop_app", {
+        openPublisher("host-app", "App view", "desktop_app", {
           displayCapture: args.requireDisplayCapture,
         }),
         openPublisher("avatar", "Avatar", "avatar", { avatar: true }),
