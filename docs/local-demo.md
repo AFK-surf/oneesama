@@ -99,12 +99,16 @@ publisher from the control dock. `fallback-canvas` is the deterministic default;
 `oneesama-video` uses the muted two-state video avatar; `hiyori-live2d` may fall
 back visibly if local Live2D/WebGL/dependency conditions are unavailable.
 
-By default the Local Operator Surface is key-aware: if `MAB_OPENAI_API_KEY` or
-`OPENAI_API_KEY` is configured, `dev:local-operator` selects
-`openai_realtime`; without a key it starts the Diagnostic Conversation Engine
-and marks the fallback as `openai_realtime_api_key_missing` in startup JSON,
-runtime status, and Debug Reports. To force a specific replaceable Conversation
-Engine transport, set `MAB_LAN_OPERATOR_TRANSPORT` explicitly:
+By default the Local Operator Surface selects live OpenAI Realtime. The key is
+backend-only: `dev:local-operator` first loads local backend live-env files from
+`~/.config/oneesama/live-env` (or `ONEESAMA_LIVE_DEFAULT_ENV_DIR`), then accepts
+`ONEESAMA_OPENAI_API_KEY`, `MAB_OPENAI_API_KEY`, or `OPENAI_API_KEY`. The browser
+only sees transport/engine status, never the key. If no backend key is available,
+startup JSON, runtime status, and Debug Reports keep
+`openai_realtime_api_key_missing` as the backend blocker instead of silently
+turning the product path into a mock session. To force the local Diagnostic
+Conversation Engine for tests or diagnostics, set `MAB_LAN_OPERATOR_TRANSPORT`
+explicitly:
 
 ```bash
 MAB_LAN_OPERATOR_TRANSPORT=openai_realtime \
@@ -115,10 +119,11 @@ vp run dev:local-operator
 
 The local live transport uses the GA Realtime WebSocket endpoint and forwards
 operator PCM chunks as `input_audio_buffer.append`. It does not use the removed
-`OpenAI-Beta: realtime=v1` header. `OPENAI_API_KEY` is accepted when
-`MAB_OPENAI_API_KEY` is not set. For deterministic local gate runs without a
-provider, set `MAB_LAN_OPERATOR_TRANSPORT=mock` or use the gate scripts, which
-construct the Diagnostic Conversation Engine explicitly.
+`OpenAI-Beta: realtime=v1` header. `ONEESAMA_OPENAI_API_KEY` is preferred when
+present, with `MAB_OPENAI_API_KEY` and `OPENAI_API_KEY` accepted as fallbacks.
+For deterministic local gate runs without a provider, set
+`MAB_LAN_OPERATOR_TRANSPORT=mock` or use the gate scripts, which construct the
+Diagnostic Conversation Engine explicitly.
 
 To collect a strict live-provider evidence report from the Local Operator
 Surface, run:
