@@ -105,6 +105,7 @@ test("LAN operator CU Cursor button drives the pointer fixture", async () => {
       timeout: 10_000,
     });
 
+    await page.click("#diagnostic-controls > summary");
     await page.click("#cu-cursor-button");
     // The animated fixture steps over time; wait until the trail has accumulated.
     await page.waitForFunction(

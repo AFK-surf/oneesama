@@ -477,23 +477,18 @@ function resultFromTransportOutput(
 }
 
 function rawControlEvent(command: ConversationEngineControlCommand): OpenAIRealtimeRawEvent {
-  if (command.type === "connect")
-    return { type: "session.connect", reason: command.reason || "operator_connect" };
-  if (command.type === "disconnect")
-    return { type: "session.disconnect", reason: command.reason || "operator_disconnect" };
+  if (command.type === "connect") return { type: "session.connect" };
+  if (command.type === "disconnect") return { type: "session.disconnect" };
   if (command.type === "drain_events") return { type: "session.drain_events" };
   if (command.type === "cancel_response") {
     return {
       type: "response.cancel",
       response_id: command.responseId,
-      reason: command.reason || "operator_cancelled",
     };
   }
   if (command.type === "clear_audio_buffer") return { type: "input_audio_buffer.clear" };
-  if (command.type === "reset_session") {
-    return { type: "session.reset", reason: command.reason || "operator_reset" };
-  }
-  return { type: "session.reconnect", reason: command.reason || "operator_reconnect" };
+  if (command.type === "reset_session") return { type: "session.reset" };
+  return { type: "session.reconnect" };
 }
 
 function defaultRealtimeApiKey() {
@@ -678,12 +673,23 @@ function attachSocketListener(
   socket.addEventListener?.(event, handler, once ? { once: true } : undefined);
 }
 
+function stripOpenAIRealtimeClientEventInternalFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripOpenAIRealtimeClientEventInternalFields);
+  if (!value || typeof value !== "object") return value;
+  const output: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "reason") continue;
+    output[key] = stripOpenAIRealtimeClientEventInternalFields(entry);
+  }
+  return output;
+}
+
 function sendRealtimeJson(
   socket: OpenAIRealtimeWebSocketLike | null,
   event: OpenAIRealtimeRawEvent,
 ) {
   if (!isOpenSocket(socket) || typeof socket?.send !== "function") return false;
-  socket.send(JSON.stringify(event));
+  socket.send(JSON.stringify(stripOpenAIRealtimeClientEventInternalFields(event)));
   return true;
 }
 

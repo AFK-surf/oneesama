@@ -22,6 +22,9 @@ const DEFAULT_TEXT =
 const DEFAULT_MODEL = "gpt-realtime-2";
 
 function defaultApiKey() {
+  if (process.env.ONEESAMA_OPENAI_API_KEY) {
+    return { value: process.env.ONEESAMA_OPENAI_API_KEY, source: "ONEESAMA_OPENAI_API_KEY" };
+  }
   if (process.env.MAB_OPENAI_API_KEY) {
     return { value: process.env.MAB_OPENAI_API_KEY, source: "MAB_OPENAI_API_KEY" };
   }

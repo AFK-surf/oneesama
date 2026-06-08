@@ -265,7 +265,7 @@ test("LAN operator surface sends typed debug text through the Conversation Engin
     assert.equal(turn.status, "completed");
     assert.equal(panel.input, true);
     assert.equal(panel.sendButton, true);
-    assert.match(panel.modeStatus, /diagnostic typed_text_test_engine/);
+    assert.match(panel.modeStatus, /Diagnostic typed_text_test_engine/);
     assert.equal(panel.connectHidden, true);
     assert.ok(
       body.recentEvents.some((event) => event.event === "operator_text_input_completed"),
@@ -338,7 +338,7 @@ test("LAN operator web app exposes live Realtime text connect without browser ke
       disabled: document.getElementById("operator-realtime-connect-button")?.disabled ?? null,
       button: document.getElementById("operator-realtime-connect-button")?.textContent || "",
     }));
-    assert.match(before.status, /live openai_realtime_ui_test (ready|connected)/);
+    assert.match(before.status, /Realtime (ready|connected)/);
     assert.match(before.title, /OpenAI Realtime engine: openai_realtime_ui_test/);
     assert.equal(before.hidden, false);
     assert.equal(before.disabled, false);
@@ -354,7 +354,7 @@ test("LAN operator web app exposes live Realtime text connect without browser ke
         const status = document.getElementById("operator-realtime-mode-status")?.textContent || "";
         const button =
           document.getElementById("operator-realtime-connect-button")?.textContent || "";
-        return /live openai_realtime_ui_test connected/.test(status) && button === "Reconnect"
+        return /Realtime connected/.test(status) && button === "Reconnect"
           ? { status, button }
           : false;
       },

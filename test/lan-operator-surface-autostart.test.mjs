@@ -7,7 +7,7 @@ import {
   parseLanOperatorSurfaceAutostartConfig,
 } from "../packages/core/src/operator/lan-operator-surface-autostart.ts";
 
-test("LAN operator autostart defaults to the real operator UI plus avatar publisher", () => {
+test("LAN operator autostart defaults to one operator UI with embedded avatar publisher", () => {
   const config = parseLanOperatorSurfaceAutostartConfig([], {});
   const urls = buildLanOperatorSurfaceAutostartUrls("http://127.0.0.1:18913", config);
 
@@ -17,15 +17,12 @@ test("LAN operator autostart defaults to the real operator UI plus avatar publis
   assert.equal(config.avatarPreset, "fallback-canvas");
   assert.deepEqual(
     urls.map((entry) => entry.kind),
-    ["operator", "avatar_publisher"],
+    ["operator"],
   );
-  assert.equal(new URL(urls[0].url).pathname, "/operator");
-  const avatarUrl = new URL(urls[1].url);
-  assert.equal(avatarUrl.pathname, "/host-visual");
-  assert.equal(avatarUrl.searchParams.get("avatar"), "1");
-  assert.equal(avatarUrl.searchParams.get("sourceId"), "avatar");
-  assert.equal(avatarUrl.searchParams.get("kind"), "avatar");
-  assert.equal(avatarUrl.searchParams.get("avatarPreset"), "fallback-canvas");
+  const operatorUrl = new URL(urls[0].url);
+  assert.equal(operatorUrl.pathname, "/operator");
+  assert.equal(operatorUrl.searchParams.get("autoAvatarPublisher"), "1");
+  assert.equal(operatorUrl.searchParams.get("avatarPreset"), "fallback-canvas");
 });
 
 test("LAN operator autostart can be disabled or configured for tests", () => {
@@ -50,13 +47,13 @@ test("LAN operator autostart can be disabled or configured for tests", () => {
   );
   const urls = buildLanOperatorSurfaceAutostartUrls("http://127.0.0.1:18913", videoConfig);
   assert.equal(videoConfig.avatarPreset, "oneesama-video");
-  assert.equal(new URL(urls[1].url).searchParams.get("avatarPreset"), "oneesama-video");
+  assert.equal(new URL(urls[0].url).searchParams.get("avatarPreset"), "oneesama-video");
 });
 
 test("LAN operator autostart launcher uses native open commands without blocking", () => {
   const calls = [];
   const launches = launchLanOperatorSurfaceAutostartUrls(
-    [{ kind: "avatar_publisher", url: "http://127.0.0.1:18913/host-visual?avatar=1" }],
+    [{ kind: "operator", url: "http://127.0.0.1:18913/operator?autoAvatarPublisher=1" }],
     {
       platform: "darwin",
       spawnImpl: (command, args, options) => {
@@ -68,7 +65,7 @@ test("LAN operator autostart launcher uses native open commands without blocking
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, "open");
-  assert.deepEqual(calls[0].args, ["http://127.0.0.1:18913/host-visual?avatar=1"]);
+  assert.deepEqual(calls[0].args, ["http://127.0.0.1:18913/operator?autoAvatarPublisher=1"]);
   assert.equal(calls[0].options.detached, true);
   assert.equal(calls[0].options.stdio, "ignore");
   assert.equal(launches[0].launched, true);

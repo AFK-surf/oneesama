@@ -206,6 +206,14 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       .dock-grow { flex: 1 1 240px; min-width: 200px; }
       .dock-grow form, .dock-grow [data-operator-text-input] { display: flex; flex: 1; gap: 6px; }
       .dock-grow #operator-text-input { flex: 1; min-width: 0; max-width: none; }
+      .diagnostic-menu { display: flex; align-items: center; gap: 6px; }
+      .diagnostic-menu[open] { flex: 1 1 100%; flex-wrap: wrap; padding-top: 2px; }
+      .diagnostic-menu > summary { list-style: none; }
+      .diagnostic-menu > summary::-webkit-details-marker { display: none; }
+      .diagnostic-popover {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+        min-width: 0;
+      }
 
       /* ----- debug panel ----- */
       .debug-shell { display: flex; flex-direction: column; }
@@ -357,6 +365,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
               <select class="voice-device" id="voice-device-select" aria-label="Microphone">
                 <option value="">Default mic</option>
               </select>
+              <button class="btn" id="refresh-voice-devices-button" type="button" title="Refresh microphone list">Refresh</button>
               <button class="btn primary" id="voice-button" type="button">Arm</button>
               <button class="btn" id="voice-mute-button" type="button">Mute</button>
               <button class="btn" id="voice-ptt-button" type="button" title="Diagnostic push-to-talk">PTT</button>
@@ -375,9 +384,8 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             </div>
           </div>
           <div class="control-dock">
-            <div class="dock-group">
-              <span class="dock-label">Devices</span>
-              <button class="btn" id="refresh-voice-devices-button" type="button">Refresh</button>
+            <div class="dock-group dock-grow" id="operator-input-dock">
+              <span class="dock-label">Text</span>
             </div>
             <div class="dock-group">
               <span class="dock-label">Avatar</span>
@@ -386,25 +394,26 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
                 <option value="oneesama-video">Video</option>
                 <option value="hiyori-live2d">Hiyori</option>
               </select>
-              <button class="btn primary" id="open-avatar-publisher-button" type="button">Open Avatar</button>
-              <button class="btn" id="close-avatar-publisher-button" type="button">Close Avatar</button>
+              <button class="btn primary" id="open-avatar-publisher-button" type="button" title="Start or switch the embedded avatar publisher">Open Avatar</button>
+              <button class="btn" id="close-avatar-publisher-button" type="button" title="Stop the embedded avatar publisher">Close Avatar</button>
               <span class="dock-status" id="avatar-publisher-status">not open</span>
             </div>
             <div class="dock-group">
-              <span class="dock-label">Session</span>
-              <button class="btn" id="overlay-button" type="button">Ping Overlay</button>
-              <button class="btn" id="cu-cursor-button" type="button">CU Cursor</button>
-              <button class="btn" id="cancel-response-button" type="button">Cancel</button>
-              <button class="btn" id="cancel-tool-button" type="button">Cancel Tool</button>
-              <button class="btn" id="clear-audio-button" type="button">Clear Audio</button>
-              <button class="btn" id="reset-session-button" type="button">Reset</button>
+              <span class="dock-label">Debug</span>
+              <button class="btn" id="open-debug-panel-button" type="button" title="Open the Realtime telemetry tab in the debug panel">Debug panel</button>
             </div>
             <div class="dock-group">
-              <span class="dock-label">Debug</span>
-              <button class="btn" id="open-debug-panel-button" type="button">Telemetry</button>
-            </div>
-            <div class="dock-group dock-grow" id="operator-input-dock">
-              <span class="dock-label">Input</span>
+              <details class="diagnostic-menu" id="diagnostic-controls">
+                <summary class="btn" title="Show advanced diagnostic and reset controls">Diagnostics</summary>
+                <div class="diagnostic-popover" role="group" aria-label="Diagnostic controls">
+                  <button class="btn" id="overlay-button" type="button" title="Send a visual overlay ping to the app view">Ping Overlay</button>
+                  <button class="btn" id="cu-cursor-button" type="button" title="Run the cursor-rendering diagnostic fixture">CU Cursor</button>
+                  <button class="btn" id="cancel-response-button" type="button" title="Cancel the current assistant reply">Cancel Reply</button>
+                  <button class="btn" id="cancel-tool-button" type="button" title="Cancel the active tool or KWWK job">Cancel Tool</button>
+                  <button class="btn" id="clear-audio-button" type="button" title="Clear the pending Realtime audio buffer">Clear Audio</button>
+                  <button class="btn" id="reset-session-button" type="button" title="Reset the current Realtime session">Reset Session</button>
+                </div>
+              </details>
             </div>
           </div>
         </section>
@@ -570,6 +579,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
     <script>
       (() => {
         const boot = ${boot};
+        const bootParams = new URLSearchParams(location.search);
         const canvas = document.getElementById("composition");
         const ctx = canvas.getContext("2d");
         const [readyDot, voiceLabel, visualLabel, voiceWsNode, transportStateNode, voiceChunksNode, visualTracksNode, compositionNode, layoutRevisionNode, overlayCountNode, kwwkJobNode, toolRoutingNode, assistantTextNode, outputAudioNode, engineControlNode, artifactNode, timelineNode, debugShell, debugJson, debugFilterInput, debugFilterClearButton, debugFilterState, debugTimelineCount, debugTransportSummary, debugTransportTable, debugVoiceSummary, debugVoiceTable, debugTimelineTable, debugTurnCount, debugTurnTable, debugTurnTimelineSummary, debugTurnTimelineTable, debugConversationSummary, debugConversationTable, debugPortSummary, debugPortTable, debugProviderDrilldownSummary, debugProviderDrilldownTable, debugToolRoutingSummary, debugToolRoutingTable, debugKwwkSummary, debugKwwkTable, debugVisualSummary, debugCompositionTable, debugVisualSourceTable, debugArtifactSummary, debugArtifactTable, sourceTabs] = ["ready-dot", "voice-label", "visual-label", "voice-ws", "transport-state", "voice-chunks", "visual-tracks", "composition-state", "layout-revision", "overlay-count", "kwwk-job-state", "tool-routing-state", "assistant-text-state", "output-audio-state", "engine-control-state", "artifact-state", "timeline-state", "debug-panel", "debug-json", "debug-filter-input", "debug-filter-clear-button", "debug-filter-state", "debug-timeline-count", "debug-transport-summary", "debug-transport-table", "debug-voice-summary", "debug-voice-table", "debug-timeline-table", "debug-turn-count", "debug-turn-table", "debug-turn-timeline-summary", "debug-turn-timeline-table", "debug-conversation-summary", "debug-conversation-table", "debug-port-summary", "debug-port-table", "debug-provider-drilldown-summary", "debug-provider-drilldown-table", "debug-tool-routing-summary", "debug-tool-routing-table", "debug-kwwk-summary", "debug-kwwk-table", "debug-visual-summary", "debug-composition-table", "debug-visual-source-table", "debug-artifact-summary", "debug-artifact-table", "source-tabs"].map((id) => document.getElementById(id));
@@ -657,7 +667,8 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           sources: boot.sources,
           visual: { transport: "webrtc", connectionState: "not_connected", iceConnectionState: null, peerConnectionState: null, signalingState: null, receiverWebSocketState: "closed", hostPublisherConnections: 0, trackCount: 0 },
           publishers: {
-            avatarPreset: "fallback-canvas",
+            autoAvatarPublisher: bootParams.get("autoAvatarPublisher") === "1",
+            avatarPreset: bootParams.get("avatarPreset") || "fallback-canvas",
             avatarWindowOpen: false,
             lastAvatarPublisherUrl: null,
             status: "not_open",
@@ -682,7 +693,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         let drag = null;
         let voiceCapture = null;
         let outputClient = null;
-        let visualReceiver = null, voiceControls = null, textInputClient = null, artifactClient = null, compositionHeartbeat = null, avatarPublisherWindow = null;
+        let visualReceiver = null, voiceControls = null, textInputClient = null, artifactClient = null, compositionHeartbeat = null, avatarPublisherFrame = null;
         function clamp(value, min, max) {
           return Math.min(max, Math.max(min, value));
         }
@@ -1191,6 +1202,26 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           url.searchParams.set("avatarPreset", preset);
           return url.toString();
         }
+        function ensureAvatarPublisherFrame() {
+          if (avatarPublisherFrame && avatarPublisherFrame.isConnected) return avatarPublisherFrame;
+          avatarPublisherFrame = document.createElement("iframe");
+          avatarPublisherFrame.id = "avatar-publisher-frame";
+          avatarPublisherFrame.title = "Embedded avatar publisher";
+          avatarPublisherFrame.setAttribute("aria-hidden", "true");
+          avatarPublisherFrame.allow = "autoplay; camera; microphone; display-capture";
+          Object.assign(avatarPublisherFrame.style, {
+            position: "fixed",
+            width: "1px",
+            height: "1px",
+            left: "-10px",
+            bottom: "-10px",
+            opacity: "0",
+            pointerEvents: "none",
+            border: "0",
+          });
+          document.body.appendChild(avatarPublisherFrame);
+          return avatarPublisherFrame;
+        }
         function setAvatarPublisherStatus(status, text = "") {
           state.publishers.status = String(status || "idle");
           state.publishers.statusText = text || status || "idle";
@@ -1217,8 +1248,16 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           const preset = normalizeAvatarPreset(value);
           state.publishers.avatarPreset = preset;
           if (avatarPublisherRendererSelect) avatarPublisherRendererSelect.value = preset;
-          if (input.reopen && state.publishers.avatarWindowOpen) openAvatarPublisher({ preset });
-          else setAvatarPublisherStatus(state.publishers.status, state.publishers.statusText);
+          if (input.reopen && state.publishers.avatarWindowOpen) {
+            openAvatarPublisher({ preset });
+          } else if (state.publishers.avatarWindowOpen) {
+            setAvatarPublisherStatus(
+              "selected",
+              "selected " + avatarPresetLabel(preset) + " · click Switch",
+            );
+          } else {
+            setAvatarPublisherStatus(state.publishers.status, state.publishers.statusText);
+          }
           return { preset, url: avatarPublisherUrl(preset) };
         }
         function openAvatarPublisher(input = {}) {
@@ -1228,13 +1267,12 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           const url = avatarPublisherUrl(preset);
           state.publishers.lastAvatarPublisherUrl = url;
           try {
-            avatarPublisherWindow = window.open(url, "oneesama-avatar-publisher");
-            state.publishers.avatarWindowOpen = Boolean(avatarPublisherWindow && !avatarPublisherWindow.closed);
+            const frame = ensureAvatarPublisherFrame();
+            if (frame.getAttribute("src") !== url) frame.setAttribute("src", url);
+            state.publishers.avatarWindowOpen = true;
             setAvatarPublisherStatus(
-              state.publishers.avatarWindowOpen ? "open" : "blocked",
-              state.publishers.avatarWindowOpen
-                ? "open · " + avatarPresetLabel(preset)
-                : "popup blocked · " + avatarPresetLabel(preset),
+              "open",
+              "embedded · " + avatarPresetLabel(preset),
             );
           } catch (error) {
             state.publishers.avatarWindowOpen = false;
@@ -1246,7 +1284,10 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         }
         function closeAvatarPublisher() {
           try {
-            if (avatarPublisherWindow && !avatarPublisherWindow.closed) avatarPublisherWindow.close();
+            if (avatarPublisherFrame) {
+              avatarPublisherFrame.remove();
+              avatarPublisherFrame = null;
+            }
           } catch (error) {
             state.errors.push(String(error?.message || error));
           }
@@ -1255,10 +1296,23 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           syncDebug();
           return true;
         }
+        function currentAvatarPublisherPreset() {
+          return normalizeAvatarPreset(state.publishers.avatarPreset);
+        }
         function syncAvatarPublisherStatusFromSource() {
           const avatar = (state.sources || []).find((source) => source.id === "avatar");
           if (!avatar) return;
-          const preset = normalizeAvatarPreset(avatar.avatarPreset || avatar.requestedAvatarPreset || state.publishers.avatarPreset);
+          if (!state.publishers.avatarWindowOpen) return;
+          const sourcePreset = normalizeAvatarPreset(
+            avatar.avatarPreset || avatar.requestedAvatarPreset || state.publishers.avatarPreset,
+          );
+          const requestedPreset = currentAvatarPublisherPreset();
+          if (state.publishers.avatarWindowOpen && sourcePreset !== requestedPreset) {
+            state.publishers.avatarPreset = requestedPreset;
+            if (avatarPublisherRendererSelect) avatarPublisherRendererSelect.value = requestedPreset;
+            return;
+          }
+          const preset = sourcePreset;
           state.publishers.avatarPreset = preset;
           if (avatarPublisherRendererSelect) avatarPublisherRendererSelect.value = preset;
           if (avatar.state === "live" || avatar.captureStatus === "live") {
@@ -1792,7 +1846,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           sendEngineControl("reset_session");
         });
         avatarPublisherRendererSelect?.addEventListener("change", () => {
-          setAvatarPublisherPreset(avatarPublisherRendererSelect.value, { reopen: true });
+          setAvatarPublisherPreset(avatarPublisherRendererSelect.value);
         });
         openAvatarPublisherButton?.addEventListener("click", () => {
           openAvatarPublisher();
@@ -1800,6 +1854,12 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         closeAvatarPublisherButton?.addEventListener("click", () => {
           closeAvatarPublisher();
         });
+        if (avatarPublisherRendererSelect) {
+          avatarPublisherRendererSelect.value = normalizeAvatarPreset(state.publishers.avatarPreset);
+        }
+        if (state.publishers.autoAvatarPublisher) {
+          openAvatarPublisher({ preset: state.publishers.avatarPreset });
+        }
         document.getElementById("open-debug-panel-button").addEventListener("click", openDebugPanel);
         for (const [tabId, , tabName] of DEBUG_TABS) {
           document.getElementById(tabId)?.addEventListener("click", () => setDebugTab(tabName));

@@ -58,6 +58,7 @@ export function buildLanOperatorHostVisualPublisherHtml(
         canvasHeight: 720,
         captureFps: 30,
         enableVisualTestHooks: true,
+        allowIframe: true,
         ...lanOperatorAvatarPresetConfig(avatarPreset.id),
       })
     : "";

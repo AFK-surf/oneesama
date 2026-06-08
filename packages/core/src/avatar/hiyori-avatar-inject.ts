@@ -22,7 +22,8 @@ import {
 } from "./hiyori-avatar-constants.js";
 (() => {
   if (window.__meetingAvatarBotInjected) return;
-  if (window.top !== window) return;
+  const initialConfig = window.MAB_AVATAR_CONFIG || {};
+  if (window.top !== window && !initialConfig.allowIframe) return;
   window.__meetingAvatarBotInjected = true;
   const config = {
     modelUrl: DEFAULT_HIYORI_MODEL_URL,
@@ -50,7 +51,7 @@ import {
     disableLive2D: false,
     deferRendererUntilExplicitStart: false,
     enableVisualTestHooks: false,
-    ...window.MAB_AVATAR_CONFIG,
+    ...initialConfig,
   };
   const log = (...args) => console.log("[meeting-avatar]", ...args);
   function setLive2DParam(core, id, value) {

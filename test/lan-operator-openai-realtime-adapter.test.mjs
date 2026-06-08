@@ -108,6 +108,13 @@ async function waitForRuntimeStatus(url, predicate, timeoutMs = 5_000) {
   throw new Error(`runtime_status_timeout: ${JSON.stringify(lastBody)}`);
 }
 
+function containsKey(value, key) {
+  if (Array.isArray(value)) return value.some((entry) => containsKey(entry, key));
+  if (!value || typeof value !== "object") return false;
+  if (Object.prototype.hasOwnProperty.call(value, key)) return true;
+  return Object.values(value).some((entry) => containsKey(entry, key));
+}
+
 test("OpenAI Realtime mapper emits canonical conversation events without raw event leakage", () => {
   const mapper = createOpenAIRealtimeEventMapper({
     engineId: "openai_realtime_test",
@@ -281,9 +288,11 @@ test("OpenAI Realtime WebSocket transport uses GA wire shape for LAN audio chunk
     drainMs: 0,
     session: {
       instructions: "LAN operator smoke",
+      reason: "internal_session_reason_must_not_reach_provider",
     },
     response: {
       output_modalities: ["text"],
+      reason: "internal_response_reason_must_not_reach_provider",
     },
     webSocketFactory: (url, init) => {
       const socket = new FakeRealtimeWebSocket(url, init);
@@ -308,8 +317,17 @@ test("OpenAI Realtime WebSocket transport uses GA wire shape for LAN audio chunk
     dataBase64: "AAAA",
   });
   const controlOutput = await transport.sendControlEvent(
-    { type: "response.cancel", response_id: "resp_1" },
-    { type: "cancel_response", sessionId: "lan-live-transport-test", responseId: "resp_1" },
+    {
+      type: "response.cancel",
+      response_id: "resp_1",
+      reason: "internal_cancel_reason_must_not_reach_provider",
+    },
+    {
+      type: "cancel_response",
+      sessionId: "lan-live-transport-test",
+      responseId: "resp_1",
+      reason: "operator_cancelled",
+    },
   );
   const textOutput = await transport.sendTextInput({
     id: "text_live_transport",
@@ -350,6 +368,9 @@ test("OpenAI Realtime WebSocket transport uses GA wire shape for LAN audio chunk
   );
   assert.equal(sockets[0].sent[0].session.type, "realtime");
   assert.equal(sockets[0].sent[0].session.instructions, "LAN operator smoke");
+  for (const event of sockets[0].sent) {
+    assert.equal(containsKey(event, "reason"), false, JSON.stringify(event));
+  }
   assert.equal(sockets[0].sent[1].audio, "AAAA");
   assert.equal(sockets[0].sent[3].item.role, "user");
   assert.equal(sockets[0].sent[3].item.content[0].type, "input_text");

@@ -13,7 +13,7 @@ export interface LanOperatorSurfaceAutostartConfig {
 }
 
 export interface LanOperatorSurfaceAutostartUrl {
-  kind: "operator" | "avatar_publisher";
+  kind: "operator";
   url: string;
 }
 
@@ -88,16 +88,12 @@ export function buildLanOperatorSurfaceAutostartUrls(
   if (!config.openBrowser) return [];
   const urls: LanOperatorSurfaceAutostartUrl[] = [];
   if (config.openOperator) {
-    urls.push({ kind: "operator", url: new URL("/operator", baseUrl).toString() });
-  }
-  if (config.autoAvatarPublisher) {
-    const avatarUrl = new URL("/host-visual", baseUrl);
-    avatarUrl.searchParams.set("avatar", "1");
-    avatarUrl.searchParams.set("sourceId", "avatar");
-    avatarUrl.searchParams.set("label", "Avatar");
-    avatarUrl.searchParams.set("kind", "avatar");
-    avatarUrl.searchParams.set("avatarPreset", config.avatarPreset);
-    urls.push({ kind: "avatar_publisher", url: avatarUrl.toString() });
+    const operatorUrl = new URL("/operator", baseUrl);
+    if (config.autoAvatarPublisher) {
+      operatorUrl.searchParams.set("autoAvatarPublisher", "1");
+      operatorUrl.searchParams.set("avatarPreset", config.avatarPreset);
+    }
+    urls.push({ kind: "operator", url: operatorUrl.toString() });
   }
   return urls;
 }

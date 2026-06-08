@@ -12,7 +12,7 @@ export function buildLanOperatorTextInputClientScript() {
     textInput.id = "operator-text-input";
     textInput.className = "voice-device";
     textInput.type = "text";
-    textInput.placeholder = "Type debug input";
+    textInput.placeholder = "Type message to bot";
     textInput.autocomplete = "off";
     const modeStatus = document.createElement("span");
     modeStatus.id = "operator-realtime-mode-status";
@@ -26,7 +26,7 @@ export function buildLanOperatorTextInputClientScript() {
     sendButton.id = "operator-text-send-button";
     sendButton.className = "btn";
     sendButton.type = "submit";
-    sendButton.textContent = "Send Text";
+    sendButton.textContent = "Send";
     form.append(modeStatus, connectButton, textInput, sendButton);
     if (inputDock) {
       inputDock.append(form);
@@ -55,8 +55,8 @@ export function buildLanOperatorTextInputClientScript() {
       const connected = status === "connected";
       modeStatus.className = "dock-status " + (live ? (failed ? "bad" : connected ? "ok" : "warn") : "warn");
       modeStatus.textContent = live
-        ? "live " + engineId + (connected ? " connected" : failed ? " failed" : " ready")
-        : "diagnostic " + engineId;
+        ? "Realtime " + (connected ? "connected" : failed ? "failed" : "ready")
+        : "Diagnostic " + engineId;
       modeStatus.title = live
         ? "Text input will use the server-side OpenAI Realtime engine: " + engineId + "."
         : "Diagnostic text input is using the local engine: " + engineId + ".";
