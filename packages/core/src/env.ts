@@ -16,7 +16,7 @@ export function getRuntimeConfig(env = process.env) {
     "https://api.openai.com/v1"
   ).replace(/\/+$/, "");
   return {
-    openaiApiKey: env.MAB_OPENAI_API_KEY || env.OPENAI_API_KEY || "",
+    openaiApiKey: env.ONEESAMA_OPENAI_API_KEY || env.MAB_OPENAI_API_KEY || env.OPENAI_API_KEY || "",
     openaiBaseUrl,
     openaiRealtimeClientSecretsUrl:
       env.MAB_OPENAI_REALTIME_CLIENT_SECRETS_URL || `${openaiBaseUrl}/realtime/client_secrets`,

@@ -56,10 +56,10 @@ export function buildLanOperatorTextInputClientScript() {
       modeStatus.className = "dock-status " + (live ? (failed ? "bad" : connected ? "ok" : "warn") : "warn");
       modeStatus.textContent = live
         ? "live " + engineId + (connected ? " connected" : failed ? " failed" : " ready")
-        : "mock " + engineId;
+        : "diagnostic " + engineId;
       modeStatus.title = live
         ? "Text input will use the server-side OpenAI Realtime engine: " + engineId + "."
-        : "Text input is using the local diagnostic engine: " + engineId + ".";
+        : "Diagnostic text input is using the local engine: " + engineId + ".";
       connectButton.hidden = !live;
       connectButton.disabled = !live;
       connectButton.textContent = connected ? "Reconnect" : "Connect";

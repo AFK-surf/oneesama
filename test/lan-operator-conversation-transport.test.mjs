@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "vite-plus/test";
 
 import { resolveLanOperatorConversationTransport } from "../packages/core/src/operator/lan-operator-conversation-transport.ts";
@@ -8,6 +11,7 @@ import { createLanOperatorSurfaceServer } from "../packages/core/src/operator/la
 function baseEnv(overrides = {}) {
   return {
     MAB_LAN_OPERATOR_TRANSPORT: "",
+    ONEESAMA_OPENAI_API_KEY: "",
     MAB_OPENAI_API_KEY: "",
     OPENAI_API_KEY: "",
     ...overrides,
@@ -54,7 +58,7 @@ async function readFirstJsonFromCli(env) {
 
 test("LAN operator transport resolver defaults to OpenAI Realtime when an API key exists", () => {
   const selection = resolveLanOperatorConversationTransport(
-    baseEnv({ MAB_OPENAI_API_KEY: "sk-test" }),
+    baseEnv({ MAB_OPENAI_API_KEY: "test-mab-key" }),
   );
 
   assert.equal(selection.transport, "openai_realtime");
@@ -65,9 +69,22 @@ test("LAN operator transport resolver defaults to OpenAI Realtime when an API ke
   assert.equal(selection.diagnosticFallback, false);
 });
 
+test("LAN operator transport resolver accepts the Oneesama backend OpenAI key", () => {
+  const selection = resolveLanOperatorConversationTransport(
+    baseEnv({ ONEESAMA_OPENAI_API_KEY: "test-oneesama-key" }),
+  );
+
+  assert.equal(selection.transport, "openai_realtime");
+  assert.equal(selection.source, "openai_api_key");
+  assert.equal(selection.explicit, false);
+  assert.equal(selection.apiKeyConfigured, true);
+  assert.equal(selection.apiKeySource, "ONEESAMA_OPENAI_API_KEY");
+  assert.equal(selection.diagnosticFallback, false);
+});
+
 test("LAN operator transport resolver keeps an explicit diagnostic transport", () => {
   const selection = resolveLanOperatorConversationTransport(
-    baseEnv({ MAB_LAN_OPERATOR_TRANSPORT: "mock", MAB_OPENAI_API_KEY: "sk-test" }),
+    baseEnv({ MAB_LAN_OPERATOR_TRANSPORT: "mock", MAB_OPENAI_API_KEY: "test-mab-key" }),
   );
 
   assert.equal(selection.transport, "mock");
@@ -77,19 +94,19 @@ test("LAN operator transport resolver keeps an explicit diagnostic transport", (
   assert.equal(selection.diagnosticFallback, false);
 });
 
-test("LAN operator transport resolver marks missing-key diagnostic fallback", () => {
+test("LAN operator transport resolver defaults live and records missing backend key", () => {
   const selection = resolveLanOperatorConversationTransport(baseEnv());
 
-  assert.equal(selection.transport, "mock");
-  assert.equal(selection.source, "diagnostic_missing_openai_key");
+  assert.equal(selection.transport, "openai_realtime");
+  assert.equal(selection.source, "default_openai_realtime");
   assert.equal(selection.apiKeyConfigured, false);
-  assert.equal(selection.diagnosticFallback, true);
+  assert.equal(selection.diagnosticFallback, false);
   assert.equal(selection.fallbackReason, "openai_realtime_api_key_missing");
 });
 
 test("LAN operator surface context includes conversation transport selection evidence", () => {
   const selection = resolveLanOperatorConversationTransport(
-    baseEnv({ OPENAI_API_KEY: "sk-test-openai" }),
+    baseEnv({ OPENAI_API_KEY: "test-openai-key" }),
   );
   const surface = createLanOperatorSurfaceServer({
     host: "127.0.0.1",
@@ -118,7 +135,8 @@ test("LAN operator CLI selects OpenAI Realtime by default when a key is configur
     MAB_LAN_OPERATOR_TRUSTED_LAN: "",
     MAB_LAN_OPERATOR_OPEN_BROWSER: "0",
     MAB_LAN_OPERATOR_TRANSPORT: "",
-    MAB_OPENAI_API_KEY: "sk-cli-test",
+    ONEESAMA_OPENAI_API_KEY: "",
+    MAB_OPENAI_API_KEY: "test-cli-key",
     OPENAI_API_KEY: "",
   });
 
@@ -126,4 +144,84 @@ test("LAN operator CLI selects OpenAI Realtime by default when a key is configur
   assert.equal(startup.conversationTransport, "openai_realtime");
   assert.equal(startup.conversationTransportSelection.source, "openai_api_key");
   assert.equal(startup.conversationTransportSelection.apiKeySource, "MAB_OPENAI_API_KEY");
+});
+
+test("LAN operator CLI loads backend live env before selecting default transport", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "oneesama-live-env-test-"));
+  try {
+    const liveEnvDir = join(tmp, "oneesama", "live-env");
+    await mkdir(liveEnvDir, { recursive: true });
+    const keyName = "ONEESAMA_OPENAI_API_KEY";
+    await writeFile(
+      join(liveEnvDir, "oneesama-openai-live.sh"),
+      `export ${keyName}='test-backend-live-key'\n`,
+    );
+    const startup = await readFirstJsonFromCli({
+      ...process.env,
+      XDG_CONFIG_HOME: tmp,
+      ONEESAMA_LIVE_DEFAULT_ENV_DIR: "",
+      MAB_LAN_OPERATOR_HOST: "127.0.0.1",
+      MAB_LAN_OPERATOR_PORT: "0",
+      MAB_LAN_OPERATOR_ENABLE_TRUSTED_LAN: "",
+      MAB_LAN_OPERATOR_TRUSTED_LAN: "",
+      MAB_LAN_OPERATOR_OPEN_BROWSER: "0",
+      MAB_LAN_OPERATOR_TRANSPORT: "",
+      ONEESAMA_OPENAI_API_KEY: "",
+      MAB_OPENAI_API_KEY: "",
+      OPENAI_API_KEY: "",
+    });
+
+    assert.equal(startup.ok, true);
+    assert.equal(startup.conversationTransport, "openai_realtime");
+    assert.equal(startup.conversationTransportSelection.source, "openai_api_key");
+    assert.equal(startup.conversationTransportSelection.apiKeySource, keyName);
+    assert.deepEqual(startup.backendLiveEnv.keys, [keyName]);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("LAN operator CLI only uses mock when explicitly forced for diagnostics", async () => {
+  const startup = await readFirstJsonFromCli({
+    ...process.env,
+    MAB_LAN_OPERATOR_HOST: "127.0.0.1",
+    MAB_LAN_OPERATOR_PORT: "0",
+    MAB_LAN_OPERATOR_ENABLE_TRUSTED_LAN: "",
+    MAB_LAN_OPERATOR_TRUSTED_LAN: "",
+    MAB_LAN_OPERATOR_OPEN_BROWSER: "0",
+    MAB_LAN_OPERATOR_TRANSPORT: "mock",
+    ONEESAMA_OPENAI_API_KEY: "test-oneesama-key",
+    MAB_OPENAI_API_KEY: "",
+    OPENAI_API_KEY: "",
+  });
+
+  assert.equal(startup.ok, true);
+  assert.equal(startup.conversationTransport, "mock");
+  assert.equal(startup.conversationTransportSelection.source, "explicit_env");
+  assert.equal(startup.conversationTransportSelection.explicit, true);
+  assert.equal(startup.conversationTransportSelection.apiKeySource, "ONEESAMA_OPENAI_API_KEY");
+});
+
+test("LAN operator CLI defaults to live Realtime even before backend key is injected", async () => {
+  const startup = await readFirstJsonFromCli({
+    ...process.env,
+    MAB_LAN_OPERATOR_HOST: "127.0.0.1",
+    MAB_LAN_OPERATOR_PORT: "0",
+    MAB_LAN_OPERATOR_ENABLE_TRUSTED_LAN: "",
+    MAB_LAN_OPERATOR_TRUSTED_LAN: "",
+    MAB_LAN_OPERATOR_OPEN_BROWSER: "0",
+    MAB_LAN_OPERATOR_TRANSPORT: "",
+    ONEESAMA_OPENAI_API_KEY: "",
+    MAB_OPENAI_API_KEY: "",
+    OPENAI_API_KEY: "",
+  });
+
+  assert.equal(startup.ok, true);
+  assert.equal(startup.conversationTransport, "openai_realtime");
+  assert.equal(startup.conversationTransportSelection.source, "default_openai_realtime");
+  assert.equal(startup.conversationTransportSelection.apiKeyConfigured, false);
+  assert.equal(
+    startup.conversationTransportSelection.fallbackReason,
+    "openai_realtime_api_key_missing",
+  );
 });

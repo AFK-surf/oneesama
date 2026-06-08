@@ -497,7 +497,12 @@ function rawControlEvent(command: ConversationEngineControlCommand): OpenAIRealt
 }
 
 function defaultRealtimeApiKey() {
-  return process.env.MAB_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "";
+  return (
+    process.env.ONEESAMA_OPENAI_API_KEY ||
+    process.env.MAB_OPENAI_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    ""
+  );
 }
 
 function defaultRealtimeModel() {

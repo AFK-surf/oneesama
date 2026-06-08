@@ -265,7 +265,7 @@ test("LAN operator surface sends typed debug text through the Conversation Engin
     assert.equal(turn.status, "completed");
     assert.equal(panel.input, true);
     assert.equal(panel.sendButton, true);
-    assert.match(panel.modeStatus, /mock typed_text_test_engine/);
+    assert.match(panel.modeStatus, /diagnostic typed_text_test_engine/);
     assert.equal(panel.connectHidden, true);
     assert.ok(
       body.recentEvents.some((event) => event.event === "operator_text_input_completed"),

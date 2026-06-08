@@ -1,4 +1,5 @@
 import { createLanOperatorSurfaceServer } from "./lan-operator-surface.ts";
+import { loadLanOperatorBackendLiveEnv } from "./lan-operator-backend-live-env.ts";
 import { resolveLanOperatorConversationTransport } from "./lan-operator-conversation-transport.ts";
 import { parseLanOperatorWebrtcIceServers } from "./lan-operator-runtime-config.ts";
 import { decideTrustedLanOperatorMode } from "./lan-operator-trusted-lan.ts";
@@ -28,6 +29,8 @@ Env:
   MAB_LAN_OPERATOR_OPEN_BROWSER=0          Testing/CI: no browser windows
   MAB_LAN_OPERATOR_AUTO_AVATAR_PUBLISHER=0 Testing/CI: no avatar publisher
   MAB_LAN_OPERATOR_AVATAR_PRESET=<preset>  Default avatar publisher preset
+  MAB_LAN_OPERATOR_TRANSPORT=mock          Testing/diagnostics: force local engine
+  ONEESAMA_LIVE_DEFAULT_ENV_DIR=<dir>      Backend live env directory
 `);
 }
 
@@ -59,6 +62,7 @@ if (!trustedLanMode.allowed) {
   process.exit(1);
 }
 
+const backendLiveEnv = loadLanOperatorBackendLiveEnv();
 const conversationTransportSelection = resolveLanOperatorConversationTransport();
 const webrtcIceServers = parseLanOperatorWebrtcIceServers(
   process.env.MAB_LAN_OPERATOR_WEBRTC_ICE_SERVERS,
@@ -93,6 +97,7 @@ console.log(
       surfaceKind: surface.config.surfaceKind,
       conversationTransport: surface.config.conversationTransport,
       conversationTransportSelection,
+      backendLiveEnv,
       localOnlyMode: trustedLanMode.localOnlyMode,
       trustedLanOperatorMode: trustedLanMode.trustedLanOperatorMode,
       lanModeExplicitlyEnabled: trustedLanMode.lanModeExplicitlyEnabled,

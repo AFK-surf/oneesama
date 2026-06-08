@@ -6,7 +6,7 @@ import {
 export type LanOperatorConversationTransportSource =
   | "explicit_env"
   | "openai_api_key"
-  | "diagnostic_missing_openai_key";
+  | "default_openai_realtime";
 
 export interface LanOperatorConversationTransportSelection {
   schema: "oneesama.lan_operator_conversation_transport_selection.v1";
@@ -24,6 +24,7 @@ function trimmed(value: unknown) {
 }
 
 function apiKeySource(env: Record<string, string | undefined>) {
+  if (trimmed(env.ONEESAMA_OPENAI_API_KEY)) return "ONEESAMA_OPENAI_API_KEY";
   if (trimmed(env.MAB_OPENAI_API_KEY)) return "MAB_OPENAI_API_KEY";
   if (trimmed(env.OPENAI_API_KEY)) return "OPENAI_API_KEY";
   return "";
@@ -61,12 +62,12 @@ export function resolveLanOperatorConversationTransport(
   }
   return {
     schema: "oneesama.lan_operator_conversation_transport_selection.v1",
-    transport: "mock",
-    source: "diagnostic_missing_openai_key",
+    transport: "openai_realtime",
+    source: "default_openai_realtime",
     explicit: false,
     apiKeyConfigured: false,
     apiKeySource: "",
-    diagnosticFallback: true,
+    diagnosticFallback: false,
     fallbackReason: "openai_realtime_api_key_missing",
   };
 }
