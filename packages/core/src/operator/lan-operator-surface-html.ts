@@ -1749,6 +1749,54 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           return result;
         }
 
+        function avatarPublisherPreviewVideo() {
+          if (!avatarPublisherFrame || !avatarPublisherFrame.isConnected) return null;
+          try {
+            const preview = avatarPublisherFrame.contentDocument?.getElementById("preview");
+            if (preview && preview.readyState >= 2 && preview.videoWidth > 0 && preview.videoHeight > 0) {
+              return preview;
+            }
+          } catch (err) {}
+          return null;
+        }
+
+        function drawableSourceVideo(source) {
+          const receiverVideo = visualReceiver?.sourceVideo(source.id);
+          if (receiverVideo && receiverVideo.readyState >= 2) {
+            return { video: receiverVideo, mode: "webrtc_receiver" };
+          }
+          if (source.id === "avatar") {
+            const preview = avatarPublisherPreviewVideo();
+            if (preview) return { video: preview, mode: "embedded_avatar_preview" };
+          }
+          return { video: receiverVideo || null, mode: "placeholder" };
+        }
+
+        function drawPlaceholderSource(source, index, x, y, width, height) {
+          const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+          if (source.id === "avatar") {
+            gradient.addColorStop(0, "#0f766e");
+            gradient.addColorStop(1, "#1d4ed8");
+          } else {
+            gradient.addColorStop(0, "#111827");
+            gradient.addColorStop(1, "#334155");
+          }
+          ctx.fillStyle = gradient;
+          ctx.fillRect(x, y, width, height);
+          state.sourceMediaDrawRects[source.id] = {
+            box: { x, y, width, height },
+            draw: null,
+            media: { width: null, height: null },
+            fit: "placeholder",
+          };
+          ctx.fillStyle = "rgba(255,255,255,0.92)";
+          ctx.font = "600 24px system-ui, sans-serif";
+          ctx.fillText(source.label, x + 24, y + 42);
+          ctx.fillStyle = "rgba(255,255,255,0.68)";
+          ctx.font = "15px system-ui, sans-serif";
+          ctx.fillText(source.kind + " source " + String(index + 1), x + 24, y + 70);
+        }
+
         function drawSource(source, index) {
           const rect = state.sourceRects[source.id];
           const x = rect.x * canvas.width;
@@ -1756,33 +1804,16 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           const width = rect.width * canvas.width;
           const height = rect.height * canvas.height;
           const focused = source.id === state.focusedSourceId;
-          const video = visualReceiver?.sourceVideo(source.id);
-          if (video && video.readyState >= 2) {
-            drawContainedVideo(source, video, x, y, width, height);
+          const { video, mode } = drawableSourceVideo(source);
+          if (video && mode !== "placeholder") {
+            drawContainedVideo(source, video, x, y, width, height, mode);
             visualReceiver?.noteSourceRendered(source.id, video);
           } else {
-            const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
-            if (source.id === "avatar") {
-              gradient.addColorStop(0, "#0f766e");
-              gradient.addColorStop(1, "#1d4ed8");
-            } else {
-              gradient.addColorStop(0, "#111827");
-              gradient.addColorStop(1, "#334155");
-            }
-            ctx.fillStyle = gradient;
-            ctx.fillRect(x, y, width, height);
+            drawPlaceholderSource(source, index, x, y, width, height);
           }
           ctx.strokeStyle = focused ? "#93c5fd" : "#64748b";
           ctx.lineWidth = focused ? 4 : 2;
           ctx.strokeRect(x, y, width, height);
-          if (!video || video.readyState < 2) {
-            ctx.fillStyle = "rgba(255,255,255,0.92)";
-            ctx.font = "600 24px system-ui, sans-serif";
-            ctx.fillText(source.label, x + 24, y + 42);
-            ctx.fillStyle = "rgba(255,255,255,0.68)";
-            ctx.font = "15px system-ui, sans-serif";
-            ctx.fillText(source.kind + " source " + String(index + 1), x + 24, y + 70);
-          }
         }
 
         function containedMediaRect(mediaWidth, mediaHeight, x, y, width, height) {
@@ -1815,7 +1846,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           };
         }
 
-        function drawContainedVideo(source, video, x, y, width, height) {
+        function drawContainedVideo(source, video, x, y, width, height, mode = "webrtc_receiver") {
           const mediaWidth = Number(video.videoWidth || 0);
           const mediaHeight = Number(video.videoHeight || 0);
           const draw = containedMediaRect(mediaWidth, mediaHeight, x, y, width, height);
@@ -1827,6 +1858,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             draw: { x: draw.x, y: draw.y, width: draw.width, height: draw.height },
             media: { width: mediaWidth || null, height: mediaHeight || null },
             fit: draw.fit,
+            source: mode,
           };
         }
 

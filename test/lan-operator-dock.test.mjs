@@ -225,6 +225,26 @@ test("LAN operator foreground avatar controls open and switch real publisher pre
       JSON.stringify(openedFrame),
     );
     assert.equal(openedFrame.state.avatarWindowOpen, true, JSON.stringify(openedFrame.state));
+    await page.waitForFunction(
+      () => {
+        const rect = window.MAB_LAN_OPERATOR_SURFACE?.sourceMediaDrawRects?.().avatar;
+        return (
+          rect &&
+          rect.fit !== "placeholder" &&
+          rect.media?.width > 0 &&
+          rect.media?.height > 0 &&
+          ["webrtc_receiver", "embedded_avatar_preview"].includes(rect.source)
+        );
+      },
+      null,
+      { timeout: 12_000 },
+    );
+    const visibleVideo = await page.evaluate(
+      () => window.MAB_LAN_OPERATOR_SURFACE.sourceMediaDrawRects().avatar,
+    );
+    assert.notEqual(visibleVideo.fit, "placeholder", JSON.stringify(visibleVideo));
+    assert.ok(visibleVideo.media.width > 0, JSON.stringify(visibleVideo));
+    assert.ok(visibleVideo.media.height > 0, JSON.stringify(visibleVideo));
 
     await page.selectOption("#avatar-publisher-renderer-select", "hiyori-live2d");
     const selected = await page.evaluate(() => ({
@@ -311,11 +331,15 @@ test("LAN operator embedded avatar publisher autostarts without opening a popup"
         const avatar = window.MAB_LAN_OPERATOR_SURFACE?.state?.sources?.find(
           (source) => source.id === "avatar",
         );
+        const draw = window.MAB_LAN_OPERATOR_SURFACE?.sourceMediaDrawRects?.().avatar;
         return (
           Boolean(document.getElementById("avatar-publisher-frame")) &&
           avatar?.state === "live" &&
           avatar?.captureStatus === "live" &&
-          window.MAB_LAN_OPERATOR_SURFACE?.state?.visual?.trackCount >= 1
+          window.MAB_LAN_OPERATOR_SURFACE?.state?.visual?.trackCount >= 1 &&
+          draw?.fit !== "placeholder" &&
+          draw?.media?.width > 0 &&
+          draw?.media?.height > 0
         );
       },
       null,
@@ -330,6 +354,7 @@ test("LAN operator embedded avatar publisher autostarts without opening a popup"
         frameSrc: document.getElementById("avatar-publisher-frame")?.getAttribute("src"),
         visual: window.MAB_LAN_OPERATOR_SURFACE.state.visual,
         avatar,
+        draw: window.MAB_LAN_OPERATOR_SURFACE.sourceMediaDrawRects().avatar,
       };
     });
     assert.equal(context.pages().length, 1, JSON.stringify(proof));
@@ -342,6 +367,9 @@ test("LAN operator embedded avatar publisher autostarts without opening a popup"
     assert.equal(proof.visual.connectionState, "connected", JSON.stringify(proof.visual));
     assert.ok(proof.visual.trackCount >= 1, JSON.stringify(proof.visual));
     assert.equal(proof.avatar.avatarReady, true, JSON.stringify(proof.avatar));
+    assert.notEqual(proof.draw.fit, "placeholder", JSON.stringify(proof.draw));
+    assert.ok(proof.draw.media.width > 0, JSON.stringify(proof.draw));
+    assert.ok(proof.draw.media.height > 0, JSON.stringify(proof.draw));
   } finally {
     await browser.close();
     await surface.close();
