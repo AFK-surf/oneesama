@@ -1034,6 +1034,38 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           syncDebug();
           return overlay;
         }
+        // Render a REAL cursor event pushed from the server (upstream KWWK action
+        // → server → here), NOT the demo fixture. No echo back to the server.
+        function renderRemoteKwwkCursor(cursor) {
+          cursor = cursor || {};
+          const sourceId = cursor.sourceId || state.focusedSourceId || "host-app";
+          const kind = cursor.kind === "cursor" ? "move" : cursor.kind || "move";
+          const overlay = {
+            id: "overlay_remote_" + Date.now().toString(36),
+            sourceId,
+            kind,
+            x: clamp(Number(cursor.x ?? 0.5), 0, 1),
+            y: clamp(Number(cursor.y ?? 0.5), 0, 1),
+            label: String(cursor.label || "KWWK"),
+            ts: Date.now(),
+            remote: true,
+          };
+          state.overlays.push(overlay);
+          state.overlays = state.overlays.slice(-40);
+          const rect = state.sourceRects[sourceId];
+          const cursorApi = window.MAB_LAN_OPERATOR_KWWK_CURSOR;
+          if (cursorApi) {
+            cursorApi.update({
+              x: rect ? rect.x + overlay.x * rect.width : overlay.x,
+              y: rect ? rect.y + overlay.y * rect.height : overlay.y,
+              kind,
+              label: overlay.label,
+              holdMs: cursor.holdMs,
+            });
+          }
+          syncDebug();
+          return overlay;
+        }
         // Pointer (click/drag) demo fixture — drives a realistic KWWK cursor
         // sequence (approach → click pulse → drag with trail → done) so the
         // Cueboard cursor can be seen/benchmarked on the operator stage.
@@ -1498,6 +1530,10 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           if (payload.type === "canonical_conversation_event" && payload.event) {
             state.canonicalEvents = [...(state.canonicalEvents || []), payload.event].slice(-60);
             outputClient?.handleCanonicalEvent(payload.event);
+          }
+          if (payload.type === "kwwk_cursor" && payload.cursor) {
+            renderRemoteKwwkCursor(payload.cursor);
+            return;
           }
           if (payload.debug?.transport) mergeTransportSnapshot(payload.debug.transport);
           if (payload.debug?.voice) state.voice = { ...state.voice, ...payload.debug.voice };

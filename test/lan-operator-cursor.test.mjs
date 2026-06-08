@@ -46,8 +46,7 @@ test("LAN operator stage renders a Cueboard cursor with rendered-pixel proof", a
       await raf();
       const before = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       window.MAB_LAN_OPERATOR_SURFACE.runKwwkCursorFixture({ animated: false });
-      await raf();
-      await raf();
+      for (let k = 0; k < 5; k += 1) await raf();
       const after = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let changed = 0;
       for (let i = 0; i < before.length; i += 4) {
@@ -122,6 +121,128 @@ test("LAN operator CU Cursor button drives the pointer fixture", async () => {
       () => window.MAB_LAN_OPERATOR_KWWK_CURSOR.snapshot().visible,
     );
     assert.equal(visible, true);
+  } finally {
+    await browser.close();
+    await surface.close();
+  }
+});
+
+// B+C: a REAL cursor event arriving at the server (the seam upstream "A" will
+// use; here simulated via surface.emitKwwkCursor) is pushed over the events
+// websocket and renders on the stage — WITHOUT touching the demo button/fixture.
+// This proves the operator-side real-event channel is wired (renderer fed from
+// the inbound channel) with rendered-pixel proof + server-side evidence count.
+test("LAN operator stage renders a REAL inbound KWWK cursor event (server → stage), not the demo fixture", async () => {
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-cursor-inbound-smoke",
+    botName: "LAN Oneesama",
+  });
+  const { url } = await surface.listen();
+  const browser = await chromium.launch({ headless: true });
+  const consoleErrors = [];
+  try {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
+    page.on("console", (m) => {
+      if (m.type() === "error") consoleErrors.push(m.text());
+    });
+    page.on("pageerror", (e) => consoleErrors.push(String(e)));
+    await page.goto(url);
+    await page.waitForFunction(() => window.MAB_LAN_OPERATOR_SURFACE?.state?.ready === true, null, {
+      timeout: 10_000,
+    });
+    // The events websocket must be open so server broadcasts reach the stage.
+    await page.waitForFunction(
+      () => window.MAB_LAN_OPERATOR_SURFACE?.state?.transport?.events?.state === "open",
+      null,
+      { timeout: 10_000 },
+    );
+
+    // Baseline (cursor-free: no fixture/button has run).
+    await page.evaluate(async () => {
+      const c = document.getElementById("composition");
+      const raf = () => new Promise((r) => requestAnimationFrame(() => r()));
+      await raf();
+      await raf();
+      window.__cursorBefore = c.getContext("2d").getImageData(0, 0, c.width, c.height).data.slice();
+    });
+
+    // Simulate UPSTREAM A: real cursor events land on the server → pushed to stage.
+    const seq = [
+      { x: 0.4, y: 0.38, kind: "move", label: "real approach" },
+      { x: 0.44, y: 0.41, kind: "click", label: "real click" },
+      { x: 0.52, y: 0.48, kind: "drag", label: "real drag" },
+      { x: 0.6, y: 0.55, kind: "drag", label: "real drag" },
+    ];
+    for (const cursor of seq) surface.emitKwwkCursor(cursor);
+
+    // The browser receives the inbound events and renders them.
+    await page.waitForFunction(
+      () => {
+        const art = window.MAB_LAN_OPERATOR_KWWK_CURSOR?.artifact();
+        return (
+          Boolean(art) &&
+          art.events.length >= 4 &&
+          art.events.some((e) => e.kind === "cursor.click") &&
+          art.events.some((e) => e.kind === "cursor.drag")
+        );
+      },
+      null,
+      { timeout: 5_000 },
+    );
+
+    const result = await page.evaluate(async () => {
+      const canvas = document.getElementById("composition");
+      const raf = () => new Promise((r) => requestAnimationFrame(() => r()));
+      for (let k = 0; k < 5; k += 1) await raf();
+      const after = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+      const before = window.__cursorBefore;
+      let changed = 0;
+      for (let i = 0; i < before.length; i += 4) {
+        const delta =
+          Math.abs(after[i] - before[i]) +
+          Math.abs(after[i + 1] - before[i + 1]) +
+          Math.abs(after[i + 2] - before[i + 2]);
+        if (delta > 36) changed += 1;
+      }
+      const art = window.MAB_LAN_OPERATOR_KWWK_CURSOR.artifact();
+      const overlays = window.MAB_LAN_OPERATOR_SURFACE.state.overlays || [];
+      return {
+        renderedRatio: changed / (before.length / 4),
+        trail: art.trail.length,
+        hasClick: art.events.some((e) => e.kind === "cursor.click"),
+        hasDrag: art.events.some((e) => e.kind === "cursor.drag"),
+        remoteOverlays: overlays.filter((o) => o.remote === true).length,
+        nonRemoteOverlays: overlays.filter((o) => o.remote !== true).length,
+        visible: art.latest.visible,
+      };
+    });
+
+    // Rendered-pixel proof: the REAL inbound cursor actually painted on the stage.
+    assert.ok(
+      result.renderedRatio >= 0.0008,
+      `inbound cursor rendered ratio too low: ${JSON.stringify(result)}`,
+    );
+    assert.equal(result.hasClick, true, JSON.stringify(result));
+    assert.equal(result.hasDrag, true, JSON.stringify(result));
+    assert.ok(result.trail >= 2, `inbound drag trail too short: ${JSON.stringify(result)}`);
+    assert.equal(result.visible, true, JSON.stringify(result));
+    // It rendered via the inbound (remote) channel, NOT the demo button/fixture.
+    assert.ok(
+      result.remoteOverlays >= 4,
+      `expected >=4 remote overlays from inbound channel: ${JSON.stringify(result)}`,
+    );
+    assert.equal(result.nonRemoteOverlays, 0, JSON.stringify(result));
+
+    // Server-side real evidence: cursorEventCount incremented through the operator
+    // path (this is the count the tightened acceptance SLO requires).
+    const body = surface.status();
+    assert.ok(
+      Number(body.debug.kwwk.cursorEventCount) >= 4,
+      `server cursorEventCount not incremented: ${body.debug.kwwk.cursorEventCount}`,
+    );
+    assert.deepEqual(consoleErrors, [], consoleErrors.join("\n"));
   } finally {
     await browser.close();
     await surface.close();

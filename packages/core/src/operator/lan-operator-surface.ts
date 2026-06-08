@@ -118,6 +118,13 @@ export interface LanOperatorSurfaceServer {
   listen(): Promise<LanOperatorSurfaceListenResult>;
   close(): Promise<void>;
   status(health?: RuntimeHealth): Record<string, unknown>;
+  /**
+   * Entry point for a real KWWK cursor event (the seam upstream "A" will call,
+   * and tests simulate). Records the cursor as real evidence and broadcasts it
+   * to connected operator browsers so the stage renders the Cueboard cursor from
+   * the real inbound channel — not the demo fixture/button.
+   */
+  emitKwwkCursor(cursor: Record<string, unknown>): Record<string, unknown>;
 }
 
 type WebSocketKind = "events" | "voice" | "visual_operator" | "visual_host";
@@ -904,6 +911,10 @@ export function createLanOperatorSurfaceServer(
       }
       return;
     }
+    if (type === "kwwk_cursor_event") {
+      emitKwwkCursor((payload.cursor || payload) as Record<string, unknown>);
+      return;
+    }
     if (type === "kwwk_job_state") {
       mergeKwwkJobState(debug, (payload.kwwk || payload) as Record<string, unknown>);
       updateSurfaceContext({ kwwkStatus: debug.kwwk.status, kwwkTarget: debug.kwwk.target });
@@ -927,6 +938,33 @@ export function createLanOperatorSurfaceServer(
     recordEvent("realtime", "operator_surface_event", "Operator surface event received", {
       type,
     });
+  }
+
+  function emitKwwkCursor(input: Record<string, unknown> = {}) {
+    const clamp01 = (value: unknown) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : null;
+    };
+    const x = clamp01(input.x);
+    const y = clamp01(input.y);
+    const holdMs = Number(input.holdMs);
+    const cursor: Record<string, unknown> = {
+      x: x ?? 0.5,
+      y: y ?? 0.5,
+      kind: String(input.kind || "move"),
+      label: String(input.label || ""),
+      sourceId: String(input.sourceId || ""),
+      ...(Number.isFinite(holdMs) ? { holdMs } : {}),
+    };
+    // Real cursor evidence — increments the SLO-relevant count via the operator
+    // path (distinct from the demo fixture, which never touches server state).
+    debug.kwwk.cursorEventCount += 1;
+    const envelope = { sessionId: config.sessionId, type: "kwwk_cursor", cursor };
+    for (const client of clients) {
+      if (client.kind === "events") sendWebSocketText(client.socket, envelope);
+    }
+    recordEvent("tool", "kwwk_cursor_event", "KWWK cursor event", { cursor }, "info");
+    return cursor;
   }
 
   async function forwardVoiceChunk(chunk: LanOperatorVoiceChunk) {
@@ -1484,6 +1522,9 @@ export function createLanOperatorSurfaceServer(
     },
     status(nextHealth: RuntimeHealth = health) {
       return runtimeStatusBody(config, events, debug, nextHealth);
+    },
+    emitKwwkCursor(cursor: Record<string, unknown>) {
+      return emitKwwkCursor(cursor);
     },
   };
 }

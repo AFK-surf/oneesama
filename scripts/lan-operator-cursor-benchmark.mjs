@@ -72,8 +72,8 @@ async function main() {
       const before = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       // Drive the pointer fixture (approach → click → drag trail → done).
       window.MAB_LAN_OPERATOR_SURFACE.runKwwkCursorFixture({ animated: false });
-      await raf();
-      await raf();
+      // Wait several frames so the canvas has definitely painted the cursor.
+      for (let k = 0; k < 5; k += 1) await raf();
       const after = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let changed = 0;
       for (let i = 0; i < before.length; i += 4) {
