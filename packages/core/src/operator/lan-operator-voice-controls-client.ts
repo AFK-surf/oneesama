@@ -76,6 +76,7 @@ export function buildLanOperatorVoiceControlsClientScript() {
         }));
       if (state.voiceDeviceId && !state.voiceDevices.some((device) => device.deviceId === state.voiceDeviceId)) {
         state.voiceDeviceId = "";
+        options.persistUserState?.();
       }
       state.voiceCapture = { ...state.voiceCapture, availableDeviceCount: state.voiceDevices.length };
       renderDeviceOptions();
@@ -104,6 +105,7 @@ export function buildLanOperatorVoiceControlsClientScript() {
         localVad: state.voiceLocalVad,
         capture: state.voiceCapture,
       });
+      options.persistUserState?.();
       options.syncDebug?.();
       return state.voiceLocalVad;
     }
@@ -130,6 +132,7 @@ export function buildLanOperatorVoiceControlsClientScript() {
 
     async function changeDevice() {
       state.voiceDeviceId = nodes.deviceSelect.value || "";
+      options.persistUserState?.();
       if (!state.voiceArmed) {
         options.syncDebug?.();
         return;

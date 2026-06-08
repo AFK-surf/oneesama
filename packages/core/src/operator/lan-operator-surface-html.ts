@@ -1016,6 +1016,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           state.focusedSourceId = sourceId;
           state.layoutRevision += 1;
           renderSourceControls();
+          persistUserState();
           emitCompositionState();
           syncDebug();
         }
@@ -1033,6 +1034,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           state.focusedSourceId = sourceId;
           state.layoutRevision += 1;
           renderSourceControls();
+          persistUserState();
           emitCompositionState();
           syncDebug();
           return currentComposition();
@@ -1267,6 +1269,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           } else {
             setAvatarPublisherStatus(state.publishers.status, state.publishers.statusText);
           }
+          persistUserState();
           return { preset, url: avatarPublisherUrl(preset) };
         }
         function openAvatarPublisher(input = {}) {
@@ -1289,6 +1292,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             state.errors.push(String(error?.message || error));
           }
           syncDebug();
+          persistUserState();
           return { preset, url, opened: state.publishers.avatarWindowOpen };
         }
         function closeAvatarPublisher() {
@@ -1303,6 +1307,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           state.publishers.avatarWindowOpen = false;
           setAvatarPublisherStatus("closed", "closed");
           syncDebug();
+          persistUserState();
           return true;
         }
         function currentAvatarPublisherPreset() {
@@ -1465,6 +1470,104 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           setDock(dock);
           restoringLayout = false;
           persistLayout();
+        }
+        const USER_STATE_KEY = "mab.operator.user-state.v1";
+        let restoringUserState = false;
+        function validSourceId(sourceId) {
+          return (state.sources || []).some((source) => source.id === sourceId);
+        }
+        function sanitizeSourceRect(rect) {
+          if (!rect || typeof rect !== "object") return null;
+          const next = {
+            x: clamp(Number(rect.x), 0, 0.95),
+            y: clamp(Number(rect.y), 0, 0.95),
+            width: clamp(Number(rect.width), 0.08, 1),
+            height: clamp(Number(rect.height), 0.08, 1),
+          };
+          next.width = Math.min(next.width, 1 - next.x);
+          next.height = Math.min(next.height, 1 - next.y);
+          return next;
+        }
+        function currentUserState() {
+          const sourceRects = {};
+          for (const source of state.sources || []) {
+            const rect = sanitizeSourceRect(state.sourceRects?.[source.id]);
+            if (rect) sourceRects[source.id] = rect;
+          }
+          return {
+            focusedSourceId: validSourceId(state.focusedSourceId) ? state.focusedSourceId : "host-app",
+            sourceRects,
+            publishers: {
+              avatarPreset: normalizeAvatarPreset(state.publishers.avatarPreset),
+              avatarPublisherOpen: Boolean(state.publishers.avatarWindowOpen),
+            },
+            voice: {
+              deviceId: String(state.voiceDeviceId || ""),
+              localVadEnabled: Boolean(state.localVadEnabled),
+            },
+          };
+        }
+        function persistAvatarQuery(userState) {
+          try {
+            const url = new URL(location.href);
+            url.searchParams.set("avatarPreset", userState.publishers.avatarPreset);
+            url.searchParams.set("autoAvatarPublisher", userState.publishers.avatarPublisherOpen ? "1" : "0");
+            history.replaceState(null, "", url.pathname + url.search + location.hash);
+          } catch (err) {}
+        }
+        function persistUserState() {
+          if (restoringUserState) return;
+          const userState = currentUserState();
+          try {
+            localStorage.setItem(USER_STATE_KEY, JSON.stringify(userState));
+          } catch (err) {}
+          persistAvatarQuery(userState);
+        }
+        function readUserState() {
+          try {
+            const raw = localStorage.getItem(USER_STATE_KEY);
+            if (raw) return JSON.parse(raw);
+          } catch (err) {}
+          return null;
+        }
+        function restoreUserState() {
+          const userState = readUserState();
+          if (!userState || typeof userState !== "object") return;
+          restoringUserState = true;
+          try {
+            if (validSourceId(userState.focusedSourceId)) {
+              state.focusedSourceId = userState.focusedSourceId;
+            }
+            if (userState.sourceRects && typeof userState.sourceRects === "object") {
+              for (const source of state.sources || []) {
+                const rect = sanitizeSourceRect(userState.sourceRects[source.id]);
+                if (rect) state.sourceRects[source.id] = rect;
+              }
+            }
+            const publisherState = userState.publishers || {};
+            if (!bootParams.has("avatarPreset") && publisherState.avatarPreset) {
+              state.publishers.avatarPreset = normalizeAvatarPreset(publisherState.avatarPreset);
+            }
+            if (!bootParams.has("autoAvatarPublisher") && typeof publisherState.avatarPublisherOpen === "boolean") {
+              state.publishers.autoAvatarPublisher = publisherState.avatarPublisherOpen;
+            }
+            const voiceState = userState.voice || {};
+            if (typeof voiceState.deviceId === "string") {
+              state.voiceDeviceId = voiceState.deviceId;
+            }
+            if (typeof voiceState.localVadEnabled === "boolean") {
+              state.localVadEnabled = voiceState.localVadEnabled;
+              state.voiceLocalVad = {
+                ...(state.voiceLocalVad || {}),
+                enabled: state.localVadEnabled,
+                role: state.localVadEnabled ? "telemetry" : "disabled",
+                active: state.localVadEnabled ? Boolean(state.voiceLocalVad?.active) : false,
+                lastUpdatedAt: new Date().toISOString(),
+              };
+            }
+          } finally {
+            restoringUserState = false;
+          }
         }
         function startDockResize(event) {
           if (!dockMain) return;
@@ -1879,6 +1982,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         closeAvatarPublisherButton?.addEventListener("click", () => {
           closeAvatarPublisher();
         });
+        restoreUserState();
         if (avatarPublisherRendererSelect) {
           avatarPublisherRendererSelect.value = normalizeAvatarPreset(state.publishers.avatarPreset);
         }
@@ -1921,7 +2025,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         });
         debugFilterInput.addEventListener("input", () => applyDebugFilter());
         debugFilterClearButton.addEventListener("click", () => { debugFilterInput.value = ""; applyDebugFilter(); });
-        voiceControls = window.MAB_LAN_OPERATOR_VOICE_CONTROLS.create({ state, sendOperatorEvent, syncDebug, startMicrophone, stopMicrophone, setVoiceMuted });
+        voiceControls = window.MAB_LAN_OPERATOR_VOICE_CONTROLS.create({ state, sendOperatorEvent, syncDebug, startMicrophone, stopMicrophone, setVoiceMuted, persistUserState });
         voiceControls.bind();
         textInputClient = window.MAB_LAN_OPERATOR_TEXT_INPUT.create({ state, boot, sendOperatorEvent, sendEngineControl, syncDebug });
         artifactClient = window.MAB_LAN_OPERATOR_ARTIFACTS.create({ state, sendOperatorEvent, syncDebug });

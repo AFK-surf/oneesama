@@ -397,6 +397,116 @@ test("LAN operator layout persists to URL hash + localStorage and restores on re
   }
 });
 
+test("LAN operator user state persists avatar/source/VAD intent without faking live status", async () => {
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-user-state-persist-smoke",
+    botName: "LAN Oneesama",
+  });
+  const { url } = await surface.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
+    await page.goto(url);
+    await waitReady(page);
+
+    await page.evaluate(() =>
+      window.MAB_LAN_OPERATOR_SURFACE.moveSource("avatar", {
+        x: 0.18,
+        y: 0.2,
+        width: 0.33,
+        height: 0.25,
+      }),
+    );
+    await page.selectOption("#avatar-publisher-renderer-select", "oneesama-video");
+    await page.click("#open-avatar-publisher-button");
+    await page.click("#local-vad-toggle");
+    await page.waitForFunction(
+      () =>
+        document
+          .getElementById("avatar-publisher-frame")
+          ?.getAttribute("src")
+          ?.includes("avatarPreset=oneesama-video"),
+      null,
+      { timeout: 8_000 },
+    );
+
+    const persisted = await page.evaluate(() => ({
+      search: location.search,
+      stored: JSON.parse(localStorage.getItem("mab.operator.user-state.v1")),
+    }));
+    assert.match(persisted.search, /avatarPreset=oneesama-video/, JSON.stringify(persisted));
+    assert.match(persisted.search, /autoAvatarPublisher=1/, JSON.stringify(persisted));
+    assert.equal(persisted.stored.focusedSourceId, "avatar", JSON.stringify(persisted.stored));
+    assert.equal(persisted.stored.publishers.avatarPreset, "oneesama-video");
+    assert.equal(persisted.stored.publishers.avatarPublisherOpen, true);
+    assert.equal(persisted.stored.voice.localVadEnabled, true);
+    assert.equal(persisted.stored.sourceRects.avatar.x, 0.18);
+
+    await page.reload();
+    await waitReady(page);
+    await page.waitForFunction(
+      () =>
+        document
+          .getElementById("avatar-publisher-frame")
+          ?.getAttribute("src")
+          ?.includes("avatarPreset=oneesama-video"),
+      null,
+      { timeout: 8_000 },
+    );
+    const restored = await page.evaluate(() => ({
+      focusedSourceId: window.MAB_LAN_OPERATOR_SURFACE.state.focusedSourceId,
+      rect: window.MAB_LAN_OPERATOR_SURFACE.state.sourceRects.avatar,
+      publisher: window.MAB_LAN_OPERATOR_SURFACE.state.publishers,
+      frameSrc: document.getElementById("avatar-publisher-frame")?.getAttribute("src"),
+      vadChecked: document.getElementById("local-vad-toggle")?.checked,
+      localVad: window.MAB_LAN_OPERATOR_SURFACE.state.voiceLocalVad,
+      conversationStatus: window.MAB_LAN_OPERATOR_SURFACE.state.conversation.status,
+      visualTrackCount: window.MAB_LAN_OPERATOR_SURFACE.state.visual.trackCount,
+    }));
+    assert.equal(restored.focusedSourceId, "avatar", JSON.stringify(restored));
+    assert.equal(restored.rect.x, 0.18, JSON.stringify(restored.rect));
+    assert.equal(restored.publisher.avatarPreset, "oneesama-video", JSON.stringify(restored));
+    assert.equal(restored.publisher.avatarWindowOpen, true, JSON.stringify(restored.publisher));
+    assert.equal(
+      new URL(restored.frameSrc, url).searchParams.get("avatarPreset"),
+      "oneesama-video",
+    );
+    assert.equal(restored.vadChecked, true, JSON.stringify(restored));
+    assert.equal(restored.localVad.enabled, true, JSON.stringify(restored.localVad));
+    assert.notEqual(restored.conversationStatus, "connected", JSON.stringify(restored));
+    assert.ok(Number(restored.visualTrackCount) >= 0, JSON.stringify(restored));
+
+    await page.click("#close-avatar-publisher-button");
+    const closed = await page.evaluate(() => ({
+      search: location.search,
+      stored: JSON.parse(localStorage.getItem("mab.operator.user-state.v1")),
+      framePresent: Boolean(document.getElementById("avatar-publisher-frame")),
+    }));
+    assert.match(closed.search, /autoAvatarPublisher=0/, JSON.stringify(closed));
+    assert.equal(closed.stored.publishers.avatarPublisherOpen, false, JSON.stringify(closed));
+    assert.equal(closed.framePresent, false, JSON.stringify(closed));
+
+    await page.reload();
+    await waitReady(page);
+    const restoredClosed = await page.evaluate(() => ({
+      framePresent: Boolean(document.getElementById("avatar-publisher-frame")),
+      publisher: window.MAB_LAN_OPERATOR_SURFACE.state.publishers,
+    }));
+    assert.equal(restoredClosed.framePresent, false, JSON.stringify(restoredClosed));
+    assert.equal(restoredClosed.publisher.avatarWindowOpen, false, JSON.stringify(restoredClosed));
+    assert.equal(
+      restoredClosed.publisher.autoAvatarPublisher,
+      false,
+      JSON.stringify(restoredClosed),
+    );
+  } finally {
+    await browser.close();
+    await surface.close();
+  }
+});
+
 test("LAN operator layout: URL hash wins over localStorage (shareable links)", async () => {
   const surface = createLanOperatorSurfaceServer({
     host: "127.0.0.1",
