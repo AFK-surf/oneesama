@@ -164,6 +164,8 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent);
       }
       .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
+      .btn.danger { border-color: color-mix(in srgb, var(--bad) 55%, transparent); color: #ff9b9b; }
+      .btn.danger:hover { background: color-mix(in srgb, var(--bad) 18%, transparent); border-color: var(--bad); color: #ffd0d0; }
       .btn:disabled { cursor: not-allowed; opacity: 0.45; }
       :is(button, input, select):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
       .voice-device { height: 28px; max-width: 178px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--elevated); color: var(--ink); padding: 0 8px; }
@@ -294,6 +296,13 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       .inspector-next.bad { color: #ff8b8b; background: #3a171d; border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
       .inspector-next b { color: var(--ink); font-weight: 600; }
       .inspector-raw { margin: 0; padding: 8px 9px; border-radius: 6px; background: #0a0a0c; border: 1px solid var(--line); color: #c9c9cf; font-family: var(--mono); font-size: 10px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+      /* ----- realtime composer (lives in the Ledger sidebar, not the bottom toolbar) ----- */
+      .ledger-composer { flex: 0 0 auto; border-top: 1px solid var(--line); background: linear-gradient(180deg, var(--panel-2), var(--surface)); padding: 8px 10px; }
+      .ledger-composer form { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; width: 100%; align-items: center; }
+      .ledger-composer #operator-realtime-mode-status { grid-row: 1; grid-column: 1; justify-self: start; }
+      .ledger-composer #operator-realtime-connect-button { grid-row: 1; grid-column: 2; justify-self: end; }
+      .ledger-composer #operator-text-input { grid-row: 2; grid-column: 1; min-width: 0; width: 100%; }
+      .ledger-composer #operator-text-send-button { grid-row: 2; grid-column: 2; }
       /* ----- telemetry (secondary) ----- */
       .debug-panel-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .debug-tablist { display: inline-flex; gap: 3px; }
@@ -384,9 +393,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             </div>
           </div>
           <div class="control-dock">
-            <div class="dock-group dock-grow" id="operator-input-dock">
-              <span class="dock-label">Text</span>
-            </div>
+            <div class="dock-grow" aria-hidden="true"></div>
             <div class="dock-group">
               <span class="dock-label">Avatar</span>
               <select class="voice-device" id="avatar-publisher-renderer-select" aria-label="Avatar publisher type">
@@ -408,10 +415,10 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
                 <div class="diagnostic-popover" role="group" aria-label="Diagnostic controls">
                   <button class="btn" id="overlay-button" type="button" title="Send a visual overlay ping to the app view">Ping Overlay</button>
                   <button class="btn" id="cu-cursor-button" type="button" title="Run the cursor-rendering diagnostic fixture">CU Cursor</button>
-                  <button class="btn" id="cancel-response-button" type="button" title="Cancel the current assistant reply">Cancel Reply</button>
-                  <button class="btn" id="cancel-tool-button" type="button" title="Cancel the active tool or KWWK job">Cancel Tool</button>
-                  <button class="btn" id="clear-audio-button" type="button" title="Clear the pending Realtime audio buffer">Clear Audio</button>
-                  <button class="btn" id="reset-session-button" type="button" title="Reset the current Realtime session">Reset Session</button>
+                  <button class="btn" id="cancel-response-button" type="button" title="Stop the assistant's current reply (only while it is replying)" disabled>Stop reply</button>
+                  <button class="btn" id="cancel-tool-button" type="button" title="Stop the active tool / KWWK action (only while one is running)" disabled>Stop action</button>
+                  <button class="btn" id="clear-audio-button" type="button" title="Clear the pending Realtime input-audio buffer (rarely needed)">Clear audio</button>
+                  <button class="btn danger" id="reset-session-button" type="button" title="Reset the Realtime session — clears the current conversation and reconnects">Reset session…</button>
                 </div>
               </details>
             </div>
@@ -455,6 +462,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
                 <div class="inspector-next" id="inspector-next" hidden></div>
                 <pre class="inspector-raw" id="inspector-raw"></pre>
               </aside>
+              <div class="ledger-composer" id="operator-composer-dock" role="group" aria-label="Realtime message composer"></div>
             </section>
             <section class="telemetry-wrap tabpanel" id="tabpanel-telemetry" role="tabpanel" aria-labelledby="debug-tab-telemetry" data-tab="telemetry" hidden>
               <div class="telemetry-head">
@@ -896,6 +904,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         }
 
         function syncDebug() {
+          updateContextualControls();
           readyDot.className = "status-dot " + (state.ready ? "ready" : "");
           voiceLabel.textContent = "voice: " + state.voiceWsState;
           visualLabel.textContent = "visual: " + state.visual.connectionState;
@@ -1843,8 +1852,24 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           sendEngineControl("clear_audio_buffer");
         });
         document.getElementById("reset-session-button").addEventListener("click", () => {
+          // Destructive: drops the live conversation/session — confirm first.
+          if (!window.confirm("Reset the Realtime session? This clears the current conversation and reconnects.")) return;
           sendEngineControl("reset_session");
         });
+        // Contextual controls (Stop reply / Stop action) are only meaningful while
+        // the assistant is replying or a tool/KWWK job is running — gate them so the
+        // disabled state communicates "nothing to stop right now".
+        function updateContextualControls() {
+          const replyBtn = document.getElementById("cancel-response-button");
+          const toolBtn = document.getElementById("cancel-tool-button");
+          const replying = Boolean(state.output && state.output.assistantText && state.output.assistantText.currentText);
+          const kwwkStatus = String((state.kwwk && state.kwwk.status) || "");
+          const toolActive =
+            /run|exec|progress|observ|plan|verif|active/i.test(kwwkStatus) ||
+            Boolean(state.conversation && state.conversation.control && state.conversation.control.inFlight > 0);
+          if (replyBtn) replyBtn.disabled = !replying;
+          if (toolBtn) toolBtn.disabled = !toolActive;
+        }
         avatarPublisherRendererSelect?.addEventListener("change", () => {
           setAvatarPublisherPreset(avatarPublisherRendererSelect.value);
         });

@@ -2,7 +2,11 @@ export function buildLanOperatorTextInputClientScript() {
   return `(() => {
   function create(input) {
     const state = input.state;
-    const inputDock = document.getElementById("operator-input-dock");
+    // Prefer the right-side Ledger composer dock (conversation lives there);
+    // fall back to the legacy bottom input dock / toolbar for older surfaces.
+    const inputDock =
+      document.getElementById("operator-composer-dock") ||
+      document.getElementById("operator-input-dock");
     const toolbar = document.querySelector(".stage-toolbar");
     const voiceTools = document.querySelector(".voice-tools");
     const form = document.createElement("form");
