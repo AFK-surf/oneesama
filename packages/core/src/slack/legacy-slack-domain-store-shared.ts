@@ -1,5 +1,12 @@
 import type { Database as DatabaseInstance } from "better-sqlite3";
 
+export function tableCount(db: DatabaseInstance, table: string): number {
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as
+    | { count: number }
+    | undefined;
+  return Number(row?.count || 0);
+}
+
 /**
  * The legacy slack domain store accepts duck-typed payloads from many call
  * sites that historically passed JS objects without schema validation. We give

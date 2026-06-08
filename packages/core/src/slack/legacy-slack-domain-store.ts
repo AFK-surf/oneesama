@@ -15,6 +15,7 @@ import {
   rowJson,
   safeJson,
   slackIdentity,
+  tableCount,
   text,
   type CreateLegacySlackDomainStoreOptions,
   type Row,
@@ -35,12 +36,6 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
   const db = new Database(dbPath, { timeout: 5000 });
   db.pragma("busy_timeout = 5000");
   migrate(db);
-  function tableCount(table: string): number {
-    const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as
-      | { count: number }
-      | undefined;
-    return Number(row?.count || 0);
-  }
   function upsertChannel({ id, name = "", type = "public_channel" }: UpsertChannelInput = {}) {
     const channelId = text(id);
     if (!channelId) return null;
@@ -1177,7 +1172,7 @@ export function createLegacySlackDomainStore({ dbPath }: CreateLegacySlackDomain
       path: dbPath,
       schemaVersion: LEGACY_SLACK_DOMAIN_SCHEMA_VERSION,
       tables: Object.fromEntries(
-        LEGACY_SLACK_DOMAIN_TABLES.map((table) => [table, tableCount(table)]),
+        LEGACY_SLACK_DOMAIN_TABLES.map((table) => [table, tableCount(db, table)]),
       ),
     };
   }

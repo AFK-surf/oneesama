@@ -433,35 +433,37 @@ const participantStreams = [];
 const participantTrackIds = new Set();
 const injectedWorkerJobIds = new Set();
 const handledLocalToolCallIds = new Set();
-let activePeerConnection = null;
-let activeRealtimeAgentSession = null;
-let activeRealtimeAgentTransport = null;
-let realtimeAudioSender = null;
-let routingAudioContext = null;
-let routingInputGate = null;
-let routingDestination = null;
-let realtimeInputDestination = null;
-let routingAnalyser = null;
-let routingAnalyserBuffer = null;
-let routingEnergyTimer = 0;
-let realtimeInputAnalyser = null;
-let realtimeInputAnalyserBuffer = null;
-let realtimeInputEnergyTimer = 0;
-let realtimeInputMonitorSource = null;
-let meetAudioRecorder = null;
-let meetAudioRecorderStopResolve = null;
-let meetAudioCaptureUploadChain = Promise.resolve();
-let meetAudioCaptureSequence = 0;
-let routingSilenceSource = null;
-let routingAudioResumeListenersInstalled = false;
-let silentMeetAudioTrack = null;
-let primaryMeetAudioSender = null;
-let primaryMeetAudioSenderStatsTimer = 0;
-let primaryMeetAudioSenderAttachRetryTimer = 0;
+const mutableRealtimeBridgeState = {
+  activePeerConnection: null,
+  activeRealtimeAgentSession: null,
+  activeRealtimeAgentTransport: null,
+  realtimeAudioSender: null,
+  routingAudioContext: null,
+  routingInputGate: null,
+  routingDestination: null,
+  realtimeInputDestination: null,
+  routingAnalyser: null,
+  routingAnalyserBuffer: null,
+  routingEnergyTimer: 0,
+  realtimeInputAnalyser: null,
+  realtimeInputAnalyserBuffer: null,
+  realtimeInputEnergyTimer: 0,
+  realtimeInputMonitorSource: null,
+  meetAudioRecorder: null,
+  meetAudioRecorderStopResolve: null,
+  meetAudioCaptureUploadChain: Promise.resolve(),
+  meetAudioCaptureSequence: 0,
+  routingSilenceSource: null,
+  routingAudioResumeListenersInstalled: false,
+  silentMeetAudioTrack: null,
+  primaryMeetAudioSender: null,
+  primaryMeetAudioSenderStatsTimer: 0,
+  primaryMeetAudioSenderAttachRetryTimer: 0,
+  peerConnectionHookInstalled: false,
+  reconnectTimer: null,
+  reconnectGeneration: 0,
+} as Record<string, any>;
 const primaryMeetAudioSenderAttachInFlight = new WeakSet();
-let peerConnectionHookInstalled = false;
-let reconnectTimer = null;
-let reconnectGeneration = 0;
 const observedMeetChatKeys = new Set();
 const pendingMeetAudioTracks = [];
 const routedMeetAudioTrackIds = new Set();
@@ -515,7 +517,7 @@ const {
 } = (window as any).__MAB_REALTIME_CONTEXT_HELPERS.create({
   config,
   state,
-  getRealtimeAgentSession: () => activeRealtimeAgentSession,
+  getRealtimeAgentSession: () => mutableRealtimeBridgeState.activeRealtimeAgentSession,
   recordTimeline,
   sendRealtimeEvent,
 });

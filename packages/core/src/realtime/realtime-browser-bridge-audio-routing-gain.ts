@@ -14,9 +14,14 @@ function configuredRecappiProcessInputGain() {
 
 function updateRoutingInputGain(nextGain, reason = "") {
   const normalized = normalizeMeetAudioInputGain(nextGain, meetAudioInputGain());
-  if (state.connection.meetAudioInputGain === normalized && routingInputGate) return;
+  if (
+    state.connection.meetAudioInputGain === normalized &&
+    mutableRealtimeBridgeState.routingInputGate
+  )
+    return;
   state.connection.meetAudioInputGain = normalized;
-  if (routingInputGate) routingInputGate.gain.value = normalized;
+  if (mutableRealtimeBridgeState.routingInputGate)
+    mutableRealtimeBridgeState.routingInputGate.gain.value = normalized;
   recordTimeline("meet_audio_input_gain_updated", { gain: normalized, reason });
 }
 
