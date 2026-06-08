@@ -46,6 +46,24 @@ export function buildLanOperatorVisualClientScript() {
     if (source && Object.prototype.hasOwnProperty.call(source, "avatarRenderer")) {
       entry.avatarRenderer = source.avatarRenderer ? String(source.avatarRenderer) : null;
     }
+    if (source && Object.prototype.hasOwnProperty.call(source, "avatarPreset")) {
+      entry.avatarPreset = source.avatarPreset ? String(source.avatarPreset) : null;
+    }
+    if (source && Object.prototype.hasOwnProperty.call(source, "requestedAvatarPreset")) {
+      entry.requestedAvatarPreset = source.requestedAvatarPreset
+        ? String(source.requestedAvatarPreset)
+        : null;
+    }
+    if (source && Object.prototype.hasOwnProperty.call(source, "requestedAvatarRenderer")) {
+      entry.requestedAvatarRenderer = source.requestedAvatarRenderer
+        ? String(source.requestedAvatarRenderer)
+        : null;
+    }
+    if (source && Object.prototype.hasOwnProperty.call(source, "avatarFallbackReason")) {
+      entry.avatarFallbackReason = source.avatarFallbackReason
+        ? String(source.avatarFallbackReason)
+        : null;
+    }
     if (source && Object.prototype.hasOwnProperty.call(source, "avatarReady")) {
       entry.avatarReady = source.avatarReady == null ? null : Boolean(source.avatarReady);
     }

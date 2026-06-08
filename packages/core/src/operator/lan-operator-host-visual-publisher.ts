@@ -1,5 +1,10 @@
 import type { AvatarRuntimeSessionConfig } from "../avatar-runtime/contracts.ts";
 import { buildAvatarInitScript } from "../avatar/init-script-builder.ts";
+import {
+  lanOperatorAvatarPreset,
+  lanOperatorAvatarPresetConfig,
+  normalizeLanOperatorAvatarPreset,
+} from "./lan-operator-avatar-presets.ts";
 import { buildLanOperatorWebSocketClientScript } from "./lan-operator-websocket-client.ts";
 
 export interface HostVisualPublisherPageOptions {
@@ -8,6 +13,8 @@ export interface HostVisualPublisherPageOptions {
   kind?: string;
   diagnostic?: boolean;
   avatar?: boolean;
+  avatarPreset?: string;
+  avatarRenderer?: string;
 }
 
 function escapeHtml(value: unknown) {
@@ -26,6 +33,10 @@ export function buildLanOperatorHostVisualPublisherHtml(
   const webrtcIceServers = Array.isArray(renderer.webrtcIceServers)
     ? renderer.webrtcIceServers
     : [];
+  const avatarPresetId = normalizeLanOperatorAvatarPreset(
+    options.avatarPreset || options.avatarRenderer,
+  );
+  const avatarPreset = lanOperatorAvatarPreset(avatarPresetId);
   const boot = JSON.stringify({
     sessionId: config.sessionId,
     webrtcIceServers,
@@ -36,13 +47,18 @@ export function buildLanOperatorHostVisualPublisherHtml(
     },
     diagnostic: Boolean(options.diagnostic),
     avatar: Boolean(options.avatar),
+    avatarPreset: avatarPreset.id,
+    avatarPresetName: avatarPreset.name,
+    avatarRenderer: avatarPreset.renderer,
   });
   const avatarInitScript = options.avatar
     ? buildAvatarInitScript({
-        avatarRenderer: "live2d",
-        disableLive2D: true,
-        background: "#e9edf2",
+        layout: "center",
+        canvasWidth: 1280,
+        canvasHeight: 720,
         captureFps: 30,
+        enableVisualTestHooks: true,
+        ...lanOperatorAvatarPresetConfig(avatarPreset.id),
       })
     : "";
   return `<!doctype html>
@@ -106,15 +122,19 @@ export function buildLanOperatorHostVisualPublisherHtml(
           trackReadyState: null,
           errors: [],
           sourceMode: boot.avatar ? "avatar_renderer" : boot.diagnostic ? "diagnostic_canvas" : "display_capture",
+          requestedAvatarRenderer: boot.avatarRenderer,
           captureStatus: "idle",
           captureError: null,
           captureAttemptCount: 0,
           captureLastAttemptAt: null,
           captureLastSuccessAt: null,
           captureLastErrorAt: null,
+          requestedAvatarPreset: boot.avatarPreset,
           displaySurface: null,
           trackLabel: null,
           avatarRenderer: null,
+          avatarPreset: boot.avatarPreset,
+          avatarFallbackReason: null,
           avatarReady: false,
         };
         let hostVisualSocketClient = null;
@@ -144,6 +164,10 @@ export function buildLanOperatorHostVisualPublisherHtml(
             displaySurface: state.displaySurface,
             trackLabel: state.trackLabel,
             avatarRenderer: state.avatarRenderer,
+            avatarPreset: state.avatarPreset,
+            requestedAvatarPreset: state.requestedAvatarPreset,
+            requestedAvatarRenderer: state.requestedAvatarRenderer,
+            avatarFallbackReason: state.avatarFallbackReason,
             avatarReady: state.avatarReady,
           };
         }
@@ -362,6 +386,8 @@ export function buildLanOperatorHostVisualPublisherHtml(
           await window.MAB_AVATAR_START_RENDERER?.();
           const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
           state.avatarRenderer = window.MAB_AVATAR_RENDERER?.renderer || ready.rendererMode || "avatar";
+          state.avatarPreset = boot.avatarPreset;
+          state.avatarFallbackReason = window.MAB_AVATAR_RENDERER?.fallbackReason || ready.fallbackReason || null;
           state.avatarReady = true;
           state.sourceMode = "avatar_renderer";
           state.displaySurface = null;

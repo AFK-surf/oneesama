@@ -199,6 +199,10 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       .dock-group { display: flex; align-items: center; gap: 6px; }
       .dock-group + .dock-group { padding-left: 8px; border-left: 1px solid var(--line); }
       .dock-label { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-right: 2px; white-space: nowrap; }
+      .dock-status { min-width: 92px; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .dock-status.ok { color: var(--ok); }
+      .dock-status.warn { color: var(--warn); }
+      .dock-status.bad { color: var(--bad); }
       .dock-grow { flex: 1 1 240px; min-width: 200px; }
       .dock-grow form, .dock-grow [data-operator-text-input] { display: flex; flex: 1; gap: 6px; }
       .dock-grow #operator-text-input { flex: 1; min-width: 0; max-width: none; }
@@ -374,6 +378,17 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             <div class="dock-group">
               <span class="dock-label">Devices</span>
               <button class="btn" id="refresh-voice-devices-button" type="button">Refresh</button>
+            </div>
+            <div class="dock-group">
+              <span class="dock-label">Avatar</span>
+              <select class="voice-device" id="avatar-publisher-renderer-select" aria-label="Avatar publisher type">
+                <option value="fallback-canvas">Fallback</option>
+                <option value="oneesama-video">Video</option>
+                <option value="hiyori-live2d">Hiyori</option>
+              </select>
+              <button class="btn primary" id="open-avatar-publisher-button" type="button">Open Avatar</button>
+              <button class="btn" id="close-avatar-publisher-button" type="button">Close Avatar</button>
+              <span class="dock-status" id="avatar-publisher-status">not open</span>
             </div>
             <div class="dock-group">
               <span class="dock-label">Session</span>
@@ -558,6 +573,10 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         const canvas = document.getElementById("composition");
         const ctx = canvas.getContext("2d");
         const [readyDot, voiceLabel, visualLabel, voiceWsNode, transportStateNode, voiceChunksNode, visualTracksNode, compositionNode, layoutRevisionNode, overlayCountNode, kwwkJobNode, toolRoutingNode, assistantTextNode, outputAudioNode, engineControlNode, artifactNode, timelineNode, debugShell, debugJson, debugFilterInput, debugFilterClearButton, debugFilterState, debugTimelineCount, debugTransportSummary, debugTransportTable, debugVoiceSummary, debugVoiceTable, debugTimelineTable, debugTurnCount, debugTurnTable, debugTurnTimelineSummary, debugTurnTimelineTable, debugConversationSummary, debugConversationTable, debugPortSummary, debugPortTable, debugProviderDrilldownSummary, debugProviderDrilldownTable, debugToolRoutingSummary, debugToolRoutingTable, debugKwwkSummary, debugKwwkTable, debugVisualSummary, debugCompositionTable, debugVisualSourceTable, debugArtifactSummary, debugArtifactTable, sourceTabs] = ["ready-dot", "voice-label", "visual-label", "voice-ws", "transport-state", "voice-chunks", "visual-tracks", "composition-state", "layout-revision", "overlay-count", "kwwk-job-state", "tool-routing-state", "assistant-text-state", "output-audio-state", "engine-control-state", "artifact-state", "timeline-state", "debug-panel", "debug-json", "debug-filter-input", "debug-filter-clear-button", "debug-filter-state", "debug-timeline-count", "debug-transport-summary", "debug-transport-table", "debug-voice-summary", "debug-voice-table", "debug-timeline-table", "debug-turn-count", "debug-turn-table", "debug-turn-timeline-summary", "debug-turn-timeline-table", "debug-conversation-summary", "debug-conversation-table", "debug-port-summary", "debug-port-table", "debug-provider-drilldown-summary", "debug-provider-drilldown-table", "debug-tool-routing-summary", "debug-tool-routing-table", "debug-kwwk-summary", "debug-kwwk-table", "debug-visual-summary", "debug-composition-table", "debug-visual-source-table", "debug-artifact-summary", "debug-artifact-table", "source-tabs"].map((id) => document.getElementById(id));
+        const avatarPublisherRendererSelect = document.getElementById("avatar-publisher-renderer-select");
+        const openAvatarPublisherButton = document.getElementById("open-avatar-publisher-button");
+        const closeAvatarPublisherButton = document.getElementById("close-avatar-publisher-button");
+        const avatarPublisherStatus = document.getElementById("avatar-publisher-status");
         const COMPOSITION_TARGET_FPS = 30;
         const state = {
           ready: false,
@@ -637,6 +656,13 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           timeline: { currentTurnId: null, lastEventAt: null, turns: [], rows: [] },
           sources: boot.sources,
           visual: { transport: "webrtc", connectionState: "not_connected", iceConnectionState: null, peerConnectionState: null, signalingState: null, receiverWebSocketState: "closed", hostPublisherConnections: 0, trackCount: 0 },
+          publishers: {
+            avatarPreset: "fallback-canvas",
+            avatarWindowOpen: false,
+            lastAvatarPublisherUrl: null,
+            status: "not_open",
+            statusText: "not open",
+          },
           sourceRects: structuredClone(boot.sourceRects),
           sourceMediaDrawRects: {},
           focusedSourceId: "host-app",
@@ -656,7 +682,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         let drag = null;
         let voiceCapture = null;
         let outputClient = null;
-        let visualReceiver = null, voiceControls = null, textInputClient = null, artifactClient = null, compositionHeartbeat = null;
+        let visualReceiver = null, voiceControls = null, textInputClient = null, artifactClient = null, compositionHeartbeat = null, avatarPublisherWindow = null;
         function clamp(value, min, max) {
           return Math.min(max, Math.max(min, value));
         }
@@ -902,6 +928,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
               (latestTimeline.durationMs == null ? "" : " +" + String(latestTimeline.durationMs) + "ms")
             : "idle";
           voiceControls?.update();
+          syncAvatarPublisherStatusFromSource();
           renderDebugSections(composition);
           debugJson.textContent = JSON.stringify({
             sessionId: boot.sessionId,
@@ -1137,6 +1164,109 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           const callId = String(input.callId || state.toolRouting.callId || "");
           if (!callId) { Object.assign(state.toolRouting.cancel, { lastResult: "failed", lastError: "missing_call_id", lastReason: reason }); syncDebug(); return false; }
           return sendOperatorEvent({ type: "tool_cancel", callId, itemId: input.itemId || state.toolRouting.itemId || "", toolName: input.toolName || state.toolRouting.actualTool || "kwwk_computer_use", jobId: input.jobId || state.kwwk.currentJobId || "", turnId: input.turnId || state.timeline.currentTurnId || "", responseId: input.responseId || state.output.assistantText.lastResponseId || "", reason });
+        }
+
+        const AVATAR_PRESETS = ["fallback-canvas", "oneesama-video", "hiyori-live2d"];
+        function normalizeAvatarPreset(value) {
+          const normalized = String(value || "").trim().toLowerCase();
+          if (normalized === "fallback" || normalized === "canvas") return "fallback-canvas";
+          if (normalized === "video") return "oneesama-video";
+          if (normalized === "live2d" || normalized === "hiyori") return "hiyori-live2d";
+          return AVATAR_PRESETS.includes(normalized) ? normalized : "fallback-canvas";
+        }
+        function avatarPresetLabel(value) {
+          const preset = normalizeAvatarPreset(value);
+          if (preset === "oneesama-video") return "video";
+          if (preset === "hiyori-live2d") return "hiyori";
+          return "fallback";
+        }
+        function avatarPublisherUrl(value = state.publishers.avatarPreset) {
+          const preset = normalizeAvatarPreset(value);
+          const url = new URL("/host-visual", location.origin);
+          url.searchParams.set("avatar", "1");
+          url.searchParams.set("sourceId", "avatar");
+          url.searchParams.set("label", "Avatar");
+          url.searchParams.set("kind", "avatar");
+          url.searchParams.set("avatarPreset", preset);
+          return url.toString();
+        }
+        function setAvatarPublisherStatus(status, text = "") {
+          state.publishers.status = String(status || "idle");
+          state.publishers.statusText = text || status || "idle";
+          if (avatarPublisherStatus) {
+            avatarPublisherStatus.textContent = state.publishers.statusText;
+            avatarPublisherStatus.className = "dock-status " + (
+              status === "open" || status === "live"
+                ? "ok"
+                : status === "error"
+                  ? "bad"
+                  : status === "closed" || status === "not_open"
+                    ? ""
+                    : "warn"
+            );
+            avatarPublisherStatus.title = state.publishers.lastAvatarPublisherUrl || "";
+          }
+          if (openAvatarPublisherButton) {
+            openAvatarPublisherButton.textContent = state.publishers.avatarWindowOpen
+              ? "Switch Avatar"
+              : "Open Avatar";
+          }
+        }
+        function setAvatarPublisherPreset(value, input = {}) {
+          const preset = normalizeAvatarPreset(value);
+          state.publishers.avatarPreset = preset;
+          if (avatarPublisherRendererSelect) avatarPublisherRendererSelect.value = preset;
+          if (input.reopen && state.publishers.avatarWindowOpen) openAvatarPublisher({ preset });
+          else setAvatarPublisherStatus(state.publishers.status, state.publishers.statusText);
+          return { preset, url: avatarPublisherUrl(preset) };
+        }
+        function openAvatarPublisher(input = {}) {
+          const preset = normalizeAvatarPreset(input.preset || avatarPublisherRendererSelect?.value || state.publishers.avatarPreset);
+          state.publishers.avatarPreset = preset;
+          if (avatarPublisherRendererSelect) avatarPublisherRendererSelect.value = preset;
+          const url = avatarPublisherUrl(preset);
+          state.publishers.lastAvatarPublisherUrl = url;
+          try {
+            avatarPublisherWindow = window.open(url, "oneesama-avatar-publisher");
+            state.publishers.avatarWindowOpen = Boolean(avatarPublisherWindow && !avatarPublisherWindow.closed);
+            setAvatarPublisherStatus(
+              state.publishers.avatarWindowOpen ? "open" : "blocked",
+              state.publishers.avatarWindowOpen
+                ? "open · " + avatarPresetLabel(preset)
+                : "popup blocked · " + avatarPresetLabel(preset),
+            );
+          } catch (error) {
+            state.publishers.avatarWindowOpen = false;
+            setAvatarPublisherStatus("blocked", "open failed");
+            state.errors.push(String(error?.message || error));
+          }
+          syncDebug();
+          return { preset, url, opened: state.publishers.avatarWindowOpen };
+        }
+        function closeAvatarPublisher() {
+          try {
+            if (avatarPublisherWindow && !avatarPublisherWindow.closed) avatarPublisherWindow.close();
+          } catch (error) {
+            state.errors.push(String(error?.message || error));
+          }
+          state.publishers.avatarWindowOpen = false;
+          setAvatarPublisherStatus("closed", "closed");
+          syncDebug();
+          return true;
+        }
+        function syncAvatarPublisherStatusFromSource() {
+          const avatar = (state.sources || []).find((source) => source.id === "avatar");
+          if (!avatar) return;
+          const preset = normalizeAvatarPreset(avatar.avatarPreset || avatar.requestedAvatarPreset || state.publishers.avatarPreset);
+          state.publishers.avatarPreset = preset;
+          if (avatarPublisherRendererSelect) avatarPublisherRendererSelect.value = preset;
+          if (avatar.state === "live" || avatar.captureStatus === "live") {
+            const renderer = avatar.avatarRenderer ? String(avatar.avatarRenderer) : avatarPresetLabel(preset);
+            const fallback = avatar.avatarFallbackReason ? " fallback:" + String(avatar.avatarFallbackReason) : "";
+            setAvatarPublisherStatus("live", "live · " + avatarPresetLabel(preset) + " / " + renderer + fallback);
+          } else if (avatar.captureError) {
+            setAvatarPublisherStatus("error", "error · " + avatarPresetLabel(preset));
+          }
         }
 
         const DEBUG_TABS = [
@@ -1660,6 +1790,15 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         document.getElementById("reset-session-button").addEventListener("click", () => {
           sendEngineControl("reset_session");
         });
+        avatarPublisherRendererSelect?.addEventListener("change", () => {
+          setAvatarPublisherPreset(avatarPublisherRendererSelect.value, { reopen: true });
+        });
+        openAvatarPublisherButton?.addEventListener("click", () => {
+          openAvatarPublisher();
+        });
+        closeAvatarPublisherButton?.addEventListener("click", () => {
+          closeAvatarPublisher();
+        });
         document.getElementById("open-debug-panel-button").addEventListener("click", openDebugPanel);
         for (const [tabId, , tabName] of DEBUG_TABS) {
           document.getElementById(tabId)?.addEventListener("click", () => setDebugTab(tabName));
@@ -1768,6 +1907,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           state, moveSource, setFocusedSource, emitKwwkOverlay, runKwwkCursorFixture, sendSyntheticVoiceChunk,
           emitKwwkJobState, submitToolResult, cancelTool, sendEngineControl, fetchDebugReport, copyDiagnostics, downloadReport,
           createDebugBundle, markInterestingRun, registerArtifactLink, openDebugPanel, currentComposition, startMicrophone, stopMicrophone, setVoiceMuted,
+          avatarPublisherUrl, openAvatarPublisher, closeAvatarPublisher, setAvatarPublisherPreset,
           setDebugFilter: (query) => { debugFilterInput.value = String(query || ""); return applyDebugFilter(); },
           getDebugFilter: () => applyDebugFilter(),
           refreshVoiceDevices: () => voiceControls?.refreshDevices(),

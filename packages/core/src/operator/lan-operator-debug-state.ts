@@ -106,6 +106,10 @@ export type VisualState = {
     displaySurface?: string | null;
     trackLabel?: string | null;
     avatarRenderer?: string | null;
+    avatarPreset?: string | null;
+    requestedAvatarPreset?: string | null;
+    requestedAvatarRenderer?: string | null;
+    avatarFallbackReason?: string | null;
     avatarReady?: boolean | null;
   }>;
   composition: CompositionState;

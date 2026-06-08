@@ -1,7 +1,11 @@
 /* eslint-disable max-lines */
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
+import { extname, relative, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createRuntimeEvent,
   validateRuntimeSessionConfig,
@@ -85,6 +89,8 @@ export {
   buildLanOperatorRuntimeSessionConfig,
   parseLanOperatorWebrtcIceServers,
 } from "./lan-operator-runtime-config.ts";
+
+const DEFAULT_AVATAR_ASSET_ROOT = fileURLToPath(new URL("../../assets/avatar/", import.meta.url));
 
 export interface LanOperatorSurfaceOptions {
   host?: string;
@@ -177,6 +183,48 @@ function htmlResponse(res: ServerResponse, html: string) {
     "cache-control": "no-store",
   });
   res.end(html);
+}
+
+function avatarAssetRoots() {
+  return [
+    process.env.ONEESAMA_AVATAR_ASSET_ROOT,
+    process.env.MAB_AVATAR_ASSET_ROOT,
+    DEFAULT_AVATAR_ASSET_ROOT,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .map((value) => resolvePath(value));
+}
+
+function avatarAssetContentType(filePath: string) {
+  switch (extname(filePath).toLowerCase()) {
+    case ".webm":
+      return "video/webm";
+    case ".mov":
+      return "video/quicktime";
+    default:
+      return "video/mp4";
+  }
+}
+
+async function avatarAssetResponse(res: ServerResponse, pathname: string) {
+  const relativePath = decodeURIComponent(pathname.replace(/^\/assets\/avatar\/+/, ""));
+  for (const root of avatarAssetRoots()) {
+    const filePath = resolvePath(root, relativePath);
+    const rel = relative(root, filePath);
+    if (!rel || rel.startsWith("..") || rel.includes("..")) continue;
+    const info = await stat(filePath).catch(() => null);
+    if (!info?.isFile()) continue;
+    res.writeHead(200, {
+      "content-type": avatarAssetContentType(filePath),
+      "content-length": String(info.size),
+      "cache-control": "public, max-age=60",
+      "accept-ranges": "bytes",
+    });
+    createReadStream(filePath).pipe(res);
+    return;
+  }
+  return jsonResponse(res, 404, { ok: false, error: "avatar_asset_not_found" });
 }
 
 export function createLanOperatorSurfaceServer(
@@ -1424,6 +1472,9 @@ export function createLanOperatorSurfaceServer(
         (url.pathname === "/" || url.pathname === "/operator" || url.pathname === "/operator/")
       )
         return htmlResponse(res, html);
+      if (req.method === "GET" && url.pathname.startsWith("/assets/avatar/")) {
+        return avatarAssetResponse(res, url.pathname);
+      }
       if (req.method === "GET" && url.pathname === "/host-visual") {
         return htmlResponse(
           res,
@@ -1433,6 +1484,8 @@ export function createLanOperatorSurfaceServer(
             kind: url.searchParams.get("kind") || "desktop_app",
             diagnostic: url.searchParams.get("diagnostic") === "1",
             avatar: url.searchParams.get("avatar") === "1",
+            avatarPreset: url.searchParams.get("avatarPreset") || "",
+            avatarRenderer: url.searchParams.get("avatarRenderer") || "",
           }),
         );
       }

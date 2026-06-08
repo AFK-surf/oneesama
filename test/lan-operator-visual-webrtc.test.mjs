@@ -46,6 +46,7 @@ test("LAN operator receives Host Visual Stream over WebRTC and composes the trac
       publisherUrl.searchParams.set("sourceId", sourceId);
       publisherUrl.searchParams.set("label", label);
       publisherUrl.searchParams.set("kind", kind);
+      if (input.avatarPreset) publisherUrl.searchParams.set("avatarPreset", input.avatarPreset);
       await publisherPage.goto(publisherUrl.toString());
       await publisherPage.waitForFunction(
         () => window.MAB_LAN_HOST_VISUAL_PUBLISHER?.state?.trackReadyState === "live",
@@ -168,9 +169,15 @@ test("LAN operator receives Host Visual Stream over WebRTC and composes the trac
     assert.equal(avatarSource.sourceMode, "avatar_renderer");
     assert.equal(avatarSource.captureStatus, "live");
     assert.equal(avatarSource.avatarReady, true);
+    assert.equal(avatarSource.avatarPreset, "fallback-canvas");
+    assert.equal(avatarSource.requestedAvatarPreset, "fallback-canvas");
+    assert.equal(avatarSource.requestedAvatarRenderer, "fallback");
     assert.equal(avatarSource.avatarRenderer, "fallback");
     assert.equal(avatarPublisherState.sourceMode, "avatar_renderer");
     assert.equal(avatarPublisherState.avatarReady, true);
+    assert.equal(avatarPublisherState.avatarPreset, "fallback-canvas");
+    assert.equal(avatarPublisherState.requestedAvatarPreset, "fallback-canvas");
+    assert.equal(avatarPublisherState.requestedAvatarRenderer, "fallback");
     assert.equal(avatarPublisherState.avatarRenderer, "fallback");
     assert.ok(hostSource.width > 0, JSON.stringify(hostSource));
     assert.ok(hostSource.height > 0, JSON.stringify(hostSource));

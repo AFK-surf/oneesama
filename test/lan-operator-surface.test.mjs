@@ -78,6 +78,28 @@ test("LAN operator surface serves /operator as the Local Operator app entrypoint
   }
 });
 
+test("LAN operator surface serves local avatar video assets for foreground preset switches", async () => {
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-avatar-asset-route",
+    botName: "Oneesama",
+  });
+  const { url } = await surface.listen();
+  try {
+    const response = await fetch(
+      new URL("/assets/avatar/v1-green/oneesama-video-idle-loop-subtle.mp4", url),
+    );
+    const bytes = await response.arrayBuffer();
+
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") || "", /video\/mp4/);
+    assert.ok(bytes.byteLength > 1024);
+  } finally {
+    await surface.close();
+  }
+});
+
 test("LAN operator surface exposes voice controls and optional local VAD telemetry", async () => {
   const surface = createLanOperatorSurfaceServer({
     host: "127.0.0.1",

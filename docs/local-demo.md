@@ -76,13 +76,28 @@ Terminal C, for the single-machine Local Operator Surface:
 vp run dev:local-operator
 ```
 
-`dev:local-operator` binds to `127.0.0.1:18913` by default. Open
+`dev:local-operator` binds to `127.0.0.1:18913` by default and opens the real
+foreground operator surface plus a live avatar publisher. The operator URL is
 `http://127.0.0.1:18913/operator` on the same Mac that runs Oneesama. The root
-path remains a compatibility alias for the same app. Non-loopback
-binding is a legacy diagnostic mode and is not the Local Operator RFC
-acceptance path. Runtime status and debug reports expose bind mode,
-`localOnlyMode`, loopback URL, and reachability blockers in
-`summaries.surfaceContext`.
+path remains a compatibility alias for the same app. Non-loopback binding is a
+legacy diagnostic mode and is not the Local Operator RFC acceptance path.
+Runtime status and debug reports expose bind mode, `localOnlyMode`, loopback
+URL, and reachability blockers in `summaries.surfaceContext`.
+
+Flags and env overrides are primarily for tests and diagnostics:
+
+```bash
+vp run dev:local-operator -- --no-open
+MAB_LAN_OPERATOR_OPEN_BROWSER=0 vp run dev:local-operator
+MAB_LAN_OPERATOR_AUTO_AVATAR_PUBLISHER=0 vp run dev:local-operator
+MAB_LAN_OPERATOR_AVATAR_PRESET=oneesama-video vp run dev:local-operator
+```
+
+The foreground operator page also exposes avatar publisher controls: choose
+`fallback-canvas`, `oneesama-video`, or `hiyori-live2d`, then open/close the
+publisher from the control dock. `fallback-canvas` is the deterministic default;
+`oneesama-video` uses the muted two-state video avatar; `hiyori-live2d` may fall
+back visibly if local Live2D/WebGL/dependency conditions are unavailable.
 
 By default the Local Operator Surface is key-aware: if `MAB_OPENAI_API_KEY` or
 `OPENAI_API_KEY` is configured, `dev:local-operator` selects
@@ -142,8 +157,9 @@ recording, or export. Move/resize/focus changes happen in that browser before
 operator changes the layout. For an automated diagnostic track that does not
 require display-capture permission, open
 `http://127.0.0.1:18913/host-visual?diagnostic=1`.
-To publish the avatar renderer over the same Host Visual Stream lane, open
-`http://127.0.0.1:18913/host-visual?avatar=1&sourceId=avatar&label=Avatar&kind=avatar`.
+The normal `dev:local-operator` startup opens the avatar renderer automatically.
+For diagnostic/manual checks, the same Host Visual Stream lane is:
+`http://127.0.0.1:18913/host-visual?avatar=1&sourceId=avatar&label=Avatar&kind=avatar&avatarPreset=fallback-canvas`.
 For fallback/debug-only evidence, the older diagnostic avatar canvas can still
 be opened with `diagnostic=1&sourceId=avatar&label=Avatar&kind=avatar`.
 The local Host Visual Stream acceptance gate opens both host-app and avatar

@@ -40,6 +40,16 @@ export function mergeHostVisualState(debug: DebugState, visual: Partial<DebugSta
       displaySurface: source.displaySurface ? String(source.displaySurface) : null,
       trackLabel: source.trackLabel ? String(source.trackLabel) : null,
       avatarRenderer: source.avatarRenderer ? String(source.avatarRenderer) : null,
+      avatarPreset: source.avatarPreset ? String(source.avatarPreset) : null,
+      requestedAvatarPreset: source.requestedAvatarPreset
+        ? String(source.requestedAvatarPreset)
+        : null,
+      requestedAvatarRenderer: source.requestedAvatarRenderer
+        ? String(source.requestedAvatarRenderer)
+        : null,
+      avatarFallbackReason: source.avatarFallbackReason
+        ? String(source.avatarFallbackReason)
+        : null,
       avatarReady: source.avatarReady == null ? null : Boolean(source.avatarReady),
     }));
   }
@@ -66,6 +76,10 @@ export function hostVisualRuntimeDetail(debug: DebugState) {
       captureAttemptCount: source.captureAttemptCount,
       displaySurface: source.displaySurface,
       avatarRenderer: source.avatarRenderer,
+      avatarPreset: source.avatarPreset,
+      requestedAvatarPreset: source.requestedAvatarPreset,
+      requestedAvatarRenderer: source.requestedAvatarRenderer,
+      avatarFallbackReason: source.avatarFallbackReason,
     })),
   };
 }

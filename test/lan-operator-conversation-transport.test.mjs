@@ -116,6 +116,7 @@ test("LAN operator CLI selects OpenAI Realtime by default when a key is configur
     MAB_LAN_OPERATOR_PORT: "0",
     MAB_LAN_OPERATOR_ENABLE_TRUSTED_LAN: "",
     MAB_LAN_OPERATOR_TRUSTED_LAN: "",
+    MAB_LAN_OPERATOR_OPEN_BROWSER: "0",
     MAB_LAN_OPERATOR_TRANSPORT: "",
     MAB_OPENAI_API_KEY: "sk-cli-test",
     OPENAI_API_KEY: "",

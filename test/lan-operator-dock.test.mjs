@@ -170,6 +170,93 @@ test("LAN operator debug dock tabs (Ledger/Telemetry/Sources) switch without los
   }
 });
 
+test("LAN operator foreground avatar controls open and switch real publisher preset URLs", async () => {
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-avatar-controls-smoke",
+    botName: "LAN Oneesama",
+  });
+  const { url } = await surface.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
+    await page.goto(url);
+    await waitReady(page);
+
+    const initial = await page.evaluate(() => ({
+      select: document.getElementById("avatar-publisher-renderer-select")?.value,
+      status: document.getElementById("avatar-publisher-status")?.textContent,
+      url: window.MAB_LAN_OPERATOR_SURFACE.avatarPublisherUrl(),
+    }));
+    assert.equal(initial.select, "fallback-canvas", JSON.stringify(initial));
+    assert.equal(initial.status, "not open", JSON.stringify(initial));
+    assert.equal(new URL(initial.url).searchParams.get("avatarPreset"), "fallback-canvas");
+
+    await page.evaluate(() => {
+      window.__avatarPublisherOpens = [];
+      window.__avatarPublisherClosed = 0;
+      window.open = (href, name) => {
+        window.__avatarPublisherOpens.push({ url: String(href), name: String(name) });
+        return {
+          closed: false,
+          close() {
+            this.closed = true;
+            window.__avatarPublisherClosed += 1;
+          },
+        };
+      };
+    });
+
+    const opened = await page.evaluate(() =>
+      window.MAB_LAN_OPERATOR_SURFACE.openAvatarPublisher({ preset: "oneesama-video" }),
+    );
+    assert.equal(opened.opened, true, JSON.stringify(opened));
+    assert.equal(new URL(opened.url).searchParams.get("avatarPreset"), "oneesama-video");
+
+    const switched = await page.evaluate(() =>
+      window.MAB_LAN_OPERATOR_SURFACE.setAvatarPublisherPreset("hiyori-live2d", {
+        reopen: true,
+      }),
+    );
+    assert.equal(switched.preset, "hiyori-live2d", JSON.stringify(switched));
+    assert.equal(new URL(switched.url).searchParams.get("avatarPreset"), "hiyori-live2d");
+
+    const foreground = await page.evaluate(() => ({
+      select: document.getElementById("avatar-publisher-renderer-select")?.value,
+      status: document.getElementById("avatar-publisher-status")?.textContent,
+      opens: window.__avatarPublisherOpens,
+      state: window.MAB_LAN_OPERATOR_SURFACE.state.publishers,
+    }));
+    assert.equal(foreground.select, "hiyori-live2d", JSON.stringify(foreground));
+    assert.match(foreground.status, /open · hiyori/, JSON.stringify(foreground));
+    assert.equal(foreground.opens.length, 2, JSON.stringify(foreground));
+    assert.equal(foreground.opens[0].name, "oneesama-avatar-publisher");
+    assert.equal(
+      new URL(foreground.opens[0].url).searchParams.get("avatarPreset"),
+      "oneesama-video",
+    );
+    assert.equal(
+      new URL(foreground.opens[1].url).searchParams.get("avatarPreset"),
+      "hiyori-live2d",
+    );
+    assert.equal(foreground.state.avatarWindowOpen, true, JSON.stringify(foreground.state));
+
+    await page.evaluate(() => window.MAB_LAN_OPERATOR_SURFACE.closeAvatarPublisher());
+    const closed = await page.evaluate(() => ({
+      status: document.getElementById("avatar-publisher-status")?.textContent,
+      closed: window.__avatarPublisherClosed,
+      state: window.MAB_LAN_OPERATOR_SURFACE.state.publishers,
+    }));
+    assert.equal(closed.status, "closed", JSON.stringify(closed));
+    assert.equal(closed.closed, 1, JSON.stringify(closed));
+    assert.equal(closed.state.avatarWindowOpen, false, JSON.stringify(closed.state));
+  } finally {
+    await browser.close();
+    await surface.close();
+  }
+});
+
 async function waitReady(page) {
   await page.waitForFunction(() => window.MAB_LAN_OPERATOR_SURFACE?.state?.ready === true, null, {
     timeout: 10_000,
