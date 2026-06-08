@@ -873,6 +873,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             if (focusName) stageHud.appendChild(hud("", "focus", focusName));
             stageHud.appendChild(hud("", "frame", durationLabel(composition.lastRenderedFrameAgeMs)));
           }
+          textInputClient?.renderStatus?.();
           replaceTableRows(debugVisualSourceTable, state.sources.map((source) => [
             source.label + " / " + source.id,
             source.state + " / " + String(source.sourceMode || "-") +
@@ -1837,7 +1838,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         debugFilterClearButton.addEventListener("click", () => { debugFilterInput.value = ""; applyDebugFilter(); });
         voiceControls = window.MAB_LAN_OPERATOR_VOICE_CONTROLS.create({ state, sendOperatorEvent, syncDebug, startMicrophone, stopMicrophone, setVoiceMuted });
         voiceControls.bind();
-        textInputClient = window.MAB_LAN_OPERATOR_TEXT_INPUT.create({ state, boot, sendOperatorEvent, syncDebug });
+        textInputClient = window.MAB_LAN_OPERATOR_TEXT_INPUT.create({ state, boot, sendOperatorEvent, sendEngineControl, syncDebug });
         artifactClient = window.MAB_LAN_OPERATOR_ARTIFACTS.create({ state, sendOperatorEvent, syncDebug });
 
         (async () => {

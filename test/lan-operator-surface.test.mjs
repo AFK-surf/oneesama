@@ -241,6 +241,8 @@ test("LAN operator surface sends typed debug text through the Conversation Engin
     const panel = await page.evaluate(() => ({
       input: Boolean(document.getElementById("operator-text-input")),
       sendButton: Boolean(document.getElementById("operator-text-send-button")),
+      modeStatus: document.getElementById("operator-realtime-mode-status")?.textContent || "",
+      connectHidden: document.getElementById("operator-realtime-connect-button")?.hidden ?? null,
     }));
 
     assert.equal(receivedTextInputs.length, 1);
@@ -263,6 +265,8 @@ test("LAN operator surface sends typed debug text through the Conversation Engin
     assert.equal(turn.status, "completed");
     assert.equal(panel.input, true);
     assert.equal(panel.sendButton, true);
+    assert.match(panel.modeStatus, /mock typed_text_test_engine/);
+    assert.equal(panel.connectHidden, true);
     assert.ok(
       body.recentEvents.some((event) => event.event === "operator_text_input_completed"),
       JSON.stringify(body.recentEvents),
@@ -276,6 +280,98 @@ test("LAN operator surface sends typed debug text through the Conversation Engin
     );
     assert.equal(reportBody.report.summaries.turns.latest.milestones.heard, false);
     assert.equal(reportBody.report.summaries.surfaceContext.visual.focusedSourceId, "host-app");
+  } finally {
+    await browser.close();
+    await surface.close();
+  }
+});
+
+test("LAN operator web app exposes live Realtime text connect without browser key handling", async () => {
+  const controls = [];
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-live-text-web-control",
+    botName: "LAN Oneesama",
+    conversationTransport: "openai_realtime",
+    conversationEngine: {
+      id: "openai_realtime_ui_test",
+      receiveVoiceChunk: () => ({
+        result: { ok: true, engineId: "openai_realtime_ui_test" },
+        events: [],
+      }),
+      receiveTextInput: () => ({
+        result: { ok: true, engineId: "openai_realtime_ui_test", accepted: true },
+        events: [],
+      }),
+      control: (command) => {
+        controls.push(command);
+        const ts = new Date().toISOString();
+        return {
+          result: { ok: true, engineId: "openai_realtime_ui_test", control: command.type },
+          events: [
+            {
+              id: "openai_realtime_ui_test_connected",
+              ts,
+              sessionId: command.sessionId,
+              type: "engine_connected",
+              engineId: "openai_realtime_ui_test",
+              detail: { inputMode: "text", source: "operator_text_input" },
+            },
+          ],
+        };
+      },
+    },
+  });
+  const { url } = await surface.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
+    await page.goto(url);
+    await page.waitForFunction(() => window.MAB_LAN_OPERATOR_SURFACE?.state?.ready === true, null, {
+      timeout: 10_000,
+    });
+    const before = await page.evaluate(() => ({
+      status: document.getElementById("operator-realtime-mode-status")?.textContent || "",
+      title: document.getElementById("operator-realtime-mode-status")?.getAttribute("title") || "",
+      hidden: document.getElementById("operator-realtime-connect-button")?.hidden ?? null,
+      disabled: document.getElementById("operator-realtime-connect-button")?.disabled ?? null,
+      button: document.getElementById("operator-realtime-connect-button")?.textContent || "",
+    }));
+    assert.match(before.status, /live openai_realtime_ui_test (ready|connected)/);
+    assert.match(before.title, /OpenAI Realtime engine: openai_realtime_ui_test/);
+    assert.equal(before.hidden, false);
+    assert.equal(before.disabled, false);
+    assert.match(before.button, /^(Connect|Reconnect)$/);
+
+    await page.click("#operator-realtime-connect-button");
+    const body = await waitForRuntimeStatus(
+      url,
+      (nextBody) => nextBody.debug.conversation.control.lastCommand === "connect",
+    );
+    const after = await page.waitForFunction(
+      () => {
+        const status = document.getElementById("operator-realtime-mode-status")?.textContent || "";
+        const button =
+          document.getElementById("operator-realtime-connect-button")?.textContent || "";
+        return /live openai_realtime_ui_test connected/.test(status) && button === "Reconnect"
+          ? { status, button }
+          : false;
+      },
+      null,
+      { timeout: 5_000 },
+    );
+    const afterValue = await after.jsonValue();
+
+    const connectCommand = controls.find(
+      (command) => command.reason === "operator_realtime_text_connect",
+    );
+    assert.ok(connectCommand, JSON.stringify(controls));
+    assert.equal(connectCommand.type, "connect");
+    assert.equal(connectCommand.detail.inputMode, "text");
+    assert.equal(connectCommand.detail.source, "operator_text_input");
+    assert.equal(body.debug.surfaceContext.operatorMode.conversationTransport, "openai_realtime");
+    assert.equal(afterValue.button, "Reconnect");
   } finally {
     await browser.close();
     await surface.close();
