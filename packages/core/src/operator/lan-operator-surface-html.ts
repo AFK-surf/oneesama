@@ -282,6 +282,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       .verdict-pipeline .stage:hover { background: var(--elevated); color: var(--ink); }
       /* ----- selected-event inspector (Phase 5) ----- */
       .event-inspector { flex: 0 0 auto; max-height: 46%; display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--line-2); background: linear-gradient(180deg, var(--panel-2), var(--surface)); padding: 9px 11px; overflow: auto; }
+      .event-inspector[hidden] { display: none; }
       .inspector-head { display: flex; align-items: center; gap: 8px; }
       .inspector-head .tl-chip { color: var(--muted); }
       .inspector-owner { font-family: var(--mono); font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
