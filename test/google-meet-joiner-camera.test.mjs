@@ -47,6 +47,10 @@ test("ensureMeetCameraOff clicks the visible Meet camera toggle only when camera
 
 test("caption-only Meet joins force camera off before and after admission", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+  const runtimeSyncSource = await readFile(
+    "packages/core/src/meeting/google-meet-joiner-runtime-sync.ts",
+    "utf8",
+  );
   const preJoinCall =
     'if (!installAvatar) await ensureMeetCameraOff(page, diagnostics, "pre_join");';
   const postAdmissionCall =
@@ -54,7 +58,7 @@ test("caption-only Meet joins force camera off before and after admission", asyn
 
   assert.ok(source.includes(preJoinCall), "join flow must disable fake camera before join");
   assert.ok(
-    source.includes(postAdmissionCall),
+    runtimeSyncSource.includes(postAdmissionCall),
     "join flow must re-check fake camera after admission",
   );
   assert.ok(
@@ -62,7 +66,8 @@ test("caption-only Meet joins force camera off before and after admission", asyn
     "camera must be disabled before clicking the Meet join button",
   );
   assert.ok(
-    source.indexOf(postAdmissionCall) < source.indexOf("const avatarRendererStart"),
+    runtimeSyncSource.indexOf(postAdmissionCall) <
+      runtimeSyncSource.indexOf("const avatarRendererStart"),
     "camera must be re-checked before final join state is captured",
   );
 });
@@ -94,15 +99,18 @@ test("Realtime Meet joins keep local playback unmuted for audio capture by defau
 });
 
 test("Meet avatar camera defaults avoid 1080p chroma-key CPU burn", async () => {
-  const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+  const helperSource = await readFile(
+    "packages/core/src/meeting/google-meet-joiner-helpers.ts",
+    "utf8",
+  );
   const envSource = await readFile("packages/core/src/env.ts", "utf8");
 
   assert.ok(
-    source.includes("config.avatarCanvasWidth || 1280"),
+    helperSource.includes("config.avatarCanvasWidth || 1280"),
     "Meet avatar canvas should default to the native 720p video asset width",
   );
   assert.ok(
-    source.includes("config.avatarCanvasHeight || 720"),
+    helperSource.includes("config.avatarCanvasHeight || 720"),
     "Meet avatar canvas should default to the native 720p video asset height",
   );
   assert.ok(
@@ -115,16 +123,17 @@ test("Meet avatar camera defaults avoid 1080p chroma-key CPU burn", async () => 
     "live video avatar should default to offline-keyed alpha clips",
   );
   assert.ok(
-    source.includes("mimeType: videoMimeType(relativePath)") &&
-      source.includes("enabled: !videoUsesAlpha"),
+    helperSource.includes("mimeType: videoMimeType(relativePath)") &&
+      helperSource.includes("enabled: !videoUsesAlpha"),
     "alpha video clips should bypass runtime chroma keying",
   );
   assert.ok(
-    source.includes("maxProcessingWidth: 640") && source.includes("maxProcessingHeight: 360"),
+    helperSource.includes("maxProcessingWidth: 640") &&
+      helperSource.includes("maxProcessingHeight: 360"),
     "non-alpha chroma-key fallback should process a downscaled matte instead of full 720p frames",
   );
   assert.ok(
-    source.includes("videoCrossfadeMs: 0"),
+    helperSource.includes("videoCrossfadeMs: 0"),
     "live video avatar should avoid double chroma work during state transitions",
   );
 });
@@ -165,6 +174,10 @@ test("Realtime Recappi Meet joins keep raw audio on native server VAD", async ()
 
 test("WebDriver handoff installs Meet runtime with CDP before script-tag fallback", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+  const helperSource = await readFile(
+    "packages/core/src/meeting/google-meet-joiner-helpers.ts",
+    "utf8",
+  );
   const helperName = "async function installRuntimeInitScriptForPage";
   const cdpMethod = 'cdp.send("Runtime.evaluate"';
   const cspBypass = "allowUnsafeEvalBlockedByCSP: true";
@@ -173,33 +186,37 @@ test("WebDriver handoff installs Meet runtime with CDP before script-tag fallbac
     "await installRuntimeInitScriptForPage(page, script, { diagnostics, webDriverPreJoined });";
 
   assert.ok(
-    source.includes(helperName),
+    helperSource.includes(helperName),
     "WebDriver joins need a dedicated current-page runtime installer",
   );
   assert.ok(
-    source.includes(cdpMethod) && source.includes(cspBypass),
+    helperSource.includes(cdpMethod) && helperSource.includes(cspBypass),
     "late runtime install must use CDP Runtime.evaluate with CSP unsafe-eval bypass",
   );
   assert.ok(
-    source.includes(fallback),
+    helperSource.includes(fallback),
     "script-tag fallback should remain for non-Meet or non-CDP diagnostic pages",
   );
   assert.ok(source.includes(call), "runtime init loop should use the shared late-install helper");
   assert.ok(
-    source.indexOf(cdpMethod) < source.indexOf(fallback),
+    helperSource.indexOf(cdpMethod) < helperSource.indexOf(fallback),
     "CDP install must run before the Trusted Types-sensitive script-tag fallback",
   );
 });
 
 test("Realtime avatar joins do not default to Chrome built-in fake camera", async () => {
   const source = await readFile("packages/core/src/meeting/google-meet-joiner.ts", "utf8");
+  const helperSource = await readFile(
+    "packages/core/src/meeting/google-meet-joiner-helpers.ts",
+    "utf8",
+  );
 
   assert.ok(
-    source.includes("function shouldUseChromeFakeMediaDevice"),
+    helperSource.includes("function shouldUseChromeFakeMediaDevice"),
     "joiner should centralize Chrome fake media device policy",
   );
   assert.ok(
-    source.includes("if (input.installAvatar) return false;"),
+    helperSource.includes("if (input.installAvatar) return false;"),
     "avatar joins should rely on avatar runtime tracks, not Chrome's green fake camera",
   );
   assert.ok(
@@ -207,9 +224,9 @@ test("Realtime avatar joins do not default to Chrome built-in fake camera", asyn
     "launcher args should receive the avatar-aware fake media policy",
   );
   assert.ok(
-    source.includes("--use-file-for-fake-audio-capture") &&
-      source.indexOf("if (input.installAvatar) return false;") <
-        source.indexOf("--use-file-for-fake-audio-capture"),
+    helperSource.includes("--use-file-for-fake-audio-capture") &&
+      helperSource.indexOf("if (input.installAvatar) return false;") <
+        helperSource.indexOf("--use-file-for-fake-audio-capture"),
     "explicit synthetic-audio diagnostics may still request Chrome fake media only outside avatar joins",
   );
 });
