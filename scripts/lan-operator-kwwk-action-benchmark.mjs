@@ -866,7 +866,181 @@ function compactPhaseEvidence(result, sample) {
   };
 }
 
-async function runKwwkAction(args, page, turnContext = {}) {
+function finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizedCoordinate(value, fallback = 0.5) {
+  const number = finiteNumber(value);
+  if (number == null) return fallback;
+  return Math.max(0, Math.min(1, number));
+}
+
+export function operatorCursorKindFromKwwkEvent(kind) {
+  const text = String(kind || "").toLowerCase();
+  if (text.includes("click") || text.includes("press")) return "click";
+  if (text.includes("drag")) return "drag";
+  if (text.includes("target") || text.includes("highlight")) return "target";
+  if (text.includes("done")) return "done";
+  if (text.includes("blocked")) return "blocked";
+  return "move";
+}
+
+export function operatorCursorFromKwwkEvent(event, input = {}) {
+  const normalizedX = finiteNumber(event?.normalizedX);
+  const normalizedY = finiteNumber(event?.normalizedY);
+  const rawX = finiteNumber(event?.x);
+  const rawY = finiteNumber(event?.y);
+  const x = normalizedCoordinate(
+    normalizedX ?? (rawX != null && rawX >= 0 && rawX <= 1 ? rawX : null),
+  );
+  const y = normalizedCoordinate(
+    normalizedY ?? (rawY != null && rawY >= 0 && rawY <= 1 ? rawY : null),
+  );
+  const label = String(event?.label || input.label || "").trim();
+  return {
+    x,
+    y,
+    kind: operatorCursorKindFromKwwkEvent(event?.kind || input.kind),
+    label,
+    sourceId: String(input.sourceId || "host-app"),
+  };
+}
+
+export function operatorCursorsFromKwwkResult(result, input = {}) {
+  const events = result?.metadata?.cursor?.events;
+  if (!Array.isArray(events)) return [];
+  return events
+    .filter((event) => event && typeof event === "object")
+    .map((event) => operatorCursorFromKwwkEvent(event, input));
+}
+
+function replayKwwkCursorEventsToOperator(surface, result, input = {}) {
+  if (!surface?.emitKwwkCursor) return [];
+  const cursors = operatorCursorsFromKwwkResult(result, input);
+  for (const cursor of cursors) surface.emitKwwkCursor(cursor);
+  return cursors;
+}
+
+async function runKwwkCursorReplayProbe(input) {
+  const { args, page, binary, baseKwwkState, target, modelPlan: buildModelPlan, surface } = input;
+  const jobId = "lan_kwwk_cursor_replay_probe";
+  const operation = {
+    kind: "scroll",
+    direction: "down",
+    pages: 1,
+  };
+  const helper = spawnHelper(binary, args.timeoutMs, operation, buildModelPlan);
+  try {
+    await page.evaluate((state) => window.MAB_LAN_OPERATOR_SURFACE.emitKwwkJobState(state), {
+      ...baseKwwkState,
+      jobId,
+      status: "executing",
+      target,
+      action: { kind: "scroll", label: "cursor replay probe", status: "running" },
+      phaseEvidence: {
+        execute: {
+          status: "running",
+          durationMs: 0,
+          summary: "helper pointer request running for cursor replay",
+          detail: { source: "kwwk_cursor_replay_probe", helperRequestId: jobId },
+        },
+      },
+    });
+    const output = await callHelperWithKwwkProgress(
+      helper,
+      {
+        jsonrpc: "2.0",
+        id: jobId,
+        method: "kwwk.cu.execute",
+        params: {
+          instruction: "scroll the target window once for LAN operator cursor replay evidence",
+          target,
+          includeScreenshot: false,
+          modelPlan: buildModelPlan(operation),
+          verification: { useLightObservation: true },
+        },
+      },
+      {
+        page,
+        baseKwwkState,
+        jobId,
+        target,
+        instruction: "cursor replay probe",
+        operation,
+      },
+    );
+    const result = output.response?.result || {};
+    const cursors = replayKwwkCursorEventsToOperator(surface, result, {
+      sourceId: "host-app",
+      label: "cursor replay",
+    });
+    const stage = await page.evaluate(
+      async (stageInput) => {
+        if (stageInput.cursorCount > 0) {
+          await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+          await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        }
+        const artifact = window.MAB_LAN_OPERATOR_KWWK_CURSOR?.artifact?.() || {};
+        const overlays = window.MAB_LAN_OPERATOR_SURFACE?.state?.overlays || [];
+        return {
+          cursorArtifactEventCount: Array.isArray(artifact.events) ? artifact.events.length : 0,
+          cursorVisible: window.MAB_LAN_OPERATOR_KWWK_CURSOR?.snapshot?.()?.visible === true,
+          remoteOverlayCount: overlays.filter((overlay) => overlay.remote === true).length,
+        };
+      },
+      { cursorCount: cursors.length },
+    );
+    const ok = result.ok === true && cursors.length > 0 && stage.cursorVisible === true;
+    await page.evaluate((state) => window.MAB_LAN_OPERATOR_SURFACE.emitKwwkJobState(state), {
+      ...baseKwwkState,
+      jobId,
+      status: ok ? "completed" : "failed",
+      blocker: ok ? "" : "kwwk_cursor_replay_probe_failed",
+      target,
+      action: { kind: "scroll", label: "cursor replay probe", status: ok ? "completed" : "failed" },
+      actionCount: 1,
+      phaseEvidence: {
+        execute: {
+          status: ok ? "executed" : "blocked",
+          durationMs: output.durationMs,
+          summary: `${cursors.length} helper cursor event(s) replayed`,
+          detail: {
+            source: "kwwk_cursor_replay_probe",
+            cursorPolicy: result.metadata?.cursor?.policy || null,
+            cursorEventCount: cursors.length,
+            stage,
+          },
+        },
+      },
+    });
+    return {
+      ok,
+      jobId,
+      action: operation.kind,
+      requestMs: output.durationMs,
+      helperCursorEventCount: cursors.length,
+      helperCursorEvents: cursors,
+      stage,
+      result,
+    };
+  } catch (error) {
+    await page.evaluate((state) => window.MAB_LAN_OPERATOR_SURFACE.emitKwwkJobState(state), {
+      ...baseKwwkState,
+      jobId,
+      status: "failed",
+      blocker: String(error?.message || error),
+      target,
+      action: { kind: "scroll", label: "cursor replay probe", status: "failed" },
+    });
+    return { ok: false, jobId, action: operation.kind, error: String(error?.message || error) };
+  } finally {
+    await helper.closeHelper().catch(() => {});
+  }
+}
+
+async function runKwwkAction(args, page, turnContext = {}, surface = null) {
   if (process.platform !== "darwin") {
     return { ok: false, error: "app_control_helper_requires_darwin" };
   }
@@ -1000,6 +1174,10 @@ async function runKwwkAction(args, page, turnContext = {}) {
           sample.verification?.blocker ||
           (sample.mutation?.verified ? "" : "fixture_mutation_missing");
       sample.phaseEvidence = compactPhaseEvidence(result, sample);
+      sample.operatorCursorEvents = replayKwwkCursorEventsToOperator(surface, result, {
+        sourceId: "host-app",
+        label: actionKind || operation.kind || "kwwk",
+      });
       samples.push(sample);
       for (const [phase, statusName] of [
         ["observe", "observing"],
@@ -1097,28 +1275,23 @@ async function runKwwkAction(args, page, turnContext = {}) {
       mutationCleanup: null,
       result: { cold: cold?.result || null, warm: warm?.result || null },
     };
-    if (args.mutationFixture) {
-      kwwkResult.mutationCleanup = await cleanupTextEditFixture(args.mutationFixture);
-      applyCleanupMutationEvidence(args, kwwkResult, kwwkResult.mutationCleanup);
-    }
     const samplesOk = samples.every(
       (sample) => sample.ok === true && sample.verification?.ok === true,
     );
-    const ok =
+    const sampleStatus =
       samplesOk &&
       (!args.mutationMarker || kwwkResult.mutation?.verified === true) &&
-      hardCancel?.ok === true;
-    const status = ok
-      ? "completed"
-      : samples.find((sample) => sample.status !== "completed")?.status || "failed";
-    const blocker = samples.find((sample) => sample.blocker)?.blocker || "";
+      hardCancel?.ok === true
+        ? "completed"
+        : samples.find((sample) => sample.status !== "completed")?.status || "failed";
+    const sampleBlocker = samples.find((sample) => sample.blocker)?.blocker || "";
     const finalSample = warm || cold;
     if (finalSample) {
       await page.evaluate((input) => window.MAB_LAN_OPERATOR_SURFACE.emitKwwkJobState(input), {
         ...baseKwwkState,
         jobId: finalSample.jobId,
-        status,
-        blocker,
+        status: sampleStatus,
+        blocker: sampleBlocker,
         actionCount: samples.length,
         target,
         timings: {
@@ -1132,14 +1305,45 @@ async function runKwwkAction(args, page, turnContext = {}) {
         phaseEvidence: finalSample.phaseEvidence,
       });
     }
+    const cursorReplayProbe = await runKwwkCursorReplayProbe({
+      args,
+      page,
+      binary,
+      baseKwwkState,
+      target,
+      modelPlan,
+      surface,
+    });
+    kwwkResult.cursorReplayProbe = cursorReplayProbe;
+    if (args.mutationFixture) {
+      kwwkResult.mutationCleanup = await cleanupTextEditFixture(args.mutationFixture);
+      applyCleanupMutationEvidence(args, kwwkResult, kwwkResult.mutationCleanup);
+    }
+    const ok =
+      samplesOk &&
+      (!args.mutationMarker || kwwkResult.mutation?.verified === true) &&
+      hardCancel?.ok === true &&
+      cursorReplayProbe.ok === true;
+    const status = ok ? "completed" : cursorReplayProbe.ok === true ? sampleStatus : "failed";
+    const blocker =
+      sampleBlocker || (cursorReplayProbe.ok === true ? "" : "kwwk_cursor_replay_probe_failed");
     await page.evaluate((input) => window.MAB_LAN_OPERATOR_SURFACE.submitToolResult(input), {
       ...baseKwwkState,
       callId: "call_lan_kwwk_action",
       itemId: "item_lan_kwwk_action",
       toolName: EXPECTED_TOOL,
-      jobId: warm?.jobId || cold?.jobId || "lan_kwwk_action_job",
+      jobId: cursorReplayProbe.jobId || warm?.jobId || cold?.jobId || "lan_kwwk_action_job",
       status,
-      output: { ok, status, blocker, mutation: kwwkResult.mutation, cold, warm, hardCancel },
+      output: {
+        ok,
+        status,
+        blocker,
+        mutation: kwwkResult.mutation,
+        cold,
+        warm,
+        hardCancel,
+        cursorReplayProbe,
+      },
       source: "kwwk",
     });
     return {
@@ -1191,6 +1395,7 @@ function buildBenchmarkReport(input) {
     kwwkResult?.cold?.verification?.ok === true &&
     kwwkResult?.warm?.verification?.ok === true &&
     kwwkResult?.hardCancel?.ok === true &&
+    kwwkResult?.cursorReplayProbe?.ok === true &&
     kwwkResult?.inFlightProgress?.phaseCountBeforeResponse >= 3 &&
     kwwkResult?.mutation?.verified === true &&
     compactFollowUpDelivered &&
@@ -1264,6 +1469,7 @@ function buildBenchmarkReport(input) {
         null,
       mutation: kwwkResult?.mutation || null,
       hardCancel: kwwkResult?.hardCancel || null,
+      cursorReplayProbe: kwwkResult?.cursorReplayProbe || null,
       phaseBlockers: kwwkResult?.phaseBlockers || null,
       mutationCleanup: mutationCleanup || null,
       cold: kwwkResult?.cold || null,
@@ -1399,7 +1605,7 @@ async function run() {
     }
     const turnContext = lanOperatorKwwkActionTurnContextFromStatus(spokenReadyStatus);
     spokenInput.turnContext = turnContext;
-    const kwwkResult = await runKwwkAction(args, page, turnContext);
+    const kwwkResult = await runKwwkAction(args, page, turnContext, surface);
     mutationCleanup = kwwkResult.mutationCleanup || null;
     const runtimeStatus = await waitForRuntimeStatus(
       listenResult.url,
@@ -1468,6 +1674,8 @@ async function run() {
         gate: report.gate,
         inputMode: report.spokenInput?.inputMode,
         maxInputEnergy: report.spokenInput?.maxInputEnergy,
+        cursorReplayProbeOk: report.kwwk?.cursorReplayProbe?.ok === true,
+        cursorReplayProbeEventCount: report.kwwk?.cursorReplayProbe?.helperCursorEventCount || 0,
       },
       null,
       2,
