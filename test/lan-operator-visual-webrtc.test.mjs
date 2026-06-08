@@ -83,6 +83,14 @@ test("LAN operator receives Host Visual Stream over WebRTC and composes the trac
       },
       10_000,
     );
+    await operatorPage.waitForFunction(
+      () => {
+        const rects = window.MAB_LAN_OPERATOR_SURFACE?.sourceMediaDrawRects?.();
+        return rects?.["host-app"]?.fit === "contain" && rects?.avatar?.fit === "contain";
+      },
+      null,
+      { timeout: 5_000 },
+    );
     const operatorVisual = await operatorPage.evaluate(() => ({
       state: window.MAB_LAN_OPERATOR_SURFACE.state.visual,
       source: window.MAB_LAN_OPERATOR_SURFACE.state.sources.find(
@@ -96,7 +104,40 @@ test("LAN operator receives Host Visual Stream over WebRTC and composes the trac
         window.MAB_LAN_OPERATOR_SURFACE.visualReceiver?.()?.sourceVideo("avatar"),
       ),
       composition: window.MAB_LAN_OPERATOR_SURFACE.currentComposition(),
+      mediaDrawRects: window.MAB_LAN_OPERATOR_SURFACE.sourceMediaDrawRects(),
     }));
+    await operatorPage.evaluate(() => {
+      window.MAB_LAN_OPERATOR_SURFACE.moveSource("avatar", {
+        x: 0.72,
+        y: 0.54,
+        width: 0.22,
+        height: 0.34,
+      });
+    });
+    const containProbe = await operatorPage
+      .waitForFunction(
+        () => {
+          const rects = window.MAB_LAN_OPERATOR_SURFACE?.sourceMediaDrawRects?.();
+          const avatar = rects?.avatar;
+          if (!avatar?.draw || !avatar?.box || !avatar?.media) return null;
+          const mediaAspect = avatar.media.width / avatar.media.height;
+          const drawAspect = avatar.draw.width / avatar.draw.height;
+          const boxAspect = avatar.box.width / avatar.box.height;
+          if (
+            avatar.fit === "contain" &&
+            Math.abs(drawAspect - mediaAspect) < 0.01 &&
+            Math.abs(boxAspect - mediaAspect) > 0.1 &&
+            avatar.draw.width <= avatar.box.width + 0.1 &&
+            avatar.draw.height <= avatar.box.height + 0.1
+          ) {
+            return { avatar, mediaAspect, drawAspect, boxAspect };
+          }
+          return null;
+        },
+        null,
+        { timeout: 5_000 },
+      )
+      .then((handle) => handle.jsonValue());
     const avatarPublisherState = await avatarPublisher.evaluate(
       () => window.MAB_LAN_HOST_VISUAL_PUBLISHER.state,
     );
@@ -137,9 +178,17 @@ test("LAN operator receives Host Visual Stream over WebRTC and composes the trac
     assert.ok(avatarSource.frameAgeMs < 1200, JSON.stringify(avatarSource));
     assert.equal(operatorVisual.hasVideo, true);
     assert.equal(operatorVisual.hasAvatarVideo, true);
+    assert.ok(operatorVisual.state.trackCount >= 2, JSON.stringify(operatorVisual.state));
+    assert.ok(
+      operatorVisual.state.hostPublisherConnections >= 2,
+      JSON.stringify(operatorVisual.state),
+    );
     assert.equal(operatorVisual.source.state, "live");
     assert.equal(operatorVisual.avatar.state, "live");
     assert.equal(operatorVisual.composition.localComposedTrack, true);
+    assert.equal(operatorVisual.mediaDrawRects["host-app"].fit, "contain");
+    assert.equal(operatorVisual.mediaDrawRects.avatar.fit, "contain");
+    assert.ok(containProbe.avatar, JSON.stringify(containProbe));
     assert.ok(
       body.recentEvents.some((event) => event.event === "host_visual_stream_state_updated"),
       JSON.stringify(body.recentEvents),

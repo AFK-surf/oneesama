@@ -168,6 +168,10 @@ export function buildLanOperatorVisualClientScript() {
             : source.frameAgeMs || null;
         }
         const liveSourceCount = state.sources.filter((source) => source.streamId || source.state === "live").length;
+        const hostPublisherConnections = Math.max(state.visual.hostPublisherConnections, liveSourceCount);
+        const trackCount = videos.size;
+        state.visual.hostPublisherConnections = hostPublisherConnections;
+        state.visual.trackCount = trackCount;
         return {
           transport: "webrtc",
           connectionState: state.visual.connectionState,
@@ -175,8 +179,8 @@ export function buildLanOperatorVisualClientScript() {
           peerConnectionState: state.visual.peerConnectionState,
           signalingState: state.visual.signalingState,
           receiverWebSocketState: state.visual.receiverWebSocketState,
-          hostPublisherConnections: Math.max(state.visual.hostPublisherConnections, liveSourceCount),
-          trackCount: videos.size,
+          hostPublisherConnections,
+          trackCount,
           reconnectCount: state.transport.visual.reconnectCount,
           lastPacketAt: state.transport.visual.lastPacketAt,
           sources: state.sources,

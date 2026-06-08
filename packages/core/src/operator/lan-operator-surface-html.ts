@@ -638,6 +638,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           sources: boot.sources,
           visual: { transport: "webrtc", connectionState: "not_connected", iceConnectionState: null, peerConnectionState: null, signalingState: null, receiverWebSocketState: "closed", hostPublisherConnections: 0, trackCount: 0 },
           sourceRects: structuredClone(boot.sourceRects),
+          sourceMediaDrawRects: {},
           focusedSourceId: "host-app",
           layoutRevision: 0,
           overlays: [],
@@ -683,6 +684,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             ...currentTrackState(),
             layoutRevision: state.layoutRevision,
             sourceRects: state.sourceRects,
+            sourceMediaDrawRects: state.sourceMediaDrawRects,
             focusedSourceId: state.focusedSourceId,
             overlayCount: state.overlays.length,
           };
@@ -1458,29 +1460,76 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           const focused = source.id === state.focusedSourceId;
           const video = visualReceiver?.sourceVideo(source.id);
           if (video && video.readyState >= 2) {
-            ctx.drawImage(video, x, y, width, height);
+            drawContainedVideo(source, video, x, y, width, height);
             visualReceiver?.noteSourceRendered(source.id, video);
           } else {
-          const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
-          if (source.id === "avatar") {
-            gradient.addColorStop(0, "#0f766e");
-            gradient.addColorStop(1, "#1d4ed8");
-          } else {
-            gradient.addColorStop(0, "#111827");
-            gradient.addColorStop(1, "#334155");
-          }
-          ctx.fillStyle = gradient;
-          ctx.fillRect(x, y, width, height);
+            const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+            if (source.id === "avatar") {
+              gradient.addColorStop(0, "#0f766e");
+              gradient.addColorStop(1, "#1d4ed8");
+            } else {
+              gradient.addColorStop(0, "#111827");
+              gradient.addColorStop(1, "#334155");
+            }
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x, y, width, height);
           }
           ctx.strokeStyle = focused ? "#93c5fd" : "#64748b";
           ctx.lineWidth = focused ? 4 : 2;
           ctx.strokeRect(x, y, width, height);
-          ctx.fillStyle = "rgba(255,255,255,0.92)";
-          ctx.font = "600 24px system-ui, sans-serif";
-          ctx.fillText(source.label, x + 24, y + 42);
-          ctx.fillStyle = "rgba(255,255,255,0.68)";
-          ctx.font = "15px system-ui, sans-serif";
-          ctx.fillText(source.kind + " source " + String(index + 1), x + 24, y + 70);
+          if (!video || video.readyState < 2) {
+            ctx.fillStyle = "rgba(255,255,255,0.92)";
+            ctx.font = "600 24px system-ui, sans-serif";
+            ctx.fillText(source.label, x + 24, y + 42);
+            ctx.fillStyle = "rgba(255,255,255,0.68)";
+            ctx.font = "15px system-ui, sans-serif";
+            ctx.fillText(source.kind + " source " + String(index + 1), x + 24, y + 70);
+          }
+        }
+
+        function containedMediaRect(mediaWidth, mediaHeight, x, y, width, height) {
+          const sourceWidth = Number(mediaWidth || 0);
+          const sourceHeight = Number(mediaHeight || 0);
+          if (!(sourceWidth > 0) || !(sourceHeight > 0) || !(width > 0) || !(height > 0)) {
+            return { x, y, width, height, fit: "stretch_fallback" };
+          }
+          const mediaAspect = sourceWidth / sourceHeight;
+          const boxAspect = width / height;
+          if (mediaAspect > boxAspect) {
+            const drawWidth = width;
+            const drawHeight = width / mediaAspect;
+            return {
+              x,
+              y: y + (height - drawHeight) / 2,
+              width: drawWidth,
+              height: drawHeight,
+              fit: "contain",
+            };
+          }
+          const drawHeight = height;
+          const drawWidth = height * mediaAspect;
+          return {
+            x: x + (width - drawWidth) / 2,
+            y,
+            width: drawWidth,
+            height: drawHeight,
+            fit: "contain",
+          };
+        }
+
+        function drawContainedVideo(source, video, x, y, width, height) {
+          const mediaWidth = Number(video.videoWidth || 0);
+          const mediaHeight = Number(video.videoHeight || 0);
+          const draw = containedMediaRect(mediaWidth, mediaHeight, x, y, width, height);
+          ctx.fillStyle = source.id === "avatar" ? "#e9edf2" : "#0b1220";
+          ctx.fillRect(x, y, width, height);
+          ctx.drawImage(video, draw.x, draw.y, draw.width, draw.height);
+          state.sourceMediaDrawRects[source.id] = {
+            box: { x, y, width, height },
+            draw: { x: draw.x, y: draw.y, width: draw.width, height: draw.height },
+            media: { width: mediaWidth || null, height: mediaHeight || null },
+            fit: draw.fit,
+          };
         }
 
         function drawOverlays() {
@@ -1725,6 +1774,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           configureLocalVad: (enabled) => voiceControls?.configureLocalVad(enabled), sendTextInput: (text) => textInputClient?.sendText(text),
           setAudioEnabled: (enabled) => outputClient?.setAudioEnabled(enabled),
           getComposedVideoTrack: () => state.localComposedTrack, outputClient: () => outputClient,
+          sourceMediaDrawRects: () => structuredClone(state.sourceMediaDrawRects || {}),
           forceCloseTransport: (label) => {
             if (label === "events") return eventsSocketClient?.socket()?.close();
             if (label === "voice") return voiceSocketClient?.socket()?.close();
