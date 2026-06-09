@@ -6,8 +6,8 @@ import type {
 } from "./lan-operator-conversation-engine.ts";
 
 export interface ConversationEventDrainPumpOptions {
-  conversationEngine: ConversationEnginePort;
-  sessionId: string;
+  conversationEngine: ConversationEnginePort | (() => ConversationEnginePort);
+  sessionId: string | (() => string);
   onEvents(events: CanonicalConversationEvent[]): void;
   onFailure(detail: Record<string, unknown>): void;
 }
@@ -15,14 +15,25 @@ export interface ConversationEventDrainPumpOptions {
 export function createConversationEventDrainPump(options: ConversationEventDrainPumpOptions) {
   let inFlight = false;
 
+  function currentEngine() {
+    return typeof options.conversationEngine === "function"
+      ? options.conversationEngine()
+      : options.conversationEngine;
+  }
+
+  function currentSessionId() {
+    return typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
+  }
+
   async function drain(reason = "provider_event_pump") {
-    if (!options.conversationEngine.control || inFlight) return;
+    const engine = currentEngine();
+    if (!engine.control || inFlight) return;
     inFlight = true;
     try {
-      const output = await options.conversationEngine.control({
+      const output = await engine.control({
         id: randomUUID(),
         ts: new Date().toISOString(),
-        sessionId: options.sessionId,
+        sessionId: currentSessionId(),
         type: "drain_events",
         reason,
         detail: {},

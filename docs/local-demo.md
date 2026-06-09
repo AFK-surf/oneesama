@@ -93,22 +93,26 @@ MAB_LAN_OPERATOR_AUTO_AVATAR_PUBLISHER=0 vp run dev:local-operator
 MAB_LAN_OPERATOR_AVATAR_PRESET=oneesama-video vp run dev:local-operator
 ```
 
-The foreground operator page also exposes avatar publisher controls: choose
-`fallback-canvas`, `oneesama-video`, or `hiyori-live2d`, then open/close the
-publisher from the control dock. `fallback-canvas` is the deterministic default;
-`oneesama-video` uses the muted two-state video avatar; `hiyori-live2d` may fall
-back visibly if local Live2D/WebGL/dependency conditions are unavailable.
+The foreground operator page embeds the avatar publisher automatically. Choose
+`fallback-canvas`, `oneesama-video`, or `hiyori-live2d` from the Avatar control;
+the selection switches the embedded publisher immediately. `fallback-canvas` is
+the deterministic default; `oneesama-video` uses the muted two-state video
+avatar; `hiyori-live2d` may fall back visibly if local
+Live2D/WebGL/dependency conditions are unavailable.
 
-By default the Local Operator Surface selects live OpenAI Realtime. The key is
-backend-only: `dev:local-operator` first loads local backend live-env files from
+By default the Local Operator Surface prefers live OpenAI Realtime when an OpenAI
+key exists, selects Gemini Live when only a Gemini key exists, and otherwise
+keeps the OpenAI Realtime path with a missing-key blocker. Keys are backend-only:
+`dev:local-operator` first loads local backend live-env files from
 `~/.config/oneesama/live-env` (or `ONEESAMA_LIVE_DEFAULT_ENV_DIR`), then accepts
-`ONEESAMA_OPENAI_API_KEY`, `MAB_OPENAI_API_KEY`, or `OPENAI_API_KEY`. The browser
-only sees transport/engine status, never the key. If no backend key is available,
-startup JSON, runtime status, and Debug Reports keep
-`openai_realtime_api_key_missing` as the backend blocker instead of silently
-turning the product path into a mock session. To force the local Diagnostic
-Conversation Engine for tests or diagnostics, set `MAB_LAN_OPERATOR_TRANSPORT`
-explicitly:
+`ONEESAMA_OPENAI_API_KEY`, `MAB_OPENAI_API_KEY`, or `OPENAI_API_KEY` for OpenAI
+and `ONEESAMA_GEMINI_API_KEY`, `MAB_GEMINI_API_KEY`, `GEMINI_API_KEY`, or
+`GOOGLE_API_KEY` for Gemini. The browser only sees transport/engine status,
+never the key. If no backend key is available, startup JSON, runtime status, and
+Debug Reports keep `openai_realtime_api_key_missing` as the backend blocker
+instead of silently turning the product path into a mock session. To force the
+local Diagnostic Conversation Engine for tests or diagnostics, set
+`MAB_LAN_OPERATOR_TRANSPORT` explicitly:
 
 ```bash
 MAB_LAN_OPERATOR_TRANSPORT=openai_realtime \
@@ -124,6 +128,40 @@ present, with `MAB_OPENAI_API_KEY` and `OPENAI_API_KEY` accepted as fallbacks.
 For deterministic local gate runs without a provider, set
 `MAB_LAN_OPERATOR_TRANSPORT=mock` or use the gate scripts, which construct the
 Diagnostic Conversation Engine explicitly.
+
+To try Gemini Live with Gemini 3.1 Flash Live, force the transport and provide a
+backend-only Gemini key:
+
+```bash
+MAB_LAN_OPERATOR_TRANSPORT=gemini_live \
+GEMINI_API_KEY=... \
+MAB_LAN_GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview \
+vp run dev:local-operator
+```
+
+The same key can live in
+`~/.config/oneesama/live-env/oneesama-gemini-live.sh`:
+
+```bash
+export ONEESAMA_GEMINI_API_KEY='...'
+export MAB_LAN_GEMINI_LIVE_MODEL='gemini-3.1-flash-live-preview'
+export MAB_LAN_GEMINI_THINKING_LEVEL='low'
+```
+
+The Gemini transport uses the raw Live API WebSocket, sends the first client
+message as `setup`, sends typed turns as `clientContent`, and forwards local PCM
+chunks as `realtimeInput.audio`. Gemini Live's native-audio path is most
+predictable with mono PCM16 at 16 kHz; the local operator includes the observed
+sample rate in the audio MIME type so provider-side diagnostics can distinguish
+browser mic rates from synthetic 16 kHz smoke chunks.
+
+The operator web app exposes provider configuration without exposing secrets:
+the Provider dock and Telemetry Provider Config table show the selected
+transport, key source, model, Gemini thinking level, and a copyable launch
+command. Changing provider from the Provider dock calls the backend
+`/runtime/provider` switch endpoint, which replaces the server-side conversation
+engine and opens a fresh live session. The browser never receives the provider
+key.
 
 To collect a strict live-provider evidence report from the Local Operator
 Surface, run:
@@ -144,24 +182,28 @@ only for local diagnostics. The optional command exits 0 for a missing-key skip
 but still writes `ok:false` and `acceptanceSatisfied:false`, so it does not count
 as acceptance evidence.
 
-The operator UI includes microphone device selection, explicit arm/disarm,
-mute/unmute, diagnostic push-to-talk, typed debug text input, and an optional
-Local VAD telemetry toggle. Local VAD defaults off because Realtime turn
+The operator UI includes a visible Mic group with microphone device selection,
+Start mic/Stop mic, mute/unmute, diagnostic push-to-talk, typed debug text
+input, and an optional Local VAD telemetry toggle. Local VAD defaults off because Realtime turn
 formation belongs to the configured Conversation Engine; when enabled, it is
 UI/debug telemetry only. Typed text is also a feedback/debug aid, and the
 primary local voice gates still require Operator Voice Input evidence.
 
-The operator's main stage is the bot's focused app/system view. In local mode,
+The operator's main stage is the bot's focused app/system view. The default
+composition fills the canvas with the App view and renders the avatar as a
+foreground picture-in-picture overlay. In local mode,
 the concrete adapter is the Host Visual Stream: open
 `http://127.0.0.1:18913/host-visual` on the host and click `Share Display`.
 The Local Operator Surface receives the local app view over WebRTC and composes
-it into the movable operator-side canvas/video track. Raw Host Visual Stream
-tracks are inputs; the Operator Composed Video Track synthesized by the Local
-Operator Surface is the user-side synthesized output for local layout, future
-sharing, recording, or export. Move/resize/focus changes happen in that browser
-before `canvas.captureStream()`, so the local source does not need to recapture
-when the operator changes the layout. For an automated diagnostic track that
-does not require display-capture permission, open
+it into the operator-side canvas/video track. The App view is a fixed full-canvas
+background; avatar and foreground source overlays can move/resize above it. Raw
+Host Visual Stream tracks are inputs; the Operator Composed Video Track
+synthesized by the Local Operator Surface is the user-side synthesized output
+for local layout, future sharing, recording, or export. Overlay
+move/resize/focus changes happen in that browser before `canvas.captureStream()`,
+so the local source does not need to recapture when the operator changes the
+layout. For an automated diagnostic track that does not require display-capture
+permission, open
 `http://127.0.0.1:18913/host-visual?diagnostic=1`.
 The normal `dev:local-operator` startup opens the avatar renderer automatically.
 For diagnostic/manual checks, the same Host Visual Stream lane is:

@@ -8,6 +8,7 @@ import { extname, relative, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createRuntimeEvent,
+  normalizeConversationTransport,
   validateRuntimeSessionConfig,
   type AvatarRuntimeSessionConfig,
   type ConversationTransport,
@@ -83,6 +84,11 @@ import {
   createOpenAIRealtimeConversationEngine,
   createOpenAIRealtimeWebSocketTransport,
 } from "./lan-operator-openai-realtime-adapter.ts";
+import {
+  createGeminiLiveConversationEngine,
+  createGeminiLiveWebSocketTransport,
+} from "./lan-operator-gemini-live-adapter.ts";
+import { buildLanOperatorLiveProviderConfig } from "./lan-operator-live-provider-config.ts";
 import type { LanOperatorVoiceChunk, LanOperatorVoiceForwardResult } from "./lan-operator-voice.ts";
 
 export {
@@ -104,6 +110,7 @@ export interface LanOperatorSurfaceOptions {
   maxVoiceForwardInFlight?: number;
   conversationEventDrainIntervalMs?: number;
   conversationEngine?: ConversationEnginePort;
+  createConversationEngine?: (transport: ConversationTransport) => ConversationEnginePort;
   webrtcIceServers?: Array<Record<string, unknown>>;
   handleVoiceChunk?: (
     chunk: LanOperatorVoiceChunk,
@@ -166,7 +173,22 @@ function createDefaultConversationEngine(transport: ConversationTransport) {
       transport: createOpenAIRealtimeWebSocketTransport(),
     });
   }
+  if (transport === "gemini_live") {
+    return createGeminiLiveConversationEngine({
+      transport: createGeminiLiveWebSocketTransport(),
+    });
+  }
   return createDiagnosticConversationEngine();
+}
+
+function isRuntimeSwitchLiveTransport(
+  transport: ConversationTransport,
+): transport is "openai_realtime" | "gemini_live" {
+  return transport === "openai_realtime" || transport === "gemini_live";
+}
+
+function shouldDrainConversationEvents(transport: ConversationTransport) {
+  return transport === "openai_realtime" || transport === "gemini_live";
 }
 
 function jsonResponse(res: ServerResponse, status: number, body: unknown) {
@@ -175,6 +197,19 @@ function jsonResponse(res: ServerResponse, status: number, body: unknown) {
     "cache-control": "no-store",
   });
   res.end(JSON.stringify(body, null, 2));
+}
+
+async function readJsonRequestBody(req: IncomingMessage, maxBytes = 64_000) {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.byteLength;
+    if (bytes > maxBytes) throw new Error("request_body_too_large");
+    chunks.push(buffer);
+  }
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  return text ? (JSON.parse(text) as Record<string, unknown>) : {};
 }
 
 function htmlResponse(res: ServerResponse, html: string) {
@@ -235,15 +270,20 @@ export function createLanOperatorSurfaceServer(
   if (!validation.ok || !validation.config) {
     throw new Error(`lan_operator runtime config invalid: ${validation.errors.join("; ")}`);
   }
-  const config = validation.config;
+  let config = validation.config;
   const events = [...validation.events];
   const debug = defaultDebugState();
   const trustedLanOperatorMode = options.trustedLanOperatorMode ?? true;
   const lanModeExplicitlyEnabled = options.lanModeExplicitlyEnabled ?? trustedLanOperatorMode;
+  let liveProviderConfig = buildLanOperatorLiveProviderConfig({
+    selectedTransport: config.conversationTransport,
+    conversationTransportSelection: options.conversationTransportSelection || null,
+  });
   Object.assign(debug.surfaceContext, {
     trustedLanOperatorMode,
     lanModeExplicitlyEnabled,
     conversationTransportSelection: options.conversationTransportSelection || null,
+    liveProviderConfig,
     lanReachability: buildLanOperatorReachability({
       bindHost: options.host || DEFAULT_HOST,
       port: Number(options.port ?? DEFAULT_PORT),
@@ -251,7 +291,7 @@ export function createLanOperatorSurfaceServer(
       lanModeExplicitlyEnabled,
     }),
   });
-  const html = buildLanOperatorSurfaceHtml(config);
+  const html = buildLanOperatorSurfaceHtml(config, { liveProviderConfig });
   const clients = new Set<WebSocketClient>();
   const maxVoiceForwardInFlight = Math.max(
     1,
@@ -263,8 +303,11 @@ export function createLanOperatorSurfaceServer(
       options.conversationEventDrainIntervalMs ?? DEFAULT_CONVERSATION_EVENT_DRAIN_INTERVAL_MS,
     ),
   );
-  const conversationEngine =
-    options.conversationEngine || createDefaultConversationEngine(config.conversationTransport);
+  const conversationEngineFactory =
+    options.createConversationEngine || createDefaultConversationEngine;
+  let conversationEngine =
+    options.conversationEngine || conversationEngineFactory(config.conversationTransport);
+  let providerSwitchInFlight = false;
   debug.conversation.engineId = conversationEngine.id;
   debug.conversation.provider.adapterKind = config.conversationTransport;
   let health: RuntimeHealth = "ready";
@@ -305,6 +348,209 @@ export function createLanOperatorSurfaceServer(
       }
     }
     return runtimeEvent;
+  }
+
+  function runtimeSwitchSelection(
+    transport: "openai_realtime" | "gemini_live",
+    providerKeySource: string,
+  ): LanOperatorConversationTransportSelection {
+    return {
+      schema: "oneesama.lan_operator_conversation_transport_selection.v1",
+      transport,
+      source: "runtime_provider_switch",
+      explicit: true,
+      apiKeyConfigured: Boolean(providerKeySource),
+      apiKeySource: providerKeySource,
+      diagnosticFallback: false,
+      fallbackReason: providerKeySource ? "" : `${transport}_api_key_missing`,
+    };
+  }
+
+  function resetConversationDebugState(
+    transport: "openai_realtime" | "gemini_live",
+    engine: ConversationEnginePort,
+  ) {
+    const freshDebug = defaultDebugState();
+    debug.output = freshDebug.output;
+    debug.toolRouting = freshDebug.toolRouting;
+    debug.timeline = freshDebug.timeline;
+    debug.conversation = freshDebug.conversation;
+    debug.conversation.engineId = engine.id;
+    debug.conversation.status = "not_connected";
+    debug.conversation.provider.adapterKind = transport;
+  }
+
+  function rebuildLiveProviderConfig(
+    transport: "openai_realtime" | "gemini_live",
+    selection: LanOperatorConversationTransportSelection | null,
+  ) {
+    liveProviderConfig = buildLanOperatorLiveProviderConfig({
+      selectedTransport: transport,
+      conversationTransportSelection: selection,
+    });
+    Object.assign(debug.surfaceContext, {
+      conversationTransportSelection: selection,
+      liveProviderConfig,
+    });
+    return liveProviderConfig;
+  }
+
+  async function disconnectConversationEngineForProviderSwitch(
+    engine: ConversationEnginePort,
+    targetTransport: "openai_realtime" | "gemini_live",
+  ) {
+    if (!engine.disconnect) return;
+    try {
+      const disconnectEvents = await engine.disconnect(`provider_switch_to_${targetTransport}`);
+      recordCanonicalConversationEvents(disconnectEvents || []);
+    } catch (error) {
+      recordEvent(
+        "realtime",
+        "conversation_provider_switch_disconnect_failed",
+        "Previous conversation engine disconnect failed during provider switch",
+        {
+          engineId: engine.id,
+          targetTransport,
+          error: String((error as Error)?.message || error),
+        },
+        "warn",
+      );
+    }
+  }
+
+  async function switchConversationProvider(payload: Record<string, unknown>) {
+    if (providerSwitchInFlight) {
+      return {
+        status: 409,
+        body: { ok: false, error: "conversation_provider_switch_in_flight" },
+      };
+    }
+    let targetTransport: ConversationTransport;
+    try {
+      targetTransport = normalizeConversationTransport(payload.transport || payload.provider);
+    } catch (error) {
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error: "conversation_provider_switch_transport_invalid",
+          detail: String((error as Error)?.message || error),
+        },
+      };
+    }
+    if (!isRuntimeSwitchLiveTransport(targetTransport)) {
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error: "conversation_provider_switch_transport_unsupported",
+          transport: targetTransport,
+        },
+      };
+    }
+
+    const candidateProviderConfig = buildLanOperatorLiveProviderConfig({
+      selectedTransport: targetTransport,
+      conversationTransportSelection: null,
+    });
+    const targetProvider = candidateProviderConfig.providers.find(
+      (provider) => provider.transport === targetTransport,
+    );
+    if (!targetProvider?.keyConfigured) {
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error: "conversation_provider_key_missing",
+          transport: targetTransport,
+          acceptedKeyEnv: targetProvider?.acceptedKeyEnv || [],
+        },
+      };
+    }
+
+    providerSwitchInFlight = true;
+    try {
+      const previousTransport = config.conversationTransport;
+      if (previousTransport !== targetTransport) {
+        const nextConfig = buildLanOperatorRuntimeSessionConfig({
+          sessionId: config.sessionId,
+          botName: config.botName,
+          conversationTransport: targetTransport,
+          webrtcIceServers: options.webrtcIceServers || [],
+        });
+        const nextValidation = validateRuntimeSessionConfig(nextConfig);
+        if (!nextValidation.ok || !nextValidation.config) {
+          return {
+            status: 400,
+            body: {
+              ok: false,
+              error: "conversation_provider_switch_config_invalid",
+              errors: nextValidation.errors,
+            },
+          };
+        }
+        await disconnectConversationEngineForProviderSwitch(conversationEngine, targetTransport);
+        config = nextValidation.config;
+        events.push(...nextValidation.events);
+        conversationEngine = conversationEngineFactory(targetTransport);
+        const selection = runtimeSwitchSelection(targetTransport, targetProvider.keySource);
+        rebuildLiveProviderConfig(targetTransport, selection);
+        resetConversationDebugState(targetTransport, conversationEngine);
+        updateSurfaceContext({
+          providerSwitch: targetTransport,
+          previousTransport,
+          source: "runtime_provider_switch",
+        });
+        recordEvent(
+          "realtime",
+          "conversation_provider_switched",
+          "Conversation provider switched",
+          {
+            previousTransport,
+            conversationTransport: targetTransport,
+            engineId: conversationEngine.id,
+            keySource: targetProvider.keySource,
+          },
+        );
+      } else {
+        const selection = runtimeSwitchSelection(targetTransport, targetProvider.keySource);
+        rebuildLiveProviderConfig(targetTransport, selection);
+        updateSurfaceContext({
+          providerSwitch: targetTransport,
+          previousTransport,
+          source: "runtime_provider_switch",
+        });
+      }
+      if (payload.connect !== false) {
+        await handleEngineControl({
+          control: {
+            type: "connect",
+            reason: "provider_switch",
+            detail: {
+              from: previousTransport,
+              to: targetTransport,
+              source: "runtime_provider_switch",
+            },
+          },
+        });
+      }
+      const body = runtimeStatusBody(config, events, debug, health);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          previousTransport,
+          conversationTransport: config.conversationTransport,
+          engineId: conversationEngine.id,
+          liveProviderConfig,
+          snapshot: body.snapshot,
+          debug: body.debug,
+          recentEvents: body.recentEvents,
+        },
+      };
+    } finally {
+      providerSwitchInFlight = false;
+    }
   }
 
   function mergeTransportState(
@@ -475,6 +721,7 @@ export function createLanOperatorSurfaceServer(
   }
 
   async function handleEngineControl(payload: Record<string, unknown>) {
+    const engine = conversationEngine;
     const control = (payload.control || payload) as Record<string, unknown>;
     const controlType = String(control.type || "");
     if (!isEngineControlType(controlType)) {
@@ -503,8 +750,8 @@ export function createLanOperatorSurfaceServer(
     updateSurfaceContext({ control: command.type });
     recordEvent("realtime", "engine_control_started", "Engine control started", { command });
     try {
-      const output = conversationEngine.control
-        ? await conversationEngine.control(command)
+      const output = engine.control
+        ? await engine.control(command)
         : { result: { ok: false, error: "conversation_engine_control_missing" }, events: [] };
       recordCanonicalConversationEvents(output.events || []);
       recordEngineControlFinished(debug, output);
@@ -528,6 +775,7 @@ export function createLanOperatorSurfaceServer(
   }
 
   async function handleTextInput(payload: Record<string, unknown>) {
+    const engine = conversationEngine;
     const payloadSessionId = String(payload.sessionId || "");
     if (payloadSessionId && payloadSessionId !== config.sessionId) {
       recordEvent(
@@ -575,13 +823,13 @@ export function createLanOperatorSurfaceServer(
       textLength: text.length,
       surfaceContext: textInput.surfaceContext || {},
     });
-    const output = conversationEngine.receiveTextInput
-      ? await conversationEngine.receiveTextInput(textInput)
+    const output = engine.receiveTextInput
+      ? await engine.receiveTextInput(textInput)
       : {
           result: {
             ok: false,
             error: "conversation_engine_text_input_missing",
-            engineId: conversationEngine.id,
+            engineId: engine.id,
           },
           events: [
             {
@@ -589,7 +837,7 @@ export function createLanOperatorSurfaceServer(
               ts: new Date().toISOString(),
               sessionId: textInput.sessionId,
               type: "engine_error" as const,
-              engineId: conversationEngine.id,
+              engineId: engine.id,
               error: "conversation_engine_text_input_missing",
               detail: { inputMode: "text", inputId: textInput.id },
             },
@@ -612,6 +860,7 @@ export function createLanOperatorSurfaceServer(
   }
 
   async function handleToolResult(payload: Record<string, unknown>) {
+    const engine = conversationEngine;
     const callId = String(payload.callId || payload.call_id || debug.toolRouting.callId || "");
     if (!callId) {
       recordEvent(
@@ -649,13 +898,13 @@ export function createLanOperatorSurfaceServer(
       status: toolResult.status,
       source: toolResult.source,
     });
-    const engineOutput = conversationEngine.receiveToolResult
-      ? await conversationEngine.receiveToolResult(toolResult)
+    const engineOutput = engine.receiveToolResult
+      ? await engine.receiveToolResult(toolResult)
       : {
           result: {
             ok: false,
             error: "conversation_engine_tool_result_missing",
-            engineId: conversationEngine.id,
+            engineId: engine.id,
           },
           events: [
             {
@@ -663,7 +912,7 @@ export function createLanOperatorSurfaceServer(
               ts: new Date().toISOString(),
               sessionId: toolResult.sessionId,
               type: "engine_error" as const,
-              engineId: conversationEngine.id,
+              engineId: engine.id,
               error: "conversation_engine_tool_result_missing",
               detail: { inputMode: "tool_result", callId: toolResult.callId },
             },
@@ -1016,7 +1265,8 @@ export function createLanOperatorSurfaceServer(
   }
 
   async function forwardVoiceChunk(chunk: LanOperatorVoiceChunk) {
-    if (!options.handleVoiceChunk && !conversationEngine) return;
+    const engine = conversationEngine;
+    if (!options.handleVoiceChunk && !engine) return;
     if (debug.voice.forwardInFlight >= maxVoiceForwardInFlight) {
       debug.voice.forwardBackpressureDrops += 1;
       recordEvent(
@@ -1034,7 +1284,7 @@ export function createLanOperatorSurfaceServer(
     }
     debug.voice.forwardInFlight += 1;
     try {
-      const engineOutput = await conversationEngine.receiveVoiceChunk(chunk);
+      const engineOutput = await engine.receiveVoiceChunk(chunk);
       recordCanonicalConversationEvents(engineOutput.events || []);
       const legacyResult = options.handleVoiceChunk
         ? await options.handleVoiceChunk(chunk)
@@ -1489,6 +1739,11 @@ export function createLanOperatorSurfaceServer(
           }),
         );
       }
+      if (req.method === "POST" && url.pathname === "/runtime/provider") {
+        const payload = await readJsonRequestBody(req);
+        const result = await switchConversationProvider(payload);
+        return jsonResponse(res, result.status, result.body);
+      }
       if (req.method === "GET" && url.pathname === "/runtime/status") {
         return jsonResponse(res, 200, runtimeStatusBody(config, events, debug, health));
       }
@@ -1516,8 +1771,8 @@ export function createLanOperatorSurfaceServer(
   });
   server.on("upgrade", handleUpgrade);
   const conversationEventDrainPump = createConversationEventDrainPump({
-    conversationEngine,
-    sessionId: config.sessionId,
+    conversationEngine: () => conversationEngine,
+    sessionId: () => config.sessionId,
     onEvents: recordCanonicalConversationEvents,
     onFailure: (detail) =>
       recordEvent(
@@ -1529,13 +1784,19 @@ export function createLanOperatorSurfaceServer(
       ),
   });
   const conversationEventDrainTimer =
-    config.conversationTransport === "openai_realtime" && conversationEventDrainIntervalMs > 0
-      ? setInterval(() => void conversationEventDrainPump.drain(), conversationEventDrainIntervalMs)
+    conversationEventDrainIntervalMs > 0
+      ? setInterval(() => {
+          if (shouldDrainConversationEvents(config.conversationTransport)) {
+            void conversationEventDrainPump.drain();
+          }
+        }, conversationEventDrainIntervalMs)
       : null;
   conversationEventDrainTimer?.unref?.();
 
   return {
-    config,
+    get config() {
+      return config;
+    },
     events,
     server,
     async listen() {

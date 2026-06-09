@@ -15,6 +15,7 @@ export function buildLanOperatorSurfaceContext(
   const lanReachability = debug.surfaceContext.lanReachability || null;
   const conversationTransportSelection =
     debug.surfaceContext.conversationTransportSelection || null;
+  const liveProviderConfig = debug.surfaceContext.liveProviderConfig || null;
   const renderer = (config.renderer || {}) as { webrtcIceServers?: unknown };
   const webrtcIceServers = Array.isArray(renderer.webrtcIceServers)
     ? renderer.webrtcIceServers
@@ -75,6 +76,7 @@ export function buildLanOperatorSurfaceContext(
     lanReachability,
     lanPeerEvidence,
     conversationTransportSelection,
+    liveProviderConfig,
     clientContext,
   };
 }

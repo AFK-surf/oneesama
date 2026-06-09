@@ -29,6 +29,9 @@ Env:
   MAB_LAN_OPERATOR_OPEN_BROWSER=0          Testing/CI: no browser windows
   MAB_LAN_OPERATOR_AUTO_AVATAR_PUBLISHER=0 Testing/CI: no avatar publisher
   MAB_LAN_OPERATOR_AVATAR_PRESET=<preset>  Default avatar publisher preset
+  MAB_LAN_OPERATOR_TRANSPORT=gemini_live   Try Gemini Live / Gemini 3.1 Flash Live
+  MAB_LAN_OPERATOR_TRANSPORT=openai_realtime
+                                           Try OpenAI Realtime
   MAB_LAN_OPERATOR_TRANSPORT=mock          Testing/diagnostics: force local engine
   ONEESAMA_LIVE_DEFAULT_ENV_DIR=<dir>      Backend live env directory
 `);

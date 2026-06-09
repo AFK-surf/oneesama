@@ -407,7 +407,7 @@ export type DebugState = {
 };
 
 export const DEFAULT_SOURCE_RECTS: CompositionState["sourceRects"] = {
-  "host-app": { x: 0.04, y: 0.08, width: 0.7, height: 0.7 },
+  "host-app": { x: 0, y: 0, width: 1, height: 1 },
   avatar: { x: 0.72, y: 0.56, width: 0.24, height: 0.24 },
 };
 

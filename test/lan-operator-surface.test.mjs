@@ -22,6 +22,60 @@ async function waitForRuntimeStatus(url, predicate, timeoutMs = 5_000) {
   throw new Error(`runtime_status_timeout: ${JSON.stringify(lastBody)}`);
 }
 
+function createLiveProviderTestEngine(transport, controls = []) {
+  const engineId = `${transport}_ui_test`;
+  return {
+    id: engineId,
+    receiveVoiceChunk: () => ({
+      result: { ok: true, engineId },
+      events: [],
+    }),
+    receiveTextInput: () => ({
+      result: { ok: true, engineId, accepted: true },
+      events: [],
+    }),
+    receiveToolResult: () => ({
+      result: { ok: true, engineId, accepted: true },
+      events: [],
+    }),
+    control: (command) => {
+      controls.push({ ...command, engineId });
+      const ts = new Date().toISOString();
+      return {
+        result: { ok: true, engineId, control: command.type },
+        events:
+          command.type === "connect"
+            ? [
+                {
+                  id: `${engineId}_connected`,
+                  ts,
+                  sessionId: command.sessionId,
+                  type: "engine_connected",
+                  engineId,
+                  detail: {
+                    provider: transport,
+                    providerEventType: "transport.connected",
+                    inputMode: "text",
+                    source: command.reason || "provider_switch",
+                  },
+                },
+              ]
+            : [],
+      };
+    },
+    disconnect: (reason) => [
+      {
+        id: `${engineId}_disconnected`,
+        ts: new Date().toISOString(),
+        sessionId: "",
+        type: "engine_disconnected",
+        engineId,
+        detail: { provider: transport, providerEventType: "transport.disconnected", reason },
+      },
+    ],
+  };
+}
+
 test("LAN operator surface config declares always-on voice and operator composition", () => {
   const config = buildLanOperatorRuntimeSessionConfig({
     sessionId: "lan-operator-contract-test",
@@ -124,6 +178,7 @@ test("LAN operator surface exposes voice controls and optional local VAD telemet
         armed: window.MAB_LAN_OPERATOR_SURFACE.state.voiceArmed,
         muted: window.MAB_LAN_OPERATOR_SURFACE.state.voiceMuted,
         deviceSelect: Boolean(document.getElementById("voice-device-select")),
+        micEntry: document.querySelector(".voice-tools .dock-label")?.textContent,
         armText: document.getElementById("voice-button")?.innerText,
         defaultVadEnabled,
         disabledVadEnabled: disabledVad.enabled,
@@ -136,6 +191,7 @@ test("LAN operator surface exposes voice controls and optional local VAD telemet
         muted: initial.muted,
         deviceSelect: initial.deviceSelect,
         armText: initial.armText,
+        micEntry: initial.micEntry,
         defaultVadEnabled: initial.defaultVadEnabled,
         disabledVadEnabled: initial.disabledVadEnabled,
       },
@@ -143,7 +199,8 @@ test("LAN operator surface exposes voice controls and optional local VAD telemet
         armed: false,
         muted: false,
         deviceSelect: true,
-        armText: "Arm",
+        armText: "Start mic",
+        micEntry: "Mic",
         defaultVadEnabled: false,
         disabledVadEnabled: false,
       },
@@ -338,8 +395,12 @@ test("LAN operator web app exposes live Realtime text connect without browser ke
       disabled: document.getElementById("operator-realtime-connect-button")?.disabled ?? null,
       button: document.getElementById("operator-realtime-connect-button")?.textContent || "",
     }));
-    assert.match(before.status, /Realtime (ready|connected)/);
-    assert.match(before.title, /OpenAI Realtime engine: openai_realtime_ui_test/);
+    assert.match(before.status, /OpenAI Realtime (not connected|connected)/);
+    assert.doesNotMatch(before.status, /ready/);
+    assert.match(
+      before.title,
+      /OpenAI Realtime engine: openai_realtime_ui_test; session status: (not connected|connected)/,
+    );
     assert.equal(before.hidden, false);
     assert.equal(before.disabled, false);
     assert.match(before.button, /^(Connect|Reconnect)$/);
@@ -375,6 +436,188 @@ test("LAN operator web app exposes live Realtime text connect without browser ke
   } finally {
     await browser.close();
     await surface.close();
+  }
+});
+
+test("LAN operator backend switches live provider and reconnects the session", async () => {
+  const previous = {
+    ONEESAMA_GEMINI_API_KEY: process.env.ONEESAMA_GEMINI_API_KEY,
+    ONEESAMA_OPENAI_API_KEY: process.env.ONEESAMA_OPENAI_API_KEY,
+  };
+  process.env.ONEESAMA_GEMINI_API_KEY = "fake-gemini-provider-switch-key";
+  process.env.ONEESAMA_OPENAI_API_KEY = "fake-openai-provider-switch-key";
+  const controls = [];
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-provider-switch-backend",
+    botName: "LAN Oneesama",
+    conversationTransport: "gemini_live",
+    createConversationEngine: (transport) => createLiveProviderTestEngine(transport, controls),
+  });
+  const { url } = await surface.listen();
+  try {
+    const response = await fetch(new URL("/runtime/provider", url), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ transport: "openai_realtime", connect: true }),
+    });
+    const body = await response.json();
+    const statusBody = await (await fetch(new URL("/runtime/status", url))).json();
+    const connectCommand = controls.find(
+      (command) => command.engineId === "openai_realtime_ui_test" && command.type === "connect",
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.previousTransport, "gemini_live");
+    assert.equal(body.conversationTransport, "openai_realtime");
+    assert.equal(body.engineId, "openai_realtime_ui_test");
+    assert.equal(body.liveProviderConfig.selectedTransport, "openai_realtime");
+    assert.equal(surface.config.conversationTransport, "openai_realtime");
+    assert.ok(connectCommand, JSON.stringify(controls));
+    assert.equal(connectCommand.reason, "provider_switch");
+    assert.equal(statusBody.snapshot.conversationTransport, "openai_realtime");
+    assert.equal(statusBody.debug.conversation.engineId, "openai_realtime_ui_test");
+    assert.equal(statusBody.debug.conversation.status, "connected");
+    assert.equal(
+      statusBody.debug.surfaceContext.operatorMode.conversationTransport,
+      "openai_realtime",
+    );
+  } finally {
+    await surface.close();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("LAN operator web app exposes Gemini Live provider config without browser key handling", async () => {
+  const secret = "fake-gemini-live-key-should-not-reach-browser";
+  const openAiSecret = "fake-openai-live-key-should-not-reach-browser";
+  const previous = {
+    ONEESAMA_GEMINI_API_KEY: process.env.ONEESAMA_GEMINI_API_KEY,
+    ONEESAMA_OPENAI_API_KEY: process.env.ONEESAMA_OPENAI_API_KEY,
+    MAB_LAN_GEMINI_LIVE_MODEL: process.env.MAB_LAN_GEMINI_LIVE_MODEL,
+    MAB_LAN_GEMINI_THINKING_LEVEL: process.env.MAB_LAN_GEMINI_THINKING_LEVEL,
+  };
+  process.env.ONEESAMA_GEMINI_API_KEY = secret;
+  process.env.ONEESAMA_OPENAI_API_KEY = openAiSecret;
+  process.env.MAB_LAN_GEMINI_LIVE_MODEL = "gemini-3.1-flash-live-preview";
+  process.env.MAB_LAN_GEMINI_THINKING_LEVEL = "low";
+  const controls = [];
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-gemini-provider-config-web",
+    botName: "LAN Oneesama",
+    conversationTransport: "gemini_live",
+    conversationTransportSelection: {
+      schema: "oneesama.lan_operator_conversation_transport_selection.v1",
+      transport: "gemini_live",
+      source: "explicit_env",
+      explicit: true,
+      apiKeyConfigured: true,
+      apiKeySource: "ONEESAMA_GEMINI_API_KEY",
+      diagnosticFallback: false,
+      fallbackReason: "",
+    },
+    createConversationEngine: (transport) => createLiveProviderTestEngine(transport, controls),
+  });
+  const { url } = await surface.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
+    await page.goto(url);
+    await page.waitForFunction(() => window.MAB_LAN_OPERATOR_SURFACE?.state?.ready === true, null, {
+      timeout: 10_000,
+    });
+    const before = await page.evaluate(() => {
+      const select = document.getElementById("conversation-provider-select");
+      const status = document.getElementById("conversation-provider-status");
+      const table = document.getElementById("debug-provider-config-table");
+      const config = window.MAB_LAN_OPERATOR_SURFACE.liveProviderConfig();
+      return {
+        selected: select?.value || "",
+        status: status?.textContent || "",
+        composerStatus: document.getElementById("operator-realtime-mode-status")?.textContent || "",
+        tableText: table?.innerText || "",
+        debugJson: document.getElementById("debug-json")?.innerText || "",
+        config,
+      };
+    });
+    await page.selectOption("#conversation-provider-select", "openai_realtime");
+    await page.waitForFunction(
+      () => {
+        const state = window.MAB_LAN_OPERATOR_SURFACE?.state;
+        const status = document.getElementById("conversation-provider-status")?.textContent || "";
+        return (
+          state?.liveProviderConfig?.selectedTransport === "openai_realtime" &&
+          state?.conversation?.engineId === "openai_realtime_ui_test" &&
+          /selected/.test(status)
+        );
+      },
+      null,
+      { timeout: 5_000 },
+    );
+    const view = await page.evaluate(() => {
+      const select = document.getElementById("conversation-provider-select");
+      const status = document.getElementById("conversation-provider-status");
+      const table = document.getElementById("debug-provider-config-table");
+      return {
+        selectedAfter: select?.value || "",
+        statusAfter: status?.textContent || "",
+        tableText: table?.innerText || "",
+        debugJson: document.getElementById("debug-json")?.innerText || "",
+        config: window.MAB_LAN_OPERATOR_SURFACE.liveProviderConfig(),
+      };
+    });
+    const statusBody = await (await fetch(new URL("/runtime/status", url))).json();
+    const geminiProvider = before.config.providers.find(
+      (provider) => provider.transport === "gemini_live",
+    );
+    const switchConnectCommand = controls.find(
+      (command) => command.engineId === "openai_realtime_ui_test" && command.type === "connect",
+    );
+
+    assert.equal(before.selected, "gemini_live");
+    assert.match(before.status, /selected/);
+    assert.match(before.composerStatus, /Gemini Live not connected/);
+    assert.equal(view.selectedAfter, "openai_realtime");
+    assert.match(view.statusAfter, /selected/);
+    assert.match(before.tableText, /Gemini Live/);
+    assert.match(before.tableText, /ONEESAMA_GEMINI_API_KEY/);
+    assert.match(before.tableText, /gemini-3\.1-flash-live-preview/);
+    assert.match(before.tableText, /thinking:low/);
+    assert.match(before.tableText, /MAB_LAN_OPERATOR_TRANSPORT=gemini_live/);
+    assert.match(view.tableText, /OpenAI Realtime/);
+    assert.match(view.tableText, /ONEESAMA_OPENAI_API_KEY/);
+    assert.doesNotMatch(view.tableText, new RegExp(secret));
+    assert.doesNotMatch(view.tableText, new RegExp(openAiSecret));
+    assert.doesNotMatch(view.debugJson, new RegExp(secret));
+    assert.doesNotMatch(view.debugJson, new RegExp(openAiSecret));
+    assert.equal(geminiProvider.keyConfigured, true);
+    assert.equal(geminiProvider.keySource, "ONEESAMA_GEMINI_API_KEY");
+    assert.equal("apiKey" in geminiProvider, false);
+    assert.ok(switchConnectCommand, JSON.stringify(controls));
+    assert.equal(switchConnectCommand.reason, "provider_switch");
+    assert.equal(view.config.selectedTransport, "openai_realtime");
+    assert.equal(statusBody.snapshot.conversationTransport, "openai_realtime");
+    assert.equal(statusBody.debug.conversation.engineId, "openai_realtime_ui_test");
+    assert.equal(
+      statusBody.debug.surfaceContext.liveProviderConfig.providers.find(
+        (provider) => provider.transport === "gemini_live",
+      ).keySource,
+      "ONEESAMA_GEMINI_API_KEY",
+    );
+  } finally {
+    await browser.close();
+    await surface.close();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 
@@ -1273,7 +1516,7 @@ test("LAN operator surface microphone capture emits PCM16 chunks to the voice po
     assert.equal(clientVoice.permissionState, "granted");
     assert.equal(
       await page.evaluate(() => document.getElementById("voice-button")?.innerText),
-      "Disarm",
+      "Stop mic",
     );
     assert.ok(forwarded.length >= 2, JSON.stringify(forwarded));
     assert.equal(forwarded[0].source, "operator_mic_pcm16");

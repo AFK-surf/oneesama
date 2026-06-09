@@ -41,7 +41,7 @@ export function buildLanOperatorVoiceControlsClientScript() {
       const capture = state.voiceCapture || {};
       const localVad = state.voiceLocalVad || {};
       const energy = Number(capture.lastEnergy ?? localVad.lastEnergy ?? 0);
-      nodes.voiceButton.textContent = state.voiceArmed ? "Disarm" : "Arm";
+      nodes.voiceButton.textContent = state.voiceArmed ? "Stop mic" : "Start mic";
       nodes.voiceButton.classList.toggle("primary", !state.voiceArmed);
       nodes.muteButton.textContent = state.voiceMuted ? "Unmute" : "Mute";
       nodes.muteButton.disabled = !state.voiceArmed;

@@ -5,7 +5,9 @@ import {
 
 export type LanOperatorConversationTransportSource =
   | "explicit_env"
+  | "gemini_api_key"
   | "openai_api_key"
+  | "runtime_provider_switch"
   | "default_openai_realtime";
 
 export interface LanOperatorConversationTransportSelection {
@@ -30,13 +32,30 @@ function apiKeySource(env: Record<string, string | undefined>) {
   return "";
 }
 
+function geminiApiKeySource(env: Record<string, string | undefined>) {
+  if (trimmed(env.ONEESAMA_GEMINI_API_KEY)) return "ONEESAMA_GEMINI_API_KEY";
+  if (trimmed(env.MAB_GEMINI_API_KEY)) return "MAB_GEMINI_API_KEY";
+  if (trimmed(env.GEMINI_API_KEY)) return "GEMINI_API_KEY";
+  if (trimmed(env.GOOGLE_API_KEY)) return "GOOGLE_API_KEY";
+  return "";
+}
+
+function apiKeySourceForTransport(
+  env: Record<string, string | undefined>,
+  transport: ConversationTransport,
+) {
+  if (transport === "gemini_live") return geminiApiKeySource(env);
+  if (transport === "openai_realtime") return apiKeySource(env);
+  return apiKeySource(env) || geminiApiKeySource(env);
+}
+
 export function resolveLanOperatorConversationTransport(
   env: Record<string, string | undefined> = process.env,
 ): LanOperatorConversationTransportSelection {
   const explicitTransport = trimmed(env.MAB_LAN_OPERATOR_TRANSPORT);
-  const keySource = apiKeySource(env);
   if (explicitTransport) {
     const transport = normalizeConversationTransport(explicitTransport);
+    const keySource = apiKeySourceForTransport(env, transport);
     return {
       schema: "oneesama.lan_operator_conversation_transport_selection.v1",
       transport,
@@ -48,6 +67,7 @@ export function resolveLanOperatorConversationTransport(
       fallbackReason: "",
     };
   }
+  const keySource = apiKeySource(env);
   if (keySource) {
     return {
       schema: "oneesama.lan_operator_conversation_transport_selection.v1",
@@ -56,6 +76,19 @@ export function resolveLanOperatorConversationTransport(
       explicit: false,
       apiKeyConfigured: true,
       apiKeySource: keySource,
+      diagnosticFallback: false,
+      fallbackReason: "",
+    };
+  }
+  const geminiKeySource = geminiApiKeySource(env);
+  if (geminiKeySource) {
+    return {
+      schema: "oneesama.lan_operator_conversation_transport_selection.v1",
+      transport: "gemini_live",
+      source: "gemini_api_key",
+      explicit: false,
+      apiKeyConfigured: true,
+      apiKeySource: geminiKeySource,
       diagnosticFallback: false,
       fallbackReason: "",
     };

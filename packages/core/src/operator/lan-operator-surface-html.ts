@@ -10,6 +10,7 @@ import { buildLanOperatorVoiceControlsClientScript } from "./lan-operator-voice-
 import { buildLanOperatorVoiceClientScript } from "./lan-operator-voice-client.ts";
 import { buildLanOperatorVisualClientScript } from "./lan-operator-visual-client.ts";
 import { buildLanOperatorWebSocketClientScript } from "./lan-operator-websocket-client.ts";
+import type { LanOperatorLiveProviderConfig } from "./lan-operator-live-provider-config.ts";
 function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -17,7 +18,10 @@ function escapeHtml(value: unknown) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
-export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessionConfig>) {
+export function buildLanOperatorSurfaceHtml(
+  config: Readonly<AvatarRuntimeSessionConfig>,
+  options: { liveProviderConfig?: LanOperatorLiveProviderConfig } = {},
+) {
   const webrtcIceServers = Array.isArray(
     (config.renderer as { webrtcIceServers?: unknown } | undefined)?.webrtcIceServers,
   )
@@ -27,6 +31,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
     sessionId: config.sessionId,
     botName: config.botName,
     conversationTransport: config.conversationTransport,
+    liveProviderConfig: options.liveProviderConfig || null,
     webrtcIceServers,
     sources: [
       { id: "host-app", label: "App view", kind: "desktop_app", state: "synthetic" },
@@ -52,290 +57,312 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
     <title>${escapeHtml(title)}</title>
     <style>
       :root {
-        color-scheme: dark;
-        /* shadcn-style zinc dark tokens */
-        --background: #09090b;
-        --surface: #0c0c0f;
-        --panel: #141417;
-        --panel-2: #1a1a1e;
-        --elevated: #212127;
-        --ink: #fafafa;
-        --muted: #a1a1aa;
-        --faint: #71717a;
-        --line: #26262b;
-        --line-2: #323239;
-        --accent: #34d399;
-        --accent-ink: #052e1f;
-        --blue: #60a5fa;
-        --ok: #34d399;
-        --warn: #fbbf24;
-        --bad: #f87171;
-        --ring: color-mix(in srgb, var(--accent) 55%, transparent);
-        --radius: 9px;
+        color-scheme: light;
+        /* calm light tokens */
+        --background: #eef0f4;
+        --surface: #ffffff;
+        --panel: #ffffff;
+        --panel-2: #f5f6f8;
+        --elevated: #ffffff;
+        --elevated-2: #f1f2f5;
+        --ink: #1b1d22;
+        --muted: #5b606b;
+        --faint: #969ba6;
+        --line: #e4e6ea;
+        --line-2: #d4d7dd;
+        --accent: #0f9d6e;
+        --accent-ink: #ffffff;
+        --blue: #2f6df0;
+        --ok: #0f9d6e;
+        --warn: #c47d12;
+        --bad: #d6453d;
+        --ring: color-mix(in srgb, var(--accent) 45%, transparent);
+        --radius: 12px;
+        --radius-sm: 8px;
+        --shadow-sm: 0 1px 2px rgba(24,28,40,0.06), 0 1px 1px rgba(24,28,40,0.04);
+        --shadow-md: 0 8px 24px rgba(24,28,40,0.10), 0 2px 6px rgba(24,28,40,0.06);
+        --stage-bg: #f1f3f6;
+        --glass: rgba(255,255,255,0.82);
         --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
         --sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       * { box-sizing: border-box; }
-      ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+      /* The hidden attribute must always win, even over class display rules
+         (e.g. .btn sets display:inline-flex, which would otherwise show a
+         hidden Connect/Disconnect button). */
+      [hidden] { display: none !important; }
+      ::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); }
       html, body { height: 100%; }
       body {
         margin: 0; color: var(--ink); font-family: var(--sans);
         font-size: 13px; -webkit-font-smoothing: antialiased; letter-spacing: 0.1px;
         background:
-          radial-gradient(1100px 560px at 80% -12%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+          radial-gradient(1200px 620px at 84% -16%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+          radial-gradient(900px 520px at 6% 112%, color-mix(in srgb, var(--blue) 6%, transparent), transparent 58%),
           var(--background);
       }
       button, select, input { font: inherit; font-size: 12px; color: var(--ink); }
-      ::-webkit-scrollbar { width: 10px; height: 10px; }
-      ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
-      ::-webkit-scrollbar-thumb:hover { background: #45454d; background-clip: padding-box; }
+      ::-webkit-scrollbar { width: 11px; height: 11px; }
+      ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; border: 3px solid transparent; background-clip: padding-box; }
+      ::-webkit-scrollbar-thumb:hover { background: #b9bdc6; background-clip: padding-box; }
 
       /* ----- app shell: fixed viewport height, panels scroll internally ----- */
       .app { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; }
       header {
         display: flex; align-items: center; justify-content: space-between; gap: 16px;
-        min-height: 52px; padding: 0 18px;
+        height: 48px; padding: 0 16px;
         border-bottom: 1px solid var(--line);
-        background: color-mix(in srgb, var(--panel) 82%, transparent);
-        backdrop-filter: blur(14px) saturate(140%);
+        background: color-mix(in srgb, var(--surface) 88%, transparent);
+        backdrop-filter: blur(16px) saturate(120%);
       }
-      .brand { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
-      h1 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.2; letter-spacing: 0.2px; white-space: nowrap; }
-      .topline { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-      .topline span[id$="-label"] { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 99px; background: var(--panel-2); white-space: nowrap; }
-      #session-label { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
-      .status-dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent); }
-      .status-dot.ready { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
-      .status-dot.bad { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
+      header > div { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      h1 { margin: 0; font-size: 13.5px; font-weight: 660; line-height: 1.2; letter-spacing: 0.2px; white-space: nowrap; color: var(--ink); }
+      .topline { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+      .topline span[id$="-label"] { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 99px; background: var(--panel-2); white-space: nowrap; }
+      #session-label { font-family: var(--mono); font-size: 10.5px; color: var(--faint); border: 0; background: none; padding: 0; }
+      .status-dot { width: 7px; height: 7px; border-radius: 99px; display: inline-block; background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent); }
+      .status-dot.ready { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+      .status-dot.bad { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent); }
 
-      main { display: grid; gap: 0; padding: 10px; min-height: 0; overflow: hidden; }
-      main[data-dock="right"] { grid-template-columns: minmax(0, 1fr) 14px var(--dock-w, clamp(520px, 44vw, 800px)); grid-template-rows: minmax(0, 1fr); }
-      main[data-dock="bottom"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 14px var(--dock-h, 40vh); }
+      main { display: grid; gap: 12px; padding: 12px; min-height: 0; overflow: hidden; }
+      main[data-dock="right"] { grid-template-columns: minmax(0, 1fr) 12px var(--dock-w, clamp(340px, 27vw, 440px)); grid-template-rows: minmax(0, 1fr); }
+      main[data-dock="bottom"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 12px var(--dock-h, 38vh); }
       main[data-dock="hidden"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
       main[data-dock="hidden"] .dock-splitter, main[data-dock="hidden"] .debug-shell { display: none; }
-      /* Clean mode (debug hidden): the stage reads as a clean shared-screen Meet —
-         drop the debug-oriented control dock; keep the canvas + voice controls. */
+      /* Clean mode (debug hidden): drop the secondary control strip; header bar,
+         stage, and the mic bar stay — still grounded, no floating overlays. */
       main[data-dock="hidden"] .control-dock { display: none; }
       .dock-splitter { position: relative; align-self: stretch; justify-self: stretch; background: transparent; }
       main[data-dock="right"] .dock-splitter { cursor: col-resize; }
       main[data-dock="bottom"] .dock-splitter { cursor: row-resize; }
-      .dock-splitter::before { content: ""; position: absolute; inset: 0; margin: auto; background: var(--line-2); border-radius: 99px; }
-      main[data-dock="right"] .dock-splitter::before { width: 2px; height: 44px; }
-      main[data-dock="bottom"] .dock-splitter::before { height: 2px; width: 44px; }
+      .dock-splitter::before { content: ""; position: absolute; inset: 0; margin: auto; background: var(--line-2); border-radius: 99px; transition: background .12s ease; }
+      main[data-dock="right"] .dock-splitter::before { width: 3px; height: 40px; }
+      main[data-dock="bottom"] .dock-splitter::before { height: 3px; width: 40px; }
       .dock-splitter:hover::before, .dock-splitter:focus-visible::before { background: var(--accent); }
       .dock-controls { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
-      .dock-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--elevated); color: var(--muted); cursor: pointer; font-size: 11px; line-height: 1; }
-      .dock-btn:hover { background: #2a2a30; color: var(--ink); }
-      .dock-btn[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
-      .dock-summon { position: fixed; right: 14px; bottom: 14px; z-index: 20; display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 99px; background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(10px); color: var(--muted); font-family: var(--mono); font-size: 11px; cursor: pointer; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+      .dock-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--surface); color: var(--muted); cursor: pointer; font-size: 11px; line-height: 1; }
+      .dock-btn:hover { background: var(--elevated-2); color: var(--ink); }
+      .dock-btn[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+      .dock-summon { position: fixed; right: 16px; bottom: 16px; z-index: 20; display: inline-flex; align-items: center; gap: 8px; padding: 9px 13px; border: 1px solid var(--line-2); border-radius: 99px; background: var(--glass); backdrop-filter: blur(12px); color: var(--muted); font-family: var(--mono); font-size: 11px; cursor: pointer; box-shadow: var(--shadow-md); }
       .dock-summon[hidden] { display: none; }
-      .dock-summon:hover { border-color: #3a3a42; color: var(--ink); }
+      .dock-summon:hover { border-color: #c2c6cd; color: var(--ink); }
       .dock-summon-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--accent); flex: 0 0 auto; }
       .dock-summon-dot.warn { background: var(--warn); }
       .dock-summon-dot.bad { background: var(--bad); }
       .dock-summon-cue { color: var(--faint); font-size: 9.5px; }
+
       .stage-shell, .debug-shell {
         min-height: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-        overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.02), 0 8px 30px rgba(0,0,0,0.35);
+        overflow: hidden; box-shadow: var(--shadow-md);
       }
       .stage-shell { display: flex; flex-direction: column; }
 
-      /* ----- stage toolbar (primary controls only) ----- */
-      .stage-toolbar {
-        flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px;
-        padding: 8px 10px; border-bottom: 1px solid var(--line);
-        background: linear-gradient(180deg, var(--panel-2), var(--panel));
-      }
-      .toolbar-group { display: flex; align-items: center; gap: 6px; min-width: 0; }
-      .voice-tools { gap: 6px; }
-      .toolbar-divider { width: 1px; align-self: stretch; margin: 2px 2px; background: var(--line); }
-
       /* ----- buttons / inputs ----- */
       .btn {
-        display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
-        border: 1px solid var(--line-2); border-radius: 7px; background: var(--elevated); color: var(--ink);
-        height: 28px; padding: 0 10px; cursor: pointer; font-weight: 550;
-        transition: background .12s ease, border-color .12s ease, transform .04s ease;
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;
+        border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink);
+        height: 30px; padding: 0 12px; cursor: pointer; font-weight: 540; box-shadow: var(--shadow-sm);
+        transition: background .12s ease, border-color .12s ease, transform .04s ease, color .12s ease;
       }
-      .btn:hover { background: #2a2a30; border-color: #3a3a42; }
+      .btn:hover { background: var(--elevated-2); border-color: #c2c6cd; }
       .btn:active { transform: translateY(1px); }
       .btn.primary {
-        border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent); color: var(--accent-ink); font-weight: 650;
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent);
+        border-color: transparent; background: var(--accent); color: var(--accent-ink); font-weight: 640;
+        box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 30%, transparent), 0 6px 16px color-mix(in srgb, var(--accent) 24%, transparent);
       }
-      .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
-      .btn.danger { border-color: color-mix(in srgb, var(--bad) 55%, transparent); color: #ff9b9b; }
-      .btn.danger:hover { background: color-mix(in srgb, var(--bad) 18%, transparent); border-color: var(--bad); color: #ffd0d0; }
-      .btn:disabled { cursor: not-allowed; opacity: 0.45; }
+      .btn.primary:hover { background: color-mix(in srgb, var(--accent) 90%, black); border-color: transparent; }
+      .btn.danger { border-color: color-mix(in srgb, var(--bad) 45%, transparent); color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, var(--surface)); }
+      .btn.danger:hover { background: color-mix(in srgb, var(--bad) 12%, var(--surface)); border-color: var(--bad); }
+      .btn:disabled { cursor: not-allowed; opacity: 0.45; box-shadow: none; }
+      .btn[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
       :is(button, input, select):focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-      .voice-device { height: 28px; max-width: 178px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--elevated); color: var(--ink); padding: 0 8px; }
-      .checkbox-control { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--elevated); color: var(--muted); font-size: 11px; user-select: none; }
+      select, .voice-device { height: 30px; max-width: 168px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); padding: 0 9px; box-shadow: var(--shadow-sm); }
+      .checkbox-control { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); font-size: 11px; user-select: none; cursor: pointer; box-shadow: var(--shadow-sm); }
       .checkbox-control input { accent-color: var(--accent); }
-      .energy-wrap { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--elevated); }
-      .energy-meter { width: 64px; height: 6px; border-radius: 99px; overflow: hidden; background: var(--line-2); }
-      .energy-meter span { display: block; width: 0%; height: 100%; background: linear-gradient(90deg, var(--accent), #6ee7b7); transition: width .1s linear; }
+      .energy-wrap { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-sm); }
+      .energy-meter { width: 56px; height: 6px; border-radius: 99px; overflow: hidden; background: var(--line-2); }
+      .energy-meter span { display: block; width: 0%; height: 100%; background: linear-gradient(90deg, var(--accent), #34d399); transition: width .1s linear; }
       .energy-label { min-width: 30px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; font-family: var(--mono); text-align: right; }
+      .toolbar-group { display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .toolbar-divider { width: 1px; align-self: stretch; margin: 4px 1px; background: var(--line-2); }
+      .dock-label { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
 
-      /* ----- source tabs ----- */
-      .source-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-      .source-tabs button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--blue) 65%, transparent); color: #bfdbfe; background: color-mix(in srgb, var(--blue) 16%, transparent); }
-
-      /* ----- stage grid: full-width shared-screen canvas (source switching = toolbar tabs) ----- */
-      .stage-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr; }
-      .canvas-wrap { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 10px; overflow: hidden; background: radial-gradient(120% 120% at 50% 0%, #121216, #08080a); }
-      .stage-hud { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; padding: 6px 11px; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--line-2) 70%, transparent); background: color-mix(in srgb, #000 52%, transparent); backdrop-filter: blur(8px) saturate(130%); font-family: var(--mono); font-size: 10px; color: var(--muted); }
+      /* ----- stage: attached header bar + canvas + attached mic bar (all grounded) ----- */
+      .stage-topbar {
+        flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 9px 12px; border-bottom: 1px solid var(--line);
+        background: var(--panel-2);
+      }
+      .source-tabs { display: flex; gap: 3px; padding: 3px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-sm); }
+      .source-tabs button { height: 26px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-weight: 560; cursor: pointer; transition: background .12s ease, color .12s ease; }
+      .source-tabs button:hover { color: var(--ink); background: var(--elevated-2); }
+      .source-tabs button[aria-pressed="true"] { color: #1a44b8; background: color-mix(in srgb, var(--blue) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 30%, transparent); }
+      .stage-hud { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 5px 12px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
       .hud-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
       .hud-chip b { color: var(--ink); font-weight: 600; }
       .hud-dot { width: 6px; height: 6px; border-radius: 99px; background: var(--faint); flex: 0 0 auto; }
       .hud-chip.ok .hud-dot { background: var(--ok); }
       .hud-chip.warn .hud-dot { background: var(--warn); }
       .hud-chip.bad .hud-dot { background: var(--bad); }
-      canvas { aspect-ratio: 16 / 9; max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 10px; border: 1px solid var(--line-2); background: #050507; box-shadow: 0 18px 50px rgba(0,0,0,0.55); touch-action: none; }
 
-      /* ----- control dock (secondary / diagnostic controls, below stage) ----- */
-      .control-dock {
-        flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 8px;
-        padding: 7px 12px; border-top: 1px solid var(--line);
-        background: linear-gradient(180deg, var(--panel), var(--surface));
+      .stage-grid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr; }
+      .canvas-wrap { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 14px; overflow: hidden; background: var(--stage-bg); }
+      canvas { aspect-ratio: 16 / 9; max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 12px; border: 1px solid var(--line-2); background: #0c0e12; box-shadow: var(--shadow-md); touch-action: none; }
+
+      /* attached mic bar (grounded footer of the stage) */
+      .stage-controls {
+        flex: 0 0 auto; display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 7px;
+        padding: 9px 12px; border-top: 1px solid var(--line);
+        background: var(--panel-2);
       }
-      .dock-group { display: flex; align-items: center; gap: 6px; }
-      .dock-group + .dock-group { padding-left: 8px; border-left: 1px solid var(--line); }
-      .dock-label { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-right: 2px; white-space: nowrap; }
-      .dock-status { min-width: 92px; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .dock-status.ok { color: var(--ok); }
-      .dock-status.warn { color: var(--warn); }
-      .dock-status.bad { color: var(--bad); }
-      .dock-grow { flex: 1 1 240px; min-width: 200px; }
-      .dock-grow form, .dock-grow [data-operator-text-input] { display: flex; flex: 1; gap: 6px; }
-      .dock-grow #operator-text-input { flex: 1; min-width: 0; max-width: none; }
-      .diagnostic-menu { display: flex; align-items: center; gap: 6px; }
-      .diagnostic-menu[open] { flex: 1 1 100%; flex-wrap: wrap; padding-top: 2px; }
+      .voice-tools { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: center; }
+      .voice-tools .dock-label { margin-right: 1px; }
+
+      /* ----- secondary control strip (below stage, hidden in clean mode) ----- */
+      .control-dock {
+        flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 7px 10px;
+        padding: 8px 14px; border-top: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .dock-group { display: flex; align-items: center; gap: 7px; }
+      .dock-group + .dock-group { padding-left: 10px; border-left: 1px solid var(--line); }
+      .dock-grow { flex: 1 1 0; min-width: 0; }
+      .dock-status { min-width: 0; max-width: 220px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* darker than the token colors so small status text stays readable (AA) on the light panels */
+      .dock-status.ok { color: #0a7a52; }
+      .dock-status.warn { color: #9a6310; }
+      .dock-status.bad { color: #b5322b; }
+      .control-dock .btn { height: 28px; padding: 0 10px; }
+      .diagnostic-menu { display: flex; align-items: center; gap: 7px; }
+      .diagnostic-menu[open] { flex: 1 1 100%; flex-wrap: wrap; padding-top: 4px; }
       .diagnostic-menu > summary { list-style: none; }
       .diagnostic-menu > summary::-webkit-details-marker { display: none; }
-      .diagnostic-popover {
-        display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-        min-width: 0;
-      }
+      .diagnostic-popover { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 
-      /* ----- debug panel ----- */
+      /* ----- debug dock ----- */
       .debug-shell { display: flex; flex-direction: column; }
-      .debug-header {
-        display: flex; align-items: center; justify-content: space-between; gap: 10px;
-        padding: 8px 10px 8px 12px; border-bottom: 1px solid var(--line);
-        background: linear-gradient(180deg, var(--panel-2), var(--panel));
-      }
-      .debug-header h2 { margin: 0; font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
-      .debug-body { flex: 1; overflow: hidden; min-height: 0; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
-      /* ----- realtime conversation cockpit (primary) ----- */
-      .conversation-panel { flex: 1 1 60%; min-height: 220px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow: hidden; }
-      .conversation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 11px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, var(--panel-2), var(--panel)); }
-      .conversation-title { font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+      .debug-body { flex: 1; overflow: hidden; min-height: 0; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+      .debug-panel-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .debug-tablist { display: inline-flex; gap: 3px; padding: 3px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+      .debug-tab { border: 0; border-radius: 7px; background: transparent; color: var(--muted); height: 28px; padding: 0 13px; cursor: pointer; font-size: 11.5px; font-weight: 580; }
+      .debug-tab:hover { background: var(--elevated-2); color: var(--ink); }
+      .debug-tab[aria-selected="true"] { color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm); }
+      .tabpanel[hidden] { display: none; }
+
+      /* ----- realtime conversation (primary ledger view) ----- */
+      .conversation-panel { flex: 1 1 60%; min-height: 220px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+      .conversation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+      .conversation-title { font-size: 12.5px; font-weight: 660; letter-spacing: 0.1px; color: var(--ink); }
       .conversation-meta { font-size: 10px; color: var(--faint); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .cockpit-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 7px 11px; border-bottom: 1px solid var(--line); background: var(--panel); }
-      .cockpit-chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
-      .cockpit-dot { width: 7px; height: 7px; border-radius: 99px; background: var(--faint); flex: 0 0 auto; }
+      .verdict-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+      .verdict-strip:empty { display: none; }
+      .verdict-badge { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; padding: 2px 9px; border-radius: 6px; white-space: nowrap; color: var(--muted); background: var(--panel-2); }
+      .verdict-badge.ok { color: #0a7a52; background: #e4f6ee; }
+      .verdict-badge.warn { color: #9a6310; background: #fcf1dc; }
+      .verdict-badge.bad { color: #b5322b; background: #fbe6e4; }
+      .verdict-pipeline { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+      .stage { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 9.5px; color: var(--faint); padding: 1px 6px; border-radius: 99px; }
+      .stage::before { content: ""; width: 6px; height: 6px; border-radius: 99px; background: var(--faint); flex: 0 0 auto; }
+      .stage.ok { color: #0a7a52; } .stage.ok::before { background: var(--ok); }
+      .stage.warn { color: #9a6310; } .stage.warn::before { background: var(--warn); }
+      .stage.bad { color: #b5322b; background: color-mix(in srgb, var(--bad) 10%, transparent); } .stage.bad::before { background: var(--bad); }
+      .stage-arrow { color: var(--line-2); font-size: 10px; }
+      .verdict-next { font-size: 10px; color: var(--muted); font-family: var(--mono); }
+      .verdict-next b { color: var(--ink); font-weight: 600; }
+      .verdict-pipeline .stage { cursor: pointer; }
+      .verdict-pipeline .stage:hover { background: var(--elevated-2); color: var(--ink); }
+      .cockpit-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 14px; padding: 7px 14px; border-bottom: 1px solid var(--line); color: var(--faint); }
+      .cockpit-strip:empty { display: none; }
+      .cockpit-chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 10px; color: var(--muted); white-space: nowrap; }
+      .cockpit-dot { width: 6px; height: 6px; border-radius: 99px; background: var(--faint); flex: 0 0 auto; }
       .cockpit-chip.ok .cockpit-dot { background: var(--ok); }
       .cockpit-chip.running .cockpit-dot { background: var(--blue); }
       .cockpit-chip.error { color: var(--bad); }
       .cockpit-chip.error .cockpit-dot { background: var(--bad); }
-      .verdict-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; padding: 7px 11px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, var(--panel-2), var(--panel)); }
-      .verdict-badge { font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; padding: 2px 9px; border-radius: 6px; white-space: nowrap; color: var(--muted); background: var(--elevated); }
-      .verdict-badge.ok { color: #8be8a4; background: #14261a; }
-      .verdict-badge.warn { color: #fbbf24; background: #2a2310; }
-      .verdict-badge.bad { color: #ff8b8b; background: #3a171d; }
-      .verdict-pipeline { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
-      .stage { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 9.5px; color: var(--faint); padding: 1px 6px; border-radius: 99px; }
-      .stage::before { content: ""; width: 6px; height: 6px; border-radius: 99px; background: var(--faint); flex: 0 0 auto; }
-      .stage.ok { color: #cfe9d6; } .stage.ok::before { background: var(--ok); }
-      .stage.warn { color: #e9d9b0; } .stage.warn::before { background: var(--warn); }
-      .stage.bad { color: #e9b8bc; background: color-mix(in srgb, var(--bad) 14%, transparent); } .stage.bad::before { background: var(--bad); }
-      .stage-arrow { color: var(--line-2); font-size: 10px; }
-      .verdict-next { font-size: 10px; color: var(--muted); font-family: var(--mono); }
-      .verdict-next b { color: var(--ink); font-weight: 600; }
-      .conversation-stream { flex: 1; min-height: 0; overflow: auto; }
-      .conversation-empty { color: var(--faint); font-size: 12px; text-align: center; padding: 28px 12px; line-height: 1.5; }
-      .tl-row { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-left: 2px solid transparent; padding: 7px 11px 7px 9px; color: var(--ink); cursor: pointer; }
+      .conversation-stream { flex: 1; min-height: 0; overflow: auto; padding: 6px 0; }
+      .conversation-empty { color: var(--faint); font-size: 12.5px; text-align: center; padding: 40px 22px; line-height: 1.6; }
+
+      /* conversation rows as a clean chat/log */
+      .tl-row { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; background: transparent; border: 0; border-left: 2px solid transparent; padding: 9px 14px 9px 12px; color: var(--ink); cursor: pointer; transition: background .1s ease; }
       .tl-row:hover, .tl-row.open { background: var(--panel-2); }
       .tl-main { display: flex; align-items: center; gap: 9px; }
-      .tl-chip { flex: 0 0 auto; min-width: 64px; font-family: var(--mono); font-size: 8.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; background: var(--elevated); color: var(--muted); text-align: center; }
-      .tl-summary { flex: 1; min-width: 0; color: var(--ink); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .tl-status { flex: 0 0 auto; font-family: var(--mono); font-size: 8.5px; font-weight: 650; padding: 1px 7px; border-radius: 99px; white-space: nowrap; color: var(--muted); background: var(--elevated); }
+      .tl-chip { flex: 0 0 auto; min-width: 58px; font-family: var(--mono); font-size: 8.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: var(--panel-2); color: var(--muted); text-align: center; }
+      .tl-summary { flex: 1; min-width: 0; color: var(--ink); font-size: 12.5px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .tl-status { flex: 0 0 auto; font-family: var(--mono); font-size: 8.5px; font-weight: 650; padding: 1px 8px; border-radius: 99px; white-space: nowrap; color: var(--muted); background: var(--panel-2); }
       .tl-dur { flex: 0 0 auto; min-width: 34px; color: var(--faint); font-family: var(--mono); font-size: 9.5px; text-align: right; }
       .tl-meta { display: flex; flex-wrap: wrap; gap: 4px 9px; color: var(--faint); font-size: 9px; font-family: var(--mono); font-variant-numeric: tabular-nums; padding-left: 1px; }
-      .tl-user { border-left-color: #5da7ff; }
+      .tl-user { border-left-color: var(--blue); }
       .tl-assistant { border-left-color: var(--accent); }
-      .tl-tool { border-left-color: #61d8c6; }
-      .tl-connection { border-left-color: #747782; }
-      .tl-error { border-left-color: #ff5f6d; }
-      .tl-user .tl-chip { color: #5da7ff; }
-      .tl-assistant .tl-chip { color: var(--accent); }
-      .tl-tool .tl-chip { color: #61d8c6; }
-      .tl-connection .tl-chip { color: #9aa0aa; }
-      .tl-error .tl-chip { color: #ff8b8b; }
-      .tl-status.ok { color: #8be8a4; background: #14261a; }
-      .tl-status.running { color: #90c8ff; background: #15233a; }
-      .tl-status.error { color: #ff8b8b; background: #3a171d; }
-      .tl-raw { margin-top: 6px; padding: 8px 9px; border-radius: 6px; background: #0a0a0c; border: 1px solid var(--line); color: #c9c9cf; font-family: var(--mono); font-size: 10px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
-      .tl-row.selected { background: color-mix(in srgb, var(--accent) 13%, transparent); border-left-color: var(--accent); }
+      .tl-tool { border-left-color: #14a8c0; }
+      .tl-connection { border-left-color: #b3b8c0; }
+      .tl-error { border-left-color: var(--bad); }
+      .tl-user .tl-chip { color: #1a44b8; background: color-mix(in srgb, var(--blue) 12%, var(--panel-2)); }
+      .tl-assistant .tl-chip { color: #0a7a52; background: color-mix(in srgb, var(--accent) 14%, var(--panel-2)); }
+      .tl-tool .tl-chip { color: #0a7c90; }
+      .tl-connection .tl-chip { color: #6b7280; }
+      .tl-error .tl-chip { color: #b5322b; }
+      .tl-status.ok { color: #0a7a52; background: #e4f6ee; }
+      .tl-status.running { color: #1a44b8; background: #e6edfd; }
+      .tl-status.error { color: #b5322b; background: #fbe6e4; }
+      .tl-raw { margin-top: 6px; padding: 9px 10px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px solid var(--line); color: #3f4450; font-family: var(--mono); font-size: 10px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+      .tl-row.selected { background: color-mix(in srgb, var(--accent) 9%, transparent); border-left-color: var(--accent); }
       .tl-row.selected .tl-summary { color: var(--ink); }
-      .verdict-pipeline .stage { cursor: pointer; }
-      .verdict-pipeline .stage:hover { background: var(--elevated); color: var(--ink); }
-      /* ----- selected-event inspector (Phase 5) ----- */
-      .event-inspector { flex: 0 0 auto; max-height: 46%; display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--line-2); background: linear-gradient(180deg, var(--panel-2), var(--surface)); padding: 9px 11px; overflow: auto; }
+
+      /* ----- selected-event inspector ----- */
+      .event-inspector { flex: 0 0 auto; max-height: 46%; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line-2); background: var(--panel-2); padding: 11px 14px; overflow: auto; }
       .event-inspector[hidden] { display: none; }
       .inspector-head { display: flex; align-items: center; gap: 8px; }
-      .inspector-head .tl-chip { color: var(--muted); }
-      .inspector-owner { font-family: var(--mono); font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+      .inspector-head .tl-chip { color: var(--muted); background: var(--surface); }
+      .inspector-owner { font-family: var(--mono); font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
       .inspector-spacer { flex: 1; }
       .inspector-head .btn { height: 24px; padding: 0 9px; }
       #inspector-close { min-width: 26px; padding: 0; font-size: 15px; line-height: 1; }
-      .inspector-evidence { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px 12px; }
-      .insp-kv { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+      .inspector-evidence { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 12px; }
+      .insp-kv { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       .insp-kv b { color: var(--faint); font-size: 8.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
       .insp-kv span { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 11px; color: var(--ink); overflow-wrap: anywhere; }
-      .inspector-next { font-family: var(--mono); font-size: 10.5px; color: #e9d9b0; background: #2a2310; border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); border-radius: 6px; padding: 5px 8px; }
-      .inspector-next.bad { color: #ff8b8b; background: #3a171d; border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
+      .inspector-next { font-family: var(--mono); font-size: 10.5px; color: #9a6310; background: #fcf1dc; border: 1px solid color-mix(in srgb, var(--warn) 32%, transparent); border-radius: var(--radius-sm); padding: 6px 9px; }
+      .inspector-next.bad { color: #b5322b; background: #fbe6e4; border-color: color-mix(in srgb, var(--bad) 32%, transparent); }
       .inspector-next b { color: var(--ink); font-weight: 600; }
-      .inspector-raw { margin: 0; padding: 8px 9px; border-radius: 6px; background: #0a0a0c; border: 1px solid var(--line); color: #c9c9cf; font-family: var(--mono); font-size: 10px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
-      /* ----- realtime composer (lives in the Ledger sidebar, not the bottom toolbar) ----- */
-      .ledger-composer { flex: 0 0 auto; border-top: 1px solid var(--line); background: linear-gradient(180deg, var(--panel-2), var(--surface)); padding: 8px 10px; }
-      .ledger-composer form { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; width: 100%; align-items: center; }
-      .ledger-composer #operator-realtime-mode-status { grid-row: 1; grid-column: 1; justify-self: start; }
-      .ledger-composer #operator-realtime-connect-button { grid-row: 1; grid-column: 2; justify-self: end; }
-      .ledger-composer #operator-text-input { grid-row: 2; grid-column: 1; min-width: 0; width: 100%; }
-      .ledger-composer #operator-text-send-button { grid-row: 2; grid-column: 2; }
-      /* ----- telemetry (secondary) ----- */
-      .debug-panel-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-      .debug-tablist { display: inline-flex; gap: 3px; }
-      .debug-tab { border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); color: var(--muted); height: 26px; padding: 0 11px; cursor: pointer; font-size: 11px; font-weight: 600; }
-      .debug-tab:hover { background: var(--elevated); color: var(--ink); }
-      .debug-tab[aria-selected="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); }
-      .tabpanel[hidden] { display: none; }
-      .telemetry-wrap { display: flex; flex: 1 1 auto; min-height: 0; overflow: auto; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); padding: 10px; }
-      .telemetry-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--faint); }
+      .inspector-raw { margin: 0; padding: 9px 10px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--line); color: #3f4450; font-family: var(--mono); font-size: 10px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+
+      /* ----- composer (lives in the ledger) ----- */
+      .ledger-composer { flex: 0 0 auto; border-top: 1px solid var(--line); background: var(--panel-2); padding: 11px 14px; }
+      .ledger-composer form { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+      .ledger-composer .composer-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+      .ledger-composer .composer-row-status { justify-content: space-between; gap: 10px; }
+      .ledger-composer .composer-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+      .ledger-composer #operator-realtime-mode-status { flex: 1 1 auto; min-width: 0; max-width: none; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ledger-composer #operator-text-input { flex: 1 1 auto; min-width: 0; width: 100%; max-width: none; height: 36px; }
+      .ledger-composer #operator-text-send-button { flex: 0 0 auto; height: 36px; }
+
+      /* ----- telemetry / sources ----- */
+      .telemetry-wrap { display: flex; flex: 1 1 auto; min-height: 0; overflow: auto; flex-direction: column; gap: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 12px; }
+      .telemetry-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 660; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
       .telemetry-head .toolbar-group { gap: 6px; }
-      .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
-      .metric { min-height: 0; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(180deg, var(--panel-2), var(--panel)); padding: 7px 8px; display: flex; flex-direction: column; gap: 3px; }
+      .telemetry-head .btn { height: 28px; padding: 0 10px; }
+      .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 7px; }
+      .metric { min-height: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); padding: 8px 9px; display: flex; flex-direction: column; gap: 4px; }
       .metric b { color: var(--faint); font-size: 9.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
-      .metric span { font-size: 12.5px; font-family: var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; line-height: 1.25; }
+      .metric span { font-size: 12.5px; font-family: var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; line-height: 1.25; color: var(--ink); }
       .debug-filter { display: flex; align-items: center; gap: 8px; }
-      .debug-filter input { flex: 1; min-width: 0; height: 30px; border: 1px solid var(--line-2); border-radius: 7px; padding: 0 10px; background: var(--surface); color: var(--ink); }
+      .debug-filter input { flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); padding: 0 11px; background: var(--surface); color: var(--ink); }
       .debug-filter input::placeholder { color: var(--faint); }
-      .debug-filter span { min-width: 84px; color: var(--faint); font-size: 10.5px; text-align: right; font-family: var(--mono); }
-      .debug-sections { display: grid; gap: 8px; }
-      .debug-section { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
+      .debug-filter span { min-width: 80px; color: var(--faint); font-size: 10.5px; text-align: right; font-family: var(--mono); }
+      .debug-sections { display: grid; gap: 9px; }
+      .debug-section { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); overflow: hidden; }
       .debug-section[data-filter-hidden="true"], .debug-table tr[data-filter-hidden="true"], pre[data-filter-hidden="true"] { display: none; }
       .debug-section-title {
         display: flex; align-items: center; justify-content: space-between; gap: 8px;
-        min-height: 30px; padding: 6px 10px; border-bottom: 1px solid var(--line);
+        min-height: 32px; padding: 7px 11px; border-bottom: 1px solid var(--line);
         color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
         background: var(--panel-2);
       }
       .debug-section-title span { color: var(--ink); font-weight: 600; letter-spacing: 0; text-transform: none; font-family: var(--mono); font-size: 10.5px; }
       .debug-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10.5px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
-      .debug-table th, .debug-table td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-      .debug-table th { color: var(--faint); font-weight: 600; background: var(--surface); text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.04em; }
-      .debug-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--elevated) 32%, transparent); }
+      .debug-table th, .debug-table td { padding: 5px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; color: var(--ink); }
+      .debug-table th { color: var(--faint); font-weight: 600; background: var(--panel-2); text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.04em; }
+      .debug-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--panel-2) 60%, transparent); }
       .debug-table tr:last-child td { border-bottom: 0; }
       .debug-ok { color: var(--ok); font-weight: 650; }
       .debug-warn { color: var(--warn); font-weight: 650; }
@@ -343,7 +370,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       td.debug-ok { box-shadow: inset 2px 0 0 var(--ok); }
       td.debug-warn { box-shadow: inset 2px 0 0 var(--warn); }
       td.debug-bad { box-shadow: inset 2px 0 0 var(--bad); }
-      pre { margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: #d4d4d8; font-size: 10.5px; line-height: 1.5; font-family: var(--mono); overflow: auto; max-height: 48vh; }
+      pre { margin: 0; padding: 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); color: #3f4450; font-size: 10.5px; line-height: 1.5; font-family: var(--mono); overflow: auto; max-height: 48vh; }
 
       @media (max-width: 1040px) {
         main { grid-template-columns: 1fr; overflow: auto; }
@@ -369,14 +396,23 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
       </header>
       <main data-dock="right">
         <section class="stage-shell">
-          <div class="stage-toolbar">
-            <div class="toolbar-group source-tabs" id="source-tabs"></div>
+          <div class="stage-topbar">
+            <div class="source-tabs" id="source-tabs"></div>
+            <div class="stage-hud" id="stage-hud"></div>
+          </div>
+          <div class="stage-grid">
+            <div class="canvas-wrap">
+              <canvas id="composition" width="1280" height="720"></canvas>
+            </div>
+          </div>
+          <div class="stage-controls">
             <div class="toolbar-group voice-tools">
+              <span class="dock-label">Mic</span>
               <select class="voice-device" id="voice-device-select" aria-label="Microphone">
                 <option value="">Default mic</option>
               </select>
               <button class="btn" id="refresh-voice-devices-button" type="button" title="Refresh microphone list">Refresh</button>
-              <button class="btn primary" id="voice-button" type="button">Arm</button>
+              <button class="btn primary" id="voice-button" type="button">Start mic</button>
               <button class="btn" id="voice-mute-button" type="button">Mute</button>
               <button class="btn" id="voice-ptt-button" type="button" title="Diagnostic push-to-talk">PTT</button>
               <span class="toolbar-divider" aria-hidden="true"></span>
@@ -387,14 +423,13 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
               </span>
             </div>
           </div>
-          <div class="stage-grid">
-            <div class="canvas-wrap">
-              <canvas id="composition" width="1280" height="720"></canvas>
-              <div class="stage-hud" id="stage-hud"></div>
-            </div>
-          </div>
           <div class="control-dock">
-            <div class="dock-grow" aria-hidden="true"></div>
+            <div class="dock-group">
+              <span class="dock-label">Provider</span>
+              <select class="voice-device" id="conversation-provider-select" aria-label="Realtime provider"></select>
+              <button class="btn" id="copy-provider-run-button" type="button" title="Copy the selected provider launch command">Copy Env</button>
+              <span class="dock-status" id="conversation-provider-status">loading</span>
+            </div>
             <div class="dock-group">
               <span class="dock-label">Avatar</span>
               <select class="voice-device" id="avatar-publisher-renderer-select" aria-label="Avatar publisher type">
@@ -402,8 +437,6 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
                 <option value="oneesama-video">Video</option>
                 <option value="hiyori-live2d">Hiyori</option>
               </select>
-              <button class="btn primary" id="open-avatar-publisher-button" type="button" title="Start or switch the embedded avatar publisher">Open Avatar</button>
-              <button class="btn" id="close-avatar-publisher-button" type="button" title="Stop the embedded avatar publisher">Close Avatar</button>
               <span class="dock-status" id="avatar-publisher-status">not open</span>
             </div>
             <div class="dock-group">
@@ -448,7 +481,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
               <div class="verdict-strip" id="operator-verdict"></div>
               <div class="cockpit-strip" id="operator-cockpit"></div>
               <div class="conversation-stream" id="operator-conversation-stream">
-                <div class="conversation-empty">No messages yet. Arm the mic and speak, or type below and hit Send Text.</div>
+                <div class="conversation-empty">No messages yet. Start mic and speak, or type below and hit Send Text.</div>
               </div>
               <aside class="event-inspector" id="operator-event-inspector" data-inspector-open="false" aria-live="polite" hidden>
                 <div class="inspector-head" id="inspector-head">
@@ -538,6 +571,13 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
                   <tbody id="debug-port-table"></tbody>
                 </table>
               </section>
+              <section class="debug-section">
+                <div class="debug-section-title">Provider Config <span id="debug-provider-config-summary">loading</span></div>
+                <table class="debug-table">
+                  <thead><tr><th>Provider</th><th>Key</th><th>Model / Config</th><th>Launch</th></tr></thead>
+                  <tbody id="debug-provider-config-table"></tbody>
+                </table>
+              </section>
               <section class="debug-section"><div class="debug-section-title">Provider Raw Event Drilldown <span id="debug-provider-drilldown-summary">none</span></div><table class="debug-table"><thead><tr><th>Provider</th><th>Raw event</th><th>Canonical</th><th>Summary</th></tr></thead><tbody id="debug-provider-drilldown-table"></tbody></table></section>
               <section class="debug-section">
                 <div class="debug-section-title">Tool Routing <span id="debug-tool-routing-summary">idle</span></div>
@@ -591,12 +631,17 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         const bootParams = new URLSearchParams(location.search);
         const canvas = document.getElementById("composition");
         const ctx = canvas.getContext("2d");
-        const [readyDot, voiceLabel, visualLabel, voiceWsNode, transportStateNode, voiceChunksNode, visualTracksNode, compositionNode, layoutRevisionNode, overlayCountNode, kwwkJobNode, toolRoutingNode, assistantTextNode, outputAudioNode, engineControlNode, artifactNode, timelineNode, debugShell, debugJson, debugFilterInput, debugFilterClearButton, debugFilterState, debugTimelineCount, debugTransportSummary, debugTransportTable, debugVoiceSummary, debugVoiceTable, debugTimelineTable, debugTurnCount, debugTurnTable, debugTurnTimelineSummary, debugTurnTimelineTable, debugConversationSummary, debugConversationTable, debugPortSummary, debugPortTable, debugProviderDrilldownSummary, debugProviderDrilldownTable, debugToolRoutingSummary, debugToolRoutingTable, debugKwwkSummary, debugKwwkTable, debugVisualSummary, debugCompositionTable, debugVisualSourceTable, debugArtifactSummary, debugArtifactTable, sourceTabs] = ["ready-dot", "voice-label", "visual-label", "voice-ws", "transport-state", "voice-chunks", "visual-tracks", "composition-state", "layout-revision", "overlay-count", "kwwk-job-state", "tool-routing-state", "assistant-text-state", "output-audio-state", "engine-control-state", "artifact-state", "timeline-state", "debug-panel", "debug-json", "debug-filter-input", "debug-filter-clear-button", "debug-filter-state", "debug-timeline-count", "debug-transport-summary", "debug-transport-table", "debug-voice-summary", "debug-voice-table", "debug-timeline-table", "debug-turn-count", "debug-turn-table", "debug-turn-timeline-summary", "debug-turn-timeline-table", "debug-conversation-summary", "debug-conversation-table", "debug-port-summary", "debug-port-table", "debug-provider-drilldown-summary", "debug-provider-drilldown-table", "debug-tool-routing-summary", "debug-tool-routing-table", "debug-kwwk-summary", "debug-kwwk-table", "debug-visual-summary", "debug-composition-table", "debug-visual-source-table", "debug-artifact-summary", "debug-artifact-table", "source-tabs"].map((id) => document.getElementById(id));
+        const [readyDot, voiceLabel, visualLabel, voiceWsNode, transportStateNode, voiceChunksNode, visualTracksNode, compositionNode, layoutRevisionNode, overlayCountNode, kwwkJobNode, toolRoutingNode, assistantTextNode, outputAudioNode, engineControlNode, artifactNode, timelineNode, debugShell, debugJson, debugFilterInput, debugFilterClearButton, debugFilterState, debugTimelineCount, debugTransportSummary, debugTransportTable, debugVoiceSummary, debugVoiceTable, debugTimelineTable, debugTurnCount, debugTurnTable, debugTurnTimelineSummary, debugTurnTimelineTable, debugConversationSummary, debugConversationTable, debugPortSummary, debugPortTable, debugProviderConfigSummary, debugProviderConfigTable, debugProviderDrilldownSummary, debugProviderDrilldownTable, debugToolRoutingSummary, debugToolRoutingTable, debugKwwkSummary, debugKwwkTable, debugVisualSummary, debugCompositionTable, debugVisualSourceTable, debugArtifactSummary, debugArtifactTable, sourceTabs] = ["ready-dot", "voice-label", "visual-label", "voice-ws", "transport-state", "voice-chunks", "visual-tracks", "composition-state", "layout-revision", "overlay-count", "kwwk-job-state", "tool-routing-state", "assistant-text-state", "output-audio-state", "engine-control-state", "artifact-state", "timeline-state", "debug-panel", "debug-json", "debug-filter-input", "debug-filter-clear-button", "debug-filter-state", "debug-timeline-count", "debug-transport-summary", "debug-transport-table", "debug-voice-summary", "debug-voice-table", "debug-timeline-table", "debug-turn-count", "debug-turn-table", "debug-turn-timeline-summary", "debug-turn-timeline-table", "debug-conversation-summary", "debug-conversation-table", "debug-port-summary", "debug-port-table", "debug-provider-config-summary", "debug-provider-config-table", "debug-provider-drilldown-summary", "debug-provider-drilldown-table", "debug-tool-routing-summary", "debug-tool-routing-table", "debug-kwwk-summary", "debug-kwwk-table", "debug-visual-summary", "debug-composition-table", "debug-visual-source-table", "debug-artifact-summary", "debug-artifact-table", "source-tabs"].map((id) => document.getElementById(id));
+        const conversationProviderSelect = document.getElementById("conversation-provider-select");
+        const copyProviderRunButton = document.getElementById("copy-provider-run-button");
+        const conversationProviderStatus = document.getElementById("conversation-provider-status");
         const avatarPublisherRendererSelect = document.getElementById("avatar-publisher-renderer-select");
-        const openAvatarPublisherButton = document.getElementById("open-avatar-publisher-button");
-        const closeAvatarPublisherButton = document.getElementById("close-avatar-publisher-button");
         const avatarPublisherStatus = document.getElementById("avatar-publisher-status");
         const COMPOSITION_TARGET_FPS = 30;
+        const LEGACY_DEFAULT_SOURCE_RECTS = {
+          "host-app": { x: 0.04, y: 0.08, width: 0.7, height: 0.7 },
+          avatar: { x: 0.72, y: 0.56, width: 0.24, height: 0.24 },
+        };
         const state = {
           ready: false,
           sessionId: boot.sessionId,
@@ -610,6 +655,9 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             visual: window.MAB_LAN_OPERATOR_WEBSOCKET.defaultConnection(),
           },
           transportMeta: { surfaceId: boot.sessionId, hostUrl: location.origin },
+          liveProviderConfig: boot.liveProviderConfig || null,
+          providerConfigSelection: boot.conversationTransport,
+          providerSwitch: { status: "idle", targetTransport: null, lastError: null, lastResult: null },
           webrtcIceServers: Array.isArray(boot.webrtcIceServers) ? boot.webrtcIceServers : [],
           voiceArmed: false,
           voiceMuted: false,
@@ -676,7 +724,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           sources: boot.sources,
           visual: { transport: "webrtc", connectionState: "not_connected", iceConnectionState: null, peerConnectionState: null, signalingState: null, receiverWebSocketState: "closed", hostPublisherConnections: 0, trackCount: 0 },
           publishers: {
-            autoAvatarPublisher: bootParams.get("autoAvatarPublisher") === "1",
+            autoAvatarPublisher: true,
             avatarPreset: bootParams.get("avatarPreset") || "fallback-canvas",
             avatarWindowOpen: false,
             lastAvatarPublisherUrl: null,
@@ -783,6 +831,209 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           }
         }
 
+        function liveProviderConfig() {
+          return state.liveProviderConfig || boot.liveProviderConfig || { providers: [] };
+        }
+
+        function liveProviderEntries() {
+          const config = liveProviderConfig();
+          return Array.isArray(config.providers) ? config.providers : [];
+        }
+
+        function providerEntry(transport) {
+          return liveProviderEntries().find((provider) => provider.transport === transport) || null;
+        }
+
+        function activeConversationTransport() {
+          const config = liveProviderConfig();
+          return String(
+            config.selectedTransport ||
+            state.conversation?.provider?.adapterKind ||
+            boot.conversationTransport ||
+            "mock"
+          );
+        }
+
+        function providerConfigLabel(provider) {
+          if (!provider) return "unknown";
+          return provider.label || provider.transport || "provider";
+        }
+
+        function providerConfigStatus(provider, targetTransport) {
+          if (!provider) return "unknown";
+          const activeTransport = activeConversationTransport();
+          const switching =
+            state.providerSwitch.status === "switching" &&
+            state.providerSwitch.targetTransport === targetTransport;
+          const failed =
+            state.providerSwitch.status === "failed" &&
+            state.providerSwitch.targetTransport === targetTransport;
+          const keyState = provider.keyConfigured
+            ? "key:" + String(provider.keySource || "configured")
+            : "key missing";
+          if (switching) return "switching / " + keyState;
+          if (failed) return "failed / " + keyState;
+          return (targetTransport === activeTransport ? "selected" : "available") + " / " + keyState;
+        }
+
+        function providerConfigModel(provider) {
+          if (!provider) return "-";
+          const parts = [
+            provider.model || "-",
+            provider.modelSource ? "model:" + provider.modelSource : "",
+            provider.config?.thinkingLevel ? "thinking:" + provider.config.thinkingLevel : "",
+          ];
+          return parts.filter(Boolean).join(" / ");
+        }
+
+        function populateProviderSelect() {
+          if (!conversationProviderSelect || conversationProviderSelect.options.length > 0) return;
+          for (const provider of liveProviderEntries()) {
+            const option = document.createElement("option");
+            option.value = provider.transport;
+            option.textContent = providerConfigLabel(provider);
+            conversationProviderSelect.appendChild(option);
+          }
+          if (!conversationProviderSelect.options.length) {
+            const option = document.createElement("option");
+            option.value = boot.conversationTransport;
+            option.textContent = boot.conversationTransport;
+            conversationProviderSelect.appendChild(option);
+          }
+          conversationProviderSelect.value = activeConversationTransport();
+          state.providerConfigSelection = conversationProviderSelect.value;
+        }
+
+        function renderProviderConfigDock() {
+          populateProviderSelect();
+          const activeTransport = activeConversationTransport();
+          const targetTransport = String(state.providerConfigSelection || activeTransport);
+          const provider = providerEntry(targetTransport);
+          if (conversationProviderSelect) {
+            conversationProviderSelect.disabled = state.providerSwitch.status === "switching";
+            if (conversationProviderSelect.value !== targetTransport) {
+              conversationProviderSelect.value = targetTransport;
+            }
+          }
+          if (conversationProviderStatus) {
+            const switching =
+              state.providerSwitch.status === "switching" &&
+              state.providerSwitch.targetTransport === targetTransport;
+            const failed =
+              state.providerSwitch.status === "failed" &&
+              state.providerSwitch.targetTransport === targetTransport;
+            conversationProviderStatus.textContent = providerConfigStatus(provider, targetTransport);
+            conversationProviderStatus.className = "dock-status " +
+              (failed
+                ? "bad"
+                : switching
+                  ? "warn"
+                  : targetTransport === activeTransport
+                ? (provider?.keyConfigured ? "ok" : "bad")
+                : (provider?.keyConfigured ? "warn" : "bad"));
+          }
+          if (copyProviderRunButton) {
+            copyProviderRunButton.disabled = !provider?.runCommand;
+            copyProviderRunButton.title = provider?.runCommand || "No provider launch command";
+          }
+        }
+
+        async function copySelectedProviderRunCommand() {
+          const targetTransport = String(state.providerConfigSelection || activeConversationTransport());
+          const provider = providerEntry(targetTransport);
+          const command = String(provider?.runCommand || "");
+          if (!command) return { ok: false, error: "provider_run_command_missing" };
+          try {
+            await navigator.clipboard?.writeText(command);
+            if (copyProviderRunButton) {
+              copyProviderRunButton.textContent = "Copied";
+              setTimeout(() => { copyProviderRunButton.textContent = "Copy Env"; }, 1200);
+            }
+            return { ok: true, command };
+          } catch (error) {
+            return { ok: false, error: String(error?.message || error), command };
+          }
+        }
+
+        function mergeRuntimeDebugSnapshot(debug, options = {}) {
+          if (!debug || typeof debug !== "object") return;
+          if (debug.surfaceContext?.liveProviderConfig) {
+            state.liveProviderConfig = debug.surfaceContext.liveProviderConfig;
+            const selected = String(state.liveProviderConfig?.selectedTransport || "");
+            if (selected) boot.conversationTransport = selected;
+          }
+          const selectedTransport = String(debug.surfaceContext?.operatorMode?.conversationTransport || "");
+          if (selectedTransport) boot.conversationTransport = selectedTransport;
+          if (debug.transport) mergeTransportSnapshot(debug.transport);
+          if (debug.voice) state.voice = { ...state.voice, ...debug.voice };
+          if (debug.output && options.replaceOutput) state.output = debug.output;
+          if (debug.artifacts) state.artifacts = debug.artifacts;
+          if (debug.timeline) state.timeline = debug.timeline;
+          if (debug.kwwk) state.kwwk = debug.kwwk;
+          if (debug.toolRouting) state.toolRouting = debug.toolRouting;
+          const conversation = debug.conversation;
+          if (conversation) {
+            state.conversation = {
+              ...state.conversation,
+              ...conversation,
+              control: { ...state.conversation.control, ...(conversation.control || {}) },
+            };
+          }
+        }
+
+        async function switchConversationProvider(transport) {
+          const targetTransport = String(transport || "").trim();
+          if (!targetTransport) return { ok: false, error: "provider_transport_missing" };
+          state.providerConfigSelection = targetTransport;
+          state.providerSwitch = {
+            status: "switching",
+            targetTransport,
+            lastError: null,
+            lastResult: null,
+          };
+          renderProviderConfigDock();
+          syncDebug();
+          try {
+            const response = await fetch("/runtime/provider", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ transport: targetTransport, connect: true }),
+            });
+            const body = await response.json();
+            if (!response.ok || !body.ok) {
+              throw new Error(body.error || "provider_switch_failed");
+            }
+            if (body.liveProviderConfig) state.liveProviderConfig = body.liveProviderConfig;
+            if (body.conversationTransport) {
+              boot.conversationTransport = body.conversationTransport;
+              state.providerConfigSelection = body.conversationTransport;
+            }
+            mergeRuntimeDebugSnapshot(body.debug, { replaceOutput: true });
+            state.providerSwitch = {
+              status: "active",
+              targetTransport: String(body.conversationTransport || targetTransport),
+              lastError: null,
+              lastResult: body,
+            };
+            textInputClient?.renderStatus?.();
+            renderProviderConfigDock();
+            syncDebug();
+            return body;
+          } catch (error) {
+            const message = String(error?.message || error);
+            state.providerSwitch = {
+              status: "failed",
+              targetTransport,
+              lastError: message,
+              lastResult: null,
+            };
+            state.errors.push("provider_switch_failed:" + message);
+            renderProviderConfigDock();
+            syncDebug();
+            return { ok: false, error: message, transport: targetTransport };
+          }
+        }
+
         function applyDebugFilter() { return window.MAB_LAN_OPERATOR_DEBUG_PANEL.applyFilter({ input: debugFilterInput, status: debugFilterState, json: debugJson }); }
 
         function renderDebugSections(composition) {
@@ -851,6 +1102,8 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             debugConversationTable,
             debugPortSummary,
             debugPortTable,
+            debugProviderConfigSummary,
+            debugProviderConfigTable,
             debugProviderDrilldownSummary,
             debugProviderDrilldownTable,
             durationLabel,
@@ -877,21 +1130,32 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             const vTone = /connected|live|open/i.test(vConn) ? "ok" : (/fail|error|closed/i.test(vConn) ? "bad" : "warn");
             let focusName = "";
             for (const src of state.sources || []) { if (src.id === composition.focusedSourceId) { focusName = src.label; break; } }
-            const hud = (tone, label, value) => {
-              const c = document.createElement("span");
-              c.className = "hud-chip" + (tone ? " " + tone : "");
-              const d = document.createElement("span"); d.className = "hud-dot"; c.appendChild(d);
-              if (label) c.appendChild(document.createTextNode(label + " "));
-              const b = document.createElement("b"); b.textContent = value; c.appendChild(b);
-              return c;
-            };
-            stageHud.innerHTML = "";
-            stageHud.appendChild(hud(vTone, "webrtc", String(vConn)));
-            stageHud.appendChild(hud("", "", String(composition.mode || "live") + " " + String(composition.width) + "x" + String(composition.height) + " @" + String(composition.targetFps) + "fps"));
-            stageHud.appendChild(hud("", "tracks", String(state.visual.trackCount || 0)));
-            stageHud.appendChild(hud("", "sources", String((state.sources || []).length)));
-            if (focusName) stageHud.appendChild(hud("", "focus", focusName));
-            stageHud.appendChild(hud("", "frame", durationLabel(composition.lastRenderedFrameAgeMs)));
+            // Only stable status chips here. The per-frame "frame age" value is
+            // intentionally NOT shown — it changes every heartbeat and made the
+            // HUD flicker/reflow. It still lives in the Telemetry tab (Frame age).
+            const chips = [
+              [vTone, "webrtc", String(vConn)],
+              ["", "", String(composition.mode || "live") + " " + String(composition.width) + "x" + String(composition.height) + " @" + String(composition.targetFps) + "fps"],
+              ["", "tracks", String(state.visual.trackCount || 0)],
+              ["", "sources", String((state.sources || []).length)],
+            ];
+            if (focusName) chips.push(["", "focus", focusName]);
+            // Rebuild the DOM only when the chip content actually changed, so an
+            // idle HUD never repaints (no flicker).
+            const hudSig = JSON.stringify(chips);
+            if (stageHud.dataset.hudSig !== hudSig) {
+              stageHud.dataset.hudSig = hudSig;
+              const hud = (tone, label, value) => {
+                const c = document.createElement("span");
+                c.className = "hud-chip" + (tone ? " " + tone : "");
+                const d = document.createElement("span"); d.className = "hud-dot"; c.appendChild(d);
+                if (label) c.appendChild(document.createTextNode(label + " "));
+                const b = document.createElement("b"); b.textContent = value; c.appendChild(b);
+                return c;
+              };
+              stageHud.innerHTML = "";
+              for (const [tone, label, value] of chips) stageHud.appendChild(hud(tone, label, value));
+            }
           }
           textInputClient?.renderStatus?.();
           replaceTableRows(debugVisualSourceTable, state.sources.map((source) => [
@@ -950,11 +1214,12 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
               (latestTimeline.durationMs == null ? "" : " +" + String(latestTimeline.durationMs) + "ms")
             : "idle";
           voiceControls?.update();
+          renderProviderConfigDock();
           syncAvatarPublisherStatusFromSource();
           renderDebugSections(composition);
           debugJson.textContent = JSON.stringify({
             sessionId: boot.sessionId,
-            conversationTransport: boot.conversationTransport,
+            conversationTransport: activeConversationTransport(),
             voice: {
               websocketState: state.voiceWsState,
               armed: state.voiceArmed,
@@ -978,6 +1243,9 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             },
             transport: state.transport,
             transportMeta: state.transportMeta,
+            liveProviderConfig: state.liveProviderConfig,
+            providerConfigSelection: state.providerConfigSelection,
+            providerSwitch: state.providerSwitch,
             canonicalEvents: state.canonicalEvents || [],
             conversation: state.conversation,
             toolRouting: state.toolRouting,
@@ -1016,13 +1284,32 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         function setFocusedSource(sourceId) {
           state.focusedSourceId = sourceId;
           state.layoutRevision += 1;
+          markCompositionDirty();
           renderSourceControls();
           persistUserState();
           emitCompositionState();
           syncDebug();
         }
 
+        function isFixedSource(sourceId) {
+          return sourceId === "host-app";
+        }
+
+        function fixedSourceRect(sourceId) {
+          return structuredClone(boot.sourceRects?.[sourceId] || { x: 0, y: 0, width: 1, height: 1 });
+        }
+
         function moveSource(sourceId, rect) {
+          markCompositionDirty();
+          if (isFixedSource(sourceId)) {
+            state.sourceRects[sourceId] = fixedSourceRect(sourceId);
+            state.focusedSourceId = sourceId;
+            renderSourceControls();
+            persistUserState();
+            emitCompositionState();
+            syncDebug();
+            return currentComposition();
+          }
           const next = {
             x: clamp(Number(rect.x), 0, 0.95),
             y: clamp(Number(rect.y), 0, 0.95),
@@ -1250,28 +1537,13 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             );
             avatarPublisherStatus.title = state.publishers.lastAvatarPublisherUrl || "";
           }
-          if (openAvatarPublisherButton) {
-            openAvatarPublisherButton.textContent = state.publishers.avatarWindowOpen
-              ? "Switch Avatar"
-              : "Open Avatar";
-          }
         }
         function setAvatarPublisherPreset(value, input = {}) {
           const preset = normalizeAvatarPreset(value);
           state.publishers.avatarPreset = preset;
           if (avatarPublisherRendererSelect) avatarPublisherRendererSelect.value = preset;
-          if (input.reopen && state.publishers.avatarWindowOpen) {
-            openAvatarPublisher({ preset });
-          } else if (state.publishers.avatarWindowOpen) {
-            setAvatarPublisherStatus(
-              "selected",
-              "selected " + avatarPresetLabel(preset) + " · click Switch",
-            );
-          } else {
-            setAvatarPublisherStatus(state.publishers.status, state.publishers.statusText);
-          }
-          persistUserState();
-          return { preset, url: avatarPublisherUrl(preset) };
+          if (input.persist === false) return { preset, url: avatarPublisherUrl(preset) };
+          return openAvatarPublisher({ preset });
         }
         function openAvatarPublisher(input = {}) {
           const preset = normalizeAvatarPreset(input.preset || avatarPublisherRendererSelect?.value || state.publishers.avatarPreset);
@@ -1295,21 +1567,6 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           syncDebug();
           persistUserState();
           return { preset, url, opened: state.publishers.avatarWindowOpen };
-        }
-        function closeAvatarPublisher() {
-          try {
-            if (avatarPublisherFrame) {
-              avatarPublisherFrame.remove();
-              avatarPublisherFrame = null;
-            }
-          } catch (error) {
-            state.errors.push(String(error?.message || error));
-          }
-          state.publishers.avatarWindowOpen = false;
-          setAvatarPublisherStatus("closed", "closed");
-          syncDebug();
-          persistUserState();
-          return true;
         }
         function currentAvatarPublisherPreset() {
           return normalizeAvatarPreset(state.publishers.avatarPreset);
@@ -1489,9 +1746,23 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           next.height = Math.min(next.height, 1 - next.y);
           return next;
         }
+        function rectApproximatelyEqual(left, right) {
+          if (!left || !right) return false;
+          return Math.abs(Number(left.x) - Number(right.x)) < 0.001 &&
+            Math.abs(Number(left.y) - Number(right.y)) < 0.001 &&
+            Math.abs(Number(left.width) - Number(right.width)) < 0.001 &&
+            Math.abs(Number(left.height) - Number(right.height)) < 0.001;
+        }
+        function migrateStoredSourceRect(sourceId, rect) {
+          if (isFixedSource(sourceId)) return null;
+          const legacyDefault = LEGACY_DEFAULT_SOURCE_RECTS[sourceId];
+          if (legacyDefault && rectApproximatelyEqual(rect, legacyDefault)) return null;
+          return rect;
+        }
         function currentUserState() {
           const sourceRects = {};
           for (const source of state.sources || []) {
+            if (isFixedSource(source.id)) continue;
             const rect = sanitizeSourceRect(state.sourceRects?.[source.id]);
             if (rect) sourceRects[source.id] = rect;
           }
@@ -1500,7 +1771,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             sourceRects,
             publishers: {
               avatarPreset: normalizeAvatarPreset(state.publishers.avatarPreset),
-              avatarPublisherOpen: Boolean(state.publishers.avatarWindowOpen),
+              avatarPublisherOpen: true,
             },
             voice: {
               deviceId: String(state.voiceDeviceId || ""),
@@ -1512,7 +1783,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           try {
             const url = new URL(location.href);
             url.searchParams.set("avatarPreset", userState.publishers.avatarPreset);
-            url.searchParams.set("autoAvatarPublisher", userState.publishers.avatarPublisherOpen ? "1" : "0");
+            url.searchParams.delete("autoAvatarPublisher");
             history.replaceState(null, "", url.pathname + url.search + location.hash);
           } catch (err) {}
         }
@@ -1542,16 +1813,15 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             if (userState.sourceRects && typeof userState.sourceRects === "object") {
               for (const source of state.sources || []) {
                 const rect = sanitizeSourceRect(userState.sourceRects[source.id]);
-                if (rect) state.sourceRects[source.id] = rect;
+                const migratedRect = migrateStoredSourceRect(source.id, rect);
+                if (migratedRect) state.sourceRects[source.id] = migratedRect;
               }
             }
             const publisherState = userState.publishers || {};
             if (!bootParams.has("avatarPreset") && publisherState.avatarPreset) {
               state.publishers.avatarPreset = normalizeAvatarPreset(publisherState.avatarPreset);
             }
-            if (!bootParams.has("autoAvatarPublisher") && typeof publisherState.avatarPublisherOpen === "boolean") {
-              state.publishers.autoAvatarPublisher = publisherState.avatarPublisherOpen;
-            }
+            state.publishers.autoAvatarPublisher = true;
             const voiceState = userState.voice || {};
             if (typeof voiceState.deviceId === "string") {
               state.voiceDeviceId = voiceState.deviceId;
@@ -1870,7 +2140,28 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           if (cursorApi) cursorApi.draw(ctx, canvas.width, canvas.height);
         }
 
-        function render() {
+        const COMPOSITION_FRAME_MS = 1000 / COMPOSITION_TARGET_FPS;
+        // When nothing is moving we still repaint a couple of times a second as a
+        // cheap safety net (covers any state change we didn't explicitly flag).
+        const COMPOSITION_IDLE_REDRAW_MS = 500;
+        let compositionDirty = true;
+        let compositionLastTickMs = -1;
+        let compositionLastDrawMs = -1;
+        function markCompositionDirty() {
+          compositionDirty = true;
+        }
+        function compositionHasLiveMedia() {
+          for (const source of state.sources || []) {
+            const drawable = drawableSourceVideo(source);
+            if (drawable.video && drawable.mode !== "placeholder") return true;
+          }
+          return false;
+        }
+        function compositionCursorActive() {
+          const cursor = window.MAB_LAN_OPERATOR_KWWK_CURSOR;
+          return Boolean(cursor && cursor.snapshot && cursor.snapshot().visible);
+        }
+        function drawComposition() {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.fillStyle = "#0f172a";
           ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1879,7 +2170,23 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           state.compositionFrameCount += 1;
           state.compositionLastFrameAt = new Date().toISOString();
           state.compositionLastFrameEpochMs = performance.now();
+          compositionDirty = false;
+          compositionLastDrawMs = state.compositionLastFrameEpochMs;
+        }
+        function render() {
           requestAnimationFrame(render);
+          const now = performance.now();
+          // Cap the draw rate to the composition target fps. requestAnimationFrame
+          // fires at the display refresh (often 60–120Hz), but canvas.captureStream
+          // only samples at COMPOSITION_TARGET_FPS, so any faster draw is wasted CPU.
+          if (compositionLastTickMs >= 0 && now - compositionLastTickMs < COMPOSITION_FRAME_MS - 1) return;
+          compositionLastTickMs = now;
+          // Live video / an animating cursor / an explicit change need a real draw.
+          // Otherwise the canvas is static — fall back to the slow idle redraw so an
+          // idle operator surface costs ~2fps instead of pegging a core at 60–120fps.
+          const active = compositionDirty || compositionHasLiveMedia() || compositionCursorActive();
+          if (!active && compositionLastDrawMs >= 0 && now - compositionLastDrawMs < COMPOSITION_IDLE_REDRAW_MS) return;
+          drawComposition();
         }
 
         function mergeTransportSnapshot(serverTransport) {
@@ -1914,14 +2221,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
             renderRemoteKwwkCursor(payload.cursor);
             return;
           }
-          if (payload.debug?.transport) mergeTransportSnapshot(payload.debug.transport);
-          if (payload.debug?.voice) state.voice = { ...state.voice, ...payload.debug.voice };
-          const conversation = payload.debug?.conversation;
-          if (conversation) state.conversation = { ...state.conversation, ...conversation, control: { ...state.conversation.control, ...(conversation.control || {}) } };
-          if (payload.debug?.artifacts) state.artifacts = payload.debug.artifacts;
-          if (payload.debug?.timeline) state.timeline = payload.debug.timeline;
-          if (payload.debug?.kwwk) state.kwwk = payload.debug.kwwk;
-          if (payload.debug?.toolRouting) state.toolRouting = payload.debug.toolRouting;
+          if (payload.debug) mergeRuntimeDebugSnapshot(payload.debug);
           syncDebug();
         }
 
@@ -1943,6 +2243,15 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           if (!source) return;
           const rect = state.sourceRects[source.id];
           state.focusedSourceId = source.id;
+          markCompositionDirty();
+          if (isFixedSource(source.id)) {
+            drag = null;
+            renderSourceControls();
+            persistUserState();
+            emitCompositionState();
+            syncDebug();
+            return;
+          }
           const resize = point.x > rect.x + rect.width - 0.04 && point.y > rect.y + rect.height - 0.04;
           drag = { sourceId: source.id, origin: point, start: { ...rect }, resize };
           canvas.setPointerCapture(event.pointerId);
@@ -1965,6 +2274,7 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
                 x: drag.start.x + dx,
                 y: drag.start.y + dy,
               };
+          markCompositionDirty();
           moveSource(drag.sourceId, next);
         });
 
@@ -2009,19 +2319,22 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
         avatarPublisherRendererSelect?.addEventListener("change", () => {
           setAvatarPublisherPreset(avatarPublisherRendererSelect.value);
         });
-        openAvatarPublisherButton?.addEventListener("click", () => {
-          openAvatarPublisher();
+        conversationProviderSelect?.addEventListener("change", () => {
+          void switchConversationProvider(conversationProviderSelect.value);
         });
-        closeAvatarPublisherButton?.addEventListener("click", () => {
-          closeAvatarPublisher();
+        copyProviderRunButton?.addEventListener("click", () => {
+          void copySelectedProviderRunCommand().then((result) => {
+            if (!result.ok && result.command) {
+              state.errors.push("provider_run_command_copy_failed");
+              syncDebug();
+            }
+          });
         });
         restoreUserState();
         if (avatarPublisherRendererSelect) {
           avatarPublisherRendererSelect.value = normalizeAvatarPreset(state.publishers.avatarPreset);
         }
-        if (state.publishers.autoAvatarPublisher) {
-          openAvatarPublisher({ preset: state.publishers.avatarPreset });
-        }
+        openAvatarPublisher({ preset: state.publishers.avatarPreset });
         document.getElementById("open-debug-panel-button").addEventListener("click", openDebugPanel);
         for (const [tabId, , tabName] of DEBUG_TABS) {
           document.getElementById(tabId)?.addEventListener("click", () => setDebugTab(tabName));
@@ -2130,12 +2443,15 @@ export function buildLanOperatorSurfaceHtml(config: Readonly<AvatarRuntimeSessio
           state, moveSource, setFocusedSource, emitKwwkOverlay, runKwwkCursorFixture, sendSyntheticVoiceChunk,
           emitKwwkJobState, submitToolResult, cancelTool, sendEngineControl, fetchDebugReport, copyDiagnostics, downloadReport,
           createDebugBundle, markInterestingRun, registerArtifactLink, openDebugPanel, currentComposition, startMicrophone, stopMicrophone, setVoiceMuted,
-          avatarPublisherUrl, openAvatarPublisher, closeAvatarPublisher, setAvatarPublisherPreset,
+          avatarPublisherUrl, openAvatarPublisher, setAvatarPublisherPreset,
           setDebugFilter: (query) => { debugFilterInput.value = String(query || ""); return applyDebugFilter(); },
           getDebugFilter: () => applyDebugFilter(),
           refreshVoiceDevices: () => voiceControls?.refreshDevices(),
           configureLocalVad: (enabled) => voiceControls?.configureLocalVad(enabled), sendTextInput: (text) => textInputClient?.sendText(text),
           setAudioEnabled: (enabled) => outputClient?.setAudioEnabled(enabled),
+          liveProviderConfig: () => structuredClone(state.liveProviderConfig || {}),
+          switchConversationProvider,
+          copySelectedProviderRunCommand,
           getComposedVideoTrack: () => state.localComposedTrack, outputClient: () => outputClient,
           sourceMediaDrawRects: () => structuredClone(state.sourceMediaDrawRects || {}),
           forceCloseTransport: (label) => {

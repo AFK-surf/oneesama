@@ -1,6 +1,11 @@
 export type SurfaceKind = "google_meet" | "local_browser" | "lan_operator" | "embedded";
 
-export type ConversationTransport = "agents_sdk" | "mock" | "openai_realtime" | "webrtc_mock";
+export type ConversationTransport =
+  | "agents_sdk"
+  | "gemini_live"
+  | "mock"
+  | "openai_realtime"
+  | "webrtc_mock";
 
 export type RuntimeAudioInput = "meet_remote_audio" | "local_mic" | "synthetic" | "none";
 export type RuntimeTextInput = "meet_chat" | "caption" | "local_text" | "worker_internal";
@@ -181,6 +186,11 @@ const TRANSPORT_ALIASES: Record<string, ConversationTransport> = {
   openai_realtime: "openai_realtime",
   "openai-realtime": "openai_realtime",
   realtime: "openai_realtime",
+  gemini_live: "gemini_live",
+  "gemini-live": "gemini_live",
+  gemini: "gemini_live",
+  gemini_realtime: "gemini_live",
+  "gemini-realtime": "gemini_live",
   webrtc: "agents_sdk",
   mock: "mock",
   webrtc_mock: "webrtc_mock",

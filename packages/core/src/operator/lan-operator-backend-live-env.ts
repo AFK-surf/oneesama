@@ -5,6 +5,7 @@ import { join } from "node:path";
 const DEFAULT_LIVE_ENV_FILES = [
   "oneesama-live-env-from-proc.sh",
   "oneesama-openai-live.sh",
+  "oneesama-gemini-live.sh",
   "oneesama-app-control-live.sh",
 ];
 

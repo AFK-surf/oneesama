@@ -188,31 +188,29 @@ test("LAN operator foreground avatar controls open and switch real publisher pre
       select: document.getElementById("avatar-publisher-renderer-select")?.value,
       status: document.getElementById("avatar-publisher-status")?.textContent,
       url: window.MAB_LAN_OPERATOR_SURFACE.avatarPublisherUrl(),
+      frameSrc: document.getElementById("avatar-publisher-frame")?.getAttribute("src"),
+      openButton: Boolean(document.getElementById("open-avatar-publisher-button")),
+      closeButton: Boolean(document.getElementById("close-avatar-publisher-button")),
     }));
     assert.equal(initial.select, "fallback-canvas", JSON.stringify(initial));
-    assert.equal(initial.status, "not open", JSON.stringify(initial));
+    assert.match(initial.status, /(embedded|live) · fallback/, JSON.stringify(initial));
     assert.equal(new URL(initial.url).searchParams.get("avatarPreset"), "fallback-canvas");
+    assert.equal(
+      new URL(initial.frameSrc, url).searchParams.get("avatarPreset"),
+      "fallback-canvas",
+    );
+    assert.equal(initial.openButton, false, JSON.stringify(initial));
+    assert.equal(initial.closeButton, false, JSON.stringify(initial));
 
     await page.evaluate(() => {
       window.__avatarPublisherOpens = [];
-      window.__avatarPublisherClosed = 0;
       window.open = (href, name) => {
         window.__avatarPublisherOpens.push({ url: String(href), name: String(name) });
-        return {
-          closed: false,
-          close() {
-            this.closed = true;
-            window.__avatarPublisherClosed += 1;
-          },
-        };
+        return null;
       };
     });
 
-    const opened = await page.evaluate(() =>
-      window.MAB_LAN_OPERATOR_SURFACE.openAvatarPublisher({ preset: "oneesama-video" }),
-    );
-    assert.equal(opened.opened, true, JSON.stringify(opened));
-    assert.equal(new URL(opened.url).searchParams.get("avatarPreset"), "oneesama-video");
+    await page.selectOption("#avatar-publisher-renderer-select", "oneesama-video");
     const openedFrame = await page.evaluate(() => ({
       src: document.getElementById("avatar-publisher-frame")?.getAttribute("src"),
       opens: window.__avatarPublisherOpens,
@@ -255,46 +253,14 @@ test("LAN operator foreground avatar controls open and switch real publisher pre
       state: window.MAB_LAN_OPERATOR_SURFACE.state.publishers,
     }));
     assert.equal(selected.select, "hiyori-live2d", JSON.stringify(selected));
-    assert.match(selected.status, /selected hiyori · click Switch/, JSON.stringify(selected));
+    assert.match(selected.status, /(embedded|live) · hiyori/, JSON.stringify(selected));
     assert.equal(selected.opens.length, 0, JSON.stringify(selected));
     assert.equal(
       new URL(selected.frameSrc, url).searchParams.get("avatarPreset"),
-      "oneesama-video",
+      "hiyori-live2d",
       JSON.stringify(selected),
     );
     assert.equal(selected.state.avatarWindowOpen, true, JSON.stringify(selected.state));
-
-    await page.click("#open-avatar-publisher-button");
-    const switched = await page.evaluate(() => ({
-      select: document.getElementById("avatar-publisher-renderer-select")?.value,
-      status: document.getElementById("avatar-publisher-status")?.textContent,
-      frameSrc: document.getElementById("avatar-publisher-frame")?.getAttribute("src"),
-      opens: window.__avatarPublisherOpens,
-      state: window.MAB_LAN_OPERATOR_SURFACE.state.publishers,
-    }));
-    assert.equal(switched.select, "hiyori-live2d", JSON.stringify(switched));
-    assert.match(switched.status, /embedded · hiyori/, JSON.stringify(switched));
-    assert.equal(switched.opens.length, 0, JSON.stringify(switched));
-    assert.equal(
-      new URL(switched.frameSrc, url).searchParams.get("avatarPreset"),
-      "hiyori-live2d",
-      JSON.stringify(switched),
-    );
-    assert.equal(switched.state.avatarWindowOpen, true, JSON.stringify(switched.state));
-
-    await page.evaluate(() => window.MAB_LAN_OPERATOR_SURFACE.closeAvatarPublisher());
-    const closed = await page.evaluate(() => ({
-      status: document.getElementById("avatar-publisher-status")?.textContent,
-      framePresent: Boolean(document.getElementById("avatar-publisher-frame")),
-      opens: window.__avatarPublisherOpens,
-      closed: window.__avatarPublisherClosed,
-      state: window.MAB_LAN_OPERATOR_SURFACE.state.publishers,
-    }));
-    assert.equal(closed.status, "closed", JSON.stringify(closed));
-    assert.equal(closed.framePresent, false, JSON.stringify(closed));
-    assert.equal(closed.opens.length, 0, JSON.stringify(closed));
-    assert.equal(closed.closed, 0, JSON.stringify(closed));
-    assert.equal(closed.state.avatarWindowOpen, false, JSON.stringify(closed.state));
   } finally {
     await browser.close();
     await surface.close();
@@ -322,7 +288,7 @@ test("LAN operator embedded avatar publisher autostarts without opening a popup"
     });
     const page = await context.newPage();
     const target = new URL(url);
-    target.searchParams.set("autoAvatarPublisher", "1");
+    target.searchParams.set("autoAvatarPublisher", "0");
     target.searchParams.set("avatarPreset", "fallback-canvas");
     await page.goto(target.toString());
     await waitReady(page);
@@ -351,6 +317,7 @@ test("LAN operator embedded avatar publisher autostarts without opening a popup"
       );
       return {
         opens: window.__avatarPublisherOpens,
+        search: location.search,
         frameSrc: document.getElementById("avatar-publisher-frame")?.getAttribute("src"),
         visual: window.MAB_LAN_OPERATOR_SURFACE.state.visual,
         avatar,
@@ -359,6 +326,11 @@ test("LAN operator embedded avatar publisher autostarts without opening a popup"
     });
     assert.equal(context.pages().length, 1, JSON.stringify(proof));
     assert.equal(proof.opens.length, 0, JSON.stringify(proof));
+    assert.equal(
+      new URL(`http://local.test/${proof.search}`).searchParams.has("autoAvatarPublisher"),
+      false,
+      JSON.stringify(proof),
+    );
     assert.equal(
       new URL(proof.frameSrc, url).searchParams.get("avatarPreset"),
       "fallback-canvas",
@@ -370,6 +342,100 @@ test("LAN operator embedded avatar publisher autostarts without opening a popup"
     assert.notEqual(proof.draw.fit, "placeholder", JSON.stringify(proof.draw));
     assert.ok(proof.draw.media.width > 0, JSON.stringify(proof.draw));
     assert.ok(proof.draw.media.height > 0, JSON.stringify(proof.draw));
+  } finally {
+    await browser.close();
+    await surface.close();
+  }
+});
+
+test("LAN operator app view fills the composition with avatar overlaid", async () => {
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-app-view-fill-smoke",
+    botName: "LAN Oneesama",
+  });
+  const { url } = await surface.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ viewport: { width: 1366, height: 860 } });
+    await context.addInitScript(() => {
+      localStorage.setItem(
+        "mab.operator.user-state.v1",
+        JSON.stringify({
+          focusedSourceId: "host-app",
+          sourceRects: {
+            "host-app": { x: 0.2, y: 0.16, width: 0.32, height: 0.44 },
+            avatar: { x: 0.72, y: 0.56, width: 0.24, height: 0.24 },
+          },
+          publishers: { avatarPreset: "fallback-canvas", avatarPublisherOpen: true },
+          voice: { deviceId: "", localVadEnabled: false },
+        }),
+      );
+    });
+    const page = await context.newPage();
+    await page.goto(url);
+    await waitReady(page);
+    await page.waitForFunction(
+      () => {
+        const rects = window.MAB_LAN_OPERATOR_SURFACE?.sourceMediaDrawRects?.();
+        return (
+          rects?.["host-app"]?.box?.width === 1280 &&
+          rects?.["host-app"]?.box?.height === 720 &&
+          rects?.avatar?.box?.width > 0
+        );
+      },
+      null,
+      { timeout: 8_000 },
+    );
+
+    const canvasBox = await page.locator("#composition").boundingBox();
+    assert.ok(canvasBox, "composition canvas should be visible");
+    await page.mouse.move(
+      canvasBox.x + canvasBox.width * 0.95,
+      canvasBox.y + canvasBox.height * 0.95,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      canvasBox.x + canvasBox.width * 0.72,
+      canvasBox.y + canvasBox.height * 0.72,
+    );
+    await page.mouse.up();
+    await page.evaluate(() =>
+      window.MAB_LAN_OPERATOR_SURFACE.moveSource("host-app", {
+        x: 0.2,
+        y: 0.2,
+        width: 0.4,
+        height: 0.4,
+      }),
+    );
+
+    const proof = await page.evaluate(() => ({
+      sourceRects: window.MAB_LAN_OPERATOR_SURFACE.state.sourceRects,
+      drawRects: window.MAB_LAN_OPERATOR_SURFACE.sourceMediaDrawRects(),
+      sourceOrder: window.MAB_LAN_OPERATOR_SURFACE.state.sources.map((source) => source.id),
+      stored: JSON.parse(localStorage.getItem("mab.operator.user-state.v1")),
+    }));
+    assert.deepEqual(proof.sourceRects["host-app"], {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    });
+    assert.equal(proof.sourceOrder.at(-1), "avatar", JSON.stringify(proof.sourceOrder));
+    assert.deepEqual(proof.drawRects["host-app"].box, {
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 720,
+    });
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(proof.stored.sourceRects, "host-app"),
+      false,
+      JSON.stringify(proof.stored),
+    );
+    assert.ok(proof.drawRects.avatar.box.x > 0, JSON.stringify(proof.drawRects.avatar));
+    assert.ok(proof.drawRects.avatar.box.y > 0, JSON.stringify(proof.drawRects.avatar));
   } finally {
     await browser.close();
     await surface.close();
@@ -448,7 +514,6 @@ test("LAN operator user state persists avatar/source/VAD intent without faking l
       }),
     );
     await page.selectOption("#avatar-publisher-renderer-select", "oneesama-video");
-    await page.click("#open-avatar-publisher-button");
     await page.click("#local-vad-toggle");
     await page.waitForFunction(
       () =>
@@ -465,7 +530,11 @@ test("LAN operator user state persists avatar/source/VAD intent without faking l
       stored: JSON.parse(localStorage.getItem("mab.operator.user-state.v1")),
     }));
     assert.match(persisted.search, /avatarPreset=oneesama-video/, JSON.stringify(persisted));
-    assert.match(persisted.search, /autoAvatarPublisher=1/, JSON.stringify(persisted));
+    assert.equal(
+      new URL(`http://local.test/${persisted.search}`).searchParams.has("autoAvatarPublisher"),
+      false,
+      JSON.stringify(persisted),
+    );
     assert.equal(persisted.stored.focusedSourceId, "avatar", JSON.stringify(persisted.stored));
     assert.equal(persisted.stored.publishers.avatarPreset, "oneesama-video");
     assert.equal(persisted.stored.publishers.avatarPublisherOpen, true);
@@ -505,30 +574,6 @@ test("LAN operator user state persists avatar/source/VAD intent without faking l
     assert.equal(restored.localVad.enabled, true, JSON.stringify(restored.localVad));
     assert.notEqual(restored.conversationStatus, "connected", JSON.stringify(restored));
     assert.ok(Number(restored.visualTrackCount) >= 0, JSON.stringify(restored));
-
-    await page.click("#close-avatar-publisher-button");
-    const closed = await page.evaluate(() => ({
-      search: location.search,
-      stored: JSON.parse(localStorage.getItem("mab.operator.user-state.v1")),
-      framePresent: Boolean(document.getElementById("avatar-publisher-frame")),
-    }));
-    assert.match(closed.search, /autoAvatarPublisher=0/, JSON.stringify(closed));
-    assert.equal(closed.stored.publishers.avatarPublisherOpen, false, JSON.stringify(closed));
-    assert.equal(closed.framePresent, false, JSON.stringify(closed));
-
-    await page.reload();
-    await waitReady(page);
-    const restoredClosed = await page.evaluate(() => ({
-      framePresent: Boolean(document.getElementById("avatar-publisher-frame")),
-      publisher: window.MAB_LAN_OPERATOR_SURFACE.state.publishers,
-    }));
-    assert.equal(restoredClosed.framePresent, false, JSON.stringify(restoredClosed));
-    assert.equal(restoredClosed.publisher.avatarWindowOpen, false, JSON.stringify(restoredClosed));
-    assert.equal(
-      restoredClosed.publisher.autoAvatarPublisher,
-      false,
-      JSON.stringify(restoredClosed),
-    );
   } finally {
     await browser.close();
     await surface.close();

@@ -55,6 +55,48 @@ export function buildLanOperatorDebugPanelClientScript() {
     ]);
   }
 
+  function liveProviderConfigRows(config, selectedTransport) {
+    const providers = Array.isArray(config?.providers) ? config.providers : [];
+    return providers.map((provider) => [
+      [
+        provider.label || provider.transport || "provider",
+        provider.transport === selectedTransport ? "selected" : "",
+      ].filter(Boolean).join(" / "),
+      provider.keyConfigured
+        ? "configured / " + String(provider.keySource || "key")
+        : "missing / " + (provider.acceptedKeyEnv || []).join("|"),
+      [
+        provider.model || "-",
+        provider.modelSource ? "model:" + provider.modelSource : "",
+        provider.config?.thinkingLevel ? "thinking:" + provider.config.thinkingLevel : "",
+      ].filter(Boolean).join(" / "),
+      provider.runCommand || "-",
+    ]);
+  }
+
+  function renderLiveProviderConfig(input) {
+    if (!input.debugProviderConfigSummary || !input.debugProviderConfigTable) return;
+    const config = input.state.liveProviderConfig || input.boot.liveProviderConfig || {};
+    const selectedTransport =
+      config.selectedTransport ||
+      input.state.conversation?.provider?.adapterKind ||
+      input.boot.conversationTransport ||
+      "";
+    const providers = Array.isArray(config.providers) ? config.providers : [];
+    const selected = providers.find((provider) => provider.transport === selectedTransport) || null;
+    input.debugProviderConfigSummary.textContent = selected
+      ? [
+          selected.label || selected.transport,
+          selected.keyConfigured ? "configured" : "key missing",
+          selected.model || "-",
+        ].join(" / ")
+      : String(selectedTransport || "diagnostic");
+    input.replaceTableRows(
+      input.debugProviderConfigTable,
+      providers.length ? liveProviderConfigRows(config, selectedTransport) : [["-", "-", "-", "-"]],
+    );
+  }
+
   function lowerText() {
     return Array.from(arguments).map((value) => {
       if (value && typeof value === "object") {
@@ -232,7 +274,12 @@ export function buildLanOperatorDebugPanelClientScript() {
       primaryBlocker ? "primary:" + primaryBlocker.layer : "no primary blocker",
     ].join(" / ");
     input.replaceTableRows(input.debugConversationTable, [
-      ["Engine", String(conversation.engineId || "unknown") + " / " + boot.conversationTransport],
+      [
+        "Engine",
+        String(conversation.engineId || "unknown") +
+          " / " +
+          String(state.liveProviderConfig?.selectedTransport || boot.conversationTransport),
+      ],
       ["Session", boot.sessionId],
       ["Turn", currentTurnId || "-"],
       ["Response", currentResponseId || "-"],
@@ -250,7 +297,12 @@ export function buildLanOperatorDebugPanelClientScript() {
       ["Interruption", interruption ? String(interruption.responseId || "") + " / " + String(interruption.detail?.reason || interruption.detail?.control || "interrupted") : "-"],
     ]);
 
-    const adapterKind = provider.adapterKind || conversation.engineId || boot.conversationTransport || "unknown";
+    const adapterKind =
+      provider.adapterKind ||
+      conversation.engineId ||
+      state.liveProviderConfig?.selectedTransport ||
+      boot.conversationTransport ||
+      "unknown";
     input.debugPortSummary.textContent = [
       adapterKind,
       provider.rawEventDrilldownAvailable ? "provider drill-down" : "canonical only",
@@ -264,6 +316,7 @@ export function buildLanOperatorDebugPanelClientScript() {
       ["Provider counts", countSummary(provider.providerEventCounts)],
       ["Recent provider events", providerEventSummary(provider.recentEvents)],
     ]);
+    renderLiveProviderConfig(input);
     if (input.debugProviderDrilldownSummary && input.debugProviderDrilldownTable) {
       const providerEvents = provider.recentEvents || [];
       input.debugProviderDrilldownSummary.textContent = provider.rawEventDrilldownAvailable
@@ -488,7 +541,11 @@ export function buildLanOperatorDebugPanelClientScript() {
 
     var metaNode = document.getElementById("conversation-meta");
     if (metaNode) {
-      var engine = conv.engineId || (input.boot && input.boot.conversationTransport) || "engine";
+      var engine =
+        conv.engineId ||
+        (state.liveProviderConfig && state.liveProviderConfig.selectedTransport) ||
+        (input.boot && input.boot.conversationTransport) ||
+        "engine";
       metaNode.textContent = String(engine) + " · " + String(conv.status || "not_connected");
     }
 
@@ -551,7 +608,12 @@ export function buildLanOperatorDebugPanelClientScript() {
       var running = null;
       for (var m = rows.length - 1; m >= 0; m--) { if (rows[m].kind === "tool" && rows[m].statusTone === "running") { running = rows[m]; break; } }
       var errText = lastError ? lastError.text : ((conv.control && conv.control.lastError) || "");
-      var engineName = String(conv.engineId || (input.boot && input.boot.conversationTransport) || "engine");
+      var engineName = String(
+        conv.engineId ||
+        (state.liveProviderConfig && state.liveProviderConfig.selectedTransport) ||
+        (input.boot && input.boot.conversationTransport) ||
+        "engine",
+      );
       cockpit.innerHTML = "";
       cockpit.appendChild(statusChip(connTone, (conv.status === "connected" ? "connected" : (conv.status || "offline")) + " · " + engineName));
       cockpit.appendChild(statusChip(running ? "running" : "neutral", running ? ("tool: " + running.owner) : "idle"));
@@ -628,7 +690,7 @@ export function buildLanOperatorDebugPanelClientScript() {
       stream.innerHTML = "";
       var empty = document.createElement("div");
       empty.className = "conversation-empty";
-      empty.textContent = "No messages yet. Arm the mic and speak, or type below and hit Send Text.";
+      empty.textContent = "No messages yet. Start mic and speak, or type below and hit Send Text.";
       stream.appendChild(empty);
       stream.__selectedId = null;
       renderEventInspector(input, null);
