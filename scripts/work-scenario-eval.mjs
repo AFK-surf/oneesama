@@ -92,9 +92,12 @@ async function plannerFor(mode, scenario, baseUrl) {
     return createReplayWorkPlanner(records);
   }
   if (mode === "live") {
-    const { createOpenAIWorkPlanner } =
-      await import("../packages/core/src/work/work-openai-planner.ts");
-    return createOpenAIWorkPlanner({ baseUrl });
+    const [{ createOpenAIWorkPlanner }, { loadLanOperatorBackendLiveEnv }] = await Promise.all([
+      import("../packages/core/src/work/work-openai-planner.ts"),
+      import("../packages/core/src/operator/lan-operator-backend-live-env.ts"),
+    ]);
+    loadLanOperatorBackendLiveEnv();
+    return createOpenAIWorkPlanner({ baseUrlHint: baseUrl });
   }
   throw new Error(`unknown_mode:${mode}`);
 }

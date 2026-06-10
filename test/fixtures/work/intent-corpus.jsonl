@@ -1,0 +1,50 @@
+{"transcript": "帮我查一下 Fixture Product 2.0 更新了什么", "expected": "job", "queryIncludes": "2.0"}
+{"transcript": "查一下 release notes", "expected": "job", "queryIncludes": "release"}
+{"transcript": "搜索 Team plan 的价格", "expected": "job", "queryIncludes": "Team"}
+{"transcript": "search for the team plan pricing", "expected": "job", "queryIncludes": "pricing"}
+{"transcript": "find out what changed in version 2.0", "expected": "job", "queryIncludes": "2.0"}
+{"transcript": "look up the known issues of the importer", "expected": "job", "queryIncludes": "known issues"}
+{"transcript": "帮我搜一下产品介绍", "expected": "job", "queryIncludes": "产品介绍"}
+{"transcript": "查查已知问题", "expected": "job", "queryIncludes": "已知问题"}
+{"transcript": "麻烦查一下定价页面", "expected": "job", "queryIncludes": "定价"}
+{"transcript": "check the release notes for 1.5", "expected": "job", "queryIncludes": "1.5"}
+{"transcript": "请搜索 Fixture Product 是什么", "expected": "job", "queryIncludes": "Fixture"}
+{"transcript": "找一下 2.0 的已知问题", "expected": "job", "queryIncludes": "已知问题"}
+{"transcript": "research the fixture product pricing", "expected": "job", "queryIncludes": "pricing"}
+{"transcript": "look up what fixture product is", "expected": "job", "queryIncludes": "fixture"}
+{"transcript": "帮忙查询一下团队版多少钱", "expected": "job", "queryIncludes": "团队版"}
+{"transcript": "你去看看 release notes 里有什么新东西", "expected": "job", "queryIncludes": "release notes"}
+{"transcript": "search fixture release notes", "expected": "job", "queryIncludes": "release"}
+{"transcript": "了解一下这个产品的定价", "expected": "job", "queryIncludes": "定价"}
+{"transcript": "调研一下 2.0 版本的变化", "expected": "job", "queryIncludes": "2.0"}
+{"transcript": "check out the about page", "expected": "job", "queryIncludes": "about"}
+{"transcript": "看一下已知问题部分", "expected": "job", "queryIncludes": "已知问题"}
+{"transcript": "find the price of the solo plan", "expected": "job", "queryIncludes": "solo"}
+{"transcript": "查询 Fixture 产品的发布说明", "expected": "job", "queryIncludes": "发布说明"}
+{"transcript": "帮我看看 1.5 改了什么", "expected": "job", "queryIncludes": "1.5"}
+{"transcript": "search for known importer issues", "expected": "job", "queryIncludes": "importer"}
+{"transcript": "请帮我查一下产品功能介绍", "expected": "job", "queryIncludes": "功能介绍"}
+{"transcript": "find pricing details", "expected": "job", "queryIncludes": "pricing"}
+{"transcript": "搜一下发布日志", "expected": "job", "queryIncludes": "发布日志"}
+{"transcript": "查一下 solo 套餐多少钱", "expected": "job", "queryIncludes": "solo"}
+{"transcript": "look up release notes for fixture product", "expected": "job", "queryIncludes": "release"}
+{"transcript": "我觉得这个设计不错", "expected": "not_a_command"}
+{"transcript": "刚才说到哪了", "expected": "not_a_command"}
+{"transcript": "what do you think about the design", "expected": "not_a_command"}
+{"transcript": "今天会议先到这里", "expected": "not_a_command"}
+{"transcript": "我们下周再讨论搜索功能", "expected": "not_a_command"}
+{"transcript": "the search feature is broken", "expected": "not_a_command"}
+{"transcript": "别查了，先开会", "expected": "not_a_command"}
+{"transcript": "你刚才查到什么了", "expected": "not_a_command"}
+{"transcript": "这个查询接口有 bug", "expected": "not_a_command"}
+{"transcript": "搜索结果看起来不对", "expected": "not_a_command"}
+{"transcript": "我先去开个会", "expected": "not_a_command"}
+{"transcript": "那个 bug 修好了吗", "expected": "not_a_command"}
+{"transcript": "maybe we should refactor the planner", "expected": "not_a_command"}
+{"transcript": "上次的演示挺顺利的", "expected": "not_a_command"}
+{"transcript": "麻烦把窗口关掉", "expected": "not_a_command"}
+{"transcript": "stop the current action", "expected": "not_a_command"}
+{"transcript": "这个页面好看吗", "expected": "not_a_command"}
+{"transcript": "先记下来待会再说", "expected": "not_a_command"}
+{"transcript": "it is time for lunch", "expected": "not_a_command"}
+{"transcript": "search results look wrong", "expected": "not_a_command"}
