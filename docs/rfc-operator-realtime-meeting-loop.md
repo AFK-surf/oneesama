@@ -119,11 +119,23 @@ in the work browser → verified done → extracted passage spoken back as
 assistant audio — via the harness (synthetic 24 kHz utterances), without
 the cockpit UI.
 
-**Remaining:** cockpit UI wiring (Intent Card display, work-browser frames
-into the composition canvas, transcript→job pipeline inside the operator
-server process) and the meeting-loop milestones M1 (video out, needs H7
-link addressing), M3 (audio out), M2 (audio in), M4 (meet-loop
-acceptance).
+**MW-UI — DONE (web-UI acceptance).** The `/operator` surface has a **Work**
+tab: type a command → the operator server compiles intent, runs the stepwise
+planner in a server-side headless work browser (self-contained committed
+fixture site by default; `MAB_LAN_OPERATOR_WORK_BASE_URL` to point
+elsewhere), and streams the browser screencast + Intent Card + per-step log +
+verified result back into the page over the events WS (`work_run` →
+`work_event`/`work_frame`). Verified end-to-end by driving `/operator` with
+Playwright: typed command → 6 steps → frames rendered → status `done`,
+post-condition `text_present:Fixture` met, spoken-summary text shown.
+`window.MAB_LAN_OPERATOR_SURFACE.runWork(command)` is the test hook.
+
+**Remaining:** voice→Work wiring in the page (today the transcript→intent
+path is proven in the e2e harness; the Work tab takes typed input — add the
+mic-transcript feed), work frames onto the main composition canvas (vs the
+Work-tab preview) as the future Meet shared screen, and the meeting-loop
+milestones M1 (video out, needs H7 link addressing), M3 (audio out), M2
+(audio in), M4 (meet-loop acceptance).
 
 ## Read this first: verified hazards
 

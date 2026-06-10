@@ -6,6 +6,7 @@ import { buildLanOperatorDebugPanelClientScript } from "./lan-operator-debug-pan
 import { buildLanOperatorKwwkCursorClientScript } from "./lan-operator-kwwk-cursor-client.ts";
 import { buildLanOperatorOutputClientScript } from "./lan-operator-output-client.ts";
 import { buildLanOperatorTextInputClientScript } from "./lan-operator-text-input-client.ts";
+import { buildLanOperatorWorkPanelClientScript } from "./lan-operator-work-panel-client.ts";
 import { buildLanOperatorVoiceControlsClientScript } from "./lan-operator-voice-controls-client.ts";
 import { buildLanOperatorVoiceClientScript } from "./lan-operator-voice-client.ts";
 import { buildLanOperatorVisualClientScript } from "./lan-operator-visual-client.ts";
@@ -47,6 +48,7 @@ export function buildLanOperatorSurfaceHtml(
   const outputClientSource = buildLanOperatorOutputClientScript(),
     visualClientSource = buildLanOperatorVisualClientScript(),
     textInputClientSource = buildLanOperatorTextInputClientScript(),
+    workPanelClientSource = buildLanOperatorWorkPanelClientScript(),
     debugPanelClientSource = buildLanOperatorDebugPanelClientScript(),
     kwwkCursorClientSource = buildLanOperatorKwwkCursorClientScript();
   return `<!doctype html>
@@ -248,6 +250,36 @@ export function buildLanOperatorSurfaceHtml(
       .debug-tab:hover { background: var(--elevated-2); color: var(--ink); }
       .debug-tab[aria-selected="true"] { color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm); }
       .tabpanel[hidden] { display: none; }
+
+      /* ----- work panel (typed/voice command -> work browser) ----- */
+      .work-panel { flex: 1 1 60%; min-height: 220px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: auto; padding: 12px 14px; }
+      .work-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .work-status { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      .work-status[data-state="running"] { color: var(--accent); }
+      .work-status[data-state="done"] { color: #0a7a52; }
+      .work-status[data-state="failed"], .work-status[data-state="blocked"] { color: #b5322b; }
+      .work-composer { display: flex; gap: 8px; }
+      .work-composer #operator-work-input { flex: 1 1 auto; min-width: 0; height: 36px; }
+      .work-composer #operator-work-run-button { flex: 0 0 auto; height: 36px; }
+      .work-stage { position: relative; }
+      .work-frame-wrap { position: relative; aspect-ratio: 16 / 9; width: 100%; background: #0f172a; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+      .work-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+      .work-frame-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 12px; text-align: center; padding: 0 16px; }
+      .work-cursor { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; border: 2px solid #f4c45a; box-shadow: 0 0 0 2px rgba(0,0,0,0.4); pointer-events: none; transition: left 0.12s ease, top 0.12s ease; }
+      .work-intent { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 9px 12px; font-size: 12px; }
+      .work-intent .work-intent-title { font-weight: 640; }
+      .work-intent .work-pc { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+      .work-steps { display: flex; flex-direction: column; gap: 4px; }
+      .work-step { display: flex; gap: 8px; align-items: baseline; font-family: var(--mono); font-size: 11px; padding: 4px 8px; border-radius: 7px; background: var(--panel-2); }
+      .work-step[data-failed="true"] { background: color-mix(in srgb, #b5322b 14%, var(--panel-2)); color: #b5322b; }
+      .work-step .work-step-n { color: var(--faint); flex: 0 0 auto; }
+      .work-step .work-step-op { color: var(--accent); flex: 0 0 auto; font-weight: 640; }
+      .work-step .work-step-note { color: var(--muted); overflow-wrap: anywhere; }
+      .work-result { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; }
+      .work-result[data-status="done"] { border-color: #0a7a52; background: color-mix(in srgb, #0a7a52 8%, var(--surface)); }
+      .work-result[data-status="failed"], .work-result[data-status="blocked"] { border-color: #b5322b; background: color-mix(in srgb, #b5322b 8%, var(--surface)); }
+      .work-result .work-result-summary { margin-top: 6px; line-height: 1.45; }
+      .work-result .work-pc-line { font-family: var(--mono); font-size: 10.5px; }
 
       /* ----- realtime conversation (primary ledger view) ----- */
       .conversation-panel { flex: 1 1 60%; min-height: 220px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
@@ -463,6 +495,7 @@ export function buildLanOperatorSurfaceHtml(
           <div class="debug-body">
             <div class="debug-panel-bar">
               <div class="debug-tablist" role="tablist" aria-label="Debug views">
+                <button class="debug-tab" id="debug-tab-work" role="tab" aria-selected="false" aria-controls="tabpanel-work" type="button">Work</button>
                 <button class="debug-tab" id="debug-tab-ledger" role="tab" aria-selected="true" aria-controls="tabpanel-ledger" type="button">Ledger</button>
                 <button class="debug-tab" id="debug-tab-telemetry" role="tab" aria-selected="false" aria-controls="tabpanel-telemetry" type="button">Telemetry</button>
                 <button class="debug-tab" id="debug-tab-sources" role="tab" aria-selected="false" aria-controls="tabpanel-sources" type="button">Sources</button>
@@ -473,6 +506,26 @@ export function buildLanOperatorSurfaceHtml(
                 <button class="dock-btn" id="dock-hide-button" type="button" title="Clean mode — hide debug (\`)">✕</button>
               </span>
             </div>
+            <section class="work-panel tabpanel" id="tabpanel-work" role="tabpanel" aria-labelledby="debug-tab-work" data-tab="work" hidden>
+              <div class="work-head">
+                <span class="conversation-title">Have oneesama do work</span>
+                <span class="work-status" id="operator-work-status">idle</span>
+              </div>
+              <form class="work-composer" id="operator-work-form">
+                <input class="voice-device" id="operator-work-input" type="text" autocomplete="off" placeholder="e.g. 帮我查一下 Fixture Product 2.0 更新了什么" />
+                <button class="btn primary" id="operator-work-run-button" type="submit">Run</button>
+              </form>
+              <div class="work-stage">
+                <div class="work-frame-wrap">
+                  <img class="work-frame" id="operator-work-frame" alt="Work browser view" />
+                  <span class="work-cursor" id="operator-work-cursor" hidden></span>
+                  <div class="work-frame-empty" id="operator-work-frame-empty">The work browser appears here once a command runs.</div>
+                </div>
+              </div>
+              <div class="work-intent" id="operator-work-intent" hidden></div>
+              <div class="work-steps" id="operator-work-steps"></div>
+              <div class="work-result" id="operator-work-result" hidden></div>
+            </section>
             <section class="conversation-panel tabpanel active" id="tabpanel-ledger" role="tabpanel" aria-labelledby="debug-tab-ledger" data-tab="ledger">
               <div class="conversation-head">
                 <span class="conversation-title">Realtime Conversation</span>
@@ -622,7 +675,7 @@ export function buildLanOperatorSurfaceHtml(
     <script>${websocketClientSource}</script>
     <script>${artifactClientSource}</script>
     <script>${outputClientSource}</script>
-    <script>${visualClientSource}</script><script>${textInputClientSource}</script>
+    <script>${visualClientSource}</script><script>${textInputClientSource}</script><script>${workPanelClientSource}</script>
     <script>${debugPanelClientSource}</script>
     <script>${kwwkCursorClientSource}</script>
     <script>
@@ -757,7 +810,7 @@ export function buildLanOperatorSurfaceHtml(
         let drag = null;
         let voiceCapture = null;
         let outputClient = null;
-        let visualReceiver = null, voiceControls = null, textInputClient = null, artifactClient = null, compositionHeartbeat = null, avatarPublisherFrame = null;
+        let visualReceiver = null, voiceControls = null, textInputClient = null, workPanelClient = null, artifactClient = null, compositionHeartbeat = null, avatarPublisherFrame = null;
         function clamp(value, min, max) {
           return Math.min(max, Math.max(min, value));
         }
@@ -1613,6 +1666,7 @@ export function buildLanOperatorSurfaceHtml(
         }
 
         const DEBUG_TABS = [
+          ["debug-tab-work", "tabpanel-work", "work"],
           ["debug-tab-ledger", "tabpanel-ledger", "ledger"],
           ["debug-tab-telemetry", "tabpanel-telemetry", "telemetry"],
           ["debug-tab-sources", "tabpanel-sources", "sources"],
@@ -2237,6 +2291,14 @@ export function buildLanOperatorSurfaceHtml(
             renderRemoteKwwkCursor(payload.cursor);
             return;
           }
+          if (payload.type === "work_event") {
+            workPanelClient?.handleWorkEvent(payload.event);
+            return;
+          }
+          if (payload.type === "work_frame") {
+            workPanelClient?.handleWorkFrame(payload.frame);
+            return;
+          }
           if (payload.debug) mergeRuntimeDebugSnapshot(payload.debug);
           syncDebug();
         }
@@ -2390,6 +2452,7 @@ export function buildLanOperatorSurfaceHtml(
         voiceControls = window.MAB_LAN_OPERATOR_VOICE_CONTROLS.create({ state, sendOperatorEvent, syncDebug, startMicrophone, stopMicrophone, setVoiceMuted, persistUserState });
         voiceControls.bind();
         textInputClient = window.MAB_LAN_OPERATOR_TEXT_INPUT.create({ state, boot, sendOperatorEvent, sendEngineControl, syncDebug });
+        workPanelClient = window.MAB_LAN_OPERATOR_WORK_PANEL.create({ state, sendOperatorEvent });
         artifactClient = window.MAB_LAN_OPERATOR_ARTIFACTS.create({ state, sendOperatorEvent, syncDebug });
 
         (async () => {
@@ -2464,6 +2527,7 @@ export function buildLanOperatorSurfaceHtml(
           getDebugFilter: () => applyDebugFilter(),
           refreshVoiceDevices: () => voiceControls?.refreshDevices(),
           configureLocalVad: (enabled) => voiceControls?.configureLocalVad(enabled), sendTextInput: (text) => textInputClient?.sendText(text),
+          runWork: (command) => workPanelClient?.submit(command),
           setAudioEnabled: (enabled) => outputClient?.setAudioEnabled(enabled),
           liveProviderConfig: () => structuredClone(state.liveProviderConfig || {}),
           switchConversationProvider,

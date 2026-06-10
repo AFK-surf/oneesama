@@ -90,6 +90,10 @@ import {
 } from "./lan-operator-gemini-live-adapter.ts";
 import { buildLanOperatorLiveProviderConfig } from "./lan-operator-live-provider-config.ts";
 import type { LanOperatorVoiceChunk, LanOperatorVoiceForwardResult } from "./lan-operator-voice.ts";
+import {
+  createLanOperatorWorkRuntime,
+  type LanOperatorWorkRuntime,
+} from "./lan-operator-work-runtime.ts";
 
 export {
   buildLanOperatorRuntimeSessionConfig,
@@ -1061,6 +1065,10 @@ export function createLanOperatorSurfaceServer(
       await handleToolCancel(payload as Record<string, unknown>);
       return;
     }
+    if (type === "work_run") {
+      await handleWorkRun(payload as Record<string, unknown>);
+      return;
+    }
     if (type === "conversation_tool_result" || type === "tool_result") {
       await handleToolResult(payload as Record<string, unknown>);
       return;
@@ -1270,6 +1278,42 @@ export function createLanOperatorSurfaceServer(
     }
     recordEvent("tool", "kwwk_cursor_event", "KWWK cursor event", { cursor }, "info");
     return cursor;
+  }
+
+  // Work pipeline: a typed command runs the full loop in a server-side work
+  // browser, streamed back to the operator UI. Lazily created on first use so
+  // the Playwright browser never launches unless the surface is asked to work.
+  let workRuntime: LanOperatorWorkRuntime | null = null;
+  function broadcastToEvents(envelope: Record<string, unknown>) {
+    for (const client of clients) {
+      if (client.kind === "events") sendWebSocketText(client.socket, envelope);
+    }
+  }
+  function ensureWorkRuntime(): LanOperatorWorkRuntime {
+    if (workRuntime) return workRuntime;
+    workRuntime = createLanOperatorWorkRuntime({
+      baseUrl: process.env.MAB_LAN_OPERATOR_WORK_BASE_URL || undefined,
+      onEvent: (event) =>
+        broadcastToEvents({ sessionId: config.sessionId, type: "work_event", event }),
+      onFrame: (frame) =>
+        broadcastToEvents({ sessionId: config.sessionId, type: "work_frame", frame }),
+    });
+    return workRuntime;
+  }
+  async function handleWorkRun(payload: Record<string, unknown>) {
+    const command = String(payload.command || payload.text || "").trim();
+    if (!command) {
+      broadcastToEvents({
+        sessionId: config.sessionId,
+        type: "work_event",
+        event: { type: "error", detail: { reason: "work_command_empty" } },
+      });
+      return;
+    }
+    recordEvent("tool", "work_run_requested", "Work run requested", { command }, "info");
+    const runtime = ensureWorkRuntime();
+    const outcome = await runtime.run(command);
+    recordEvent("tool", "work_run_finished", "Work run finished", { command, ...outcome }, "info");
   }
 
   async function forwardVoiceChunk(chunk: LanOperatorVoiceChunk) {
@@ -1865,6 +1909,7 @@ export function createLanOperatorSurfaceServer(
     },
     async close() {
       if (conversationEventDrainTimer) clearInterval(conversationEventDrainTimer);
+      await workRuntime?.close().catch(() => {});
       for (const client of clients) sendWebSocketClose(client.socket);
       clients.clear();
       if (!server.listening) return;
