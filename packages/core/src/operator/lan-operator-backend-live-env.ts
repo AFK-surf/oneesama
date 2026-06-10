@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { loadOperatorDotEnvFiles } from "./lan-operator-dotenv.ts";
+
 const DEFAULT_LIVE_ENV_FILES = [
   "oneesama-live-env-from-proc.sh",
   "oneesama-openai-live.sh",
@@ -41,6 +43,9 @@ export function loadLanOperatorBackendLiveEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): LanOperatorBackendLiveEnvLoadResult {
   const keys = new Set<string>();
+  // Repo-root .env / .env.local first (the conventional local-config file);
+  // ~/.config live-env files fill any gaps. No-override throughout.
+  for (const key of loadOperatorDotEnvFiles(undefined, undefined, env)) keys.add(key);
   for (const filePath of defaultLiveEnvPaths(env)) {
     if (!existsSync(filePath)) continue;
     const content = readFileSync(filePath, "utf8");

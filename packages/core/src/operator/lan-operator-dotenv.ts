@@ -25,6 +25,7 @@ function parseAssignment(line: string): [string, string] | null {
 export function loadOperatorDotEnvFiles(
   files: string[] = [".env.local", ".env"],
   cwd: string = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   const loaded: string[] = [];
   for (const file of files) {
@@ -34,8 +35,8 @@ export function loadOperatorDotEnvFiles(
       const assignment = parseAssignment(line);
       if (!assignment) continue;
       const [key, value] = assignment;
-      if (value !== "" && process.env[key] === undefined) {
-        process.env[key] = value;
+      if (value !== "" && env[key] === undefined) {
+        env[key] = value;
         loaded.push(key);
       }
     }
