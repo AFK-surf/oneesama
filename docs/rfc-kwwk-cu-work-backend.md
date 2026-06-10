@@ -1,6 +1,8 @@
 # RFC: kwwk-cu is the work executor (drop the CDP backend)
 
-- Status: Draft (rev 2 — CDP dropped as a redundant reimplementation)
+- Status: Implemented (rev 3 — CDP removed; kwwk-cu AX is the only executor).
+  Remaining: the live `--act` validation (real cursor) + Work-tab live frames
+  (Screen Recording) are supervised steps on the appliance.
 - Date: 2026-06-10
 - Owner: Peng Xiao
 - Supersedes: decision **D3** in
