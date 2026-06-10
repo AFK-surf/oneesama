@@ -1,0 +1,24 @@
+{
+  "schema": "oneesama.work_scenario.v1",
+  "id": "pricing-team-plan",
+  "description": "Family A: find the Team plan price.",
+  "job": {
+    "id": "job_pricing_team_plan",
+    "surfaceId": "work-browser",
+    "intent": "Find how much the Team plan of Fixture Product costs per month.",
+    "constraints": [],
+    "postConditions": [
+      { "kind": "url_includes", "value": "pricing" },
+      { "kind": "text_present", "value": "forty-nine dollars" }
+    ],
+    "riskLevel": "read_only",
+    "source": "fixture",
+    "createdAt": "2026-06-10T00:00:00.000Z"
+  },
+  "fixturePlan": {
+    "query": "pricing",
+    "resultLink": "Pricing",
+    "passageNeedle": "Team plan",
+    "summary": "The Team plan costs forty-nine dollars per month and includes five work surfaces."
+  }
+}

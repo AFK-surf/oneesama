@@ -1,0 +1,24 @@
+{
+  "schema": "oneesama.work_scenario.v1",
+  "id": "release-notes-1-5",
+  "description": "Family A: research what changed in 1.5.",
+  "job": {
+    "id": "job_release_notes_1_5",
+    "surfaceId": "work-browser",
+    "intent": "Find what changed in version 1.5 of Fixture Product.",
+    "constraints": [],
+    "postConditions": [
+      { "kind": "url_includes", "value": "release-notes" },
+      { "kind": "text_present", "value": "composition canvas" }
+    ],
+    "riskLevel": "read_only",
+    "source": "fixture",
+    "createdAt": "2026-06-10T00:00:00.000Z"
+  },
+  "fixturePlan": {
+    "query": "version",
+    "resultLink": "Release Notes",
+    "passageNeedle": "1.5 introduced",
+    "summary": "Fixture Product 1.5 introduced the composition canvas and the voice bridge."
+  }
+}

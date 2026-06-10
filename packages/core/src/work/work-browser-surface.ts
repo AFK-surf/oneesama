@@ -136,15 +136,26 @@ export function createWorkBrowserSurface(options: WorkBrowserSurfaceOptions): Wo
   }
 
   async function observe(): Promise<WorkSurfaceObservation> {
-    const payload = (await page.evaluate(SNAPSHOT_SCRIPT(maxRefs))) as SnapshotPayload;
+    // A click can race its own navigation; if the execution context dies
+    // mid-snapshot, wait for the new document and retry.
+    let payload: SnapshotPayload | null = null;
+    for (let attempt = 0; attempt < 3 && !payload; attempt++) {
+      try {
+        payload = (await page.evaluate(SNAPSHOT_SCRIPT(maxRefs))) as SnapshotPayload;
+      } catch (error) {
+        if (attempt === 2) throw error;
+        await page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => {});
+      }
+    }
+    const snapshot = payload as SnapshotPayload;
     return {
       schema: "oneesama.work_observation.v1",
       surfaceId,
       url: page.url(),
       title: await page.title().catch(() => ""),
-      outline: payload.outline,
-      refs: payload.refs,
-      truncated: payload.truncated,
+      outline: snapshot.outline,
+      refs: snapshot.refs,
+      truncated: snapshot.truncated,
       capturedAt: new Date().toISOString(),
     };
   }

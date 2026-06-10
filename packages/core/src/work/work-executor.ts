@@ -74,9 +74,18 @@ export function createWorkExecutor(options: WorkExecutorOptions): WorkExecutor {
     let blocker = "";
 
     while (steps.length < maxSteps) {
-      const observation = await surface.observe();
-      emit({ type: "observation", jobId: job.id, step: steps.length, observation });
-      const decided = await planner.decide({ job, observation, steps });
+      let observation: WorkSurfaceObservation;
+      let decided: unknown;
+      try {
+        observation = await surface.observe();
+        emit({ type: "observation", jobId: job.id, step: steps.length, observation });
+        decided = await planner.decide({ job, observation, steps });
+      } catch (error) {
+        blocker = `executor_exception:${String(
+          error instanceof Error ? error.message : error,
+        ).slice(0, 200)}`;
+        break;
+      }
       const validation = validateWorkOperation(decided);
       if (!validation.ok || !validation.operation) {
         blocker = `planner_operation_invalid:${validation.errors.join(",")}`;
@@ -118,7 +127,7 @@ export function createWorkExecutor(options: WorkExecutorOptions): WorkExecutor {
       let retried = false;
       if (!result.ok && !result.blocked) {
         // One bounded retry against a fresh observation (refs may be stale).
-        await surface.observe();
+        await surface.observe().catch(() => null);
         retried = true;
         result = await surface.perform(operation);
       }
