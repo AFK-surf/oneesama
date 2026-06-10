@@ -409,6 +409,9 @@ private func kwwkExecutionMetadata(
     "coreSeedSnapshot": seedSnapshot,
     "coreOutputSnapshots": outputSnapshots,
     "coreOutputTextPreview": outputs.map { kwwkTextPreview($0.text) },
+    // Full untruncated formatted state — the operator-side work planner
+    // consumes this to choose targets (the preview is only ~319 chars).
+    "coreOutputText": outputs.map { $0.text },
     "coreTimings": [
       "seedMs": max(0, seedMs),
       "actionMs": max(0, actionMs),

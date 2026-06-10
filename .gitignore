@@ -22,3 +22,6 @@ test-results/
 /snake-mobile-app.zip
 
 internal/slackagent/runtime/
+
+# SwiftPM build artifacts (kwwk-cu helper)
+packages/core/src/meeting/.build/
