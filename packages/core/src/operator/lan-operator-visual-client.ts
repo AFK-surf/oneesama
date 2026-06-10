@@ -368,7 +368,9 @@ export function buildLanOperatorVisualClientScript() {
           nextReconnectAt: null,
         });
         const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-        ws = new WebSocket(protocol + "//" + location.host + "/operator/visual/ws");
+        const authToken = new URLSearchParams(location.search).get("token") || "";
+        const authSuffix = authToken ? "?token=" + encodeURIComponent(authToken) : "";
+        ws = new WebSocket(protocol + "//" + location.host + "/operator/visual/ws" + authSuffix);
         ws.addEventListener("open", () => {
           state.visual.receiverWebSocketState = "open";
           state.visual.connectionState = "connecting";

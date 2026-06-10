@@ -629,6 +629,13 @@ export function buildLanOperatorSurfaceHtml(
       (() => {
         const boot = ${boot};
         const bootParams = new URLSearchParams(location.search);
+        // Access token (server gates routes when MAB_LAN_OPERATOR_TOKEN is
+        // set); appended to same-origin runtime fetches and child-page URLs.
+        const accessToken = bootParams.get("token") || "";
+        function runtimeAuthUrl(path) {
+          if (!accessToken) return path;
+          return path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(accessToken);
+        }
         const canvas = document.getElementById("composition");
         const ctx = canvas.getContext("2d");
         const [readyDot, voiceLabel, visualLabel, voiceWsNode, transportStateNode, voiceChunksNode, visualTracksNode, compositionNode, layoutRevisionNode, overlayCountNode, kwwkJobNode, toolRoutingNode, assistantTextNode, outputAudioNode, engineControlNode, artifactNode, timelineNode, debugShell, debugJson, debugFilterInput, debugFilterClearButton, debugFilterState, debugTimelineCount, debugTransportSummary, debugTransportTable, debugVoiceSummary, debugVoiceTable, debugTimelineTable, debugTurnCount, debugTurnTable, debugTurnTimelineSummary, debugTurnTimelineTable, debugConversationSummary, debugConversationTable, debugPortSummary, debugPortTable, debugProviderConfigSummary, debugProviderConfigTable, debugProviderDrilldownSummary, debugProviderDrilldownTable, debugToolRoutingSummary, debugToolRoutingTable, debugKwwkSummary, debugKwwkTable, debugVisualSummary, debugCompositionTable, debugVisualSourceTable, debugArtifactSummary, debugArtifactTable, sourceTabs] = ["ready-dot", "voice-label", "visual-label", "voice-ws", "transport-state", "voice-chunks", "visual-tracks", "composition-state", "layout-revision", "overlay-count", "kwwk-job-state", "tool-routing-state", "assistant-text-state", "output-audio-state", "engine-control-state", "artifact-state", "timeline-state", "debug-panel", "debug-json", "debug-filter-input", "debug-filter-clear-button", "debug-filter-state", "debug-timeline-count", "debug-transport-summary", "debug-transport-table", "debug-voice-summary", "debug-voice-table", "debug-timeline-table", "debug-turn-count", "debug-turn-table", "debug-turn-timeline-summary", "debug-turn-timeline-table", "debug-conversation-summary", "debug-conversation-table", "debug-port-summary", "debug-port-table", "debug-provider-config-summary", "debug-provider-config-table", "debug-provider-drilldown-summary", "debug-provider-drilldown-table", "debug-tool-routing-summary", "debug-tool-routing-table", "debug-kwwk-summary", "debug-kwwk-table", "debug-visual-summary", "debug-composition-table", "debug-visual-source-table", "debug-artifact-summary", "debug-artifact-table", "source-tabs"].map((id) => document.getElementById(id));
@@ -1002,7 +1009,7 @@ export function buildLanOperatorSurfaceHtml(
           renderProviderConfigDock();
           syncDebug();
           try {
-            const response = await fetch("/runtime/provider", {
+            const response = await fetch(runtimeAuthUrl("/runtime/provider"), {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ transport: targetTransport, connect: true }),
@@ -1507,6 +1514,7 @@ export function buildLanOperatorSurfaceHtml(
           url.searchParams.set("label", "Avatar");
           url.searchParams.set("kind", "avatar");
           url.searchParams.set("avatarPreset", preset);
+          if (accessToken) url.searchParams.set("token", accessToken);
           return url.toString();
         }
         function ensureAvatarPublisherFrame() {
@@ -1924,7 +1932,7 @@ export function buildLanOperatorSurfaceHtml(
         }
 
         async function fetchDebugReport() {
-          const response = await fetch("/runtime/report", { cache: "no-store" });
+          const response = await fetch(runtimeAuthUrl("/runtime/report"), { cache: "no-store" });
           if (!response.ok) throw new Error("debug_report_fetch_failed:" + String(response.status));
           return await response.json();
         }

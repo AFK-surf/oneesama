@@ -107,6 +107,7 @@ export interface LanOperatorSurfaceOptions {
   conversationTransportSelection?: LanOperatorConversationTransportSelection;
   trustedLanOperatorMode?: boolean;
   lanModeExplicitlyEnabled?: boolean;
+  accessToken?: string;
   maxVoiceForwardInFlight?: number;
   conversationEventDrainIntervalMs?: number;
   conversationEngine?: ConversationEnginePort;
@@ -275,6 +276,13 @@ export function createLanOperatorSurfaceServer(
   const debug = defaultDebugState();
   const trustedLanOperatorMode = options.trustedLanOperatorMode ?? true;
   const lanModeExplicitlyEnabled = options.lanModeExplicitlyEnabled ?? trustedLanOperatorMode;
+  // When set, every WS upgrade and HTTP route (except static avatar assets)
+  // requires this token (?token= query or Authorization: Bearer). The server
+  // binds beyond localhost, so this is what stands between the LAN and the
+  // engine controls once the surface drives a real meeting.
+  const accessToken = String(
+    options.accessToken ?? process.env.MAB_LAN_OPERATOR_TOKEN ?? "",
+  ).trim();
   let liveProviderConfig = buildLanOperatorLiveProviderConfig({
     selectedTransport: config.conversationTransport,
     conversationTransportSelection: options.conversationTransportSelection || null,
@@ -1553,6 +1561,18 @@ export function createLanOperatorSurfaceServer(
       socket.destroy();
       return;
     }
+    if (!requestAuthorized(req, url)) {
+      recordEvent(
+        "guard",
+        "operator_ws_unauthorized",
+        "Operator WebSocket upgrade rejected",
+        { path: url.pathname, kind },
+        "warn",
+      );
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     socket.write(
       [
         "HTTP/1.1 101 Switching Protocols",
@@ -1714,9 +1734,27 @@ export function createLanOperatorSurfaceServer(
     });
   }
 
+  function requestAuthorized(req: IncomingMessage, url: URL) {
+    if (!accessToken) return true;
+    if (url.searchParams.get("token") === accessToken) return true;
+    return String(req.headers.authorization || "") === `Bearer ${accessToken}`;
+  }
+
   const server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+      // Static avatar media is exempt (no control surface, referenced by
+      // in-page runtimes); everything else is gated when a token is set.
+      if (!url.pathname.startsWith("/assets/avatar/") && !requestAuthorized(req, url)) {
+        recordEvent(
+          "guard",
+          "operator_request_unauthorized",
+          "Operator HTTP request rejected",
+          { path: url.pathname, method: String(req.method || "") },
+          "warn",
+        );
+        return jsonResponse(res, 401, { ok: false, error: "unauthorized" });
+      }
       if (
         req.method === "GET" &&
         (url.pathname === "/" || url.pathname === "/operator" || url.pathname === "/operator/")

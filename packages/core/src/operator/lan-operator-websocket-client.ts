@@ -113,7 +113,13 @@ export function buildLanOperatorWebSocketClientScript() {
       manualClose = false;
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return ws;
       patch({ state: connection.connectCount > 0 ? "reconnecting" : "connecting", nextReconnectAt: null });
-      ws = new WebSocket((location.protocol === "https:" ? "wss:" : "ws:") + "//" + location.host + options.path);
+      // Pass the page's access token through to the upgrade request — the
+      // server gates WS upgrades when MAB_LAN_OPERATOR_TOKEN is set.
+      const authToken = new URLSearchParams(location.search).get("token") || "";
+      const authSuffix = authToken
+        ? (options.path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(authToken)
+        : "";
+      ws = new WebSocket((location.protocol === "https:" ? "wss:" : "ws:") + "//" + location.host + options.path + authSuffix);
       ws.addEventListener("open", () => {
         patch({
           state: "open",
