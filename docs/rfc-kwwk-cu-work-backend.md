@@ -171,36 +171,43 @@ Swift 6.3.2) on this machine. Concrete results:
 - **Accessibility is granted** (`accessibilityTrusted: true`) — the TCC
   Accessibility wall I expected is already cleared here (from the 6/6 meeting
   work).
-- **But `state` cannot resolve the target window** even with
-  `target.process_id` of a live, focused Chrome (`window found: false`,
-  no `accessibility` payload). `findWindow` uses ScreenCaptureKit; this points
-  to **Screen Recording TCC not granted** (distinct from Accessibility) — the
-  observation/screenshot path needs it and it is missing.
-- **Two observation paths, and the low-level one is the weak one.** The
-  low-level `state` JSON-RPC method (`kwwk-cu-observation.swift`) is a raw
-  `AXUIElementCreateApplication` walk that does **not** invoke
-  `ChromiumAccessibilityActivation` — so it would not expose Chrome **web**
-  content even with the window resolved. The rich web-AX path
-  (with Chromium activation) lives in the external `KWWKComputerUseCore`
-  `ComputerUseClient.state(app:)`, reached via the core operation path
-  (`kwwk-cu-core.swift` `seed`/`executeKWWKCUCoreOperation`), **not** the
-  low-level `state` method.
+- **Two observation paths — use the core one.** The low-level `state`
+  JSON-RPC method (`kwwk-cu-observation.swift`) is a raw
+  `AXUIElementCreateApplication` walk that needs ScreenCaptureKit window
+  resolution (Screen Recording TCC) and does **not** invoke
+  `ChromiumAccessibilityActivation` — it returned `window found: false` /
+  no web content here. The **core client path** (`kwwk.cu.action` with a
+  `state` op → `kwwk-cu-core.swift` `seed` → `ComputerUseClient.getAppState`)
+  is the rich one: it activates Chromium AX and walks the tree via pure
+  Accessibility.
+- **POSITIVE: the core path sees the browser page with only Accessibility,
+  no Screen Recording.** Live probe against a real Chrome showing the
+  committed fixture page (`kwwk.cu.action` state op, `target.app = "Google
+Chrome"`, no screenshot): `ok:true`, `nodeCount: 62`, correct window title,
+  the page H1 captured. A read-only `kwwk.cu.plan` over that state put the
+  **web link text "Back to search" into the planner's state** — i.e. web
+  elements are individually present and addressable in what the planner sees.
+  The biggest plan risk (web invisible to AX) is **retired**.
 
-**Two design consequences for this RFC:**
+**Design consequences:**
 
-1. The AX adapter's `observe()` must route through the **core client path**
-   (`client.state(app:)`, which activates Chromium AX), not the low-level
-   `state` method — otherwise web content is invisible. This refines D-AX-1:
-   we drive low-level primitives for _actions_, but observation goes through
-   the core client.
-2. **Screen Recording TCC must be granted** to the helper's launch context
-   (in addition to Accessibility) before any observation works. This is a
-   hard, user-granted prerequisite — added to M0.
+1. The AX adapter's `observe()` routes through the **core client path**
+   (state op → `getAppState`, Chromium-activated), not the low-level `state`
+   method. D-AX-1 stands (drive primitives for actions); observation goes
+   through the core client. `includeScreenshot:false` keeps it
+   Accessibility-only (no Screen Recording).
+2. **Screen Recording is only needed for screenshots**, not for the
+   no-screenshot observation — so it is NOT a hard prerequisite for the core
+   AX path (earlier draft was wrong). Grant it only if/when we attach
+   screenshots.
+3. **Planner model/schema needs config**: the read-only `kwwk.cu.plan` errored
+   `blocked_planner_model_invalid_json_schema` (model returned JSON not
+   matching the planner schema) — a tuning detail (model/schema), orthogonal
+   to observation, to settle when wiring the operator planner onto kwwk-cu.
 
-The remaining M0 measurement (family-A web-AX precision) needs Screen
-Recording granted **and** live input on the real desktop (synthetic
-clicks/typing move the real cursor) — a deliberate, supervised run, not a
-headless one.
+Still unmeasured (needs a supervised live run — real cursor/keyboard):
+end-to-end family-A success (planner picks the right element → click lands →
+verified). The observation half is proven; the act/verify half is next.
 
 ## Migration sequence (and the honest cost)
 
