@@ -160,6 +160,48 @@ screen/window capture, and the cursor is kwwk-cu's real cursor (drop the
 drawn-dot overlay). `work_run` / `work_event` / `work_frame` wire-protocol is
 unchanged.
 
+## M0 findings (2026-06-10, partial — probed the built helper live)
+
+Probed the already-built helper binary
+(`/tmp/oneesama-app-control-helper-swiftpm/release/OneesamaAppControlHelper`,
+Swift 6.3.2) on this machine. Concrete results:
+
+- **Builds + runs**: control/`ping` and `list_apps`/`state` (overview) respond.
+  No build wall.
+- **Accessibility is granted** (`accessibilityTrusted: true`) — the TCC
+  Accessibility wall I expected is already cleared here (from the 6/6 meeting
+  work).
+- **But `state` cannot resolve the target window** even with
+  `target.process_id` of a live, focused Chrome (`window found: false`,
+  no `accessibility` payload). `findWindow` uses ScreenCaptureKit; this points
+  to **Screen Recording TCC not granted** (distinct from Accessibility) — the
+  observation/screenshot path needs it and it is missing.
+- **Two observation paths, and the low-level one is the weak one.** The
+  low-level `state` JSON-RPC method (`kwwk-cu-observation.swift`) is a raw
+  `AXUIElementCreateApplication` walk that does **not** invoke
+  `ChromiumAccessibilityActivation` — so it would not expose Chrome **web**
+  content even with the window resolved. The rich web-AX path
+  (with Chromium activation) lives in the external `KWWKComputerUseCore`
+  `ComputerUseClient.state(app:)`, reached via the core operation path
+  (`kwwk-cu-core.swift` `seed`/`executeKWWKCUCoreOperation`), **not** the
+  low-level `state` method.
+
+**Two design consequences for this RFC:**
+
+1. The AX adapter's `observe()` must route through the **core client path**
+   (`client.state(app:)`, which activates Chromium AX), not the low-level
+   `state` method — otherwise web content is invisible. This refines D-AX-1:
+   we drive low-level primitives for _actions_, but observation goes through
+   the core client.
+2. **Screen Recording TCC must be granted** to the helper's launch context
+   (in addition to Accessibility) before any observation works. This is a
+   hard, user-granted prerequisite — added to M0.
+
+The remaining M0 measurement (family-A web-AX precision) needs Screen
+Recording granted **and** live input on the real desktop (synthetic
+clicks/typing move the real cursor) — a deliberate, supervised run, not a
+headless one.
+
 ## Migration sequence (and the honest cost)
 
 The current green gates (live fixture 50/50, replay 100%) are **CDP-derived**;
