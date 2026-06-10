@@ -1292,7 +1292,7 @@ export function createLanOperatorSurfaceServer(
   function ensureWorkRuntime(): LanOperatorWorkRuntime {
     if (workRuntime) return workRuntime;
     workRuntime = createLanOperatorWorkRuntime({
-      baseUrl: process.env.MAB_LAN_OPERATOR_WORK_BASE_URL || undefined,
+      axApp: process.env.MAB_LAN_OPERATOR_WORK_AX_APP || undefined,
       onEvent: (event) =>
         broadcastToEvents({ sessionId: config.sessionId, type: "work_event", event }),
       onFrame: (frame) =>

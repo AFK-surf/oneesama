@@ -44,14 +44,14 @@ export interface WorkPostConditionResult {
 }
 
 /**
- * Backend port (RFC D10): the CDP work browser implements this first;
- * the native kwwk-cu AX helper is the planned second backend. Everything
- * above this interface (jobs, planner, executor, harness) must stay
- * backend-agnostic.
+ * Backend port (RFC D10): kwwk-cu native AX is the single production backend
+ * (the CDP work browser was dropped as a redundant reimplementation); `fake`
+ * is the in-memory deterministic test double. Everything above this interface
+ * (jobs, planner, executor, harness) stays backend-agnostic.
  */
 export interface WorkSurfacePort {
   id: string;
-  kind: "cdp_browser" | "native_ax";
+  kind: "native_ax" | "fake";
   observe(): Promise<WorkSurfaceObservation>;
   perform(operation: WorkOperation): Promise<WorkOperationResult>;
   checkPostCondition(condition: WorkJobPostCondition): Promise<WorkPostConditionResult>;

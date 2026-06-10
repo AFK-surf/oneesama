@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Oneesama Realtime 实现复盘 · 2026-06-10</title>
+    <style>
+      :root {
+        --bg: #eef0f4;
+        --surface: #ffffff;
+        --panel: #f7f8fa;
+        --ink: #1b1d22;
+        --muted: #5b616e;
+        --faint: #8b909c;
+        --line: #e4e6ea;
+        --accent: #0f9d6e;
+        --ok: #0a7a52;
+        --warn: #9a6310;
+        --bad: #b5322b;
+        --info: #2563c9;
+        --mono: ui-monospace, "SF Mono", Menlo, monospace;
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.6 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          "PingFang SC",
+          sans-serif;
+      }
+      .wrap {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 40px 24px 80px;
+      }
+      header.page {
+        border-bottom: 2px solid var(--ink);
+        padding-bottom: 18px;
+        margin-bottom: 28px;
+      }
+      h1 {
+        font-size: 27px;
+        margin: 0 0 6px;
+        letter-spacing: -0.01em;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      h2 {
+        font-size: 19px;
+        margin: 38px 0 12px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+      }
+      h3 {
+        font-size: 15px;
+        margin: 22px 0 8px;
+        color: var(--ink);
+      }
+      p {
+        margin: 10px 0;
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        background: var(--panel);
+        padding: 1px 5px;
+        border-radius: 5px;
+      }
+      pre {
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.5;
+        background: #1b1d22;
+        color: #e6e8ec;
+        padding: 14px 16px;
+        border-radius: 10px;
+        overflow-x: auto;
+      }
+      pre .c {
+        color: #8b909c;
+      }
+      pre .k {
+        color: #79c0ff;
+      }
+      pre .s {
+        color: #9ece6a;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 18px 20px;
+        margin: 14px 0;
+      }
+      .tldr {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-left: 4px solid var(--accent);
+        border-radius: 12px;
+        padding: 18px 22px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      @media (max-width: 720px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0;
+        font-size: 13.5px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th {
+        background: var(--panel);
+        font-size: 11.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--faint);
+      }
+      .pill {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 650;
+        padding: 2px 9px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .p-ok {
+        background: color-mix(in srgb, var(--ok) 14%, white);
+        color: var(--ok);
+      }
+      .p-bad {
+        background: color-mix(in srgb, var(--bad) 13%, white);
+        color: var(--bad);
+      }
+      .p-warn {
+        background: color-mix(in srgb, var(--warn) 15%, white);
+        color: var(--warn);
+      }
+      .p-info {
+        background: color-mix(in srgb, var(--info) 12%, white);
+        color: var(--info);
+      }
+      .metric {
+        text-align: center;
+        padding: 14px 10px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+      .metric .n {
+        font-size: 26px;
+        font-weight: 720;
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+      }
+      .metric .l {
+        font-size: 11.5px;
+        color: var(--muted);
+        margin-top: 3px;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin: 16px 0;
+      }
+      @media (max-width: 720px) {
+        .metrics {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .ref {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--info);
+      }
+      .lead {
+        font-size: 13px;
+        color: var(--muted);
+        margin: 2px 0 0;
+      }
+      ul {
+        margin: 8px 0;
+        padding-left: 22px;
+      }
+      li {
+        margin: 4px 0;
+      }
+      .diagram {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.45;
+        white-space: pre;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 16px;
+        overflow-x: auto;
+        color: var(--ink);
+      }
+      .tag {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+      }
+      footer {
+        margin-top: 50px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+        color: var(--faint);
+        font-size: 12.5px;
+      }
+      .two-col-note {
+        color: var(--muted);
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="page">
+        <h1>Oneesama Realtime 实现复盘</h1>
+        <div class="sub">
+          代码级审计 · 2026-06-10 · RFC rev 5 · 全程读实际代码（带 file:line），非凭记忆
+        </div>
+      </header>
+
+      <div class="tldr">
+        <strong>一句话状态。</strong> 仓库里有<strong>两套互不相通的 realtime 栈</strong>：①
+        <em>operator 栈</em>（本轮工作的对象，conversation engine + OpenAI/Gemini 适配器 +
+        工作管线），已打通"说话/打字 → 精确干活 → 验证 → 播报"全链并过完四道验收门；②
+        <em>meeting 栈</em>（既有的 <code>realtime-browser-bridge</code> + Agents SDK +
+        kwwk-cu），是另一条独立实现，与 operator 栈不共享对话引擎。本轮在 operator
+        栈里找到并修复了语音"从来连不上"的真凶（H11），并实测推翻了采样率假设（H2）。会议接线（M1–M4）和"网页里用语音触发"尚未完成。
+      </div>
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="n">100%</div>
+          <div class="l">回放 CI（管线确定性）</div>
+        </div>
+        <div class="metric">
+          <div class="n">100% · 0</div>
+          <div class="l">意图编译召回 · 误触发</div>
+        </div>
+        <div class="metric">
+          <div class="n">50/50</div>
+          <div class="l">真模型执行（p50 2284ms）</div>
+        </div>
+        <div class="metric">
+          <div class="n">10/10</div>
+          <div class="l">端到端语音</div>
+        </div>
+      </div>
+
+      <h2>1 · 两套 realtime 栈（最重要的认知）</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>operator 栈 <span class="pill p-ok">本轮主战场</span></h3>
+          <p class="lead">
+            <code>packages/core/src/operator/</code> + <code>packages/core/src/work/</code>
+          </p>
+          <ul>
+            <li>
+              <strong>大脑</strong>：<code>ConversationEnginePort</code> + 17 种 canonical
+              事件；OpenAI Realtime / Gemini Live / diagnostic 三引擎。
+            </li>
+            <li>
+              <strong>跑在哪</strong>：Node 服务进程内（operator 服务器 + 服务端工作浏览器）。
+            </li>
+            <li><strong>音频</strong>：浏览器麦克风 PCM16 → voice WS → 引擎 → provider WS。</li>
+            <li>
+              <strong>干活</strong>：工作管线（typed job → 步进 planner → CDP 浏览器 → 验证）。
+            </li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>meeting 栈 <span class="pill p-info">既有 / 独立</span></h3>
+          <p class="lead">
+            <code>packages/core/src/realtime/</code> + <code>meeting/</code> +
+            <code>apps/meeting-agent/</code>
+          </p>
+          <ul>
+            <li>
+              <strong>大脑</strong>：<code>realtime-browser-bridge</code>（mock / webrtc-mock /
+              agents-sdk 三模式），在 Meet 页内或 sidecar 页跑。
+            </li>
+            <li>
+              <strong>音频入</strong>：参会者音频 seam（<code
+                >meeting-avatar-participant-audio-stream</code
+              >
+              事件）。
+            </li>
+            <li>
+              <strong>干活</strong>：kwwk-cu Swift helper（macOS 无障碍 AX 控制，Gemini planner）。
+            </li>
+            <li>
+              <strong>关键</strong>：<strong>不</strong>使用 operator 栈的对话引擎，是平行实现。
+            </li>
+          </ul>
+        </div>
+      </div>
+      <p class="two-col-note">
+        RFC 的最终目标是把这两套接起来：operator 栈做"一个大脑"，meeting
+        栈退化为媒体端点（摄像头/麦克风/参会者音频）。这就是尚未完成的 M1–M4。
+      </p>
+
+      <h2>2 · operator realtime 数据通路（逐段）</h2>
+
+      <h3>2.1 Transport 选择 <span class="ref">lan-operator-conversation-transport.ts:52</span></h3>
+      <p>
+        显式 <code>MAB_LAN_OPERATOR_TRANSPORT</code> &gt; 检测到 OpenAI key &gt; 检测到 Gemini key
+        &gt; 无 key 回落 diagnostic（mock）。key 链：<code>ONEESAMA_OPENAI_API_KEY</code> →
+        <code>MAB_OPENAI_API_KEY</code> → <code>OPENAI_API_KEY</code>（Gemini 同理 +
+        <code>GOOGLE_API_KEY</code>）。
+      </p>
+
+      <h3>2.2 语音上行 <span class="ref">voice-client.ts:149 · surface.ts:1319</span></h3>
+      <p>
+        浏览器 <code>AudioContext({ sampleRate: 24000 })</code>（与 provider 声明的 24kHz
+        对齐，旧浏览器回落设备率，chunk 元数据始终带真实率）→ ScriptProcessor 切 1024 采样 → PCM16
+        base64 → voice WS。服务端 <code>forwardVoiceChunk</code> 有
+        <strong>32 路 in-flight 上限</strong
+        >，超了丢弃计数；<strong>单活跃流假设</strong>（第二路流被当 stale 拒绝）。
+      </p>
+
+      <h3>
+        2.3 OpenAI 适配器：会话声明
+        <span class="ref">lan-operator-openai-realtime-adapter.ts:617</span>
+      </h3>
+      <p>
+        本轮关键修复之一——必须声明<strong>完整</strong> audio 块（部分块会被 API 静默忽略，是首个
+        transcript_timeout 的根因）：
+      </p>
+      <pre><span class="k">audio</span>: {
+  <span class="k">input</span>: {
+    format: { type: <span class="s">"audio/pcm"</span>, rate: <span class="s">24000</span> },
+    turn_detection: { type: <span class="s">"server_vad"</span> },
+    transcription: { model: <span class="s">"gpt-4o-mini-transcribe"</span> },  <span class="c">// 喂意图编译器</span>
+  },
+  <span class="k">output</span>: { format: { type: <span class="s">"audio/pcm"</span>, rate: <span class="s">24000</span> } },
+}</pre>
+
+      <h3>
+        2.4 canonical 事件抽取 <span class="ref">conversation-event-pump.ts · surface.ts:652</span>
+      </h3>
+      <p>
+        事件不是 push，是<strong>每 100ms 轮询 drain</strong>（<code>drain_events</code>
+        控制命令，单飞 inFlight 防并发）。provider 原始事件经映射表转成 17 种 canonical 事件，写进
+        80 条环形缓冲，再广播给所有 events 客户端。
+      </p>
+
+      <h2>3 · 工作管线（"精确干活"的本体）</h2>
+      <div class="diagram">
+        语音/打字指令 │ ▼ 意图编译 work-intent-compiler.ts (语法优先 + 可选 LLM 兜底) typed job
+        oneesama.work_job.v1 (后端无关的冻结契约 · D10) │ intent / constraints / postConditions /
+        riskLevel ▼ 步进执行器 work-executor.ts (观察→决策→执行→验证, 每步一动作) │ ├ 观察: aria
+        快照 + 稳定 [ref=eN] work-browser-surface.ts │ ├ 决策: 单步 LLM 计划 work-openai-planner.ts
+        (gpt-5.5) │ ├ 执行: CDP 工作浏览器 + 工作区隔离 (allowed-hosts 硬约束) │ └ 验证:
+        每步后置条件 + 一次有界重试 ▼ done（仅当全部后置条件通过）/ blocked（带证据，绝不静默乱点）
+      </div>
+      <p>
+        录制/回放在 LLM 边界（<code>work-planner.ts</code>）：回放=确定性 CI 门（失败必是管线
+        bug，不是模型）；live=给 prompt/模型打分。这正是"harness 优先、prompt 是耗材"的落地。
+      </p>
+
+      <h3>验收门（D9，2026-06-10 实测）</h3>
+      <table>
+        <tr>
+          <th>门</th>
+          <th>要求</th>
+          <th>实测</th>
+          <th></th>
+        </tr>
+        <tr>
+          <td>1 回放 CI（管线）</td>
+          <td>100%</td>
+          <td>100%</td>
+          <td><span class="pill p-ok">PASS</span></td>
+        </tr>
+        <tr>
+          <td>2 意图编译</td>
+          <td>≥95% 召回 · 0 误触</td>
+          <td>100% · 0/20</td>
+          <td><span class="pill p-ok">PASS</span></td>
+        </tr>
+        <tr>
+          <td>3 真模型执行</td>
+          <td>≥90% / 10 次每场景</td>
+          <td>50/50 · p50 2284ms</td>
+          <td><span class="pill p-ok">PASS</span></td>
+        </tr>
+        <tr>
+          <td>4 端到端语音</td>
+          <td>≥8/10</td>
+          <td>10/10 · 15–19s/任务</td>
+          <td><span class="pill p-ok">PASS</span></td>
+        </tr>
+      </table>
+      <p class="lead">
+        网页验收已接通：<code>/operator</code> 的 <strong>Work 标签</strong>，打字 →
+        服务端工作浏览器实时画面 + Intent Card + 逐步日志 + 验证结果（commit
+        <code>eccaf8d</code>，Playwright 实测 done/6 步/画面渲染）。
+      </p>
+
+      <h2>4 · 本轮发现 &amp; 修复的 bug</h2>
+      <div class="card">
+        <p>
+          <span class="pill p-ok">已修</span>
+          <strong>H11 — 并发连接 thrash（语音从来连不上的真凶）</strong>
+          <span class="ref">…openai-realtime-adapter.ts:838</span>
+        </p>
+        <p>
+          connect() 只对"已 OPEN"短路，对"握手中"直接关掉重连。32 路并发语音 chunk 各触发一次
+          auto-connect → 每次握手都被下一个掐死 →
+          <code>"WebSocket was closed before the connection was established"</code>
+          ×274，流一停立刻连上。修复=两个适配器各加共享 in-flight connect promise。修后 0
+          错、转写精确、走代理也行。残留小问题：×32 个 cosmetic
+          <code>engine_connected</code> 重复事件。
+        </p>
+      </div>
+      <div class="card">
+        <p><span class="pill p-info">已推翻</span> <strong>H2 — 采样率假设</strong></p>
+        <p>
+          实测 24kHz 和 48kHz 裸 PCM16 在
+          <code>gpt-realtime-2</code> 上都<strong>精确转写</strong>（"purple elephant seventy-seven"
+          / "green tiger 42"）；端点容忍未声明的采样率。从 blocker 降级为卫生项（已声明格式 + 24kHz
+          采集 + 常驻 <code>eval:transcription</code> 守门）。次要：48kHz 会双触发 server VAD。
+        </p>
+      </div>
+      <div class="card">
+        <p>
+          <span class="pill p-ok">已修</span> <strong>快照覆盖 — inspector 测试转绿</strong>
+          <span class="ref">surface-html.ts:974</span>
+        </p>
+        <p>
+          服务端 debug 快照整体展开覆盖 <code>state.conversation</code>，心跳里的空
+          <code>canonicalEvents</code> 会抹掉客户端事件。改为：服务端环形缓冲仅在非空时权威。
+        </p>
+      </div>
+      <div class="card">
+        <p>
+          <span class="pill p-warn">新发现 · 未修</span> <strong>Gemini 控制命令死分支</strong>
+          <span class="ref">…gemini-live-adapter.ts:761</span>
+        </p>
+        <p>
+          <code>rawControlEvent</code> 的 if/else 两个分支返回完全相同的
+          <code>{ realtimeInput: { audioStreamEnd: true } }</code>——<code>clear_audio_buffer</code>
+          与 <code>cancel_response</code> 没有区别处理，<code>if</code> 是死代码。严重度低（Gemini
+          是 A/B 备选，非主路径），但应补上各自的 Gemini API 语义。
+        </p>
+      </div>
+
+      <h2>5 · 风险台账（H1–H11）</h2>
+      <table>
+        <tr>
+          <th>#</th>
+          <th>风险</th>
+          <th>状态</th>
+          <th>要点</th>
+        </tr>
+        <tr>
+          <td>H1</td>
+          <td>两个 provider 都没注册 tools</td>
+          <td><span class="pill p-warn">OPEN</span></td>
+          <td>
+            模型自主调
+            <code>kwwk_computer_use</code>
+            路径为空；但意图编译器是主路径，故只挡"模型自主快路径"，不挡工作管线。
+          </td>
+        </tr>
+        <tr>
+          <td>H2</td>
+          <td>采样率未声明/疑似错</td>
+          <td><span class="pill p-info">REFUTED</span></td>
+          <td>实测两种率都精确转写，降级为卫生项。</td>
+        </tr>
+        <tr>
+          <td>H3</td>
+          <td>服务端仅允许单活跃语音流</td>
+          <td><span class="pill p-warn">OPEN</span></td>
+          <td>第二路（会议音频）被拒；挡 M2，需 per-source 流注册表。</td>
+        </tr>
+        <tr>
+          <td>H4</td>
+          <td>无混音器</td>
+          <td><span class="pill p-warn">OPEN</span></td>
+          <td>两路 PCM 串行 append 会损坏时间线；MVP 必须互斥切换，混音推后。</td>
+        </tr>
+        <tr>
+          <td>H5</td>
+          <td>后台节流冻住合成摄像头</td>
+          <td><span class="pill p-warn">OPEN</span></td>
+          <td>标签页隐藏时 rAF 停；需 watchdog + 占位画面，或 Worker+OffscreenCanvas。</td>
+        </tr>
+        <tr>
+          <td>H6</td>
+          <td>Meet 页连不回 operator 服务器</td>
+          <td><span class="pill p-ok">MITIGATED</span></td>
+          <td>
+            M0 实测：同机 <code>ws://localhost</code> 可连；跨机被 mixed-content 拦。方案=控制走
+            CDP、视频走页内 WebRTC。
+          </td>
+        </tr>
+        <tr>
+          <td>H7</td>
+          <td>visual 信令写死二元广播</td>
+          <td><span class="pill p-warn">OPEN</span></td>
+          <td>加第三种 kind 会与 avatar 回环串线；挡 M1，需显式链路寻址。</td>
+        </tr>
+        <tr>
+          <td>H8</td>
+          <td>不能 replaceTrack Meet 的 sender</td>
+          <td><span class="pill p-warn">OPEN</span></td>
+          <td>用 init-script 时刻装好的中继 track，换画的内容而非 track。</td>
+        </tr>
+        <tr>
+          <td>H9</td>
+          <td>operator 服务器无鉴权</td>
+          <td><span class="pill p-ok">MITIGATED</span></td>
+          <td>
+            已加 <code>MAB_LAN_OPERATOR_TOKEN</code> 门禁（全 WS/HTTP）。真会议前置仍需 join-scoped
+            token。
+          </td>
+        </tr>
+        <tr>
+          <td>H10</td>
+          <td>每个事件广播都带整份 debug 克隆</td>
+          <td><span class="pill p-warn">OPEN</span></td>
+          <td><code>cloneDebugState</code> 在音频 chunk 频率下开销大；需 lean 订阅模式。</td>
+        </tr>
+        <tr>
+          <td>H11</td>
+          <td>并发连接 thrash 杀死语音</td>
+          <td><span class="pill p-ok">FIXED</span></td>
+          <td>本轮根因 + 修复，见上。</td>
+        </tr>
+      </table>
+
+      <h2>6 · 尚未完成</h2>
+      <ul>
+        <li>
+          <strong>网页语音触发</strong>：转写→意图这条链已在 e2e harness 验证 10/10，但
+          <code>/operator</code> 的 Work 标签目前只接打字输入；麦克风转写自动喂进 Work 还没接。
+        </li>
+        <li>
+          <strong>工作画面上主舞台</strong>：现在工作浏览器画面在 Work
+          标签的预览框；放到主合成画布（= 将来 Meet 共享屏）是 M1。
+        </li>
+        <li>
+          <strong>会议闭环 M1→M3→M2→M4</strong>：视频出（依赖 H7）→ 助手音频出 → 参会者音频入 →
+          会议链路验收。
+        </li>
+        <li>
+          <strong>H1 / H3 / H4 / H10</strong>：tools 注册（可选）、per-source 语音流、混音、lean
+          订阅——按里程碑推进。
+        </li>
+        <li>
+          <strong>Gemini 死分支</strong>：补 <code>clear_audio_buffer</code> /
+          <code>cancel_response</code> 各自语义。
+        </li>
+      </ul>
+
+      <h2>7 · 如何复现验收</h2>
+      <pre><span class="c"># 启动（.env 已配好开关，密钥在 ~/.config/oneesama/live-env）</span>
+vp run dev
+
+<span class="c"># 网页打字验收：/operator → Work 标签 → 输入指令 → Run</span>
+
+<span class="c"># 离线确定性门（免费，进 CI）</span>
+vp run eval:work-intent                 <span class="c"># 100% 召回 / 0 误触</span>
+vp test run test/work-scenario-replay.test.mjs   <span class="c"># 回放 100%</span>
+
+<span class="c"># 真模型门（用 OpenAI key）</span>
+vp run eval:work-scenarios:live         <span class="c"># 50/50</span>
+vp run eval:work-e2e-voice              <span class="c"># 10/10 端到端语音</span></pre>
+
+      <footer>
+        权威源：<code>docs/rfc-operator-realtime-meeting-loop.md</code>（rev
+        5）。本报告由代码级审计生成，所有断言带 file:line。 相关提交：<code>455a546</code>（H11
+        修复）· <code>d5a3e0a→2a5fea2</code>（MW1–4）· <code>eccaf8d</code>（Work 标签）。
+      </footer>
+    </div>
+  </body>
+</html>

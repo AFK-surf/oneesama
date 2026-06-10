@@ -164,7 +164,7 @@ export function createWorkFakeSurface(options: WorkFakeSurfaceOptions): WorkSurf
 
   return {
     id: surfaceId,
-    kind: "native_ax",
+    kind: "fake",
     observe,
     perform,
     checkPostCondition,

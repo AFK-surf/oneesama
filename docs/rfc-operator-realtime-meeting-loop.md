@@ -109,11 +109,11 @@ captures at 24 kHz: H2 hygiene closed.
 | 4. End-to-end voice       | ≥8/10                | **10/10**, ~15–19 s per task        |
 
 The work pipeline lives in `packages/core/src/work/` (typed job → stepwise
-OpenAI planner with record/replay → CDP work browser with workspace
-isolation → verified post-conditions); evals in `scripts/work-*-eval.mjs`
-(`vp run eval:work-intent | eval:work-scenarios[:replay|:live] |
-eval:work-e2e-voice`), corpus/scenarios/recordings/baseline committed under
-`test/fixtures/work/` and `test/evals/`. Gate 4 exercises the full loop —
+OpenAI planner with record/replay → executor backend with workspace
+isolation → verified post-conditions). The executor backend was since
+switched from the CDP work browser to **kwwk-cu native AX** — see
+[the kwwk-cu work-backend RFC](rfc-kwwk-cu-work-backend.md); evals are now
+`vp run eval:work-intent | eval:work-e2e-voice | work:ax-live`. Gate 4 exercises the full loop —
 spoken command → realtime transcription → intent compiler → live planner
 in the work browser → verified done → extracted passage spoken back as
 assistant audio — via the harness (synthetic 24 kHz utterances), without

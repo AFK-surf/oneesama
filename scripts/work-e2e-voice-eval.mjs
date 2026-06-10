@@ -1,8 +1,10 @@
-// D9 gate 4: end-to-end voice work loop.
+// End-to-end voice work loop (voice -> work wiring gate).
 //   spoken command (synthetic PCM via macOS `say`) -> OpenAI realtime input
-//   transcription -> intent compiler -> typed job -> live stepwise planner in
-//   the CDP work browser -> verified done -> extracted passage injected back
-//   into the realtime session -> spoken summary (assistant audio).
+//   transcription -> intent compiler -> typed job -> live stepwise planner on
+//   a deterministic in-memory fake work surface -> verified done -> extracted
+//   passage injected back into the realtime session -> spoken summary.
+//   (The real executor backend is kwwk-cu AX; the fake surface keeps this
+//   voice-wiring gate automated and browser-free.)
 //
 //   vp run eval:work-e2e-voice            # 10 runs, gate: >=8 successes
 //   vp exec tsx scripts/work-e2e-voice-eval.mjs --runs 3
@@ -12,14 +14,49 @@
 import { execFile, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { promisify } from "node:util";
-import { chromium } from "playwright";
-
 import { loadLanOperatorBackendLiveEnv } from "../packages/core/src/operator/lan-operator-backend-live-env.ts";
-import { createWorkBrowserSurface } from "../packages/core/src/work/work-browser-surface.ts";
 import { createWorkExecutor } from "../packages/core/src/work/work-executor.ts";
-import { startWorkFixtureServer } from "../packages/core/src/work/work-fixture-server.ts";
+import { createWorkFakeSurface } from "../packages/core/src/work/work-fake-surface.ts";
 import { compileWorkIntent } from "../packages/core/src/work/work-intent-compiler.ts";
 import { createOpenAIWorkPlanner } from "../packages/core/src/work/work-openai-planner.ts";
+
+// The work half runs on a deterministic in-memory fake surface (the CDP work
+// browser was dropped); the voice -> transcribe -> intent -> planner ->
+// execute -> verify -> spoken-summary loop is what this gate exercises. One
+// rich page covers all three utterances.
+function fakeWorkPages() {
+  return {
+    pages: {
+      "work://release-notes": {
+        url: "work://release-notes",
+        title: "Fixture Product Release Notes",
+        text: "What changed in version 2.0: Fixture Product 2.0 adds offline replay, a stepwise planner, and verified post-conditions. The Team plan costs forty-nine dollars per month. Known issues: the 2.0 importer skips archives larger than two gigabytes.",
+        refs: [
+          { ref: "1", role: "heading", name: "What changed in version 2.0" },
+          {
+            ref: "2",
+            role: "text",
+            name: "Fixture Product 2.0 adds offline replay and a stepwise planner",
+          },
+          { ref: "3", role: "text", name: "The Team plan costs forty-nine dollars per month" },
+          {
+            ref: "4",
+            role: "text",
+            name: "Known issues: importer skips archives larger than two gigabytes",
+          },
+        ],
+        extracts: {
+          1: "Fixture Product 2.0 adds offline replay, a stepwise planner, and verified post-conditions.",
+          2: "Fixture Product 2.0 adds offline replay, a stepwise planner, and verified post-conditions.",
+          3: "The Team plan costs forty-nine dollars per month.",
+          4: "The 2.0 importer skips archives larger than two gigabytes.",
+        },
+      },
+    },
+    startUrl: "work://release-notes",
+    allowedHosts: ["work"],
+  };
+}
 
 const execFileAsync = promisify(execFile);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -139,12 +176,8 @@ const report = {
   gate: { required: Math.ceil(args.runs * 0.8), ok: false },
 };
 
-const fixture = await startWorkFixtureServer(
-  new URL("../test/fixtures/work", import.meta.url).pathname,
-);
 const wavs = await synthesizeUtterances();
 const operator = await startOperatorServer(args.port);
-const browser = await chromium.launch({ headless: true });
 
 const statusBody = await (await fetch(`http://127.0.0.1:${args.port}/runtime/status`)).json();
 const sessionId = statusBody?.debug?.surfaceContext?.sessionId;
@@ -250,23 +283,20 @@ for (let run = 0; run < args.runs; run++) {
       throw new Error(`intent_not_a_command:${detail.transcript}`);
     }
 
-    const page = await browser.newPage();
-    const surface = createWorkBrowserSurface({
-      page,
+    const surface = createWorkFakeSurface({
+      ...fakeWorkPages(),
       surfaceId: compilation.job.surfaceId,
-      allowedHosts: ["127.0.0.1", "localhost"],
     });
     let result;
     try {
       const executor = createWorkExecutor({
         surface,
-        planner: createOpenAIWorkPlanner({ baseUrlHint: fixture.url }),
+        planner: createOpenAIWorkPlanner({ baseUrlHint: "work://release-notes" }),
         maxSteps: 10,
       });
       result = await executor.run(compilation.job);
     } finally {
       await surface.close().catch(() => {});
-      await page.close().catch(() => {});
     }
     detail.status = result.status;
     if (result.status !== "done") throw new Error(`job_${result.status}:${result.blocker}`);
@@ -315,7 +345,5 @@ console.log(`artifact: ${args.jsonOut}`);
 
 eventsWs.close();
 voiceWs.close();
-await browser.close();
-await fixture.close();
 operator.kill();
 process.exit(report.gate.ok ? 0 : 1);

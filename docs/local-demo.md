@@ -512,24 +512,24 @@ vp exec tsx scripts/lan-operator-slo-suite.mjs --samples 5 --json-out /tmp/onees
 
 ### Work pipeline (precision CU harness)
 
-The work pipeline (RFC `docs/rfc-operator-realtime-meeting-loop.md`, MW
-milestone) turns a spoken/typed request into a typed job executed stepwise in
-a CDP work browser against committed fixture pages, with verified
-post-conditions. Three eval entry points:
+The work pipeline (RFC `docs/rfc-kwwk-cu-work-backend.md`) turns a
+spoken/typed request into a typed job executed stepwise by **kwwk-cu** (native
+macOS Accessibility, the single executor backend; the CDP work browser was
+dropped as a redundant reimplementation), with verified post-conditions.
 
 ```bash
-vp run eval:work-intent             # transcript -> typed job | not_a_command (D9 gate 2)
-vp run eval:work-scenarios          # fixture "ideal planner", 5 family-A scenarios
-vp run eval:work-scenarios:replay   # recorded plans, deterministic plumbing gate (D9 gate 1)
-vp run eval:work-scenarios:live     # real OpenAI stepwise planner, 10 runs/scenario (D9 gate 3)
+vp run eval:work-intent       # transcript -> typed job | not_a_command (deterministic gate)
+vp run eval:work-e2e-voice    # spoken command -> transcribe -> intent -> work (fake surface) -> spoken summary
+vp run work:ax-live -- "look up what changed in 2.0" --app "Google Chrome"        # observe-only
+vp run work:ax-live -- "look up what changed in 2.0" --app "Google Chrome" --act  # supervised: drives the real cursor
 ```
 
-Artifacts land in `/tmp/oneesama-work-*-latest.json`; live runs append to
-`test/evals/work-scenario-history.jsonl`. The deterministic gates also run in
-CI via `test/work-intent-compiler.test.mjs` and
-`test/work-scenario-replay.test.mjs`. Recordings are regenerated with
-`vp exec tsx scripts/work-scenario-eval.mjs --mode fixture --runs 1
---record-out test/fixtures/work/recordings`.
+Deterministic gates run in CI without a browser: `test/work-intent-compiler.test.mjs`,
+`test/work-executor-fake.test.mjs` (executor + record/replay on the in-memory
+fake surface), `test/work-ax-surface.test.mjs`, and
+`test/lan-operator-work-runtime-ax.test.mjs`. The real kwwk-cu path is
+validated live (real cursor) via `work:ax-live --act`, which needs macOS
+Accessibility permission for the helper.
 
 ## 4. Exercise Slack Commands Without Slack
 
