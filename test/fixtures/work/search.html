@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture Search</title>
+  </head>
+  <body>
+    <h1>Fixture Search</h1>
+    <form id="search-form">
+      <input type="text" name="q" placeholder="Search query" aria-label="Search query" />
+      <button type="submit">Search</button>
+    </form>
+    <ul id="results" aria-label="Search results"></ul>
+    <script>
+      const INDEX = [
+        {
+          href: "/release-notes.html",
+          title: "Fixture Product Release Notes",
+          keywords: ["release", "notes", "changelog", "2.0", "what changed", "version"],
+        },
+        {
+          href: "/pricing.html",
+          title: "Fixture Product Pricing",
+          keywords: ["pricing", "price", "cost", "plan"],
+        },
+        {
+          href: "/about.html",
+          title: "About Fixture Product",
+          keywords: ["about", "company", "team"],
+        },
+      ];
+      document.getElementById("search-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const query = String(new FormData(event.target).get("q") || "").toLowerCase();
+        const terms = query.split(/\s+/).filter(Boolean);
+        const list = document.getElementById("results");
+        list.textContent = "";
+        const matches = INDEX.filter((entry) =>
+          terms.some(
+            (term) =>
+              entry.title.toLowerCase().includes(term) ||
+              entry.keywords.some((keyword) => keyword.includes(term)),
+          ),
+        );
+        for (const entry of matches.length > 0 ? matches : INDEX) {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = entry.href;
+          link.textContent = entry.title;
+          item.append(link);
+          list.append(item);
+        }
+      });
+    </script>
+  </body>
+</html>
