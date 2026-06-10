@@ -134,6 +134,7 @@
     "benchmark:realtime-local-kwwk-action": "vp exec tsx scripts/lan-operator-kwwk-action-benchmark.mjs --json-out /tmp/oneesama-realtime-local-kwwk-action-latest.json",
     "acceptance:realtime-local-kwwk-action:real-mic": "vp exec tsx scripts/lan-operator-kwwk-action-benchmark.mjs --real-mic --headed --timeout-ms 90000 --json-out /tmp/oneesama-realtime-local-kwwk-action-real-mic-latest.json",
     "work:try": "vp exec tsx scripts/work-run.mjs",
+    "work:ax-live": "vp exec tsx scripts/work-ax-live.mjs",
     "eval:work-intent": "vp exec tsx scripts/work-intent-eval.mjs --json-out /tmp/oneesama-work-intent-eval-latest.json",
     "eval:work-scenarios": "vp exec tsx scripts/work-scenario-eval.mjs --mode fixture --runs 1 --json-out /tmp/oneesama-work-scenario-eval-latest.json",
     "eval:work-scenarios:replay": "vp exec tsx scripts/work-scenario-eval.mjs --mode replay --runs 1 --json-out /tmp/oneesama-work-scenario-eval-replay-latest.json",
