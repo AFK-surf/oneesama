@@ -28,6 +28,7 @@
   },
   "type": "module",
   "scripts": {
+    "dev": "vp exec tsx packages/core/src/operator/lan-operator-surface-cli.ts",
     "doctor": "vp exec tsx src/cli.ts doctor",
     "dev:slack": "vp exec tsx apps/slack-agent/src/index.ts",
     "dev:meeting": "vp exec tsx apps/meeting-agent/src/index.ts",

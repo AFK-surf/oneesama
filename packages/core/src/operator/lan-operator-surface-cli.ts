@@ -1,5 +1,6 @@
 import { createLanOperatorSurfaceServer } from "./lan-operator-surface.ts";
 import { loadLanOperatorBackendLiveEnv } from "./lan-operator-backend-live-env.ts";
+import { loadOperatorDotEnvFiles } from "./lan-operator-dotenv.ts";
 import { resolveLanOperatorConversationTransport } from "./lan-operator-conversation-transport.ts";
 import { parseLanOperatorWebrtcIceServers } from "./lan-operator-runtime-config.ts";
 import { decideTrustedLanOperatorMode } from "./lan-operator-trusted-lan.ts";
@@ -42,6 +43,10 @@ if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
   printHelp();
   process.exit(0);
 }
+
+// Load repo-root .env / .env.local before any env read below (vp exec tsx
+// does not). No-override: shell-inline env and live-env secrets still win.
+loadOperatorDotEnvFiles();
 
 const host =
   process.env.MAB_LOCAL_OPERATOR_HOST || process.env.MAB_LAN_OPERATOR_HOST || "127.0.0.1";
