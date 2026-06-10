@@ -212,6 +212,22 @@ Verify Meet's actual CSP behavior empirically in the M0 spike before
 committing to in-page WebRTC; the fallback is relaying video frames through
 the sidecar, which is expensive and should be a last resort.
 
+**M0 spike result (2026-06-10).** Header inspection of `meet.google.com`:
+CSP enforces `require-trusted-types-for 'script'` + nonce/strict-dynamic
+`script-src`, but declares **no `connect-src` and no `webrtc` directive** —
+WS/fetch targets and RTCPeerConnection are CSP-unrestricted. Live page
+probe (headless Chromium; unauthenticated, so it landed on the
+workspace.google.com marketing page — in-meeting CSP still needs a
+logged-in confirmation): `new RTCPeerConnection()` + offer ✅;
+`ws://127.0.0.1:<port>/operator/events/ws` **connected successfully to a
+real operator server** ✅; `ws://<LAN-IP>` throws `SecurityError` (mixed
+content, browser-level and page-independent) ❌; external `wss://` ✅.
+Net effect: **on the appliance (meeting agent and operator server on the
+same machine) the Meet page can talk to the operator server directly over
+`ws://localhost` — the CDP relay plane is only required for cross-machine
+deployments.** Trusted Types remains a real constraint for injected code
+touching DOM sinks (use textContent/element building, or a TT policy).
+
 ### H7 — `relayVisualSignal` routing is a hardcoded two-kind broadcast
 
 The relay computes the target as the _other_ kind of a fixed pair:
