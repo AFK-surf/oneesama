@@ -838,7 +838,22 @@ export function createGeminiLiveWebSocketTransport(
     }
   }
 
-  async function connect(sessionId: string): Promise<GeminiLiveTransportResult> {
+  // Single-flight guard: concurrent callers (the engine auto-connects on every
+  // in-flight voice chunk, up to the server's forward limit) must share one
+  // handshake — otherwise each attempt closes the previous CONNECTING socket
+  // and the connection never establishes.
+  let connectInFlight: Promise<GeminiLiveTransportResult> | null = null;
+
+  function connect(sessionId: string): Promise<GeminiLiveTransportResult> {
+    if (!connectInFlight) {
+      connectInFlight = connectNow(sessionId).finally(() => {
+        connectInFlight = null;
+      });
+    }
+    return connectInFlight;
+  }
+
+  async function connectNow(sessionId: string): Promise<GeminiLiveTransportResult> {
     const apiKey = options.apiKey ?? defaultGeminiApiKey();
     if (!apiKey) {
       return {

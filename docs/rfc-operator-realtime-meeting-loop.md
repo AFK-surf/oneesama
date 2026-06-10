@@ -90,7 +90,9 @@ Appliance-level risks to design around (vision-level, not code-verified):
 ## Read this first: verified hazards
 
 Each item: what breaks, the code evidence, and the required change. These are
-not hypotheticals — H1–H4 and H6–H9 were verified by reading the current code.
+not hypotheticals — H1–H4 and H6–H9 were verified by reading the current
+code, and H2/H11 were tested against the live OpenAI endpoint on 2026-06-10
+(H2 refuted, H11 confirmed and fixed).
 
 ### H1 — The operator stack registers NO tools with either provider
 
@@ -134,6 +136,15 @@ recorded utterance + check the transcript). Fix at one place: capture at
 `new AudioContext({ sampleRate: 24000 })` (Chromium resamples internally) or
 resample in the client worklet, and declare the format explicitly in the
 session config.
+
+**M0 verification result (2026-06-10): REFUTED for OpenAI.** Streaming a
+known utterance as 24 kHz and as raw 48 kHz PCM16 both transcribed exactly
+("purple elephant seventy-seven" / "green tiger 42") on `gpt-realtime-2`
+over a warm connection — the endpoint tolerates undeclared device rates.
+Downgraded from blocker to hygiene: still declare the format (the 48 kHz
+run double-triggered server VAD, `speech_started`×2), and keep
+`eval:transcription` as the permanent guard. The real voice blocker was
+H11.
 
 ### H3 — The server assumes exactly ONE active voice stream
 
@@ -253,6 +264,28 @@ an already heavy serialization path; at audio-chunk rate this is the main
 server CPU driver. Add a **lean subscription mode** (e.g.
 `/operator/events/ws?lean=1`: events only, no debug payload) and use it for
 the meet bridge; consider it for the cockpit too.
+
+### H11 — Concurrent auto-connect thrash killed every live voice session (FOUND + FIXED 2026-06-10)
+
+The engine auto-connects on every voice chunk, and the server forwards up to
+32 chunks concurrently. `connect()` had no single-flight guard: it only
+short-circuited on an OPEN socket and otherwise closed the CONNECTING one
+(`closeSocket("operator_reconnect")`) — so under streaming, every chunk's
+connect attempt killed the previous pending handshake and the connection
+**never** established ("WebSocket was closed before the connection was
+established" per chunk). **This — not sample rate — is why realtime voice
+never worked outside mock.**
+
+Verified by the M0 experiment: 274 errors while streaming; the connection
+succeeded the instant streaming stopped. Fixed with a shared in-flight
+connect promise in both adapters (`lan-operator-openai-realtime-adapter.ts`,
+`lan-operator-gemini-live-adapter.ts`); post-fix the auto-connect path runs
+0 errors with exact transcription, both direct and through `https_proxy`
+(the suspected proxy-tunnel failure was this same bug). Residual minor
+issues: the queued waiters each emit a cosmetic duplicate `engine_connected`
+(×32), and audio arriving during the connect window can exceed the
+32-in-flight forward limit and get dropped — the real mic flow avoids the
+loss because arming the mic triggers connect before speech starts.
 
 ## Precision first: tool recall and computer-use success rate
 
@@ -603,9 +636,11 @@ and the local dialog bridge (one brain, one bus writer).
 
 ## Prerequisite fixes (ordered; most block a milestone)
 
-1. **Provider sample-rate verification + fix (H2)** — blocks MW
-   (transcription accuracy feeds the intent compiler) and M2/M3, and is a
-   latent bug for the existing voice path. One evening with real keys.
+1. **Provider sample-rate verification (H2)** — DONE 2026-06-10: refuted
+   for OpenAI (both 24 kHz and 48 kHz transcribe exactly); remaining work is
+   hygiene (declare format, fix the 48 kHz VAD double-trigger) plus the
+   permanent `eval:transcription` guard. The actual voice blocker was H11
+   (connect thrash), found and fixed the same day.
 2. **Tool registration plumbing (H1)** — optional after the P1 reframe:
    only the model-initiated fast path (P1.5) needs it. The `...session`
    spread in `defaultSessionUpdate` and Gemini `options.tools` are the

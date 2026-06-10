@@ -816,7 +816,22 @@ export function createOpenAIRealtimeWebSocketTransport(
     }
   }
 
-  async function connect(sessionId: string): Promise<OpenAIRealtimeTransportResult> {
+  // Single-flight guard: concurrent callers (the engine auto-connects on every
+  // in-flight voice chunk, up to the server's forward limit) must share one
+  // handshake — otherwise each attempt closes the previous CONNECTING socket
+  // and the connection never establishes.
+  let connectInFlight: Promise<OpenAIRealtimeTransportResult> | null = null;
+
+  function connect(sessionId: string): Promise<OpenAIRealtimeTransportResult> {
+    if (!connectInFlight) {
+      connectInFlight = connectNow(sessionId).finally(() => {
+        connectInFlight = null;
+      });
+    }
+    return connectInFlight;
+  }
+
+  async function connectNow(sessionId: string): Promise<OpenAIRealtimeTransportResult> {
     const apiKey = options.apiKey ?? defaultRealtimeApiKey();
     if (!apiKey) {
       return {
