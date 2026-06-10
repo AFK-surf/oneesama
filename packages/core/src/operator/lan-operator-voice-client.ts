@@ -141,7 +141,15 @@ export function buildLanOperatorVoiceClientScript() {
         });
         throw error;
       }
-      audioContext = new AudioContextImpl();
+      // Capture at the provider's declared pcm rate (the session now pins
+      // audio/pcm@24000); Chromium resamples internally. Fall back to the
+      // device rate if the option is unsupported — the chunk metadata
+      // always carries the real rate.
+      try {
+        audioContext = new AudioContextImpl({ sampleRate: 24000 });
+      } catch {
+        audioContext = new AudioContextImpl();
+      }
       await audioContext.resume?.();
       source = audioContext.createMediaStreamSource(stream);
       processor = audioContext.createScriptProcessor(DEFAULT_PROCESSOR_SIZE, 1, 1);

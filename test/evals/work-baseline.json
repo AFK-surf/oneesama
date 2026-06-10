@@ -1,0 +1,12 @@
+{
+  "schema": "oneesama.work_scenario_baseline.v1",
+  "note": "D9 floors for live-mode eval (vp run eval:work-scenarios:live --check-baseline). Achieved on 2026-06-10: 100% overall (50/50), stepMsP50 2284.",
+  "overallSuccessRate": 0.9,
+  "scenarios": {
+    "about-product": 0.9,
+    "pricing-team-plan": 0.9,
+    "release-notes-1-5": 0.9,
+    "release-notes-2-0": 0.9,
+    "release-notes-known-issues": 0.9
+  }
+}

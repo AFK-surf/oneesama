@@ -268,8 +268,11 @@ export function createWorkBrowserSurface(options: WorkBrowserSurfaceOptions): Wo
         return { condition, ok: url.includes(condition.value), detail: url };
       }
       if (condition.kind === "text_present" || condition.kind === "text_absent") {
+        // Case-insensitive: compiled jobs carry spoken-language terms, and
+        // "pricing" must match a "Pricing" heading — this is a semantic
+        // check, not a byte check.
         const text = await page.evaluate(() => document.body?.innerText || "");
-        const present = text.includes(condition.value);
+        const present = text.toLowerCase().includes(condition.value.toLowerCase());
         const ok = condition.kind === "text_present" ? present : !present;
         return { condition, ok, detail: `text_${present ? "present" : "absent"}` };
       }
@@ -278,7 +281,7 @@ export function createWorkBrowserSurface(options: WorkBrowserSurfaceOptions): Wo
       const observation = await observe();
       return {
         condition,
-        ok: observation.outline.includes(condition.value),
+        ok: observation.outline.toLowerCase().includes(condition.value.toLowerCase()),
         detail: "outline_match",
       };
     } catch (error) {

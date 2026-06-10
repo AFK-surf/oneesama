@@ -510,6 +510,27 @@ sample count, for example:
 vp exec tsx scripts/lan-operator-slo-suite.mjs --samples 5 --json-out /tmp/oneesama-realtime-local-slo-suite-5x.json
 ```
 
+### Work pipeline (precision CU harness)
+
+The work pipeline (RFC `docs/rfc-operator-realtime-meeting-loop.md`, MW
+milestone) turns a spoken/typed request into a typed job executed stepwise in
+a CDP work browser against committed fixture pages, with verified
+post-conditions. Three eval entry points:
+
+```bash
+vp run eval:work-intent             # transcript -> typed job | not_a_command (D9 gate 2)
+vp run eval:work-scenarios          # fixture "ideal planner", 5 family-A scenarios
+vp run eval:work-scenarios:replay   # recorded plans, deterministic plumbing gate (D9 gate 1)
+vp run eval:work-scenarios:live     # real OpenAI stepwise planner, 10 runs/scenario (D9 gate 3)
+```
+
+Artifacts land in `/tmp/oneesama-work-*-latest.json`; live runs append to
+`test/evals/work-scenario-history.jsonl`. The deterministic gates also run in
+CI via `test/work-intent-compiler.test.mjs` and
+`test/work-scenario-replay.test.mjs`. Recordings are regenerated with
+`vp exec tsx scripts/work-scenario-eval.mjs --mode fixture --runs 1
+--record-out test/fixtures/work/recordings`.
+
 ## 4. Exercise Slack Commands Without Slack
 
 ```bash

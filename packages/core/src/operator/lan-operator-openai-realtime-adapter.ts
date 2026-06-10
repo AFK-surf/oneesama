@@ -625,6 +625,21 @@ function defaultSessionUpdate(
       instructions:
         options.instructions ||
         "You are Oneesama's realtime Local Operator Surface conversation engine. Respond concisely and use tools when the user asks you to control the focused app/system view.",
+      // Realtime-2 session shape (same as realtime-contract.ts): a partial
+      // audio.input block is silently ignored, so declare the full block.
+      // Input transcription feeds the intent compiler (RFC P1.2) and the
+      // explicit 24 kHz pcm format closes the H2 hygiene item — the voice
+      // client captures at 24 kHz to match.
+      audio: {
+        input: {
+          format: { type: "audio/pcm", rate: 24000 },
+          turn_detection: { type: "server_vad" },
+          transcription: { model: "gpt-4o-mini-transcribe" },
+        },
+        output: {
+          format: { type: "audio/pcm", rate: 24000 },
+        },
+      },
       ...session,
     },
   };

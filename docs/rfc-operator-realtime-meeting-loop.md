@@ -1,6 +1,7 @@
 # RFC: Operator-Driven Realtime Meeting Loop
 
-- Status: Draft (rev 4 — vision + grilled decisions D1–D10 baked in)
+- Status: In implementation (rev 5 — M0 + MW shipped with all four D9 gates
+  green; meeting-loop milestones M1/M3/M2/M4 remain)
 - Date: 2026-06-10
 - Owner: Peng Xiao
 - Related: [ADR 0001 (conversation engine port)](adr/0001-conversation-engine-port.md),
@@ -86,6 +87,43 @@ Appliance-level risks to design around (vision-level, not code-verified):
 | D8  | Hybrid content sourcing: evals run on committed local fixture pages only; live demos use DuckDuckGo/site-specific search; real Google excluded from V1.                                                   |
 | D9  | MW done-bar: replay-CI 100 %; intent-compile ≥95 % exact-match with zero distractor false-triggers; fixture execution ≥90 % over 10 runs/scenario with step-latency p50 ≤2.5 s recorded; e2e voice ≥8/10. |
 | D10 | Operation protocol is backend-agnostic — kwwk-cu's verb set is the shared contract (CDP backend #1, AX backend #2); five technical defaults recorded in Detailed design → MW.                             |
+
+## Implementation status (2026-06-10)
+
+**M0 — DONE.** Snapshot-merge fix (inspector test green), access-token gating
+on all WS upgrades + HTTP routes (H9; `MAB_LAN_OPERATOR_TOKEN`), Meet CSP
+spike recorded in H6 (ws://localhost works from the Meet page — same-machine
+appliance can skip the CDP relay), provider sample rates verified (H2
+refuted), and the H11 connect-thrash fix landed the same day. The realtime
+session now declares `audio/pcm@24000` in/out, enables input transcription
+(`gpt-4o-mini-transcribe` — feeds the intent compiler), and the voice client
+captures at 24 kHz: H2 hygiene closed.
+
+**MW — DONE; all four D9 gates green (numbers from 2026-06-10):**
+
+| Gate                      | Required             | Achieved                            |
+| ------------------------- | -------------------- | ----------------------------------- |
+| 1. Replay CI (plumbing)   | 100 %                | 100 % (`test/work-scenario-replay`) |
+| 2. Intent compile         | ≥95 %, 0 false-trig. | 100 % recall, 0/20 false-triggers   |
+| 3. Live fixture execution | ≥90 % over 10 runs   | **100 % (50/50)**, step p50 2284 ms |
+| 4. End-to-end voice       | ≥8/10                | **10/10**, ~15–19 s per task        |
+
+The work pipeline lives in `packages/core/src/work/` (typed job → stepwise
+OpenAI planner with record/replay → CDP work browser with workspace
+isolation → verified post-conditions); evals in `scripts/work-*-eval.mjs`
+(`vp run eval:work-intent | eval:work-scenarios[:replay|:live] |
+eval:work-e2e-voice`), corpus/scenarios/recordings/baseline committed under
+`test/fixtures/work/` and `test/evals/`. Gate 4 exercises the full loop —
+spoken command → realtime transcription → intent compiler → live planner
+in the work browser → verified done → extracted passage spoken back as
+assistant audio — via the harness (synthetic 24 kHz utterances), without
+the cockpit UI.
+
+**Remaining:** cockpit UI wiring (Intent Card display, work-browser frames
+into the composition canvas, transcript→job pipeline inside the operator
+server process) and the meeting-loop milestones M1 (video out, needs H7
+link addressing), M3 (audio out), M2 (audio in), M4 (meet-loop
+acceptance).
 
 ## Read this first: verified hazards
 

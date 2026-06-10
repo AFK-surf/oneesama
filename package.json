@@ -136,6 +136,7 @@
     "eval:work-scenarios": "vp exec tsx scripts/work-scenario-eval.mjs --mode fixture --runs 1 --json-out /tmp/oneesama-work-scenario-eval-latest.json",
     "eval:work-scenarios:replay": "vp exec tsx scripts/work-scenario-eval.mjs --mode replay --runs 1 --json-out /tmp/oneesama-work-scenario-eval-replay-latest.json",
     "eval:work-scenarios:live": "vp exec tsx scripts/work-scenario-eval.mjs --mode live --runs 10 --append-history --json-out /tmp/oneesama-work-scenario-eval-live-latest.json",
+    "eval:work-e2e-voice": "vp exec tsx scripts/work-e2e-voice-eval.mjs --runs 10 --json-out /tmp/oneesama-work-e2e-voice-latest.json",
     "benchmark:realtime-local-debug-panel": "vp exec tsx scripts/lan-operator-debug-panel-benchmark.mjs --json-out /tmp/oneesama-realtime-local-debug-panel-latest.json",
     "benchmark:realtime-local-operator-cursor": "vp exec tsx scripts/lan-operator-cursor-benchmark.mjs --json-out /tmp/oneesama-realtime-local-operator-cursor-latest.json",
     "benchmark:realtime-local-slo-suite": "vp exec tsx scripts/lan-operator-slo-suite.mjs --samples 1 --json-out /tmp/oneesama-realtime-local-slo-suite-latest.json",
