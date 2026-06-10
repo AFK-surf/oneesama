@@ -973,9 +973,17 @@ export function buildLanOperatorSurfaceHtml(
           if (debug.toolRouting) state.toolRouting = debug.toolRouting;
           const conversation = debug.conversation;
           if (conversation) {
+            // The server's canonical-event ring buffer is authoritative only
+            // when it actually has events; an empty snapshot (mock heartbeat,
+            // fresh session) must not wipe client-held events.
+            const canonicalEvents =
+              Array.isArray(conversation.canonicalEvents) && conversation.canonicalEvents.length > 0
+                ? conversation.canonicalEvents
+                : state.conversation.canonicalEvents;
             state.conversation = {
               ...state.conversation,
               ...conversation,
+              ...(canonicalEvents ? { canonicalEvents } : {}),
               control: { ...state.conversation.control, ...(conversation.control || {}) },
             };
           }
