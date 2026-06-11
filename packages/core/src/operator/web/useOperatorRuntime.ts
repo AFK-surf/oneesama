@@ -23,6 +23,7 @@ import {
   engineControlMessage,
   toolCancelMessage,
 } from "./operatorRuntimeCommands.ts";
+import { copyRuntimeReportText, downloadRuntimeReportText } from "./operatorRuntimeArtifacts.ts";
 import type { OperatorBoot, RealtimeState } from "./useRealtime.ts";
 
 export type { OperatorDebug, RuntimeEventView, RuntimeStatusBody };
@@ -161,21 +162,20 @@ export function useOperatorRuntime(
   );
 
   const copyReport = useCallback(async () => {
-    const text = await client.fetchReportText();
-    await navigator.clipboard?.writeText?.(text).catch(() => undefined);
+    const textLength = await copyRuntimeReportText({
+      fetchReportText: client.fetchReportText,
+      clipboard: navigator.clipboard,
+    });
     send(debugReportArtifactMessage({ action: "copy", label: "operator_web" }));
-    return text.length;
+    return textLength;
   }, [client, send]);
 
   const downloadReport = useCallback(async () => {
-    const text = await client.fetchReportText();
-    const blob = new Blob([text], { type: "application/json" });
-    const href = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = href;
-    anchor.download = `lan-operator-report-${Date.now()}.json`;
-    anchor.click();
-    URL.revokeObjectURL(href);
+    await downloadRuntimeReportText({
+      fetchReportText: client.fetchReportText,
+      document,
+      url: URL,
+    });
     send(debugReportArtifactMessage({ action: "download", label: "operator_web" }));
   }, [client, send]);
 
