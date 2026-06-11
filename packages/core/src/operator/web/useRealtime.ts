@@ -3,6 +3,11 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { LanOperatorLiveProviderConfig } from "../lan-operator-live-provider-config.ts";
 import { wsUrl } from "./protocol.ts";
 import {
+  operatorSurfaceConnectedMessage,
+  operatorTextInputMessage,
+  realtimeEngineControlMessage,
+} from "./realtimeCommands.ts";
+import {
   canonicalEventFromPayload,
   foldRealtimePayload,
   initialRealtimeViewState,
@@ -80,7 +85,7 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
       wsRef.current = ws;
       ws.addEventListener("open", () => {
         dispatch({ type: "socket_opened" });
-        ws?.send(JSON.stringify({ type: "operator_surface_connected" }));
+        ws?.send(JSON.stringify(operatorSurfaceConnectedMessage()));
       });
       ws.addEventListener("close", () => {
         dispatch({ type: "socket_closed" });
@@ -113,41 +118,23 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
 
   const connect = useCallback(() => {
     dispatch({ type: "connect_requested" });
-    send({
-      type: "engine_control",
-      sessionId: boot.sessionId,
-      control: {
-        type: "connect",
-        reason: "operator_web_connect",
-        detail: { source: "operator_web" },
-      },
-    });
+    send(realtimeEngineControlMessage(boot.sessionId, "connect", "operator_web_connect"));
   }, [boot.sessionId, send]);
 
   const disconnect = useCallback(() => {
-    send({
-      type: "engine_control",
-      sessionId: boot.sessionId,
-      control: {
-        type: "disconnect",
-        reason: "operator_web_disconnect",
-        detail: { source: "operator_web" },
-      },
-    });
+    send(realtimeEngineControlMessage(boot.sessionId, "disconnect", "operator_web_disconnect"));
   }, [boot.sessionId, send]);
 
   const sendText = useCallback(
     (text: string) => {
-      const value = text.trim();
-      if (!value) return;
-      seqRef.current += 1;
-      send({
-        type: "operator_text_input",
+      const message = operatorTextInputMessage({
         sessionId: boot.sessionId,
-        inputId: "web_text_" + Date.now().toString(36) + "_" + seqRef.current,
-        text: value,
-        source: "operator_web_text",
+        text,
+        sequence: seqRef.current + 1,
       });
+      if (!message) return;
+      seqRef.current += 1;
+      send(message);
     },
     [boot.sessionId, send],
   );
