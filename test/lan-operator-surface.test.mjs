@@ -121,7 +121,9 @@ test("LAN operator surface serves /operator as the Local Operator app entrypoint
   });
   const { url } = await surface.listen();
   try {
-    const response = await fetch(new URL("/operator", url));
+    // The legacy string surface now lives at /operator-legacy (React is the
+    // canonical /operator); this asserts the legacy HTML is still served.
+    const response = await fetch(new URL("/operator-legacy", url));
     const html = await response.text();
 
     assert.equal(response.status, 200);

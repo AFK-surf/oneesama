@@ -1800,19 +1800,20 @@ export function createLanOperatorSurfaceServer(
         );
         return jsonResponse(res, 401, { ok: false, error: "unauthorized" });
       }
+      // The React surface is the canonical operator (/operator). The legacy
+      // string surface stays at the root (/) and /operator-legacy as a fallback
+      // (it still carries the full debug/telemetry/diagnostics cockpit).
       if (
         req.method === "GET" &&
-        (url.pathname === "/" || url.pathname === "/operator" || url.pathname === "/operator/")
+        (url.pathname === "/" ||
+          url.pathname === "/operator-legacy" ||
+          url.pathname === "/operator-legacy/")
       )
         return htmlResponse(res, html);
-      // New React surface (parity in progress); legacy string surface stays at /operator.
-      if (
-        req.method === "GET" &&
-        (url.pathname === "/operator2" || url.pathname === "/operator2/")
-      ) {
+      if (req.method === "GET" && (url.pathname === "/operator" || url.pathname === "/operator/")) {
         const bundleUrl = accessToken
-          ? `/operator2/app.js?token=${encodeURIComponent(accessToken)}`
-          : "/operator2/app.js";
+          ? `/operator/app.js?token=${encodeURIComponent(accessToken)}`
+          : "/operator/app.js";
         return htmlResponse(
           res,
           buildOperatorWebShellHtml(
@@ -1827,7 +1828,20 @@ export function createLanOperatorSurfaceServer(
           ),
         );
       }
-      if (req.method === "GET" && url.pathname === "/operator2/app.js") {
+      // Back-compat: the old gating route for the React surface.
+      if (
+        req.method === "GET" &&
+        (url.pathname === "/operator2" || url.pathname === "/operator2/")
+      ) {
+        res.writeHead(302, {
+          location: accessToken
+            ? `/operator?token=${encodeURIComponent(accessToken)}`
+            : "/operator",
+        });
+        res.end();
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/operator/app.js") {
         try {
           const bundle = await buildOperatorWebBundle();
           res.writeHead(200, {
