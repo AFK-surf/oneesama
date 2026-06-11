@@ -1800,16 +1800,9 @@ export function createLanOperatorSurfaceServer(
         );
         return jsonResponse(res, 401, { ok: false, error: "unauthorized" });
       }
-      // The React surface is the canonical operator (/operator). The legacy
-      // string surface stays at the root (/) and /operator-legacy as a fallback
-      // (it still carries the full debug/telemetry/diagnostics cockpit).
-      if (
-        req.method === "GET" &&
-        (url.pathname === "/" ||
-          url.pathname === "/operator-legacy" ||
-          url.pathname === "/operator-legacy/")
-      )
-        return htmlResponse(res, html);
+      // React is the operator surface (/operator). The legacy string surface
+      // (full debug/telemetry cockpit) stays at the root /.
+      if (req.method === "GET" && url.pathname === "/") return htmlResponse(res, html);
       if (req.method === "GET" && (url.pathname === "/operator" || url.pathname === "/operator/")) {
         const bundleUrl = accessToken
           ? `/operator/app.js?token=${encodeURIComponent(accessToken)}`
@@ -1827,19 +1820,6 @@ export function createLanOperatorSurfaceServer(
             bundleUrl,
           ),
         );
-      }
-      // Back-compat: the old gating route for the React surface.
-      if (
-        req.method === "GET" &&
-        (url.pathname === "/operator2" || url.pathname === "/operator2/")
-      ) {
-        res.writeHead(302, {
-          location: accessToken
-            ? `/operator?token=${encodeURIComponent(accessToken)}`
-            : "/operator",
-        });
-        res.end();
-        return;
       }
       if (req.method === "GET" && url.pathname === "/operator/app.js") {
         try {
