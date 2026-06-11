@@ -5,9 +5,15 @@ import {
   LOCAL_VAD_THRESHOLD,
   createVoiceStreamId,
   localVadSnapshot,
+  localVadConfiguredMessage,
+  micArmedMessage,
+  micBlockedMessage,
+  micDisarmedMessage,
+  micMutedMessage,
   permissionStateForError,
   voiceChunkMessage,
   voiceCaptureSnapshot,
+  voiceDevicesRefreshedMessage,
   voiceEngineControl,
   voiceStreamOpenedMessage,
 } from "../packages/core/src/operator/web/voiceEvents.ts";
@@ -111,4 +117,129 @@ test("operator voice events build deterministic stream ids and PCM chunk payload
   assert.equal(chunk.energy, 0.25);
   assert.equal(typeof chunk.dataBase64, "string");
   assert.ok(chunk.dataBase64.length > 0);
+});
+
+test("operator voice events build mic status payload contracts", () => {
+  assert.deepEqual(
+    micBlockedMessage({
+      error: Object.assign(new Error("permission denied"), { name: "NotAllowedError" }),
+      muted: true,
+      deviceId: "mic-1",
+      availableDeviceCount: 3,
+    }),
+    {
+      type: "operator_mic_blocked",
+      error: "permission denied",
+      capture: {
+        armed: false,
+        muted: true,
+        mode: "microphone_pcm16",
+        status: "blocked",
+        error: "permission denied",
+        permissionState: "denied",
+        deviceId: "mic-1",
+        availableDeviceCount: 3,
+      },
+    },
+  );
+
+  assert.deepEqual(
+    micArmedMessage({
+      muted: false,
+      deviceId: "mic-1",
+      deviceLabel: "Desk Mic",
+      availableDeviceCount: 2,
+    }),
+    {
+      type: "operator_mic_armed",
+      capture: {
+        armed: true,
+        muted: false,
+        mode: "microphone_pcm16",
+        status: "capturing",
+        permissionState: "granted",
+        deviceId: "mic-1",
+        deviceLabel: "Desk Mic",
+        availableDeviceCount: 2,
+      },
+    },
+  );
+
+  assert.deepEqual(
+    micMutedMessage({
+      muted: true,
+      micOn: false,
+      deviceId: "",
+      availableDeviceCount: 0,
+    }),
+    {
+      type: "operator_mic_muted",
+      capture: {
+        armed: false,
+        muted: true,
+        mode: "microphone_pcm16",
+        status: "idle",
+        deviceId: null,
+        availableDeviceCount: 0,
+      },
+    },
+  );
+
+  assert.deepEqual(
+    micDisarmedMessage({
+      muted: true,
+      deviceId: "mic-1",
+      availableDeviceCount: 1,
+    }),
+    {
+      type: "operator_mic_disarmed",
+      capture: {
+        armed: false,
+        muted: true,
+        mode: "microphone_pcm16",
+        status: "idle",
+        deviceId: "mic-1",
+        availableDeviceCount: 1,
+      },
+    },
+  );
+});
+
+test("operator voice events build VAD and device status payload contracts", () => {
+  const configured = localVadConfiguredMessage({
+    enabled: true,
+    active: true,
+    lastEnergy: 0.08,
+    micOn: true,
+    deviceId: "mic-1",
+  });
+  assert.equal(configured.type, "operator_local_vad_configured");
+  assert.deepEqual(configured.capture, {
+    status: "capturing",
+    deviceId: "mic-1",
+  });
+  assert.equal(configured.localVad.enabled, true);
+  assert.equal(configured.localVad.role, "telemetry");
+  assert.equal(configured.localVad.active, true);
+  assert.equal(configured.localVad.threshold, LOCAL_VAD_THRESHOLD);
+  assert.equal(configured.localVad.lastEnergy, 0.08);
+  assert.equal(typeof configured.localVad.lastUpdatedAt, "string");
+
+  const refreshed = voiceDevicesRefreshedMessage({
+    availableDeviceCount: 2,
+    enabled: false,
+    active: true,
+    lastEnergy: 0.5,
+    micOn: false,
+    deviceId: "",
+  });
+  assert.equal(refreshed.type, "operator_voice_devices_refreshed");
+  assert.equal(refreshed.availableDeviceCount, 2);
+  assert.deepEqual(refreshed.capture, {
+    status: "idle",
+    deviceId: null,
+  });
+  assert.equal(refreshed.localVad.enabled, false);
+  assert.equal(refreshed.localVad.role, "disabled");
+  assert.equal(refreshed.localVad.active, false);
 });

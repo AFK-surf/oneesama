@@ -14,10 +14,13 @@ import {
 import {
   LOCAL_VAD_THRESHOLD,
   createVoiceStreamId,
-  localVadSnapshot,
-  permissionStateForError,
+  localVadConfiguredMessage,
+  micArmedMessage,
+  micBlockedMessage,
+  micDisarmedMessage,
+  micMutedMessage,
   voiceChunkMessage,
-  voiceCaptureSnapshot,
+  voiceDevicesRefreshedMessage,
   voiceEngineControl,
   voiceStreamOpenedMessage,
 } from "./voiceEvents.ts";
@@ -73,38 +76,29 @@ export function useVoice(
 
   const reportMicBlocked = useCallback(
     (error: unknown) => {
-      const message = String((error as Error)?.message || error || "microphone_blocked");
-      sendOperatorEvent({
-        type: "operator_mic_blocked",
-        error: message,
-        capture: voiceCaptureSnapshot({
-          armed: false,
+      sendOperatorEvent(
+        micBlockedMessage({
+          error,
           muted: mutedRef.current,
-          status: "blocked",
-          error: message,
-          permissionState: permissionStateForError(error),
-          deviceId: selectedDeviceIdRef.current || null,
+          deviceId: selectedDeviceIdRef.current,
           availableDeviceCount: devicesLengthRef.current,
         }),
-      });
+      );
     },
     [sendOperatorEvent],
   );
 
   const emitLocalVadConfigured = useCallback(
     (enabled: boolean, active = localVadActiveRef.current, lastEnergy = energyRef.current) => {
-      sendOperatorEvent({
-        type: "operator_local_vad_configured",
-        localVad: localVadSnapshot({
+      sendOperatorEvent(
+        localVadConfiguredMessage({
           enabled,
-          active: enabled ? active : false,
+          active,
           lastEnergy,
+          micOn: micOnRef.current,
+          deviceId: selectedDeviceIdRef.current,
         }),
-        capture: {
-          status: micOnRef.current ? "capturing" : "idle",
-          deviceId: selectedDeviceIdRef.current || null,
-        },
-      });
+      );
     },
     [sendOperatorEvent],
   );
@@ -131,19 +125,16 @@ export function useVoice(
       devices: nextDevices,
       selectedDeviceId: nextSelectedDeviceId,
     });
-    sendOperatorEvent({
-      type: "operator_voice_devices_refreshed",
-      availableDeviceCount: nextDevices.length,
-      capture: {
-        status: micOnRef.current ? "capturing" : "idle",
-        deviceId: selectedDeviceIdRef.current || null,
-      },
-      localVad: localVadSnapshot({
+    sendOperatorEvent(
+      voiceDevicesRefreshedMessage({
+        availableDeviceCount: nextDevices.length,
         enabled: localVadEnabledRef.current,
-        active: localVadEnabledRef.current && localVadActiveRef.current,
+        active: localVadActiveRef.current,
         lastEnergy: energyRef.current,
+        micOn: micOnRef.current,
+        deviceId: selectedDeviceIdRef.current,
       }),
-    });
+    );
     return nextDevices;
   }, [sendOperatorEvent]);
 
@@ -153,16 +144,14 @@ export function useVoice(
       sendOperatorEvent(
         voiceEngineControl(boot.sessionId, "set_voice_muted", reason, { muted: nextMuted }),
       );
-      sendOperatorEvent({
-        type: "operator_mic_muted",
-        capture: voiceCaptureSnapshot({
-          armed: micOnRef.current,
+      sendOperatorEvent(
+        micMutedMessage({
           muted: nextMuted,
-          status: micOnRef.current ? "capturing" : "idle",
-          deviceId: selectedDeviceIdRef.current || null,
+          micOn: micOnRef.current,
+          deviceId: selectedDeviceIdRef.current,
           availableDeviceCount: devicesLengthRef.current,
         }),
-      });
+      );
     },
     [boot.sessionId, sendOperatorEvent, setMuted],
   );
@@ -181,16 +170,13 @@ export function useVoice(
     voiceWsRef.current?.close();
     voiceWsRef.current = null;
     dispatch({ type: "mic_stopped" });
-    sendOperatorEvent({
-      type: "operator_mic_disarmed",
-      capture: voiceCaptureSnapshot({
-        armed: false,
+    sendOperatorEvent(
+      micDisarmedMessage({
         muted: mutedRef.current,
-        status: "idle",
-        deviceId: selectedDeviceIdRef.current || null,
+        deviceId: selectedDeviceIdRef.current,
         availableDeviceCount: devicesLengthRef.current,
       }),
-    });
+    );
     sendOperatorEvent(
       voiceEngineControl(boot.sessionId, "set_voice_armed", "operator_web_stop_mic", {
         armed: false,
@@ -239,18 +225,14 @@ export function useVoice(
             armed: true,
           }),
         );
-        sendOperatorEvent({
-          type: "operator_mic_armed",
-          capture: voiceCaptureSnapshot({
-            armed: true,
+        sendOperatorEvent(
+          micArmedMessage({
             muted: mutedRef.current,
-            status: "capturing",
-            permissionState: "granted",
-            deviceId: selectedDeviceIdRef.current || null,
+            deviceId: selectedDeviceIdRef.current,
             deviceLabel: track?.label || "",
             availableDeviceCount: devicesLengthRef.current,
           }),
-        });
+        );
       });
 
       const source = ctx.createMediaStreamSource(stream);

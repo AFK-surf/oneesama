@@ -32,6 +32,51 @@ export interface VoiceChunkMessageInput {
   samples: Float32Array;
 }
 
+export type OperatorVoiceStatusMessage = Record<string, unknown> & {
+  type:
+    | "operator_local_vad_configured"
+    | "operator_mic_armed"
+    | "operator_mic_blocked"
+    | "operator_mic_disarmed"
+    | "operator_mic_muted"
+    | "operator_voice_devices_refreshed";
+};
+
+export interface VoiceCaptureStatusInput {
+  micOn: boolean;
+  deviceId?: string;
+}
+
+export interface VoiceVadStatusInput {
+  enabled: boolean;
+  active: boolean;
+  lastEnergy: number;
+}
+
+export interface VoiceDevicesRefreshedMessageInput
+  extends VoiceCaptureStatusInput, VoiceVadStatusInput {
+  availableDeviceCount: number;
+}
+
+export interface VoiceMicBlockedMessageInput {
+  error: unknown;
+  muted: boolean;
+  deviceId?: string;
+  availableDeviceCount: number;
+}
+
+export interface VoiceMicMutedMessageInput extends VoiceCaptureStatusInput {
+  muted: boolean;
+  availableDeviceCount: number;
+}
+
+export interface VoiceMicCaptureMessageInput {
+  muted: boolean;
+  deviceId?: string;
+  deviceLabel?: string;
+  availableDeviceCount: number;
+}
+
 export function permissionStateForError(error: unknown) {
   const name = String((error as { name?: string })?.name || "");
   if (name === "NotAllowedError" || name === "SecurityError") return "denied";
@@ -61,6 +106,100 @@ export function localVadSnapshot(input: LocalVadSnapshotInput) {
     threshold: LOCAL_VAD_THRESHOLD,
     lastEnergy: input.lastEnergy,
     lastUpdatedAt: input.nowIso || new Date().toISOString(),
+  };
+}
+
+export function micBlockedMessage(input: VoiceMicBlockedMessageInput): OperatorVoiceStatusMessage {
+  const message = String((input.error as Error)?.message || input.error || "microphone_blocked");
+  return {
+    type: "operator_mic_blocked",
+    error: message,
+    capture: voiceCaptureSnapshot({
+      armed: false,
+      muted: input.muted,
+      status: "blocked",
+      error: message,
+      permissionState: permissionStateForError(input.error),
+      deviceId: input.deviceId || null,
+      availableDeviceCount: input.availableDeviceCount,
+    }),
+  };
+}
+
+export function localVadConfiguredMessage(
+  input: VoiceCaptureStatusInput & VoiceVadStatusInput,
+): OperatorVoiceStatusMessage {
+  return {
+    type: "operator_local_vad_configured",
+    localVad: localVadSnapshot({
+      enabled: input.enabled,
+      active: input.enabled ? input.active : false,
+      lastEnergy: input.lastEnergy,
+    }),
+    capture: captureStatus(input),
+  };
+}
+
+export function voiceDevicesRefreshedMessage(
+  input: VoiceDevicesRefreshedMessageInput,
+): OperatorVoiceStatusMessage {
+  return {
+    type: "operator_voice_devices_refreshed",
+    availableDeviceCount: input.availableDeviceCount,
+    capture: captureStatus(input),
+    localVad: localVadSnapshot({
+      enabled: input.enabled,
+      active: input.enabled && input.active,
+      lastEnergy: input.lastEnergy,
+    }),
+  };
+}
+
+export function micMutedMessage(input: VoiceMicMutedMessageInput): OperatorVoiceStatusMessage {
+  return {
+    type: "operator_mic_muted",
+    capture: voiceCaptureSnapshot({
+      armed: input.micOn,
+      muted: input.muted,
+      status: input.micOn ? "capturing" : "idle",
+      deviceId: input.deviceId || null,
+      availableDeviceCount: input.availableDeviceCount,
+    }),
+  };
+}
+
+export function micDisarmedMessage(input: VoiceMicCaptureMessageInput): OperatorVoiceStatusMessage {
+  return {
+    type: "operator_mic_disarmed",
+    capture: voiceCaptureSnapshot({
+      armed: false,
+      muted: input.muted,
+      status: "idle",
+      deviceId: input.deviceId || null,
+      availableDeviceCount: input.availableDeviceCount,
+    }),
+  };
+}
+
+export function micArmedMessage(input: VoiceMicCaptureMessageInput): OperatorVoiceStatusMessage {
+  return {
+    type: "operator_mic_armed",
+    capture: voiceCaptureSnapshot({
+      armed: true,
+      muted: input.muted,
+      status: "capturing",
+      permissionState: "granted",
+      deviceId: input.deviceId || null,
+      deviceLabel: input.deviceLabel || "",
+      availableDeviceCount: input.availableDeviceCount,
+    }),
+  };
+}
+
+function captureStatus(input: VoiceCaptureStatusInput) {
+  return {
+    status: input.micOn ? "capturing" : "idle",
+    deviceId: input.deviceId || null,
   };
 }
 
