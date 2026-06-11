@@ -2,12 +2,13 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import type { LanOperatorLiveProviderConfig } from "../lan-operator-live-provider-config.ts";
 import { wsUrl } from "./protocol.ts";
-import {
-  operatorSurfaceConnectedMessage,
-  operatorTextInputMessage,
-  realtimeEngineControlMessage,
-} from "./realtimeCommands.ts";
+import { operatorTextInputMessage, realtimeEngineControlMessage } from "./realtimeCommands.ts";
 import { parseRealtimeSocketPayload, publishRealtimePayload } from "./realtimeIncoming.ts";
+import {
+  REALTIME_SOCKET_OPEN_STATE,
+  startRealtimeSocketSession,
+  type RealtimeSocketLike,
+} from "./realtimeSocket.ts";
 import {
   foldRealtimePayload,
   initialRealtimeViewState,
@@ -65,34 +66,30 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
     boot.conversationTransport,
     initialRealtimeViewState,
   );
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<RealtimeSocketLike | null>(null);
   const seqRef = useRef(0);
   const listenersRef = useRef(new Set<(event: CanonicalEvent) => void>());
   const rawListenersRef = useRef(new Set<(payload: Record<string, unknown>) => void>());
 
   const send = useCallback((message: Record<string, unknown>) => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+    if (ws && ws.readyState === REALTIME_SOCKET_OPEN_STATE) ws.send(JSON.stringify(message));
   }, []);
 
   useEffect(() => {
-    let closed = false;
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const open = () => {
-      ws = new WebSocket(wsUrl(boot.token, "/operator/events/ws"));
-      wsRef.current = ws;
-      ws.addEventListener("open", () => {
+    return startRealtimeSocketSession({
+      url: wsUrl(boot.token, "/operator/events/ws"),
+      setCurrentSocket: (socket) => {
+        wsRef.current = socket;
+      },
+      onOpen: () => {
         dispatch({ type: "socket_opened" });
-        ws?.send(JSON.stringify(operatorSurfaceConnectedMessage()));
-      });
-      ws.addEventListener("close", () => {
+      },
+      onClose: () => {
         dispatch({ type: "socket_closed" });
-        if (!closed) reconnectTimer = setTimeout(open, 1000);
-      });
-      ws.addEventListener("message", (event) => {
-        const payload = parseRealtimeSocketPayload(event.data);
+      },
+      onMessageData: (data) => {
+        const payload = parseRealtimeSocketPayload(data);
         if (!payload) return;
         publishRealtimePayload({
           payload,
@@ -100,14 +97,8 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
           canonicalListeners: listenersRef.current,
         });
         dispatch({ type: "payload", payload });
-      });
-    };
-    open();
-    return () => {
-      closed = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      ws?.close();
-    };
+      },
+    });
   }, [boot.token]);
 
   const connect = useCallback(() => {
