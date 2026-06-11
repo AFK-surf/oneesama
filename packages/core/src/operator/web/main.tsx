@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App.tsx";
+import { OperatorErrorBoundary } from "./OperatorErrorBoundary.tsx";
 import type { OperatorBoot } from "./useRealtime.ts";
 
 declare global {
@@ -15,7 +16,9 @@ const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
     <StrictMode>
-      <App boot={boot} />
+      <OperatorErrorBoundary>
+        <App boot={boot} />
+      </OperatorErrorBoundary>
     </StrictMode>,
   );
 }

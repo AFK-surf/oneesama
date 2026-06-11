@@ -154,7 +154,9 @@ test("LAN operator React cockpit boots with provider config and core control con
     assert.match(html, /window\.__OPERATOR_BOOT__/);
     assert.match(html, /"liveProviderConfig"/);
     assert.match(html, /"providers":\[/);
+    assert.match(html, /op-fatal/);
     assert.match(bundle, /Local Operator Cockpit/);
+    assert.match(bundle, /Operator UI crashed/);
     assert.match(bundle, /conversation-provider-select/);
     assert.match(bundle, /voice-device-select/);
     assert.match(bundle, /cancel-response-button/);
