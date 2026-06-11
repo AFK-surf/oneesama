@@ -1,37 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DebugState } from "../lan-operator-debug-state.ts";
-import type {
-  LanOperatorLiveProviderConfig,
-  LanOperatorLiveProviderEntry,
-} from "../lan-operator-live-provider-config.ts";
-import { authSuffix } from "./protocol.ts";
+import {
+  createOperatorRuntimeClient,
+  extractLiveProviderConfig,
+  type LanOperatorLiveProviderConfig,
+  type LanOperatorLiveProviderEntry,
+  type OperatorDebug,
+  type ProviderSwitchState,
+  type RuntimeEventView,
+  type RuntimeStatusBody,
+} from "./operatorRuntimeClient.ts";
 import type { OperatorBoot, RealtimeState } from "./useRealtime.ts";
 
-export type OperatorDebug = Partial<DebugState> & Record<string, unknown>;
-
-export interface RuntimeEventView {
-  id?: string;
-  ts?: string;
-  phase?: string;
-  event?: string;
-  severity?: string;
-  summary?: string;
-  detail?: Record<string, unknown>;
-}
-
-export interface RuntimeStatusBody {
-  ok?: boolean;
-  snapshot?: Record<string, unknown>;
-  inputPolicy?: Record<string, unknown>;
-  outputPolicy?: Record<string, unknown>;
-  debug?: OperatorDebug;
-  recentEvents?: RuntimeEventView[];
-  liveProviderConfig?: LanOperatorLiveProviderConfig;
-  conversationTransport?: string;
-  report?: unknown;
-  error?: string;
-}
+export type { OperatorDebug, RuntimeEventView, RuntimeStatusBody };
 
 export type EngineControlType =
   | "connect"
@@ -43,12 +25,6 @@ export type EngineControlType =
   | "set_voice_muted"
   | "reset_session"
   | "reconnect";
-
-export interface ProviderSwitchState {
-  status: "idle" | "switching" | "active" | "failed";
-  targetTransport: string;
-  lastError: string;
-}
 
 export interface OperatorRuntimeState {
   debug: OperatorDebug;
@@ -69,39 +45,12 @@ export interface OperatorRuntimeState {
   markInteresting: (input?: { label?: string; note?: string }) => void;
 }
 
-function extractLiveProviderConfig(body: RuntimeStatusBody): LanOperatorLiveProviderConfig | null {
-  const direct = body.liveProviderConfig;
-  if (direct) return direct;
-  const fromDebug = body.debug?.surfaceContext as
-    | { liveProviderConfig?: LanOperatorLiveProviderConfig }
-    | undefined;
-  return fromDebug?.liveProviderConfig || null;
-}
-
-async function jsonRequest(
-  token: string | undefined,
-  path: string,
-  init?: RequestInit,
-): Promise<RuntimeStatusBody> {
-  const headers = new Headers(init?.headers);
-  if (init?.body && !headers.has("content-type")) headers.set("content-type", "application/json");
-  const response = await fetch(authSuffix(token, path), {
-    cache: "no-store",
-    ...init,
-    headers,
-  });
-  const body = (await response.json().catch(() => ({}))) as RuntimeStatusBody;
-  if (!response.ok || body.ok === false) {
-    throw new Error(body.error || `runtime_request_failed:${response.status}`);
-  }
-  return body;
-}
-
 export function useOperatorRuntime(
   boot: OperatorBoot,
   realtime: RealtimeState,
 ): OperatorRuntimeState {
   const { send, subscribeRaw, transport } = realtime;
+  const client = useMemo(() => createOperatorRuntimeClient(boot.token), [boot.token]);
   const [debug, setDebug] = useState<OperatorDebug>({});
   const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null);
   const [inputPolicy, setInputPolicy] = useState<Record<string, unknown> | null>(null);
@@ -130,14 +79,14 @@ export function useOperatorRuntime(
 
   const refreshStatus = useCallback(async () => {
     try {
-      const body = await jsonRequest(boot.token, "/runtime/status");
+      const body = await client.refreshStatus();
       applyRuntimeBody(body);
       return body;
     } catch (error) {
       setRuntimeError(String((error as Error)?.message || error));
       return null;
     }
-  }, [applyRuntimeBody, boot.token]);
+  }, [applyRuntimeBody, client]);
 
   useEffect(() => {
     void refreshStatus();
@@ -164,10 +113,7 @@ export function useOperatorRuntime(
       if (!targetTransport) return null;
       setProviderSwitch({ status: "switching", targetTransport, lastError: "" });
       try {
-        const body = await jsonRequest(boot.token, "/runtime/provider", {
-          method: "POST",
-          body: JSON.stringify({ transport: targetTransport, connect: true }),
-        });
+        const body = await client.switchProvider(targetTransport);
         applyRuntimeBody(body);
         setProviderSwitch({
           status: "active",
@@ -182,7 +128,7 @@ export function useOperatorRuntime(
         return null;
       }
     },
-    [applyRuntimeBody, boot.token],
+    [applyRuntimeBody, client],
   );
 
   const sendEngineControl = useCallback(
@@ -225,11 +171,6 @@ export function useOperatorRuntime(
     [debug.kwwk, debug.output, debug.timeline, debug.toolRouting, send],
   );
 
-  const fetchReportText = useCallback(async () => {
-    const body = await jsonRequest(boot.token, "/runtime/report");
-    return JSON.stringify(body.report || body, null, 2);
-  }, [boot.token]);
-
   const markInteresting = useCallback(
     (input: { label?: string; note?: string } = {}) => {
       send({
@@ -243,14 +184,14 @@ export function useOperatorRuntime(
   );
 
   const copyReport = useCallback(async () => {
-    const text = await fetchReportText();
+    const text = await client.fetchReportText();
     await navigator.clipboard?.writeText?.(text).catch(() => undefined);
     send({ type: "debug_report_artifact", action: "copy", label: "operator_web" });
     return text.length;
-  }, [fetchReportText, send]);
+  }, [client, send]);
 
   const downloadReport = useCallback(async () => {
-    const text = await fetchReportText();
+    const text = await client.fetchReportText();
     const blob = new Blob([text], { type: "application/json" });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -259,7 +200,7 @@ export function useOperatorRuntime(
     anchor.click();
     URL.revokeObjectURL(href);
     send({ type: "debug_report_artifact", action: "download", label: "operator_web" });
-  }, [fetchReportText, send]);
+  }, [client, send]);
 
   const selectedProvider = useMemo(() => {
     if (!providerConfig) return null;
