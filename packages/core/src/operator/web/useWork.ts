@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer } from "react";
 
 import type { RealtimeState } from "./useRealtime.ts";
+import { workRunMessage } from "./workCommands.ts";
 import {
   INITIAL_WORK_VIEW,
   foldWorkEvent,
@@ -40,10 +41,10 @@ export function useWork(realtime: RealtimeState): WorkState {
 
   const run = useCallback(
     (next: string) => {
-      const value = next.trim();
-      if (!value) return;
+      const message = workRunMessage(next);
+      if (!message) return;
       dispatch({ type: "run" });
-      send({ type: "work_run", command: value });
+      send(message);
     },
     [send],
   );
