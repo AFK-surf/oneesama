@@ -1,22 +1,12 @@
 import { useState } from "react";
 
-import type { DebugState } from "../lan-operator-debug-state.ts";
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { WorkState } from "./useWork.ts";
-
-const PHASE_LABEL: Record<string, string> = {
-  idle: "idle",
-  running: "running…",
-  done: "done",
-  not_a_command: "not a command",
-  error: "error",
-};
+import { workPanelView } from "./workPanelView.ts";
 
 export function WorkPanel({ work, runtime }: { work: WorkState; runtime: OperatorRuntimeState }) {
   const [draft, setDraft] = useState("");
-  const running = work.phase === "running";
-  const kwwk = runtime.debug.kwwk as DebugState["kwwk"] | undefined;
-  const verification = kwwk?.verification;
+  const view = workPanelView(work, runtime);
 
   return (
     <div className="op-work">
@@ -24,14 +14,14 @@ export function WorkPanel({ work, runtime }: { work: WorkState; runtime: Operato
         <div>
           <h2>Work</h2>
           <p>
-            {kwwk?.status || work.phase} / {kwwk?.latestActionKind || work.backend || "manual"}
+            {view.headerStatus} / {view.headerBackend}
           </p>
         </div>
         <button
           className="btn"
           onClick={() => runtime.cancelTool()}
           type="button"
-          disabled={!/queued|observing|planning|executing|verifying/i.test(kwwk?.status || "")}
+          disabled={view.stopActionDisabled}
         >
           Stop action
         </button>
@@ -51,33 +41,24 @@ export function WorkPanel({ work, runtime }: { work: WorkState; runtime: Operato
           placeholder="Tell oneesama what to do…"
           autoComplete="off"
         />
-        <button className="btn primary" type="submit" disabled={running}>
+        <button className="btn primary" type="submit" disabled={view.runButtonDisabled}>
           Run
         </button>
       </form>
 
       <div className="op-work-body">
         <div className="op-work-kwwk">
-          <span className={"op-work-phase phase-" + (kwwk?.status || "idle")}>
-            {kwwk?.status || "idle"}
-          </span>
-          <span>job {kwwk?.currentJobId || "-"}</span>
-          <span>cursor {kwwk?.cursorEventCount || 0}</span>
-          <span>actions {kwwk?.actionCount || 0}</span>
-          <span>
-            verify{" "}
-            {verification?.ok == null
-              ? verification?.status || "-"
-              : verification.ok
-                ? "ok"
-                : "failed"}
-          </span>
+          <span className={"op-work-phase " + view.kwwkPhaseClass}>{view.kwwkStatus}</span>
+          <span>job {view.jobLabel}</span>
+          <span>cursor {view.cursorLabel}</span>
+          <span>actions {view.actionCountLabel}</span>
+          <span>verify {view.verificationLabel}</span>
         </div>
-        {kwwk?.blocker ? <div className="op-error">blocked: {kwwk.blocker}</div> : null}
-        {kwwk?.actions?.length ? (
+        {view.blockerText ? <div className="op-error">{view.blockerText}</div> : null}
+        {view.recentActions.length ? (
           <div className="op-work-actions">
-            {kwwk.actions.slice(-5).map((action, index) => (
-              <div key={`${action.ts}-${index}`}>
+            {view.recentActions.map((action) => (
+              <div key={action.key}>
                 <strong>{action.kind}</strong>
                 <span>{action.label}</span>
                 <em>{action.status}</em>
@@ -86,21 +67,21 @@ export function WorkPanel({ work, runtime }: { work: WorkState; runtime: Operato
           </div>
         ) : null}
 
-        {work.phase === "idle" ? (
+        {view.empty ? (
           <div className="op-empty">
             Type a command — e.g. “look up what changed in 2.0”. Runs on the kwwk-cu backend.
           </div>
         ) : (
           <>
             <div className="op-work-head">
-              <span className={"op-work-phase phase-" + work.phase}>{PHASE_LABEL[work.phase]}</span>
-              {work.backend ? <span className="op-work-tag">{work.backend}</span> : null}
+              <span className={"op-work-phase " + view.workPhaseClass}>{view.phaseLabel}</span>
+              {view.backendLabel ? <span className="op-work-tag">{view.backendLabel}</span> : null}
             </div>
-            {work.intent ? <div className="op-work-intent">{work.intent}</div> : null}
+            {view.intentText ? <div className="op-work-intent">{view.intentText}</div> : null}
 
-            {work.steps.length > 0 ? (
+            {view.steps.length > 0 ? (
               <ol className="op-work-steps">
-                {work.steps.map((s, i) => (
+                {view.steps.map((s, i) => (
                   <li key={i} className={s.failed ? "failed" : ""}>
                     <span className="op-work-step-op">
                       {s.type}
@@ -113,23 +94,23 @@ export function WorkPanel({ work, runtime }: { work: WorkState; runtime: Operato
               </ol>
             ) : null}
 
-            {work.result ? (
+            {view.result ? (
               <div className="op-work-result">
-                {(work.result.postConditions || []).map((c, i) => (
+                {(view.result.postConditions || []).map((c, i) => (
                   <div key={i} className="op-work-check">
                     {c.ok ? "✓" : "✗"} {c.condition?.kind}: {c.condition?.value}
                   </div>
                 ))}
-                {work.result.extracted ? (
-                  <div className="op-work-extract">{work.result.extracted}</div>
+                {view.result.extracted ? (
+                  <div className="op-work-extract">{view.result.extracted}</div>
                 ) : null}
-                {work.result.blocker ? (
-                  <div className="op-work-step-err">blocked: {work.result.blocker}</div>
+                {view.result.blocker ? (
+                  <div className="op-work-step-err">blocked: {view.result.blocker}</div>
                 ) : null}
               </div>
             ) : null}
 
-            {work.error ? <div className="op-error">⚠ {work.error}</div> : null}
+            {view.errorText ? <div className="op-error">⚠ {view.errorText}</div> : null}
           </>
         )}
       </div>
