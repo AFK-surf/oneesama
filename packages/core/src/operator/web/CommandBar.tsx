@@ -1,3 +1,4 @@
+import { copyProviderRunCommand, shouldResetRealtimeSession } from "./commandBarActions.ts";
 import { commandBarView } from "./commandBarView.ts";
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { OperatorBoot, RealtimeState } from "./useRealtime.ts";
@@ -67,7 +68,7 @@ export function CommandBar({
         <button
           className="btn"
           onClick={() => {
-            void navigator.clipboard?.writeText?.(selectedProvider?.runCommand || "");
+            void copyProviderRunCommand(selectedProvider?.runCommand || "", navigator.clipboard);
           }}
           type="button"
           disabled={view.copyEnvDisabled}
@@ -117,7 +118,7 @@ export function CommandBar({
         <button
           className="btn danger"
           onClick={() => {
-            if (window.confirm("Reset the Realtime session?")) {
+            if (shouldResetRealtimeSession(window.confirm)) {
               runtime.sendEngineControl("reset_session");
             }
           }}
