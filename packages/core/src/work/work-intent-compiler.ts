@@ -73,7 +73,7 @@ export async function compileWorkIntent(
   transcript: string,
   options: WorkIntentCompilerOptions = {},
 ): Promise<WorkIntentCompilation> {
-  const surfaceId = options.surfaceId || "work-browser";
+  const surfaceId = options.surfaceId || "kwwk-ax";
   const text = String(transcript || "").trim();
   if (!text) {
     return {

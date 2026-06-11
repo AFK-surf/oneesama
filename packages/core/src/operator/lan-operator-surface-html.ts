@@ -149,7 +149,6 @@ export function buildLanOperatorSurfaceHtml(
       .dock-summon[hidden] { display: none; }
       .dock-summon:hover { border-color: #c2c6cd; color: var(--ink); }
       .dock-summon-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--accent); flex: 0 0 auto; }
-      .dock-summon-dot.warn { background: var(--warn); }
       .dock-summon-dot.bad { background: var(--bad); }
       .dock-summon-cue { color: var(--faint); font-size: 9.5px; }
 
@@ -228,7 +227,6 @@ export function buildLanOperatorSurfaceHtml(
       }
       .dock-group { display: flex; align-items: center; gap: 7px; }
       .dock-group + .dock-group { padding-left: 10px; border-left: 1px solid var(--line); }
-      .dock-grow { flex: 1 1 0; min-width: 0; }
       .dock-status { min-width: 0; max-width: 220px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       /* darker than the token colors so small status text stays readable (AA) on the light panels */
       .dock-status.ok { color: #0a7a52; }
@@ -251,7 +249,7 @@ export function buildLanOperatorSurfaceHtml(
       .debug-tab[aria-selected="true"] { color: var(--ink); background: var(--surface); box-shadow: var(--shadow-sm); }
       .tabpanel[hidden] { display: none; }
 
-      /* ----- work panel (typed/voice command -> work browser) ----- */
+      /* ----- work panel (typed/voice command -> kwwk-cu AX work surface) ----- */
       .work-panel { flex: 1 1 60%; min-height: 220px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: auto; padding: 12px 14px; }
       .work-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .work-status { font-family: var(--mono); font-size: 11px; color: var(--muted); }
@@ -316,7 +314,7 @@ export function buildLanOperatorSurfaceHtml(
 
       /* conversation rows as a clean chat/log */
       .tl-row { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; background: transparent; border: 0; border-left: 2px solid transparent; padding: 9px 14px 9px 12px; color: var(--ink); cursor: pointer; transition: background .1s ease; }
-      .tl-row:hover, .tl-row.open { background: var(--panel-2); }
+      .tl-row:hover { background: var(--panel-2); }
       .tl-main { display: flex; align-items: center; gap: 9px; }
       .tl-chip { flex: 0 0 auto; min-width: 58px; font-family: var(--mono); font-size: 8.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: var(--panel-2); color: var(--muted); text-align: center; }
       .tl-summary { flex: 1; min-width: 0; color: var(--ink); font-size: 12.5px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -336,7 +334,6 @@ export function buildLanOperatorSurfaceHtml(
       .tl-status.ok { color: #0a7a52; background: #e4f6ee; }
       .tl-status.running { color: #1a44b8; background: #e6edfd; }
       .tl-status.error { color: #b5322b; background: #fbe6e4; }
-      .tl-raw { margin-top: 6px; padding: 9px 10px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px solid var(--line); color: #3f4450; font-family: var(--mono); font-size: 10px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
       .tl-row.selected { background: color-mix(in srgb, var(--accent) 9%, transparent); border-left-color: var(--accent); }
       .tl-row.selected .tl-summary { color: var(--ink); }
 
@@ -406,8 +403,6 @@ export function buildLanOperatorSurfaceHtml(
 
       @media (max-width: 1040px) {
         main { grid-template-columns: 1fr; overflow: auto; }
-        .stage-grid { grid-template-columns: 1fr; }
-        aside { border-right: 0; border-bottom: 1px solid var(--line); }
       }
     </style>
   </head>
@@ -517,9 +512,9 @@ export function buildLanOperatorSurfaceHtml(
               </form>
               <div class="work-stage">
                 <div class="work-frame-wrap">
-                  <img class="work-frame" id="operator-work-frame" alt="Work browser view" />
+                  <img class="work-frame" id="operator-work-frame" alt="Work surface view" />
                   <span class="work-cursor" id="operator-work-cursor" hidden></span>
-                  <div class="work-frame-empty" id="operator-work-frame-empty">The work browser appears here once a command runs.</div>
+                  <div class="work-frame-empty" id="operator-work-frame-empty">Work-surface frames appear here once screen capture is wired.</div>
                 </div>
               </div>
               <div class="work-intent" id="operator-work-intent" hidden></div>
@@ -558,10 +553,6 @@ export function buildLanOperatorSurfaceHtml(
                   <button class="btn" id="copy-debug-button" type="button">Copy JSON</button>
                   <button class="btn" id="download-report-button" type="button">Download</button>
                   <button class="btn" id="mark-run-button" type="button">Mark</button>
-                  <select id="debug-view" aria-label="Debug view">
-                    <option value="summary">Summary</option>
-                    <option value="trace">Trace</option>
-                  </select>
                 </div>
               </div>
             <div class="metric-grid">
@@ -699,7 +690,6 @@ export function buildLanOperatorSurfaceHtml(
         const avatarPublisherStatus = document.getElementById("avatar-publisher-status");
         const COMPOSITION_TARGET_FPS = 30;
         const LEGACY_DEFAULT_SOURCE_RECTS = {
-          "host-app": { x: 0.04, y: 0.08, width: 0.7, height: 0.7 },
           avatar: { x: 0.72, y: 0.56, width: 0.24, height: 0.24 },
         };
         const state = {
@@ -784,7 +774,6 @@ export function buildLanOperatorSurfaceHtml(
           sources: boot.sources,
           visual: { transport: "webrtc", connectionState: "not_connected", iceConnectionState: null, peerConnectionState: null, signalingState: null, receiverWebSocketState: "closed", hostPublisherConnections: 0, trackCount: 0 },
           publishers: {
-            autoAvatarPublisher: true,
             avatarPreset: bootParams.get("avatarPreset") || "fallback-canvas",
             avatarWindowOpen: false,
             lastAvatarPublisherUrl: null,
@@ -803,14 +792,13 @@ export function buildLanOperatorSurfaceHtml(
           compositionLastFrameEpochMs: 0,
           errors: [],
         };
-        let eventsWs = null;
         let voiceWs = null;
         let eventsSocketClient = null;
         let voiceSocketClient = null;
         let drag = null;
         let voiceCapture = null;
         let outputClient = null;
-        let visualReceiver = null, voiceControls = null, textInputClient = null, workPanelClient = null, artifactClient = null, compositionHeartbeat = null, avatarPublisherFrame = null;
+        let visualReceiver = null, voiceControls = null, textInputClient = null, workPanelClient = null, artifactClient = null, avatarPublisherFrame = null;
         function clamp(value, min, max) {
           return Math.min(max, Math.max(min, value));
         }
@@ -1891,7 +1879,6 @@ export function buildLanOperatorSurfaceHtml(
             if (!bootParams.has("avatarPreset") && publisherState.avatarPreset) {
               state.publishers.avatarPreset = normalizeAvatarPreset(publisherState.avatarPreset);
             }
-            state.publishers.autoAvatarPublisher = true;
             const voiceState = userState.voice || {};
             if (typeof voiceState.deviceId === "string") {
               state.voiceDeviceId = voiceState.deviceId;
@@ -2473,7 +2460,6 @@ export function buildLanOperatorSurfaceHtml(
               path: "/operator/events/ws",
               onState: (connection) => { state.eventsWsState = connection.state; },
               onOpen: (client) => {
-                eventsWs = client.socket();
                 client.send({ type: "operator_surface_connected" });
               },
               onMessage: handleEventsMessage,
@@ -2504,7 +2490,7 @@ export function buildLanOperatorSurfaceHtml(
             voiceSocketClient.connect();
             await waitForOpen(voiceSocketClient);
             void voiceControls.refreshDevices().catch(() => undefined);
-            compositionHeartbeat = window.setInterval(() => {
+            window.setInterval(() => {
               emitCompositionState();
               syncDebug();
             }, 1000);
@@ -2524,7 +2510,6 @@ export function buildLanOperatorSurfaceHtml(
           createDebugBundle, markInterestingRun, registerArtifactLink, openDebugPanel, currentComposition, startMicrophone, stopMicrophone, setVoiceMuted,
           avatarPublisherUrl, openAvatarPublisher, setAvatarPublisherPreset,
           setDebugFilter: (query) => { debugFilterInput.value = String(query || ""); return applyDebugFilter(); },
-          getDebugFilter: () => applyDebugFilter(),
           refreshVoiceDevices: () => voiceControls?.refreshDevices(),
           configureLocalVad: (enabled) => voiceControls?.configureLocalVad(enabled), sendTextInput: (text) => textInputClient?.sendText(text),
           runWork: (command) => workPanelClient?.submit(command),

@@ -39,25 +39,6 @@ export function digestObservation(observation: WorkSurfaceObservation): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/** Deterministic planner for offline tests: returns the scripted operation per step. */
-export function createScriptedWorkPlanner(operations: WorkOperation[]): WorkPlannerPort {
-  return {
-    id: "scripted_work_planner",
-    async decide(input) {
-      const index = input.steps.length;
-      const operation = operations[index];
-      if (!operation) {
-        return {
-          schema: "oneesama.work_operation.v1",
-          type: "blocked",
-          blocker: `scripted_planner_exhausted_at_step_${index}`,
-        };
-      }
-      return operation;
-    },
-  };
-}
-
 /**
  * Records every decision of the inner planner at the LLM boundary (RFC D4).
  * The sink receives one record per step; persist them and feed

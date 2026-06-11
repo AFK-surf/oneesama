@@ -115,19 +115,19 @@ switched from the CDP work browser to **kwwk-cu native AX** — see
 [the kwwk-cu work-backend RFC](rfc-kwwk-cu-work-backend.md); evals are now
 `vp run eval:work-intent | eval:work-e2e-voice | work:ax-live`. Gate 4 exercises the full loop —
 spoken command → realtime transcription → intent compiler → live planner
-in the work browser → verified done → extracted passage spoken back as
+on the current work surface → verified done → extracted passage spoken back as
 assistant audio — via the harness (synthetic 24 kHz utterances), without
 the cockpit UI.
 
 **MW-UI — DONE (web-UI acceptance).** The `/operator` surface has a **Work**
 tab: type a command → the operator server compiles intent, runs the stepwise
-planner in a server-side headless work browser (self-contained committed
-fixture site by default; `MAB_LAN_OPERATOR_WORK_BASE_URL` to point
-elsewhere), and streams the browser screencast + Intent Card + per-step log +
+planner against the kwwk-cu native AX backend (configured by
+`MAB_LAN_OPERATOR_WORK_AX_APP`) and streams the Intent Card + per-step log +
 verified result back into the page over the events WS (`work_run` →
-`work_event`/`work_frame`). Verified end-to-end by driving `/operator` with
-Playwright: typed command → 6 steps → frames rendered → status `done`,
-post-condition `text_present:Fixture` met, spoken-summary text shown.
+`work_event`). Frames are not currently streamed. Historical acceptance was
+verified end-to-end by driving `/operator` with Playwright against the earlier
+CDP fixture backend: typed command → 6 steps → frames rendered → status
+`done`, post-condition `text_present:Fixture` met, spoken-summary text shown.
 `window.MAB_LAN_OPERATOR_SURFACE.runWork(command)` is the test hook.
 
 **Remaining:** voice→Work wiring in the page (today the transcript→intent

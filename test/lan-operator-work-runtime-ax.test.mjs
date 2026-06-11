@@ -51,10 +51,8 @@ test("work runtime AX backend runs a job to verified done (injected transport + 
   const events = [];
   const transport = fakeAxTransport();
   const runtime = createLanOperatorWorkRuntime({
-    backend: "ax",
     axApp: "Google Chrome",
     onEvent: (e) => events.push(e),
-    onFrame: () => {},
     createAxTransport: async () => transport,
     createPlanner: () => scriptedPlanner(),
   });
@@ -86,9 +84,7 @@ test("work runtime rejects a non-command without touching the backend", async ()
   const events = [];
   let transportBuilt = false;
   const runtime = createLanOperatorWorkRuntime({
-    backend: "ax",
     onEvent: (e) => events.push(e),
-    onFrame: () => {},
     createAxTransport: async () => {
       transportBuilt = true;
       return fakeAxTransport();

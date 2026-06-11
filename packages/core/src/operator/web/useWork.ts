@@ -25,7 +25,6 @@ export type WorkPhase = "idle" | "running" | "done" | "not_a_command" | "error";
 
 export interface WorkState {
   phase: WorkPhase;
-  command: string;
   intent: string;
   backend: string;
   steps: WorkStep[];
@@ -47,7 +46,6 @@ interface WorkEvent {
  */
 export function useWork(realtime: RealtimeState): WorkState {
   const [phase, setPhase] = useState<WorkPhase>("idle");
-  const [command, setCommand] = useState("");
   const [intent, setIntent] = useState("");
   const [backend, setBackend] = useState("");
   const [steps, setSteps] = useState<WorkStep[]>([]);
@@ -97,7 +95,6 @@ export function useWork(realtime: RealtimeState): WorkState {
     (next: string) => {
       const value = next.trim();
       if (!value) return;
-      setCommand(value);
       setIntent("");
       setBackend("");
       setSteps([]);
@@ -109,5 +106,5 @@ export function useWork(realtime: RealtimeState): WorkState {
     [realtime],
   );
 
-  return { phase, command, intent, backend, steps, result, error, run };
+  return { phase, intent, backend, steps, result, error, run };
 }

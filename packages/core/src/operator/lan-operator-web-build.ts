@@ -17,8 +17,8 @@ let cachedBundle: Promise<string> | null = null;
 /**
  * Bundle the React operator app (web/main.tsx) to a single IIFE via esbuild,
  * in-memory and cached. No dist files, no separate build step — the operator
- * server serves the result. This is the new React surface (`/operator2`); the
- * legacy string surface stays at `/operator` until parity.
+ * server serves the result at `/operator` (bundle at `/operator/app.js`); the
+ * legacy string surface stays at the root `/`.
  */
 export function buildOperatorWebBundle(): Promise<string> {
   if (!cachedBundle) {

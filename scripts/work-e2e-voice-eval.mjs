@@ -291,7 +291,10 @@ for (let run = 0; run < args.runs; run++) {
     try {
       const executor = createWorkExecutor({
         surface,
-        planner: createOpenAIWorkPlanner({ baseUrlHint: "work://release-notes" }),
+        planner: createOpenAIWorkPlanner({
+          startHint:
+            "The work site lives at work://release-notes. Navigate there if you are not already on a useful page.",
+        }),
         maxSteps: 10,
       });
       result = await executor.run(compilation.job);

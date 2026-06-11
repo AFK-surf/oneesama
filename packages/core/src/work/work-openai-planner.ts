@@ -5,8 +5,8 @@ export interface OpenAIWorkPlannerOptions {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
-  /** Work-surface base URL hint inserted into the system prompt (e.g. the fixture site). */
-  baseUrlHint?: string;
+  /** Free-text starting-context line inserted into the system prompt. */
+  startHint?: string;
   fetchImpl?: typeof fetch;
   maxCompletionTokens?: number;
 }
@@ -29,14 +29,14 @@ function defaultBaseUrl(env: NodeJS.ProcessEnv = process.env) {
 
 const SYSTEM_PROMPT = (
   startHint: string,
-) => `You operate a work browser for a precise meeting assistant. Each turn you
+) => `You operate a desktop work surface for a precise meeting assistant. Each turn you
 receive the job intent, the current page observation (an outline where every
 actionable element carries [ref=eN]), and the step history. Respond with
 EXACTLY ONE JSON object for the single next operation:
 
 {"type": "<one of: ${WORK_OPERATION_TYPES.join(", ")}>",
  "target": {"ref": "eN"},        // required for click / type-text / set-value / extract
- "value": "...",                 // navigate: url; type-text/set-value: text; press-key: key; wait-for: text; scroll: up|down
+ "value": "...",                 // navigate: url (when supported); type-text/set-value: text; press-key: key; wait-for: text; scroll: up|down
  "rationale": "...",             // one short line, shown on the shared cursor
  "summary": "...",               // ONLY with type "done": 1-2 sentences answering the intent from extracted text
  "blocker": "..."}               // ONLY with type "blocked": why the job cannot proceed
@@ -45,9 +45,9 @@ Rules, in priority order:
 1. Precision over speed. Only use refs that appear in the CURRENT observation.
    Never invent refs or URLs.
 2. ${startHint}
-3. Typical research flow: navigate to the search page, type the query into the
-   search textbox, click the search button, click the most relevant result
-   link, extract the passage (text ref) that answers the intent, then done.
+3. Typical research flow: if a search page is available, type the query and
+   search; otherwise work with the current observation. Then click the most
+   relevant result, extract the passage that answers the intent, then done.
 4. Before "done", you must have extracted the supporting passage with
    "extract". The summary must come from extracted text, not memory.
 5. If two steps in a row made no progress, prefer "blocked" with a clear
@@ -86,9 +86,7 @@ export function createOpenAIWorkPlanner(options: OpenAIWorkPlannerOptions = {}):
   const baseUrl = options.baseUrl ?? defaultBaseUrl();
   const model = options.model ?? defaultWorkPlannerModel();
   const fetchImpl = options.fetchImpl ?? fetch;
-  const startHint = options.baseUrlHint
-    ? `The work site lives at ${options.baseUrlHint} — start research at ${options.baseUrlHint}/search.html when you are not already on a useful page.`
-    : "Start from the page you are on.";
+  const startHint = options.startHint ?? "Start from the page you are on.";
 
   return {
     id: `openai_work_planner(${model})`,

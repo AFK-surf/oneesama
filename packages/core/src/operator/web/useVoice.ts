@@ -7,7 +7,6 @@ export interface VoiceState {
   micOn: boolean;
   muted: boolean;
   energy: number;
-  voiceWsOpen: boolean;
   startMic: () => Promise<void>;
   stopMic: () => void;
   toggleMute: () => void;
@@ -30,7 +29,6 @@ export function useVoice(
   const [micOn, setMicOn] = useState(false);
   const [muted, setMuted] = useState(false);
   const [energy, setEnergy] = useState(0);
-  const [voiceWsOpen, setVoiceWsOpen] = useState(false);
 
   const captureCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -115,7 +113,6 @@ export function useVoice(
     streamIdRef.current = "web_voice_" + Date.now().toString(36);
     seqRef.current = 0;
     ws.addEventListener("open", () => {
-      setVoiceWsOpen(true);
       ws.send(
         JSON.stringify({
           type: "operator_voice_stream_opened",
@@ -126,7 +123,6 @@ export function useVoice(
         }),
       );
     });
-    ws.addEventListener("close", () => setVoiceWsOpen(false));
 
     const source = ctx.createMediaStreamSource(stream);
     const processor = ctx.createScriptProcessor(PROCESSOR_FRAMES, 1, 1);
@@ -171,5 +167,5 @@ export function useVoice(
 
   useEffect(() => () => stopMic(), [stopMic]);
 
-  return { micOn, muted, energy, voiceWsOpen, startMic, stopMic, toggleMute };
+  return { micOn, muted, energy, startMic, stopMic, toggleMute };
 }

@@ -62,7 +62,9 @@ try {
 
   if (!args.act) {
     // Read-only: show what the planner WOULD do first, without acting.
-    const planner = createOpenAIWorkPlanner({ baseUrlHint: args.app });
+    const planner = createOpenAIWorkPlanner({
+      startHint: `You are operating the macOS app "${args.app}" via Accessibility. "navigate" is unavailable; work with the current window and refs.`,
+    });
     const first = await planner.decide({ job: compilation.job, observation: obs, steps: [] });
     console.log(`\n[4/4] planner's first proposed operation (NOT executed):`);
     console.log(`     ${JSON.stringify(first)}`);
@@ -71,7 +73,9 @@ try {
     console.log(`\n[3/4] executing (real cursor) …`);
     const executor = createWorkExecutor({
       surface,
-      planner: createOpenAIWorkPlanner({ baseUrlHint: args.app }),
+      planner: createOpenAIWorkPlanner({
+        startHint: `You are operating the macOS app "${args.app}" via Accessibility. "navigate" is unavailable; work with the current window and refs.`,
+      }),
       maxSteps: args.maxSteps,
       onEvent: (event) => {
         if (event.type === "operation" && event.operation) {

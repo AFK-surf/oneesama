@@ -168,7 +168,6 @@ function transportKeyForKind(kind: WebSocketKind | string): TransportKey | null 
 }
 
 function payloadFromMessage(message: unknown): Record<string, unknown> {
-  if (typeof message === "string") return JSON.parse(message) as Record<string, unknown>;
   if (message && typeof message === "object") return message as Record<string, unknown>;
   return {};
 }
@@ -1281,9 +1280,9 @@ export function createLanOperatorSurfaceServer(
     return cursor;
   }
 
-  // Work pipeline: a typed command runs the full loop in a server-side work
-  // browser, streamed back to the operator UI. Lazily created on first use so
-  // the Playwright browser never launches unless the surface is asked to work.
+  // Work pipeline: a typed command runs the full loop through the kwwk-cu
+  // native AX backend, with events streamed back to the operator UI. Lazily
+  // created on first use so the helper process only starts when work runs.
   let workRuntime: LanOperatorWorkRuntime | null = null;
   function broadcastToEvents(envelope: Record<string, unknown>) {
     for (const client of clients) {
@@ -1296,8 +1295,6 @@ export function createLanOperatorSurfaceServer(
       axApp: process.env.MAB_LAN_OPERATOR_WORK_AX_APP || undefined,
       onEvent: (event) =>
         broadcastToEvents({ sessionId: config.sessionId, type: "work_event", event }),
-      onFrame: (frame) =>
-        broadcastToEvents({ sessionId: config.sessionId, type: "work_frame", frame }),
     });
     return workRuntime;
   }
@@ -1319,7 +1316,6 @@ export function createLanOperatorSurfaceServer(
 
   async function forwardVoiceChunk(chunk: LanOperatorVoiceChunk) {
     const engine = conversationEngine;
-    if (!options.handleVoiceChunk && !engine) return;
     if (debug.voice.forwardInFlight >= maxVoiceForwardInFlight) {
       debug.voice.forwardBackpressureDrops += 1;
       recordEvent(
