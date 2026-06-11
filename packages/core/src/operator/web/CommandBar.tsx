@@ -1,13 +1,6 @@
+import { commandBarView } from "./commandBarView.ts";
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { OperatorBoot, RealtimeState } from "./useRealtime.ts";
-
-const STATUS_TONE: Record<string, string> = {
-  connected: "ok",
-  connecting: "warn",
-  degraded: "warn",
-  failed: "bad",
-  not_connected: "idle",
-};
 
 export function CommandBar({
   boot,
@@ -20,21 +13,7 @@ export function CommandBar({
 }) {
   const providerConfig = runtime.providerConfig;
   const selectedProvider = runtime.selectedProvider;
-  const selectedTransport =
-    selectedProvider?.transport ||
-    providerConfig?.selectedLiveTransport ||
-    providerConfig?.selectedTransport ||
-    realtime.transport;
-  const connectionStatus =
-    String(runtime.debug.conversation?.status || realtime.status || "not_connected") ||
-    "not_connected";
-  const health = String(runtime.snapshot?.health || "starting");
-  const switching = runtime.providerSwitch.status === "switching";
-  const canConnect = realtime.wsOpen && connectionStatus !== "connected";
-  const canStopAction =
-    /started|streaming|running|observing|planning|executing|verifying/i.test(
-      String(runtime.debug.toolRouting?.status || runtime.debug.kwwk?.status || ""),
-    ) || Number(runtime.debug.conversation?.control?.inFlight || 0) > 0;
+  const view = commandBarView(runtime, realtime);
 
   return (
     <header className="op-command">
@@ -48,8 +27,8 @@ export function CommandBar({
           <span>Provider</span>
           <select
             className="op-select"
-            value={selectedTransport}
-            disabled={!providerConfig?.runtimeSwitchSupported || switching}
+            value={view.selectedTransport}
+            disabled={!providerConfig?.runtimeSwitchSupported || view.switching}
             onChange={(event) => void runtime.switchProvider(event.target.value)}
             id="conversation-provider-select"
           >
@@ -64,29 +43,25 @@ export function CommandBar({
               </option>
             ))}
             {!providerConfig?.providers?.length ? (
-              <option value={selectedTransport}>{selectedTransport || "unknown"}</option>
+              <option value={view.selectedTransport}>{view.selectedTransport || "unknown"}</option>
             ) : null}
           </select>
         </label>
 
         <div className="op-provider-detail" id="conversation-provider-status">
-          <span>{selectedProvider?.model || selectedTransport || "unknown"}</span>
-          <span>{selectedProvider?.keySource || "no key source"}</span>
-          <span>{switching ? "switching" : "selected"}</span>
+          <span>{view.providerModel}</span>
+          <span>{view.providerKeySource}</span>
+          <span>{view.providerStatus}</span>
         </div>
       </div>
 
       <div className="op-command-actions">
-        <StatusPill label="runtime" value={health} tone={health === "ready" ? "ok" : "warn"} />
-        <StatusPill
-          label="events"
-          value={realtime.wsOpen ? "ws open" : "ws closed"}
-          tone={realtime.wsOpen ? "ok" : "idle"}
-        />
+        <StatusPill label="runtime" value={view.health} tone={view.runtimeTone} />
+        <StatusPill label="events" value={view.eventsLabel} tone={view.eventsTone} />
         <StatusPill
           label="session"
-          value={connectionStatus}
-          tone={STATUS_TONE[connectionStatus] || "idle"}
+          value={view.connectionStatus}
+          tone={view.sessionTone}
           id="operator-realtime-mode-status"
         />
         <button
@@ -95,12 +70,12 @@ export function CommandBar({
             void navigator.clipboard?.writeText?.(selectedProvider?.runCommand || "");
           }}
           type="button"
-          disabled={!selectedProvider?.runCommand}
+          disabled={view.copyEnvDisabled}
         >
           Copy Env
         </button>
 
-        {connectionStatus === "connected" ? (
+        {view.connectionStatus === "connected" ? (
           <button className="btn" onClick={realtime.disconnect} type="button">
             Disconnect
           </button>
@@ -109,7 +84,7 @@ export function CommandBar({
             className="btn primary"
             onClick={realtime.connect}
             type="button"
-            disabled={!canConnect}
+            disabled={view.connectButtonDisabled}
           >
             Connect
           </button>
@@ -118,7 +93,7 @@ export function CommandBar({
           className="btn"
           onClick={() => runtime.sendEngineControl("cancel_response")}
           type="button"
-          disabled={!runtime.debug.output?.assistantText?.currentText}
+          disabled={view.stopReplyDisabled}
           id="cancel-response-button"
         >
           Stop reply
@@ -127,7 +102,7 @@ export function CommandBar({
           className="btn"
           onClick={() => runtime.cancelTool()}
           type="button"
-          disabled={!canStopAction}
+          disabled={view.stopActionDisabled}
           id="cancel-tool-button"
         >
           Stop action
