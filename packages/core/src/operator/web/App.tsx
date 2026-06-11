@@ -4,6 +4,7 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel.tsx";
 import { Stage } from "./Stage.tsx";
 import { VoiceBar } from "./VoiceBar.tsx";
 import { WorkPanel } from "./WorkPanel.tsx";
+import { appShellView } from "./appShellView.ts";
 import { useLegacySurfaceBridge } from "./useLegacySurfaceBridge.ts";
 import { useOperatorRuntime } from "./useOperatorRuntime.ts";
 import { useRealtime, type OperatorBoot } from "./useRealtime.ts";
@@ -15,21 +16,17 @@ export function App({ boot }: { boot: OperatorBoot }) {
   const runtime = useOperatorRuntime(boot, rt);
   const voice = useVoice(boot, rt.subscribe, rt.send);
   const work = useWork(rt);
-  const connected = String(runtime.debug.conversation?.status || rt.status) === "connected";
+  const shell = appShellView(runtime, rt);
 
   useLegacySurfaceBridge({ runtime, voice });
 
-  const shellClass = `op op-${String(
-    runtime.debug.conversation?.status || rt.status || "not_connected",
-  )}`;
-
   return (
-    <div className={shellClass}>
+    <div className={shell.shellClass}>
       <CommandBar boot={boot} realtime={rt} runtime={runtime} />
       <main className="op-main">
         <div className="op-left-rail">
           <Stage boot={boot} debug={runtime.debug} />
-          <VoiceBar voice={voice} connected={connected} />
+          <VoiceBar voice={voice} connected={shell.connected} />
         </div>
         <div className="op-center-rail">
           <ConversationPanel realtime={rt} runtime={runtime} />
