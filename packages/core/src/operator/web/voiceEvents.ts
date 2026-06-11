@@ -77,6 +77,17 @@ export interface VoiceMicCaptureMessageInput {
   availableDeviceCount: number;
 }
 
+export interface VoiceCaptureOpenedMessagesInput extends VoiceMicCaptureMessageInput {
+  sessionId: string;
+  voiceStreamId: string;
+  openedAt?: string;
+}
+
+export interface VoiceCaptureOpenedMessages {
+  voiceMessage: ReturnType<typeof voiceStreamOpenedMessage>;
+  operatorEvents: [ReturnType<typeof voiceEngineControl>, OperatorVoiceStatusMessage];
+}
+
 export function permissionStateForError(error: unknown) {
   const name = String((error as { name?: string })?.name || "");
   if (name === "NotAllowedError" || name === "SecurityError") return "denied";
@@ -193,6 +204,25 @@ export function micArmedMessage(input: VoiceMicCaptureMessageInput): OperatorVoi
       deviceLabel: input.deviceLabel || "",
       availableDeviceCount: input.availableDeviceCount,
     }),
+  };
+}
+
+export function voiceCaptureOpenedMessages(
+  input: VoiceCaptureOpenedMessagesInput,
+): VoiceCaptureOpenedMessages {
+  return {
+    voiceMessage: voiceStreamOpenedMessage(input.sessionId, input.voiceStreamId, input.openedAt),
+    operatorEvents: [
+      voiceEngineControl(input.sessionId, "set_voice_armed", "operator_web_start_mic", {
+        armed: true,
+      }),
+      micArmedMessage({
+        muted: input.muted,
+        deviceId: input.deviceId,
+        deviceLabel: input.deviceLabel,
+        availableDeviceCount: input.availableDeviceCount,
+      }),
+    ],
   };
 }
 

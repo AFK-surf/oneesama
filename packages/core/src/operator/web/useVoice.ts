@@ -21,13 +21,12 @@ import {
 import {
   createVoiceStreamId,
   localVadConfiguredMessage,
-  micArmedMessage,
   micBlockedMessage,
   micDisarmedMessage,
   micMutedMessage,
+  voiceCaptureOpenedMessages,
   voiceDevicesRefreshedMessage,
   voiceEngineControl,
-  voiceStreamOpenedMessage,
 } from "./voiceEvents.ts";
 
 export interface VoiceState extends VoiceViewState {
@@ -207,20 +206,16 @@ export function useVoice(
       seqRef.current = 0;
       dispatch({ type: "set_chunks_sent", chunksSent: 0 });
       ws.addEventListener("open", () => {
-        ws.send(JSON.stringify(voiceStreamOpenedMessage(boot.sessionId, streamIdRef.current)));
-        sendOperatorEvent(
-          voiceEngineControl(boot.sessionId, "set_voice_armed", "operator_web_start_mic", {
-            armed: true,
-          }),
-        );
-        sendOperatorEvent(
-          micArmedMessage({
-            muted: mutedRef.current,
-            deviceId: selectedDeviceIdRef.current,
-            deviceLabel: track?.label || "",
-            availableDeviceCount: devicesLengthRef.current,
-          }),
-        );
+        const opened = voiceCaptureOpenedMessages({
+          sessionId: boot.sessionId,
+          voiceStreamId: streamIdRef.current,
+          muted: mutedRef.current,
+          deviceId: selectedDeviceIdRef.current,
+          deviceLabel: track?.label || "",
+          availableDeviceCount: devicesLengthRef.current,
+        });
+        ws.send(JSON.stringify(opened.voiceMessage));
+        for (const message of opened.operatorEvents) sendOperatorEvent(message);
       });
 
       const processor = connectVoiceCaptureGraph({

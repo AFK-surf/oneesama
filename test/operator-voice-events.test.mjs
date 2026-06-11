@@ -12,6 +12,7 @@ import {
   micMutedMessage,
   permissionStateForError,
   voiceChunkMessage,
+  voiceCaptureOpenedMessages,
   voiceCaptureSnapshot,
   voiceDevicesRefreshedMessage,
   voiceEngineControl,
@@ -87,6 +88,51 @@ test("operator voice events build VAD and stream-open payload contracts", () => 
       voiceStreamId: "web_voice_1",
       voiceStreamGeneration: 1,
       openedAt: "2026-06-11T00:00:01.000Z",
+    },
+  );
+
+  assert.deepEqual(
+    voiceCaptureOpenedMessages({
+      sessionId: "session-1",
+      voiceStreamId: "web_voice_1",
+      openedAt: "2026-06-11T00:00:01.000Z",
+      muted: true,
+      deviceId: "mic-1",
+      deviceLabel: "Desk Mic",
+      availableDeviceCount: 2,
+    }),
+    {
+      voiceMessage: {
+        type: "operator_voice_stream_opened",
+        sessionId: "session-1",
+        voiceStreamId: "web_voice_1",
+        voiceStreamGeneration: 1,
+        openedAt: "2026-06-11T00:00:01.000Z",
+      },
+      operatorEvents: [
+        {
+          type: "engine_control",
+          sessionId: "session-1",
+          control: {
+            type: "set_voice_armed",
+            reason: "operator_web_start_mic",
+            detail: { source: "operator_web", armed: true },
+          },
+        },
+        {
+          type: "operator_mic_armed",
+          capture: {
+            armed: true,
+            muted: true,
+            mode: "microphone_pcm16",
+            status: "capturing",
+            permissionState: "granted",
+            deviceId: "mic-1",
+            deviceLabel: "Desk Mic",
+            availableDeviceCount: 2,
+          },
+        },
+      ],
     },
   );
 });
