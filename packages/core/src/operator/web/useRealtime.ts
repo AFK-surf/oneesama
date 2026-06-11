@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import type { LanOperatorLiveProviderConfig } from "../lan-operator-live-provider-config.ts";
 import { wsUrl } from "./protocol.ts";
+import {
+  canonicalEventFromPayload,
+  foldRealtimePayload,
+  initialRealtimeViewState,
+  realtimeConnectRequested,
+  realtimeSocketClosed,
+  realtimeSocketOpened,
+} from "./realtimeState.ts";
+import type { CanonicalEvent, RealtimeViewState } from "./realtimeState.ts";
+export type { CanonicalEvent, RealtimeStatus } from "./realtimeState.ts";
 
 export interface OperatorBoot {
   sessionId: string;
@@ -12,24 +22,7 @@ export interface OperatorBoot {
   liveProviderConfig?: LanOperatorLiveProviderConfig | null;
 }
 
-export interface CanonicalEvent {
-  type: string;
-  text?: string;
-  responseId?: string;
-  audioBase64?: string;
-  error?: string;
-  detail?: Record<string, unknown>;
-  [key: string]: unknown;
-}
-
-export type RealtimeStatus = "not_connected" | "connecting" | "connected" | "failed";
-
-export interface RealtimeState {
-  wsOpen: boolean;
-  status: RealtimeStatus;
-  transport: string;
-  events: CanonicalEvent[];
-  error: string;
+export interface RealtimeState extends RealtimeViewState {
   connect: () => void;
   disconnect: () => void;
   sendText: (text: string) => void;
@@ -41,6 +34,19 @@ export interface RealtimeState {
   subscribeRaw: (listener: (payload: Record<string, unknown>) => void) => () => void;
 }
 
+type RealtimeAction =
+  | { type: "socket_opened" }
+  | { type: "socket_closed" }
+  | { type: "payload"; payload: Record<string, unknown> }
+  | { type: "connect_requested" };
+
+function realtimeReducer(state: RealtimeViewState, action: RealtimeAction): RealtimeViewState {
+  if (action.type === "socket_opened") return realtimeSocketOpened(state);
+  if (action.type === "socket_closed") return realtimeSocketClosed(state);
+  if (action.type === "connect_requested") return realtimeConnectRequested(state);
+  return foldRealtimePayload(state, action.payload);
+}
+
 /**
  * Realtime hook: owns the events WebSocket and the canonical-event stream,
  * and sends engine controls + text input over the same wire protocol the
@@ -49,11 +55,11 @@ export interface RealtimeState {
  * playback doesn't re-render the conversation on every ~50ms chunk).
  */
 export function useRealtime(boot: OperatorBoot): RealtimeState {
-  const [wsOpen, setWsOpen] = useState(false);
-  const [status, setStatus] = useState<RealtimeStatus>("not_connected");
-  const [transport, setTransport] = useState(boot.conversationTransport || "unknown");
-  const [events, setEvents] = useState<CanonicalEvent[]>([]);
-  const [error, setError] = useState("");
+  const [state, dispatch] = useReducer(
+    realtimeReducer,
+    boot.conversationTransport,
+    initialRealtimeViewState,
+  );
   const wsRef = useRef<WebSocket | null>(null);
   const seqRef = useRef(0);
   const listenersRef = useRef(new Set<(event: CanonicalEvent) => void>());
@@ -73,11 +79,11 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
       ws = new WebSocket(wsUrl(boot.token, "/operator/events/ws"));
       wsRef.current = ws;
       ws.addEventListener("open", () => {
-        setWsOpen(true);
+        dispatch({ type: "socket_opened" });
         ws?.send(JSON.stringify({ type: "operator_surface_connected" }));
       });
       ws.addEventListener("close", () => {
-        setWsOpen(false);
+        dispatch({ type: "socket_closed" });
         if (!closed) reconnectTimer = setTimeout(open, 1000);
       });
       ws.addEventListener("message", (event) => {
@@ -88,23 +94,13 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
           return;
         }
         for (const listener of rawListenersRef.current) listener(payload);
-        if (payload.type === "canonical_conversation_event" && payload.event) {
-          const ev = payload.event as CanonicalEvent;
+        const ev = canonicalEventFromPayload(payload);
+        if (ev) {
           // Audio chunks go to subscribers only — keeping them out of the
           // rendered event list avoids re-rendering on every ~50ms chunk.
           for (const listener of listenersRef.current) listener(ev);
-          if (ev.type !== "assistant_audio_chunk") {
-            setEvents((prev) => [...prev, ev].slice(-200));
-          }
-          if (ev.type === "engine_error") setError(String(ev.error || "engine_error"));
         }
-        const debug = payload.debug as
-          | { conversation?: { status?: string; provider?: { adapterKind?: string } } }
-          | undefined;
-        if (debug?.conversation?.status) setStatus(debug.conversation.status as RealtimeStatus);
-        if (debug?.conversation?.provider?.adapterKind) {
-          setTransport(debug.conversation.provider.adapterKind);
-        }
+        dispatch({ type: "payload", payload });
       });
     };
     open();
@@ -116,8 +112,7 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
   }, [boot.token]);
 
   const connect = useCallback(() => {
-    setError("");
-    setStatus("connecting");
+    dispatch({ type: "connect_requested" });
     send({
       type: "engine_control",
       sessionId: boot.sessionId,
@@ -172,11 +167,7 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
   }, []);
 
   return {
-    wsOpen,
-    status,
-    transport,
-    events,
-    error,
+    ...state,
     connect,
     disconnect,
     sendText,

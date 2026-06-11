@@ -689,19 +689,28 @@ test("LAN operator surface reports transport reconnect state", async () => {
     await page.evaluate(() => window.MAB_LAN_OPERATOR_SURFACE.forceCloseTransport("voice"));
 
     await page.waitForFunction(
-      () =>
-        window.MAB_LAN_OPERATOR_SURFACE.state.transport.voice.reconnectCount >= 1 &&
-        window.MAB_LAN_OPERATOR_SURFACE.state.transport.voice.state === "open",
-      null,
+      (streamId) => {
+        const state = window.MAB_LAN_OPERATOR_SURFACE.state;
+        return (
+          state.transport.voice.reconnectCount >= 1 &&
+          state.transport.voice.state === "open" &&
+          state.voiceWsState === "open" &&
+          state.voiceStreamId &&
+          state.voiceStreamId !== streamId
+        );
+      },
+      firstStream,
       { timeout: 10_000 },
     );
-    await page.evaluate((streamId) => {
-      window.MAB_LAN_OPERATOR_SURFACE.sendSyntheticVoiceChunk({
+    const sendResult = await page.evaluate((streamId) => {
+      const stale = window.MAB_LAN_OPERATOR_SURFACE.sendSyntheticVoiceChunk({
         sequence: 1,
         voiceStreamId: streamId,
       });
-      window.MAB_LAN_OPERATOR_SURFACE.sendSyntheticVoiceChunk({ sequence: 2 });
+      const fresh = window.MAB_LAN_OPERATOR_SURFACE.sendSyntheticVoiceChunk({ sequence: 2 });
+      return { stale, fresh };
     }, firstStream);
+    assert.deepEqual(sendResult, { stale: true, fresh: true });
     const body = await waitForRuntimeStatus(
       url,
       (nextBody) =>
