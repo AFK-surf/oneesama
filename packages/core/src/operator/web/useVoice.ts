@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { CanonicalEvent, OperatorBoot } from "./useRealtime.ts";
-import { pcm16Base64, rmsEnergy, wsUrl } from "./protocol.ts";
+import { rmsEnergy, wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
 import { useLatestRef } from "./useLatestRef.ts";
 import {
   LOCAL_VAD_THRESHOLD,
+  createVoiceStreamId,
   localVadSnapshot,
   permissionStateForError,
+  voiceChunkMessage,
   voiceCaptureSnapshot,
   voiceEngineControl,
   voiceStreamOpenedMessage,
@@ -252,7 +254,7 @@ export function useVoice(
 
       const ws = new WebSocket(wsUrl(boot.token, "/operator/voice/ws"));
       voiceWsRef.current = ws;
-      streamIdRef.current = "web_voice_" + Date.now().toString(36);
+      streamIdRef.current = createVoiceStreamId();
       seqRef.current = 0;
       setChunksSent(0);
       ws.addEventListener("open", () => {
@@ -292,21 +294,18 @@ export function useVoice(
         if (ws.bufferedAmount > 1_000_000) return; // backpressure drop
         const sequence = seqRef.current++;
         ws.send(
-          JSON.stringify({
-            type: "voice_chunk",
-            source: "operator_web_pcm16",
-            sessionId: boot.sessionId,
-            sequence,
-            voiceStreamId: streamIdRef.current,
-            voiceStreamGeneration: 1,
-            monotonicMs: performance.now(),
-            sentAt: new Date().toISOString(),
-            sampleRate: ctx?.sampleRate || CAPTURE_SAMPLE_RATE,
-            channels: 1,
-            durationMs: (input.length / (ctx?.sampleRate || CAPTURE_SAMPLE_RATE)) * 1000,
-            energy: energyValue,
-            dataBase64: pcm16Base64(input),
-          }),
+          JSON.stringify(
+            voiceChunkMessage({
+              samples: input,
+              sampleRate: ctx?.sampleRate || CAPTURE_SAMPLE_RATE,
+              energy: energyValue,
+              monotonicMs: performance.now(),
+              sentAt: new Date().toISOString(),
+              sequence,
+              voiceStreamId: streamIdRef.current,
+              sessionId: boot.sessionId,
+            }),
+          ),
         );
         if (sequence % 8 === 0) setChunksSent(sequence + 1);
       };

@@ -1,4 +1,5 @@
 import type { EngineControlType } from "./useOperatorRuntime.ts";
+import { pcm16Base64 } from "./protocol.ts";
 
 export const LOCAL_VAD_THRESHOLD = 0.02;
 
@@ -18,6 +19,17 @@ export interface LocalVadSnapshotInput {
   active: boolean;
   lastEnergy: number;
   nowIso?: string;
+}
+
+export interface VoiceChunkMessageInput {
+  sessionId: string;
+  sequence: number;
+  voiceStreamId: string;
+  monotonicMs: number;
+  sentAt: string;
+  sampleRate: number;
+  energy: number;
+  samples: Float32Array;
 }
 
 export function permissionStateForError(error: unknown) {
@@ -80,5 +92,27 @@ export function voiceStreamOpenedMessage(
     voiceStreamId,
     voiceStreamGeneration: 1,
     openedAt,
+  };
+}
+
+export function createVoiceStreamId(nowMs = Date.now()): string {
+  return "web_voice_" + nowMs.toString(36);
+}
+
+export function voiceChunkMessage(input: VoiceChunkMessageInput) {
+  return {
+    type: "voice_chunk",
+    source: "operator_web_pcm16",
+    sessionId: input.sessionId,
+    sequence: input.sequence,
+    voiceStreamId: input.voiceStreamId,
+    voiceStreamGeneration: 1,
+    monotonicMs: input.monotonicMs,
+    sentAt: input.sentAt,
+    sampleRate: input.sampleRate,
+    channels: 1,
+    durationMs: (input.samples.length / input.sampleRate) * 1000,
+    energy: input.energy,
+    dataBase64: pcm16Base64(input.samples),
   };
 }
