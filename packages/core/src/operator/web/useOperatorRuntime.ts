@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer } from "react";
 
-import type { DebugState } from "../lan-operator-debug-state.ts";
 import {
   createOperatorRuntimeClient,
   type LanOperatorLiveProviderEntry,
@@ -19,6 +18,11 @@ import {
   selectRuntimeProvider,
 } from "./runtimeState.ts";
 import type { OperatorRuntimeViewState } from "./runtimeState.ts";
+import {
+  debugReportArtifactMessage,
+  engineControlMessage,
+  toolCancelMessage,
+} from "./operatorRuntimeCommands.ts";
 import type { OperatorBoot, RealtimeState } from "./useRealtime.ts";
 
 export type { OperatorDebug, RuntimeEventView, RuntimeStatusBody };
@@ -131,53 +135,27 @@ export function useOperatorRuntime(
 
   const sendEngineControl = useCallback(
     (type: EngineControlType, detail: Record<string, unknown> = {}) => {
-      send({
-        type: "engine_control",
-        sessionId: boot.sessionId,
-        control: {
-          type,
-          reason: `operator_web_${type}`,
-          responseId: String(
-            detail.responseId ||
-              (state.debug.output as DebugState["output"] | undefined)?.assistantText
-                ?.lastResponseId ||
-              "",
-          ),
-          detail: { source: "operator_web", ...detail },
-        },
-      });
+      send(engineControlMessage({ debug: state.debug, detail, sessionId: boot.sessionId, type }));
     },
-    [boot.sessionId, state.debug.output, send],
+    [boot.sessionId, state.debug, send],
   );
 
   const cancelTool = useCallback(
     (reason = "operator_cancelled") => {
-      const toolRouting = state.debug.toolRouting as DebugState["toolRouting"] | undefined;
-      const kwwk = state.debug.kwwk as DebugState["kwwk"] | undefined;
-      const timeline = state.debug.timeline as DebugState["timeline"] | undefined;
-      const output = state.debug.output as DebugState["output"] | undefined;
-      send({
-        type: "tool_cancel",
-        callId: toolRouting?.callId || "",
-        itemId: toolRouting?.itemId || "",
-        toolName: toolRouting?.actualTool || "kwwk_computer_use",
-        jobId: kwwk?.currentJobId || "",
-        turnId: timeline?.currentTurnId || "",
-        responseId: output?.assistantText?.lastResponseId || "",
-        reason,
-      });
+      send(toolCancelMessage(state.debug, reason));
     },
-    [send, state.debug.kwwk, state.debug.output, state.debug.timeline, state.debug.toolRouting],
+    [send, state.debug],
   );
 
   const markInteresting = useCallback(
     (input: { label?: string; note?: string } = {}) => {
-      send({
-        type: "debug_report_artifact",
-        action: "mark",
-        label: input.label || "operator_web_mark",
-        note: input.note || "",
-      });
+      send(
+        debugReportArtifactMessage({
+          action: "mark",
+          label: input.label || "operator_web_mark",
+          note: input.note || "",
+        }),
+      );
     },
     [send],
   );
@@ -185,7 +163,7 @@ export function useOperatorRuntime(
   const copyReport = useCallback(async () => {
     const text = await client.fetchReportText();
     await navigator.clipboard?.writeText?.(text).catch(() => undefined);
-    send({ type: "debug_report_artifact", action: "copy", label: "operator_web" });
+    send(debugReportArtifactMessage({ action: "copy", label: "operator_web" }));
     return text.length;
   }, [client, send]);
 
@@ -198,7 +176,7 @@ export function useOperatorRuntime(
     anchor.download = `lan-operator-report-${Date.now()}.json`;
     anchor.click();
     URL.revokeObjectURL(href);
-    send({ type: "debug_report_artifact", action: "download", label: "operator_web" });
+    send(debugReportArtifactMessage({ action: "download", label: "operator_web" }));
   }, [client, send]);
 
   const selectedProvider = useMemo(() => {
