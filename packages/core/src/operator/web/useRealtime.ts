@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { wsUrl } from "./protocol.ts";
+
 export interface OperatorBoot {
   sessionId: string;
   token?: string;
   conversationTransport?: string;
   botName?: string;
+  webrtcIceServers?: Array<Record<string, unknown>>;
 }
 
 export interface CanonicalEvent {
   type: string;
   text?: string;
   responseId?: string;
+  audioBase64?: string;
+  error?: string;
+  detail?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -25,18 +31,16 @@ export interface RealtimeState {
   connect: () => void;
   disconnect: () => void;
   sendText: (text: string) => void;
-}
-
-function authSuffix(token: string | undefined, path: string) {
-  if (!token) return path;
-  return path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+  /** Subscribe to every canonical event (audio playback etc.); returns unsubscribe. */
+  subscribe: (listener: (event: CanonicalEvent) => void) => () => void;
 }
 
 /**
- * Phase-1 realtime hook: owns the events WebSocket and the canonical-event
- * stream, and sends engine controls + text input over the same wire protocol
- * the legacy surface uses. The heavy imperative clients (voice/canvas/WebRTC)
- * are reused in later phases; this hook only needs events + control + text.
+ * Realtime hook: owns the events WebSocket and the canonical-event stream,
+ * and sends engine controls + text input over the same wire protocol the
+ * legacy surface uses. High-frequency assistant_audio_chunk events are
+ * delivered only to subscribers (kept out of the rendered `events` list so
+ * playback doesn't re-render the conversation on every ~50ms chunk).
  */
 export function useRealtime(boot: OperatorBoot): RealtimeState {
   const [wsOpen, setWsOpen] = useState(false);
@@ -46,6 +50,7 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
   const [error, setError] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
   const seqRef = useRef(0);
+  const listenersRef = useRef(new Set<(event: CanonicalEvent) => void>());
 
   const send = useCallback((message: Record<string, unknown>) => {
     const ws = wsRef.current;
@@ -58,10 +63,7 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const open = () => {
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      ws = new WebSocket(
-        proto + "//" + location.host + authSuffix(boot.token, "/operator/events/ws"),
-      );
+      ws = new WebSocket(wsUrl(boot.token, "/operator/events/ws"));
       wsRef.current = ws;
       ws.addEventListener("open", () => {
         setWsOpen(true);
@@ -80,15 +82,21 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
         }
         if (payload.type === "canonical_conversation_event" && payload.event) {
           const ev = payload.event as CanonicalEvent;
-          setEvents((prev) => [...prev, ev].slice(-200));
+          // Audio chunks go to subscribers only — keeping them out of the
+          // rendered event list avoids re-rendering on every ~50ms chunk.
+          for (const listener of listenersRef.current) listener(ev);
+          if (ev.type !== "assistant_audio_chunk") {
+            setEvents((prev) => [...prev, ev].slice(-200));
+          }
           if (ev.type === "engine_error") setError(String(ev.error || "engine_error"));
         }
         const debug = payload.debug as
           | { conversation?: { status?: string; provider?: { adapterKind?: string } } }
           | undefined;
         if (debug?.conversation?.status) setStatus(debug.conversation.status as RealtimeStatus);
-        if (debug?.conversation?.provider?.adapterKind)
+        if (debug?.conversation?.provider?.adapterKind) {
           setTransport(debug.conversation.provider.adapterKind);
+        }
       });
     };
     open();
@@ -141,5 +149,12 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
     [boot.sessionId, send],
   );
 
-  return { wsOpen, status, transport, events, error, connect, disconnect, sendText };
+  const subscribe = useCallback((listener: (event: CanonicalEvent) => void) => {
+    listenersRef.current.add(listener);
+    return () => {
+      listenersRef.current.delete(listener);
+    };
+  }, []);
+
+  return { wsOpen, status, transport, events, error, connect, disconnect, sendText, subscribe };
 }

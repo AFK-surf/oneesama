@@ -1821,6 +1821,7 @@ export function createLanOperatorSurfaceServer(
               token: accessToken || undefined,
               conversationTransport: config.conversationTransport,
               botName: config.botName,
+              webrtcIceServers: options.webrtcIceServers || [],
             },
             bundleUrl,
           ),

@@ -1,6 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Stage } from "./Stage.tsx";
 import { useRealtime, type CanonicalEvent, type OperatorBoot } from "./useRealtime.ts";
+import { useVoice } from "./useVoice.ts";
 
 interface Turn {
   role: "you" | "bot";
@@ -45,9 +47,16 @@ const STATUS_COLOR: Record<string, string> = {
 
 export function App({ boot }: { boot: OperatorBoot }) {
   const rt = useRealtime(boot);
+  const voice = useVoice(boot, rt.subscribe);
   const [draft, setDraft] = useState("");
   const turns = useMemo(() => turnsFromEvents(rt.events), [rt.events]);
   const connected = rt.status === "connected";
+  const streamRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = streamRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns.length]);
 
   return (
     <div className="op">
@@ -59,57 +68,100 @@ export function App({ boot }: { boot: OperatorBoot }) {
         </div>
       </header>
 
-      <main className="op-stream">
-        {turns.length === 0 ? (
-          <div className="op-empty">
-            No messages yet. Connect, then type below (or speak — voice comes next).
+      <div className="op-body">
+        <div className="op-left">
+          <Stage boot={boot} />
+          <div className="op-mic">
+            {voice.micOn ? (
+              <>
+                <button className="btn" onClick={voice.stopMic} type="button">
+                  Stop mic
+                </button>
+                <button
+                  className="btn"
+                  onClick={voice.toggleMute}
+                  type="button"
+                  aria-pressed={voice.muted}
+                >
+                  {voice.muted ? "Unmute" : "Mute"}
+                </button>
+                <span className="op-energy" aria-label="mic energy">
+                  <span
+                    className="op-energy-bar"
+                    style={{ width: Math.min(100, voice.energy * 400) + "%" }}
+                  />
+                </span>
+              </>
+            ) : (
+              <button
+                className="btn primary"
+                onClick={() => void voice.startMic()}
+                type="button"
+                disabled={!connected}
+              >
+                Start mic
+              </button>
+            )}
+            {!connected ? <span className="op-mic-hint">connect first to speak</span> : null}
           </div>
-        ) : (
-          turns.map((t, i) => (
-            <div key={i} className={"op-turn op-turn-" + t.role}>
-              <span className="op-turn-role">{t.role === "you" ? "you" : "bot"}</span>
-              <span className="op-turn-text">{t.text || "…"}</span>
-              <span className="op-turn-status">{t.status}</span>
-            </div>
-          ))
-        )}
-        {rt.error ? <div className="op-error">⚠ {rt.error}</div> : null}
-      </main>
-
-      <footer className="op-composer">
-        <div className="op-conn">
-          <span className={"op-conn-label " + (connected ? "ok" : "off")}>
-            {connected ? "connected" : rt.wsOpen ? "not connected" : "offline"}
-          </span>
-          {connected ? (
-            <button className="btn" onClick={rt.disconnect}>
-              Disconnect
-            </button>
-          ) : (
-            <button className="btn primary" onClick={rt.connect} disabled={!rt.wsOpen}>
-              Connect
-            </button>
-          )}
         </div>
-        <form
-          className="op-input"
-          onSubmit={(e) => {
-            e.preventDefault();
-            rt.sendText(draft);
-            setDraft("");
-          }}
-        >
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Type a message…"
-            autoComplete="off"
-          />
-          <button className="btn" type="submit" disabled={!connected}>
-            Send
-          </button>
-        </form>
-      </footer>
+
+        <section className="op-conv">
+          <div className="op-stream" ref={streamRef}>
+            {turns.length === 0 ? (
+              <div className="op-empty">No messages yet. Connect, then speak or type below.</div>
+            ) : (
+              turns.map((t, i) => (
+                <div key={i} className={"op-turn op-turn-" + t.role}>
+                  <span className="op-turn-role">{t.role}</span>
+                  <span className="op-turn-text">{t.text || "…"}</span>
+                  <span className="op-turn-status">{t.status}</span>
+                </div>
+              ))
+            )}
+            {rt.error ? <div className="op-error">⚠ {rt.error}</div> : null}
+          </div>
+          <footer className="op-composer">
+            <div className="op-conn">
+              <span className={"op-conn-label " + (connected ? "ok" : "off")}>
+                {connected ? "connected" : rt.wsOpen ? "not connected" : "offline"}
+              </span>
+              {connected ? (
+                <button className="btn" onClick={rt.disconnect} type="button">
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  className="btn primary"
+                  onClick={rt.connect}
+                  disabled={!rt.wsOpen}
+                  type="button"
+                >
+                  Connect
+                </button>
+              )}
+            </div>
+            <form
+              className="op-input"
+              onSubmit={(e) => {
+                e.preventDefault();
+                rt.sendText(draft);
+                setDraft("");
+              }}
+            >
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Type a message…"
+                autoComplete="off"
+              />
+              <button className="btn" type="submit" disabled={!connected}>
+                Send
+              </button>
+            </form>
+          </footer>
+        </section>
+      </div>
     </div>
   );
 }

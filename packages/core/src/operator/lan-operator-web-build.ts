@@ -7,6 +7,7 @@ export interface OperatorWebBoot {
   token?: string;
   conversationTransport?: string;
   botName?: string;
+  webrtcIceServers?: Array<Record<string, unknown>>;
 }
 
 const ENTRY = fileURLToPath(new URL("./web/main.tsx", import.meta.url));
@@ -60,11 +61,25 @@ export function buildOperatorWebShellHtml(boot: OperatorWebBoot, bundleUrl: stri
       :root { --bg:#eef0f4; --surface:#fff; --panel:#f7f8fa; --ink:#1b1d22; --muted:#5b616e; --faint:#8b909c; --line:#e4e6ea; --accent:#0f9d6e; --blue:#2563c9; color-scheme:light; }
       * { box-sizing: border-box; }
       body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; }
-      .op { display:flex; flex-direction:column; height:100vh; max-width:760px; margin:0 auto; }
-      .op-header { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--line); background:var(--surface); }
+      .op { display:flex; flex-direction:column; height:100vh; }
+      .op-header { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--line); background:var(--surface); }
       .op-title { font-weight:680; font-size:15px; }
       .op-status { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; color:var(--muted); display:flex; align-items:center; gap:6px; }
       .op-status .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+      .op-body { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:14px; padding:14px; }
+      @media (max-width:880px) { .op-body { grid-template-columns:1fr; grid-template-rows:minmax(220px,1fr) minmax(220px,1fr); } }
+      .op-left { display:flex; flex-direction:column; gap:10px; min-width:0; }
+      .op-stage { flex:1; min-height:0; display:flex; flex-direction:column; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--surface); }
+      .op-stage-tabs { display:flex; gap:3px; padding:6px; border-bottom:1px solid var(--line); }
+      .op-stage-tabs button { height:28px; padding:0 14px; border:0; border-radius:7px; background:transparent; color:var(--muted); font:inherit; font-weight:560; cursor:pointer; }
+      .op-stage-tabs button.active { color:#1a44b8; background:color-mix(in srgb,var(--blue) 14%,transparent); }
+      .op-stage-frame { flex:1; min-height:0; position:relative; background:#0f172a; }
+      .op-stage-frame iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+      .op-mic { display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+      .op-mic-hint { font-size:11px; color:var(--faint); }
+      .op-energy { width:80px; height:6px; border-radius:3px; background:var(--line); overflow:hidden; }
+      .op-energy-bar { display:block; height:100%; background:var(--accent); transition:width .08s linear; }
+      .op-conv { display:flex; flex-direction:column; min-height:0; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--surface); }
       .op-stream { flex:1; min-height:0; overflow:auto; padding:16px 18px; display:flex; flex-direction:column; gap:10px; }
       .op-empty { color:var(--faint); text-align:center; margin:auto; font-size:13px; }
       .op-turn { display:flex; flex-direction:column; gap:3px; max-width:78%; padding:9px 12px; border-radius:12px; }
