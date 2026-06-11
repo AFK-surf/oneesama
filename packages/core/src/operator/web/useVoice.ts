@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import type { CanonicalEvent, OperatorBoot } from "./useRealtime.ts";
 import { rmsEnergy, wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
 import { useLatestRef } from "./useLatestRef.ts";
+import { INITIAL_VOICE_VIEW, voiceViewReducer } from "./voiceState.ts";
+import type { VoiceViewState } from "./voiceState.ts";
 import {
   listVoiceInputDevices,
   selectedVoiceDeviceMissing,
@@ -20,16 +22,7 @@ import {
   voiceStreamOpenedMessage,
 } from "./voiceEvents.ts";
 
-export interface VoiceState {
-  micOn: boolean;
-  muted: boolean;
-  pushToTalkActive: boolean;
-  localVadEnabled: boolean;
-  localVadActive: boolean;
-  energy: number;
-  devices: VoiceDevice[];
-  selectedDeviceId: string;
-  chunksSent: number;
+export interface VoiceState extends VoiceViewState {
   refreshDevices: () => Promise<VoiceDevice[]>;
   setSelectedDeviceId: (deviceId: string) => void;
   setLocalVadEnabled: (enabled: boolean) => void;
@@ -52,24 +45,16 @@ export function useVoice(
   subscribe: (listener: (event: CanonicalEvent) => void) => () => void,
   sendOperatorEvent: (message: Record<string, unknown>) => void,
 ): VoiceState {
-  const [micOn, setMicOn] = useState(false);
-  const [muted, setMutedState] = useState(false);
-  const [pushToTalkActive, setPushToTalkActive] = useState(false);
-  const [localVadEnabled, setLocalVadEnabledState] = useState(false);
-  const [localVadActive, setLocalVadActive] = useState(false);
-  const [energy, setEnergy] = useState(0);
-  const [devices, setDevices] = useState<VoiceDevice[]>([]);
-  const [selectedDeviceId, setSelectedDeviceIdState] = useState("");
-  const [chunksSent, setChunksSent] = useState(0);
+  const [voiceView, dispatch] = useReducer(voiceViewReducer, INITIAL_VOICE_VIEW);
 
-  const mutedRef = useLatestRef(muted);
-  const micOnRef = useLatestRef(micOn);
-  const localVadEnabledRef = useLatestRef(localVadEnabled);
-  const localVadActiveRef = useLatestRef(localVadActive);
-  const energyRef = useLatestRef(energy);
-  const devicesLengthRef = useLatestRef(devices.length);
-  const selectedDeviceIdRef = useLatestRef(selectedDeviceId);
-  const pushToTalkActiveRef = useLatestRef(pushToTalkActive);
+  const mutedRef = useLatestRef(voiceView.muted);
+  const micOnRef = useLatestRef(voiceView.micOn);
+  const localVadEnabledRef = useLatestRef(voiceView.localVadEnabled);
+  const localVadActiveRef = useLatestRef(voiceView.localVadActive);
+  const energyRef = useLatestRef(voiceView.energy);
+  const devicesLengthRef = useLatestRef(voiceView.devices.length);
+  const selectedDeviceIdRef = useLatestRef(voiceView.selectedDeviceId);
+  const pushToTalkActiveRef = useLatestRef(voiceView.pushToTalkActive);
   const captureCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -83,7 +68,7 @@ export function useVoice(
 
   const setMuted = useCallback((next: boolean) => {
     mutedRef.current = next;
-    setMutedState(next);
+    dispatch({ type: "set_muted", muted: next });
   }, []);
 
   const reportMicBlocked = useCallback(
@@ -127,8 +112,8 @@ export function useVoice(
   const setLocalVadEnabled = useCallback(
     (enabled: boolean) => {
       localVadEnabledRef.current = enabled;
-      setLocalVadEnabledState(enabled);
-      if (!enabled) setLocalVadActive(false);
+      dispatch({ type: "set_local_vad_enabled", enabled });
+      if (!enabled) localVadActiveRef.current = false;
       emitLocalVadConfigured(enabled);
     },
     [emitLocalVadConfigured],
@@ -136,11 +121,16 @@ export function useVoice(
 
   const refreshDevices = useCallback(async () => {
     const nextDevices = await listVoiceInputDevices(navigator.mediaDevices);
-    setDevices(nextDevices);
+    let nextSelectedDeviceId = selectedDeviceIdRef.current;
     if (selectedVoiceDeviceMissing(nextDevices, selectedDeviceIdRef.current)) {
-      selectedDeviceIdRef.current = "";
-      setSelectedDeviceIdState("");
+      nextSelectedDeviceId = "";
+      selectedDeviceIdRef.current = nextSelectedDeviceId;
     }
+    dispatch({
+      type: "set_devices",
+      devices: nextDevices,
+      selectedDeviceId: nextSelectedDeviceId,
+    });
     sendOperatorEvent({
       type: "operator_voice_devices_refreshed",
       availableDeviceCount: nextDevices.length,
@@ -190,9 +180,7 @@ export function useVoice(
     captureCtxRef.current = null;
     voiceWsRef.current?.close();
     voiceWsRef.current = null;
-    setMicOn(false);
-    setEnergy(0);
-    setLocalVadActive(false);
+    dispatch({ type: "mic_stopped" });
     sendOperatorEvent({
       type: "operator_mic_disarmed",
       capture: voiceCaptureSnapshot({
@@ -243,7 +231,7 @@ export function useVoice(
       voiceWsRef.current = ws;
       streamIdRef.current = createVoiceStreamId();
       seqRef.current = 0;
-      setChunksSent(0);
+      dispatch({ type: "set_chunks_sent", chunksSent: 0 });
       ws.addEventListener("open", () => {
         ws.send(JSON.stringify(voiceStreamOpenedMessage(boot.sessionId, streamIdRef.current)));
         sendOperatorEvent(
@@ -273,9 +261,12 @@ export function useVoice(
       processor.onaudioprocess = (event) => {
         const input = event.inputBuffer.getChannelData(0);
         const energyValue = rmsEnergy(input);
-        setEnergy(energyValue);
+        dispatch({ type: "set_energy", energy: energyValue });
         const vadActive = energyValue >= LOCAL_VAD_THRESHOLD;
-        if (localVadEnabledRef.current) setLocalVadActive(vadActive);
+        if (localVadEnabledRef.current) {
+          localVadActiveRef.current = vadActive;
+          dispatch({ type: "set_local_vad_active", active: vadActive });
+        }
         if (mutedRef.current) return;
         if (ws.readyState !== WebSocket.OPEN) return;
         if (ws.bufferedAmount > 1_000_000) return; // backpressure drop
@@ -294,12 +285,14 @@ export function useVoice(
             }),
           ),
         );
-        if (sequence % 8 === 0) setChunksSent(sequence + 1);
+        if (sequence % 8 === 0) {
+          dispatch({ type: "set_chunks_sent", chunksSent: sequence + 1 });
+        }
       };
       source.connect(processor);
       processor.connect(sink);
       sink.connect(ctx.destination);
-      setMicOn(true);
+      dispatch({ type: "mic_started" });
     } catch (error) {
       processorRef.current?.disconnect();
       processorRef.current = null;
@@ -309,8 +302,7 @@ export function useVoice(
       if (captureCtxRef.current === ctx) captureCtxRef.current = null;
       voiceWsRef.current?.close();
       voiceWsRef.current = null;
-      setMicOn(false);
-      setEnergy(0);
+      dispatch({ type: "mic_stopped" });
       reportMicBlocked(error);
       throw error;
     }
@@ -319,7 +311,7 @@ export function useVoice(
   const setSelectedDeviceId = useCallback(
     (deviceId: string) => {
       selectedDeviceIdRef.current = deviceId;
-      setSelectedDeviceIdState(deviceId);
+      dispatch({ type: "set_selected_device", deviceId });
       if (micOnRef.current) {
         stopMic();
         window.setTimeout(() => void startMic().catch(() => undefined), 0);
@@ -335,7 +327,7 @@ export function useVoice(
   const startPushToTalk = useCallback(async () => {
     if (pushToTalkActiveRef.current) return;
     pushToTalkActiveRef.current = true;
-    setPushToTalkActive(true);
+    dispatch({ type: "set_push_to_talk_active", active: true });
     pttPreviousMutedRef.current = mutedRef.current;
     pttStartedMicRef.current = !micOnRef.current;
     try {
@@ -343,7 +335,7 @@ export function useVoice(
       setVoiceMuted(false, "operator_web_ptt_start");
     } catch (error) {
       pushToTalkActiveRef.current = false;
-      setPushToTalkActive(false);
+      dispatch({ type: "set_push_to_talk_active", active: false });
       setVoiceMuted(pttPreviousMutedRef.current, "operator_web_ptt_failed");
       throw error;
     }
@@ -352,7 +344,7 @@ export function useVoice(
   const finishPushToTalk = useCallback(() => {
     if (!pushToTalkActiveRef.current) return;
     pushToTalkActiveRef.current = false;
-    setPushToTalkActive(false);
+    dispatch({ type: "set_push_to_talk_active", active: false });
     setVoiceMuted(
       pttStartedMicRef.current ? true : pttPreviousMutedRef.current,
       "operator_web_ptt_finish",
@@ -362,15 +354,7 @@ export function useVoice(
   useEffect(() => () => stopMic(), [stopMic]);
 
   return {
-    micOn,
-    muted,
-    pushToTalkActive,
-    localVadEnabled,
-    localVadActive,
-    energy,
-    devices,
-    selectedDeviceId,
-    chunksSent,
+    ...voiceView,
     refreshDevices,
     setSelectedDeviceId,
     setLocalVadEnabled,
