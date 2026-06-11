@@ -27,11 +27,10 @@ import {
   createVoiceStreamId,
   localVadConfiguredMessage,
   micBlockedMessage,
-  micDisarmedMessage,
-  micMutedMessage,
+  voiceCaptureDisarmedMessages,
   voiceCaptureOpenedMessages,
   voiceDevicesRefreshedMessage,
-  voiceEngineControl,
+  voiceMutedMessages,
 } from "./voiceEvents.ts";
 
 export interface VoiceState extends VoiceViewState {
@@ -147,17 +146,15 @@ export function useVoice(
   const setVoiceMuted = useCallback(
     (nextMuted: boolean, reason = "operator_web_set_mute") => {
       setMuted(nextMuted);
-      sendOperatorEvent(
-        voiceEngineControl(boot.sessionId, "set_voice_muted", reason, { muted: nextMuted }),
-      );
-      sendOperatorEvent(
-        micMutedMessage({
-          muted: nextMuted,
-          micOn: micOnRef.current,
-          deviceId: selectedDeviceIdRef.current,
-          availableDeviceCount: devicesLengthRef.current,
-        }),
-      );
+      const muted = voiceMutedMessages({
+        sessionId: boot.sessionId,
+        reason,
+        muted: nextMuted,
+        micOn: micOnRef.current,
+        deviceId: selectedDeviceIdRef.current,
+        availableDeviceCount: devicesLengthRef.current,
+      });
+      for (const message of muted.operatorEvents) sendOperatorEvent(message);
     },
     [boot.sessionId, sendOperatorEvent, setMuted],
   );
@@ -178,18 +175,13 @@ export function useVoice(
     captureCtxRef.current = null;
     voiceWsRef.current = null;
     dispatch({ type: "mic_stopped" });
-    sendOperatorEvent(
-      micDisarmedMessage({
-        muted: mutedRef.current,
-        deviceId: selectedDeviceIdRef.current,
-        availableDeviceCount: devicesLengthRef.current,
-      }),
-    );
-    sendOperatorEvent(
-      voiceEngineControl(boot.sessionId, "set_voice_armed", "operator_web_stop_mic", {
-        armed: false,
-      }),
-    );
+    const disarmed = voiceCaptureDisarmedMessages({
+      sessionId: boot.sessionId,
+      muted: mutedRef.current,
+      deviceId: selectedDeviceIdRef.current,
+      availableDeviceCount: devicesLengthRef.current,
+    });
+    for (const message of disarmed.operatorEvents) sendOperatorEvent(message);
   }, [boot.sessionId, sendOperatorEvent]);
 
   const startMic = useCallback(async () => {

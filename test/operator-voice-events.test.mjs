@@ -11,11 +11,13 @@ import {
   micDisarmedMessage,
   micMutedMessage,
   permissionStateForError,
+  voiceCaptureDisarmedMessages,
   voiceChunkMessage,
   voiceCaptureOpenedMessages,
   voiceCaptureSnapshot,
   voiceDevicesRefreshedMessage,
   voiceEngineControl,
+  voiceMutedMessages,
   voiceStreamOpenedMessage,
 } from "../packages/core/src/operator/web/voiceEvents.ts";
 
@@ -232,6 +234,41 @@ test("operator voice events build mic status payload contracts", () => {
   );
 
   assert.deepEqual(
+    voiceMutedMessages({
+      sessionId: "session-1",
+      reason: "operator_web_toggle_mute",
+      muted: true,
+      micOn: false,
+      deviceId: "",
+      availableDeviceCount: 0,
+    }),
+    {
+      operatorEvents: [
+        {
+          type: "engine_control",
+          sessionId: "session-1",
+          control: {
+            type: "set_voice_muted",
+            reason: "operator_web_toggle_mute",
+            detail: { source: "operator_web", muted: true },
+          },
+        },
+        {
+          type: "operator_mic_muted",
+          capture: {
+            armed: false,
+            muted: true,
+            mode: "microphone_pcm16",
+            status: "idle",
+            deviceId: null,
+            availableDeviceCount: 0,
+          },
+        },
+      ],
+    },
+  );
+
+  assert.deepEqual(
     micDisarmedMessage({
       muted: true,
       deviceId: "mic-1",
@@ -247,6 +284,39 @@ test("operator voice events build mic status payload contracts", () => {
         deviceId: "mic-1",
         availableDeviceCount: 1,
       },
+    },
+  );
+
+  assert.deepEqual(
+    voiceCaptureDisarmedMessages({
+      sessionId: "session-1",
+      muted: true,
+      deviceId: "mic-1",
+      availableDeviceCount: 1,
+    }),
+    {
+      operatorEvents: [
+        {
+          type: "operator_mic_disarmed",
+          capture: {
+            armed: false,
+            muted: true,
+            mode: "microphone_pcm16",
+            status: "idle",
+            deviceId: "mic-1",
+            availableDeviceCount: 1,
+          },
+        },
+        {
+          type: "engine_control",
+          sessionId: "session-1",
+          control: {
+            type: "set_voice_armed",
+            reason: "operator_web_stop_mic",
+            detail: { source: "operator_web", armed: false },
+          },
+        },
+      ],
     },
   );
 });

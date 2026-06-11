@@ -77,10 +77,28 @@ export interface VoiceMicCaptureMessageInput {
   availableDeviceCount: number;
 }
 
+export interface VoiceMutedMessagesInput extends VoiceMicMutedMessageInput {
+  sessionId: string;
+  reason?: string;
+}
+
+export interface VoiceCaptureDisarmedMessagesInput extends VoiceMicCaptureMessageInput {
+  sessionId: string;
+  reason?: string;
+}
+
 export interface VoiceCaptureOpenedMessagesInput extends VoiceMicCaptureMessageInput {
   sessionId: string;
   voiceStreamId: string;
   openedAt?: string;
+}
+
+export interface VoiceMutedMessages {
+  operatorEvents: [ReturnType<typeof voiceEngineControl>, OperatorVoiceStatusMessage];
+}
+
+export interface VoiceCaptureDisarmedMessages {
+  operatorEvents: [OperatorVoiceStatusMessage, ReturnType<typeof voiceEngineControl>];
 }
 
 export interface VoiceCaptureOpenedMessages {
@@ -179,6 +197,27 @@ export function micMutedMessage(input: VoiceMicMutedMessageInput): OperatorVoice
   };
 }
 
+export function voiceMutedMessages(input: VoiceMutedMessagesInput): VoiceMutedMessages {
+  return {
+    operatorEvents: [
+      voiceEngineControl(
+        input.sessionId,
+        "set_voice_muted",
+        input.reason || "operator_web_set_mute",
+        {
+          muted: input.muted,
+        },
+      ),
+      micMutedMessage({
+        muted: input.muted,
+        micOn: input.micOn,
+        deviceId: input.deviceId,
+        availableDeviceCount: input.availableDeviceCount,
+      }),
+    ],
+  };
+}
+
 export function micDisarmedMessage(input: VoiceMicCaptureMessageInput): OperatorVoiceStatusMessage {
   return {
     type: "operator_mic_disarmed",
@@ -189,6 +228,28 @@ export function micDisarmedMessage(input: VoiceMicCaptureMessageInput): Operator
       deviceId: input.deviceId || null,
       availableDeviceCount: input.availableDeviceCount,
     }),
+  };
+}
+
+export function voiceCaptureDisarmedMessages(
+  input: VoiceCaptureDisarmedMessagesInput,
+): VoiceCaptureDisarmedMessages {
+  return {
+    operatorEvents: [
+      micDisarmedMessage({
+        muted: input.muted,
+        deviceId: input.deviceId,
+        availableDeviceCount: input.availableDeviceCount,
+      }),
+      voiceEngineControl(
+        input.sessionId,
+        "set_voice_armed",
+        input.reason || "operator_web_stop_mic",
+        {
+          armed: false,
+        },
+      ),
+    ],
   };
 }
 
