@@ -45,6 +45,7 @@ interface WorkEvent {
  * manual command trigger (the realtime model does not yet call it as a tool).
  */
 export function useWork(realtime: RealtimeState): WorkState {
+  const { send, subscribeRaw } = realtime;
   const [phase, setPhase] = useState<WorkPhase>("idle");
   const [intent, setIntent] = useState("");
   const [backend, setBackend] = useState("");
@@ -53,7 +54,7 @@ export function useWork(realtime: RealtimeState): WorkState {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    return realtime.subscribeRaw((payload) => {
+    return subscribeRaw((payload) => {
       if (payload.type !== "work_event" || !payload.event) return;
       const event = payload.event as WorkEvent;
       const detail = event.detail || {};
@@ -89,7 +90,7 @@ export function useWork(realtime: RealtimeState): WorkState {
         setPhase("error");
       }
     });
-  }, [realtime.subscribeRaw]);
+  }, [subscribeRaw]);
 
   const run = useCallback(
     (next: string) => {
@@ -101,9 +102,9 @@ export function useWork(realtime: RealtimeState): WorkState {
       setResult(null);
       setError("");
       setPhase("running");
-      realtime.send({ type: "work_run", command: value });
+      send({ type: "work_run", command: value });
     },
-    [realtime],
+    [send],
   );
 
   return { phase, intent, backend, steps, result, error, run };

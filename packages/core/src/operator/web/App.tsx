@@ -1,195 +1,120 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect } from "react";
 
+import type { DebugState } from "../lan-operator-debug-state.ts";
+import { CommandBar } from "./CommandBar.tsx";
+import { ConversationPanel } from "./ConversationPanel.tsx";
+import { DiagnosticsPanel } from "./DiagnosticsPanel.tsx";
 import { Stage } from "./Stage.tsx";
+import { VoiceBar } from "./VoiceBar.tsx";
 import { WorkPanel } from "./WorkPanel.tsx";
-import { useRealtime, type CanonicalEvent, type OperatorBoot } from "./useRealtime.ts";
+import { useOperatorRuntime } from "./useOperatorRuntime.ts";
+import { useRealtime, type OperatorBoot } from "./useRealtime.ts";
 import { useVoice } from "./useVoice.ts";
 import { useWork } from "./useWork.ts";
 
-interface Turn {
-  role: "you" | "bot";
-  text: string;
-  status: string;
-}
-
-// Collapse the canonical event stream into readable conversation turns:
-// completed transcripts are what the bot heard; assistant text deltas/completes
-// accumulate per responseId into one bot turn.
-function turnsFromEvents(events: CanonicalEvent[]): Turn[] {
-  const turns: Turn[] = [];
-  const assistantByResponse = new Map<string, Turn>();
-  for (const ev of events) {
-    if (ev.type === "transcript_completed" && ev.text) {
-      turns.push({ role: "you", text: String(ev.text), status: "heard" });
-    } else if (ev.type === "assistant_text_delta" || ev.type === "assistant_text_completed") {
-      const key = String(ev.responseId || "r");
-      let turn = assistantByResponse.get(key);
-      if (!turn) {
-        turn = { role: "bot", text: "", status: "speaking" };
-        assistantByResponse.set(key, turn);
-        turns.push(turn);
-      }
-      if (ev.type === "assistant_text_completed") {
-        if (ev.text) turn.text = String(ev.text);
-        turn.status = "final";
-      } else if (ev.text) {
-        turn.text += String(ev.text);
-      }
-    }
-  }
-  return turns;
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  connected: "#0a7a52",
-  connecting: "#9a6310",
-  not_connected: "#8b909c",
-  failed: "#b5322b",
-};
+type LegacySurfaceWindow = Window &
+  typeof globalThis & {
+    MAB_LAN_OPERATOR_SURFACE?: Record<string, unknown>;
+  };
 
 export function App({ boot }: { boot: OperatorBoot }) {
   const rt = useRealtime(boot);
-  const voice = useVoice(boot, rt.subscribe);
+  const runtime = useOperatorRuntime(boot, rt);
+  const voice = useVoice(boot, rt.subscribe, rt.send);
   const work = useWork(rt);
-  const [draft, setDraft] = useState("");
-  const [tab, setTab] = useState<"chat" | "work">("chat");
-  const turns = useMemo(() => turnsFromEvents(rt.events), [rt.events]);
-  const connected = rt.status === "connected";
-  const streamRef = useRef<HTMLDivElement | null>(null);
+  const connected = String(runtime.debug.conversation?.status || rt.status) === "connected";
 
-  useEffect(() => {
-    const el = streamRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [turns.length]);
+  useLegacySurfaceBridge({ runtime, voice });
+
+  const shellClass = `op op-${String(
+    runtime.debug.conversation?.status || rt.status || "not_connected",
+  )}`;
 
   return (
-    <div className="op">
-      <header className="op-header">
-        <div className="op-title">{boot.botName || "Oneesama"} · Realtime</div>
-        <div className="op-status">
-          <span className="dot" style={{ background: STATUS_COLOR[rt.status] || "#8b909c" }} />
-          {rt.status} · {rt.transport}
+    <div className={shellClass}>
+      <CommandBar boot={boot} realtime={rt} runtime={runtime} />
+      <main className="op-main">
+        <div className="op-left-rail">
+          <Stage boot={boot} debug={runtime.debug} />
+          <VoiceBar voice={voice} connected={connected} />
         </div>
-      </header>
-
-      <div className="op-body">
-        <div className="op-left">
-          <Stage boot={boot} />
-          <div className="op-mic">
-            {voice.micOn ? (
-              <>
-                <button className="btn" onClick={voice.stopMic} type="button">
-                  Stop mic
-                </button>
-                <button
-                  className="btn"
-                  onClick={voice.toggleMute}
-                  type="button"
-                  aria-pressed={voice.muted}
-                >
-                  {voice.muted ? "Unmute" : "Mute"}
-                </button>
-                <span className="op-energy" aria-label="mic energy">
-                  <span
-                    className="op-energy-bar"
-                    style={{ width: Math.min(100, voice.energy * 400) + "%" }}
-                  />
-                </span>
-              </>
-            ) : (
-              <button
-                className="btn primary"
-                onClick={() => void voice.startMic()}
-                type="button"
-                disabled={!connected}
-              >
-                Start mic
-              </button>
-            )}
-            {!connected ? <span className="op-mic-hint">connect first to speak</span> : null}
-          </div>
+        <div className="op-center-rail">
+          <ConversationPanel realtime={rt} runtime={runtime} />
+          <WorkPanel work={work} runtime={runtime} />
         </div>
-
-        <section className="op-conv">
-          <div className="op-conv-tabs">
-            <button
-              className={tab === "chat" ? "active" : ""}
-              onClick={() => setTab("chat")}
-              type="button"
-            >
-              Chat
-            </button>
-            <button
-              className={tab === "work" ? "active" : ""}
-              onClick={() => setTab("work")}
-              type="button"
-            >
-              Work{work.phase === "running" ? " ·" : ""}
-            </button>
-          </div>
-          {tab === "work" ? (
-            <WorkPanel work={work} />
-          ) : (
-            <>
-              <div className="op-stream" ref={streamRef}>
-                {turns.length === 0 ? (
-                  <div className="op-empty">
-                    No messages yet. Connect, then speak or type below.
-                  </div>
-                ) : (
-                  turns.map((t, i) => (
-                    <div key={i} className={"op-turn op-turn-" + t.role}>
-                      <span className="op-turn-role">{t.role}</span>
-                      <span className="op-turn-text">{t.text || "…"}</span>
-                      <span className="op-turn-status">{t.status}</span>
-                    </div>
-                  ))
-                )}
-                {rt.error ? <div className="op-error">⚠ {rt.error}</div> : null}
-              </div>
-              <footer className="op-composer">
-                <div className="op-conn">
-                  <span className={"op-conn-label " + (connected ? "ok" : "off")}>
-                    {connected ? "connected" : rt.wsOpen ? "not connected" : "offline"}
-                  </span>
-                  {connected ? (
-                    <button className="btn" onClick={rt.disconnect} type="button">
-                      Disconnect
-                    </button>
-                  ) : (
-                    <button
-                      className="btn primary"
-                      onClick={rt.connect}
-                      disabled={!rt.wsOpen}
-                      type="button"
-                    >
-                      Connect
-                    </button>
-                  )}
-                </div>
-                <form
-                  className="op-input"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    rt.sendText(draft);
-                    setDraft("");
-                  }}
-                >
-                  <input
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    placeholder="Type a message…"
-                    autoComplete="off"
-                  />
-                  <button className="btn" type="submit" disabled={!connected}>
-                    Send
-                  </button>
-                </form>
-              </footer>
-            </>
-          )}
-        </section>
-      </div>
+        <DiagnosticsPanel runtime={runtime} />
+      </main>
     </div>
   );
+}
+
+function useLegacySurfaceBridge({
+  runtime,
+  voice,
+}: {
+  runtime: ReturnType<typeof useOperatorRuntime>;
+  voice: ReturnType<typeof useVoice>;
+}) {
+  useEffect(() => {
+    const debug = runtime.debug;
+    const voiceDebug = debug.voice as DebugState["voice"] | undefined;
+    const visual = debug.visual as DebugState["visual"] | undefined;
+    const kwwk = debug.kwwk as DebugState["kwwk"] | undefined;
+    const state = new Proxy(
+      {
+        ready: true,
+        voiceCapture: {
+          status: voice.micOn ? "capturing" : "idle",
+          lastEnergy: voice.energy,
+          availableDeviceCount: voice.devices.length,
+          deviceId: voice.selectedDeviceId,
+        },
+        voiceLocalVad: {
+          enabled: voice.localVadEnabled,
+          role: voice.localVadEnabled ? "telemetry" : "disabled",
+          active: voice.localVadActive,
+          threshold: 0.02,
+          lastEnergy: voice.energy,
+        },
+        voiceDeviceId: voice.selectedDeviceId,
+        voiceDevices: voice.devices,
+        voiceChunksSent: voice.chunksSent,
+        voiceMuted: voice.muted,
+        voice: voiceDebug || {},
+        visual: visual || {},
+        sources: visual?.sources || [],
+        kwwk: kwwk || {},
+        conversation: debug.conversation || {},
+        liveProviderConfig: runtime.providerConfig,
+      },
+      {
+        set(target, property, value) {
+          if (property === "voiceDeviceId") {
+            voice.setSelectedDeviceId(String(value || ""));
+          }
+          return Reflect.set(target, property, value);
+        },
+      },
+    );
+    const surface = {
+      state,
+      refreshVoiceDevices: voice.refreshDevices,
+      configureLocalVad: (enabled: boolean) => {
+        voice.setLocalVadEnabled(Boolean(enabled));
+        return {
+          enabled: Boolean(enabled),
+          role: enabled ? "telemetry" : "disabled",
+          active: false,
+          threshold: 0.02,
+          lastEnergy: voice.energy,
+        };
+      },
+      markInterestingRun: runtime.markInteresting,
+      copyDiagnostics: runtime.copyReport,
+      liveProviderConfig: () => structuredClone(runtime.providerConfig || {}),
+      currentComposition: () => structuredClone(visual?.composition || {}),
+      currentDebug: () => structuredClone(debug || {}),
+    };
+    (window as LegacySurfaceWindow).MAB_LAN_OPERATOR_SURFACE = surface;
+  }, [runtime, voice]);
 }

@@ -3,32 +3,62 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanonicalEvent, OperatorBoot } from "./useRealtime.ts";
 import { pcm16Base64, pcm16ToFloat32, rmsEnergy, wsUrl } from "./protocol.ts";
 
+export interface VoiceDevice {
+  index: number;
+  deviceId: string;
+  label: string;
+  groupId: string;
+}
+
 export interface VoiceState {
   micOn: boolean;
   muted: boolean;
+  pushToTalkActive: boolean;
+  localVadEnabled: boolean;
+  localVadActive: boolean;
   energy: number;
+  devices: VoiceDevice[];
+  selectedDeviceId: string;
+  chunksSent: number;
+  refreshDevices: () => Promise<VoiceDevice[]>;
+  setSelectedDeviceId: (deviceId: string) => void;
+  setLocalVadEnabled: (enabled: boolean) => void;
   startMic: () => Promise<void>;
   stopMic: () => void;
   toggleMute: () => void;
+  startPushToTalk: () => Promise<void>;
+  finishPushToTalk: () => void;
 }
 
 const CAPTURE_SAMPLE_RATE = 24000; // matches the session's declared pcm rate
 const PROCESSOR_FRAMES = 1024;
+const LOCAL_VAD_THRESHOLD = 0.02;
+
+function permissionStateForError(error: unknown) {
+  const name = String((error as { name?: string })?.name || "");
+  if (name === "NotAllowedError" || name === "SecurityError") return "denied";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "unavailable";
+  return "unknown";
+}
 
 /**
- * Voice for the React surface: mic capture (PCM16 @24k over the voice WS, the
- * same wire format the legacy surface uses) and assistant audio playback
- * (decode assistant_audio_chunk events → scheduled WebAudio). Playback is fed
- * by the realtime event subscription (audio chunks are excluded from the
- * rendered events list); capture opens its own voice WS.
+ * Voice for the React cockpit: mic capture (PCM16 @24k over the voice WS),
+ * assistant audio playback, device selection, PTT, and local-VAD telemetry.
  */
 export function useVoice(
   boot: OperatorBoot,
   subscribe: (listener: (event: CanonicalEvent) => void) => () => void,
+  sendOperatorEvent: (message: Record<string, unknown>) => void,
 ): VoiceState {
   const [micOn, setMicOn] = useState(false);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMutedState] = useState(false);
+  const [pushToTalkActive, setPushToTalkActive] = useState(false);
+  const [localVadEnabled, setLocalVadEnabledState] = useState(false);
+  const [localVadActive, setLocalVadActive] = useState(false);
   const [energy, setEnergy] = useState(0);
+  const [devices, setDevices] = useState<VoiceDevice[]>([]);
+  const [selectedDeviceId, setSelectedDeviceIdState] = useState("");
+  const [chunksSent, setChunksSent] = useState(0);
 
   const captureCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -37,10 +67,43 @@ export function useVoice(
   const seqRef = useRef(0);
   const streamIdRef = useRef("");
   const mutedRef = useRef(false);
+  const micOnRef = useRef(false);
+  const localVadEnabledRef = useRef(false);
+  const localVadActiveRef = useRef(false);
+  const energyRef = useRef(0);
+  const devicesLengthRef = useRef(0);
+  const selectedDeviceIdRef = useRef("");
+  const pushToTalkActiveRef = useRef(false);
+  const pttPreviousMutedRef = useRef(false);
+  const pttStartedMicRef = useRef(false);
 
   // --- assistant audio playback (fed by the event subscription) ---
   const playCtxRef = useRef<AudioContext | null>(null);
   const scheduledAtRef = useRef(0);
+
+  useEffect(() => {
+    micOnRef.current = micOn;
+  }, [micOn]);
+
+  useEffect(() => {
+    localVadEnabledRef.current = localVadEnabled;
+  }, [localVadEnabled]);
+
+  useEffect(() => {
+    localVadActiveRef.current = localVadActive;
+  }, [localVadActive]);
+
+  useEffect(() => {
+    energyRef.current = energy;
+  }, [energy]);
+
+  useEffect(() => {
+    selectedDeviceIdRef.current = selectedDeviceId;
+  }, [selectedDeviceId]);
+
+  useEffect(() => {
+    devicesLengthRef.current = devices.length;
+  }, [devices.length]);
 
   useEffect(() => {
     const playChunk = (ev: CanonicalEvent) => {
@@ -72,10 +135,135 @@ export function useVoice(
     return subscribe(playChunk);
   }, [subscribe]);
 
+  const setMuted = useCallback((next: boolean) => {
+    mutedRef.current = next;
+    setMutedState(next);
+  }, []);
+
+  const reportMicBlocked = useCallback(
+    (error: unknown) => {
+      const message = String((error as Error)?.message || error || "microphone_blocked");
+      sendOperatorEvent({
+        type: "operator_mic_blocked",
+        error: message,
+        capture: {
+          armed: false,
+          muted: mutedRef.current,
+          mode: "microphone_pcm16",
+          status: "blocked",
+          error: message,
+          permissionState: permissionStateForError(error),
+          deviceId: selectedDeviceIdRef.current || null,
+          availableDeviceCount: devicesLengthRef.current,
+        },
+      });
+    },
+    [sendOperatorEvent],
+  );
+
+  const emitLocalVadConfigured = useCallback(
+    (enabled: boolean, active = localVadActiveRef.current, lastEnergy = energyRef.current) => {
+      sendOperatorEvent({
+        type: "operator_local_vad_configured",
+        localVad: {
+          enabled,
+          role: enabled ? "telemetry" : "disabled",
+          active: enabled ? active : false,
+          threshold: LOCAL_VAD_THRESHOLD,
+          lastEnergy,
+          lastUpdatedAt: new Date().toISOString(),
+        },
+        capture: {
+          status: micOnRef.current ? "capturing" : "idle",
+          deviceId: selectedDeviceIdRef.current || null,
+        },
+      });
+    },
+    [sendOperatorEvent],
+  );
+
+  const setLocalVadEnabled = useCallback(
+    (enabled: boolean) => {
+      localVadEnabledRef.current = enabled;
+      setLocalVadEnabledState(enabled);
+      if (!enabled) setLocalVadActive(false);
+      emitLocalVadConfigured(enabled);
+    },
+    [emitLocalVadConfigured],
+  );
+
+  const refreshDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    const nextDevices = (await navigator.mediaDevices.enumerateDevices())
+      .filter((device) => device.kind === "audioinput")
+      .map((device, index) => ({
+        index,
+        deviceId: device.deviceId,
+        label: device.label || `Microphone ${index + 1}`,
+        groupId: device.groupId,
+      }));
+    setDevices(nextDevices);
+    if (
+      selectedDeviceIdRef.current &&
+      !nextDevices.some((device) => device.deviceId === selectedDeviceIdRef.current)
+    ) {
+      selectedDeviceIdRef.current = "";
+      setSelectedDeviceIdState("");
+    }
+    sendOperatorEvent({
+      type: "operator_voice_devices_refreshed",
+      availableDeviceCount: nextDevices.length,
+      capture: {
+        status: micOnRef.current ? "capturing" : "idle",
+        deviceId: selectedDeviceIdRef.current || null,
+      },
+      localVad: {
+        enabled: localVadEnabledRef.current,
+        role: localVadEnabledRef.current ? "telemetry" : "disabled",
+        active: localVadEnabledRef.current && localVadActiveRef.current,
+        threshold: LOCAL_VAD_THRESHOLD,
+        lastEnergy: energyRef.current,
+        lastUpdatedAt: new Date().toISOString(),
+      },
+    });
+    return nextDevices;
+  }, [sendOperatorEvent]);
+
+  const setVoiceMuted = useCallback(
+    (nextMuted: boolean, reason = "operator_web_set_mute") => {
+      setMuted(nextMuted);
+      sendOperatorEvent({
+        type: "engine_control",
+        sessionId: boot.sessionId,
+        control: {
+          type: "set_voice_muted",
+          reason,
+          detail: { muted: nextMuted, source: "operator_web" },
+        },
+      });
+      sendOperatorEvent({
+        type: "operator_mic_muted",
+        capture: {
+          armed: micOnRef.current,
+          muted: nextMuted,
+          mode: "microphone_pcm16",
+          status: micOnRef.current ? "capturing" : "idle",
+          deviceId: selectedDeviceIdRef.current || null,
+          availableDeviceCount: devicesLengthRef.current,
+        },
+      });
+    },
+    [boot.sessionId, sendOperatorEvent, setMuted],
+  );
+
+  useEffect(() => {
+    void refreshDevices().catch(() => undefined);
+  }, [refreshDevices]);
+
   const stopMic = useCallback(() => {
     processorRef.current?.disconnect();
     processorRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     void captureCtxRef.current?.close?.();
     captureCtxRef.current = null;
@@ -83,89 +271,213 @@ export function useVoice(
     voiceWsRef.current = null;
     setMicOn(false);
     setEnergy(0);
-  }, []);
-
-  const startMic = useCallback(async () => {
-    if (micOn) return;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+    setLocalVadActive(false);
+    sendOperatorEvent({
+      type: "operator_mic_disarmed",
+      capture: {
+        armed: false,
+        muted: mutedRef.current,
+        mode: "microphone_pcm16",
+        status: "idle",
+        deviceId: selectedDeviceIdRef.current || null,
+        availableDeviceCount: devicesLengthRef.current,
       },
     });
-    streamRef.current = stream;
-    const Ctor =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    let ctx: AudioContext;
-    try {
-      ctx = new Ctor({ sampleRate: CAPTURE_SAMPLE_RATE });
-    } catch {
-      ctx = new Ctor();
-    }
-    captureCtxRef.current = ctx;
-    await ctx.resume?.();
-
-    const ws = new WebSocket(wsUrl(boot.token, "/operator/voice/ws"));
-    voiceWsRef.current = ws;
-    streamIdRef.current = "web_voice_" + Date.now().toString(36);
-    seqRef.current = 0;
-    ws.addEventListener("open", () => {
-      ws.send(
-        JSON.stringify({
-          type: "operator_voice_stream_opened",
-          sessionId: boot.sessionId,
-          voiceStreamId: streamIdRef.current,
-          voiceStreamGeneration: 1,
-          openedAt: new Date().toISOString(),
-        }),
-      );
+    sendOperatorEvent({
+      type: "engine_control",
+      sessionId: boot.sessionId,
+      control: {
+        type: "set_voice_armed",
+        reason: "operator_web_stop_mic",
+        detail: { armed: false, source: "operator_web" },
+      },
     });
+  }, [boot.sessionId, sendOperatorEvent]);
 
-    const source = ctx.createMediaStreamSource(stream);
-    const processor = ctx.createScriptProcessor(PROCESSOR_FRAMES, 1, 1);
-    processorRef.current = processor;
-    const sink = ctx.createGain();
-    sink.gain.value = 0;
-    processor.onaudioprocess = (e) => {
-      const input = e.inputBuffer.getChannelData(0);
-      const energyValue = rmsEnergy(input);
-      setEnergy(energyValue);
-      if (mutedRef.current) return;
-      if (ws.readyState !== WebSocket.OPEN) return;
-      if (ws.bufferedAmount > 1_000_000) return; // backpressure drop
-      ws.send(
-        JSON.stringify({
-          type: "voice_chunk",
-          source: "operator_web_pcm16",
+  const startMic = useCallback(async () => {
+    if (micOnRef.current) return;
+    let stream: MediaStream | null = null;
+    let ctx: AudioContext | null = null;
+    try {
+      const deviceId = selectedDeviceIdRef.current;
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      streamRef.current = stream;
+      void refreshDevices().catch(() => undefined);
+      const track = stream.getAudioTracks()[0] || null;
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      try {
+        ctx = new Ctor({ sampleRate: CAPTURE_SAMPLE_RATE });
+      } catch {
+        ctx = new Ctor();
+      }
+      captureCtxRef.current = ctx;
+      await ctx.resume?.();
+
+      const ws = new WebSocket(wsUrl(boot.token, "/operator/voice/ws"));
+      voiceWsRef.current = ws;
+      streamIdRef.current = "web_voice_" + Date.now().toString(36);
+      seqRef.current = 0;
+      setChunksSent(0);
+      ws.addEventListener("open", () => {
+        ws.send(
+          JSON.stringify({
+            type: "operator_voice_stream_opened",
+            sessionId: boot.sessionId,
+            voiceStreamId: streamIdRef.current,
+            voiceStreamGeneration: 1,
+            openedAt: new Date().toISOString(),
+          }),
+        );
+        sendOperatorEvent({
+          type: "engine_control",
           sessionId: boot.sessionId,
-          sequence: seqRef.current++,
-          voiceStreamId: streamIdRef.current,
-          voiceStreamGeneration: 1,
-          monotonicMs: performance.now(),
-          sentAt: new Date().toISOString(),
-          sampleRate: ctx.sampleRate,
-          channels: 1,
-          durationMs: (input.length / ctx.sampleRate) * 1000,
-          energy: energyValue,
-          dataBase64: pcm16Base64(input),
-        }),
-      );
-    };
-    source.connect(processor);
-    processor.connect(sink);
-    sink.connect(ctx.destination);
-    setMicOn(true);
-  }, [boot.sessionId, boot.token, micOn]);
+          control: {
+            type: "set_voice_armed",
+            reason: "operator_web_start_mic",
+            detail: { armed: true, source: "operator_web" },
+          },
+        });
+        sendOperatorEvent({
+          type: "operator_mic_armed",
+          capture: {
+            armed: true,
+            muted: mutedRef.current,
+            mode: "microphone_pcm16",
+            status: "capturing",
+            permissionState: "granted",
+            deviceId: selectedDeviceIdRef.current || null,
+            deviceLabel: track?.label || "",
+            availableDeviceCount: devicesLengthRef.current,
+          },
+        });
+      });
+
+      const source = ctx.createMediaStreamSource(stream);
+      const processor = ctx.createScriptProcessor(PROCESSOR_FRAMES, 1, 1);
+      processorRef.current = processor;
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
+      processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        const energyValue = rmsEnergy(input);
+        setEnergy(energyValue);
+        const vadActive = energyValue >= LOCAL_VAD_THRESHOLD;
+        if (localVadEnabledRef.current) setLocalVadActive(vadActive);
+        if (mutedRef.current) return;
+        if (ws.readyState !== WebSocket.OPEN) return;
+        if (ws.bufferedAmount > 1_000_000) return; // backpressure drop
+        const sequence = seqRef.current++;
+        ws.send(
+          JSON.stringify({
+            type: "voice_chunk",
+            source: "operator_web_pcm16",
+            sessionId: boot.sessionId,
+            sequence,
+            voiceStreamId: streamIdRef.current,
+            voiceStreamGeneration: 1,
+            monotonicMs: performance.now(),
+            sentAt: new Date().toISOString(),
+            sampleRate: ctx?.sampleRate || CAPTURE_SAMPLE_RATE,
+            channels: 1,
+            durationMs: (input.length / (ctx?.sampleRate || CAPTURE_SAMPLE_RATE)) * 1000,
+            energy: energyValue,
+            dataBase64: pcm16Base64(input),
+          }),
+        );
+        if (sequence % 8 === 0) setChunksSent(sequence + 1);
+      };
+      source.connect(processor);
+      processor.connect(sink);
+      sink.connect(ctx.destination);
+      setMicOn(true);
+    } catch (error) {
+      processorRef.current?.disconnect();
+      processorRef.current = null;
+      stream?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      void ctx?.close?.();
+      if (captureCtxRef.current === ctx) captureCtxRef.current = null;
+      voiceWsRef.current?.close();
+      voiceWsRef.current = null;
+      setMicOn(false);
+      setEnergy(0);
+      reportMicBlocked(error);
+      throw error;
+    }
+  }, [boot.sessionId, boot.token, refreshDevices, reportMicBlocked, sendOperatorEvent]);
+
+  const setSelectedDeviceId = useCallback(
+    (deviceId: string) => {
+      selectedDeviceIdRef.current = deviceId;
+      setSelectedDeviceIdState(deviceId);
+      if (micOnRef.current) {
+        stopMic();
+        window.setTimeout(() => void startMic().catch(() => undefined), 0);
+      }
+    },
+    [startMic, stopMic],
+  );
 
   const toggleMute = useCallback(() => {
-    mutedRef.current = !mutedRef.current;
-    setMuted(mutedRef.current);
-  }, []);
+    setVoiceMuted(!mutedRef.current, "operator_web_toggle_mute");
+  }, [setVoiceMuted]);
+
+  const startPushToTalk = useCallback(async () => {
+    if (pushToTalkActiveRef.current) return;
+    pushToTalkActiveRef.current = true;
+    setPushToTalkActive(true);
+    pttPreviousMutedRef.current = mutedRef.current;
+    pttStartedMicRef.current = !micOnRef.current;
+    try {
+      if (!micOnRef.current) await startMic();
+      setVoiceMuted(false, "operator_web_ptt_start");
+    } catch (error) {
+      pushToTalkActiveRef.current = false;
+      setPushToTalkActive(false);
+      setVoiceMuted(pttPreviousMutedRef.current, "operator_web_ptt_failed");
+      throw error;
+    }
+  }, [setVoiceMuted, startMic]);
+
+  const finishPushToTalk = useCallback(() => {
+    if (!pushToTalkActiveRef.current) return;
+    pushToTalkActiveRef.current = false;
+    setPushToTalkActive(false);
+    setVoiceMuted(
+      pttStartedMicRef.current ? true : pttPreviousMutedRef.current,
+      "operator_web_ptt_finish",
+    );
+  }, [setVoiceMuted]);
 
   useEffect(() => () => stopMic(), [stopMic]);
 
-  return { micOn, muted, energy, startMic, stopMic, toggleMute };
+  return {
+    micOn,
+    muted,
+    pushToTalkActive,
+    localVadEnabled,
+    localVadActive,
+    energy,
+    devices,
+    selectedDeviceId,
+    chunksSent,
+    refreshDevices,
+    setSelectedDeviceId,
+    setLocalVadEnabled,
+    startMic,
+    stopMic,
+    toggleMute,
+    startPushToTalk,
+    finishPushToTalk,
+  };
 }

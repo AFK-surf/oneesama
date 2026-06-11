@@ -1812,6 +1812,7 @@ export function createLanOperatorSurfaceServer(
               conversationTransport: config.conversationTransport,
               botName: config.botName,
               webrtcIceServers: options.webrtcIceServers || [],
+              liveProviderConfig,
             },
             bundleUrl,
           ),

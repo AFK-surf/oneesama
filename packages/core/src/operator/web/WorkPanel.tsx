@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import type { DebugState } from "../lan-operator-debug-state.ts";
+import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { WorkState } from "./useWork.ts";
 
 const PHASE_LABEL: Record<string, string> = {
@@ -10,12 +12,31 @@ const PHASE_LABEL: Record<string, string> = {
   error: "error",
 };
 
-export function WorkPanel({ work }: { work: WorkState }) {
+export function WorkPanel({ work, runtime }: { work: WorkState; runtime: OperatorRuntimeState }) {
   const [draft, setDraft] = useState("");
   const running = work.phase === "running";
+  const kwwk = runtime.debug.kwwk as DebugState["kwwk"] | undefined;
+  const verification = kwwk?.verification;
 
   return (
     <div className="op-work">
+      <div className="op-panel-head">
+        <div>
+          <h2>Work</h2>
+          <p>
+            {kwwk?.status || work.phase} / {kwwk?.latestActionKind || work.backend || "manual"}
+          </p>
+        </div>
+        <button
+          className="btn"
+          onClick={() => runtime.cancelTool()}
+          type="button"
+          disabled={!/queued|observing|planning|executing|verifying/i.test(kwwk?.status || "")}
+        >
+          Stop action
+        </button>
+      </div>
+
       <form
         className="op-input"
         onSubmit={(e) => {
@@ -36,6 +57,35 @@ export function WorkPanel({ work }: { work: WorkState }) {
       </form>
 
       <div className="op-work-body">
+        <div className="op-work-kwwk">
+          <span className={"op-work-phase phase-" + (kwwk?.status || "idle")}>
+            {kwwk?.status || "idle"}
+          </span>
+          <span>job {kwwk?.currentJobId || "-"}</span>
+          <span>cursor {kwwk?.cursorEventCount || 0}</span>
+          <span>actions {kwwk?.actionCount || 0}</span>
+          <span>
+            verify{" "}
+            {verification?.ok == null
+              ? verification?.status || "-"
+              : verification.ok
+                ? "ok"
+                : "failed"}
+          </span>
+        </div>
+        {kwwk?.blocker ? <div className="op-error">blocked: {kwwk.blocker}</div> : null}
+        {kwwk?.actions?.length ? (
+          <div className="op-work-actions">
+            {kwwk.actions.slice(-5).map((action, index) => (
+              <div key={`${action.ts}-${index}`}>
+                <strong>{action.kind}</strong>
+                <span>{action.label}</span>
+                <em>{action.status}</em>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         {work.phase === "idle" ? (
           <div className="op-empty">
             Type a command — e.g. “look up what changed in 2.0”. Runs on the kwwk-cu backend.

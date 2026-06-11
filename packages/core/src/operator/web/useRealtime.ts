@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { LanOperatorLiveProviderConfig } from "../lan-operator-live-provider-config.ts";
 import { wsUrl } from "./protocol.ts";
 
 export interface OperatorBoot {
@@ -8,6 +9,7 @@ export interface OperatorBoot {
   conversationTransport?: string;
   botName?: string;
   webrtcIceServers?: Array<Record<string, unknown>>;
+  liveProviderConfig?: LanOperatorLiveProviderConfig | null;
 }
 
 export interface CanonicalEvent {

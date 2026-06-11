@@ -134,6 +134,37 @@ test("LAN operator surface serves /operator as the Local Operator app entrypoint
   }
 });
 
+test("LAN operator React cockpit boots with provider config and core control contracts", async () => {
+  const surface = createLanOperatorSurfaceServer({
+    host: "127.0.0.1",
+    port: 0,
+    sessionId: "lan-operator-react-cockpit-contract",
+    botName: "Oneesama",
+    conversationTransport: "openai_realtime",
+  });
+  const { url } = await surface.listen();
+  try {
+    const pageResponse = await fetch(new URL("/operator", url));
+    const html = await pageResponse.text();
+    const bundleResponse = await fetch(new URL("/operator/app.js", url));
+    const bundle = await bundleResponse.text();
+
+    assert.equal(pageResponse.status, 200);
+    assert.equal(bundleResponse.status, 200);
+    assert.match(html, /window\.__OPERATOR_BOOT__/);
+    assert.match(html, /"liveProviderConfig"/);
+    assert.match(html, /"providers":\[/);
+    assert.match(bundle, /Local Operator Cockpit/);
+    assert.match(bundle, /conversation-provider-select/);
+    assert.match(bundle, /voice-device-select/);
+    assert.match(bundle, /cancel-response-button/);
+    assert.match(bundle, /debug-json/);
+    assert.match(bundle, /operator_mic_blocked/);
+  } finally {
+    await surface.close();
+  }
+});
+
 test("LAN operator surface serves local avatar video assets for foreground preset switches", async () => {
   const surface = createLanOperatorSurfaceServer({
     host: "127.0.0.1",
