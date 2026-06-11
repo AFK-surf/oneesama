@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import type { CanonicalEvent, OperatorBoot } from "./useRealtime.ts";
-import { rmsEnergy, wsUrl } from "./protocol.ts";
+import { wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
 import { useLatestRef } from "./useLatestRef.ts";
 import {
-  CAPTURE_SAMPLE_RATE,
   PROCESSOR_FRAMES,
-  canSendVoiceChunk,
   createVoiceCaptureAudioContext,
-  shouldPublishVoiceChunkCount,
   stopVoiceCaptureResources,
   voiceAudioConstraints,
 } from "./voiceCaptureResources.ts";
+import { voiceCaptureFrameDecision } from "./voiceCaptureFrames.ts";
 import { INITIAL_VOICE_VIEW, voiceViewReducer } from "./voiceState.ts";
 import type { VoiceViewState } from "./voiceState.ts";
 import {
@@ -21,14 +19,12 @@ import {
   type VoiceDevice,
 } from "./voiceDevices.ts";
 import {
-  LOCAL_VAD_THRESHOLD,
   createVoiceStreamId,
   localVadConfiguredMessage,
   micArmedMessage,
   micBlockedMessage,
   micDisarmedMessage,
   micMutedMessage,
-  voiceChunkMessage,
   voiceDevicesRefreshedMessage,
   voiceEngineControl,
   voiceStreamOpenedMessage,
@@ -234,39 +230,30 @@ export function useVoice(
       sink.gain.value = 0;
       processor.onaudioprocess = (event) => {
         const input = event.inputBuffer.getChannelData(0);
-        const energyValue = rmsEnergy(input);
-        dispatch({ type: "set_energy", energy: energyValue });
-        const vadActive = energyValue >= LOCAL_VAD_THRESHOLD;
-        if (localVadEnabledRef.current) {
-          localVadActiveRef.current = vadActive;
-          dispatch({ type: "set_local_vad_active", active: vadActive });
+        const frame = voiceCaptureFrameDecision({
+          samples: input,
+          sampleRate: ctx?.sampleRate,
+          localVadEnabled: localVadEnabledRef.current,
+          muted: mutedRef.current,
+          readyState: ws.readyState,
+          bufferedAmount: ws.bufferedAmount,
+          sequence: seqRef.current,
+          voiceStreamId: streamIdRef.current,
+          sessionId: boot.sessionId,
+          monotonicMs: performance.now(),
+          sentAt: new Date().toISOString(),
+        });
+        dispatch({ type: "set_energy", energy: frame.energy });
+        if (frame.updateLocalVad) {
+          localVadActiveRef.current = frame.vadActive;
+          dispatch({ type: "set_local_vad_active", active: frame.vadActive });
         }
-        if (
-          !canSendVoiceChunk({
-            muted: mutedRef.current,
-            readyState: ws.readyState,
-            bufferedAmount: ws.bufferedAmount,
-          })
-        ) {
-          return;
+        seqRef.current = frame.nextSequence;
+        if (frame.chunkMessage) {
+          ws.send(JSON.stringify(frame.chunkMessage));
         }
-        const sequence = seqRef.current++;
-        ws.send(
-          JSON.stringify(
-            voiceChunkMessage({
-              samples: input,
-              sampleRate: ctx?.sampleRate || CAPTURE_SAMPLE_RATE,
-              energy: energyValue,
-              monotonicMs: performance.now(),
-              sentAt: new Date().toISOString(),
-              sequence,
-              voiceStreamId: streamIdRef.current,
-              sessionId: boot.sessionId,
-            }),
-          ),
-        );
-        if (shouldPublishVoiceChunkCount(sequence)) {
-          dispatch({ type: "set_chunks_sent", chunksSent: sequence + 1 });
+        if (frame.chunksSent != null) {
+          dispatch({ type: "set_chunks_sent", chunksSent: frame.chunksSent });
         }
       };
       source.connect(processor);
