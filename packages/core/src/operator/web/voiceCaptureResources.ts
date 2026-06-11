@@ -25,6 +25,16 @@ export interface VoiceCaptureResourceHandles {
   websocket?: Pick<WebSocket, "close"> | null;
 }
 
+export interface VoiceCaptureGraphInput {
+  audioContext: Pick<
+    AudioContext,
+    "createGain" | "createMediaStreamSource" | "createScriptProcessor" | "destination"
+  >;
+  stream: MediaStream;
+  onAudioProcess: (event: AudioProcessingEvent) => void;
+  processorFrames?: number;
+}
+
 export function voiceAudioConstraints(deviceId: string): MediaStreamConstraints {
   return {
     audio: {
@@ -35,6 +45,22 @@ export function voiceAudioConstraints(deviceId: string): MediaStreamConstraints 
       autoGainControl: true,
     },
   };
+}
+
+export function connectVoiceCaptureGraph(input: VoiceCaptureGraphInput): ScriptProcessorNode {
+  const source = input.audioContext.createMediaStreamSource(input.stream);
+  const processor = input.audioContext.createScriptProcessor(
+    input.processorFrames ?? PROCESSOR_FRAMES,
+    1,
+    1,
+  );
+  const sink = input.audioContext.createGain();
+  sink.gain.value = 0;
+  processor.onaudioprocess = input.onAudioProcess;
+  source.connect(processor);
+  processor.connect(sink);
+  sink.connect(input.audioContext.destination);
+  return processor;
 }
 
 export async function createVoiceCaptureAudioContext(

@@ -3,9 +3,11 @@ import { test } from "vite-plus/test";
 
 import {
   CAPTURE_SAMPLE_RATE,
+  PROCESSOR_FRAMES,
   VOICE_WS_BACKPRESSURE_BYTES,
   VOICE_WS_OPEN_STATE,
   canSendVoiceChunk,
+  connectVoiceCaptureGraph,
   createVoiceCaptureAudioContext,
   shouldPublishVoiceChunkCount,
   stopVoiceCaptureResources,
@@ -72,6 +74,61 @@ test("operator voice capture resources support webkit audio context fallback", a
 
   assert.ok(ctx instanceof FakeWebkitAudioContext);
   assert.deepEqual(calls, [{ sampleRate: CAPTURE_SAMPLE_RATE }, "resume"]);
+});
+
+test("operator voice capture resources connect browser audio graph through silent sink", () => {
+  const calls = [];
+  const stream = { id: "stream-1" };
+  const destination = { label: "destination" };
+  const source = {
+    label: "source",
+    connect: (target) => calls.push(["source.connect", target.label]),
+  };
+  const processor = {
+    label: "processor",
+    onaudioprocess: null,
+    connect: (target) => calls.push(["processor.connect", target.label]),
+  };
+  const sink = {
+    label: "sink",
+    gain: { value: 1 },
+    connect: (target) => calls.push(["sink.connect", target.label]),
+  };
+  const ctx = {
+    destination,
+    createMediaStreamSource: (nextStream) => {
+      calls.push(["createMediaStreamSource", nextStream.id]);
+      return source;
+    },
+    createScriptProcessor: (frames, inputs, outputs) => {
+      calls.push(["createScriptProcessor", frames, inputs, outputs]);
+      return processor;
+    },
+    createGain: () => {
+      calls.push(["createGain"]);
+      return sink;
+    },
+  };
+  const events = [];
+
+  const returned = connectVoiceCaptureGraph({
+    audioContext: ctx,
+    stream,
+    onAudioProcess: (event) => events.push(event.kind),
+  });
+
+  assert.equal(returned, processor);
+  assert.equal(sink.gain.value, 0);
+  processor.onaudioprocess({ kind: "frame" });
+  assert.deepEqual(events, ["frame"]);
+  assert.deepEqual(calls, [
+    ["createMediaStreamSource", "stream-1"],
+    ["createScriptProcessor", PROCESSOR_FRAMES, 1, 1],
+    ["createGain"],
+    ["source.connect", "processor"],
+    ["processor.connect", "sink"],
+    ["sink.connect", "destination"],
+  ]);
 });
 
 test("operator voice capture resources gate chunk sending by mute and backpressure", () => {

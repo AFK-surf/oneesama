@@ -5,7 +5,7 @@ import { wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
 import { useLatestRef } from "./useLatestRef.ts";
 import {
-  PROCESSOR_FRAMES,
+  connectVoiceCaptureGraph,
   createVoiceCaptureAudioContext,
   stopVoiceCaptureResources,
   voiceAudioConstraints,
@@ -223,42 +223,39 @@ export function useVoice(
         );
       });
 
-      const source = ctx.createMediaStreamSource(stream);
-      const processor = ctx.createScriptProcessor(PROCESSOR_FRAMES, 1, 1);
+      const processor = connectVoiceCaptureGraph({
+        audioContext: ctx,
+        stream,
+        onAudioProcess: (event) => {
+          const input = event.inputBuffer.getChannelData(0);
+          const frame = voiceCaptureFrameDecision({
+            samples: input,
+            sampleRate: ctx?.sampleRate,
+            localVadEnabled: localVadEnabledRef.current,
+            muted: mutedRef.current,
+            readyState: ws.readyState,
+            bufferedAmount: ws.bufferedAmount,
+            sequence: seqRef.current,
+            voiceStreamId: streamIdRef.current,
+            sessionId: boot.sessionId,
+            monotonicMs: performance.now(),
+            sentAt: new Date().toISOString(),
+          });
+          dispatch({ type: "set_energy", energy: frame.energy });
+          if (frame.updateLocalVad) {
+            localVadActiveRef.current = frame.vadActive;
+            dispatch({ type: "set_local_vad_active", active: frame.vadActive });
+          }
+          seqRef.current = frame.nextSequence;
+          if (frame.chunkMessage) {
+            ws.send(JSON.stringify(frame.chunkMessage));
+          }
+          if (frame.chunksSent != null) {
+            dispatch({ type: "set_chunks_sent", chunksSent: frame.chunksSent });
+          }
+        },
+      });
       processorRef.current = processor;
-      const sink = ctx.createGain();
-      sink.gain.value = 0;
-      processor.onaudioprocess = (event) => {
-        const input = event.inputBuffer.getChannelData(0);
-        const frame = voiceCaptureFrameDecision({
-          samples: input,
-          sampleRate: ctx?.sampleRate,
-          localVadEnabled: localVadEnabledRef.current,
-          muted: mutedRef.current,
-          readyState: ws.readyState,
-          bufferedAmount: ws.bufferedAmount,
-          sequence: seqRef.current,
-          voiceStreamId: streamIdRef.current,
-          sessionId: boot.sessionId,
-          monotonicMs: performance.now(),
-          sentAt: new Date().toISOString(),
-        });
-        dispatch({ type: "set_energy", energy: frame.energy });
-        if (frame.updateLocalVad) {
-          localVadActiveRef.current = frame.vadActive;
-          dispatch({ type: "set_local_vad_active", active: frame.vadActive });
-        }
-        seqRef.current = frame.nextSequence;
-        if (frame.chunkMessage) {
-          ws.send(JSON.stringify(frame.chunkMessage));
-        }
-        if (frame.chunksSent != null) {
-          dispatch({ type: "set_chunks_sent", chunksSent: frame.chunksSent });
-        }
-      };
-      source.connect(processor);
-      processor.connect(sink);
-      sink.connect(ctx.destination);
       dispatch({ type: "mic_started" });
     } catch (error) {
       stopVoiceCaptureResources({
