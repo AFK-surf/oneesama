@@ -4,6 +4,15 @@ import type { CanonicalEvent, OperatorBoot } from "./useRealtime.ts";
 import { rmsEnergy, wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
 import { useLatestRef } from "./useLatestRef.ts";
+import {
+  CAPTURE_SAMPLE_RATE,
+  PROCESSOR_FRAMES,
+  canSendVoiceChunk,
+  createVoiceCaptureAudioContext,
+  shouldPublishVoiceChunkCount,
+  stopVoiceCaptureResources,
+  voiceAudioConstraints,
+} from "./voiceCaptureResources.ts";
 import { INITIAL_VOICE_VIEW, voiceViewReducer } from "./voiceState.ts";
 import type { VoiceViewState } from "./voiceState.ts";
 import {
@@ -35,9 +44,6 @@ export interface VoiceState extends VoiceViewState {
   startPushToTalk: () => Promise<void>;
   finishPushToTalk: () => void;
 }
-
-const CAPTURE_SAMPLE_RATE = 24000; // matches the session's declared pcm rate
-const PROCESSOR_FRAMES = 1024;
 
 /**
  * Voice for the React cockpit: mic capture (PCM16 @24k over the voice WS),
@@ -161,13 +167,15 @@ export function useVoice(
   }, [refreshDevices]);
 
   const stopMic = useCallback(() => {
-    processorRef.current?.disconnect();
+    stopVoiceCaptureResources({
+      processor: processorRef.current,
+      stream: streamRef.current,
+      audioContext: captureCtxRef.current,
+      websocket: voiceWsRef.current,
+    });
     processorRef.current = null;
-    streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    void captureCtxRef.current?.close?.();
     captureCtxRef.current = null;
-    voiceWsRef.current?.close();
     voiceWsRef.current = null;
     dispatch({ type: "mic_stopped" });
     sendOperatorEvent(
@@ -190,28 +198,12 @@ export function useVoice(
     let ctx: AudioContext | null = null;
     try {
       const deviceId = selectedDeviceIdRef.current;
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      stream = await navigator.mediaDevices.getUserMedia(voiceAudioConstraints(deviceId));
       streamRef.current = stream;
       void refreshDevices().catch(() => undefined);
       const track = stream.getAudioTracks()[0] || null;
-      const Ctor =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      try {
-        ctx = new Ctor({ sampleRate: CAPTURE_SAMPLE_RATE });
-      } catch {
-        ctx = new Ctor();
-      }
+      ctx = await createVoiceCaptureAudioContext(window);
       captureCtxRef.current = ctx;
-      await ctx.resume?.();
 
       const ws = new WebSocket(wsUrl(boot.token, "/operator/voice/ws"));
       voiceWsRef.current = ws;
@@ -249,9 +241,15 @@ export function useVoice(
           localVadActiveRef.current = vadActive;
           dispatch({ type: "set_local_vad_active", active: vadActive });
         }
-        if (mutedRef.current) return;
-        if (ws.readyState !== WebSocket.OPEN) return;
-        if (ws.bufferedAmount > 1_000_000) return; // backpressure drop
+        if (
+          !canSendVoiceChunk({
+            muted: mutedRef.current,
+            readyState: ws.readyState,
+            bufferedAmount: ws.bufferedAmount,
+          })
+        ) {
+          return;
+        }
         const sequence = seqRef.current++;
         ws.send(
           JSON.stringify(
@@ -267,7 +265,7 @@ export function useVoice(
             }),
           ),
         );
-        if (sequence % 8 === 0) {
+        if (shouldPublishVoiceChunkCount(sequence)) {
           dispatch({ type: "set_chunks_sent", chunksSent: sequence + 1 });
         }
       };
@@ -276,13 +274,15 @@ export function useVoice(
       sink.connect(ctx.destination);
       dispatch({ type: "mic_started" });
     } catch (error) {
-      processorRef.current?.disconnect();
+      stopVoiceCaptureResources({
+        processor: processorRef.current,
+        stream,
+        audioContext: ctx,
+        websocket: voiceWsRef.current,
+      });
       processorRef.current = null;
-      stream?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
-      void ctx?.close?.();
       if (captureCtxRef.current === ctx) captureCtxRef.current = null;
-      voiceWsRef.current?.close();
       voiceWsRef.current = null;
       dispatch({ type: "mic_stopped" });
       reportMicBlocked(error);
