@@ -22,11 +22,11 @@ export function Stage({ boot }: { boot: OperatorBoot }) {
     () => ({
       app: authSuffix(
         boot.token,
-        "/host-visual?sourceId=host-app&label=App%20view&kind=desktop_app",
+        "/host-visual?embed=1&sourceId=host-app&label=App%20view&kind=desktop_app",
       ),
       avatar: authSuffix(
         boot.token,
-        `/host-visual?avatar=1&sourceId=avatar&label=Avatar&kind=avatar&avatarPreset=${encodeURIComponent(avatarPreset)}`,
+        `/host-visual?embed=1&avatar=1&sourceId=avatar&label=Avatar&kind=avatar&avatarPreset=${encodeURIComponent(avatarPreset)}`,
       ),
     }),
     [boot.token, avatarPreset],

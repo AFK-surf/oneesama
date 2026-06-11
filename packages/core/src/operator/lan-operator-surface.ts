@@ -1859,6 +1859,7 @@ export function createLanOperatorSurfaceServer(
             avatar: url.searchParams.get("avatar") === "1",
             avatarPreset: url.searchParams.get("avatarPreset") || "",
             avatarRenderer: url.searchParams.get("avatarRenderer") || "",
+            embed: url.searchParams.get("embed") === "1",
           }),
         );
       }

@@ -15,6 +15,8 @@ export interface HostVisualPublisherPageOptions {
   avatar?: boolean;
   avatarPreset?: string;
   avatarRenderer?: string;
+  /** Chrome-less render for embedding in another surface (hides header/controls/status). */
+  embed?: boolean;
 }
 
 function escapeHtml(value: unknown) {
@@ -83,9 +85,15 @@ export function buildLanOperatorHostVisualPublisherHtml(
       button.primary { border-color: #0f766e; background: #0f766e; color: #fff; }
       video, canvas { width: 100%; aspect-ratio: 16 / 9; border: 1px solid #c6cfdd; border-radius: 8px; background: #0f172a; }
       pre { margin: 0; padding: 10px; border-radius: 7px; background: #0f172a; color: #e2e8f0; overflow: auto; font-size: 12px; }
+      /* Chrome-less embed: just the live render, filling the frame. */
+      body[data-embed] { display: block; background: #0f172a; }
+      body[data-embed] main { width: 100%; min-height: 100vh; border: 0; border-radius: 0; }
+      body[data-embed] header, body[data-embed] .actions, body[data-embed] #status { display: none; }
+      body[data-embed] .body { padding: 0; gap: 0; height: 100vh; }
+      body[data-embed] video, body[data-embed] canvas { height: 100vh; aspect-ratio: auto; border: 0; border-radius: 0; object-fit: contain; }
     </style>
   </head>
-  <body>
+  <body${options.embed ? " data-embed" : ""}>
     <main>
       <header>
         <h1>${escapeHtml(config.botName)} Host Visual Publisher</h1>
