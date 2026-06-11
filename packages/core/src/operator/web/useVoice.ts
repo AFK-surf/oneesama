@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { CanonicalEvent, OperatorBoot } from "./useRealtime.ts";
-import { pcm16Base64, pcm16ToFloat32, rmsEnergy, wsUrl } from "./protocol.ts";
+import { pcm16Base64, rmsEnergy, wsUrl } from "./protocol.ts";
+import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
+import { useLatestRef } from "./useLatestRef.ts";
 
 export interface VoiceDevice {
   index: number;
@@ -60,80 +62,24 @@ export function useVoice(
   const [selectedDeviceId, setSelectedDeviceIdState] = useState("");
   const [chunksSent, setChunksSent] = useState(0);
 
+  const mutedRef = useLatestRef(muted);
+  const micOnRef = useLatestRef(micOn);
+  const localVadEnabledRef = useLatestRef(localVadEnabled);
+  const localVadActiveRef = useLatestRef(localVadActive);
+  const energyRef = useLatestRef(energy);
+  const devicesLengthRef = useLatestRef(devices.length);
+  const selectedDeviceIdRef = useLatestRef(selectedDeviceId);
+  const pushToTalkActiveRef = useLatestRef(pushToTalkActive);
   const captureCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const voiceWsRef = useRef<WebSocket | null>(null);
   const seqRef = useRef(0);
   const streamIdRef = useRef("");
-  const mutedRef = useRef(false);
-  const micOnRef = useRef(false);
-  const localVadEnabledRef = useRef(false);
-  const localVadActiveRef = useRef(false);
-  const energyRef = useRef(0);
-  const devicesLengthRef = useRef(0);
-  const selectedDeviceIdRef = useRef("");
-  const pushToTalkActiveRef = useRef(false);
   const pttPreviousMutedRef = useRef(false);
   const pttStartedMicRef = useRef(false);
 
-  // --- assistant audio playback (fed by the event subscription) ---
-  const playCtxRef = useRef<AudioContext | null>(null);
-  const scheduledAtRef = useRef(0);
-
-  useEffect(() => {
-    micOnRef.current = micOn;
-  }, [micOn]);
-
-  useEffect(() => {
-    localVadEnabledRef.current = localVadEnabled;
-  }, [localVadEnabled]);
-
-  useEffect(() => {
-    localVadActiveRef.current = localVadActive;
-  }, [localVadActive]);
-
-  useEffect(() => {
-    energyRef.current = energy;
-  }, [energy]);
-
-  useEffect(() => {
-    selectedDeviceIdRef.current = selectedDeviceId;
-  }, [selectedDeviceId]);
-
-  useEffect(() => {
-    devicesLengthRef.current = devices.length;
-  }, [devices.length]);
-
-  useEffect(() => {
-    const playChunk = (ev: CanonicalEvent) => {
-      if (ev.type !== "assistant_audio_chunk") return;
-      const b64 = String(
-        ev.audioBase64 || (ev.detail as { audioBase64?: string })?.audioBase64 || "",
-      );
-      if (!b64) return;
-      if (!playCtxRef.current) {
-        const Ctor =
-          window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        playCtxRef.current = new Ctor();
-      }
-      const ctx = playCtxRef.current;
-      void ctx.resume?.();
-      const rate = Number((ev.detail as { sampleRate?: number })?.sampleRate || 24000);
-      const mono = pcm16ToFloat32(b64);
-      if (mono.length === 0) return;
-      const buffer = ctx.createBuffer(1, mono.length, rate);
-      buffer.getChannelData(0).set(mono);
-      const src = ctx.createBufferSource();
-      src.buffer = buffer;
-      src.connect(ctx.destination);
-      const at = Math.max(ctx.currentTime, scheduledAtRef.current);
-      src.start(at);
-      scheduledAtRef.current = at + buffer.duration;
-    };
-    return subscribe(playChunk);
-  }, [subscribe]);
+  useAssistantAudioPlayback(subscribe);
 
   const setMuted = useCallback((next: boolean) => {
     mutedRef.current = next;
