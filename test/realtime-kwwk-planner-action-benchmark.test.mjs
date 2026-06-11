@@ -78,7 +78,7 @@ test("KWWK planner/action report is not backend or real-room evidence", () => {
           { kind: "type_text", text: "oneesama" },
           { kind: "press_key", key: "return" },
         ]),
-        "scroll-zh": plan([{ kind: "scroll", direction: "down" }]),
+        "scroll-zh": plan([{ kind: "scroll", direction: "down", elementIndex: 0 }]),
         "observe-zh": plan([{ kind: "state" }]),
         "observe-title-report-en": plan([{ kind: "state" }]),
         "second-button-fixture": plan([
@@ -200,7 +200,7 @@ test("KWWK planner/action report can include optional live macOS fixture evidenc
         { kind: "press_key", key: "return" },
       ],
     ],
-    ["scroll-zh", [{ kind: "scroll", direction: "down" }]],
+    ["scroll-zh", [{ kind: "scroll", direction: "down", elementIndex: 0 }]],
     ["observe-zh", [{ kind: "state" }]],
     ["observe-title-report-en", [{ kind: "state" }]],
     [
@@ -283,7 +283,7 @@ test("KWWK planner/action report can include optional live browser fixture evide
         { kind: "press_key", key: "return" },
       ],
     ],
-    ["scroll-zh", [{ kind: "scroll", direction: "down" }]],
+    ["scroll-zh", [{ kind: "scroll", direction: "down", elementIndex: 0 }]],
     ["observe-zh", [{ kind: "state" }]],
     ["observe-title-report-en", [{ kind: "state" }]],
     [

@@ -133,7 +133,22 @@
 
   function createToolState(state: Record<string, any>) {
     function rememberToolCall(kind: LocalToolKind, call: Record<string, unknown>) {
-      state[`${kind}Tools`].calls.push({ ts: new Date().toISOString(), ...call });
+      const calls = state[`${kind}Tools`].calls;
+      const next = { ts: new Date().toISOString(), ...call };
+      const callId = String(call.callId || "");
+      const name = String(call.name || "");
+      const existingIndex =
+        callId && name
+          ? calls.findIndex(
+              (entry: Record<string, unknown>) =>
+                String(entry.callId || "") === callId && String(entry.name || "") === name,
+            )
+          : -1;
+      if (existingIndex >= 0) {
+        calls[existingIndex] = { ...calls[existingIndex], ...next };
+      } else {
+        calls.push(next);
+      }
       state[`${kind}Tools`].calls = state[`${kind}Tools`].calls.slice(-40);
     }
 

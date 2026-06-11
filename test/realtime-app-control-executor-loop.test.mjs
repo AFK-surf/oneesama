@@ -47,7 +47,10 @@ async function dispatchToolCall(page, callId, args) {
     { callId, args },
   );
   await page.waitForFunction(
-    (id) => window.MAB_REALTIME_BRIDGE?.workspaceTools?.calls?.some((call) => call.callId === id),
+    (id) =>
+      window.MAB_REALTIME_BRIDGE?.workspaceTools?.calls?.some(
+        (call) => call.callId === id && call.status !== "running",
+      ),
     callId,
   );
 }

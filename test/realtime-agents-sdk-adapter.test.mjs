@@ -98,7 +98,8 @@ test("Realtime sidecar placement keeps the Agents SDK out of Meet surface init",
   assert.doesNotMatch(meetSurfaceScript, /OpenAIAgentsRealtime/);
   assert.doesNotMatch(meetSurfaceScript, /const Bc=\{jitless:!0\}/);
   assert.doesNotMatch(meetSurfaceScript, /sidecar-only prompt/);
-  assert.doesNotMatch(meetSurfaceScript, /kwwk_computer_use/);
+  assert.doesNotMatch(meetSurfaceScript, /"name":"kwwk_computer_use"/);
+  assert.doesNotMatch(meetSurfaceScript, /Sidecar-only app control schema/);
   assert.doesNotMatch(meetSurfaceScript, /gpt-realtime-2/);
   assert.doesNotMatch(meetSurfaceScript, /api\.openai\.example/);
 

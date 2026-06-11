@@ -272,6 +272,7 @@ async function runMockReceiverScenario(page, options = {}) {
     });
 
     if (scenario.emitSpeechAndResponse) {
+      await wait(420);
       dispatchRealtimeServerEvent({ type: "input_audio_buffer.speech_started" });
       dispatchRealtimeServerEvent({ type: "response.created", response: { id: "resp_mock" } });
       dispatchRealtimeServerEvent({

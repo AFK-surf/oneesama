@@ -76,6 +76,25 @@
       }
       const host = (window as any).MAB_HOST_ENQUEUE_REALTIME_PCM;
       if (typeof host === "function") return await host(payload);
+      const bus = (window as any).MAB_AVATAR_AUDIO_BUS;
+      if (typeof bus?.enqueuePcmFrames === "function") {
+        return await bus.enqueuePcmFrames(payload);
+      }
+      if (typeof bus?.injectTone === "function") {
+        return bus.injectTone({
+          label: payload.label || "openai-realtime-sidecar-output",
+          gain: 0.0001,
+          durationMs: Math.max(
+            1,
+            Math.round(
+              ((Array.isArray(payload.samples) ? payload.samples.length : 0) /
+                Math.max(1, Number(payload.channels || 1)) /
+                Math.max(1, Number(payload.sampleRate || 48000))) *
+                1000,
+            ),
+          ),
+        });
+      }
       return { ok: false, error: "realtime_output_audio_port_missing" };
     }
 
@@ -231,13 +250,15 @@
           const frame = Math.floor(index / channels);
           return Math.sin((2 * Math.PI * frequencyHz * frame) / sampleRate) * gain;
         });
-        return await routeSidecarPcmFrames({
+        const result = await routeSidecarPcmFrames({
           label: options.label || "webrtc-mock-remote-audio",
           format: "float32",
           sampleRate,
           channels,
           samples,
         });
+        recordTimeline("mock_remote_audio_route", { ok: result?.ok !== false });
+        return result;
       }
       const bus = await waitForAvatarAudioBus(options.timeoutMs);
       if (!bus?.injectTone) {

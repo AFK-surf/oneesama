@@ -615,7 +615,6 @@
           action: "lean_forward",
           holdMs: 45000,
         });
-        await updateKWWKCursorFeedback("move", `正在操作 ${targetLabel}`);
       } else if (
         name === "open_shared_browser_surface" ||
         name === "control_shared_browser_surface"
@@ -651,28 +650,25 @@
         if ((result as { ok?: boolean })?.ok === false) {
           const blockerText = appControlBlockerText(result);
           updateAvatarHudStatus("blocked", blockerText, { mood: "sad", action: "shrug" });
-          await updateKWWKCursorFeedback("blocked", blockerText, cursorPoint || undefined);
+          if (cursorPoint) await updateKWWKCursorFeedback("blocked", blockerText, cursorPoint);
         } else if (["queued", "accepted", "running", "started"].includes(status)) {
           updateAvatarHudStatus("opening_preview", `正在操作 ${appControlTargetLabel(toolArgs)}`, {
             mood: "thinking",
             action: "lean_forward",
             holdMs: 45000,
           });
-          await updateKWWKCursorFeedback("move", "操作中", cursorPoint || undefined);
+          if (cursorPoint) await updateKWWKCursorFeedback("move", "操作中", cursorPoint);
         } else if (appControlExecutorStillWorking(result)) {
           updateAvatarHudStatus("thinking", "正在操作应用", {
             mood: "thinking",
             action: "think",
             holdMs: 45000,
           });
-          await updateKWWKCursorFeedback("move", "操作中", cursorPoint || undefined);
+          if (cursorPoint) await updateKWWKCursorFeedback("move", "操作中", cursorPoint);
         } else {
           updateAvatarHudStatus("done", "操作完成", { mood: "happy", action: "emphasize" });
-          await updateKWWKCursorFeedback(
-            cursorPoint?.kind || "done",
-            "完成",
-            cursorPoint || undefined,
-          );
+          if (cursorPoint)
+            await updateKWWKCursorFeedback(cursorPoint.kind || "done", "完成", cursorPoint);
         }
       }
       return result;
