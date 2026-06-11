@@ -4,6 +4,14 @@ import type { CanonicalEvent, OperatorBoot } from "./useRealtime.ts";
 import { pcm16Base64, rmsEnergy, wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
 import { useLatestRef } from "./useLatestRef.ts";
+import {
+  LOCAL_VAD_THRESHOLD,
+  localVadSnapshot,
+  permissionStateForError,
+  voiceCaptureSnapshot,
+  voiceEngineControl,
+  voiceStreamOpenedMessage,
+} from "./voiceEvents.ts";
 
 export interface VoiceDevice {
   index: number;
@@ -34,14 +42,6 @@ export interface VoiceState {
 
 const CAPTURE_SAMPLE_RATE = 24000; // matches the session's declared pcm rate
 const PROCESSOR_FRAMES = 1024;
-const LOCAL_VAD_THRESHOLD = 0.02;
-
-function permissionStateForError(error: unknown) {
-  const name = String((error as { name?: string })?.name || "");
-  if (name === "NotAllowedError" || name === "SecurityError") return "denied";
-  if (name === "NotFoundError" || name === "OverconstrainedError") return "unavailable";
-  return "unknown";
-}
 
 /**
  * Voice for the React cockpit: mic capture (PCM16 @24k over the voice WS),
@@ -92,16 +92,15 @@ export function useVoice(
       sendOperatorEvent({
         type: "operator_mic_blocked",
         error: message,
-        capture: {
+        capture: voiceCaptureSnapshot({
           armed: false,
           muted: mutedRef.current,
-          mode: "microphone_pcm16",
           status: "blocked",
           error: message,
           permissionState: permissionStateForError(error),
           deviceId: selectedDeviceIdRef.current || null,
           availableDeviceCount: devicesLengthRef.current,
-        },
+        }),
       });
     },
     [sendOperatorEvent],
@@ -111,14 +110,11 @@ export function useVoice(
     (enabled: boolean, active = localVadActiveRef.current, lastEnergy = energyRef.current) => {
       sendOperatorEvent({
         type: "operator_local_vad_configured",
-        localVad: {
+        localVad: localVadSnapshot({
           enabled,
-          role: enabled ? "telemetry" : "disabled",
           active: enabled ? active : false,
-          threshold: LOCAL_VAD_THRESHOLD,
           lastEnergy,
-          lastUpdatedAt: new Date().toISOString(),
-        },
+        }),
         capture: {
           status: micOnRef.current ? "capturing" : "idle",
           deviceId: selectedDeviceIdRef.current || null,
@@ -163,14 +159,11 @@ export function useVoice(
         status: micOnRef.current ? "capturing" : "idle",
         deviceId: selectedDeviceIdRef.current || null,
       },
-      localVad: {
+      localVad: localVadSnapshot({
         enabled: localVadEnabledRef.current,
-        role: localVadEnabledRef.current ? "telemetry" : "disabled",
         active: localVadEnabledRef.current && localVadActiveRef.current,
-        threshold: LOCAL_VAD_THRESHOLD,
         lastEnergy: energyRef.current,
-        lastUpdatedAt: new Date().toISOString(),
-      },
+      }),
     });
     return nextDevices;
   }, [sendOperatorEvent]);
@@ -178,25 +171,18 @@ export function useVoice(
   const setVoiceMuted = useCallback(
     (nextMuted: boolean, reason = "operator_web_set_mute") => {
       setMuted(nextMuted);
-      sendOperatorEvent({
-        type: "engine_control",
-        sessionId: boot.sessionId,
-        control: {
-          type: "set_voice_muted",
-          reason,
-          detail: { muted: nextMuted, source: "operator_web" },
-        },
-      });
+      sendOperatorEvent(
+        voiceEngineControl(boot.sessionId, "set_voice_muted", reason, { muted: nextMuted }),
+      );
       sendOperatorEvent({
         type: "operator_mic_muted",
-        capture: {
+        capture: voiceCaptureSnapshot({
           armed: micOnRef.current,
           muted: nextMuted,
-          mode: "microphone_pcm16",
           status: micOnRef.current ? "capturing" : "idle",
           deviceId: selectedDeviceIdRef.current || null,
           availableDeviceCount: devicesLengthRef.current,
-        },
+        }),
       });
     },
     [boot.sessionId, sendOperatorEvent, setMuted],
@@ -220,24 +206,19 @@ export function useVoice(
     setLocalVadActive(false);
     sendOperatorEvent({
       type: "operator_mic_disarmed",
-      capture: {
+      capture: voiceCaptureSnapshot({
         armed: false,
         muted: mutedRef.current,
-        mode: "microphone_pcm16",
         status: "idle",
         deviceId: selectedDeviceIdRef.current || null,
         availableDeviceCount: devicesLengthRef.current,
-      },
+      }),
     });
-    sendOperatorEvent({
-      type: "engine_control",
-      sessionId: boot.sessionId,
-      control: {
-        type: "set_voice_armed",
-        reason: "operator_web_stop_mic",
-        detail: { armed: false, source: "operator_web" },
-      },
-    });
+    sendOperatorEvent(
+      voiceEngineControl(boot.sessionId, "set_voice_armed", "operator_web_stop_mic", {
+        armed: false,
+      }),
+    );
   }, [boot.sessionId, sendOperatorEvent]);
 
   const startMic = useCallback(async () => {
@@ -275,36 +256,23 @@ export function useVoice(
       seqRef.current = 0;
       setChunksSent(0);
       ws.addEventListener("open", () => {
-        ws.send(
-          JSON.stringify({
-            type: "operator_voice_stream_opened",
-            sessionId: boot.sessionId,
-            voiceStreamId: streamIdRef.current,
-            voiceStreamGeneration: 1,
-            openedAt: new Date().toISOString(),
+        ws.send(JSON.stringify(voiceStreamOpenedMessage(boot.sessionId, streamIdRef.current)));
+        sendOperatorEvent(
+          voiceEngineControl(boot.sessionId, "set_voice_armed", "operator_web_start_mic", {
+            armed: true,
           }),
         );
         sendOperatorEvent({
-          type: "engine_control",
-          sessionId: boot.sessionId,
-          control: {
-            type: "set_voice_armed",
-            reason: "operator_web_start_mic",
-            detail: { armed: true, source: "operator_web" },
-          },
-        });
-        sendOperatorEvent({
           type: "operator_mic_armed",
-          capture: {
+          capture: voiceCaptureSnapshot({
             armed: true,
             muted: mutedRef.current,
-            mode: "microphone_pcm16",
             status: "capturing",
             permissionState: "granted",
             deviceId: selectedDeviceIdRef.current || null,
             deviceLabel: track?.label || "",
             availableDeviceCount: devicesLengthRef.current,
-          },
+          }),
         });
       });
 
