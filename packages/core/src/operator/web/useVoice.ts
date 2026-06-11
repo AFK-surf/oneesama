@@ -5,6 +5,11 @@ import { rmsEnergy, wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
 import { useLatestRef } from "./useLatestRef.ts";
 import {
+  listVoiceInputDevices,
+  selectedVoiceDeviceMissing,
+  type VoiceDevice,
+} from "./voiceDevices.ts";
+import {
   LOCAL_VAD_THRESHOLD,
   createVoiceStreamId,
   localVadSnapshot,
@@ -14,13 +19,6 @@ import {
   voiceEngineControl,
   voiceStreamOpenedMessage,
 } from "./voiceEvents.ts";
-
-export interface VoiceDevice {
-  index: number;
-  deviceId: string;
-  label: string;
-  groupId: string;
-}
 
 export interface VoiceState {
   micOn: boolean;
@@ -137,20 +135,9 @@ export function useVoice(
   );
 
   const refreshDevices = useCallback(async () => {
-    if (!navigator.mediaDevices?.enumerateDevices) return [];
-    const nextDevices = (await navigator.mediaDevices.enumerateDevices())
-      .filter((device) => device.kind === "audioinput")
-      .map((device, index) => ({
-        index,
-        deviceId: device.deviceId,
-        label: device.label || `Microphone ${index + 1}`,
-        groupId: device.groupId,
-      }));
+    const nextDevices = await listVoiceInputDevices(navigator.mediaDevices);
     setDevices(nextDevices);
-    if (
-      selectedDeviceIdRef.current &&
-      !nextDevices.some((device) => device.deviceId === selectedDeviceIdRef.current)
-    ) {
+    if (selectedVoiceDeviceMissing(nextDevices, selectedDeviceIdRef.current)) {
       selectedDeviceIdRef.current = "";
       setSelectedDeviceIdState("");
     }
