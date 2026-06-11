@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Stage } from "./Stage.tsx";
+import { WorkPanel } from "./WorkPanel.tsx";
 import { useRealtime, type CanonicalEvent, type OperatorBoot } from "./useRealtime.ts";
 import { useVoice } from "./useVoice.ts";
+import { useWork } from "./useWork.ts";
 
 interface Turn {
   role: "you" | "bot";
@@ -48,7 +50,9 @@ const STATUS_COLOR: Record<string, string> = {
 export function App({ boot }: { boot: OperatorBoot }) {
   const rt = useRealtime(boot);
   const voice = useVoice(boot, rt.subscribe);
+  const work = useWork(rt);
   const [draft, setDraft] = useState("");
+  const [tab, setTab] = useState<"chat" | "work">("chat");
   const turns = useMemo(() => turnsFromEvents(rt.events), [rt.events]);
   const connected = rt.status === "connected";
   const streamRef = useRef<HTMLDivElement | null>(null);
@@ -107,59 +111,83 @@ export function App({ boot }: { boot: OperatorBoot }) {
         </div>
 
         <section className="op-conv">
-          <div className="op-stream" ref={streamRef}>
-            {turns.length === 0 ? (
-              <div className="op-empty">No messages yet. Connect, then speak or type below.</div>
-            ) : (
-              turns.map((t, i) => (
-                <div key={i} className={"op-turn op-turn-" + t.role}>
-                  <span className="op-turn-role">{t.role}</span>
-                  <span className="op-turn-text">{t.text || "…"}</span>
-                  <span className="op-turn-status">{t.status}</span>
-                </div>
-              ))
-            )}
-            {rt.error ? <div className="op-error">⚠ {rt.error}</div> : null}
-          </div>
-          <footer className="op-composer">
-            <div className="op-conn">
-              <span className={"op-conn-label " + (connected ? "ok" : "off")}>
-                {connected ? "connected" : rt.wsOpen ? "not connected" : "offline"}
-              </span>
-              {connected ? (
-                <button className="btn" onClick={rt.disconnect} type="button">
-                  Disconnect
-                </button>
-              ) : (
-                <button
-                  className="btn primary"
-                  onClick={rt.connect}
-                  disabled={!rt.wsOpen}
-                  type="button"
-                >
-                  Connect
-                </button>
-              )}
-            </div>
-            <form
-              className="op-input"
-              onSubmit={(e) => {
-                e.preventDefault();
-                rt.sendText(draft);
-                setDraft("");
-              }}
+          <div className="op-conv-tabs">
+            <button
+              className={tab === "chat" ? "active" : ""}
+              onClick={() => setTab("chat")}
+              type="button"
             >
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Type a message…"
-                autoComplete="off"
-              />
-              <button className="btn" type="submit" disabled={!connected}>
-                Send
-              </button>
-            </form>
-          </footer>
+              Chat
+            </button>
+            <button
+              className={tab === "work" ? "active" : ""}
+              onClick={() => setTab("work")}
+              type="button"
+            >
+              Work{work.phase === "running" ? " ·" : ""}
+            </button>
+          </div>
+          {tab === "work" ? (
+            <WorkPanel work={work} />
+          ) : (
+            <>
+              <div className="op-stream" ref={streamRef}>
+                {turns.length === 0 ? (
+                  <div className="op-empty">
+                    No messages yet. Connect, then speak or type below.
+                  </div>
+                ) : (
+                  turns.map((t, i) => (
+                    <div key={i} className={"op-turn op-turn-" + t.role}>
+                      <span className="op-turn-role">{t.role}</span>
+                      <span className="op-turn-text">{t.text || "…"}</span>
+                      <span className="op-turn-status">{t.status}</span>
+                    </div>
+                  ))
+                )}
+                {rt.error ? <div className="op-error">⚠ {rt.error}</div> : null}
+              </div>
+              <footer className="op-composer">
+                <div className="op-conn">
+                  <span className={"op-conn-label " + (connected ? "ok" : "off")}>
+                    {connected ? "connected" : rt.wsOpen ? "not connected" : "offline"}
+                  </span>
+                  {connected ? (
+                    <button className="btn" onClick={rt.disconnect} type="button">
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button
+                      className="btn primary"
+                      onClick={rt.connect}
+                      disabled={!rt.wsOpen}
+                      type="button"
+                    >
+                      Connect
+                    </button>
+                  )}
+                </div>
+                <form
+                  className="op-input"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    rt.sendText(draft);
+                    setDraft("");
+                  }}
+                >
+                  <input
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder="Type a message…"
+                    autoComplete="off"
+                  />
+                  <button className="btn" type="submit" disabled={!connected}>
+                    Send
+                  </button>
+                </form>
+              </footer>
+            </>
+          )}
         </section>
       </div>
     </div>

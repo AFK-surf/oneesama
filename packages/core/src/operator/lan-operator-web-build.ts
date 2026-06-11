@@ -80,7 +80,28 @@ export function buildOperatorWebShellHtml(boot: OperatorWebBoot, bundleUrl: stri
       .op-energy { width:80px; height:6px; border-radius:3px; background:var(--line); overflow:hidden; }
       .op-energy-bar { display:block; height:100%; background:var(--accent); transition:width .08s linear; }
       .op-conv { display:flex; flex-direction:column; min-height:0; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--surface); }
+      .op-conv-tabs { display:flex; gap:3px; padding:6px; border-bottom:1px solid var(--line); flex:0 0 auto; }
+      .op-conv-tabs button { height:28px; padding:0 14px; border:0; border-radius:7px; background:transparent; color:var(--muted); font:inherit; font-weight:560; cursor:pointer; }
+      .op-conv-tabs button.active { color:#1a44b8; background:color-mix(in srgb,var(--blue) 14%,transparent); }
       .op-stream { flex:1; min-height:0; overflow:auto; padding:16px 18px; display:flex; flex-direction:column; gap:10px; }
+      .op-work { display:flex; flex-direction:column; min-height:0; flex:1; }
+      .op-work .op-input { padding:12px 14px; border-bottom:1px solid var(--line); }
+      .op-work-body { flex:1; min-height:0; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
+      .op-work-head { display:flex; align-items:center; gap:8px; }
+      .op-work-phase { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; padding:2px 8px; border-radius:6px; background:var(--panel); color:var(--muted); }
+      .op-work-phase.phase-done { color:#0a7a52; background:color-mix(in srgb,var(--accent) 14%,white); }
+      .op-work-phase.phase-error, .op-work-phase.phase-not_a_command { color:#b5322b; background:color-mix(in srgb,#b5322b 12%,white); }
+      .op-work-phase.phase-running { color:#9a6310; background:color-mix(in srgb,#9a6310 14%,white); }
+      .op-work-tag { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--faint); }
+      .op-work-intent { font-weight:560; }
+      .op-work-steps { margin:0; padding-left:18px; display:flex; flex-direction:column; gap:6px; font-size:13px; }
+      .op-work-steps li.failed { color:#b5322b; }
+      .op-work-step-op { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+      .op-work-step-why { display:block; color:var(--muted); font-size:12px; }
+      .op-work-step-err { display:block; color:#b5322b; font-size:12px; }
+      .op-work-result { display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--line); padding-top:10px; }
+      .op-work-check { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+      .op-work-extract { background:var(--panel); border-radius:8px; padding:10px; font-size:13px; white-space:pre-wrap; }
       .op-empty { color:var(--faint); text-align:center; margin:auto; font-size:13px; }
       .op-turn { display:flex; flex-direction:column; gap:3px; max-width:78%; padding:9px 12px; border-radius:12px; }
       .op-turn-you { align-self:flex-end; background:color-mix(in srgb,var(--blue) 12%,white); }

@@ -31,8 +31,12 @@ export interface RealtimeState {
   connect: () => void;
   disconnect: () => void;
   sendText: (text: string) => void;
+  /** Send a raw message over the events WS (e.g. work_run). */
+  send: (message: Record<string, unknown>) => void;
   /** Subscribe to every canonical event (audio playback etc.); returns unsubscribe. */
   subscribe: (listener: (event: CanonicalEvent) => void) => () => void;
+  /** Subscribe to every raw WS envelope (work_event etc.); returns unsubscribe. */
+  subscribeRaw: (listener: (payload: Record<string, unknown>) => void) => () => void;
 }
 
 /**
@@ -51,6 +55,7 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
   const wsRef = useRef<WebSocket | null>(null);
   const seqRef = useRef(0);
   const listenersRef = useRef(new Set<(event: CanonicalEvent) => void>());
+  const rawListenersRef = useRef(new Set<(payload: Record<string, unknown>) => void>());
 
   const send = useCallback((message: Record<string, unknown>) => {
     const ws = wsRef.current;
@@ -80,6 +85,7 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
         } catch {
           return;
         }
+        for (const listener of rawListenersRef.current) listener(payload);
         if (payload.type === "canonical_conversation_event" && payload.event) {
           const ev = payload.event as CanonicalEvent;
           // Audio chunks go to subscribers only — keeping them out of the
@@ -156,5 +162,24 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
     };
   }, []);
 
-  return { wsOpen, status, transport, events, error, connect, disconnect, sendText, subscribe };
+  const subscribeRaw = useCallback((listener: (payload: Record<string, unknown>) => void) => {
+    rawListenersRef.current.add(listener);
+    return () => {
+      rawListenersRef.current.delete(listener);
+    };
+  }, []);
+
+  return {
+    wsOpen,
+    status,
+    transport,
+    events,
+    error,
+    connect,
+    disconnect,
+    sendText,
+    send,
+    subscribe,
+    subscribeRaw,
+  };
 }
