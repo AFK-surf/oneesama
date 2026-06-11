@@ -164,6 +164,9 @@ test("LAN operator React cockpit boots with provider config and core control con
     assert.match(bundle, /voice-device-select/);
     assert.match(bundle, /cancel-response-button/);
     assert.match(bundle, /debug-json/);
+    assert.match(bundle, /MAB_LAN_OPERATOR_SURFACE/);
+    assert.match(bundle, /refreshVoiceDevices/);
+    assert.match(bundle, /configureLocalVad/);
     assert.match(bundle, /operator_mic_blocked/);
   } finally {
     await surface.close();
