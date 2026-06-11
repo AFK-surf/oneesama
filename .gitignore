@@ -25,3 +25,6 @@ internal/slackagent/runtime/
 
 # SwiftPM build artifacts (kwwk-cu helper)
 packages/core/src/meeting/.build/
+
+# local audit report (do not commit)
+docs/realtime-implementation-audit.html

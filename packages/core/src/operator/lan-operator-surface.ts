@@ -25,6 +25,7 @@ import { createLanPeerEvidenceTracker } from "./lan-operator-lan-peer.ts";
 import { defaultDebugState, type DebugState } from "./lan-operator-debug-state.ts";
 import { buildLanOperatorRuntimeSessionConfig } from "./lan-operator-runtime-config.ts";
 import { buildLanOperatorSurfaceHtml } from "./lan-operator-surface-html.ts";
+import { buildOperatorWebBundle, buildOperatorWebShellHtml } from "./lan-operator-web-build.ts";
 import {
   buildLanOperatorDebugReport,
   cloneDebugState,
@@ -1804,6 +1805,45 @@ export function createLanOperatorSurfaceServer(
         (url.pathname === "/" || url.pathname === "/operator" || url.pathname === "/operator/")
       )
         return htmlResponse(res, html);
+      // New React surface (parity in progress); legacy string surface stays at /operator.
+      if (
+        req.method === "GET" &&
+        (url.pathname === "/operator2" || url.pathname === "/operator2/")
+      ) {
+        const bundleUrl = accessToken
+          ? `/operator2/app.js?token=${encodeURIComponent(accessToken)}`
+          : "/operator2/app.js";
+        return htmlResponse(
+          res,
+          buildOperatorWebShellHtml(
+            {
+              sessionId: config.sessionId,
+              token: accessToken || undefined,
+              conversationTransport: config.conversationTransport,
+              botName: config.botName,
+            },
+            bundleUrl,
+          ),
+        );
+      }
+      if (req.method === "GET" && url.pathname === "/operator2/app.js") {
+        try {
+          const bundle = await buildOperatorWebBundle();
+          res.writeHead(200, {
+            "content-type": "text/javascript; charset=utf-8",
+            "cache-control": "no-store",
+          });
+          res.end(bundle);
+        } catch (error) {
+          res.writeHead(500, { "content-type": "text/javascript; charset=utf-8" });
+          res.end(
+            `document.body.innerHTML='<pre style="padding:16px;color:#b5322b">operator web bundle build failed:\\n'+${JSON.stringify(
+              String(error instanceof Error ? error.message : error),
+            )}+'</pre>'`,
+          );
+        }
+        return;
+      }
       if (req.method === "GET" && url.pathname.startsWith("/assets/avatar/")) {
         return avatarAssetResponse(res, url.pathname);
       }
