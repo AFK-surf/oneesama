@@ -7,6 +7,7 @@ import {
   buildLanOperatorRuntimeSessionConfig,
   createLanOperatorSurfaceServer,
 } from "../packages/core/src/operator/lan-operator-surface.ts";
+import { OPERATOR_WEB_BUNDLER } from "../packages/core/src/operator/lan-operator-web-build.ts";
 import { validateRuntimeSessionConfig } from "../packages/core/src/avatar-runtime/contracts.ts";
 
 async function waitForRuntimeStatus(url, predicate, timeoutMs = 5_000) {
@@ -135,6 +136,8 @@ test("LAN operator surface serves /operator as the Local Operator app entrypoint
 });
 
 test("LAN operator React cockpit boots with provider config and core control contracts", async () => {
+  assert.equal(OPERATOR_WEB_BUNDLER, "vite-plus");
+
   const surface = createLanOperatorSurfaceServer({
     host: "127.0.0.1",
     port: 0,

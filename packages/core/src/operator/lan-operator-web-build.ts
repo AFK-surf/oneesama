@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 
-import * as esbuild from "esbuild";
+import { build as viteBuild } from "vite-plus";
+import type { InlineConfig } from "vite-plus";
 
 import type { LanOperatorLiveProviderConfig } from "./lan-operator-live-provider-config.ts";
 import { OPERATOR_WEB_STYLES } from "./operator-web-styles.ts";
@@ -15,38 +16,86 @@ export interface OperatorWebBoot {
 }
 
 const ENTRY = fileURLToPath(new URL("./web/main.tsx", import.meta.url));
+export const OPERATOR_WEB_BUNDLER = "vite-plus";
 
 let cachedBundle: Promise<string> | null = null;
 
+interface OperatorWebBuildResult {
+  output?: unknown[];
+}
+
+interface OperatorWebOutputChunk {
+  code: string;
+  isEntry?: boolean;
+  type: "chunk";
+}
+
 /**
- * Bundle the React operator app (web/main.tsx) to a single IIFE via esbuild,
- * in-memory and cached. No dist files, no separate build step — the operator
+ * Bundle the React operator app (web/main.tsx) to a single IIFE via Vite+,
+ * in-memory and cached. No dist files, no separate build step - the operator
  * server serves the result at `/operator` (bundle at `/operator/app.js`); the
  * legacy string surface stays at the root `/`.
  */
 export function buildOperatorWebBundle(): Promise<string> {
   if (!cachedBundle) {
-    cachedBundle = esbuild
-      .build({
-        entryPoints: [ENTRY],
-        bundle: true,
-        format: "iife",
-        platform: "browser",
-        target: ["es2022"],
-        jsx: "automatic",
-        write: false,
-        minify: true,
-        sourcemap: false,
-        define: { "process.env.NODE_ENV": '"production"' },
-        logLevel: "silent",
-      })
-      .then((result) => result.outputFiles[0]?.text ?? "")
+    cachedBundle = viteBuild(buildOperatorWebBundleConfig())
+      .then((result) => extractOperatorWebEntryChunk(result).code)
       .catch((error) => {
         cachedBundle = null; // allow retry after a fix
         throw error;
       });
   }
   return cachedBundle;
+}
+
+function buildOperatorWebBundleConfig(): InlineConfig {
+  return {
+    configFile: false,
+    mode: "production",
+    logLevel: "silent",
+    define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    build: {
+      cssCodeSplit: false,
+      emptyOutDir: false,
+      lib: {
+        entry: ENTRY,
+        fileName: () => "operator-app.js",
+        formats: ["iife"],
+        name: "OneesamaOperatorWeb",
+      },
+      minify: true,
+      sourcemap: false,
+      target: "es2022",
+      write: false,
+    },
+  };
+}
+
+function extractOperatorWebEntryChunk(result: unknown): OperatorWebOutputChunk {
+  const results = Array.isArray(result) ? result : [result];
+  const output = results
+    .flatMap((item) => (isOperatorWebBuildResult(item) ? item.output || [] : []))
+    .filter(isOperatorWebOutputChunk);
+  const entryChunk = output.find((item) => item.isEntry);
+  if (!entryChunk) {
+    throw new Error("operator_web_bundle_entry_chunk_missing");
+  }
+  return entryChunk;
+}
+
+function isOperatorWebBuildResult(value: unknown): value is OperatorWebBuildResult {
+  return Boolean(value && typeof value === "object" && "output" in value);
+}
+
+function isOperatorWebOutputChunk(value: unknown): value is OperatorWebOutputChunk {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "type" in value &&
+    value.type === "chunk" &&
+    "code" in value &&
+    typeof value.code === "string",
+  );
 }
 
 function escapeJson(value: unknown): string {
