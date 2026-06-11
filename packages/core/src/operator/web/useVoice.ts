@@ -14,6 +14,11 @@ import { voiceCaptureFrameDecision } from "./voiceCaptureFrames.ts";
 import { INITIAL_VOICE_VIEW, voiceViewReducer } from "./voiceState.ts";
 import type { VoiceViewState } from "./voiceState.ts";
 import {
+  beginPushToTalk,
+  failPushToTalk,
+  finishPushToTalk as finishPushToTalkDecision,
+} from "./voicePushToTalk.ts";
+import {
   listVoiceInputDevices,
   selectedVoiceDeviceMissing,
   type VoiceDevice,
@@ -286,30 +291,38 @@ export function useVoice(
   }, [setVoiceMuted]);
 
   const startPushToTalk = useCallback(async () => {
-    if (pushToTalkActiveRef.current) return;
+    const decision = beginPushToTalk({
+      active: pushToTalkActiveRef.current,
+      muted: mutedRef.current,
+      micOn: micOnRef.current,
+    });
+    if (!decision.shouldActivate) return;
     pushToTalkActiveRef.current = true;
     dispatch({ type: "set_push_to_talk_active", active: true });
-    pttPreviousMutedRef.current = mutedRef.current;
-    pttStartedMicRef.current = !micOnRef.current;
+    pttPreviousMutedRef.current = decision.previousMuted;
+    pttStartedMicRef.current = decision.startedMic;
     try {
-      if (!micOnRef.current) await startMic();
-      setVoiceMuted(false, "operator_web_ptt_start");
+      if (decision.shouldStartMic) await startMic();
+      if (decision.mute) setVoiceMuted(decision.mute.muted, decision.mute.reason);
     } catch (error) {
       pushToTalkActiveRef.current = false;
       dispatch({ type: "set_push_to_talk_active", active: false });
-      setVoiceMuted(pttPreviousMutedRef.current, "operator_web_ptt_failed");
+      const failed = failPushToTalk(pttPreviousMutedRef.current);
+      setVoiceMuted(failed.muted, failed.reason);
       throw error;
     }
   }, [setVoiceMuted, startMic]);
 
   const finishPushToTalk = useCallback(() => {
-    if (!pushToTalkActiveRef.current) return;
+    const decision = finishPushToTalkDecision({
+      active: pushToTalkActiveRef.current,
+      previousMuted: pttPreviousMutedRef.current,
+      startedMic: pttStartedMicRef.current,
+    });
+    if (!decision.shouldDeactivate) return;
     pushToTalkActiveRef.current = false;
     dispatch({ type: "set_push_to_talk_active", active: false });
-    setVoiceMuted(
-      pttStartedMicRef.current ? true : pttPreviousMutedRef.current,
-      "operator_web_ptt_finish",
-    );
+    if (decision.mute) setVoiceMuted(decision.mute.muted, decision.mute.reason);
   }, [setVoiceMuted]);
 
   useEffect(() => () => stopMic(), [stopMic]);
