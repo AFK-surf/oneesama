@@ -1,16 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
 
 import type { DebugState } from "../lan-operator-debug-state.ts";
 import {
   createOperatorRuntimeClient,
-  extractLiveProviderConfig,
-  type LanOperatorLiveProviderConfig,
   type LanOperatorLiveProviderEntry,
   type OperatorDebug,
-  type ProviderSwitchState,
   type RuntimeEventView,
   type RuntimeStatusBody,
 } from "./operatorRuntimeClient.ts";
+import {
+  foldRuntimeBody,
+  foldRuntimeRawPayload,
+  initialOperatorRuntimeViewState,
+  providerSwitchFailed,
+  providerSwitchStarted,
+  providerSwitchSucceeded,
+  runtimeRequestFailed,
+  selectRuntimeProvider,
+} from "./runtimeState.ts";
+import type { OperatorRuntimeViewState } from "./runtimeState.ts";
 import type { OperatorBoot, RealtimeState } from "./useRealtime.ts";
 
 export type { OperatorDebug, RuntimeEventView, RuntimeStatusBody };
@@ -26,16 +34,8 @@ export type EngineControlType =
   | "reset_session"
   | "reconnect";
 
-export interface OperatorRuntimeState {
-  debug: OperatorDebug;
-  snapshot: Record<string, unknown> | null;
-  inputPolicy: Record<string, unknown> | null;
-  outputPolicy: Record<string, unknown> | null;
-  recentEvents: RuntimeEventView[];
-  providerConfig: LanOperatorLiveProviderConfig | null;
+export interface OperatorRuntimeState extends OperatorRuntimeViewState {
   selectedProvider: LanOperatorLiveProviderEntry | null;
-  runtimeError: string;
-  providerSwitch: ProviderSwitchState;
   refreshStatus: () => Promise<RuntimeStatusBody | null>;
   switchProvider: (transport: string) => Promise<RuntimeStatusBody | null>;
   sendEngineControl: (type: EngineControlType, detail?: Record<string, unknown>) => void;
@@ -45,36 +45,44 @@ export interface OperatorRuntimeState {
   markInteresting: (input?: { label?: string; note?: string }) => void;
 }
 
+type OperatorRuntimeAction =
+  | { type: "body"; body: RuntimeStatusBody }
+  | { type: "raw_payload"; payload: Record<string, unknown> }
+  | { type: "request_failed"; error: unknown }
+  | { type: "provider_switch_started"; targetTransport: string }
+  | { type: "provider_switch_succeeded"; targetTransport: string }
+  | { type: "provider_switch_failed"; targetTransport: string; error: unknown };
+
+function operatorRuntimeReducer(
+  state: OperatorRuntimeViewState,
+  action: OperatorRuntimeAction,
+): OperatorRuntimeViewState {
+  if (action.type === "body") return foldRuntimeBody(state, action.body);
+  if (action.type === "raw_payload") return foldRuntimeRawPayload(state, action.payload);
+  if (action.type === "request_failed") return runtimeRequestFailed(state, action.error);
+  if (action.type === "provider_switch_started") {
+    return providerSwitchStarted(state, action.targetTransport);
+  }
+  if (action.type === "provider_switch_succeeded") {
+    return providerSwitchSucceeded(state, action.targetTransport);
+  }
+  return providerSwitchFailed(state, action.targetTransport, action.error);
+}
+
 export function useOperatorRuntime(
   boot: OperatorBoot,
   realtime: RealtimeState,
 ): OperatorRuntimeState {
   const { send, subscribeRaw, transport } = realtime;
   const client = useMemo(() => createOperatorRuntimeClient(boot.token), [boot.token]);
-  const [debug, setDebug] = useState<OperatorDebug>({});
-  const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null);
-  const [inputPolicy, setInputPolicy] = useState<Record<string, unknown> | null>(null);
-  const [outputPolicy, setOutputPolicy] = useState<Record<string, unknown> | null>(null);
-  const [recentEvents, setRecentEvents] = useState<RuntimeEventView[]>([]);
-  const [providerConfig, setProviderConfig] = useState<LanOperatorLiveProviderConfig | null>(
+  const [state, dispatch] = useReducer(
+    operatorRuntimeReducer,
     boot.liveProviderConfig || null,
+    initialOperatorRuntimeViewState,
   );
-  const [runtimeError, setRuntimeError] = useState("");
-  const [providerSwitch, setProviderSwitch] = useState<ProviderSwitchState>({
-    status: "idle",
-    targetTransport: "",
-    lastError: "",
-  });
 
   const applyRuntimeBody = useCallback((body: RuntimeStatusBody) => {
-    if (body.snapshot) setSnapshot(body.snapshot);
-    if (body.inputPolicy) setInputPolicy(body.inputPolicy);
-    if (body.outputPolicy) setOutputPolicy(body.outputPolicy);
-    if (body.debug) setDebug(body.debug);
-    if (body.recentEvents) setRecentEvents(body.recentEvents.slice(-80));
-    const nextProviderConfig = extractLiveProviderConfig(body);
-    if (nextProviderConfig) setProviderConfig(nextProviderConfig);
-    setRuntimeError("");
+    dispatch({ type: "body", body });
   }, []);
 
   const refreshStatus = useCallback(async () => {
@@ -83,7 +91,7 @@ export function useOperatorRuntime(
       applyRuntimeBody(body);
       return body;
     } catch (error) {
-      setRuntimeError(String((error as Error)?.message || error));
+      dispatch({ type: "request_failed", error });
       return null;
     }
   }, [applyRuntimeBody, client]);
@@ -96,35 +104,25 @@ export function useOperatorRuntime(
 
   useEffect(() => {
     return subscribeRaw((payload) => {
-      const body: RuntimeStatusBody = {};
-      if (payload.debug && typeof payload.debug === "object") {
-        body.debug = payload.debug as OperatorDebug;
-      }
-      if (payload.event && typeof payload.event === "object") {
-        setRecentEvents((prev) => [...prev, payload.event as RuntimeEventView].slice(-80));
-      }
-      if (body.debug) applyRuntimeBody(body);
+      dispatch({ type: "raw_payload", payload });
     });
-  }, [applyRuntimeBody, subscribeRaw]);
+  }, [subscribeRaw]);
 
   const switchProvider = useCallback(
     async (nextTransport: string) => {
       const targetTransport = String(nextTransport || "").trim();
       if (!targetTransport) return null;
-      setProviderSwitch({ status: "switching", targetTransport, lastError: "" });
+      dispatch({ type: "provider_switch_started", targetTransport });
       try {
         const body = await client.switchProvider(targetTransport);
         applyRuntimeBody(body);
-        setProviderSwitch({
-          status: "active",
+        dispatch({
+          type: "provider_switch_succeeded",
           targetTransport: String(body.conversationTransport || targetTransport),
-          lastError: "",
         });
         return body;
       } catch (error) {
-        const message = String((error as Error)?.message || error);
-        setRuntimeError(message);
-        setProviderSwitch({ status: "failed", targetTransport, lastError: message });
+        dispatch({ type: "provider_switch_failed", targetTransport, error });
         return null;
       }
     },
@@ -141,22 +139,23 @@ export function useOperatorRuntime(
           reason: `operator_web_${type}`,
           responseId: String(
             detail.responseId ||
-              (debug.output as DebugState["output"] | undefined)?.assistantText?.lastResponseId ||
+              (state.debug.output as DebugState["output"] | undefined)?.assistantText
+                ?.lastResponseId ||
               "",
           ),
           detail: { source: "operator_web", ...detail },
         },
       });
     },
-    [boot.sessionId, debug.output, send],
+    [boot.sessionId, state.debug.output, send],
   );
 
   const cancelTool = useCallback(
     (reason = "operator_cancelled") => {
-      const toolRouting = debug.toolRouting as DebugState["toolRouting"] | undefined;
-      const kwwk = debug.kwwk as DebugState["kwwk"] | undefined;
-      const timeline = debug.timeline as DebugState["timeline"] | undefined;
-      const output = debug.output as DebugState["output"] | undefined;
+      const toolRouting = state.debug.toolRouting as DebugState["toolRouting"] | undefined;
+      const kwwk = state.debug.kwwk as DebugState["kwwk"] | undefined;
+      const timeline = state.debug.timeline as DebugState["timeline"] | undefined;
+      const output = state.debug.output as DebugState["output"] | undefined;
       send({
         type: "tool_cancel",
         callId: toolRouting?.callId || "",
@@ -168,7 +167,7 @@ export function useOperatorRuntime(
         reason,
       });
     },
-    [debug.kwwk, debug.output, debug.timeline, debug.toolRouting, send],
+    [send, state.debug.kwwk, state.debug.output, state.debug.timeline, state.debug.toolRouting],
   );
 
   const markInteresting = useCallback(
@@ -203,26 +202,12 @@ export function useOperatorRuntime(
   }, [client, send]);
 
   const selectedProvider = useMemo(() => {
-    if (!providerConfig) return null;
-    const selectedTransport =
-      providerConfig.selectedLiveTransport || providerConfig.selectedTransport || transport;
-    return (
-      providerConfig.providers.find((provider) => provider.transport === selectedTransport) ||
-      providerConfig.providers.find((provider) => provider.selected) ||
-      null
-    );
-  }, [providerConfig, transport]);
+    return selectRuntimeProvider(state.providerConfig, transport);
+  }, [state.providerConfig, transport]);
 
   return {
-    debug,
-    snapshot,
-    inputPolicy,
-    outputPolicy,
-    recentEvents,
-    providerConfig,
+    ...state,
     selectedProvider,
-    runtimeError,
-    providerSwitch,
     refreshStatus,
     switchProvider,
     sendEngineControl,
