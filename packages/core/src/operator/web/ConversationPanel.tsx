@@ -1,39 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { DebugState } from "../lan-operator-debug-state.ts";
+import { conversationView, type ConversationTimelineTurn } from "./conversationView.ts";
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
-import type { CanonicalEvent, RealtimeState } from "./useRealtime.ts";
-
-export interface Turn {
-  role: "you" | "bot";
-  text: string;
-  status: string;
-}
-
-export function turnsFromEvents(events: CanonicalEvent[]): Turn[] {
-  const turns: Turn[] = [];
-  const assistantByResponse = new Map<string, Turn>();
-  for (const ev of events) {
-    if (ev.type === "transcript_completed" && ev.text) {
-      turns.push({ role: "you", text: String(ev.text), status: "heard" });
-    } else if (ev.type === "assistant_text_delta" || ev.type === "assistant_text_completed") {
-      const key = String(ev.responseId || "r");
-      let turn = assistantByResponse.get(key);
-      if (!turn) {
-        turn = { role: "bot", text: "", status: "speaking" };
-        assistantByResponse.set(key, turn);
-        turns.push(turn);
-      }
-      if (ev.type === "assistant_text_completed") {
-        if (ev.text) turn.text = String(ev.text);
-        turn.status = "final";
-      } else if (ev.text) {
-        turn.text += String(ev.text);
-      }
-    }
-  }
-  return turns;
-}
+import type { RealtimeState } from "./useRealtime.ts";
 
 export function ConversationPanel({
   realtime,
@@ -44,17 +13,15 @@ export function ConversationPanel({
 }) {
   const [draft, setDraft] = useState("");
   const streamRef = useRef<HTMLDivElement | null>(null);
-  const turns = useMemo(() => turnsFromEvents(realtime.events), [realtime.events]);
-  const timeline = runtime.debug.timeline as DebugState["timeline"] | undefined;
-  const latestTurn = timeline?.turns?.at(-1) || null;
-  const output = runtime.debug.output as DebugState["output"] | undefined;
-  const control = runtime.debug.conversation?.control;
-  const connected = String(runtime.debug.conversation?.status || realtime.status) === "connected";
+  const view = useMemo(
+    () => conversationView(runtime, realtime),
+    [realtime.error, realtime.events, realtime.status, runtime.debug, runtime.runtimeError],
+  );
 
   useEffect(() => {
     const el = streamRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [turns.length, output?.assistantText?.currentText]);
+  }, [view.turns.length, view.liveAssistantText]);
 
   return (
     <section className="op-conversation">
@@ -62,27 +29,23 @@ export function ConversationPanel({
         <div>
           <h2>Conversation</h2>
           <p>
-            {latestTurn?.latestEvent || realtime.events.at(-1)?.type || "idle"} /{" "}
-            {timeline?.currentTurnId || "no turn"}
+            {view.latestEventLabel} / {view.currentTurnLabel}
           </p>
         </div>
         <div className="op-mini-metrics">
-          <Metric label="events" value={String(realtime.events.length)} />
-          <Metric
-            label="speech"
-            value={String(runtime.debug.conversation?.eventCounts?.speech_started || 0)}
-          />
-          <Metric label="control" value={control?.lastResult || control?.lastCommand || "idle"} />
+          <Metric label="events" value={view.eventCountLabel} />
+          <Metric label="speech" value={view.speechStartedCountLabel} />
+          <Metric label="control" value={view.controlLabel} />
         </div>
       </div>
 
-      {latestTurn ? <Milestones turn={latestTurn} /> : null}
+      {view.latestTurn ? <Milestones turn={view.latestTurn} /> : null}
 
       <div className="op-stream" ref={streamRef}>
-        {turns.length === 0 && !output?.assistantText?.currentText ? (
+        {view.empty ? (
           <div className="op-empty">No messages yet. Connect, then speak or type below.</div>
         ) : (
-          turns.map((turn, index) => (
+          view.turns.map((turn, index) => (
             <div key={index} className={`op-turn op-turn-${turn.role}`}>
               <span className="op-turn-role">{turn.role}</span>
               <span className="op-turn-text">{turn.text || "..."}</span>
@@ -90,16 +53,14 @@ export function ConversationPanel({
             </div>
           ))
         )}
-        {output?.assistantText?.currentText ? (
+        {view.liveAssistantText ? (
           <div className="op-turn op-turn-bot live">
             <span className="op-turn-role">bot</span>
-            <span className="op-turn-text">{output.assistantText.currentText}</span>
+            <span className="op-turn-text">{view.liveAssistantText}</span>
             <span className="op-turn-status">live</span>
           </div>
         ) : null}
-        {realtime.error || runtime.runtimeError ? (
-          <div className="op-error">{realtime.error || runtime.runtimeError}</div>
-        ) : null}
+        {view.errorText ? <div className="op-error">{view.errorText}</div> : null}
       </div>
 
       <form
@@ -116,7 +77,7 @@ export function ConversationPanel({
           placeholder="Type a message..."
           autoComplete="off"
         />
-        <button className="btn primary" type="submit" disabled={!connected}>
+        <button className="btn primary" type="submit" disabled={!view.connected}>
           Send
         </button>
       </form>
@@ -124,7 +85,7 @@ export function ConversationPanel({
   );
 }
 
-function Milestones({ turn }: { turn: NonNullable<DebugState["timeline"]["turns"][number]> }) {
+function Milestones({ turn }: { turn: ConversationTimelineTurn }) {
   const milestones = turn.milestones || {};
   return (
     <div className="op-milestones">
