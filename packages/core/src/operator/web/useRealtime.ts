@@ -7,8 +7,8 @@ import {
   operatorTextInputMessage,
   realtimeEngineControlMessage,
 } from "./realtimeCommands.ts";
+import { parseRealtimeSocketPayload, publishRealtimePayload } from "./realtimeIncoming.ts";
 import {
-  canonicalEventFromPayload,
   foldRealtimePayload,
   initialRealtimeViewState,
   realtimeConnectRequested,
@@ -92,19 +92,13 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
         if (!closed) reconnectTimer = setTimeout(open, 1000);
       });
       ws.addEventListener("message", (event) => {
-        let payload: Record<string, unknown>;
-        try {
-          payload = JSON.parse(String(event.data));
-        } catch {
-          return;
-        }
-        for (const listener of rawListenersRef.current) listener(payload);
-        const ev = canonicalEventFromPayload(payload);
-        if (ev) {
-          // Audio chunks go to subscribers only — keeping them out of the
-          // rendered event list avoids re-rendering on every ~50ms chunk.
-          for (const listener of listenersRef.current) listener(ev);
-        }
+        const payload = parseRealtimeSocketPayload(event.data);
+        if (!payload) return;
+        publishRealtimePayload({
+          payload,
+          rawListeners: rawListenersRef.current,
+          canonicalListeners: listenersRef.current,
+        });
         dispatch({ type: "payload", payload });
       });
     };
