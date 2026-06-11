@@ -1,36 +1,8 @@
 import { useMemo, useState } from "react";
 
-import type { DebugState, VisualState } from "../lan-operator-debug-state.ts";
-import { authSuffix } from "./protocol.ts";
+import { stageView } from "./stageView.ts";
 import type { OperatorDebug } from "./useOperatorRuntime.ts";
 import type { OperatorBoot } from "./useRealtime.ts";
-
-type StageSource = VisualState["sources"][number];
-
-const FALLBACK_SOURCES: StageSource[] = [
-  { id: "avatar", label: "Avatar", kind: "avatar", state: "synthetic" },
-  { id: "host-app", label: "App view", kind: "desktop_app", state: "synthetic" },
-];
-
-function stageUrl(
-  boot: OperatorBoot,
-  source: StageSource,
-  avatarPreset: string,
-  refreshKey: number,
-) {
-  const params = new URLSearchParams({
-    embed: "1",
-    sourceId: source.id,
-    label: source.label || source.id,
-    kind: source.kind || "desktop_app",
-    refresh: String(refreshKey),
-  });
-  if (source.kind === "avatar" || source.id === "avatar") {
-    params.set("avatar", "1");
-    params.set("avatarPreset", source.avatarPreset || avatarPreset);
-  }
-  return authSuffix(boot.token, `/host-visual?${params.toString()}`);
-}
 
 /**
  * Stage shows the embodied bot and app/source lanes. It still reuses the
@@ -38,23 +10,14 @@ function stageUrl(
  * as a first-class domain instead of a decorative preview.
  */
 export function Stage({ boot, debug }: { boot: OperatorBoot; debug: OperatorDebug }) {
-  const visual = debug.visual as DebugState["visual"] | undefined;
-  const sources = visual?.sources?.length ? visual.sources : FALLBACK_SOURCES;
   const [activeSourceId, setActiveSourceId] = useState("avatar");
   const [refreshKey, setRefreshKey] = useState(0);
   const avatarPreset =
     new URLSearchParams(location.search).get("avatarPreset") || "fallback-canvas";
-
-  const activeSource = sources.find((source) => source.id === activeSourceId) || sources[0];
-  const frames = useMemo(
-    () =>
-      sources.map((source) => ({
-        source,
-        src: stageUrl(boot, source, avatarPreset, refreshKey),
-      })),
-    [avatarPreset, boot, refreshKey, sources],
+  const view = useMemo(
+    () => stageView({ activeSourceId, avatarPreset, debug, refreshKey, token: boot.token }),
+    [activeSourceId, avatarPreset, boot.token, debug, refreshKey],
   );
-  const composition = visual?.composition;
 
   return (
     <section className="op-stage">
@@ -62,7 +25,7 @@ export function Stage({ boot, debug }: { boot: OperatorBoot; debug: OperatorDebu
         <div>
           <h2>Stage</h2>
           <p>
-            {visual?.connectionState || "not_connected"} / {visual?.trackCount || 0} tracks
+            {view.connectionStateLabel} / {view.trackCountLabel} tracks
           </p>
         </div>
         <div className="op-stage-actions">
@@ -73,44 +36,35 @@ export function Stage({ boot, debug }: { boot: OperatorBoot; debug: OperatorDebu
       </div>
 
       <div className="op-stage-tabs">
-        {sources.map((source) => (
+        {view.sourceTabs.map((source) => (
           <button
             key={source.id}
-            className={source.id === activeSource.id ? "active" : ""}
+            className={source.active ? "active" : ""}
             onClick={() => setActiveSourceId(source.id)}
             type="button"
           >
-            <span>{source.label || source.id}</span>
-            <em>{source.state || source.kind}</em>
+            <span>{source.label}</span>
+            <em>{source.stateLabel}</em>
           </button>
         ))}
       </div>
 
       <div className="op-stage-frame">
-        {frames.map(({ source, src }) => (
+        {view.frames.map((frame) => (
           <iframe
-            key={source.id}
-            title={source.label || source.id}
-            src={src}
-            style={{ display: source.id === activeSource.id ? "block" : "none" }}
+            key={frame.id}
+            title={frame.title}
+            src={frame.src}
+            style={{ display: frame.active ? "block" : "none" }}
             allow="autoplay; camera; microphone; display-capture"
           />
         ))}
       </div>
 
       <div className="op-stage-telemetry">
-        <Metric label="visual ws" value={visual?.receiverWebSocketState || "closed"} />
-        <Metric
-          label="webrtc"
-          value={visual?.peerConnectionState || visual?.connectionState || "-"}
-        />
-        <Metric label="layout" value={`rev ${composition?.layoutRevision || 0}`} />
-        <Metric
-          label="canvas"
-          value={`${composition?.width || 0}x${composition?.height || 0}@${composition?.targetFps || 0}`}
-        />
-        <Metric label="focus" value={composition?.focusedSourceId || "-"} />
-        <Metric label="overlays" value={String(composition?.overlayCount || 0)} />
+        {view.telemetryRows.map((metric) => (
+          <Metric key={metric.label} label={metric.label} value={metric.value} />
+        ))}
       </div>
     </section>
   );
