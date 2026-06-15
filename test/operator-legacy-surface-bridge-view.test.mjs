@@ -19,6 +19,7 @@ function voice(overrides = {}) {
     micOn: false,
     muted: false,
     selectedDeviceId: "",
+    syntheticVoiceReady: false,
     ...overrides,
   };
 }
@@ -33,10 +34,18 @@ test("operator legacy surface state view maps voice and debug state", () => {
         voice: { chunksReceived: 2 },
         visual: {
           sources: [{ id: "screen", label: "Screen", kind: "desktop_app", state: "live" }],
-          composition: { layoutRevision: 3 },
+          composition: {
+            layoutRevision: 3,
+            focusedSourceId: "screen",
+            sourceRects: { screen: { x: 0, y: 0, width: 1, height: 1 } },
+          },
         },
         kwwk: { status: "executing", actionCount: 4 },
         conversation: { status: "connected" },
+        transport: { events: { state: "open" }, voice: { state: "open" } },
+        toolRouting: { callId: "call-1" },
+        timeline: { currentTurnId: "turn-1" },
+        output: { assistantText: { lastResponseId: "resp-1" } },
       },
     },
     voice({
@@ -48,7 +57,9 @@ test("operator legacy surface state view maps voice and debug state", () => {
       micOn: true,
       muted: true,
       selectedDeviceId: "desk",
+      syntheticVoiceReady: true,
     }),
+    true,
   );
 
   assert.equal(state.ready, true);
@@ -72,19 +83,36 @@ test("operator legacy surface state view maps voice and debug state", () => {
   assert.equal(state.voice.chunksReceived, 2);
   assert.equal(state.visual.composition.layoutRevision, 3);
   assert.equal(state.sources.length, 1);
+  assert.deepEqual(state.overlays, []);
+  assert.equal(state.eventsWsState, "open");
+  assert.equal(state.voiceWsState, "open");
+  assert.equal(state.focusedSourceId, "screen");
+  assert.equal(state.sourceRects.screen.width, 1);
   assert.equal(state.kwwk.status, "executing");
   assert.equal(state.conversation.status, "connected");
+  assert.equal(state.toolRouting.callId, "call-1");
+  assert.equal(state.timeline.currentTurnId, "turn-1");
+  assert.equal(state.output.assistantText.lastResponseId, "resp-1");
   assert.equal(state.liveProviderConfig, providerConfig);
 });
 
 test("operator legacy surface state view falls back to empty debug objects", () => {
-  const state = legacySurfaceStateView({ providerConfig: null, debug: {} }, voice());
+  const state = legacySurfaceStateView({ providerConfig: null, debug: {} }, voice(), false);
 
+  assert.equal(state.ready, false);
   assert.deepEqual(state.voice, {});
   assert.deepEqual(state.visual, {});
   assert.deepEqual(state.sources, []);
+  assert.deepEqual(state.overlays, []);
+  assert.equal(state.eventsWsState, "closed");
+  assert.equal(state.voiceWsState, "closed");
+  assert.deepEqual(state.sourceRects, {});
+  assert.equal(state.focusedSourceId, null);
   assert.deepEqual(state.kwwk, {});
   assert.deepEqual(state.conversation, {});
+  assert.deepEqual(state.toolRouting, {});
+  assert.deepEqual(state.timeline, {});
+  assert.deepEqual(state.output, {});
   assert.equal(state.liveProviderConfig, null);
 });
 

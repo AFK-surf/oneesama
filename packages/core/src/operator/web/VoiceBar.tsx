@@ -83,7 +83,7 @@ export function VoiceBar({ voice, connected }: { voice: VoiceState; connected: b
           Refresh
         </button>
         {view.showStopMic ? (
-          <button className="btn" id="voice-button" onClick={voice.stopMic} type="button">
+          <button className="btn" id="voice-button" onClick={() => voice.stopMic()} type="button">
             Stop mic
           </button>
         ) : (

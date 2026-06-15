@@ -18,7 +18,7 @@ export function App({ boot }: { boot: OperatorBoot }) {
   const work = useWork(rt);
   const shell = appShellView(runtime, rt);
 
-  useLegacySurfaceBridge({ runtime, voice });
+  useLegacySurfaceBridge({ realtime: rt, runtime, voice });
 
   return (
     <div className={shell.shellClass}>

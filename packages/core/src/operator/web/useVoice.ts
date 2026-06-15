@@ -5,6 +5,7 @@ import { wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
 import { useLatestRef } from "./useLatestRef.ts";
 import {
+  VOICE_WS_OPEN_STATE,
   connectVoiceCaptureGraph,
   createVoiceCaptureAudioContext,
   stopVoiceCaptureResources,
@@ -27,21 +28,40 @@ import {
   createVoiceStreamId,
   localVadConfiguredMessage,
   micBlockedMessage,
+  parseVoiceSocketPayload,
   voiceCaptureDisarmedMessages,
   voiceCaptureOpenedMessages,
+  syntheticVoiceChunkMessage,
+  voiceChunkAckObservedMessage,
   voiceDevicesRefreshedMessage,
   voiceMutedMessages,
+  voiceStreamOpenedMessage,
 } from "./voiceEvents.ts";
+
+export interface SyntheticVoiceChunkInput {
+  sequence?: number;
+  voiceStreamId?: string;
+  streamId?: string;
+  voiceStreamGeneration?: number;
+  sampleRate?: number;
+  channels?: number;
+  durationMs?: number;
+  energy?: number;
+  source?: string;
+  dataBase64?: string;
+}
 
 export interface VoiceState extends VoiceViewState {
   refreshDevices: () => Promise<VoiceDevice[]>;
   setSelectedDeviceId: (deviceId: string) => void;
   setLocalVadEnabled: (enabled: boolean) => void;
   startMic: () => Promise<void>;
-  stopMic: () => void;
+  stopMic: (reason?: string) => void;
+  setVoiceMuted: (muted: boolean, reason?: string) => void;
   toggleMute: () => void;
   startPushToTalk: () => Promise<void>;
   finishPushToTalk: () => void;
+  sendSyntheticVoiceChunk: (input?: SyntheticVoiceChunkInput) => boolean;
 }
 
 /**
@@ -63,18 +83,23 @@ export function useVoice(
   const devicesLengthRef = useLatestRef(voiceView.devices.length);
   const selectedDeviceIdRef = useLatestRef(voiceView.selectedDeviceId);
   const pushToTalkActiveRef = useLatestRef(voiceView.pushToTalkActive);
+  const chunksSentRef = useLatestRef(voiceView.chunksSent);
   const captureCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const voiceWsRef = useRef<WebSocket | null>(null);
+  const syntheticVoiceWsRef = useRef<WebSocket | null>(null);
   const micStartPromiseRef = useRef<Promise<void> | null>(null);
   const captureGenerationRef = useRef(0);
   const seqRef = useRef(0);
   const streamIdRef = useRef("");
+  const syntheticSeqRef = useRef(0);
+  const syntheticStreamIdRef = useRef("");
+  const syntheticStreamGenerationRef = useRef(0);
   const pttPreviousMutedRef = useRef(false);
   const pttStartedMicRef = useRef(false);
 
-  useAssistantAudioPlayback(subscribe);
+  useAssistantAudioPlayback(subscribe, sendOperatorEvent);
 
   const setMuted = useCallback((next: boolean) => {
     mutedRef.current = next;
@@ -91,6 +116,15 @@ export function useVoice(
           availableDeviceCount: devicesLengthRef.current,
         }),
       );
+    },
+    [sendOperatorEvent],
+  );
+
+  const handleVoiceSocketMessage = useCallback(
+    (event: MessageEvent) => {
+      const payload = parseVoiceSocketPayload(event.data);
+      if (payload?.type !== "operator_voice_chunk_ack") return;
+      sendOperatorEvent(voiceChunkAckObservedMessage(payload));
     },
     [sendOperatorEvent],
   );
@@ -165,34 +199,100 @@ export function useVoice(
     void refreshDevices().catch(() => undefined);
   }, [refreshDevices]);
 
-  const stopMic = useCallback(() => {
-    captureGenerationRef.current += 1;
-    micStartPromiseRef.current = null;
-    stopVoiceCaptureResources({
-      processor: processorRef.current,
-      stream: streamRef.current,
-      audioContext: captureCtxRef.current,
-      websocket: voiceWsRef.current,
-    });
-    processorRef.current = null;
-    streamRef.current = null;
-    captureCtxRef.current = null;
-    voiceWsRef.current = null;
-    if (pushToTalkActiveRef.current) {
-      pushToTalkActiveRef.current = false;
-      dispatch({ type: "set_push_to_talk_active", active: false });
+  useEffect(() => {
+    if (voiceView.micOn) {
+      const socket = syntheticVoiceWsRef.current;
+      syntheticVoiceWsRef.current = null;
+      syntheticStreamIdRef.current = "";
+      dispatch({ type: "set_synthetic_voice_ready", ready: false });
+      socket?.close();
+      return () => undefined;
     }
-    pttStartedMicRef.current = false;
-    pttPreviousMutedRef.current = mutedRef.current;
-    dispatch({ type: "mic_stopped" });
-    const disarmed = voiceCaptureDisarmedMessages({
-      sessionId: boot.sessionId,
-      muted: mutedRef.current,
-      deviceId: selectedDeviceIdRef.current,
-      availableDeviceCount: devicesLengthRef.current,
-    });
-    for (const message of disarmed.operatorEvents) sendOperatorEvent(message);
-  }, [boot.sessionId, sendOperatorEvent]);
+
+    let closed = false;
+    let reconnectTimer: number | null = null;
+
+    const connectSyntheticVoiceSocket = () => {
+      const ws = new WebSocket(wsUrl(boot.token, "/operator/voice/ws"));
+      syntheticVoiceWsRef.current = ws;
+      dispatch({ type: "set_synthetic_voice_ready", ready: false });
+      ws.addEventListener("open", () => {
+        if (closed) return;
+        syntheticStreamGenerationRef.current = 1;
+        syntheticStreamIdRef.current = createVoiceStreamId();
+        syntheticSeqRef.current = 0;
+        ws.send(
+          JSON.stringify(
+            voiceStreamOpenedMessage(
+              boot.sessionId,
+              syntheticStreamIdRef.current,
+              new Date().toISOString(),
+            ),
+          ),
+        );
+        dispatch({ type: "set_synthetic_voice_ready", ready: true });
+      });
+      ws.addEventListener("message", handleVoiceSocketMessage);
+      ws.addEventListener("close", () => {
+        if (syntheticVoiceWsRef.current === ws) syntheticVoiceWsRef.current = null;
+        dispatch({ type: "set_synthetic_voice_ready", ready: false });
+        if (closed) return;
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = null;
+          if (!closed) connectSyntheticVoiceSocket();
+        }, 1000);
+      });
+      ws.addEventListener("error", () => {
+        dispatch({ type: "set_synthetic_voice_ready", ready: false });
+      });
+    };
+
+    connectSyntheticVoiceSocket();
+
+    return () => {
+      closed = true;
+      if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      const socket = syntheticVoiceWsRef.current;
+      syntheticVoiceWsRef.current = null;
+      syntheticStreamIdRef.current = "";
+      dispatch({ type: "set_synthetic_voice_ready", ready: false });
+      socket?.close();
+    };
+  }, [boot.sessionId, boot.token, handleVoiceSocketMessage, voiceView.micOn]);
+
+  const stopMic = useCallback(
+    (reason = "operator_web_stop_mic") => {
+      captureGenerationRef.current += 1;
+      micStartPromiseRef.current = null;
+      stopVoiceCaptureResources({
+        processor: processorRef.current,
+        stream: streamRef.current,
+        audioContext: captureCtxRef.current,
+        websocket: voiceWsRef.current,
+      });
+      processorRef.current = null;
+      streamRef.current = null;
+      captureCtxRef.current = null;
+      voiceWsRef.current = null;
+      if (pushToTalkActiveRef.current) {
+        pushToTalkActiveRef.current = false;
+        dispatch({ type: "set_push_to_talk_active", active: false });
+      }
+      pttStartedMicRef.current = false;
+      pttPreviousMutedRef.current = mutedRef.current;
+      dispatch({ type: "mic_stopped" });
+      const disarmed = voiceCaptureDisarmedMessages({
+        sessionId: boot.sessionId,
+        reason,
+        muted: mutedRef.current,
+        deviceId: selectedDeviceIdRef.current,
+        availableDeviceCount: devicesLengthRef.current,
+      });
+      for (const message of disarmed.operatorEvents) sendOperatorEvent(message);
+    },
+    [boot.sessionId, sendOperatorEvent],
+  );
 
   const startMic = useCallback(() => {
     if (micOnRef.current) return Promise.resolve();
@@ -237,6 +337,7 @@ export function useVoice(
           ws?.send(JSON.stringify(opened.voiceMessage));
           for (const message of opened.operatorEvents) sendOperatorEvent(message);
         });
+        ws.addEventListener("message", handleVoiceSocketMessage);
 
         processor = connectVoiceCaptureGraph({
           audioContext: ctx,
@@ -267,6 +368,7 @@ export function useVoice(
               ws.send(JSON.stringify(frame.chunkMessage));
             }
             if (frame.chunksSent != null) {
+              chunksSentRef.current = frame.chunksSent;
               dispatch({ type: "set_chunks_sent", chunksSent: frame.chunksSent });
             }
           },
@@ -308,7 +410,66 @@ export function useVoice(
       },
     );
     return promise;
-  }, [boot.sessionId, boot.token, refreshDevices, reportMicBlocked, sendOperatorEvent]);
+  }, [
+    boot.sessionId,
+    boot.token,
+    chunksSentRef,
+    handleVoiceSocketMessage,
+    refreshDevices,
+    reportMicBlocked,
+    sendOperatorEvent,
+  ]);
+
+  const sendSyntheticVoiceChunk = useCallback(
+    (input: SyntheticVoiceChunkInput = {}) => {
+      const syntheticSocket = syntheticVoiceWsRef.current;
+      const activeMicSocket = voiceWsRef.current;
+      const ws =
+        syntheticSocket?.readyState === VOICE_WS_OPEN_STATE
+          ? syntheticSocket
+          : activeMicSocket?.readyState === VOICE_WS_OPEN_STATE
+            ? activeMicSocket
+            : null;
+      if (!ws) return false;
+      const usingSyntheticSocket = ws === syntheticSocket;
+      const fallbackSequence =
+        (usingSyntheticSocket ? syntheticSeqRef.current : seqRef.current) + 1;
+      const sequence = finiteNumber(input.sequence, fallbackSequence);
+      const voiceStreamId = String(
+        input.voiceStreamId ||
+          input.streamId ||
+          (usingSyntheticSocket ? syntheticStreamIdRef.current : streamIdRef.current) ||
+          "",
+      );
+      if (!voiceStreamId) return false;
+      const voiceStreamGeneration = finiteNumber(
+        input.voiceStreamGeneration,
+        usingSyntheticSocket ? syntheticStreamGenerationRef.current : 1,
+      );
+      const message = syntheticVoiceChunkMessage({
+        sessionId: boot.sessionId,
+        sequence,
+        voiceStreamId,
+        voiceStreamGeneration,
+        monotonicMs: performance.now(),
+        sentAt: new Date().toISOString(),
+        sampleRate: finiteNumber(input.sampleRate, 24000),
+        channels: finiteNumber(input.channels, 1),
+        durationMs: finiteNumber(input.durationMs, 20),
+        energy: finiteNumber(input.energy, 0.16),
+        source: input.source || "synthetic_pcm16",
+        dataBase64: input.dataBase64,
+      });
+      ws.send(JSON.stringify(message));
+      if (usingSyntheticSocket)
+        syntheticSeqRef.current = Math.max(syntheticSeqRef.current, sequence);
+      const nextChunksSent = Math.max(chunksSentRef.current, sequence);
+      chunksSentRef.current = nextChunksSent;
+      dispatch({ type: "set_chunks_sent", chunksSent: nextChunksSent });
+      return true;
+    },
+    [boot.sessionId, chunksSentRef],
+  );
 
   const setSelectedDeviceId = useCallback(
     (deviceId: string) => {
@@ -371,8 +532,15 @@ export function useVoice(
     setLocalVadEnabled,
     startMic,
     stopMic,
+    setVoiceMuted,
     toggleMute,
     startPushToTalk,
     finishPushToTalk,
+    sendSyntheticVoiceChunk,
   };
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }

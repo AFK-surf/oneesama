@@ -10,6 +10,7 @@ export interface VoiceViewState {
   devices: VoiceDevice[];
   selectedDeviceId: string;
   chunksSent: number;
+  syntheticVoiceReady: boolean;
 }
 
 export type VoiceViewAction =
@@ -21,6 +22,7 @@ export type VoiceViewAction =
   | { type: "set_devices"; devices: VoiceDevice[]; selectedDeviceId: string }
   | { type: "set_selected_device"; deviceId: string }
   | { type: "set_chunks_sent"; chunksSent: number }
+  | { type: "set_synthetic_voice_ready"; ready: boolean }
   | { type: "mic_started" }
   | { type: "mic_stopped" };
 
@@ -34,6 +36,7 @@ export const INITIAL_VOICE_VIEW: VoiceViewState = {
   devices: [],
   selectedDeviceId: "",
   chunksSent: 0,
+  syntheticVoiceReady: false,
 };
 
 export function voiceViewReducer(state: VoiceViewState, action: VoiceViewAction): VoiceViewState {
@@ -64,6 +67,9 @@ export function voiceViewReducer(state: VoiceViewState, action: VoiceViewAction)
   }
   if (action.type === "set_chunks_sent") {
     return { ...state, chunksSent: action.chunksSent };
+  }
+  if (action.type === "set_synthetic_voice_ready") {
+    return { ...state, syntheticVoiceReady: action.ready };
   }
   if (action.type === "mic_started") return { ...state, micOn: true };
   return {

@@ -32,6 +32,21 @@ export interface VoiceChunkMessageInput {
   samples: Float32Array;
 }
 
+export interface SyntheticVoiceChunkMessageInput {
+  sessionId: string;
+  sequence: number;
+  voiceStreamId: string;
+  voiceStreamGeneration?: number;
+  monotonicMs: number;
+  sentAt: string;
+  sampleRate?: number;
+  channels?: number;
+  durationMs?: number;
+  energy?: number;
+  source?: string;
+  dataBase64?: string;
+}
+
 export type OperatorVoiceStatusMessage = Record<string, unknown> & {
   type:
     | "operator_local_vad_configured"
@@ -345,4 +360,48 @@ export function voiceChunkMessage(input: VoiceChunkMessageInput) {
     energy: input.energy,
     dataBase64: pcm16Base64(input.samples),
   };
+}
+
+export function syntheticVoiceChunkMessage(input: SyntheticVoiceChunkMessageInput) {
+  return {
+    type: "voice_chunk",
+    source: input.source || "synthetic_pcm16",
+    sessionId: input.sessionId,
+    sequence: input.sequence,
+    voiceStreamId: input.voiceStreamId,
+    voiceStreamGeneration: input.voiceStreamGeneration ?? 1,
+    monotonicMs: input.monotonicMs,
+    sentAt: input.sentAt,
+    sampleRate: input.sampleRate ?? 24000,
+    channels: input.channels ?? 1,
+    durationMs: input.durationMs ?? 20,
+    energy: input.energy ?? 0.16,
+    dataBase64: input.dataBase64 || "AAAAAA==",
+  };
+}
+
+export function voiceChunkAckObservedMessage(payload: Record<string, unknown>, nowMs = Date.now()) {
+  const ackAt = new Date(nowMs).toISOString();
+  const sentAtMs = Date.parse(String(payload.sentAt || ""));
+  const ackRttMs = Number.isFinite(sentAtMs) ? Math.max(0, nowMs - sentAtMs) : null;
+  return {
+    type: "operator_voice_chunk_ack_observed",
+    ack: {
+      ...payload,
+      ackAt,
+      ackRttMs,
+      ackClock: "client_send_to_ack_wall",
+    },
+  };
+}
+
+export function parseVoiceSocketPayload(data: unknown): Record<string, unknown> | null {
+  try {
+    const payload = JSON.parse(String(data));
+    return payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }

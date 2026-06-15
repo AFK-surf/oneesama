@@ -20,7 +20,7 @@ export interface LegacyLocalVadView {
 }
 
 export interface LegacySurfaceStateView {
-  ready: true;
+  ready: boolean;
   voiceCapture: LegacyVoiceCaptureView;
   voiceLocalVad: LegacyLocalVadView;
   voiceDeviceId: string;
@@ -30,8 +30,16 @@ export interface LegacySurfaceStateView {
   voice: DebugState["voice"] | Record<string, never>;
   visual: DebugState["visual"] | Record<string, never>;
   sources: DebugState["visual"]["sources"];
+  overlays: Array<Record<string, unknown>>;
+  eventsWsState: string;
+  voiceWsState: string;
+  sourceRects: DebugState["visual"]["composition"]["sourceRects"] | Record<string, never>;
+  focusedSourceId: string | null;
   kwwk: DebugState["kwwk"] | Record<string, never>;
   conversation: DebugState["conversation"] | Record<string, never>;
+  toolRouting: DebugState["toolRouting"] | Record<string, never>;
+  timeline: DebugState["timeline"] | Record<string, never>;
+  output: DebugState["output"] | Record<string, never>;
   liveProviderConfig: OperatorRuntimeState["providerConfig"];
 }
 
@@ -47,16 +55,23 @@ export function legacySurfaceStateView(
     | "micOn"
     | "muted"
     | "selectedDeviceId"
+    | "syntheticVoiceReady"
   >,
+  ready = true,
 ): LegacySurfaceStateView {
   const debug = runtime.debug;
   const voiceDebug = debug.voice as DebugState["voice"] | undefined;
   const visual = debug.visual as DebugState["visual"] | undefined;
   const kwwk = debug.kwwk as DebugState["kwwk"] | undefined;
   const conversation = debug.conversation as DebugState["conversation"] | undefined;
+  const toolRouting = debug.toolRouting as DebugState["toolRouting"] | undefined;
+  const timeline = debug.timeline as DebugState["timeline"] | undefined;
+  const output = debug.output as DebugState["output"] | undefined;
+  const transport = debug.transport as DebugState["transport"] | undefined;
+  const composition = visual?.composition;
 
   return {
-    ready: true,
+    ready,
     voiceCapture: legacyVoiceCaptureView(voice),
     voiceLocalVad: legacyLocalVadView({
       active: voice.localVadActive,
@@ -70,8 +85,17 @@ export function legacySurfaceStateView(
     voice: voiceDebug || {},
     visual: visual || {},
     sources: visual?.sources || [],
+    overlays: [],
+    eventsWsState: transport?.events?.state || "closed",
+    voiceWsState:
+      voice.syntheticVoiceReady || voice.micOn ? "open" : transport?.voice?.state || "closed",
+    sourceRects: composition?.sourceRects || {},
+    focusedSourceId: composition?.focusedSourceId || null,
     kwwk: kwwk || {},
     conversation: conversation || {},
+    toolRouting: toolRouting || {},
+    timeline: timeline || {},
+    output: output || {},
     liveProviderConfig: runtime.providerConfig,
   };
 }

@@ -11,6 +11,9 @@ import {
   micDisarmedMessage,
   micMutedMessage,
   permissionStateForError,
+  parseVoiceSocketPayload,
+  syntheticVoiceChunkMessage,
+  voiceChunkAckObservedMessage,
   voiceCaptureDisarmedMessages,
   voiceChunkMessage,
   voiceCaptureOpenedMessages,
@@ -165,6 +168,62 @@ test("operator voice events build deterministic stream ids and PCM chunk payload
   assert.equal(chunk.energy, 0.25);
   assert.equal(typeof chunk.dataBase64, "string");
   assert.ok(chunk.dataBase64.length > 0);
+});
+
+test("operator voice events build synthetic chunks and ack observations", () => {
+  assert.deepEqual(
+    syntheticVoiceChunkMessage({
+      sessionId: "session-1",
+      sequence: 2,
+      voiceStreamId: "web_voice_fake",
+      voiceStreamGeneration: 3,
+      monotonicMs: 12,
+      sentAt: "2026-06-11T00:00:02.000Z",
+      source: "fixture_pcm16",
+    }),
+    {
+      type: "voice_chunk",
+      source: "fixture_pcm16",
+      sessionId: "session-1",
+      sequence: 2,
+      voiceStreamId: "web_voice_fake",
+      voiceStreamGeneration: 3,
+      monotonicMs: 12,
+      sentAt: "2026-06-11T00:00:02.000Z",
+      sampleRate: 24000,
+      channels: 1,
+      durationMs: 20,
+      energy: 0.16,
+      dataBase64: "AAAAAA==",
+    },
+  );
+
+  assert.deepEqual(
+    voiceChunkAckObservedMessage(
+      {
+        type: "operator_voice_chunk_ack",
+        sequence: 2,
+        sentAt: "2026-06-11T00:00:02.000Z",
+      },
+      Date.parse("2026-06-11T00:00:02.025Z"),
+    ),
+    {
+      type: "operator_voice_chunk_ack_observed",
+      ack: {
+        type: "operator_voice_chunk_ack",
+        sequence: 2,
+        sentAt: "2026-06-11T00:00:02.000Z",
+        ackAt: "2026-06-11T00:00:02.025Z",
+        ackRttMs: 25,
+        ackClock: "client_send_to_ack_wall",
+      },
+    },
+  );
+
+  assert.deepEqual(parseVoiceSocketPayload('{"type":"operator_voice_chunk_ack"}'), {
+    type: "operator_voice_chunk_ack",
+  });
+  assert.equal(parseVoiceSocketPayload("not-json"), null);
 });
 
 test("operator voice events build mic status payload contracts", () => {

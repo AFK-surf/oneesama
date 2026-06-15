@@ -33,7 +33,7 @@ export interface RealtimeState extends RealtimeViewState {
   disconnect: () => void;
   sendText: (text: string) => void;
   /** Send a raw message over the events WS (e.g. work_run). */
-  send: (message: Record<string, unknown>) => void;
+  send: (message: Record<string, unknown>) => boolean;
   /** Subscribe to every canonical event (audio playback etc.); returns unsubscribe. */
   subscribe: (listener: (event: CanonicalEvent) => void) => () => void;
   /** Subscribe to every raw WS envelope (work_event etc.); returns unsubscribe. */
@@ -73,7 +73,9 @@ export function useRealtime(boot: OperatorBoot): RealtimeState {
 
   const send = useCallback((message: Record<string, unknown>) => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === REALTIME_SOCKET_OPEN_STATE) ws.send(JSON.stringify(message));
+    if (!ws || ws.readyState !== REALTIME_SOCKET_OPEN_STATE) return false;
+    ws.send(JSON.stringify(message));
+    return true;
   }, []);
 
   useEffect(() => {
