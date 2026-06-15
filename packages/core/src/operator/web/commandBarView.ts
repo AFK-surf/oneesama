@@ -1,5 +1,6 @@
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { RealtimeState } from "./useRealtime.ts";
+import { canStopKwwkStatus } from "./operatorKwwkStatus.ts";
 
 export type StatusTone = "ok" | "warn" | "bad" | "idle";
 
@@ -76,8 +77,7 @@ export function commandBarView(
 
 export function commandBarCanStopAction(debug: OperatorRuntimeState["debug"]): boolean {
   return (
-    /started|streaming|running|observing|planning|executing|verifying/i.test(
-      String(debug.toolRouting?.status || debug.kwwk?.status || ""),
-    ) || Number(debug.conversation?.control?.inFlight || 0) > 0
+    canStopKwwkStatus(String(debug.toolRouting?.status || debug.kwwk?.status || "")) ||
+    Number(debug.conversation?.control?.inFlight || 0) > 0
   );
 }

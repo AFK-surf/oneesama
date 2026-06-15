@@ -93,6 +93,7 @@ test("operator command bar view supports provider fallback and switching state",
 
 test("operator command bar view detects stoppable actions from tool state", () => {
   assert.equal(commandBarCanStopAction({ toolRouting: { status: "planning" } }), true);
+  assert.equal(commandBarCanStopAction({ kwwk: { status: "queued" } }), true);
   assert.equal(commandBarCanStopAction({ kwwk: { status: "verifying" } }), true);
   assert.equal(commandBarCanStopAction({ conversation: { control: { inFlight: 1 } } }), true);
   assert.equal(commandBarCanStopAction({ toolRouting: { status: "idle" } }), false);

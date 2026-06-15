@@ -11,13 +11,13 @@ async function updateAppControlWorkerHud(job, delivery) {
       action: "think",
       holdMs: 45000,
     });
-    if (cursorPoint) await updateKWWKCursorFeedback("move", "操作中", cursorPoint);
+    await updateKWWKCursorFeedback("move", "操作中", cursorPoint || undefined);
   } else if (status === "failed" || status === "timeout") {
     updateAvatarHudStatus("blocked", "操作受阻", { mood: "sad", action: "shrug" });
-    if (cursorPoint) await updateKWWKCursorFeedback("blocked", "操作受阻", cursorPoint);
+    await updateKWWKCursorFeedback("blocked", "操作受阻", cursorPoint || undefined);
   } else if (status === "completed") {
     updateAvatarHudStatus("done", "操作完成", { mood: "happy", action: "emphasize" });
-    if (cursorPoint) await updateKWWKCursorFeedback(cursorPoint.kind, "完成", cursorPoint);
+    await updateKWWKCursorFeedback(cursorPoint?.kind || "done", "完成", cursorPoint || undefined);
   }
 }
 

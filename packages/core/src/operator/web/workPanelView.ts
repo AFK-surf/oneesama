@@ -1,5 +1,6 @@
 import type { DebugState } from "../lan-operator-debug-state.ts";
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
+import { canStopKwwkStatus } from "./operatorKwwkStatus.ts";
 import type { WorkState } from "./useWork.ts";
 
 export interface WorkActionView {
@@ -40,8 +41,6 @@ const PHASE_LABEL: Record<string, string> = {
   error: "error",
 };
 
-const STOPPABLE_KWWK_STATUS = /queued|observing|planning|executing|verifying/i;
-
 export function workPanelView(
   work: Pick<WorkState, "backend" | "error" | "intent" | "phase" | "result" | "steps">,
   runtime: Pick<OperatorRuntimeState, "debug">,
@@ -74,7 +73,7 @@ export function workPanelView(
 }
 
 export function canStopKwwk(status: string | null | undefined): boolean {
-  return STOPPABLE_KWWK_STATUS.test(status || "");
+  return canStopKwwkStatus(status);
 }
 
 function verificationLabel(verification: DebugState["kwwk"]["verification"] | undefined): string {

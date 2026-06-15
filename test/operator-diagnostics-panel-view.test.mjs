@@ -182,3 +182,19 @@ test("operator diagnostics panel view falls back to empty labels", () => {
   assert.equal(view.telemetryRows.find((row) => row.label === "events ws")?.value, "-");
   assert.equal(view.telemetryRows.find((row) => row.label === "kwwk actions")?.value, "0");
 });
+
+test("operator diagnostics panel view can skip raw json construction", () => {
+  const view = diagnosticsPanelView(
+    {
+      debug: { transport: { events: { state: "open" } } },
+      providerConfig: { selectedTransport: "openai_realtime", providers: [] },
+      recentEvents: [{ event: "runtime_updated" }],
+      snapshot: { health: "ready" },
+    },
+    "",
+    { includeRawJson: false },
+  );
+
+  assert.equal(view.rawJson, "");
+  assert.equal(view.latestEventLabel, "runtime_updated");
+});

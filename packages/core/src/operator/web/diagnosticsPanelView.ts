@@ -42,11 +42,17 @@ export interface DiagnosticsPanelView {
   rawJson: string;
 }
 
+export interface DiagnosticsPanelViewOptions {
+  includeRawJson?: boolean;
+}
+
 export function diagnosticsPanelView(
   runtime: Pick<OperatorRuntimeState, "debug" | "providerConfig" | "recentEvents" | "snapshot">,
   filter: string,
+  options: DiagnosticsPanelViewOptions = {},
 ): DiagnosticsPanelView {
   const debug = runtime.debug;
+  const includeRawJson = options.includeRawJson !== false;
   const visual = debug.visual as DebugState["visual"] | undefined;
   const voice = debug.voice as DebugState["voice"] | undefined;
   const transport = debug.transport as DebugState["transport"] | undefined;
@@ -87,16 +93,18 @@ export function diagnosticsPanelView(
     })),
     sourcesEmpty: !visual?.sources?.length,
     timelineRows: timelineRowsView(timeline?.rows || [], filter),
-    rawJson: JSON.stringify(
-      {
-        snapshot: runtime.snapshot,
-        provider: runtime.providerConfig,
-        debug,
-        recentEvents: runtime.recentEvents,
-      },
-      null,
-      2,
-    ),
+    rawJson: includeRawJson
+      ? JSON.stringify(
+          {
+            snapshot: runtime.snapshot,
+            provider: runtime.providerConfig,
+            debug,
+            recentEvents: runtime.recentEvents,
+          },
+          null,
+          2,
+        )
+      : "",
   };
 }
 

@@ -11,7 +11,7 @@ import {
   stopVoiceCaptureResources,
   voiceAudioConstraints,
 } from "./voiceCaptureResources.ts";
-import { voiceCaptureFrameDecision } from "./voiceCaptureFrames.ts";
+import { shouldPublishVoiceEnergy, voiceCaptureFrameDecision } from "./voiceCaptureFrames.ts";
 import { INITIAL_VOICE_VIEW, voiceViewReducer } from "./voiceState.ts";
 import type { VoiceViewState } from "./voiceState.ts";
 import {
@@ -93,6 +93,9 @@ export function useVoice(
   const captureGenerationRef = useRef(0);
   const seqRef = useRef(0);
   const streamIdRef = useRef("");
+  const voiceStreamGenerationRef = useRef(0);
+  const voiceReconnectTimerRef = useRef<number | null>(null);
+  const energyPublishRef = useRef({ energy: 0, atMs: 0 });
   const syntheticSeqRef = useRef(0);
   const syntheticStreamIdRef = useRef("");
   const syntheticStreamGenerationRef = useRef(0);
@@ -128,6 +131,12 @@ export function useVoice(
     },
     [sendOperatorEvent],
   );
+
+  const clearVoiceReconnectTimer = useCallback(() => {
+    if (voiceReconnectTimerRef.current == null) return;
+    window.clearTimeout(voiceReconnectTimerRef.current);
+    voiceReconnectTimerRef.current = null;
+  }, []);
 
   const emitLocalVadConfigured = useCallback(
     (enabled: boolean, active = localVadActiveRef.current, lastEnergy = energyRef.current) => {
@@ -265,6 +274,7 @@ export function useVoice(
     (reason = "operator_web_stop_mic") => {
       captureGenerationRef.current += 1;
       micStartPromiseRef.current = null;
+      clearVoiceReconnectTimer();
       stopVoiceCaptureResources({
         processor: processorRef.current,
         stream: streamRef.current,
@@ -275,6 +285,8 @@ export function useVoice(
       streamRef.current = null;
       captureCtxRef.current = null;
       voiceWsRef.current = null;
+      energyPublishRef.current = { energy: 0, atMs: 0 };
+      energyRef.current = 0;
       if (pushToTalkActiveRef.current) {
         pushToTalkActiveRef.current = false;
         dispatch({ type: "set_push_to_talk_active", active: false });
@@ -291,7 +303,7 @@ export function useVoice(
       });
       for (const message of disarmed.operatorEvents) sendOperatorEvent(message);
     },
-    [boot.sessionId, sendOperatorEvent],
+    [boot.sessionId, clearVoiceReconnectTimer, sendOperatorEvent],
   );
 
   const startMic = useCallback(() => {
@@ -303,48 +315,84 @@ export function useVoice(
     const promise = (async () => {
       let stream: MediaStream | null = null;
       let ctx: AudioContext | null = null;
-      let ws: WebSocket | null = null;
       let processor: ScriptProcessorNode | null = null;
       try {
         const deviceId = selectedDeviceIdRef.current;
         stream = await navigator.mediaDevices.getUserMedia(voiceAudioConstraints(deviceId));
         if (captureGenerationRef.current !== generation) {
-          stopVoiceCaptureResources({ processor, stream, audioContext: ctx, websocket: ws });
+          stopVoiceCaptureResources({
+            processor,
+            stream,
+            audioContext: ctx,
+            websocket: voiceWsRef.current,
+          });
           return;
         }
         void refreshDevices().catch(() => undefined);
         const track = stream.getAudioTracks()[0] || null;
         ctx = await createVoiceCaptureAudioContext(window);
         if (captureGenerationRef.current !== generation) {
-          stopVoiceCaptureResources({ processor, stream, audioContext: ctx, websocket: ws });
+          stopVoiceCaptureResources({
+            processor,
+            stream,
+            audioContext: ctx,
+            websocket: voiceWsRef.current,
+          });
           return;
         }
 
-        ws = new WebSocket(wsUrl(boot.token, "/operator/voice/ws"));
-        streamIdRef.current = createVoiceStreamId();
         seqRef.current = 0;
         dispatch({ type: "set_chunks_sent", chunksSent: 0 });
-        ws.addEventListener("open", () => {
+
+        const openCaptureVoiceSocket = () => {
           if (captureGenerationRef.current !== generation) return;
-          const opened = voiceCaptureOpenedMessages({
-            sessionId: boot.sessionId,
-            voiceStreamId: streamIdRef.current,
-            muted: mutedRef.current,
-            deviceId: selectedDeviceIdRef.current,
-            deviceLabel: track?.label || "",
-            availableDeviceCount: devicesLengthRef.current,
+          clearVoiceReconnectTimer();
+          const ws = new WebSocket(wsUrl(boot.token, "/operator/voice/ws"));
+          const streamGeneration = voiceStreamGenerationRef.current + 1;
+          voiceStreamGenerationRef.current = streamGeneration;
+          streamIdRef.current = createVoiceStreamId();
+          seqRef.current = 0;
+          voiceWsRef.current = ws;
+          ws.addEventListener("open", () => {
+            if (captureGenerationRef.current !== generation || voiceWsRef.current !== ws) return;
+            const opened = voiceCaptureOpenedMessages({
+              sessionId: boot.sessionId,
+              voiceStreamId: streamIdRef.current,
+              voiceStreamGeneration: streamGeneration,
+              muted: mutedRef.current,
+              deviceId: selectedDeviceIdRef.current,
+              deviceLabel: track?.label || "",
+              availableDeviceCount: devicesLengthRef.current,
+            });
+            ws.send(JSON.stringify(opened.voiceMessage));
+            for (const message of opened.operatorEvents) sendOperatorEvent(message);
           });
-          ws?.send(JSON.stringify(opened.voiceMessage));
-          for (const message of opened.operatorEvents) sendOperatorEvent(message);
-        });
-        ws.addEventListener("message", handleVoiceSocketMessage);
+          ws.addEventListener("message", handleVoiceSocketMessage);
+          ws.addEventListener("close", () => {
+            if (voiceWsRef.current !== ws) return;
+            voiceWsRef.current = null;
+            if (captureGenerationRef.current !== generation) return;
+            voiceReconnectTimerRef.current = window.setTimeout(() => {
+              voiceReconnectTimerRef.current = null;
+              openCaptureVoiceSocket();
+            }, 650);
+          });
+          ws.addEventListener("error", () => {
+            if (voiceWsRef.current !== ws) return;
+            ws.close();
+          });
+        };
+
+        openCaptureVoiceSocket();
 
         processor = connectVoiceCaptureGraph({
           audioContext: ctx,
           stream,
           onAudioProcess: (event) => {
+            const ws = voiceWsRef.current;
             if (captureGenerationRef.current !== generation || !ws) return;
             const input = event.inputBuffer.getChannelData(0);
+            const nowMs = performance.now();
             const frame = voiceCaptureFrameDecision({
               samples: input,
               sampleRate: ctx?.sampleRate,
@@ -354,12 +402,24 @@ export function useVoice(
               bufferedAmount: ws.bufferedAmount,
               sequence: seqRef.current,
               voiceStreamId: streamIdRef.current,
+              voiceStreamGeneration: voiceStreamGenerationRef.current,
               sessionId: boot.sessionId,
-              monotonicMs: performance.now(),
+              monotonicMs: nowMs,
               sentAt: new Date().toISOString(),
             });
-            dispatch({ type: "set_energy", energy: frame.energy });
-            if (frame.updateLocalVad) {
+            if (
+              shouldPublishVoiceEnergy({
+                previousEnergy: energyPublishRef.current.energy,
+                nextEnergy: frame.energy,
+                lastPublishedAtMs: energyPublishRef.current.atMs,
+                nowMs,
+              })
+            ) {
+              energyPublishRef.current = { energy: frame.energy, atMs: nowMs };
+              energyRef.current = frame.energy;
+              dispatch({ type: "set_energy", energy: frame.energy });
+            }
+            if (frame.updateLocalVad && frame.vadActive !== localVadActiveRef.current) {
               localVadActiveRef.current = frame.vadActive;
               dispatch({ type: "set_local_vad_active", active: frame.vadActive });
             }
@@ -374,25 +434,30 @@ export function useVoice(
           },
         });
         if (captureGenerationRef.current !== generation) {
-          stopVoiceCaptureResources({ processor, stream, audioContext: ctx, websocket: ws });
+          stopVoiceCaptureResources({
+            processor,
+            stream,
+            audioContext: ctx,
+            websocket: voiceWsRef.current,
+          });
           return;
         }
         streamRef.current = stream;
         captureCtxRef.current = ctx;
-        voiceWsRef.current = ws;
         processorRef.current = processor;
         dispatch({ type: "mic_started" });
       } catch (error) {
+        clearVoiceReconnectTimer();
         stopVoiceCaptureResources({
           processor,
           stream,
           audioContext: ctx,
-          websocket: ws,
+          websocket: voiceWsRef.current,
         });
         processorRef.current = null;
         streamRef.current = null;
         if (captureCtxRef.current === ctx) captureCtxRef.current = null;
-        if (voiceWsRef.current === ws) voiceWsRef.current = null;
+        voiceWsRef.current = null;
         dispatch({ type: "mic_stopped" });
         reportMicBlocked(error);
         throw error;
@@ -414,6 +479,7 @@ export function useVoice(
     boot.sessionId,
     boot.token,
     chunksSentRef,
+    clearVoiceReconnectTimer,
     handleVoiceSocketMessage,
     refreshDevices,
     reportMicBlocked,
@@ -444,7 +510,9 @@ export function useVoice(
       if (!voiceStreamId) return false;
       const voiceStreamGeneration = finiteNumber(
         input.voiceStreamGeneration,
-        usingSyntheticSocket ? syntheticStreamGenerationRef.current : 1,
+        usingSyntheticSocket
+          ? syntheticStreamGenerationRef.current
+          : voiceStreamGenerationRef.current,
       );
       const message = syntheticVoiceChunkMessage({
         sessionId: boot.sessionId,

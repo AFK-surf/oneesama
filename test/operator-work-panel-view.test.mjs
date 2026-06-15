@@ -132,6 +132,9 @@ test("operator work panel view derives blocker, verification, result, and errors
 
 test("operator work panel view recognises stoppable kwwk phases", () => {
   assert.equal(canStopKwwk("queued"), true);
+  assert.equal(canStopKwwk("started"), true);
+  assert.equal(canStopKwwk("streaming"), true);
+  assert.equal(canStopKwwk("running"), true);
   assert.equal(canStopKwwk("observing"), true);
   assert.equal(canStopKwwk("planning"), true);
   assert.equal(canStopKwwk("executing"), true);

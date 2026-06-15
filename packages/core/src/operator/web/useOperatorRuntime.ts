@@ -71,8 +71,16 @@ export function useOperatorRuntime(
 
   useEffect(() => {
     void refreshStatus();
-    const interval = window.setInterval(() => void refreshStatus(), 2500);
-    return () => window.clearInterval(interval);
+    const refreshIfVisible = () => {
+      if (!document.hidden) void refreshStatus();
+    };
+    const handleVisibilityChange = () => refreshIfVisible();
+    const interval = window.setInterval(refreshIfVisible, 2500);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [refreshStatus]);
 
   useEffect(() => {

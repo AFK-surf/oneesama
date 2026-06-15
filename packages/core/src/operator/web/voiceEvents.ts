@@ -25,6 +25,7 @@ export interface VoiceChunkMessageInput {
   sessionId: string;
   sequence: number;
   voiceStreamId: string;
+  voiceStreamGeneration?: number;
   monotonicMs: number;
   sentAt: string;
   sampleRate: number;
@@ -105,6 +106,7 @@ export interface VoiceCaptureDisarmedMessagesInput extends VoiceMicCaptureMessag
 export interface VoiceCaptureOpenedMessagesInput extends VoiceMicCaptureMessageInput {
   sessionId: string;
   voiceStreamId: string;
+  voiceStreamGeneration?: number;
   openedAt?: string;
 }
 
@@ -287,7 +289,12 @@ export function voiceCaptureOpenedMessages(
   input: VoiceCaptureOpenedMessagesInput,
 ): VoiceCaptureOpenedMessages {
   return {
-    voiceMessage: voiceStreamOpenedMessage(input.sessionId, input.voiceStreamId, input.openedAt),
+    voiceMessage: voiceStreamOpenedMessage(
+      input.sessionId,
+      input.voiceStreamId,
+      input.openedAt,
+      input.voiceStreamGeneration,
+    ),
     operatorEvents: [
       voiceEngineControl(input.sessionId, "set_voice_armed", "operator_web_start_mic", {
         armed: true,
@@ -330,12 +337,13 @@ export function voiceStreamOpenedMessage(
   sessionId: string,
   voiceStreamId: string,
   openedAt = new Date().toISOString(),
+  voiceStreamGeneration = 1,
 ) {
   return {
     type: "operator_voice_stream_opened",
     sessionId,
     voiceStreamId,
-    voiceStreamGeneration: 1,
+    voiceStreamGeneration,
     openedAt,
   };
 }
@@ -351,7 +359,7 @@ export function voiceChunkMessage(input: VoiceChunkMessageInput) {
     sessionId: input.sessionId,
     sequence: input.sequence,
     voiceStreamId: input.voiceStreamId,
-    voiceStreamGeneration: 1,
+    voiceStreamGeneration: input.voiceStreamGeneration ?? 1,
     monotonicMs: input.monotonicMs,
     sentAt: input.sentAt,
     sampleRate: input.sampleRate,

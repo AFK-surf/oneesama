@@ -17,6 +17,7 @@ test("operator voice state starts from idle view defaults", () => {
     devices: [],
     selectedDeviceId: "",
     chunksSent: 0,
+    syntheticVoiceReady: false,
   });
 });
 
@@ -65,12 +66,14 @@ test("operator voice state tracks mic, energy, chunks, mute, and push-to-talk", 
   state = voiceViewReducer(state, { type: "set_chunks_sent", chunksSent: 9 });
   state = voiceViewReducer(state, { type: "set_muted", muted: true });
   state = voiceViewReducer(state, { type: "set_push_to_talk_active", active: true });
+  state = voiceViewReducer(state, { type: "set_synthetic_voice_ready", ready: true });
 
   assert.equal(state.micOn, true);
   assert.equal(state.energy, 0.12);
   assert.equal(state.chunksSent, 9);
   assert.equal(state.muted, true);
   assert.equal(state.pushToTalkActive, true);
+  assert.equal(state.syntheticVoiceReady, true);
 
   const stopped = voiceViewReducer(state, { type: "mic_stopped" });
   assert.equal(stopped.micOn, false);

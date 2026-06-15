@@ -93,6 +93,60 @@ test("Realtime sidecar output PCM reaches Meet avatar bus without a local speake
   });
 });
 
+test("Realtime sidecar output PCM does not use tone fallback for real PCM", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.addInitScript({
+      content: `
+        window.__MAB_SIDE_CAR_TONES = [];
+        window.MAB_AVATAR_AUDIO_BUS = {
+          injectTone(options = {}) {
+            window.__MAB_SIDE_CAR_TONES.push(options);
+            return { ok: true, durationMs: options.durationMs || 120 };
+          },
+        };
+      `,
+    });
+    await page.addInitScript({
+      content: buildRealtimeBrowserInitScript({
+        mode: "webrtc-mock",
+        realtimeRuntimePlacement: "sidecar",
+        realtimePageRole: "sidecar",
+        sessionId: "sidecar-output-audio-no-fallback-session",
+        autoConnect: false,
+        simulateRemoteAudio: false,
+      }),
+    });
+    await page.goto("data:text/html,<html><body>sidecar</body></html>");
+
+    const result = await page.evaluate(() =>
+      window.MAB_REALTIME_CLIENT.pushRealtimeOutputPcmFrames({
+        label: "real-pcm-without-port",
+        format: "float32",
+        sampleRate: 48000,
+        channels: 1,
+        samples: [0.2, -0.2, 0.1, -0.1],
+      }),
+    );
+    const bridge = await page.evaluate(() => ({
+      connection: window.MAB_REALTIME_BRIDGE.connection,
+      tones: window.__MAB_SIDE_CAR_TONES,
+    }));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "realtime_output_audio_port_missing");
+    assert.deepEqual(bridge.tones, []);
+    assert.equal(bridge.connection.remoteAudioRoutedToAvatarBus, false);
+    assert.equal(
+      bridge.connection.realtimeOutputAudioPort.lastError,
+      "realtime_output_audio_port_missing",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
 async function installMeetAvatarAudioBusFixture(page) {
   await page.setContent("<!doctype html><html><body>Meet avatar audio bus fixture</body></html>");
   await page.evaluate(() => {

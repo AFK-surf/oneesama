@@ -95,11 +95,17 @@ test("operator voice events build VAD and stream-open payload contracts", () => 
       openedAt: "2026-06-11T00:00:01.000Z",
     },
   );
+  assert.equal(
+    voiceStreamOpenedMessage("session-1", "web_voice_2", "2026-06-11T00:00:01.000Z", 4)
+      .voiceStreamGeneration,
+    4,
+  );
 
   assert.deepEqual(
     voiceCaptureOpenedMessages({
       sessionId: "session-1",
       voiceStreamId: "web_voice_1",
+      voiceStreamGeneration: 5,
       openedAt: "2026-06-11T00:00:01.000Z",
       muted: true,
       deviceId: "mic-1",
@@ -111,7 +117,7 @@ test("operator voice events build VAD and stream-open payload contracts", () => 
         type: "operator_voice_stream_opened",
         sessionId: "session-1",
         voiceStreamId: "web_voice_1",
-        voiceStreamGeneration: 1,
+        voiceStreamGeneration: 5,
         openedAt: "2026-06-11T00:00:01.000Z",
       },
       operatorEvents: [
@@ -149,6 +155,7 @@ test("operator voice events build deterministic stream ids and PCM chunk payload
     sessionId: "session-1",
     sequence: 7,
     voiceStreamId: "web_voice_ya",
+    voiceStreamGeneration: 6,
     monotonicMs: 123.4,
     sentAt: "2026-06-11T00:00:02.000Z",
     sampleRate: 4,
@@ -161,7 +168,7 @@ test("operator voice events build deterministic stream ids and PCM chunk payload
   assert.equal(chunk.sessionId, "session-1");
   assert.equal(chunk.sequence, 7);
   assert.equal(chunk.voiceStreamId, "web_voice_ya");
-  assert.equal(chunk.voiceStreamGeneration, 1);
+  assert.equal(chunk.voiceStreamGeneration, 6);
   assert.equal(chunk.sampleRate, 4);
   assert.equal(chunk.channels, 1);
   assert.equal(chunk.durationMs, 1000);

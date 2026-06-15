@@ -5,7 +5,10 @@ import {
   VOICE_WS_BACKPRESSURE_BYTES,
   VOICE_WS_OPEN_STATE,
 } from "../packages/core/src/operator/web/voiceCaptureResources.ts";
-import { voiceCaptureFrameDecision } from "../packages/core/src/operator/web/voiceCaptureFrames.ts";
+import {
+  shouldPublishVoiceEnergy,
+  voiceCaptureFrameDecision,
+} from "../packages/core/src/operator/web/voiceCaptureFrames.ts";
 import { LOCAL_VAD_THRESHOLD } from "../packages/core/src/operator/web/voiceEvents.ts";
 
 const BASE_FRAME = {
@@ -16,6 +19,7 @@ const BASE_FRAME = {
   bufferedAmount: 0,
   sequence: 0,
   voiceStreamId: "web_voice_1",
+  voiceStreamGeneration: 3,
   sessionId: "session-1",
   monotonicMs: 123.4,
   sentAt: "2026-06-11T00:00:00.000Z",
@@ -36,6 +40,7 @@ test("operator voice capture frames emit PCM chunks and publish first chunk coun
   assert.equal(decision.chunkMessage?.sessionId, "session-1");
   assert.equal(decision.chunkMessage?.sequence, 0);
   assert.equal(decision.chunkMessage?.voiceStreamId, "web_voice_1");
+  assert.equal(decision.chunkMessage?.voiceStreamGeneration, 3);
   assert.equal(decision.chunkMessage?.sampleRate, 4);
   assert.equal(decision.chunkMessage?.durationMs, 1000);
   assert.equal(decision.chunkMessage?.energy, Math.sqrt(0.5));
@@ -105,4 +110,43 @@ test("operator voice capture frames publish chunk count every eight sent chunks"
   assert.equal(sequenceEight.nextSequence, 9);
   assert.equal(sequenceEight.chunksSent, 9);
   assert.equal(sequenceEight.chunkMessage?.sequence, 8);
+});
+
+test("operator voice capture energy publishing throttles tiny frequent changes", () => {
+  assert.equal(
+    shouldPublishVoiceEnergy({
+      previousEnergy: 0,
+      nextEnergy: 0.01,
+      lastPublishedAtMs: 0,
+      nowMs: 10,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldPublishVoiceEnergy({
+      previousEnergy: 0.1,
+      nextEnergy: 0.105,
+      lastPublishedAtMs: 100,
+      nowMs: 150,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldPublishVoiceEnergy({
+      previousEnergy: 0.1,
+      nextEnergy: 0.13,
+      lastPublishedAtMs: 100,
+      nowMs: 150,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldPublishVoiceEnergy({
+      previousEnergy: 0.1,
+      nextEnergy: 0.105,
+      lastPublishedAtMs: 100,
+      nowMs: 230,
+    }),
+    true,
+  );
 });

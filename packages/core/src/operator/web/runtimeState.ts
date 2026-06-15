@@ -45,14 +45,33 @@ export function foldRuntimeBody(
   body: RuntimeStatusBody,
 ): OperatorRuntimeViewState {
   const nextProviderConfig = extractLiveProviderConfig(body);
+  const snapshot = body.snapshot || state.snapshot;
+  const inputPolicy = body.inputPolicy || state.inputPolicy;
+  const outputPolicy = body.outputPolicy || state.outputPolicy;
+  const debug = body.debug || state.debug;
+  const recentEvents = body.recentEvents
+    ? trimRecentRuntimeEvents(body.recentEvents)
+    : state.recentEvents;
+  const providerConfig = nextProviderConfig || state.providerConfig;
+  if (
+    state.snapshot === snapshot &&
+    state.inputPolicy === inputPolicy &&
+    state.outputPolicy === outputPolicy &&
+    state.debug === debug &&
+    state.recentEvents === recentEvents &&
+    state.providerConfig === providerConfig &&
+    state.runtimeError === ""
+  ) {
+    return state;
+  }
   return {
     ...state,
-    ...(body.snapshot ? { snapshot: body.snapshot } : {}),
-    ...(body.inputPolicy ? { inputPolicy: body.inputPolicy } : {}),
-    ...(body.outputPolicy ? { outputPolicy: body.outputPolicy } : {}),
-    ...(body.debug ? { debug: body.debug } : {}),
-    ...(body.recentEvents ? { recentEvents: trimRecentRuntimeEvents(body.recentEvents) } : {}),
-    ...(nextProviderConfig ? { providerConfig: nextProviderConfig } : {}),
+    snapshot,
+    inputPolicy,
+    outputPolicy,
+    debug,
+    recentEvents,
+    providerConfig,
     runtimeError: "",
   };
 }
@@ -146,6 +165,7 @@ function runtimeBodyFromRawPayload(payload: Record<string, unknown>): RuntimeSta
 }
 
 function trimRecentRuntimeEvents(events: RuntimeEventView[]): RuntimeEventView[] {
+  if (events.length <= RECENT_RUNTIME_EVENT_LIMIT) return events;
   return events.slice(-RECENT_RUNTIME_EVENT_LIMIT);
 }
 

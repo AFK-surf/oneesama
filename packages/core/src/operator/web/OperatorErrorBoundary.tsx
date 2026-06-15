@@ -8,6 +8,10 @@ interface OperatorErrorBoundaryState {
   error: Error | null;
 }
 
+export function legacyCockpitHref(search = location.search): string {
+  return `/${search || ""}`;
+}
+
 export class OperatorErrorBoundary extends Component<
   OperatorErrorBoundaryProps,
   OperatorErrorBoundaryState
@@ -33,7 +37,7 @@ export class OperatorErrorBoundary extends Component<
             <button className="btn primary" onClick={() => location.reload()} type="button">
               Reload
             </button>
-            <a className="btn" href="/">
+            <a className="btn" href={legacyCockpitHref()}>
               Legacy cockpit
             </a>
           </div>

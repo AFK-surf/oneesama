@@ -89,6 +89,38 @@ test("operator runtime state folds raw websocket payloads", () => {
   assert.equal(withoutRuntimeEvent.debug.voice.chunksReceived, 2);
 });
 
+test("operator runtime state reuses state when status body references are unchanged", () => {
+  const snapshot = { health: "ready" };
+  const inputPolicy = { audioInputs: ["local_mic"] };
+  const outputPolicy = { audioOutputs: ["local_speaker"] };
+  const debug = { conversation: { status: "connected" } };
+  const recentEvents = [{ event: "runtime.status" }];
+  const state = foldRuntimeBody(initialOperatorRuntimeViewState(), {
+    snapshot,
+    inputPolicy,
+    outputPolicy,
+    debug,
+    recentEvents,
+  });
+
+  const refolded = foldRuntimeBody(state, {
+    snapshot,
+    inputPolicy,
+    outputPolicy,
+    debug,
+    recentEvents,
+  });
+
+  assert.equal(refolded, state);
+});
+
+test("operator runtime state does not copy short recent event lists", () => {
+  const recentEvents = [{ event: "runtime.status" }];
+  const state = foldRuntimeBody(initialOperatorRuntimeViewState(), { recentEvents });
+
+  assert.equal(state.recentEvents, recentEvents);
+});
+
 test("operator runtime state tracks request and provider-switch failures", () => {
   const initial = initialOperatorRuntimeViewState();
   const failedRequest = runtimeRequestFailed(initial, new Error("runtime_down"));

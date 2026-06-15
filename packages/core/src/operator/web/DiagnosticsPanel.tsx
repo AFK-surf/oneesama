@@ -12,8 +12,8 @@ export function DiagnosticsPanel({ runtime }: { runtime: OperatorRuntimeState })
   const [tab, setTab] = useState<DiagnosticsTab>("telemetry");
   const [filter, setFilter] = useState("");
   const view = useMemo(
-    () => diagnosticsPanelView(runtime, filter),
-    [filter, runtime.debug, runtime.providerConfig, runtime.recentEvents, runtime.snapshot],
+    () => diagnosticsPanelView(runtime, filter, { includeRawJson: tab === "raw" }),
+    [filter, runtime.debug, runtime.providerConfig, runtime.recentEvents, runtime.snapshot, tab],
   );
 
   return (
