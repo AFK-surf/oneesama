@@ -3,7 +3,6 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { CanonicalEvent, OperatorBoot } from "./useRealtime.ts";
 import { wsUrl } from "./protocol.ts";
 import { useAssistantAudioPlayback } from "./useAssistantAudioPlayback.ts";
-import { useLatestRef } from "./useLatestRef.ts";
 import {
   VOICE_WS_OPEN_STATE,
   connectVoiceCaptureGraph,
@@ -13,7 +12,7 @@ import {
 } from "./voiceCaptureResources.ts";
 import { shouldPublishVoiceEnergy, voiceCaptureFrameDecision } from "./voiceCaptureFrames.ts";
 import { INITIAL_VOICE_VIEW, voiceViewReducer } from "./voiceState.ts";
-import type { VoiceViewState } from "./voiceState.ts";
+import type { VoiceViewAction, VoiceViewState } from "./voiceState.ts";
 import {
   beginPushToTalk,
   failPushToTalk,
@@ -73,17 +72,12 @@ export function useVoice(
   subscribe: (listener: (event: CanonicalEvent) => void) => () => void,
   sendOperatorEvent: (message: Record<string, unknown>) => void,
 ): VoiceState {
-  const [voiceView, dispatch] = useReducer(voiceViewReducer, INITIAL_VOICE_VIEW);
-
-  const mutedRef = useLatestRef(voiceView.muted);
-  const micOnRef = useLatestRef(voiceView.micOn);
-  const localVadEnabledRef = useLatestRef(voiceView.localVadEnabled);
-  const localVadActiveRef = useLatestRef(voiceView.localVadActive);
-  const energyRef = useLatestRef(voiceView.energy);
-  const devicesLengthRef = useLatestRef(voiceView.devices.length);
-  const selectedDeviceIdRef = useLatestRef(voiceView.selectedDeviceId);
-  const pushToTalkActiveRef = useLatestRef(voiceView.pushToTalkActive);
-  const chunksSentRef = useLatestRef(voiceView.chunksSent);
+  const voiceViewRef = useRef(INITIAL_VOICE_VIEW);
+  const [voiceView, rawDispatch] = useReducer(voiceViewReducer, INITIAL_VOICE_VIEW);
+  const dispatch = useCallback((action: VoiceViewAction) => {
+    voiceViewRef.current = voiceViewReducer(voiceViewRef.current, action);
+    rawDispatch(action);
+  }, []);
   const captureCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -104,19 +98,21 @@ export function useVoice(
 
   useAssistantAudioPlayback(subscribe, sendOperatorEvent);
 
-  const setMuted = useCallback((next: boolean) => {
-    mutedRef.current = next;
-    dispatch({ type: "set_muted", muted: next });
-  }, []);
+  const setMuted = useCallback(
+    (next: boolean) => {
+      dispatch({ type: "set_muted", muted: next });
+    },
+    [dispatch],
+  );
 
   const reportMicBlocked = useCallback(
     (error: unknown) => {
       sendOperatorEvent(
         micBlockedMessage({
           error,
-          muted: mutedRef.current,
-          deviceId: selectedDeviceIdRef.current,
-          availableDeviceCount: devicesLengthRef.current,
+          muted: voiceViewRef.current.muted,
+          deviceId: voiceViewRef.current.selectedDeviceId,
+          availableDeviceCount: voiceViewRef.current.devices.length,
         }),
       );
     },
@@ -139,14 +135,18 @@ export function useVoice(
   }, []);
 
   const emitLocalVadConfigured = useCallback(
-    (enabled: boolean, active = localVadActiveRef.current, lastEnergy = energyRef.current) => {
+    (
+      enabled: boolean,
+      active = voiceViewRef.current.localVadActive,
+      lastEnergy = voiceViewRef.current.energy,
+    ) => {
       sendOperatorEvent(
         localVadConfiguredMessage({
           enabled,
           active,
           lastEnergy,
-          micOn: micOnRef.current,
-          deviceId: selectedDeviceIdRef.current,
+          micOn: voiceViewRef.current.micOn,
+          deviceId: voiceViewRef.current.selectedDeviceId,
         }),
       );
     },
@@ -155,20 +155,17 @@ export function useVoice(
 
   const setLocalVadEnabled = useCallback(
     (enabled: boolean) => {
-      localVadEnabledRef.current = enabled;
       dispatch({ type: "set_local_vad_enabled", enabled });
-      if (!enabled) localVadActiveRef.current = false;
       emitLocalVadConfigured(enabled);
     },
-    [emitLocalVadConfigured],
+    [dispatch, emitLocalVadConfigured],
   );
 
   const refreshDevices = useCallback(async () => {
     const nextDevices = await listVoiceInputDevices(navigator.mediaDevices);
-    let nextSelectedDeviceId = selectedDeviceIdRef.current;
-    if (selectedVoiceDeviceMissing(nextDevices, selectedDeviceIdRef.current)) {
+    let nextSelectedDeviceId = voiceViewRef.current.selectedDeviceId;
+    if (selectedVoiceDeviceMissing(nextDevices, voiceViewRef.current.selectedDeviceId)) {
       nextSelectedDeviceId = "";
-      selectedDeviceIdRef.current = nextSelectedDeviceId;
     }
     dispatch({
       type: "set_devices",
@@ -178,15 +175,15 @@ export function useVoice(
     sendOperatorEvent(
       voiceDevicesRefreshedMessage({
         availableDeviceCount: nextDevices.length,
-        enabled: localVadEnabledRef.current,
-        active: localVadActiveRef.current,
-        lastEnergy: energyRef.current,
-        micOn: micOnRef.current,
-        deviceId: selectedDeviceIdRef.current,
+        enabled: voiceViewRef.current.localVadEnabled,
+        active: voiceViewRef.current.localVadActive,
+        lastEnergy: voiceViewRef.current.energy,
+        micOn: voiceViewRef.current.micOn,
+        deviceId: nextSelectedDeviceId,
       }),
     );
     return nextDevices;
-  }, [sendOperatorEvent]);
+  }, [dispatch, sendOperatorEvent]);
 
   const setVoiceMuted = useCallback(
     (nextMuted: boolean, reason = "operator_web_set_mute") => {
@@ -195,9 +192,9 @@ export function useVoice(
         sessionId: boot.sessionId,
         reason,
         muted: nextMuted,
-        micOn: micOnRef.current,
-        deviceId: selectedDeviceIdRef.current,
-        availableDeviceCount: devicesLengthRef.current,
+        micOn: voiceViewRef.current.micOn,
+        deviceId: voiceViewRef.current.selectedDeviceId,
+        availableDeviceCount: voiceViewRef.current.devices.length,
       });
       for (const message of muted.operatorEvents) sendOperatorEvent(message);
     },
@@ -268,7 +265,7 @@ export function useVoice(
       dispatch({ type: "set_synthetic_voice_ready", ready: false });
       socket?.close();
     };
-  }, [boot.sessionId, boot.token, handleVoiceSocketMessage, voiceView.micOn]);
+  }, [boot.sessionId, boot.token, dispatch, handleVoiceSocketMessage, voiceView.micOn]);
 
   const stopMic = useCallback(
     (reason = "operator_web_stop_mic") => {
@@ -286,28 +283,26 @@ export function useVoice(
       captureCtxRef.current = null;
       voiceWsRef.current = null;
       energyPublishRef.current = { energy: 0, atMs: 0 };
-      energyRef.current = 0;
-      if (pushToTalkActiveRef.current) {
-        pushToTalkActiveRef.current = false;
+      if (voiceViewRef.current.pushToTalkActive) {
         dispatch({ type: "set_push_to_talk_active", active: false });
       }
       pttStartedMicRef.current = false;
-      pttPreviousMutedRef.current = mutedRef.current;
+      pttPreviousMutedRef.current = voiceViewRef.current.muted;
       dispatch({ type: "mic_stopped" });
       const disarmed = voiceCaptureDisarmedMessages({
         sessionId: boot.sessionId,
         reason,
-        muted: mutedRef.current,
-        deviceId: selectedDeviceIdRef.current,
-        availableDeviceCount: devicesLengthRef.current,
+        muted: voiceViewRef.current.muted,
+        deviceId: voiceViewRef.current.selectedDeviceId,
+        availableDeviceCount: voiceViewRef.current.devices.length,
       });
       for (const message of disarmed.operatorEvents) sendOperatorEvent(message);
     },
-    [boot.sessionId, clearVoiceReconnectTimer, sendOperatorEvent],
+    [boot.sessionId, clearVoiceReconnectTimer, dispatch, sendOperatorEvent],
   );
 
   const startMic = useCallback(() => {
-    if (micOnRef.current) return Promise.resolve();
+    if (voiceViewRef.current.micOn) return Promise.resolve();
     if (micStartPromiseRef.current) return micStartPromiseRef.current;
 
     const generation = captureGenerationRef.current + 1;
@@ -317,7 +312,7 @@ export function useVoice(
       let ctx: AudioContext | null = null;
       let processor: ScriptProcessorNode | null = null;
       try {
-        const deviceId = selectedDeviceIdRef.current;
+        const deviceId = voiceViewRef.current.selectedDeviceId;
         stream = await navigator.mediaDevices.getUserMedia(voiceAudioConstraints(deviceId));
         if (captureGenerationRef.current !== generation) {
           stopVoiceCaptureResources({
@@ -359,10 +354,10 @@ export function useVoice(
               sessionId: boot.sessionId,
               voiceStreamId: streamIdRef.current,
               voiceStreamGeneration: streamGeneration,
-              muted: mutedRef.current,
-              deviceId: selectedDeviceIdRef.current,
+              muted: voiceViewRef.current.muted,
+              deviceId: voiceViewRef.current.selectedDeviceId,
               deviceLabel: track?.label || "",
-              availableDeviceCount: devicesLengthRef.current,
+              availableDeviceCount: voiceViewRef.current.devices.length,
             });
             ws.send(JSON.stringify(opened.voiceMessage));
             for (const message of opened.operatorEvents) sendOperatorEvent(message);
@@ -396,8 +391,8 @@ export function useVoice(
             const frame = voiceCaptureFrameDecision({
               samples: input,
               sampleRate: ctx?.sampleRate,
-              localVadEnabled: localVadEnabledRef.current,
-              muted: mutedRef.current,
+              localVadEnabled: voiceViewRef.current.localVadEnabled,
+              muted: voiceViewRef.current.muted,
               readyState: ws.readyState,
               bufferedAmount: ws.bufferedAmount,
               sequence: seqRef.current,
@@ -416,11 +411,9 @@ export function useVoice(
               })
             ) {
               energyPublishRef.current = { energy: frame.energy, atMs: nowMs };
-              energyRef.current = frame.energy;
               dispatch({ type: "set_energy", energy: frame.energy });
             }
-            if (frame.updateLocalVad && frame.vadActive !== localVadActiveRef.current) {
-              localVadActiveRef.current = frame.vadActive;
+            if (frame.updateLocalVad && frame.vadActive !== voiceViewRef.current.localVadActive) {
               dispatch({ type: "set_local_vad_active", active: frame.vadActive });
             }
             seqRef.current = frame.nextSequence;
@@ -428,7 +421,6 @@ export function useVoice(
               ws.send(JSON.stringify(frame.chunkMessage));
             }
             if (frame.chunksSent != null) {
-              chunksSentRef.current = frame.chunksSent;
               dispatch({ type: "set_chunks_sent", chunksSent: frame.chunksSent });
             }
           },
@@ -478,8 +470,8 @@ export function useVoice(
   }, [
     boot.sessionId,
     boot.token,
-    chunksSentRef,
     clearVoiceReconnectTimer,
+    dispatch,
     handleVoiceSocketMessage,
     refreshDevices,
     reportMicBlocked,
@@ -531,65 +523,60 @@ export function useVoice(
       ws.send(JSON.stringify(message));
       if (usingSyntheticSocket)
         syntheticSeqRef.current = Math.max(syntheticSeqRef.current, sequence);
-      const nextChunksSent = Math.max(chunksSentRef.current, sequence);
-      chunksSentRef.current = nextChunksSent;
+      const nextChunksSent = Math.max(voiceViewRef.current.chunksSent, sequence);
       dispatch({ type: "set_chunks_sent", chunksSent: nextChunksSent });
       return true;
     },
-    [boot.sessionId, chunksSentRef],
+    [boot.sessionId, dispatch],
   );
 
   const setSelectedDeviceId = useCallback(
     (deviceId: string) => {
-      selectedDeviceIdRef.current = deviceId;
       dispatch({ type: "set_selected_device", deviceId });
-      if (micOnRef.current) {
+      if (voiceViewRef.current.micOn) {
         stopMic();
         window.setTimeout(() => void startMic().catch(() => undefined), 0);
       }
     },
-    [startMic, stopMic],
+    [dispatch, startMic, stopMic],
   );
 
   const toggleMute = useCallback(() => {
-    setVoiceMuted(!mutedRef.current, "operator_web_toggle_mute");
+    setVoiceMuted(!voiceViewRef.current.muted, "operator_web_toggle_mute");
   }, [setVoiceMuted]);
 
   const startPushToTalk = useCallback(async () => {
     const decision = beginPushToTalk({
-      active: pushToTalkActiveRef.current,
-      muted: mutedRef.current,
-      micOn: micOnRef.current,
+      active: voiceViewRef.current.pushToTalkActive,
+      muted: voiceViewRef.current.muted,
+      micOn: voiceViewRef.current.micOn,
     });
     if (!decision.shouldActivate) return;
-    pushToTalkActiveRef.current = true;
     dispatch({ type: "set_push_to_talk_active", active: true });
     pttPreviousMutedRef.current = decision.previousMuted;
     pttStartedMicRef.current = decision.startedMic;
     try {
       if (decision.shouldStartMic) await startMic();
-      if (!pushToTalkActiveRef.current) return;
+      if (!voiceViewRef.current.pushToTalkActive) return;
       if (decision.mute) setVoiceMuted(decision.mute.muted, decision.mute.reason);
     } catch (error) {
-      pushToTalkActiveRef.current = false;
       dispatch({ type: "set_push_to_talk_active", active: false });
       const failed = failPushToTalk(pttPreviousMutedRef.current);
       setVoiceMuted(failed.muted, failed.reason);
       throw error;
     }
-  }, [setVoiceMuted, startMic]);
+  }, [dispatch, setVoiceMuted, startMic]);
 
   const finishPushToTalk = useCallback(() => {
     const decision = finishPushToTalkDecision({
-      active: pushToTalkActiveRef.current,
+      active: voiceViewRef.current.pushToTalkActive,
       previousMuted: pttPreviousMutedRef.current,
       startedMic: pttStartedMicRef.current,
     });
     if (!decision.shouldDeactivate) return;
-    pushToTalkActiveRef.current = false;
     dispatch({ type: "set_push_to_talk_active", active: false });
     if (decision.mute) setVoiceMuted(decision.mute.muted, decision.mute.reason);
-  }, [setVoiceMuted]);
+  }, [dispatch, setVoiceMuted]);
 
   useEffect(() => () => stopMic(), [stopMic]);
 

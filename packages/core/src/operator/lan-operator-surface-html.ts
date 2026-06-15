@@ -1426,6 +1426,7 @@ export function buildLanOperatorSurfaceHtml(
               holdMs: input.holdMs,
             });
           }
+          markCompositionDirty();
           sendOperatorEvent({ type: "visual_overlay_event", overlay });
           syncDebug();
           return overlay;
@@ -1459,6 +1460,7 @@ export function buildLanOperatorSurfaceHtml(
               holdMs: cursor.holdMs,
             });
           }
+          markCompositionDirty();
           syncDebug();
           return overlay;
         }

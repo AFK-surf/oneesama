@@ -4,6 +4,32 @@ import { chromium } from "playwright";
 
 import { createLanOperatorSurfaceServer } from "../packages/core/src/operator/lan-operator-surface.ts";
 
+async function waitForCompositionPaint(page) {
+  await page.waitForFunction(
+    () => {
+      const canvas = document.getElementById("composition");
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) return false;
+      const points = [
+        [0.5, 0.5],
+        [0.25, 0.25],
+        [0.75, 0.75],
+      ];
+      return points.some(([x, y]) => {
+        const pixel = ctx.getImageData(
+          Math.max(0, Math.min(canvas.width - 1, Math.round(canvas.width * x))),
+          Math.max(0, Math.min(canvas.height - 1, Math.round(canvas.height * y))),
+          1,
+          1,
+        ).data;
+        return pixel[3] > 0;
+      });
+    },
+    null,
+    { timeout: 5_000 },
+  );
+}
+
 // Phase 3b cursor-parity: the operator stage must render a Cueboard-standard
 // cursor (arrow + ring + click pulse + drag trail + label), not a flat
 // crosshair, with rendered-pixel proof (canvas pixels actually change).
@@ -27,6 +53,7 @@ test("LAN operator stage renders a Cueboard cursor with rendered-pixel proof", a
     await page.waitForFunction(() => window.MAB_LAN_OPERATOR_SURFACE?.state?.ready === true, null, {
       timeout: 10_000,
     });
+    await waitForCompositionPaint(page);
 
     // The pointer fixture + Cueboard renderer must be wired into the page.
     const wired = await page.evaluate(() => ({
@@ -38,16 +65,28 @@ test("LAN operator stage renders a Cueboard cursor with rendered-pixel proof", a
     assert.equal(wired.renderer, true, JSON.stringify(wired));
     assert.equal(wired.button, true, JSON.stringify(wired));
 
-    const result = await page.evaluate(async () => {
+    const beforeFrameCount = await page.evaluate(async () => {
       const canvas = document.getElementById("composition");
       const ctx = canvas.getContext("2d");
       const raf = () => new Promise((r) => requestAnimationFrame(() => r()));
       await raf();
       await raf();
-      const before = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      window.__cursorBefore = ctx.getImageData(0, 0, canvas.width, canvas.height).data.slice();
       window.MAB_LAN_OPERATOR_SURFACE.runKwwkCursorFixture({ animated: false });
+      return window.MAB_LAN_OPERATOR_SURFACE.state.compositionFrameCount;
+    });
+    await page.waitForFunction(
+      (baseline) => window.MAB_LAN_OPERATOR_SURFACE.state.compositionFrameCount > baseline,
+      beforeFrameCount,
+      { timeout: 5_000 },
+    );
+    const result = await page.evaluate(async () => {
+      const canvas = document.getElementById("composition");
+      const ctx = canvas.getContext("2d");
+      const raf = () => new Promise((r) => requestAnimationFrame(() => r()));
       for (let k = 0; k < 5; k += 1) await raf();
       const after = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const before = window.__cursorBefore;
       let changed = 0;
       for (let i = 0; i < before.length; i += 4) {
         const delta =
@@ -104,6 +143,7 @@ test("LAN operator CU Cursor button drives the pointer fixture", async () => {
     await page.waitForFunction(() => window.MAB_LAN_OPERATOR_SURFACE?.state?.ready === true, null, {
       timeout: 10_000,
     });
+    await waitForCompositionPaint(page);
 
     await page.click("#diagnostic-controls > summary");
     await page.click("#cu-cursor-button");
@@ -159,6 +199,7 @@ test("LAN operator stage renders a REAL inbound KWWK cursor event (server → st
       null,
       { timeout: 10_000 },
     );
+    await waitForCompositionPaint(page);
 
     // Baseline (cursor-free: no fixture/button has run).
     await page.evaluate(async () => {
@@ -167,6 +208,7 @@ test("LAN operator stage renders a REAL inbound KWWK cursor event (server → st
       await raf();
       await raf();
       window.__cursorBefore = c.getContext("2d").getImageData(0, 0, c.width, c.height).data.slice();
+      window.__cursorBeforeFrameCount = window.MAB_LAN_OPERATOR_SURFACE.state.compositionFrameCount;
     });
 
     // Simulate UPSTREAM A: real cursor events land on the server → pushed to stage.
@@ -192,12 +234,21 @@ test("LAN operator stage renders a REAL inbound KWWK cursor event (server → st
       null,
       { timeout: 5_000 },
     );
+    const eventFrameCount = await page.evaluate(
+      () => window.MAB_LAN_OPERATOR_SURFACE.state.compositionFrameCount,
+    );
+    await page.waitForFunction(
+      (baseline) => window.MAB_LAN_OPERATOR_SURFACE.state.compositionFrameCount > baseline,
+      eventFrameCount,
+      { timeout: 5_000 },
+    );
 
     const result = await page.evaluate(async () => {
       const canvas = document.getElementById("composition");
+      const ctx = canvas.getContext("2d");
       const raf = () => new Promise((r) => requestAnimationFrame(() => r()));
       for (let k = 0; k < 5; k += 1) await raf();
-      const after = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+      const after = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       const before = window.__cursorBefore;
       let changed = 0;
       for (let i = 0; i < before.length; i += 4) {
