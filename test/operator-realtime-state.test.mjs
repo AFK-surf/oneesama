@@ -69,6 +69,18 @@ test("operator realtime state keeps assistant audio chunks out of rendered event
   assert.equal(after.events.length, 0);
   assert.equal(after.status, "connected");
   assert.equal(after.transport, "openai_realtime");
+
+  const unchanged = foldRealtimePayload(after, {
+    type: "canonical_conversation_event",
+    event: { type: "assistant_audio_chunk", audioBase64: "BBBB" },
+    debug: {
+      conversation: {
+        status: "connected",
+        provider: { adapterKind: "openai_realtime" },
+      },
+    },
+  });
+  assert.equal(unchanged, after);
 });
 
 test("operator realtime state caps rendered canonical events", () => {

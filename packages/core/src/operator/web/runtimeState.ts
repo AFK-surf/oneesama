@@ -136,6 +136,7 @@ export function selectRuntimeProvider(
 }
 
 function runtimeEventFromPayload(payload: Record<string, unknown>): RuntimeEventView | null {
+  if (payload.type !== "runtime_event") return null;
   return isRecord(payload.event) ? (payload.event as RuntimeEventView) : null;
 }
 

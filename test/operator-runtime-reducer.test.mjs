@@ -41,6 +41,7 @@ test("operator runtime reducer folds status bodies and raw payloads", () => {
   const withRawPayload = operatorRuntimeReducer(withBody, {
     type: "raw_payload",
     payload: {
+      type: "runtime_event",
       event: { event: "operator_voice_chunk_received" },
       debug: { voice: { chunksReceived: 3 } },
     },

@@ -1,8 +1,52 @@
+import { useCallback, useEffect, useRef } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
+
 import type { VoiceState } from "./useVoice.ts";
 import { voiceBarView } from "./voiceBarView.ts";
 
 export function VoiceBar({ voice, connected }: { voice: VoiceState; connected: boolean }) {
   const view = voiceBarView(voice, connected);
+  const pushToTalkPointerIdRef = useRef<number | null>(null);
+  const finishPushToTalk = useCallback(() => {
+    pushToTalkPointerIdRef.current = null;
+    voice.finishPushToTalk();
+  }, [voice.finishPushToTalk]);
+
+  useEffect(() => {
+    if (!view.pushToTalkPressed) return undefined;
+    window.addEventListener("pointerup", finishPushToTalk);
+    window.addEventListener("pointercancel", finishPushToTalk);
+    window.addEventListener("blur", finishPushToTalk);
+    return () => {
+      window.removeEventListener("pointerup", finishPushToTalk);
+      window.removeEventListener("pointercancel", finishPushToTalk);
+      window.removeEventListener("blur", finishPushToTalk);
+    };
+  }, [finishPushToTalk, view.pushToTalkPressed]);
+
+  const startPushToTalk = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      pushToTalkPointerIdRef.current = event.pointerId;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      void voice.startPushToTalk().catch(() => {
+        finishPushToTalk();
+      });
+    },
+    [finishPushToTalk, voice.startPushToTalk],
+  );
+
+  const finishCapturedPushToTalk = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (
+        pushToTalkPointerIdRef.current != null &&
+        event.currentTarget.hasPointerCapture?.(pushToTalkPointerIdRef.current)
+      ) {
+        event.currentTarget.releasePointerCapture(pushToTalkPointerIdRef.current);
+      }
+      finishPushToTalk();
+    },
+    [finishPushToTalk],
+  );
 
   return (
     <section className="op-voice">
@@ -66,9 +110,9 @@ export function VoiceBar({ voice, connected }: { voice: VoiceState; connected: b
         <button
           className="btn"
           id="voice-ptt-button"
-          onPointerDown={() => void voice.startPushToTalk().catch(() => undefined)}
-          onPointerUp={voice.finishPushToTalk}
-          onPointerCancel={voice.finishPushToTalk}
+          onPointerDown={startPushToTalk}
+          onPointerUp={finishCapturedPushToTalk}
+          onPointerCancel={finishCapturedPushToTalk}
           type="button"
           aria-pressed={view.pushToTalkPressed}
           disabled={view.pushToTalkDisabled}

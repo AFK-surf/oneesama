@@ -69,12 +69,24 @@ test("operator runtime state folds status body into one view state", () => {
 
 test("operator runtime state folds raw websocket payloads", () => {
   const folded = foldRuntimeRawPayload(initialOperatorRuntimeViewState(), {
+    type: "runtime_event",
     event: { event: "operator_voice_chunk_received" },
     debug: { voice: { chunksReceived: 1 } },
   });
 
   assert.deepEqual(folded.recentEvents, [{ event: "operator_voice_chunk_received" }]);
   assert.equal(folded.debug.voice.chunksReceived, 1);
+
+  const withoutRuntimeEvent = foldRuntimeRawPayload(initialOperatorRuntimeViewState(), {
+    type: "canonical_conversation_event",
+    event: {
+      type: "assistant_audio_chunk",
+      audioBase64: "AAAA",
+    },
+    debug: { voice: { chunksReceived: 2 } },
+  });
+  assert.deepEqual(withoutRuntimeEvent.recentEvents, []);
+  assert.equal(withoutRuntimeEvent.debug.voice.chunksReceived, 2);
 });
 
 test("operator runtime state tracks request and provider-switch failures", () => {

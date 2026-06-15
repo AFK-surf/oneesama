@@ -82,10 +82,13 @@ function foldRealtimeDebug(
   const provider = isRecord(conversation.provider) ? conversation.provider : null;
   const transport = stringValue(provider?.adapterKind);
   if (!status && !transport) return state;
+  const nextStatus = (status || state.status) as RealtimeStatus;
+  const nextTransport = transport || state.transport;
+  if (nextStatus === state.status && nextTransport === state.transport) return state;
   return {
     ...state,
-    ...(status ? { status: status as RealtimeStatus } : {}),
-    ...(transport ? { transport } : {}),
+    status: nextStatus,
+    transport: nextTransport,
   };
 }
 
