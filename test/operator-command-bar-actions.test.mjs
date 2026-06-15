@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 
-import {
-  copyProviderRunCommand,
-  shouldResetRealtimeSession,
-} from "../packages/core/src/operator/web/commandBarActions.ts";
+import { copyProviderRunCommand } from "../packages/core/src/operator/web/commandBarActions.ts";
 
 test("operator command bar actions copy provider run commands", async () => {
   const writes = [];
@@ -30,23 +27,4 @@ test("operator command bar actions ignore clipboard write failures", async () =>
   });
 
   assert.equal(copied, true);
-});
-
-test("operator command bar actions confirm realtime reset with default copy", () => {
-  const messages = [];
-  assert.equal(
-    shouldResetRealtimeSession((message) => {
-      messages.push(message);
-      return true;
-    }),
-    true,
-  );
-  assert.deepEqual(messages, ["Reset the Realtime session?"]);
-});
-
-test("operator command bar actions support reset rejection", () => {
-  assert.equal(
-    shouldResetRealtimeSession(() => false),
-    false,
-  );
 });

@@ -1,4 +1,5 @@
 import { canonicalEventFromPayload, type CanonicalEvent } from "./realtimeState.ts";
+import { isRecord } from "./operatorRecord.ts";
 
 export type RealtimeRawListener = (payload: Record<string, unknown>) => void;
 export type RealtimeCanonicalListener = (event: CanonicalEvent) => void;
@@ -24,8 +25,4 @@ export function publishRealtimePayload(input: PublishRealtimePayloadInput): Cano
   if (!event) return null;
   for (const listener of input.canonicalListeners) listener(event);
   return event;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

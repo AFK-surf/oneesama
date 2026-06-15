@@ -10,10 +10,3 @@ export async function copyProviderRunCommand(
   await Promise.resolve(clipboard.writeText(runCommand)).catch(() => undefined);
   return true;
 }
-
-export function shouldResetRealtimeSession(
-  confirm: (message: string) => boolean,
-  message = "Reset the Realtime session?",
-): boolean {
-  return confirm(message);
-}

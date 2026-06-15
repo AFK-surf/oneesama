@@ -13,7 +13,7 @@ import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { RealtimeState } from "./useRealtime.ts";
 import type { VoiceState } from "./useVoice.ts";
 import type { SyntheticVoiceChunkInput } from "./useVoice.ts";
-import { workRunMessage } from "./workCommands.ts";
+import { workRunMessage } from "./workState.ts";
 
 type LegacySurfaceWindow = Window &
   typeof globalThis & {

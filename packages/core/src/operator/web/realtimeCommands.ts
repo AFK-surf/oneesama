@@ -1,3 +1,5 @@
+import { operatorEngineControlWireMessage } from "./operatorEngineControlWire.ts";
+
 export type RealtimeWireMessage = Record<string, unknown> & { type: string };
 
 export function operatorSurfaceConnectedMessage(): RealtimeWireMessage {
@@ -9,15 +11,11 @@ export function realtimeEngineControlMessage(
   type: "connect" | "disconnect",
   reason: string,
 ): RealtimeWireMessage {
-  return {
-    type: "engine_control",
+  return operatorEngineControlWireMessage({
     sessionId,
-    control: {
-      type,
-      reason,
-      detail: { source: "operator_web" },
-    },
-  };
+    type,
+    reason,
+  });
 }
 
 export function operatorTextInputMessage(input: {

@@ -1,3 +1,5 @@
+import { isRecord } from "./operatorRecord.ts";
+
 export interface CanonicalEvent {
   type: string;
   text?: string;
@@ -102,8 +104,4 @@ function conversationDebugFromPayload(
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

@@ -7,6 +7,7 @@ import {
   type RuntimeEventView,
   type RuntimeStatusBody,
 } from "./operatorRuntimeClient.ts";
+import { isRecord } from "./operatorRecord.ts";
 
 export interface OperatorRuntimeViewState {
   debug: OperatorDebug;
@@ -18,6 +19,14 @@ export interface OperatorRuntimeViewState {
   runtimeError: string;
   providerSwitch: ProviderSwitchState;
 }
+
+export type OperatorRuntimeAction =
+  | { type: "body"; body: RuntimeStatusBody }
+  | { type: "raw_payload"; payload: Record<string, unknown> }
+  | { type: "request_failed"; error: unknown }
+  | { type: "provider_switch_started"; targetTransport: string }
+  | { type: "provider_switch_succeeded"; targetTransport: string }
+  | { type: "provider_switch_failed"; targetTransport: string; error: unknown };
 
 export const RECENT_RUNTIME_EVENT_LIMIT = 80;
 
@@ -74,6 +83,22 @@ export function foldRuntimeBody(
     providerConfig,
     runtimeError: "",
   };
+}
+
+export function operatorRuntimeReducer(
+  state: OperatorRuntimeViewState,
+  action: OperatorRuntimeAction,
+): OperatorRuntimeViewState {
+  if (action.type === "body") return foldRuntimeBody(state, action.body);
+  if (action.type === "raw_payload") return foldRuntimeRawPayload(state, action.payload);
+  if (action.type === "request_failed") return runtimeRequestFailed(state, action.error);
+  if (action.type === "provider_switch_started") {
+    return providerSwitchStarted(state, action.targetTransport);
+  }
+  if (action.type === "provider_switch_succeeded") {
+    return providerSwitchSucceeded(state, action.targetTransport);
+  }
+  return providerSwitchFailed(state, action.targetTransport, action.error);
 }
 
 export function foldRuntimeRawPayload(
@@ -171,8 +196,4 @@ function trimRecentRuntimeEvents(events: RuntimeEventView[]): RuntimeEventView[]
 
 function errorMessage(error: unknown): string {
   return String((error as Error)?.message || error);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

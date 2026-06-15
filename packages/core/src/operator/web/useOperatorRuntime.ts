@@ -7,9 +7,12 @@ import {
   type RuntimeEventView,
   type RuntimeStatusBody,
 } from "./operatorRuntimeClient.ts";
-import { initialOperatorRuntimeViewState, selectRuntimeProvider } from "./runtimeState.ts";
+import {
+  initialOperatorRuntimeViewState,
+  operatorRuntimeReducer,
+  selectRuntimeProvider,
+} from "./runtimeState.ts";
 import type { OperatorRuntimeViewState } from "./runtimeState.ts";
-import { operatorRuntimeReducer } from "./operatorRuntimeReducer.ts";
 import {
   debugReportArtifactMessage,
   engineControlMessage,

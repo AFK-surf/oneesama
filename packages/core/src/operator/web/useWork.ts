@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useReducer } from "react";
 
 import type { RealtimeState } from "./useRealtime.ts";
-import { workRunMessage } from "./workCommands.ts";
 import {
   INITIAL_WORK_VIEW,
   foldWorkEvent,
   resetWorkForRun,
   workEventFromPayload,
+  workRunMessage,
 } from "./workState.ts";
 import type { WorkEvent, WorkViewState } from "./workState.ts";
 export type { WorkPhase, WorkResult, WorkStep } from "./workState.ts";

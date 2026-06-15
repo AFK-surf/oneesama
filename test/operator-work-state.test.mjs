@@ -6,6 +6,7 @@ import {
   foldWorkEvent,
   resetWorkForRun,
   workEventFromPayload,
+  workRunMessage,
 } from "../packages/core/src/operator/web/workState.ts";
 
 test("operator work state folds intent, step, and done result events", () => {
@@ -94,4 +95,12 @@ test("operator work state resets view state before sending a new run", () => {
     error: "",
   });
   assert.notEqual(reset.steps, INITIAL_WORK_VIEW.steps);
+});
+
+test("operator work state builds trimmed work run payloads", () => {
+  assert.deepEqual(workRunMessage("  inspect the browser  "), {
+    type: "work_run",
+    command: "inspect the browser",
+  });
+  assert.equal(workRunMessage("  \n\t "), null);
 });

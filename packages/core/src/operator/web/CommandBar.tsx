@@ -1,4 +1,4 @@
-import { copyProviderRunCommand, shouldResetRealtimeSession } from "./commandBarActions.ts";
+import { copyProviderRunCommand } from "./commandBarActions.ts";
 import { commandBarView } from "./commandBarView.ts";
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { OperatorBoot, RealtimeState } from "./useRealtime.ts";
@@ -118,7 +118,7 @@ export function CommandBar({
         <button
           className="btn danger"
           onClick={() => {
-            if (shouldResetRealtimeSession(window.confirm)) {
+            if (window.confirm("Reset the Realtime session?")) {
               runtime.sendEngineControl("reset_session");
             }
           }}

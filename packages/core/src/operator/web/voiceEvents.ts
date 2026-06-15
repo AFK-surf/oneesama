@@ -1,4 +1,6 @@
 import type { EngineControlType } from "./useOperatorRuntime.ts";
+import { operatorEngineControlWireMessage } from "./operatorEngineControlWire.ts";
+import { isRecord } from "./operatorRecord.ts";
 import { pcm16Base64 } from "./protocol.ts";
 
 export const LOCAL_VAD_THRESHOLD = 0.02;
@@ -322,15 +324,12 @@ export function voiceEngineControl(
   reason: string,
   detail: Record<string, unknown>,
 ) {
-  return {
-    type: "engine_control",
+  return operatorEngineControlWireMessage({
     sessionId,
-    control: {
-      type,
-      reason,
-      detail: { source: "operator_web", ...detail },
-    },
-  };
+    type,
+    reason,
+    detail,
+  });
 }
 
 export function voiceStreamOpenedMessage(
@@ -406,9 +405,7 @@ export function voiceChunkAckObservedMessage(payload: Record<string, unknown>, n
 export function parseVoiceSocketPayload(data: unknown): Record<string, unknown> | null {
   try {
     const payload = JSON.parse(String(data));
-    return payload && typeof payload === "object" && !Array.isArray(payload)
-      ? (payload as Record<string, unknown>)
-      : null;
+    return isRecord(payload) ? payload : null;
   } catch {
     return null;
   }

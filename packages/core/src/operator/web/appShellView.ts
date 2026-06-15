@@ -1,5 +1,9 @@
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { RealtimeState } from "./useRealtime.ts";
+import {
+  operatorConnectionConnected,
+  operatorConnectionStatus,
+} from "./operatorConnectionStatus.ts";
 
 export interface AppShellView {
   connectionStatus: string;
@@ -11,11 +15,10 @@ export function appShellView(
   runtime: Pick<OperatorRuntimeState, "debug">,
   realtime: Pick<RealtimeState, "status">,
 ): AppShellView {
-  const rawStatus = runtime.debug.conversation?.status || realtime.status;
-  const connectionStatus = String(rawStatus || "not_connected");
+  const connectionStatus = operatorConnectionStatus(runtime.debug, realtime.status);
   return {
     connectionStatus,
-    connected: String(rawStatus) === "connected",
+    connected: operatorConnectionConnected(runtime.debug, realtime.status),
     shellClass: `op op-${connectionStatus}`,
   };
 }

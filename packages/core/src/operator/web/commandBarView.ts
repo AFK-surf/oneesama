@@ -1,5 +1,6 @@
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { RealtimeState } from "./useRealtime.ts";
+import { operatorConnectionStatus } from "./operatorConnectionStatus.ts";
 import { canStopKwwkStatus } from "./operatorKwwkStatus.ts";
 
 export type StatusTone = "ok" | "warn" | "bad" | "idle";
@@ -46,9 +47,7 @@ export function commandBarView(
     providerConfig?.selectedLiveTransport ||
     providerConfig?.selectedTransport ||
     realtime.transport;
-  const connectionStatus =
-    String(runtime.debug.conversation?.status || realtime.status || "not_connected") ||
-    "not_connected";
+  const connectionStatus = operatorConnectionStatus(runtime.debug, realtime.status);
   const health = String(runtime.snapshot?.health || "starting");
   const switching = runtime.providerSwitch.status === "switching";
   const canConnect = realtime.wsOpen && connectionStatus !== "connected";

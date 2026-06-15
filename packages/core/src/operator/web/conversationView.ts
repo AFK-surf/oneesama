@@ -1,6 +1,7 @@
 import type { DebugState } from "../lan-operator-debug-state.ts";
 import type { OperatorRuntimeState } from "./useOperatorRuntime.ts";
 import type { CanonicalEvent, RealtimeState } from "./useRealtime.ts";
+import { operatorConnectionConnected } from "./operatorConnectionStatus.ts";
 
 export interface Turn {
   role: "you" | "bot";
@@ -43,7 +44,7 @@ export function conversationView(
     eventCountLabel: String(realtime.events.length),
     speechStartedCountLabel: String(runtime.debug.conversation?.eventCounts?.speech_started || 0),
     controlLabel: control?.lastResult || control?.lastCommand || "idle",
-    connected: String(runtime.debug.conversation?.status || realtime.status) === "connected",
+    connected: operatorConnectionConnected(runtime.debug, realtime.status),
     liveAssistantText,
     errorText: realtime.error || runtime.runtimeError || "",
     empty: turns.length === 0 && !liveAssistantText,

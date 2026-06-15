@@ -1,3 +1,5 @@
+import { isRecord } from "./operatorRecord.ts";
+
 export interface WorkStep {
   step: number;
   type?: string;
@@ -16,6 +18,11 @@ export interface WorkResult {
   blocker?: string;
   postConditions?: Array<{ ok?: boolean; condition?: { kind?: string; value?: string } }>;
 }
+
+export type WorkRunMessage = Record<string, unknown> & {
+  type: "work_run";
+  command: string;
+};
 
 export type WorkPhase = "idle" | "running" | "done" | "not_a_command" | "error";
 
@@ -48,6 +55,12 @@ export function resetWorkForRun(): WorkViewState {
     phase: "running",
     steps: [],
   };
+}
+
+export function workRunMessage(command: string): WorkRunMessage | null {
+  const value = command.trim();
+  if (!value) return null;
+  return { type: "work_run", command: value };
 }
 
 export function workEventFromPayload(payload: Record<string, unknown>): WorkEvent | null {
@@ -116,10 +129,6 @@ function workStepFromDetail(detail: Record<string, unknown>, previousStepCount: 
 
 function optionalString(value: unknown): string | undefined {
   return value == null ? undefined : String(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isWorkEventType(value: unknown): value is WorkEvent["type"] {

@@ -1,4 +1,5 @@
 import type { DebugState } from "../lan-operator-debug-state.ts";
+import { operatorEngineControlWireMessage } from "./operatorEngineControlWire.ts";
 import type { EngineControlType, OperatorDebug } from "./useOperatorRuntime.ts";
 
 export interface EngineControlMessage {
@@ -44,16 +45,13 @@ export function engineControlMessage({
   sessionId: string;
   type: EngineControlType;
 }): EngineControlMessage {
-  return {
-    type: "engine_control",
+  return operatorEngineControlWireMessage({
     sessionId,
-    control: {
-      type,
-      reason: `operator_web_${type}`,
-      responseId: String(detail.responseId || lastAssistantResponseId(debug) || ""),
-      detail: { source: "operator_web", ...detail },
-    },
-  };
+    type,
+    reason: `operator_web_${type}`,
+    responseId: String(detail.responseId || lastAssistantResponseId(debug) || ""),
+    detail,
+  }) as EngineControlMessage;
 }
 
 export function toolCancelMessage(

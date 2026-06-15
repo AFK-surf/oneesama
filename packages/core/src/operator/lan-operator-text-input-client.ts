@@ -89,6 +89,13 @@ export function buildLanOperatorTextInputClientScript() {
         : "operator_" + transport + "_text_connect";
     }
 
+    function engineControlMessage(type, reason, detail) {
+      return {
+        type: "engine_control",
+        control: { type, reason, detail },
+      };
+    }
+
     function renderStatus() {
       const transport = conversationTransport();
       const status = conversationStatus();
@@ -126,10 +133,7 @@ export function buildLanOperatorTextInputClientScript() {
       const detail = { source: "operator_text_input", inputMode: "text" };
       const control = input.sendEngineControl
         ? input.sendEngineControl("connect", { reason: liveTextConnectReason(transport), detail })
-        : input.sendOperatorEvent({
-            type: "engine_control",
-            control: { type: "connect", reason: liveTextConnectReason(transport), detail },
-          });
+        : input.sendOperatorEvent(engineControlMessage("connect", liveTextConnectReason(transport), detail));
       renderStatus();
       return { ok: Boolean(control), control: "connect" };
     }
@@ -142,10 +146,7 @@ export function buildLanOperatorTextInputClientScript() {
       const detail = { source: "operator_text_input", inputMode: "text" };
       const control = input.sendEngineControl
         ? input.sendEngineControl("disconnect", { reason: "operator_realtime_disconnect", detail })
-        : input.sendOperatorEvent({
-            type: "engine_control",
-            control: { type: "disconnect", reason: "operator_realtime_disconnect", detail },
-          });
+        : input.sendOperatorEvent(engineControlMessage("disconnect", "operator_realtime_disconnect", detail));
       renderStatus();
       return { ok: Boolean(control), control: "disconnect" };
     }
